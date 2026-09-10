@@ -1,5 +1,5 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease, matchesKey } from "../engine/tui.js";
+import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
 import type { LeaderKeyController } from "./leader-key.js";
 import { isEscapeKey, type OverlayState, overlayOwnsInput } from "./overlay-lifecycle.js";
 
@@ -32,7 +32,13 @@ export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.exit",
 ] as const satisfies ReadonlyArray<ClioKeybinding>;
 
-export type CtrlCAction = "cancel-stream" | "close-overlay" | "clear-editor" | "arm-shutdown" | "shutdown";
+export type CtrlCAction =
+	| "cancel-stream"
+	| "close-overlay"
+	| "clear-editor"
+	| "arm-shutdown"
+	| "shutdown"
+	| "protect-queue";
 
 export interface CtrlCActionState {
 	overlayState: OverlayState;
@@ -40,13 +46,15 @@ export interface CtrlCActionState {
 	editorText: string;
 	lastCtrlCAt: number;
 	now: number;
+	hasQueuedMessages?: boolean;
 }
 
 function resolveApplicationCtrlCAction(state: CtrlCActionState): CtrlCAction {
 	if (state.overlayState !== "closed") return "close-overlay";
-	if (state.lastCtrlCAt > 0 && state.now - state.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) return "shutdown";
 	if (state.streaming) return "cancel-stream";
 	if (state.editorText.length > 0) return "clear-editor";
+	if (state.hasQueuedMessages) return "protect-queue";
+	if (state.lastCtrlCAt > 0 && state.now - state.lastCtrlCAt <= APPLICATION_DOUBLE_TAP_MS) return "shutdown";
 	return "arm-shutdown";
 }
 
@@ -79,6 +87,15 @@ export interface ApplicationControllerDeps {
 	intervals: ApplicationIntervalCoordinator;
 	intervalsToClear: ReadonlyArray<ApplicationIntervalHandle>;
 	leaderKeys: LeaderKeyController;
+	isSearchFocused?: () => boolean;
+	closeSearch?: () => void;
+	forwardFocusedInput?: (data: string) => void;
+	cancelFocusedOwner?: () => void;
+	isAutocompleteVisible?: () => boolean;
+	matchesRepeatableInput?: (data: string) => boolean;
+	routeComposerKey?: (data: string) => boolean;
+	hasQueuedMessages?: () => boolean;
+	explainProtectedExit?: () => void;
 	getOverlayState: () => OverlayState;
 	routeOverlayKey: (data: string) => boolean;
 	/** Let pi-tui's focused Editor own dedicated prompt-history actions before app bindings. */
@@ -137,7 +154,7 @@ export interface ApplicationController {
 	run: Promise<number>;
 	handleInput(data: string): ApplicationInputResult;
 	handleCtrlC(): void;
-	dismissNotifications(): void;
+	dismissNotifications(all?: boolean): void;
 	shutdown(): Promise<void>;
 }
 
@@ -153,9 +170,6 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	const keepAlive = deps.intervals.setInterval(() => {}, 1 << 30);
 	let shuttingDown = false;
 	let lastCtrlCAt = 0;
-	let lastNotificationDismissAt = 0;
-
-	const isDoubleTap = (lastAt: number, now: number): boolean => lastAt > 0 && now - lastAt <= APPLICATION_DOUBLE_TAP_MS;
 
 	let shutdownArmed = false;
 	let armedIndicator: ApplicationIntervalHandle | null = null;
@@ -274,12 +288,31 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	};
 
 	const handleCtrlC = (): void => {
+		deps.leaderKeys.reset();
+		if (deps.isSearchFocused?.()) {
+			deps.closeSearch?.();
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
+			return;
+		}
+		if (deps.getOverlayState() !== "closed" && deps.cancelFocusedOwner) {
+			deps.cancelFocusedOwner();
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
+			return;
+		}
+		if (deps.getOverlayState() === "closed" && deps.cancelActiveEditorBash()) {
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
+			return;
+		}
 		const action = resolveApplicationCtrlCAction({
 			overlayState: deps.getOverlayState(),
 			streaming: deps.isStreaming(),
 			editorText: deps.getEditorText(),
 			lastCtrlCAt,
 			now: deps.clock.now(),
+			hasQueuedMessages: deps.hasQueuedMessages?.() ?? false,
 		});
 		if (action === "shutdown") {
 			lastCtrlCAt = 0;
@@ -318,16 +351,19 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			deps.requestRender();
 			return;
 		}
+		if (action === "protect-queue") {
+			lastCtrlCAt = 0;
+			setShutdownArmed(false);
+			deps.explainProtectedExit?.();
+			return;
+		}
 		// arm-shutdown. The one branch that used to fall off the end of this
 		// function with nothing to show for the press.
 		setShutdownArmed(true);
 	};
 
-	const dismissNotifications = (): void => {
-		const now = deps.clock.now();
-		const doubleTap = isDoubleTap(lastNotificationDismissAt, now);
-		lastNotificationDismissAt = now;
-		if (doubleTap) {
+	const dismissNotifications = (all = false): void => {
+		if (all) {
 			deps.dismissAllNotifications();
 			return;
 		}
@@ -336,19 +372,27 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 	};
 
 	const handleInput = (data: string): ApplicationInputResult => {
-		const initialOverlayState = deps.getOverlayState();
-		if (overlayOwnsInput(initialOverlayState) && deps.leaderKeys.isPending()) deps.leaderKeys.reset();
-		if (!overlayOwnsInput(initialOverlayState) && deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) {
-			return { consume: true };
-		}
-
-		if (matchesKey(data, "ctrl+c") && !isKeyRelease(data)) {
+		if (isKeyRelease(data)) return { consume: true };
+		if (isKeyRepeat(data) && !(deps.matchesRepeatableInput?.(data) ?? false)) return { consume: true };
+		if (matchesKey(data, "ctrl+c")) {
 			handleCtrlC();
 			return { consume: true };
 		}
+		if (deps.leaderKeys.isPending() && deps.leaderKeys.route(data)) return { consume: true };
+		if (deps.leaderKeys.route(data)) return { consume: true };
+		if (deps.isSearchFocused?.()) {
+			deps.forwardFocusedInput?.(data);
+			return { consume: true };
+		}
 		if (deps.routeOverlayKey(data)) return { consume: true };
-		if (overlayOwnsInput(deps.getOverlayState())) return undefined;
-		if (deps.getOverlayState() === "closed" && deps.leaderKeys.route(data)) return { consume: true };
+		if (overlayOwnsInput(deps.getOverlayState())) {
+			if (deps.forwardFocusedInput) {
+				deps.forwardFocusedInput(data);
+				return { consume: true };
+			}
+			return undefined;
+		}
+		if (isEscapeKey(data) && deps.isAutocompleteVisible?.()) return undefined;
 		if (isEscapeKey(data) && deps.cancelActiveEditorBash()) return { consume: true };
 		if (isEscapeKey(data) && deps.isStreaming()) {
 			deps.cancelActiveRun();
@@ -370,6 +414,7 @@ export function createApplicationController(deps: ApplicationControllerDeps): Ap
 			if (!deps.matchesAction(data, id)) continue;
 			return deps.dispatchAction(id) ? { consume: true } : undefined;
 		}
+		if (deps.routeComposerKey?.(data)) return { consume: true };
 		return undefined;
 	};
 

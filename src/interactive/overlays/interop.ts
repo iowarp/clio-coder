@@ -125,7 +125,7 @@ function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 				`# What would you like to adopt from ${agent.kind}?`,
 				`Presence: ${agent.presence}. Version: ${agent.version ?? "unknown"}. Inventory: ${agent.inventory?.status}.`,
 				...Object.entries(counts).map(([kind, count]) => `${count} ${kind}`),
-				"Press i to review an adoption plan. Press p for project destination, u for user, k to change the kind filter.",
+				"Press i to review an adoption plan. Press p for project destination, u for user, c to change the kind filter.",
 				...(agent.inventory?.items.map((item) => `${item.scope} ${item.kind}: ${item.name}`) ?? []),
 				...(agent.inventory?.diagnostics ?? []),
 			],
@@ -202,9 +202,11 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 		title: "What would you like to adopt or connect?",
 		items: buildItems(deps),
 		filterable: true,
+		explicitSearch: true,
 		layout: "split",
 		emptyMessage: INTEROP_EMPTY,
 		hints: [
+			{ key: "c", verb: "kind filter" },
 			{ key: "i", verb: "plan adoption" },
 			{ key: "y", verb: "approve plan" },
 			{ key: "b", verb: "back" },
@@ -223,7 +225,7 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 				reset();
 				ctx.notice("info", "Adoption destination: user.");
 			},
-			k: () => {
+			c: () => {
 				const kinds: Array<AdoptionKind | undefined> = [undefined, "skill", "agent", "prompt", "plugin"];
 				filter = kinds[(kinds.indexOf(filter) + 1) % kinds.length];
 				reset();

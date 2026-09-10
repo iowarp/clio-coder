@@ -56,3 +56,11 @@ git.yazi (https://github.com/yazi-rs/plugins/tree/main/git.yazi)
   Copyright 2023 the yazi-rs authors.
   Licensed under the MIT License.
   Vendored as source with its LICENSE under the managed file-pane profile.
+
+Bundled terminal compatibility code
+----------------------------------
+Clio bundles the JavaScript from @earendil-works/pi-tui 0.85.1 with a local
+input-policy/search/semantic-edit patch, plus marked and get-east-asian-width.
+Their MIT notices are distributed in dist/assets/tui-notices/. The pinned
+pi-tui runtime package remains installed for its Darwin and Windows native
+helpers; Clio does not modify consumer dependencies during installation.

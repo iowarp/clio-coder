@@ -3,7 +3,7 @@
  *
  * Saved settings (settings.yaml) are defaults shared by every Clio process.
  * Live routing for a running session — active orchestrator target/model/
- * thinking, the fleet default used by /run, and the Alt+J / Alt+K scope list —
+ * thinking, the fleet default used by /run, and the configured model-cycle scope list —
  * is owned by the process that is running the session. Each process seeds its
  * routing from saved settings at boot and afterwards reads everything through
  * an effective view: the shared snapshot (targets, theme, safety, retry, …)
@@ -279,7 +279,7 @@ const ROUTING_FIELD_LABELS: ReadonlyArray<{
 	},
 	{
 		field: "chat.modelPicker.cycleSet",
-		label: "Alt+J/Alt+K cycle set",
+		label: "Scoped model cycle set",
 		read: (s) => s.chat.modelPicker.cycleSet.join(","),
 	},
 ];
@@ -317,7 +317,7 @@ export interface RoutingChangeNotice {
  * moves settings.yaml underneath it. One helper feeds every surface — the TUI
  * notification center and the ACP session ledger — so the wording cannot
  * drift. `commandHints` appends the interactive remedies (/settings, /model,
- * Alt+L), which only make sense where a user can type slash commands.
+ * Alt+M), which only make sense where a user can type slash commands.
  */
 export function routingChangeNotices(
 	changedPaths: ReadonlyArray<string>,

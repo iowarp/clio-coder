@@ -116,7 +116,7 @@ Tool calls appear as they run, and edits appear as diffs.
 | Load a specialized skill | `/skill <name>` |
 | Export the transcript | `/export` |
 
-Enter steers an active turn; `Alt+Enter` queues a follow-up; Escape cancels.
+Enter steers an active turn; `Ctrl+Q` queues a follow-up; Escape cancels.
 Pasted multiline text beginning with `!` or `!!` is treated as prompt text.
 Private shell output remains visible to you but is excluded from model replay
 and compaction. See [Commands and Modes](docs/guide/commands-and-modes.md).

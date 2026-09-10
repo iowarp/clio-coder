@@ -170,6 +170,10 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
 | `/skill` | `/skill <name> [task]` or `/skill off` | Invoke a skill or clear its active tool surface; `/skills` opens the browser. |
+| `/background` | `/background` | Detach the newest eligible attached dispatch through its existing owner; no eligible dispatch gives an explanatory no-op. |
+| `/interrupt` | `/interrupt <text>` | Settle the active run and send text through the interrupt owner; refusals keep its existing next-slot behavior. Missing text is correctable. |
+| `/editor` | `/editor [text]` | Edit explicit text or an empty buffer externally; return to the composer for deliberate submission. Failure preserves the command for correction. |
+| `/notifications` | `/notifications dismiss [all]` | Dismiss the oldest notice once, or explicitly dismiss all; this does not mute future notices. |
 | `/library` | `/library [inspect \| install \| remove <ref>] [import <path-or-url>] [reload]` | Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; `install`, `remove` and `import` show a reviewed plan first and write nothing until it is accepted. `reload` refreshes installed recipe resources. Alt+L opens the same browser. |
 | `/skills` | `/skills` | Open the Library on Skills. |
 | `/prompts` | `/prompts` | Open the Library on Prompts. |
@@ -452,47 +456,89 @@ one, and plain `doctor` writes nothing.
 
 ## Keybindings
 
-App bindings use `Alt + <key>` as the primary scheme, plus `Shift+Tab`,
-`Ctrl+D`, `Shift+Enter` / `Ctrl+J`, and a portable `Ctrl+G` leader. Modern terminals and Linux/meta
-setups send Alt directly. Stock macOS Terminal.app needs **Use Option as Meta
-key** enabled in Settings > Profiles > Keyboard for native Alt; otherwise use
-`Ctrl+G` then the Alt binding letter.
+Clio has eleven direct application defaults. `/help` shows the effective keys,
+fixed leader entries, scopes and user overrides. `Ctrl+G` opens a visible action
+menu with no timeout: use a suffix or Up/Down and Enter. Unknown suffixes leave
+the menu open and preserve the draft; Ctrl+G or Esc closes it. Ctrl+C immediately
+cancels the underlying owner. The menu does not search as you type.
 
-`Alt+B` and `Alt+D` are approved application-input boundary overrides of Pi's
-editor word-back and word-delete chords. Clio routes those two bindings before
-the editor sees them so the task and decision boards remain global shortcuts.
-They are intentional exceptions to the other app bindings' avoidance of Pi
-editor reserves and can be rebound through `settings.yaml.keybindings`.
+| Direct default | Action | Fixed leader suffix |
+| --- | --- | --- |
+| `Alt+L` | Toggle top-level Library | `l` |
+| `Alt+M` | Toggle model picker | `m` |
+| `Alt+O` | Cycle Compact, Standard, Detailed output | `o` |
+| `Alt+U` | Toggle dashboard | `u` |
+| `Alt+W` | Toggle Workers | `w` |
+| `Alt+E` | Toggle files from Clio focus | `e` |
+| `Shift+Tab` | Cycle supported thinking effort | `t` |
+| `Ctrl+Q` | Queue draft after the whole active run; ordinary send while idle | `f` |
+| `Alt+Q` | Restore both queue kinds before the current draft, once | `q` |
+| `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |
+| `Ctrl+G` | Open or close the contextual action menu | — |
 
-| Binding | Action |
+Additional menu entries: `i` interrupts with the draft, `s` backgrounds the newest
+eligible attached dispatch, `g` edits the expanded draft externally, `x` dismisses
+one notification, `z` undoes the focused editable field, `r` toggles transcript
+search, `p`/`n` page the transcript and Home/End jump to its bounds. Previous/next
+prompt entries are available through arrows and Enter. `/tasks`, `/decisions`
+and `/tree` retain their boards; scoped model cycling retains configurable action
+IDs and has no default direct key.
+
+| Editing or contextual key | Behavior |
 | --- | --- |
-| `Enter` | Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming). |
-| `Shift+Enter` / `Ctrl+J` | Insert a newline into multiline editor input. |
-| `Ctrl+P` / `Ctrl+N` | Browse backward / forward through prompts accepted in this interactive process; returning past the newest entry restores the unfinished draft. |
-| `Alt+Enter` | End of turn: queue the current draft for delivery when the active run settles. |
-| `Alt+I` | Interrupt: cancel the active run and deliver the current draft now. Refused while an attached dispatch runs or a permission ask is parked; the draft then queues for the next slot. |
-| `Alt+Up` | Restore queued next-slot and end-of-turn messages to the editor. |
-| `Shift+Tab` | Cycle orchestrator thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
-| `Alt+T` | Open the session tree navigator (`/tree`). |
-| `Alt+U` | Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts. |
-| `Alt+L` | Open or close the Library. |
-| `Alt+M` | Open the model and targets selector. |
-| `Alt+J` / `Alt+K` | Cycle forward / backward through the configured model set (when empty, directs the operator to `/settings chat model-picker`). |
-| `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, `Enter` opens the selected run's live worker detail, `s` steers, and `x` cancels. |
-| `Alt+E` | Toggle the files pane docked below the session in a `--with-panes` session inside herdr; the same as `/files`. Rebind through `clio-coder.files.toggle`. |
-| `Alt+B` | Open the composite session and operator task board (`/tasks`). Approved application-boundary override of editor word-back. |
-| `Alt+D` | Open the settled interview decision board (`/decisions`). Approved application-boundary override of editor word-delete. |
-| `Alt+S` / `Ctrl+Alt+B` | Convert an active attached dispatch to a detached background batch. |
-| `Alt+O` | Cycle Output style: Compact, Standard, Detailed. Session only; save a default in `/settings interface`. |
-| `Alt+G` | Open the current input in an external editor. |
-| `Alt+X` | Dismiss footer notifications. |
-| `Ctrl+G`, then a letter | Portable leader fallback for Alt-letter actions. |
-| `Ctrl+C` | With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only. |
-| `Ctrl+D` | Exit when the editor is empty; otherwise delete the next character. It never exits from inside an overlay. |
-| `PageUp` / `PageDown` | In `/resume` and list overlays: scroll the selection by one full page (12 rows). |
-| `Esc` | With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard. |
+| `Enter` | Accept completion first, otherwise send idle input or queue at the next steering slot |
+| `Ctrl+J`, `Shift+Enter` | Composer newline; distinct Shift+Enter delivery is optional |
+| `Alt+B`/`Alt+F`, Ctrl+Left/Right, Alt+Left/Right | Word movement |
+| `Alt+D`/Alt+Delete | Delete the next word |
+| Ctrl+W, Alt+Backspace, Ctrl+Backspace | Delete the previous word; Ctrl+Backspace covers Windows Terminal's BS encoding |
+| Home/End, Ctrl+A/E | Composer line bounds, including fullscreen |
+| Ctrl+P/N | Prompt history, restoring the unfinished draft on return |
+| Ctrl+underscore | Undo; menu `z` is the fallback when the physical chord is unavailable |
+| Ctrl+R | Fullscreen transcript search; regular mode explains terminal Find |
+| Search Enter / Up | Next / previous match; Home/End edit the query |
+| Search Esc / Ctrl+C / Ctrl+R | Close search without cancelling unrelated work |
+| PageUp/PageDown, Ctrl+Up/Down | Fullscreen transcript paging / previous-next prompt; overlays own their local navigation |
+| Esc | Cancel completion or one local field/detail first; plain composer cancels bash then the active run |
+| Ctrl+C | Cancel the current search/modal/child; otherwise cancel work, clear draft, or use idle-empty double Ctrl+C to quit |
 
-When scripting Clio inside tmux, prefer `tmux send-keys C-m` for submit/confirm keys instead of the literal `Enter` token; some tmux/terminal combinations do not deliver `Enter` reliably.
+Reviews, model-scope choices, permissions and interviews own their input. They
+expose no global send, navigation, background or quit actions. Top-level Library,
+model, tree and Workers scopes can expose their owner toggle; editable fields
+expose semantic undo. Nested Library reviews must finish or cancel before the
+browser toggle becomes available. Permission deletion never resolves a user
+submit binding. Enter allows only when its defined empty-draft condition holds;
+legacy LF/Ctrl+J is indistinguishable from Enter in these single-line scopes.
+
+Bracketed paste is literal and never submits, executes a slash or shell command,
+or confirms a modal. Submission needs a later deliberate key. External editing
+receives expanded paste text and preserves the draft on failure; returned text
+and recovered queues retain literal bang provenance. Input arriving during an
+asynchronous send expansion remains in the composer. Explicit release events
+are ignored before application or viewport actions. Repeats may edit, navigate
+or scroll; they cannot repeat send, toggle, cycle, confirmation, cancel or exit.
+Legacy streams cannot distinguish every held-key repeat.
+
+**Overrides and migration.** Keep overrides in `interface.keybindings`; legacy
+top-level `keybindings` remains a compatibility input. An explicit `[]` disables
+both direct access and the action's default leader entry. A default-unbound
+action may still have a leader entry. Rebinding a direct key does not change its
+fixed suffix; `leader: []` disables the menu. Unknown IDs and effective conflicts
+diagnose, and edits reload routing, components and hints together, cancelling a
+pending menu. No preferences are rewritten. Defaults move follow-up from
+Alt+Enter to Ctrl+Q and recovery from Alt+Up to Alt+Q; Alt+B/D return to editing.
+Infrequent boards use their slash commands, and interrupt/background/external
+editor/dismiss use the menu or command bridges. Explicit old choices remain.
+
+**Terminal delivery.** On stock macOS Terminal.app, Option may compose text;
+the Ctrl+G menu works without changing that setting. A temporary profile with
+Use Option as Meta enabled permits direct Alt keys. Windows Terminal/WSL2 can
+retain native Alt+Enter, Alt+arrow, clipboard, Find and zoom controls. Ctrl+J
+is the portable newline. Node raw mode normally disables flow control and
+signal generation; an SSH/mux or terminal UI can still intercept keys, so menu
+`f` is available if Ctrl+Q does not arrive. Native clipboard and terminal window
+controls remain upstream. Clio does not own keys while Yazi, an external editor
+or the host mux holds focus. Physical Windows/macOS acceptance is separate from
+Linux PTY and protocol tests; no terminal profile is installed automatically.
 
 ## Live Steering
 
@@ -502,8 +548,8 @@ There are three modes, chosen per message; the default is next slot.
 | Mode | Key | Delivery |
 | --- | --- | --- |
 | Next slot | `Enter` | Between tool batches, mid-run, through `agent.steer`. The agent keeps going and reads the message before its next model call. |
-| End of turn | `Alt+Enter` | When the whole run settles and Clio would hand control back, through `agent.followUp`. A turn is the whole run, not one model round. |
-| Interrupt | `Alt+I` (or `Ctrl+G`, `i`) | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor. |
+| End of turn | `Ctrl+Q` | When the whole run settles and Clio would hand control back, through `agent.followUp`. A turn is the whole run, not one model round. |
+| Interrupt | `Ctrl+G`, `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor. |
 
 Interrupt is refused in two states and the message is queued for the next slot
 instead, with a notice saying why: while an attached dispatch is running (the
@@ -782,9 +828,9 @@ The footer owns live activity. Transcript actions have static running or outcome
 The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:
 
 - **Adaptive Welcome Launchpad:** Before the first prompt, renders a compact launchpad with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (`>C_ Clio Coder vX.Y.Z · <workspace · git branch> · <target·model · ready> · ctx ready · type a task`) so the conversation transcript owns the viewport.
-- **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Shift+Enter newline` at wider widths.
+- **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Ctrl+J newline` at wider widths.
 - **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
-- **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Alt+X] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
+- **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Ctrl+G x] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
 - **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
 - **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
 - **Transactional Settings Center:** Open `/settings` or deep-link to one of

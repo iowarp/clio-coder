@@ -54,6 +54,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
+import { localKey } from "../keyboard-owner.js";
 import { buildHint, DEFAULT_SELECT_THEME, showClioOverlayFrame } from "../overlay-frame.js";
 import { barSep, clioTheme, GLYPH, padAnsi, rule, screenTitle } from "../theme/index.js";
 import { modelsForTarget } from "./model-selector.js";
@@ -119,6 +120,7 @@ const SELECT_DOWN = "\u001b[B";
 /** Settings pickers accept the same j/k navigation as the rows that open them. */
 class SettingsSelectList extends SelectList {
 	override handleInput(data: string): void {
+		data = localKey(data);
 		super.handleInput(data === "j" ? SELECT_DOWN : data === "k" ? SELECT_UP : data);
 	}
 }
@@ -149,7 +151,7 @@ const SETTINGS_SECTION_DESCRIPTIONS = {
 	orchestrator: "Interactive chat routing, prompt pre-warm, and the optional proactive-memory model plane.",
 	fleet: "Defaults, profiles, agent bindings, and route activation for dispatched workers, and where they run.",
 	targets: "Configured inference targets: which one chat and the fleet use, and whether each answers.",
-	models: "The /model picker, favorites, and Alt+J / Alt+K cycling.",
+	models: "The /model picker, favorites, and configured model cycling.",
 	budget: "Cost ceiling, per-turn output budget, worker concurrency, and the guardrail backstops.",
 	compaction: "When and how the context window is evicted and summarized under pressure.",
 	retry: "Automatic recovery from transient provider, network, and stalled-stream errors.",
@@ -422,7 +424,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"panes.yazi.profile": "Use Clio's managed, themed engine profile or the operator's own file-manager configuration.",
 	"panes.yazi.followCwd": "Push the conversation directory into an already-open companion pane.",
 	"panes.yazi.ratio": "Share of the height the files dock takes, at most half.",
-	scope: "Alt+J and Alt+K model cycle set.",
+	scope: "Configured model-cycle action set.",
 	"modelSelector.recentLimit": "How many recently used models /model remembers.",
 	"modelSelector.favorites": "Exact target/model refs pinned in /model.",
 	"budget.sessionCeilingUsd": "Per-session cost cap.",
@@ -540,7 +542,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Bind base, custom, and shadow native agents such as scout, researcher, and provenance to profiles. ACP delegation agents cannot be bound.",
 	"delegation.defaults.toolGovernance":
 		"clio-coder-policy gates the agent through Clio's safety net; agent-managed trusts the agent; deny-all blocks every tool.",
-	scope: "Choose target-level or exact target/model refs. Alt+J / Alt+K step the chat target through this list.",
+	scope:
+		"Choose target-level or exact target/model refs. Explicit model-cycle bindings step the chat target through this list.",
 	runtimePlugins: "Comma-separated package names, loaded at startup. Restart Clio after changing.",
 	"terminal.notify":
 		"OSC 777, or OSC 9 on iTerm2, Windows Terminal, and ConEmu. Interactive TTY runs only; the body never carries prompt text, file paths, or model output.",
@@ -835,6 +838,7 @@ export class SubmenuWrapper implements Component {
 	}
 
 	handleInput(data: string): void {
+		data = localKey(data);
 		this.child.handleInput?.(data);
 	}
 
@@ -1253,6 +1257,7 @@ class ScopedModelChecklist implements Component {
 	}
 
 	handleInput(data: string): void {
+		data = localKey(data);
 		const kb = getKeybindings();
 		if (kb.matches(data, "tui.select.up") || data === "k") {
 			this.selectedRow = this.nextEntryIndex(this.selectedRow - 1, -1);
@@ -3037,10 +3042,6 @@ function fixedLines(lines: readonly string[], width: number, height: number): st
 }
 
 /** Typed text, as opposed to an escape sequence or a control byte. */
-function isPrintableInput(data: string): boolean {
-	if (data.length === 0 || data.startsWith("\u001b")) return false;
-	return Array.from(data).every((character) => character >= " " && character !== "\u007f");
-}
 
 function scrollWindow(total: number, selected: number, height: number): [number, number] {
 	if (height <= 0 || total <= height) return [0, total];
@@ -3303,6 +3304,17 @@ export class SettingsCenter implements Component {
 	 * Enter commits it and Esc restores the committed query.
 	 */
 	private filterDraft: string | null = null;
+	private readonly filterInput = new Input();
+	get keyboardScope(): "edit" | "review" {
+		return this.filterDraft !== null ? "edit" : "review";
+	}
+	undoInput(): boolean {
+		if (this.filterDraft === null) return false;
+		this.filterInput.applyEdit("undo");
+		this.filterDraft = this.filterInput.getValue();
+		this.normalizeSelection();
+		return true;
+	}
 	/** Local cycle preview for the selected row; committed on Enter. */
 	private pendingValue: string | null = null;
 
@@ -3360,6 +3372,7 @@ export class SettingsCenter implements Component {
 	 * presses and do nothing.
 	 */
 	handleInput(data: string): void {
+		data = localKey(data);
 		if (isKeyRelease(data)) return;
 		if (matchesKey(data, "escape")) {
 			this.back();
@@ -3376,6 +3389,7 @@ export class SettingsCenter implements Component {
 		const kb = getKeybindings();
 		if (data === "/") {
 			this.filterDraft = this.filterQuery;
+			this.filterInput.setValue(this.filterDraft);
 			return;
 		}
 		if (matchesKey(data, "tab")) {
@@ -3459,17 +3473,10 @@ export class SettingsCenter implements Component {
 			this.options.requestRender?.();
 			return;
 		}
-		if (data === "\x7f" || data === "\b") {
-			this.filterDraft = draft.slice(0, -1);
-			this.normalizeSelection();
-			this.options.requestRender?.();
-			return;
-		}
-		if (isPrintableInput(data)) {
-			this.filterDraft = draft + data;
-			this.normalizeSelection();
-			this.options.requestRender?.();
-		}
+		this.filterInput.handleInput(data);
+		this.filterDraft = this.filterInput.getValue();
+		this.normalizeSelection();
+		this.options.requestRender?.();
 	}
 
 	/** The query the catalog is narrowed by right now: the live draft while the

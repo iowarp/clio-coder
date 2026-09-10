@@ -1007,7 +1007,7 @@ function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, res
 }
 
 /**
- * Alt+J / Alt+K step the orchestrator through the `scope` list of target
+ * Scoped model cycle actions step the orchestrator through the `scope` list of target
  * ids or target/model refs. Absent scope is a no-op so unconfigured users
  * feel nothing.
  */
@@ -1812,7 +1812,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const getCurrentSettings = (): ClioSettings => {
 		// Recents live in the data dir (core/recent-models.ts), never in
 		// settings.yaml; consumers that need them call listRecentModels
-		// directly, so an Alt+L pick in another session does not churn the
+		// directly, so an Alt+M pick in another session does not churn the
 		// config watcher here.
 		const base = config?.get();
 		// No config domain (unit tests, degraded boot): readSettings() returns a
@@ -2009,7 +2009,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bumpSessionState();
 		persistSavedMutation((saved) => setAtPath(saved, id, value));
 	};
-	/** Alt+J / Alt+K: step this session's orchestrator through the scope list. */
+	/** Scoped model cycle actions: step this session's orchestrator through the scope list. */
 	const cycleScopedSession = (direction: "forward" | "backward"): boolean => {
 		const next = advanceScopedTarget(getCurrentSettings(), direction);
 		if (!next) return false;

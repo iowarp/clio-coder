@@ -398,7 +398,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		) {
 			// Same target+runtime+model. Settings may still have moved
 			// thinkingLevel since the last call (the user invoked /thinking
-			// or Alt+T); reconcile the clamped level so the next prompt
+			// or Shift+Tab); reconcile the clamped level so the next prompt
 			// dispatches under the current intent without forcing a rebuild.
 			ensureReasoningProbe(target);
 			const runtimeResolution = refineRuntimeTargetWithModelHints(

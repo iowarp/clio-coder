@@ -43,11 +43,12 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Configuration reference</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="configuration_reference_blueprint.html">Configuration reference visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/configuration_reference_blueprint.html">Configuration reference visual reference</a>.</p>
 </blockquote>
-<p>Every switch that changes what Clio Coder does, in one place: settings keys, environment variables, CLI flags, project files under <code>.clio-coder/</code>, recipe and prompt-fragment frontmatter, tool arguments the model can send, and model knowledge-base tags. The source of truth is <code>src/</code>; this page is the audited inventory of what the code read at the 0.4.2 cut and is maintained by hand with each release. The narrative guide is <a href="configuration_blueprint.html">configuration-and-targets.md</a>; operator prose for each environment variable is in <a href="environment_blueprint.html">environment-variables.md</a>.</p>
+<p>Every switch that changes what Clio Coder does, in one place: settings keys, environment variables, CLI flags, project files under <code>.clio-coder/</code>, recipe and prompt-fragment frontmatter, tool arguments the model can send, and model knowledge-base tags. The source of truth is <code>src/</code>; this page is the audited inventory of what the code read at the 0.4.2 cut and is maintained by hand with each release. The narrative guide is <a href="configuration-and-targets.md">configuration-and-targets.md</a>; operator prose for each environment variable is in <a href="environment-variables.md">environment-variables.md</a>.</p>
 <p>Precedence, where several surfaces set the same value: a one-run CLI flag beats a session override (<code>/settings</code>, <code>/model</code>, <code>/thinking</code>), which beats <code>.clio-coder/settings.local.yaml</code>, which beats <code>.clio-coder/settings.yaml</code>, which beats the user <code>settings.yaml</code>, which beats the compiled default. Entries whose order differs say so in their precedence column.</p>
 <h2>Settings keys</h2>
 <p><code>settings.yaml</code> (user, project, and project-local) and the <code>/settings</code> overlay. Defaults come from <code>src/core/defaults.ts</code>.</p>
@@ -70,13 +71,13 @@
 <td><code>chat.model</code></td>
 <td><code>null</code></td>
 <td>Saved default chat model id (string or null); null with a target set rebases to that target&#39;s <code>defaultModel</code> at validation; applies next session.</td>
-<td><code>run --model</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, Alt+J/K, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+<td><code>run --model</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, configured model-cycle actions, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
 <td><code>chat.modelPicker.cycleSet</code></td>
 <td><code>[]</code></td>
-<td>Exact <code>target</code> or <code>target/model</code> refs Alt+J/Alt+K cycle through (refs with an empty target part are dropped); session-owned routing state, immediate this session, saved default next session.</td>
-<td>session routing (Alt+J/K, <code>/settings</code>) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+<td>Exact <code>target</code> or <code>target/model</code> refs configured model-cycle keys cycle through (refs with an empty target part are dropped); session-owned routing state, immediate this session, saved default next session.</td>
+<td>session routing (configured model-cycle actions, <code>/settings</code>) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
 <td><code>chat.modelPicker.favorites</code></td>
@@ -130,13 +131,13 @@
 <td><code>chat.target</code></td>
 <td><code>null</code></td>
 <td>Saved default chat target id (configured id or null); a dangling id normalizes to null and clears <code>chat.model</code>; seeds session routing at launch, so applies next session.</td>
-<td><code>run --target</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, Alt+J/K, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+<td><code>run --target</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, configured model-cycle actions, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
 <td><code>chat.thinkingLevel</code></td>
 <td><code>low</code></td>
 <td>Saved default reasoning effort for the chat model: <code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>, clamped to what the model supports at request time; applies next session.</td>
-<td><code>run --thinking</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, Alt+J/K, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
+<td><code>run --thinking</code> &gt; session routing (<code>/model</code>, <code>/thinking</code>, configured model-cycle actions, <code>/settings</code> apply-this-session) &gt; <code>.clio-coder/settings.local.yaml</code> &gt; <code>.clio-coder/settings.yaml</code> &gt; user settings.yaml &gt; default</td>
 </tr>
 <tr>
 <td><code>context.compaction.auto</code></td>
@@ -1437,7 +1438,7 @@
 <tr>
 <td><code>CLIO_CODER_WORKER_PGID</code></td>
 <td><code>worker&#39;s own pid (null on Windows)</code></td>
-<td>Set by the SSH transport to the login shell&#39;s pid (<code>$</code>); the worker entry announces it as the process group an abort must signal, else its own pid.</td>
+<td>Set by the SSH transport to the login shell&#39;s pid (<code>$$</code>); the worker entry announces it as the process group an abort must signal, else its own pid.</td>
 <td></td>
 </tr>
 <tr>
@@ -2180,7 +2181,7 @@
 </tr>
 <tr>
 <td><code>--package</code></td>
-<td>For <code>eval validate</code> and <code>eval run</code>, package reference or path (<code>&lt;path|kind:name&gt;</code>).</td>
+<td>For <code>eval validate</code> and <code>eval run</code>, package reference or path (`&lt;path</td>
 </tr>
 <tr>
 <td><code>--project</code></td>
@@ -2946,7 +2947,6 @@
 <td>Short form of --help.</td>
 </tr>
 </tbody></table>
-
 <h3><code>targets</code></h3>
 <table>
 <thead>
@@ -3625,7 +3625,7 @@
 </thead>
 <tbody><tr>
 <td><code>version</code>, <code>task</code>, <code>runtime</code>, <code>artifacts</code>, <code>validators</code>, <code>notes</code></td>
-<td>The version-1 scientific validation contract (also <code>validation.yml</code>, root <code>validation.yaml</code>, or <code>validation.yml</code>). A contract that parses raises the repo-derived rigor default from <code>normal</code> to <code>high</code>; one that does not parse is diagnosed by <code>clio-coder doctor</code> and at interactive startup and leaves <code>normal</code>. <code>VALIDATION.md</code> is advisory prose and never raises rigor. Schema in <a href="validation_blueprint.html">Scientific Validation</a>.</td>
+<td>The version-1 scientific validation contract (also <code>validation.yml</code>, root <code>validation.yaml</code>, or <code>validation.yml</code>). A contract that parses raises the repo-derived rigor default from <code>normal</code> to <code>high</code>; one that does not parse is diagnosed by <code>clio-coder doctor</code> and at interactive startup and leaves <code>normal</code>. <code>VALIDATION.md</code> is advisory prose and never raises rigor. Schema in <a href="../process/scientific-validation.md">Scientific Validation</a>.</td>
 <td><code>CLIO_CODER_RIGOR</code> &gt; parsed validation contract &gt; <code>normal</code></td>
 </tr>
 </tbody></table>

@@ -43,6 +43,7 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Commands and Modes</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
 <a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/commands_blueprint.html">Commands and Modes visual reference</a>.</p>
@@ -53,7 +54,7 @@ common operator workflows; the README remains an approachable product and
 onboarding guide.</p>
 <p>Source of truth: <code>src/cli/index.ts</code>, <code>src/interactive/slash-commands.ts</code>,
 <code>src/domains/dispatch/**</code>, <code>src/tools/registry.ts</code>, and the current test suite.
-For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/exit-codes-and-output.md">exit-codes-and-output.md</a>.</p>
+For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see <a href="exit-codes-and-output.md">exit-codes-and-output.md</a>.</p>
 <h2>CLI Commands</h2>
 <table>
 <thead>
@@ -62,8 +63,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <th>Purpose</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>clio-coder</code></td>
 <td>Launch the interactive terminal UI.</td>
 </tr>
@@ -185,11 +185,11 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 </tr>
 <tr>
 <td><code>clio-coder tools list [--json]</code></td>
-<td>List the pinned external tool registry and whether each program resolves from <code>PATH</code>, Clio's vendored data directory, or nowhere.</td>
+<td>List the pinned external tool registry and whether each program resolves from <code>PATH</code>, Clio&#39;s vendored data directory, or nowhere.</td>
 </tr>
 <tr>
 <td><code>clio-coder tools status &lt;id&gt; [--json] [--reset-profile]</code></td>
-<td>Inspect one registered tool. <code>--reset-profile</code> applies only to yazi's generated profile.</td>
+<td>Inspect one registered tool. <code>--reset-profile</code> applies only to yazi&#39;s generated profile.</td>
 </tr>
 <tr>
 <td><code>clio-coder tools install &lt;id&gt; [--force] [--json]</code></td>
@@ -205,7 +205,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 </tr>
 <tr>
 <td><code>clio-coder panes theme</code></td>
-<td>Print Clio's theme tokens as a herdr <code>[theme.custom]</code> block to paste into herdr's <code>config.toml</code>; Clio never edits that file itself. See <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/panes-and-files.md">Panes and the Files Pane</a>.</td>
+<td>Print Clio&#39;s theme tokens as a herdr <code>[theme.custom]</code> block to paste into herdr&#39;s <code>config.toml</code>; Clio never edits that file itself. See <a href="panes-and-files.md">Panes and the Files Pane</a>.</td>
 </tr>
 <tr>
 <td><code>clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force]</code></td>
@@ -229,7 +229,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 </tr>
 <tr>
 <td><code>clio-coder fleet view &lt;runId|fleetRootId&gt; [--follow]</code></td>
-<td>Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. Without <code>--follow</code>, the width-bounded snapshot is plain text with no ANSI control bytes. <code>--follow</code> requires an interactive terminal and one run id; <code>fleet view --help</code> prints this subcommand's own usage, including <code>--watch</code>.</td>
+<td>Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. Without <code>--follow</code>, the width-bounded snapshot is plain text with no ANSI control bytes. <code>--follow</code> requires an interactive terminal and one run id; <code>fleet view --help</code> prints this subcommand&#39;s own usage, including <code>--watch</code>.</td>
 </tr>
 <tr>
 <td><code>clio-coder fleet view --watch &lt;selection-file&gt;</code></td>
@@ -269,11 +269,11 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 </tr>
 <tr>
 <td><code>clio-coder trace phases &lt;runId&gt; [--db PATH]</code></td>
-<td>Show one run's recorded phases.</td>
+<td>Show one run&#39;s recorded phases.</td>
 </tr>
 <tr>
 <td><code>clio-coder trace tail &lt;runId&gt; [--follow] [--db PATH]</code></td>
-<td>Tail one run's recorded events; <code>--follow</code> streams as they land.</td>
+<td>Tail one run&#39;s recorded events; <code>--follow</code> streams as they land.</td>
 </tr>
 <tr>
 <td><code>clio-coder trace procs &lt;runId&gt; [--db PATH]</code></td>
@@ -365,10 +365,9 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 </tr>
 <tr>
 <td><code>clio-coder context working-set --session &lt;id|path&gt;</code></td>
-<td>Inspect one session's durable working-set fold and path-index summary without modifying the ledger.</td>
+<td>Inspect one session&#39;s durable working-set fold and path-index summary without modifying the ledger.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <h2>Headless Run Flags</h2>
 <table>
 <thead>
@@ -377,8 +376,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <th>Meaning</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>--target &lt;id&gt;</code></td>
 <td>One-run main-agent or dispatch target override.</td>
 </tr>
@@ -462,8 +460,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <td><code>--no-panes</code></td>
 <td>Disable pane integration for this invocation. It overrides <code>interface.panes.enabled</code>.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p><code>--with-panes</code> is an explicit first-class launch mode, not permission to start a
 pane server. Clio confirms <code>HERDR_ENV=1</code>, connects to an existing socket, and
 pings it before registering pane tools. The fleet watch pane runs
@@ -511,8 +508,7 @@ when Clio is already inside a reachable herdr session.</p>
 <th>Purpose</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>/quit</code></td>
 <td><code>/quit</code></td>
 <td>Exit Clio Coder</td>
@@ -526,6 +522,26 @@ when Clio is already inside a reachable herdr session.</p>
 <td><code>/skill</code></td>
 <td><code>/skill &lt;name&gt; [task]</code> or <code>/skill off</code></td>
 <td>Invoke a skill or clear its active tool surface; <code>/skills</code> opens the browser.</td>
+</tr>
+<tr>
+<td><code>/background</code></td>
+<td><code>/background</code></td>
+<td>Detach the newest eligible attached dispatch through its existing owner; no eligible dispatch gives an explanatory no-op.</td>
+</tr>
+<tr>
+<td><code>/interrupt</code></td>
+<td><code>/interrupt &lt;text&gt;</code></td>
+<td>Settle the active run and send text through the interrupt owner; refusals keep its existing next-slot behavior. Missing text is correctable.</td>
+</tr>
+<tr>
+<td><code>/editor</code></td>
+<td><code>/editor [text]</code></td>
+<td>Edit explicit text or an empty buffer externally; return to the composer for deliberate submission. Failure preserves the command for correction.</td>
+</tr>
+<tr>
+<td><code>/notifications</code></td>
+<td><code>/notifications dismiss [all]</code></td>
+<td>Dismiss the oldest notice once, or explicitly dismiss all; this does not mute future notices.</td>
 </tr>
 <tr>
 <td><code>/library</code></td>
@@ -580,7 +596,7 @@ when Clio is already inside a reachable herdr session.</p>
 <tr>
 <td><code>/oracle</code></td>
 <td><code>/oracle &lt;question&gt;</code></td>
-<td>Ask a read-only advisor to challenge a question against this session's settled decisions</td>
+<td>Ask a read-only advisor to challenge a question against this session&#39;s settled decisions</td>
 </tr>
 <tr>
 <td><code>/council</code></td>
@@ -635,7 +651,7 @@ when Clio is already inside a reachable herdr session.</p>
 <tr>
 <td><code>/files</code></td>
 <td><code>/files [open|close|pick]</code></td>
-<td>Toggle the files pane docked below the session; picks land in the composer as <code>@</code> mentions. See <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/panes-and-files.md">Panes and the Files Pane</a></td>
+<td>Toggle the files pane docked below the session; picks land in the composer as <code>@</code> mentions. See <a href="panes-and-files.md">Panes and the Files Pane</a></td>
 </tr>
 <tr>
 <td><code>/thinking</code></td>
@@ -665,7 +681,7 @@ when Clio is already inside a reachable herdr session.</p>
 <tr>
 <td><code>/handoff</code></td>
 <td><code>/handoff &lt;goal&gt;</code></td>
-<td>Hand this session's working state to a fresh session for a stated goal</td>
+<td>Hand this session&#39;s working state to a fresh session for a stated goal</td>
 </tr>
 <tr>
 <td><code>/tree</code></td>
@@ -682,21 +698,20 @@ when Clio is already inside a reachable herdr session.</p>
 <td><code>/export [path]</code></td>
 <td>Export a self-contained HTML transcript by default; a <code>.md</code> path writes Markdown</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Operator tasks are durable project work in <code>.clio-coder/user-tasks.json</code>. Use
 <code>clio-coder tasks add &quot;Fix the solver&quot; --expect src/solver.ts --verify test:solver:60000</code>
 or <code>/tasks add Fix the solver --expect src/solver.ts --verify test:solver:60000</code>.
 Both <code>--expect &lt;path&gt;</code> and <code>--verify &lt;checkId&gt;[:timeoutMs]</code> are repeatable. Expected
 outputs use repository-relative paths; verification ids must exist in the project
 verifier catalog or package scripts when added. An omitted timeout uses the
-check's declared timeout, and requested timeouts are bounded as in dispatch
+check&#39;s declared timeout, and requested timeouts are bounded as in dispatch
 intent. If a complete value matches a declared id containing colons, it names
 that check; otherwise the final numeric suffix is the timeout. Acceptance travels
-with the task when handed and picked, and seeds the board's required validation
+with the task when handed and picked, and seeds the board&#39;s required validation
 evidence. Under high rigor, a turn that changes files while this task is active
 must record a passing validation receipt for every named check or a successful
-<code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task's
+<code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task&#39;s
 completion note alone does not satisfy acceptance. <code>clio-coder tasks list</code>,
 <code>hand &lt;uN&gt;</code>, <code>done &lt;uN&gt;</code>, and <code>drop &lt;uN&gt;</code> manage the same inbox as <code>/tasks</code>.</p>
 <p>Retired commands are rejected before model submission. Old Library browsing forms, including <code>/resources</code>, <code>/library &lt;kind&gt;</code> and <code>/agents connect</code>, explain the canonical route. Browse with <code>/library</code>, <code>/skills</code>, <code>/agents</code> or <code>/prompts</code>; use <code>/interop</code> for local-agent adoption and <code>/extensions</code> for harness extensions.</p>
@@ -734,7 +749,7 @@ question the operator asks to orient themselves mid-run would otherwise become
 context every worker inherits. Esc closes the overlay, and cancels the round if it
 is still streaming. <code>/btw</code> during an in-flight turn is refused with a notice
 rather than queued, because a side question answered after the run it was asked
-during has already missed its moment. The round's token usage still shows in
+during has already missed its moment. The round&#39;s token usage still shows in
 <code>/cost</code>, labeled as a side question, because it was a real call and cost real
 money; it is deliberately not counted as a turn.</p>
 <p><code>/council [--roster &lt;name&gt;] [--rounds &lt;n&gt;] [--synthesis judge|vote|none] &lt;task&gt;</code>
@@ -742,7 +757,7 @@ asks a roster of two to five read-only members the same task and puts the group 
 the Fleet Runs board as one card. It owns no dispatch path of its own: the command
 builds dispatch-tool arguments and admits them through the tool registry, so a
 supervised autonomy level parks the call and the approval overlay names every
-member's label, target, model, node, round count, and synthesis mode before
+member&#39;s label, target, model, node, round count, and synthesis mode before
 anything runs. Members are pinned to read-only autonomy and the council tool
 surface by admission, exactly as they are for a council the model asks for.</p>
 <p><code>--roster</code> names a <code>fleet.rosters</code> entry. Without it the command takes
@@ -750,13 +765,13 @@ surface by admission, exactly as they are for a council the model asks for.</p>
 and names the setting to declare. A roster that is the only one configured is
 still not the default: seating a council from whichever roster happens to be
 present would run models the operator never chose. <code>--rounds</code> accepts one to
-three and <code>--synthesis</code> accepts <code>judge</code>, <code>vote</code>, or <code>none</code>, which are the tool's
+three and <code>--synthesis</code> accepts <code>judge</code>, <code>vote</code>, or <code>none</code>, which are the tool&#39;s
 own bounds, enforced where the operator typed them so a council is never refused
 after its plan has already been shown. <code>/council</code> during an in-flight turn is
 refused with a notice rather than queued, for the same reason <code>/fleet run</code> is: an
 approved plan describes the workspace as it stands. Nothing the members produce
-enters the main agent's context until an operator runs <code>/share</code>.</p>
-<p><code>/handoff &lt;goal&gt;</code> carries this session's working state into a fresh session for a
+enters the main agent&#39;s context until an operator runs <code>/share</code>.</p>
+<p><code>/handoff &lt;goal&gt;</code> carries this session&#39;s working state into a fresh session for a
 goal the operator states. The goal is required and gated: a goal shorter than 12
 characters is refused, and so is one of a small stoplist of non-goals such as
 &quot;continue&quot;, &quot;next&quot;, or &quot;resume&quot;. Both refusals name the rule they enforce, because
@@ -767,16 +782,16 @@ with JSON validated against a fixed response schema of decisions, facts, files,
 commands, and open questions. Every list and every string is bounded; output over
 a bound is truncated with a visible marker and the document names each bound that
 fired, so nothing is cut silently and an over-eager answer is never a refusal.</p>
-<p>Every file path the model names is checked against this session's read ledger and
+<p>Every file path the model names is checked against this session&#39;s read ledger and
 never against the filesystem. Paths the session did not touch are dropped and
 listed in the document under their own heading so the operator can see what the
-model invented. Extracted decisions are merged with the session's settled decision
+model invented. Extracted decisions are merged with the session&#39;s settled decision
 board, and the board wins. The result is one Markdown document opened for review:
 Enter accepts it, <code>e</code> hands it to <code>$EDITOR</code>, and Esc cancels the whole handoff with
 nothing written anywhere.</p>
 <p>On accept, Clio mints a new session, writes the reviewed document into it as
 bounded data labelled as a handoff from the old session id, and replays the old
-session's skill activations so loaded skills carry forward. The document is never
+session&#39;s skill activations so loaded skills carry forward. The document is never
 written as a fabricated user turn. The old session is left untouched apart from one
 terminal note recording the target session id. A handoff is a session operation
 throughout: it writes no memory promotion candidate and never calls the task-memory
@@ -812,22 +827,22 @@ text is still there to correct, rather than having to be retyped. Retired spelli
 <p>The accepted spelling of every command is the table under <a href="#interactive-slash-commands">Interactive Slash Commands</a>; there is exactly one per operation, and nothing else is parsed as a command.</p>
 <p>Configuration lives in one place: the <code>/settings</code> overlay. <code>/settings &lt;section&gt;</code> reaches every section directly. <code>/thinking &lt;level&gt;</code> and <code>/model &lt;pattern&gt;</code> stay as quick setters that apply without opening anything.</p>
 <p>Settings → Targets presents an operational console table (<code>HEALTH</code>, <code>ID</code>, <code>ROLES</code>, <code>RUNTIME</code>, <code>LATENCY</code>) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. <code>Enter</code> opens actions for <code>Use</code> (switches active chat target and rebases model), <code>Connect</code> (runs the API-key or OAuth flow then probes), <code>Probe</code>, and <code>Remove</code> (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via <code>clio-coder targets add</code>.</p>
-<p>Settings → Fleet is an entity workbench organized with dim group headers (<code>Defaults</code>, <code>Profiles</code>, <code>Agent routes</code>, <code>Placement</code>). Dispatched worker defaults and profile rows render as compact summaries (<code>fast-local node-a/example-coder-model  high  auto</code>), drilling into fields (<code>target</code>, <code>model</code>, <code>thinkingLevel</code>, <code>node</code>) on <code>Enter</code>. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the <code>Alt+W</code> Fleet Runs board, which also steers and cancels them. <code>Enter</code> opens the selected run's worker detail: the phase, the running call with its redacted action descriptor, and the bounded tail of the worker's own prose.</p>
-<p><code>/run</code> and <code>/delegate</code> put the worker's answer on screen. Both echo the typed
+<p>Settings → Fleet is an entity workbench organized with dim group headers (<code>Defaults</code>, <code>Profiles</code>, <code>Agent routes</code>, <code>Placement</code>). Dispatched worker defaults and profile rows render as compact summaries (<code>fast-local node-a/example-coder-model  high  auto</code>), drilling into fields (<code>target</code>, <code>model</code>, <code>thinkingLevel</code>, <code>node</code>) on <code>Enter</code>. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the <code>Alt+W</code> Fleet Runs board, which also steers and cancels them. <code>Enter</code> opens the selected run&#39;s worker detail: the phase, the running call with its redacted action descriptor, and the bounded tail of the worker&#39;s own prose.</p>
+<p><code>/run</code> and <code>/delegate</code> put the worker&#39;s answer on screen. Both echo the typed
 line dim above the block, then stream the run into the transcript as an attributed
 block: a header (<code>◇ coder · node-a/example-coder-model · run 2mkas6s</code> for fleet workers,
-or <code>◇ codex (acp) · run 7hq2ab</code> for ACP peers), the worker's prose down a rail,
+or <code>◇ codex (acp) · run 7hq2ab</code> for ACP peers), the worker&#39;s prose down a rail,
 one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
 token count, duration, and contract status (such as <code>└ ✓ ok · 8.4k tok · 18s · contract unmeasured</code>),
 with the failure reason printed on the rail above the footer when a run fails.
-Model-launched workers use <code>◆</code> and operator-launched workers use <code>◇</code>; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity, and Compact keeps identity and outcome. The footer shows the active worker count alongside the main agent's phase. Use <code>/view transcript</code> or <code>/view dispatch:&lt;runId&gt;</code> for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.</p>
+Model-launched workers use <code>◆</code> and operator-launched workers use <code>◇</code>; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity, and Compact keeps identity and outcome. The footer shows the active worker count alongside the main agent&#39;s phase. Use <code>/view transcript</code> or <code>/view dispatch:&lt;runId&gt;</code> for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.</p>
 <p>That block is the only place a <code>/run</code> answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
 will say it has not seen one. <code>--share</code> on either command hands the result over
 when the run finishes, and <code>/share [runId]</code> does it afterwards for a run already
 on screen. Bare <code>/share</code> takes the newest finished run the operator started
 themselves (never a model-asked <code>◆</code> run), while <code>/share &lt;runId&gt;</code> may name a
-model-asked run explicitly. What crosses is the receipt's own bounded text under a
+model-asked run explicitly. What crosses is the receipt&#39;s own bounded text under a
 <code>[worker result] coder · run 2mkas6s · ok · shared by the operator</code> header,
 entering the session through the ordinary user-turn path so replay and
 compaction treat it as operator text. The header names the operator as the
@@ -837,10 +852,10 @@ never dispatched the run does not discard it as unattributed output. A turn
 that only relays a shared note does not trip the unbacked-worker-claim
 advisory.
 A council run shares as a council. <code>/share &lt;synthesis runId&gt;</code> brings the whole
-<code>council-report</code> in as one bounded block: every final-round member's answer under
+<code>council-report</code> in as one bounded block: every final-round member&#39;s answer under
 its roster label, each with its verdict when it declared one, then the synthesis
 line naming the mode, the verdict, the tally, and the judge run when there was
-one. <code>/share &lt;member runId&gt;</code> brings that one member's answer in under its roster
+one. <code>/share &lt;member runId&gt;</code> brings that one member&#39;s answer in under its roster
 label, so a single voice never reaches the main agent as an unattributed one. A
 synthesis run whose sealed text does not parse as a report is shared verbatim
 rather than dropped, because the operator named that run.</p>
@@ -851,7 +866,7 @@ rule the dispatch board follows.</p>
 <p>Blocks survive a resume. Each attempt writes a <code>workerRun</code> session entry naming
 the run, its origin, and its runtime, and <code>/resume</code> rebuilds the block from that
 entry plus the sealed receipt under <code>&lt;state&gt;/receipts/&lt;runId&gt;.json</code>. The session
-file's <code>workerRun</code> entries carry ids, origins, and runtime references only, without
+file&#39;s <code>workerRun</code> entries carry ids, origins, and runtime references only, without
 prose; the replayed answer is bounded from the receipt exactly like the live one.
 A run whose receipt is gone replays with a <code>receipt unavailable</code> footer rather
 than a header with nothing under it. The entries are bookkeeping: they cost nothing
@@ -864,8 +879,8 @@ evidence, or block/drop reason. It persists as full <code>taskLedger</code> snap
 stable board history and <code>userTaskId</code> pickup links survive <code>/resume</code> and <code>/fork</code>
 and can be audited from <code>current.jsonl</code>. Operator tasks persist separately in
 <code>.clio-coder/user-tasks.json</code>; the overlay can add, hand, finish, or drop them.
-The model-facing <code>tasks</code> tool's session-ledger and inbox bookkeeping is the
-documented read-class exception described in <a href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/safety-model.md">the safety model</a>:
+The model-facing <code>tasks</code> tool&#39;s session-ledger and inbox bookkeeping is the
+documented read-class exception described in <a href="../architecture/safety-model.md">the safety model</a>:
 calls remain audited as <code>read</code> and do not grant workspace mutation authority.</p>
 <p>The <code>/decisions</code> overlay shows completed and cancelled <code>ask_user</code> interviews
 from the active branch. It retains settled and superseded values from
@@ -875,14 +890,14 @@ to the model as an ordinary operator turn after the durable snapshot changes.</p
 <p>The read-only <code>/memory</code> overlay keeps durable and session memory attributable
 in one place. It lists approved evidence-backed lessons, then the live task
 bank by private status, knowledge, and procedural class, including each
-entry's injection count and the last memory-step outcome. The welcome launchpad
+entry&#39;s injection count and the last memory-step outcome. The welcome launchpad
 and expanded dashboard summarize whether intervention is on, its rules or LLM
 tier, and current bank size.
 After <code>/resume</code>, Clio offers <code>/memory seed</code> when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 <code>context.memory.enabled</code> is false.</p>
 <p>The <code>/interop</code> overlay lists the other coding agents Clio found on this machine,
-grouped <code>Detected</code>, <code>Configured</code>, <code>Declined</code>, and <code>Inventory</code>. A detected row's detail pane
+grouped <code>Detected</code>, <code>Configured</code>, <code>Declined</code>, and <code>Inventory</code>. A detected row&#39;s detail pane
 shows the exact <code>integrations.externalAgents.entries</code> entry that connecting it would append, plus
 the two facts a new peer inherits: <code>projectContext: none</code>, so the peer receives
 the task text and never the project projection, and <code>toolGovernance: clio-coder-policy</code>, so its tool calls are gated by Clio safety. Press <code>a</code> to connect
@@ -890,7 +905,7 @@ one or <code>d</code> to decline. Opening the overlay refreshes the disk invento
 bounded version probes; navigation and plan approval start no agent session. Accepting applies to the live session,
 because <code>delegation</code> hot-reloads.</p>
 <p>Boot adds at most one line about interop. <code>/interop</code> opens the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.</p>
-<p><code>clio-coder interop inspect [--json]</code> reports host resources and wiring. <code>clio-coder interop adopt &lt;host&gt; [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]</code> shows a plan and requires approval before installing safe resources through the library. <code>/interop</code> offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/interop.md">Coding agent interoperability</a> for layouts, limits, and trust semantics.</p>
+<p><code>clio-coder interop inspect [--json]</code> reports host resources and wiring. <code>clio-coder interop adopt &lt;host&gt; [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]</code> shows a plan and requires approval before installing safe resources through the library. <code>/interop</code> offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See <a href="interop.md">Coding agent interoperability</a> for layouts, limits, and trust semantics.</p>
 <p><code>clio-coder doctor</code> reports interop and never proposes anything. It emits one
 <code>ok</code> row per detected agent naming its version, its path, and whether it is
 configured, one <code>warn</code> row for a configured peer whose command no longer resolves
@@ -899,127 +914,181 @@ machine with no other agents installed emits no interop rows at all. Reachabilit
 for a stdio peer means the command resolves; doctor never starts a session with
 one, and plain <code>doctor</code> writes nothing.</p>
 <h2>Keybindings</h2>
-<p>App bindings use <code>Alt + &lt;key&gt;</code> as the primary scheme, plus <code>Shift+Tab</code>,
-<code>Ctrl+D</code>, <code>Shift+Enter</code> / <code>Ctrl+J</code>, and a portable <code>Ctrl+G</code> leader. Modern terminals and Linux/meta
-setups send Alt directly. Stock macOS Terminal.app needs <strong>Use Option as Meta
-key</strong> enabled in Settings &gt; Profiles &gt; Keyboard for native Alt; otherwise use
-<code>Ctrl+G</code> then the Alt binding letter.</p>
-<p><code>Alt+B</code> and <code>Alt+D</code> are approved application-input boundary overrides of Pi's
-editor word-back and word-delete chords. Clio routes those two bindings before
-the editor sees them so the task and decision boards remain global shortcuts.
-They are intentional exceptions to the other app bindings' avoidance of Pi
-editor reserves and can be rebound through <code>settings.yaml.keybindings</code>.</p>
+<p>Clio has eleven direct application defaults. <code>/help</code> shows the effective keys,
+fixed leader entries, scopes and user overrides. <code>Ctrl+G</code> opens a visible action
+menu with no timeout: use a suffix or Up/Down and Enter. Unknown suffixes leave
+the menu open and preserve the draft; Ctrl+G or Esc closes it. Ctrl+C immediately
+cancels the underlying owner. The menu does not search as you type.</p>
 <table>
 <thead>
 <tr>
-<th>Binding</th>
+<th>Direct default</th>
 <th>Action</th>
+<th>Fixed leader suffix</th>
 </tr>
 </thead>
-<tbody>
-<tr>
-<td><code>Enter</code></td>
-<td>Send draft prompt (when idle) or deliver it at the next slot of the active run (when streaming).</td>
-</tr>
-<tr>
-<td><code>Shift+Enter</code> / <code>Ctrl+J</code></td>
-<td>Insert a newline into multiline editor input.</td>
-</tr>
-<tr>
-<td><code>Ctrl+P</code> / <code>Ctrl+N</code></td>
-<td>Browse backward / forward through prompts accepted in this interactive process; returning past the newest entry restores the unfinished draft.</td>
-</tr>
-<tr>
-<td><code>Alt+Enter</code></td>
-<td>End of turn: queue the current draft for delivery when the active run settles.</td>
-</tr>
-<tr>
-<td><code>Alt+I</code></td>
-<td>Interrupt: cancel the active run and deliver the current draft now. Refused while an attached dispatch runs or a permission ask is parked; the draft then queues for the next slot.</td>
-</tr>
-<tr>
-<td><code>Alt+Up</code></td>
-<td>Restore queued next-slot and end-of-turn messages to the editor.</td>
-</tr>
-<tr>
-<td><code>Shift+Tab</code></td>
-<td>Cycle orchestrator thinking level (<code>off</code>, <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>xhigh</code>, <code>max</code>).</td>
-</tr>
-<tr>
-<td><code>Alt+T</code></td>
-<td>Open the session tree navigator (<code>/tree</code>).</td>
-</tr>
-<tr>
-<td><code>Alt+U</code></td>
-<td>Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts.</td>
-</tr>
-<tr>
+<tbody><tr>
 <td><code>Alt+L</code></td>
-<td>Open or close the Library.</td>
+<td>Toggle top-level Library</td>
+<td><code>l</code></td>
 </tr>
 <tr>
 <td><code>Alt+M</code></td>
-<td>Open the model and targets selector.</td>
-</tr>
-<tr>
-<td><code>Alt+J</code> / <code>Alt+K</code></td>
-<td>Cycle forward / backward through the configured model set (when empty, directs the operator to <code>/settings chat model-picker</code>).</td>
-</tr>
-<tr>
-<td><code>Alt+W</code></td>
-<td>Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, <code>Enter</code> opens the selected run's live worker detail, <code>s</code> steers, and <code>x</code> cancels.</td>
-</tr>
-<tr>
-<td><code>Alt+E</code></td>
-<td>Toggle the files pane docked below the session in a <code>--with-panes</code> session inside herdr; the same as <code>/files</code>. Rebind through <code>clio-coder.files.toggle</code>.</td>
-</tr>
-<tr>
-<td><code>Alt+B</code></td>
-<td>Open the composite session and operator task board (<code>/tasks</code>). Approved application-boundary override of editor word-back.</td>
-</tr>
-<tr>
-<td><code>Alt+D</code></td>
-<td>Open the settled interview decision board (<code>/decisions</code>). Approved application-boundary override of editor word-delete.</td>
-</tr>
-<tr>
-<td><code>Alt+S</code> / <code>Ctrl+Alt+B</code></td>
-<td>Convert an active attached dispatch to a detached background batch.</td>
+<td>Toggle model picker</td>
+<td><code>m</code></td>
 </tr>
 <tr>
 <td><code>Alt+O</code></td>
-<td>Cycle Output style: Compact, Standard, Detailed. Session only; save a default in <code>/settings interface</code>.</td>
+<td>Cycle Compact, Standard, Detailed output</td>
+<td><code>o</code></td>
 </tr>
 <tr>
-<td><code>Alt+G</code></td>
-<td>Open the current input in an external editor.</td>
+<td><code>Alt+U</code></td>
+<td>Toggle dashboard</td>
+<td><code>u</code></td>
 </tr>
 <tr>
-<td><code>Alt+X</code></td>
-<td>Dismiss footer notifications.</td>
+<td><code>Alt+W</code></td>
+<td>Toggle Workers</td>
+<td><code>w</code></td>
 </tr>
 <tr>
-<td><code>Ctrl+G</code>, then a letter</td>
-<td>Portable leader fallback for Alt-letter actions.</td>
+<td><code>Alt+E</code></td>
+<td>Toggle files from Clio focus</td>
+<td><code>e</code></td>
 </tr>
 <tr>
-<td><code>Ctrl+C</code></td>
-<td>With no overlay: cancel stream, clear input, or press twice to exit. With an overlay open: close/cancel that overlay only.</td>
+<td><code>Shift+Tab</code></td>
+<td>Cycle supported thinking effort</td>
+<td><code>t</code></td>
+</tr>
+<tr>
+<td><code>Ctrl+Q</code></td>
+<td>Queue draft after the whole active run; ordinary send while idle</td>
+<td><code>f</code></td>
+</tr>
+<tr>
+<td><code>Alt+Q</code></td>
+<td>Restore both queue kinds before the current draft, once</td>
+<td><code>q</code></td>
 </tr>
 <tr>
 <td><code>Ctrl+D</code></td>
-<td>Exit when the editor is empty; otherwise delete the next character. It never exits from inside an overlay.</td>
+<td>Delete forward with text; exit only empty and idle with no queued messages</td>
+<td>—</td>
 </tr>
 <tr>
-<td><code>PageUp</code> / <code>PageDown</code></td>
-<td>In <code>/resume</code> and list overlays: scroll the selection by one full page (12 rows).</td>
+<td><code>Ctrl+G</code></td>
+<td>Open or close the contextual action menu</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<p>Additional menu entries: <code>i</code> interrupts with the draft, <code>s</code> backgrounds the newest
+eligible attached dispatch, <code>g</code> edits the expanded draft externally, <code>x</code> dismisses
+one notification, <code>z</code> undoes the focused editable field, <code>r</code> toggles transcript
+search, <code>p</code>/<code>n</code> page the transcript and Home/End jump to its bounds. Previous/next
+prompt entries are available through arrows and Enter. <code>/tasks</code>, <code>/decisions</code>
+and <code>/tree</code> retain their boards; scoped model cycling retains configurable action
+IDs and has no default direct key.</p>
+<table>
+<thead>
+<tr>
+<th>Editing or contextual key</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Enter</code></td>
+<td>Accept completion first, otherwise send idle input or queue at the next steering slot</td>
 </tr>
 <tr>
-<td><code>Esc</code></td>
-<td>With an overlay open: clear non-empty filter first, move up drill-down level, then close/cancel. With no overlay: cancel stream/operation or collapse dashboard.</td>
+<td><code>Ctrl+J</code>, <code>Shift+Enter</code></td>
+<td>Composer newline; distinct Shift+Enter delivery is optional</td>
 </tr>
-</tbody>
-</table>
-<p>When scripting Clio inside tmux, prefer <code>tmux send-keys C-m</code> for submit/confirm keys instead of the literal <code>Enter</code> token; some tmux/terminal combinations do not deliver <code>Enter</code> reliably.</p>
+<tr>
+<td><code>Alt+B</code>/<code>Alt+F</code>, Ctrl+Left/Right, Alt+Left/Right</td>
+<td>Word movement</td>
+</tr>
+<tr>
+<td><code>Alt+D</code>/Alt+Delete</td>
+<td>Delete the next word</td>
+</tr>
+<tr>
+<td>Ctrl+W, Alt+Backspace, Ctrl+Backspace</td>
+<td>Delete the previous word; Ctrl+Backspace covers Windows Terminal&#39;s BS encoding</td>
+</tr>
+<tr>
+<td>Home/End, Ctrl+A/E</td>
+<td>Composer line bounds, including fullscreen</td>
+</tr>
+<tr>
+<td>Ctrl+P/N</td>
+<td>Prompt history, restoring the unfinished draft on return</td>
+</tr>
+<tr>
+<td>Ctrl+underscore</td>
+<td>Undo; menu <code>z</code> is the fallback when the physical chord is unavailable</td>
+</tr>
+<tr>
+<td>Ctrl+R</td>
+<td>Fullscreen transcript search; regular mode explains terminal Find</td>
+</tr>
+<tr>
+<td>Search Enter / Up</td>
+<td>Next / previous match; Home/End edit the query</td>
+</tr>
+<tr>
+<td>Search Esc / Ctrl+C / Ctrl+R</td>
+<td>Close search without cancelling unrelated work</td>
+</tr>
+<tr>
+<td>PageUp/PageDown, Ctrl+Up/Down</td>
+<td>Fullscreen transcript paging / previous-next prompt; overlays own their local navigation</td>
+</tr>
+<tr>
+<td>Esc</td>
+<td>Cancel completion or one local field/detail first; plain composer cancels bash then the active run</td>
+</tr>
+<tr>
+<td>Ctrl+C</td>
+<td>Cancel the current search/modal/child; otherwise cancel work, clear draft, or use idle-empty double Ctrl+C to quit</td>
+</tr>
+</tbody></table>
+<p>Reviews, model-scope choices, permissions and interviews own their input. They
+expose no global send, navigation, background or quit actions. Top-level Library,
+model, tree and Workers scopes can expose their owner toggle; editable fields
+expose semantic undo. Nested Library reviews must finish or cancel before the
+browser toggle becomes available. Permission deletion never resolves a user
+submit binding. Enter allows only when its defined empty-draft condition holds;
+legacy LF/Ctrl+J is indistinguishable from Enter in these single-line scopes.</p>
+<p>Bracketed paste is literal and never submits, executes a slash or shell command,
+or confirms a modal. Submission needs a later deliberate key. External editing
+receives expanded paste text and preserves the draft on failure; returned text
+and recovered queues retain literal bang provenance. Input arriving during an
+asynchronous send expansion remains in the composer. Explicit release events
+are ignored before application or viewport actions. Repeats may edit, navigate
+or scroll; they cannot repeat send, toggle, cycle, confirmation, cancel or exit.
+Legacy streams cannot distinguish every held-key repeat.</p>
+<p><strong>Overrides and migration.</strong> Keep overrides in <code>interface.keybindings</code>; legacy
+top-level <code>keybindings</code> remains a compatibility input. An explicit <code>[]</code> disables
+both direct access and the action&#39;s default leader entry. A default-unbound
+action may still have a leader entry. Rebinding a direct key does not change its
+fixed suffix; <code>leader: []</code> disables the menu. Unknown IDs and effective conflicts
+diagnose, and edits reload routing, components and hints together, cancelling a
+pending menu. No preferences are rewritten. Defaults move follow-up from
+Alt+Enter to Ctrl+Q and recovery from Alt+Up to Alt+Q; Alt+B/D return to editing.
+Infrequent boards use their slash commands, and interrupt/background/external
+editor/dismiss use the menu or command bridges. Explicit old choices remain.</p>
+<p><strong>Terminal delivery.</strong> On stock macOS Terminal.app, Option may compose text;
+the Ctrl+G menu works without changing that setting. A temporary profile with
+Use Option as Meta enabled permits direct Alt keys. Windows Terminal/WSL2 can
+retain native Alt+Enter, Alt+arrow, clipboard, Find and zoom controls. Ctrl+J
+is the portable newline. Node raw mode normally disables flow control and
+signal generation; an SSH/mux or terminal UI can still intercept keys, so menu
+<code>f</code> is available if Ctrl+Q does not arrive. Native clipboard and terminal window
+controls remain upstream. Clio does not own keys while Yazi, an external editor
+or the host mux holds focus. Physical Windows/macOS acceptance is separate from
+Linux PTY and protocol tests; no terminal profile is installed automatically.</p>
 <h2>Live Steering</h2>
 <p>While a run is active, the key that submits a message chooses when it lands.
 There are three modes, chosen per message; the default is next slot.</p>
@@ -1031,27 +1100,25 @@ There are three modes, chosen per message; the default is next slot.</p>
 <th>Delivery</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td>Next slot</td>
 <td><code>Enter</code></td>
 <td>Between tool batches, mid-run, through <code>agent.steer</code>. The agent keeps going and reads the message before its next model call.</td>
 </tr>
 <tr>
 <td>End of turn</td>
-<td><code>Alt+Enter</code></td>
+<td><code>Ctrl+Q</code></td>
 <td>When the whole run settles and Clio would hand control back, through <code>agent.followUp</code>. A turn is the whole run, not one model round.</td>
 </tr>
 <tr>
 <td>Interrupt</td>
-<td><code>Alt+I</code> (or <code>Ctrl+G</code>, <code>i</code>)</td>
+<td><code>Ctrl+G</code>, <code>i</code> or <code>/interrupt &lt;text&gt;</code></td>
 <td>Cancels the in-flight work the way <code>Esc</code> does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Interrupt is refused in two states and the message is queued for the next slot
 instead, with a notice saying why: while an attached dispatch is running (the
-abort would kill the worker's run with no receipt; steer it with <code>@&lt;agent&gt;</code> or
+abort would kill the worker&#39;s run with no receipt; steer it with <code>@&lt;agent&gt;</code> or
 cancel it with <code>Esc</code>) and while a permission ask is parked (it is already
 waiting on you). A steer that arrives as the run ends is resubmitted as a fresh
 prompt. Headless <code>--steer-channel</code> lines are always next-slot steers.</p>
@@ -1059,13 +1126,13 @@ prompt. Headless <code>--steer-channel</code> lines are always next-slot steers.
 <pre><code class="language-text">@&lt;agentId-or-runId-prefix&gt; &lt;steering text&gt;
 </code></pre>
 <p>Clio resolves the token to an exact agent id first, then to a run-id prefix,
-and forwards the text to an HTTP or SDK worker's steering channel. File-looking
+and forwards the text to an HTTP or SDK worker&#39;s steering channel. File-looking
 tokens such as <code>@package.json</code> are rejected so ordinary repository references
 do not accidentally become steering requests.</p>
 <p>The <code>Alt+W</code> Fleet Runs board makes this control path discoverable: use
 Up/Down or <code>j</code>/<code>k</code> to select a run, <code>s</code> to close the board and prefill its
 exact <code>@&lt;runId&gt; </code> steering prefix, and <code>x</code> to cancel a live worker or queued
-retry. A steer first reports <code>queued</code>; only the worker's
+retry. A steer first reports <code>queued</code>; only the worker&#39;s
 <code>clio_coder_steer_received</code> acknowledgement reports <code>received</code>. Single-shot
 subprocess runtimes and ACP delegation do not expose a live steering channel
 and are labeled accordingly.</p>
@@ -1075,7 +1142,7 @@ and are labeled accordingly.</p>
 <ul>
 <li><strong>Target Capabilities:</strong> What the selected model target actually supports (such as tools, streaming, and vision).</li>
 <li><strong>Safety Net:</strong> Granular rule packs loaded from <code>damage-control-rules.yaml</code>, project policies, and protected artifact paths; always on, identical at every autonomy level.</li>
-<li><strong>Autonomy Mapping:</strong> Once the net passes a call, the level decides whether it runs, asks, or is denied. See <a href="https://github.com/iowarp/clio-coder/blob/main/docs/architecture/safety-model.md">safety-model.md</a> for the full matrix.</li>
+<li><strong>Autonomy Mapping:</strong> Once the net passes a call, the level decides whether it runs, asks, or is denied. See <a href="../architecture/safety-model.md">safety-model.md</a> for the full matrix.</li>
 </ul>
 <p>When an action asks for confirmation, whether from a safety-net rail or from the autonomy level, the call parks and three surfaces say so at once. The transcript row reads <code>⏸ awaiting approval</code> with <code>action ·</code>, <code>axis ·</code>, and <code>target ·</code> lines under it; the footer phase pill reads <code>⏸ confirm</code>; and a consequence-tier dialog opens with the tool, target, action, authenticated requester, one-shot authority, reversibility, and deny and stop effects. Titles distinguish workspace authority, outward consequences, safety-net confirmation, system changes, and worker escalations. The dialog sits at bottom center with five rows reserved for the composer and footer, and it re-anchors on resize. The composer rail switches to <code>CONFIRM</code> and repeats the keys while the prompt owns the keyboard.</p>
 <p>The keys are the same on both surfaces: <code>Enter</code> allows this one call, <code>Esc</code> denies it, and <code>s</code> denies it and stops the turn so nothing asks again. <code>Enter</code> allows only from an empty composer. While the composer holds a draft, the habitual send key does nothing, the rail and the dialog footer read <code>[Backspace] clear draft</code> instead of <code>[Enter] allow</code>, and only the deletion keys (<code>Backspace</code>, <code>Delete</code>, <code>Ctrl+U</code>, <code>Ctrl+W</code>, <code>Ctrl+K</code>) reach the editor until the draft is gone. Every other key is swallowed. A call that parks while another overlay holds the screen is announced with an <code>[approval]</code> notice and the dialog opens as soon as that overlay closes; the dialog lays itself out for any terminal width, so no width is too narrow for it. Approving or denying never changes the level.</p>
@@ -1090,8 +1157,7 @@ and are labeled accordingly.</p>
 <th>Use it for</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>architect</code></td>
 <td><code>plan</code> / <code>base</code></td>
 <td>Mapping boundaries, contracts, and migration slices.</td>
@@ -1149,15 +1215,14 @@ and are labeled accordingly.</p>
 <tr>
 <td><code>oracle</code></td>
 <td><code>plan</code> / <code>shadow</code></td>
-<td>Challenging one question against the session's settled decisions through <code>/oracle</code>.</td>
+<td>Challenging one question against the session&#39;s settled decisions through <code>/oracle</code>.</td>
 </tr>
 <tr>
 <td><code>context-bootstrap</code></td>
 <td><code>internal</code> / <code>internal</code></td>
 <td>Bootstrap agent behind <code>clio-coder context init</code> that inspects the repository and returns <code>CLIO-CODER.md</code>.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Examples:</p>
 <pre><code class="language-bash">clio-coder run --agent coder &quot;Find the main build, test, and lint commands.&quot;
 clio-coder run --agent architect &quot;Plan a minimal change to add JSON output to the CLI.&quot;
@@ -1174,7 +1239,7 @@ not mechanically route the request. A threshold nudge advises Scout delegation
 after 9 or more manual read-only exploration calls in one turn.</p>
 <p>Agent recipes are the Markdown source files. The normalized agent spec is the
 catalog/runtime view: category, capability class, latency class, tags, mode, and
-tool set. This keeps Clio's product vocabulary stable while dispatch continues
+tool set. This keeps Clio&#39;s product vocabulary stable while dispatch continues
 to execute through the existing engine worker path, the sanctioned Claude Code worker runtimes (<code>claude-sdk</code> and <code>claude-code</code>), or external ACP delegation agents.</p>
 <h2>Verification Lanes</h2>
 <table>
@@ -1184,8 +1249,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 <th>Purpose</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>pnpm run ci</code></td>
 <td>Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the trace-viewer suite.</td>
 </tr>
@@ -1217,8 +1281,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 <td><code>pnpm run clean</code></td>
 <td>Remove <code>dist/</code>.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Live provider checks cost tokens or local GPU time and are deliberately not
 part of deterministic CI. Maintainers perform them explicitly against an
 isolated Clio home and a named configured target, recording the target, wire
@@ -1226,8 +1289,8 @@ model id, serving configuration, and result with the release evidence. This is
 the appropriate lane for local gateways such as llama.cpp, LM Studio, vLLM,
 and SGLang, and for cloud targets with operator-provided credentials.</p>
 <h2>Environment Variables</h2>
-<p>Clio Coder also reads environment variables for platform paths, diagnostics, lifecycle integration, tests, and process-local behavior such as <code>CLIO_CODER_RIGOR</code>. Durable guardrail policy lives only in settings. For the complete maintained inventory, see <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/environment-variables.md">environment-variables.md</a>.</p>
-<hr />
+<p>Clio Coder also reads environment variables for platform paths, diagnostics, lifecycle integration, tests, and process-local behavior such as <code>CLIO_CODER_RIGOR</code>. Durable guardrail policy lives only in settings. For the complete maintained inventory, see <a href="environment-variables.md">environment-variables.md</a>.</p>
+<hr>
 <h2>Project Context</h2>
 <p>Clio uses the nearest checked-in <code>CLIO-CODER.md</code> as the canonical project guide. Run
 <code>/context init</code> in the TUI or <code>clio-coder context init</code> from the shell to create or
@@ -1285,7 +1348,7 @@ Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
 <code>.clio-coder/wiki/</code> by dispatching the <code>wiki-writer</code> agent through the configured
 model target. It makes one planning dispatch, which revises the page plan the
 codewiki index derived, then one dispatch per page. <code>quickstart.md</code> and every
-directory <code>index.md</code> are generated deterministically from the pages' front
+directory <code>index.md</code> are generated deterministically from the pages&#39; front
 matter after the run, so no dispatch writes them. <code>.clio-coder/wiki/meta.json</code> records
 the page list, model label, content hash, git head, indexed source-tree hash,
 and the plan.</p>
@@ -1335,8 +1398,7 @@ model-free.</p>
 <th>Returns</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>symbol</code></td>
 <td><code>query=&lt;name&gt;</code></td>
 <td>Declaration records with path, line, kind, and signature.</td>
@@ -1359,7 +1421,7 @@ model-free.</p>
 <tr>
 <td><code>deps</code></td>
 <td><code>query=&lt;path&gt;</code></td>
-<td>The file's internal and external imports.</td>
+<td>The file&#39;s internal and external imports.</td>
 </tr>
 <tr>
 <td><code>dependents</code></td>
@@ -1371,8 +1433,7 @@ model-free.</p>
 <td>none</td>
 <td>Wiki pages plus absent/fresh/stale state and layout warnings.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p><code>entries</code> defaults to 25 results and caps at 200. <code>path</code> accepts a
 <code>/pattern/flags</code> regex, a glob using <code>*</code>, <code>?</code>, or <code>[...]</code>, or a plain substring.
 <code>outline</code>, <code>deps</code>, and <code>dependents</code> resolve an exact indexed path or a unique
@@ -1388,8 +1449,7 @@ substring match.</p>
 <th>Detailed</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td>Answers and user messages</td>
 <td>Complete</td>
 <td>Complete</td>
@@ -1443,20 +1503,19 @@ substring match.</p>
 <td>Completion and available duration</td>
 <td>Usage and model-call facts</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>Preview budgets count terminal rows <strong>after wrapping</strong>, including the <code>/view</code> overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful <code>cat</code> or file read cannot fill the transcript with the entire file.</p>
 <p>Use <strong>/view transcript</strong> to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other <code>/view</code> categories; missing or truncated captured content is identified. Inspection applies secret redaction, and <code>!!</code> output remains excluded from model context.</p>
-<p>Output style changes presentation only. <strong>Shift+Tab</strong> still changes the model's thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. <code>/output</code> now explains how to reach Alt+O and Settings. Existing <code>minimal</code>, <code>default</code>, and <code>verbose</code> preferences map to <code>compact</code>, <code>standard</code>, and <code>detailed</code> without rewriting other preferences.</p>
-<p>The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent's current phase; a completed worker cannot clear a sibling's active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker's successful execution remains separate from its validation result.</p>
+<p>Output style changes presentation only. <strong>Shift+Tab</strong> still changes the model&#39;s thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. <code>/output</code> now explains how to reach Alt+O and Settings. Existing <code>minimal</code>, <code>default</code>, and <code>verbose</code> preferences map to <code>compact</code>, <code>standard</code>, and <code>detailed</code> without rewriting other preferences.</p>
+<p>The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent&#39;s current phase; a completed worker cannot clear a sibling&#39;s active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker&#39;s successful execution remains separate from its validation result.</p>
 <h2>TUI Surface Refinements</h2>
 <p>The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:</p>
 <ul>
 <li><strong>Adaptive Welcome Launchpad:</strong> Before the first prompt, renders a compact launchpad with bold CAPS section tags (<code>WORKSPACE</code>, <code>ROUTE</code>, <code>NEXT</code>), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (<code>&gt;C_ Clio Coder vX.Y.Z · &lt;workspace · git branch&gt; · &lt;target·model · ready&gt; · ctx ready · type a task</code>) so the conversation transcript owns the viewport.</li>
-<li><strong>Unmistakable Clio Composer:</strong> The input editor features an explicit left section tag reflecting current prompt semantics (<code>MESSAGE</code> while idle, <code>FOLLOW-UP</code> while Clio runs, and orange <code>STEER</code> when Enter steers in-flight execution). Includes the dim placeholder <code>Ask Clio…  / for commands</code> and lower-rail hint <code>Enter send · Shift+Enter newline</code> at wider widths.</li>
+<li><strong>Unmistakable Clio Composer:</strong> The input editor features an explicit left section tag reflecting current prompt semantics (<code>MESSAGE</code> while idle, <code>FOLLOW-UP</code> while Clio runs, and orange <code>STEER</code> when Enter steers in-flight execution). Includes the dim placeholder <code>Ask Clio…  / for commands</code> and lower-rail hint <code>Enter send · Ctrl+J newline</code> at wider widths.</li>
 <li><strong>Progressively Disclosed Footer:</strong> The compact footer uses a quiet two-zone status layout that suppresses idle decoration (<code>tools none</code>, <code>◌ idle</code>, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. <code>Alt+U</code> toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).</li>
-<li><strong>Footer Notification Degradation Ladder:</strong> The footer notification badge reserves the severity head (<code>glyph count noun</code>) and <code>[Alt+X] dismiss</code> tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.</li>
-<li><strong>Grouped Slash Command Palette:</strong> Typing <code>/</code> opens an autocomplete command palette grouped by operational category (<code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints. Every suggestion is the command's one canonical spelling.</li>
+<li><strong>Footer Notification Degradation Ladder:</strong> The footer notification badge reserves the severity head (<code>glyph count noun</code>) and <code>[Ctrl+G x] dismiss</code> tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.</li>
+<li><strong>Grouped Slash Command Palette:</strong> Typing <code>/</code> opens an autocomplete command palette grouped by operational category (<code>Run</code>, <code>Inspect</code>, <code>Configure</code>, <code>Sessions</code>) with compact argument hints. Every suggestion is the command&#39;s one canonical spelling.</li>
 <li><strong>Voice-First Transcript &amp; Receipts:</strong> User (<code>› </code>) and assistant (<code>✦ </code>) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (<code>minimal</code> none, <code>default</code> compact dim <code>turn · in N · out M</code>, <code>verbose</code> full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).</li>
 <li><strong>Transactional Settings Center:</strong> Open <code>/settings</code> or deep-link to one of
 <code>chat</code>, <code>fleet</code>, <code>targets</code>, <code>context</code>, <code>safety</code>, <code>interface</code>, or
@@ -1487,8 +1546,7 @@ drill-down layout below 72 columns.</li>
 <th>Purpose</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>info</code></td>
 <td><code>ℹ</code></td>
 <td><code>info</code></td>
@@ -1512,11 +1570,10 @@ drill-down layout below 72 columns.</li>
 <td><code>error</code></td>
 <td>Fatal issue or operation failure</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <h3>ListOverlay Behavior</h3>
 <p>The <code>ListOverlay</code> component provides a reusable kit for filterable, grouped, and selectable lists with an optional detail pane.</p>
-<p>Navigation keys include the up and down arrow keys, as well as the 'j' and 'k' keys when the filter input is not focused. These keys wrap selection around the ends of the list.</p>
+<p>Navigation keys include the up and down arrow keys, as well as the &#39;j&#39; and &#39;k&#39; keys when the filter input is not focused. These keys wrap selection around the ends of the list.</p>
 <p>The Tab key, or the Enter key when no primary action is defined, toggles the detail pane below the list.</p>
 <p>For filtering, typing in the input row dynamically filters items using a fuzzy search that matches both the item label and the group name. Group headers that have no matching items are hidden. The Escape key clears a non-empty filter, and pressing it again closes or cancels the overlay.</p>
 <p>The detail pane displays structured descriptions, usage, or state metadata using the Markdown component with the Clio markdown theme.</p>
@@ -1535,8 +1592,7 @@ drill-down layout below 72 columns.</li>
 <th>Try this</th>
 </tr>
 </thead>
-<tbody>
-<tr>
+<tbody><tr>
 <td><code>clio-coder: command not found</code></td>
 <td>Run <code>pnpm run install:local</code>, then <code>hash -r</code>; confirm <code>${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}</code> is on <code>PATH</code>.</td>
 </tr>
@@ -1568,8 +1624,7 @@ drill-down layout below 72 columns.</li>
 <td>You need a clean start</td>
 <td>Use <code>clio-coder reset --state</code>, <code>--data</code>, <code>--cache</code>, <code>--auth</code>, <code>--config</code>, or <code>--all</code>.</td>
 </tr>
-</tbody>
-</table>
+</tbody></table>
 <p>For issue reports, include <code>clio-coder --version</code>, <code>node --version</code>, <code>clio-coder doctor</code>,
 <code>clio-coder targets</code>, the command you ran, the target/model, expected behavior, and
 actual behavior. Redact secrets and private repository content.</p>
@@ -1590,9 +1645,8 @@ usage instructions and exits with code 0.</p>
 <p>Acceptance rows labeled Required declare expected checks and timeout limits; they are not pending executions or passing results. Inspect verification receipts for outcomes. Under high rigor, the finish gate requires the applicable passing checks or explicit limitations.</p>
 <p>Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.</p>
 <h2>Package evals</h2>
-<p><code>clio-coder eval validate --package &lt;path|kind:name&gt; --eval &lt;name&gt;</code> validates a named package suite. <code>clio-coder eval run</code> with the same package flags runs it; <code>--user</code> or <code>--project</code> selects the installed copy. Materio declares <code>scripts</code> for its offline Python contracts. The experimental skill-scenario lane is <code>clio-coder eval skill &lt;name|path&gt; [--scenario &lt;id&gt;]</code>. See <a href="resource_library_blueprint.html">Library packages</a>.</p>
+<p><code>clio-coder eval validate --package &lt;path|kind:name&gt; --eval &lt;name&gt;</code> validates a named package suite. <code>clio-coder eval run</code> with the same package flags runs it; <code>--user</code> or <code>--project</code> selects the installed copy. Materio declares <code>scripts</code> for its offline Python contracts. The experimental skill-scenario lane is <code>clio-coder eval skill &lt;name|path&gt; [--scenario &lt;id&gt;]</code>. See <a href="resource-library.md">Library packages</a>.</p>
 <p>The old top-level CLI <code>skills</code> and <code>plugins</code> groups are retired; use <code>clio-coder library</code>. In the editor, <code>/library</code>, <code>/skills</code>, <code>/agents</code> and <code>/prompts</code> open the shared browser. <code>/resources</code> and <code>/plugins</code> give a replacement hint. <code>/skill &lt;name&gt;</code> activates a skill; <code>/interop</code> handles local-agent discovery and reviewed adoption.</p>
-
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="agents_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Agent Fleet</span></a>

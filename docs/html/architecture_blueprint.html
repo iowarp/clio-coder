@@ -43,9 +43,10 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Clio Coder Architecture and Boundaries</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="architecture_blueprint.html">Clio Coder Architecture and Boundaries visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/architecture_blueprint.html">Clio Coder Architecture and Boundaries visual reference</a>.</p>
 </blockquote>
 <p>Clio Coder is an experimental, terminal-first coding harness for the CLIO ecosystem. CLIO stands for Context Layer for Input/Output; the project is named for the Greek muse of history and developed by the Gnosis Research Center at Illinois Tech. Its architecture favors small, auditable subsystems over a single monolithic agent loop: CLI entry points, the interactive TUI, provider/runtime code, worker subprocesses, tools, and feature domains are kept separate so local-model support and scientific-software workflows can evolve without collapsing safety boundaries.</p>
 <p>This page is source-code aligned for the current source tree.</p>
@@ -64,10 +65,10 @@
 </code></pre>
 <p>Feature-domain directories include the following. Not every row is a loaded
 <code>DomainModule</code>: the orchestrator currently loads config, extensions, interop,
-plugins, resources, share, context, providers, toolchain, safety, prompts, agents,
-middleware, session, observability, scheduling, dispatch, and lifecycle, plus
-mux when the pane tier is active. The other rows are libraries or CLI-owned
-feature areas.</p>
+plugins, resources, share, context, providers, toolchain, safety, prompts,
+agents, middleware, session, observability, scheduling, dispatch, and
+lifecycle, plus mux when the pane tier is active. The other rows are libraries
+or CLI-owned feature areas.</p>
 <table>
 <thead>
 <tr>
@@ -224,7 +225,7 @@ decision.</p>
 <h2>Session Routing vs. Persisted Settings</h2>
 <p>Clio maintains an explicit distinction between persisted user settings (<code>settings.yaml</code>) and session-local routing state (<code>src/core/session-routing.ts</code>).</p>
 <ol>
-<li><strong>Decoupled Overlays</strong>: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via Alt+J / Alt+K) apply dynamically through <code>applySessionRouting</code> without mutating <code>settings.yaml</code>.</li>
+<li><strong>Decoupled Overlays</strong>: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via explicit model-cycle keys) apply dynamically through <code>applySessionRouting</code> without mutating <code>settings.yaml</code>.</li>
 <li><strong>Lifecycle Flow</strong>:<ul>
 <li><code>seedSessionRouting</code>: Seeds runtime fields from configuration at startup.</li>
 <li><code>applyRoutingPatch</code>: Applies surgical routing mutations (such as changing active model or target in the TUI).</li>
@@ -323,7 +324,7 @@ and <code>src/tools/dispatch.ts</code> owns a separate cached dynamic import of
 <h2>Boundary invariants</h2>
 <p><code>pnpm run lint</code> executes the boundary checker (<code>tests/boundaries/check-boundaries.ts</code>, imported by <code>scripts/check-hygiene.ts</code>). Treat these checks as executable specifications.</p>
 <p>The enforced import rules below are complemented by the maintained
-<a href="pi_boundary_blueprint.html">Pi SDK boundary table</a>, which records the semantic owner of
+<a href="pi-boundary.md">Pi SDK boundary table</a>, which records the semantic owner of
 each overlapping helper and the Clio deltas that must survive an SDK upgrade.</p>
 <p>These six enforced boundary rules constrain dependency <strong>direction</strong>, never import <strong>form</strong> (whether static vs dynamic, default vs named):</p>
 <h3>Rule 1: <code>@earendil-works/pi-*</code> imports stay in <code>src/engine/**</code></h3>
@@ -431,7 +432,7 @@ subcommands never construct a lease; the established explicit
 <code>CLIO_CODER_INTERACTIVE=1</code> non-TTY override remains force-interactive.</p>
 <p>Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
-See <a href="performance_methodology_blueprint.html">performance-methodology.md</a> for vocabulary,
+See <a href="../process/performance-methodology.md">performance-methodology.md</a> for vocabulary,
 commands, PTY limitations, and baseline evidence.</p>
 <h2>Command spec</h2>
 <p>Interactive slash commands in Clio Coder are governed by a unified declarative command specification registry. This declarative system replaces hand-rolled parsing logic with structured specifications that define the names, flags, positionals, and subcommands for each entry. The central registry acts as the single source of truth for command matching, argument parsing, autocomplete suggestion generation, and usage help output. The parser processes user input strings using these declarative specifications to generate structured argument objects and canonical command representations. By deriving all command-related behavior from these specifications, the system ensures consistency across usage help messages and autocomplete overlays.</p>
@@ -443,7 +444,7 @@ pnpm run test
 pnpm run build
 </code></pre>
 <p>Run the focused boundary check before editing <code>src/engine/**</code>, <code>src/worker/**</code>, or cross-domain imports. Run the full test/build gate before release-facing documentation or behavior changes.</p>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="alcf_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">ALCF Inference Provider</span></a>
           <a class="nav-link-card next" href="artifact_placement_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Artifact Placement</span></a>

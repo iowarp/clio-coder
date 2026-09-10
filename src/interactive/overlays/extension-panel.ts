@@ -18,6 +18,7 @@ export class ExtensionPanelView implements Component {
 		panel: ExtensionPanel,
 		private valid: () => boolean,
 		private refresh: () => void,
+		private close: () => void = () => {},
 	) {
 		this.text = extensionPanelText(panel);
 	}
@@ -28,6 +29,10 @@ export class ExtensionPanelView implements Component {
 		return lines.slice(this.offset, this.offset + 12).map((line) => truncateToWidth(line, width));
 	}
 	handleInput(data: string): void {
+		if (matchesKey(data, "escape") || matchesKey(data, "ctrl+c")) {
+			this.close();
+			return;
+		}
 		if (matchesKey(data, "down") || matchesKey(data, "pageDown")) this.offset += 5;
 		if (matchesKey(data, "up") || matchesKey(data, "pageUp")) this.offset = Math.max(0, this.offset - 5);
 		this.refresh();
@@ -39,12 +44,27 @@ export function openExtensionPanel(
 	owner: string,
 	panel: ExtensionPanel,
 	valid: () => boolean,
+	onClose?: () => void,
 ): OverlayHandle {
-	return showClioOverlayFrame(tui, new ExtensionPanelView(panel, valid, () => tui.requestRender()), {
-		anchor: "center",
-		width: 88,
-		markerId: "extension-panel",
-		title: `Extension: ${owner}`,
-		footerHint: buildHint([{ key: "Up/Down", verb: "scroll" }]),
-	});
+	let handle: OverlayHandle;
+	handle = showClioOverlayFrame(
+		tui,
+		new ExtensionPanelView(
+			panel,
+			valid,
+			() => tui.requestRender(),
+			() => {
+				if (onClose) onClose();
+				else handle.hide();
+			},
+		),
+		{
+			anchor: "center",
+			width: 88,
+			markerId: "extension-panel",
+			title: `Extension: ${owner}`,
+			footerHint: buildHint([{ key: "Up/Down", verb: "scroll" }]),
+		},
+	);
+	return handle;
 }

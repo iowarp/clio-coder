@@ -52,6 +52,9 @@ export interface EditorSubmitEditor {
 	getText(): string;
 	/** Draft spelling for an immediate send, including any editor provenance envelope. */
 	getTextForSubmit(): string;
+	getExpandedText?(): string;
+	readonly draftRevision?: number;
+	setLiteralText?(text: string): void;
 	setText(text: string): void;
 	addToHistory(text: string): void;
 }
@@ -103,7 +106,7 @@ export interface EditorSubmitDeps {
 
 export interface EditorSubmitController {
 	runEditorBash(text: string): boolean;
-	openExternalEditorForInput(): void;
+	openExternalEditorForInput(text?: string): boolean;
 	handleEditorSteerMention(mention: { target: string; text: string }): boolean;
 	submitEditorText(text: string): void;
 	/** Admit an immutable boot record without reading or mutating the live draft. */
@@ -115,7 +118,7 @@ export interface EditorSubmitController {
 	 * refusals (attached dispatch, parked permission ask), which degrade the
 	 * message to next-slot delivery with a notice.
 	 */
-	interruptFromEditor(): void;
+	interruptFromEditor(text?: string): void;
 	restoreQueuedFollowUpsToEditor(): void;
 	hasActiveEditorBash(): boolean;
 	cancelActiveEditorBash(): boolean;
@@ -236,27 +239,45 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		return true;
 	};
 
-	const openExternalEditorForInput = (): void => {
+	const setLiteralText = (text: string): void => {
+		if (deps.editor.setLiteralText) deps.editor.setLiteralText(text);
+		else deps.editor.setText(text);
+	};
+	const openExternalEditorForInput = (explicitText?: string): boolean => {
 		const command = (deps.resolveEditor ?? resolveExternalEditor)();
 		if (!command) {
 			deps.io.stderr("[editor] no external editor configured; set VISUAL or EDITOR\n");
-			return;
+			return false;
 		}
-		const currentText = deps.editor.getText();
+		const currentText =
+			explicitText ?? deps.editor.getExpandedText?.() ?? unguardPastedEditorOperator(deps.editor.getTextForSubmit());
 		let result: ExternalEditResult;
 		try {
 			deps.ui.stop();
 			result = (deps.editExternally ?? editTextExternally)(currentText, command);
+		} catch (error) {
+			result = { ok: false, error: error instanceof Error ? error.message : String(error) };
 		} finally {
 			deps.ui.start();
 			deps.ui.requestRender(true);
 		}
-		if (result.ok) {
-			deps.editor.setText(result.text ?? "");
-		} else if (result.error) {
-			deps.io.stderr(`[editor] ${result.error}\n`);
-		}
+		if (result.ok) setLiteralText(result.text ?? "");
+		else if (result.error) deps.io.stderr(`[editor] ${result.error}\n`);
 		deps.ui.requestRender(true);
+		return result.ok;
+	};
+
+	// A snapshot remains owned until expansion and admission finish. A second
+	// press on that same snapshot is inert; a newer draft has its own identity.
+	const pendingDrafts = new Set<string>();
+	const captureDraft = () => {
+		const text = deps.editor.getText();
+		const revision = deps.editor.draftRevision;
+		const key = JSON.stringify([revision, text]);
+		return {
+			key,
+			owns: () => deps.editor.getText() === text && deps.editor.draftRevision === revision,
+		};
 	};
 
 	const submitEditorSteerMention = (mention: { target: string; text: string }): EditorSteerSubmission => {
@@ -337,7 +358,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			}
 		}
 		const command = parseSlashCommand(trimmed);
-		if (isRejectedCommand(command)) {
+		if (command.kind === "editor" || command.kind === "interrupt") {
+			// Keep the correctable command until its owner accepts the snapshot.
+			deps.editor.setText(literalText);
+			const result = deps.dispatchCommand(trimmed);
+			if (result === "accepted") deps.editor.addToHistory(literalText);
+		} else if (isRejectedCommand(command)) {
 			deps.editor.setText(literalText);
 			deps.dispatchCommand(trimmed);
 		} else if (command.kind === "unknown-command") {
@@ -419,7 +445,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 
 	const queueFollowUpFromEditor = (): void => {
 		const streaming = deps.chat.isStreaming();
-		const text = (streaming ? deps.editor.getText() : deps.editor.getTextForSubmit()).trim();
+		const snapshot = captureDraft();
+		const text = deps.editor.getTextForSubmit().trim();
 		if (text.length === 0) return;
 		if (!streaming) {
 			deps.editor.setText("");
@@ -427,8 +454,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
+		if (pendingDrafts.has(snapshot.key)) return;
+		pendingDrafts.add(snapshot.key);
 		void (async () => {
-			const submitted = await deps.expandSubmit(text);
+			const submitted = await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
 				deps.io.stderr("[follow-up] image references cannot be queued while a response is streaming\n");
 				return;
@@ -439,17 +468,20 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				return;
 			}
 			deps.editor.addToHistory(text);
-			deps.editor.setText("");
+			if (snapshot.owns()) deps.editor.setText("");
 			deps.ui.requestRender();
-		})().catch((err) => {
-			const msg = err instanceof Error ? err.message : String(err);
-			deps.io.stderr(`[follow-up] ${msg}\n`);
-		});
+		})()
+			.catch((err) => {
+				const msg = err instanceof Error ? err.message : String(err);
+				deps.io.stderr(`[follow-up] ${msg}\n`);
+			})
+			.finally(() => pendingDrafts.delete(snapshot.key));
 	};
 
-	const interruptFromEditor = (): void => {
+	const interruptFromEditor = (explicitText?: string): void => {
 		const streaming = deps.chat.isStreaming();
-		const text = (streaming ? deps.editor.getText() : deps.editor.getTextForSubmit()).trim();
+		const snapshot = captureDraft();
+		const text = (explicitText ?? deps.editor.getTextForSubmit()).trim();
 		if (text.length === 0) return;
 		if (!streaming) {
 			deps.editor.setText("");
@@ -457,8 +489,10 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.ui.requestRender();
 			return;
 		}
+		if (pendingDrafts.has(snapshot.key)) return;
+		pendingDrafts.add(snapshot.key);
 		void (async () => {
-			const submitted = await deps.expandSubmit(text);
+			const submitted = await deps.expandSubmit(unguardPastedEditorOperator(text));
 			if (submitted.images.length > 0) {
 				deps.io.stderr("[interrupt] image references cannot be sent while a response is streaming\n");
 				return;
@@ -469,7 +503,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			// than vanishing with the cancelled run. A refused interrupt cancels
 			// nothing, so the queue stays put.
 			const restored = deps.chat.interruptRefusal() === null ? deps.chat.clearQueuedFollowUps() : [];
-			deps.editor.setText(restored.join("\n\n"));
+			const newerDraft = snapshot.owns() ? "" : (deps.editor.getExpandedText?.() ?? deps.editor.getText());
+			setLiteralText([...restored, newerDraft].filter((part) => part.length > 0).join("\n\n"));
 			deps.ui.requestRender();
 			// An interrupt is a fresh prompt, so it carries what the idle path
 			// carries: the launchpad collapse, the submitted-turn count, and the
@@ -486,10 +521,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 				...(skillRequests.length > 0 ? { pendingSkillRequests: skillRequests } : {}),
 			});
 			await deps.settleVisibleFrame?.("interrupt-submit-return");
-		})().catch((err) => {
-			const msg = err instanceof Error ? err.message : String(err);
-			deps.io.stderr(`[interrupt] ${msg}\n`);
-		});
+		})()
+			.catch((err) => {
+				const msg = err instanceof Error ? err.message : String(err);
+				deps.io.stderr(`[interrupt] ${msg}\n`);
+			})
+			.finally(() => pendingDrafts.delete(snapshot.key));
 	};
 
 	const restoreQueuedFollowUpsToEditor = (): void => {
@@ -498,9 +535,9 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			deps.io.stderr("[follow-up] no queued messages to restore\n");
 			return;
 		}
-		const currentText = deps.editor.getText();
+		const currentText = deps.editor.getExpandedText?.() ?? deps.editor.getText();
 		const queuedText = restored.join("\n\n");
-		deps.editor.setText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
+		setLiteralText([queuedText, currentText].filter((part) => part.trim().length > 0).join("\n\n"));
 		deps.ui.requestRender();
 	};
 

@@ -192,6 +192,58 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			strictEqual(version.code, 0, version.stderr);
 			match(version.stdout, /^Clio Coder \d+\.\d+\.\d+$/mu);
 
+			// Ordinary npm consumers receive unpatched pi-tui dependencies. The built
+			// application must carry the compatibility implementation itself.
+			const tuiChunks = emittedFilesContaining(packageRoot, "var TuiAltScreen = class");
+			strictEqual(tuiChunks.size, 1, "one bundled patched TUI implementation");
+			const tuiChunk = [...tuiChunks][0];
+			ok(tuiChunk);
+			const keyboardChild = `
+			 import assert from "node:assert/strict";
+			 import { createRequire } from "node:module";
+			 import { pathToFileURL } from "node:url";
+			 import { existsSync } from "node:fs";
+			 import { dirname, join } from "node:path";
+			 const bundled = await import(pathToFileURL(process.argv[1]).href);
+			 const require = createRequire(pathToFileURL(process.argv[1]));
+			 const ordinary = require.resolve("@earendil-works/pi-tui");
+			 const stock = await import(pathToFileURL(ordinary).href);
+			 assert.equal(stock.TuiAltScreen.prototype.setApplicationInputPolicy, undefined);
+			 assert.ok(existsSync(join(dirname(ordinary), "..", "native", "darwin", "prebuilds", "darwin-arm64", "darwin-modifiers.node")));
+			 const noop = () => {};
+			 let ingress = noop;
+			 const terminal = { columns: 80, rows: 24, kittyProtocolActive: false, start: fn => ingress = fn, stop: noop, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop, clearLine: noop, clearFromCursor: noop, clearScreen: noop, setTitle: noop, setProgress: noop };
+			 const tui = new bundled.TuiAltScreen(terminal);
+			 const input = new bundled.Input();
+			 const root = new bundled.VStack();
+			 root.addChild(new bundled.ScrollView(new bundled.Text("alpha\\nalpha", 0, 0), { primary: true }), { grow: 1 }); root.addChild(input);
+			 tui.addChild(root); tui.setFocus(input);
+			 bundled.setKeybindings(new bundled.KeybindingsManager(bundled.TUI_KEYBINDINGS, { "tui.altScreen.search": "ctrl+r", "tui.input.submit": "ctrl+u" }));
+			 let submitted = 0; let actions = 0; let permission = true;
+			 input.onSubmit = () => submitted++;
+			 tui.setApplicationInputPolicy(data => { actions++; if (permission && bundled.matchesKey(data, "ctrl+r")) return { consume: true }; if (bundled.matchesKey(data, "ctrl+u")) { input.applyEdit("deleteToLineStart"); return { consume: true }; } });
+			 tui.start(); tui.renderNow();
+			 try {
+			  ingress(String.fromCharCode(18)); assert.equal(tui.isSearchFocused, false);
+			  permission = false; ingress(String.fromCharCode(18)); assert.equal(tui.isSearchFocused, true);
+			  tui.undoSearchQuery(); tui.closeSearch();
+			  for (const char of "draft") ingress(char); ingress(String.fromCharCode(21)); assert.equal(input.getValue(), ""); assert.equal(submitted, 0);
+			  const before = actions; ingress(String.fromCharCode(27) + "[108;3:3u"); assert.equal(actions, before);
+			  assert.equal(typeof bundled.Editor.prototype.applyEdit, "function");
+			  process.stdout.write("packed-keyboard-ok\\n");
+			 } finally { tui.stop(); }
+			`;
+			const keyboardReceipt = execFileSync(process.execPath, ["--input-type=module", "-e", keyboardChild, tuiChunk], {
+				cwd: foreign,
+				env: isolatedEnv(home),
+				encoding: "utf8",
+				timeout: 20_000,
+			});
+			match(keyboardReceipt, /packed-keyboard-ok/u);
+			for (const notice of ["pi-tui-LICENSE", "marked-LICENSE", "get-east-asian-width-LICENSE"]) {
+				ok(existsSync(join(packageRoot, "dist", "assets", "tui-notices", notice)));
+			}
+
 			const codeNavChunks = emittedFilesContaining(packageRoot, CODE_NAV_EXPORT_MARKER);
 			strictEqual(codeNavChunks.size, 1, "packed dist must contain one exported code_nav implementation chunk");
 			const codeNavChunk = [...codeNavChunks][0];

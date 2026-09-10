@@ -24,6 +24,7 @@ import {
 	type Component,
 	fuzzyFilter,
 	getKeybindings,
+	Input,
 	matchesKey,
 	type OverlayHandle,
 	type SelectItem,
@@ -32,6 +33,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { localKey } from "../keyboard-owner.js";
 import {
 	buildHint,
 	clioError,
@@ -62,9 +64,6 @@ const RUNTIME_COL_WIDTH_NARROW = 10;
 const RUNTIME_COL_WIDTH_MEDIUM = 14;
 const RUNTIME_COL_WIDTH_WIDE = 18;
 const SELECTED_PREFIX_WIDTH = 6;
-const BACKSPACE = "\x7f";
-const BACKSPACE_ALT = "\b";
-const CTRL_U = "\x15";
 const TAB = "\t";
 
 function resolveOverlayWidth(terminalColumns: number): number {
@@ -814,6 +813,16 @@ interface ModelRefreshActions {
 export class ModelOverlayView implements Component {
 	private selectedIndex = 0;
 	private query = "";
+	private readonly queryInput = new Input();
+	get keyboardScope(): "edit" | "browse" {
+		return this.query ? "edit" : "browse";
+	}
+	undoInput(): boolean {
+		this.queryInput.applyEdit("undo");
+		this.query = this.queryInput.getValue();
+		this.selectedIndex = 0;
+		return true;
+	}
 	private showAll = false;
 	private rows: ModelRow[];
 	private summary: ModelOverlaySummary;
@@ -890,23 +899,11 @@ export class ModelOverlayView implements Component {
 		this.selectedIndex = (this.selectedIndex + delta + count) % count;
 	}
 
-	private appendQuery(data: string): void {
-		this.selectionError = null;
-		this.query += data;
-		this.selectedIndex = 0;
-	}
-
-	private deleteQueryChar(): void {
-		if (this.query.length === 0) return;
-		this.selectionError = null;
-		this.query = this.query.slice(0, -1);
-		this.selectedIndex = 0;
-	}
-
 	private clearQuery(): void {
 		if (this.query.length === 0) return;
 		this.selectionError = null;
 		this.query = "";
+		this.queryInput.setValue("");
 		this.selectedIndex = 0;
 	}
 
@@ -980,7 +977,14 @@ export class ModelOverlayView implements Component {
 	invalidate(): void {}
 
 	handleInput(data: string): void {
+		data = localKey(data);
 		if (this.lifecycle.signal.aborted) return;
+		if (matchesKey(data, "escape")) {
+			if (this.query) this.clearQuery();
+			else this.onClose();
+			this.refreshActions.requestRender?.();
+			return;
+		}
 		const kb = getKeybindings();
 		if (kb.matches(data, "tui.select.up")) {
 			this.move(-1);
@@ -1022,14 +1026,6 @@ export class ModelOverlayView implements Component {
 			this.onClose();
 			return;
 		}
-		if (data === BACKSPACE || data === BACKSPACE_ALT) {
-			this.deleteQueryChar();
-			return;
-		}
-		if (data === CTRL_U) {
-			this.clearQuery();
-			return;
-		}
 		if (data === TAB) {
 			this.toggleShowAll();
 			return;
@@ -1046,7 +1042,14 @@ export class ModelOverlayView implements Component {
 			this.toggleFavorite();
 			return;
 		}
-		if (data.length === 1 && data >= " " && data !== "\x7f") this.appendQuery(data);
+		this.queryInput.handleInput(data);
+		const next = this.queryInput.getValue();
+		if (next !== this.query) {
+			this.query = next;
+			this.selectedIndex = 0;
+			this.selectionError = null;
+			this.refreshActions.requestRender?.();
+		}
 	}
 }
 

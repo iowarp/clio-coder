@@ -183,7 +183,7 @@ const DEFAULT_FACTORIES: InteractivePresentationFactories = {
 };
 
 /** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */
-function formatKeyLabel(keyId: string | undefined, fallback = "Alt+X"): string {
+function formatKeyLabel(keyId: string | undefined, fallback = "unbound"): string {
 	if (!keyId || keyId.length === 0) return fallback;
 	return keyId
 		.split("+")
@@ -243,8 +243,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
 		getDequeueKey: () => {
-			const first = keybindings.getKeys("clio-coder.message.dequeue")[0];
-			return typeof first === "string" && first.length > 0 ? first : undefined;
+			return keybindings.actionLabel("clio-coder.message.dequeue");
 		},
 	});
 	const statusController = factories.createStatusController({
@@ -410,7 +409,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		},
 		getLastTurnSummary: () => lastTurnSummary,
 		getNotifications: () => notifications.list(),
-		dismissKeyLabel: formatKeyLabel(keybindings.getKeys("clio-coder.notifications.dismiss")[0]),
+		get dismissKeyLabel() {
+			return keybindings.actionLabel("clio-coder.notifications.dismiss");
+		},
 	};
 	footer = factories.buildFooter(footerDeps);
 	const unsubscribeObservability = deps.observability.subscribe((snapshot) => {
@@ -444,7 +445,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
 		willEnterSteer: (text) => willEnterSteerActiveWork(deps, text),
 		getSubmitKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.submit")[0], "Enter"),
-		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Shift+Enter"),
+		getNewlineKeyLabel: () => formatKeyLabel(keybindings.getKeys("tui.input.newLine")[0], "Ctrl+J"),
 	};
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	editor.focused = true;

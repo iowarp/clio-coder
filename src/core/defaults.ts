@@ -283,7 +283,7 @@ export interface ReviewSettings {
 }
 
 export interface ModelSelectorSettings {
-	/** Exact target/model refs cycled by Alt+J/Alt+K. */
+	/** Exact target/model refs used by the scoped model cycle actions. */
 	cycleSet: string[];
 	/** Exact target/model refs shown in the focused model picker. */
 	favorites: string[];

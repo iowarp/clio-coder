@@ -43,9 +43,10 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Fleet Dispatch</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="fleet_dispatch_blueprint.html">Fleet Dispatch visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/fleet_dispatch_blueprint.html">Fleet Dispatch visual reference</a>.</p>
 </blockquote>
 <p>Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
@@ -53,7 +54,7 @@ guarantee it makes locally: one admission path, one autonomy matrix, one
 receipt chain. This page covers the architecture, node setup, the doctor
 preflight, placement, topologies, failure semantics, and the residency
 default. For the end-to-end demo see
-<a href="fleet_demo_blueprint.html">fleet-demo-runbook.md</a>.</p>
+<a href="../process/fleet-demo-runbook.md">fleet-demo-runbook.md</a>.</p>
 <p>Source of truth: <code>src/domains/dispatch/**</code>, <code>src/domains/scheduling/cluster.ts</code>,
 <code>src/tools/dispatch.ts</code>, <code>src/tools/monitor.ts</code>, and the contract tests under
 <code>tests/contracts/</code>.</p>
@@ -98,7 +99,7 @@ the cross-process lease state is the final capacity authority. Route quality
 can be activated only for named roles/postures after exact-tuple readiness,
 and hard constraints always eliminate before any score.</li>
 <li>Environment whitelist. The SSH command carries an explicit environment
-(<code>CLIO_CODER_WORKER_PGID=$</code> and any configured <code>CLIO_CODER_WORKER_LABELS</code>);
+(<code>CLIO_CODER_WORKER_PGID=$$</code> and any configured <code>CLIO_CODER_WORKER_LABELS</code>);
 the orchestrator&#39;s <code>process.env</code> never crosses the wire. Node residency is
 projected into the target lifecycle carried by the WorkerSpec.
 <code>CLIO_CODER_WORKER_PGID</code> names the remote process group so an abort escalates
@@ -175,13 +176,13 @@ A stale placement preference cannot over-admit a node.</li>
 queue preserves priority/FIFO order until its finite deadline instead of
 silently selecting another node.</li>
 </ol>
-<p>The durable capacity state file (<code>dispatch-admission.json</code>) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (<code>DEFAULT_CAPACITY_DRAIN_TTL_MS</code> = 3,600,000 ms). A lease acts as durable expiring authority (<code>DEFAULT_CAPACITY_LEASE_TTL_MS</code> = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in <a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a>.</p>
+<p>The durable capacity state file (<code>dispatch-admission.json</code>) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (<code>DEFAULT_CAPACITY_DRAIN_TTL_MS</code> = 3,600,000 ms). A lease acts as durable expiring authority (<code>DEFAULT_CAPACITY_LEASE_TTL_MS</code> = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in <a href="../architecture/capacity-and-scheduling.md">capacity-and-scheduling.md</a>.</p>
 <p>Use <code>clio-coder fleet drain [--json]</code> before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
 execution start—including a retry or a previously reserved member—fail closed.
 The drain expires after one hour so an abandoned operator process cannot wedge
 future dispatch; repeating the command renews the deadline. <code>clio-coder fleet status [--json]</code> reports the active deadline, requesting PID, and request time.
-Use <code>clio-coder fleet resume [--json]</code> to reopen admission early. Detailed drain mechanics are documented in <a href="capacity_scheduling_blueprint.html">capacity-and-scheduling.md</a>.</p>
+Use <code>clio-coder fleet resume [--json]</code> to reopen admission early. Detailed drain mechanics are documented in <a href="../architecture/capacity-and-scheduling.md">capacity-and-scheduling.md</a>.</p>
 <p>With no fleet configured and nothing requested, placement resolves to the
 implicit local path and optional fleet-node provenance may remain absent.
 Every new receipt uses strict integrity v20. Older receipt formats are not
@@ -294,7 +295,7 @@ legitimately route a step to, so restating the contract&#39;s boundary there wou
 mint a second grant in a second place and fail closed on contracts that run
 correctly today. A pre-v4 contract and every readonly step declare nothing and
 keep the legacy inference path. See
-<a href="dispatch_typed_intent_blueprint.html">dispatch-typed-intent.md</a> for the full producer
+<a href="../architecture/dispatch-typed-intent.md">dispatch-typed-intent.md</a> for the full producer
 table and the refusal reason codes.</p>
 <p>The first checkout writer acquires a process-owned lease under the Clio state
 directory. Its key is the canonical checkout path, and its record contains the
@@ -402,7 +403,7 @@ and covered by receipt integrity.</p>
 <h3>Detached fan-out, backgrounding, and collect</h3>
 <p><code>detach: true</code> validates, admits, and spawns every task, then returns. The
 reported id is the logical assignment id (also the first attempt&#39;s run id).
-For an in-flight attached dispatch, pressing <code>Alt+S</code> or <code>Ctrl+Alt+B</code> converts
+For an in-flight attached dispatch, using <code>Ctrl+G</code>, then <code>s</code>, or <code>/background</code> converts
 the running attached dispatch into a detached batch. Backgrounding checks
 against a refusal table: it refuses Scout dependency plans driving stages from
 the turn, compete judge gates, review cycle gates, multi-step pipelines,
@@ -640,7 +641,7 @@ args: [&quot;{{taskDir}}&quot;]
 scope: readonly
 dependencies: []
 </code></pre>
-<p>Run with <code>--var taskDir=.research/tasks/task-01</code>. A slot receives exactly one literal argument. Values must be nonempty, fit the slot's length limit, contain no NUL, and not start with <code>-</code>; fixed flags belong in the operator's registry. A whole-token <code>{{variable}}</code> binds before admission and participates in the plan hash. Missing variables, undeclared or excess slots, embedded placeholders, and flag-like values fail before execution. The code runner repeats slot validation for direct or in-memory plans. Spaces and shell metacharacters remain data without another expansion pass. Existing fixed commands accept no extra args.</p>
+<p>Run with <code>--var taskDir=.research/tasks/task-01</code>. A slot receives exactly one literal argument. Values must be nonempty, fit the slot&#39;s length limit, contain no NUL, and not start with <code>-</code>; fixed flags belong in the operator&#39;s registry. A whole-token <code>{{variable}}</code> binds before admission and participates in the plan hash. Missing variables, undeclared or excess slots, embedded placeholders, and flag-like values fail before execution. The code runner repeats slot validation for direct or in-memory plans. Spaces and shell metacharacters remain data without another expansion pass. Existing fixed commands accept no extra args.</p>
 <h2>Measured route selection and agent automation</h2>
 <p>The joint resolver treats agent, target, model, runtime, and node as one
 bounded tuple. Manual pins, the approved plan envelope, authority, audience,
@@ -789,7 +790,7 @@ authenticated validator evidence. Briefing provenance and
 bounded <code>project_context</code> provenance are also rendered independently; neither
 hash substitutes for the other.</p>
 <p>The canonical terminology for these facts is the six-axis trust status in
-<a href="memory_blueprint.html#canonical-trust-status"><code>evidence-and-memory.md</code></a>.
+<a href="../architecture/evidence-and-memory.md#canonical-trust-status"><code>evidence-and-memory.md</code></a>.
 Receipt integrity projects onto artifact integrity; receipt verification,
 typed quality, and validation grounding project onto validation grounding;
 gate decisions project onto independent review; briefing and project context
@@ -944,7 +945,7 @@ declines with a <code>will-not-fit</code> notice instead of stranding the config
 <p>Use <code>clio-coder fleet validate &lt;name&gt;</code> and <code>clio-coder fleet graph &lt;name&gt;</code> for
 model-free contract checks. An operator with configured targets can then run
 the contract explicitly with <code>clio-coder fleet run &lt;name&gt;</code> and retain its
-receipts. The <a href="fleet_demo_blueprint.html">fleet demo runbook</a> provides a bounded
+receipts. The <a href="../process/fleet-demo-runbook.md">fleet demo runbook</a> provides a bounded
 end-to-end scenario, including reviewer gates and verification commands. Live
 fleet execution is not hidden inside deterministic CI.</p>
 <h2>Bounded result delivery</h2>

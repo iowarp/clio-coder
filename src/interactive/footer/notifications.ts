@@ -442,7 +442,7 @@ export function formatNotificationBadge(
 	const count = entries.length;
 	const noun = count === 1 ? "notice" : "notices";
 	const lead = entries[0]?.text ?? "";
-	const dismiss = options.dismissKeyLabel ?? "Alt+X";
+	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
 	const compactHead = theme.fg(token, `${glyph} ${count}`);
 	const head = theme.fg(token, `${glyph} ${count} ${noun}`);
 	const separator = ` ${theme.fg("dim", "·")} `;
@@ -482,7 +482,7 @@ export function formatNotificationPanel(
 	if (entries.length === 0) return [];
 	const theme = options.theme ?? clioTheme();
 	const maxRows = Math.max(1, options.maxRows ?? 4);
-	const dismiss = options.dismissKeyLabel ?? "Alt+X";
+	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
 	const lines: string[] = [rule(theme, width, { left: "notices" })];
 	for (const entry of entries.slice(0, maxRows)) {
 		const glyph = theme.fg(notificationToken(entry.level), notificationGlyph(entry.level));

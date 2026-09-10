@@ -18,6 +18,21 @@ const GRAMMAR_NOTICES: Record<GrammarAssetSource, string[]> = {
 	"tree-sitter-wasms": ["LICENSE"],
 };
 
+/** Patched Pi JS is bundled; the pinned runtime package retains its native assets.
+ * native-module-path resolves that installed package before package-relative fallbacks.
+ */
+function vendorTuiNotices(): void {
+	const target = join("dist", "assets", "tui-notices");
+	mkdirSync(target, { recursive: true });
+	const piRequire = createRequire(require.resolve("@earendil-works/pi-tui"));
+	cpSync("src/engine/notices/pi-tui-LICENSE", join(target, "pi-tui-LICENSE"));
+	cpSync(join(dirname(piRequire.resolve("marked/package.json")), "LICENSE"), join(target, "marked-LICENSE"));
+	cpSync(
+		join(dirname(piRequire.resolve("get-east-asian-width")), "license"),
+		join(target, "get-east-asian-width-LICENSE"),
+	);
+}
+
 /**
  * Vendor the twelve wasm files the codewiki indexer loads into
  * dist/assets/grammars/ so the package needs neither grammar collection at
@@ -72,7 +87,17 @@ export default defineConfig({
 	outDir: "dist",
 	// The pure-JS tail is bundled and tree-shaken into dist/ so an install does
 	// not pull these packages; they live in devDependencies.
-	noExternal: ["chalk", "diff", "uuid", "yaml", "typebox", "@vscode/tree-sitter-wasm"],
+	noExternal: [
+		"chalk",
+		"diff",
+		"uuid",
+		"yaml",
+		"typebox",
+		"@vscode/tree-sitter-wasm",
+		/^@earendil-works\/pi-tui(?:\/|$)/,
+		"marked",
+		"get-east-asian-width",
+	],
 	// The shebang comes from the hashbang line in each entry source file;
 	// esbuild hoists it above this banner on the entry chunks and never puts
 	// one on a shared chunk.
@@ -81,6 +106,7 @@ export default defineConfig({
 	},
 	onSuccess() {
 		vendorGrammars();
+		vendorTuiNotices();
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

@@ -2,6 +2,7 @@ import type { SessionContract } from "../../domains/session/contract.js";
 import type { TreeSnapshot, TreeSnapshotNode } from "../../domains/session/tree/navigator.js";
 import {
 	type Component,
+	Input,
 	matchesKey,
 	type OverlayHandle,
 	type TUI,
@@ -9,6 +10,7 @@ import {
 	visibleWidth,
 } from "../../engine/tui.js";
 import { clockLocal, dateLocal } from "../format-time.js";
+import { localKey } from "../keyboard-owner.js";
 import { buildHint, clioError, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { type ClioTheme, clioTheme, GLYPH } from "../theme/index.js";
 
@@ -204,6 +206,13 @@ export class TreeOverlayView implements Component {
 	private showTimestamps = false;
 	private submode: Submode = "browse";
 	private labelBuffer = "";
+	private readonly labelInput = new Input();
+	undoInput(): boolean {
+		if (this.submode !== "edit-label") return false;
+		this.labelInput.applyEdit("undo");
+		this.labelBuffer = this.labelInput.getValue();
+		return true;
+	}
 	private status = "";
 	private statusKind: "info" | "error" = "info";
 
@@ -300,7 +309,11 @@ export class TreeOverlayView implements Component {
 
 	invalidate(): void {}
 
+	get keyboardScope(): "edit" | "browse" {
+		return this.submode === "edit-label" ? "edit" : "browse";
+	}
 	handleInput(data: string): void {
+		data = localKey(data);
 		if (this.submode === "edit-label") {
 			this.handleLabelInput(data);
 			return;
@@ -344,6 +357,7 @@ export class TreeOverlayView implements Component {
 		if (data === "e") {
 			this.submode = "edit-label";
 			this.labelBuffer = this.currentRow()?.node.label ?? "";
+			this.labelInput.setValue(this.labelBuffer);
 			this.setStatus("");
 			return;
 		}
@@ -375,17 +389,8 @@ export class TreeOverlayView implements Component {
 			this.refresh();
 			return;
 		}
-		// Backspace: DEL (0x7f) or BS (0x08).
-		if (data === "\x7f" || data === "\b") {
-			this.labelBuffer = this.labelBuffer.slice(0, -1);
-			return;
-		}
-		// Swallow other control sequences (arrows, etc.) so they do not end up
-		// in the label buffer.
-		if (data.length === 0) return;
-		// Accept printable chars (including multi-byte UTF-8 runs).
-		if (data.charCodeAt(0) < 0x20) return;
-		this.labelBuffer += data;
+		this.labelInput.handleInput(data);
+		this.labelBuffer = this.labelInput.getValue();
 	}
 
 	private setStatus(status: string, kind: "info" | "error" = "info"): void {

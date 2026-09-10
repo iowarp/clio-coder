@@ -223,7 +223,12 @@ type SlashCommandVariant =
 	| { kind: "usage-error"; command: string; reason: string }
 	| { kind: "empty" };
 
-export type SlashCommand = SlashCommandVariant;
+export type SlashCommand =
+	| SlashCommandVariant
+	| { kind: "background" }
+	| { kind: "editor"; text: string }
+	| { kind: "interrupt"; text: string }
+	| { kind: "notifications-dismiss"; all: boolean };
 
 export type SlashCommandKind = SlashCommand["kind"];
 
@@ -603,6 +608,13 @@ export interface PromptReferenceCard {
  * the TUI, chat loop, or overlay module graph directly.
  */
 export interface SlashCommandContext {
+	keyboardActions?: {
+		background(): void;
+		editor(text: string): boolean;
+		interrupt(text: string): void;
+		dismiss(all: boolean): void;
+		outputLabel(): string;
+	};
 	operatorExtensions?: OperatorExtensionRuntime;
 	showExtensionOutput?: (invocation: string, output: ExtensionOutput) => void;
 	io: RunIo;
@@ -860,7 +872,7 @@ export interface BuiltinSlashCommand {
 	match?(trimmed: string): SlashCommand | null;
 	fromArgs?(parsed: ParsedArgs, trimmed: string): SlashCommand;
 	/** Execute `command` against `ctx`. Called only for kinds declared in `kinds`. */
-	handle(command: SlashCommand, ctx: SlashCommandContext): void;
+	handle(command: SlashCommand, ctx: SlashCommandContext): void | "rejected";
 }
 
 const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
@@ -938,6 +950,85 @@ function formatPanesStatus(status: PanesStatus): ReadonlyArray<string> {
 }
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
+	{
+		name: "background",
+		description: "Detach the newest eligible attached dispatch",
+		group: "Work",
+		kinds: ["background"],
+		args: {},
+		fromArgs: fromArgsOrUsage("background", { kind: "background" }),
+		handle(_command, ctx) {
+			if (!ctx.keyboardActions) {
+				ctx.notice("warn", "Background action requires an interactive session");
+				return "rejected";
+			}
+			ctx.keyboardActions.background();
+		},
+	},
+	{
+		name: "editor",
+		description: "Edit explicit text (or an empty buffer) externally",
+		group: "Work",
+		kinds: ["editor"],
+		args: { positionals: [{ name: "text", required: false, rest: true }] },
+		match(text) {
+			const match = /^\/editor(?:\s+([\s\S]*))?$/u.exec(text);
+			return match ? { kind: "editor", text: match[1] ?? "" } : null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "editor") return;
+			if (!ctx.keyboardActions) {
+				ctx.notice("warn", "External editing requires an interactive session");
+				return "rejected";
+			}
+			if (!ctx.keyboardActions.editor(command.text)) return "rejected";
+		},
+	},
+	{
+		name: "interrupt",
+		description: "Interrupt the active run and send this text",
+		group: "Work",
+		kinds: ["interrupt"],
+		args: { positionals: [{ name: "text", required: true, rest: true }] },
+		match(text) {
+			const match = /^\/interrupt(?:\s+([\s\S]*))?$/u.exec(text);
+			return match
+				? match[1]?.trim()
+					? { kind: "interrupt", text: match[1] }
+					: { kind: "usage-error", command: "interrupt", reason: "Text is required" }
+				: null;
+		},
+		handle(command, ctx) {
+			if (command.kind !== "interrupt") return;
+			if (!ctx.keyboardActions) {
+				ctx.notice("warn", "Interrupt requires an interactive session");
+				return "rejected";
+			}
+			ctx.keyboardActions.interrupt(command.text);
+		},
+	},
+	{
+		name: "notifications",
+		description: "Dismiss the oldest notification or explicitly dismiss all",
+		group: "Inspect",
+		kinds: ["notifications-dismiss"],
+		args: { subcommands: { dismiss: { positionals: [{ name: "all", required: false }] } } },
+		match(text) {
+			if (!/^\/notifications(?:\s|$)/u.test(text)) return null;
+			const match = /^\/notifications\s+dismiss(?:\s+(all))?$/u.exec(text);
+			return match
+				? { kind: "notifications-dismiss", all: match[1] === "all" }
+				: { kind: "usage-error", command: "notifications", reason: "Use /notifications dismiss [all]" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "notifications-dismiss") return;
+			if (!ctx.keyboardActions) {
+				ctx.notice("warn", "Notifications require an interactive session");
+				return "rejected";
+			}
+			ctx.keyboardActions.dismiss(command.all);
+		},
+	},
 	{
 		name: "quit",
 		description: "Exit Clio Coder",
@@ -2348,7 +2439,8 @@ export function parseSlashCommand(input: string): SlashCommand {
 		return {
 			kind: "usage-error",
 			command: "output",
-			reason: "Use Alt+O to cycle Output style, or /settings interface to save a default. Use /view for full details",
+			reason:
+				"Use /help for the effective Output cycle keys, or /settings interface to save a default. Use /view for full details",
 		};
 	}
 	if (trimmed.startsWith(COMMAND_ESCAPE)) return { kind: "unknown", text: trimmed.slice(1) };
@@ -2437,14 +2529,17 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 	if (command.kind === "usage-error") {
 		const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === command.command);
 		const usage = entry ? ` ${usageNotice(entry)}` : "";
-		ctx.notice("error", `${command.reason}.${usage}`);
+		const reason =
+			command.command === "output" && ctx.keyboardActions
+				? `Use ${ctx.keyboardActions.outputLabel()} to cycle Output style, or /settings interface to save a default`
+				: command.reason;
+		ctx.notice("error", `${reason}.${usage}`);
 		ctx.render();
 		return "rejected";
 	}
 	const entry = HANDLER_BY_KIND.get(command.kind);
 	if (!entry) return "rejected";
-	entry.handle(command, ctx);
-	return "accepted";
+	return entry.handle(command, ctx) === "rejected" ? "rejected" : "accepted";
 }
 
 export interface CommandReferenceEntry {

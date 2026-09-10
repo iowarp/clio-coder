@@ -72,12 +72,12 @@ export function formatKeybindingDetailBodyLines(entry: KeybindingDetailEntry, co
 	lines.push("");
 	for (const detail of row(
 		"Change",
-		"Edit settings.yaml under keybindings, then restart Clio or reopen the TUI.",
+		"Edit settings.yaml under interface.keybindings; changes reload live. [] disables direct and leader access; commands remain. Fixed leader suffixes do not follow direct remaps.",
 		contentWidth,
 	)) {
 		lines.push(detail);
 	}
-	if (entry.id.startsWith("clio.")) {
+	if (entry.id.startsWith("clio-coder.")) {
 		const example = `${entry.id}: "alt+<key>"`;
 		lines.push(...row("Example", example, contentWidth));
 	}

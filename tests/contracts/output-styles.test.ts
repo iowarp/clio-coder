@@ -42,7 +42,7 @@ test("Alt+O has one preset action and retired /output gives migration guidance",
 	strictEqual(nextOutputStyle(nextOutputStyle(nextOutputStyle("standard"))), "standard");
 	const retired = parseSlashCommand("/output verbose");
 	strictEqual(retired.kind, "usage-error");
-	if (retired.kind === "usage-error") match(retired.reason, /Alt\+O.*\/settings.*\/view/u);
+	if (retired.kind === "usage-error") match(retired.reason, /\/help.*Output cycle.*\/settings.*\/view/u);
 });
 
 test("a long unbroken reasoning paragraph is bounded after wrapping and freezes its tail", async () => {

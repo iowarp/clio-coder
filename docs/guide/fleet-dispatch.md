@@ -368,7 +368,7 @@ and covered by receipt integrity.
 
 `detach: true` validates, admits, and spawns every task, then returns. The
 reported id is the logical assignment id (also the first attempt's run id).
-For an in-flight attached dispatch, pressing `Alt+S` or `Ctrl+Alt+B` converts
+For an in-flight attached dispatch, using `Ctrl+G`, then `s`, or `/background` converts
 the running attached dispatch into a detached batch. Backgrounding checks
 against a refusal table: it refuses Scout dependency plans driving stages from
 the turn, compete judge gates, review cycle gates, multi-step pipelines,

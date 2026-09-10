@@ -64,20 +64,27 @@ export interface PlatformKeybindingWarning {
 
 export interface LeaderTarget {
 	key: string;
-	id: ClioKeybinding;
+	id: Keybinding;
+	label?: string;
+	disabledReason?: string;
 }
 
 export interface ClioKeybindingManager {
 	matches(data: string, id: Keybinding): boolean;
 	getKeys(id: Keybinding): ReadonlyArray<KeyId>;
-	getDescription(id: ClioKeybinding): string;
+	getDescription(id: Keybinding): string;
+	readonly generation: number;
+	reload(overrides: Readonly<Record<string, string | string[]>>): void;
+	onReload(listener: () => void): () => void;
+	isDisabled(id: Keybinding): boolean;
+	actionLabel(id: Keybinding): string;
 	getConflicts(): ReadonlyArray<KeybindingConflict>;
 	overrideCount(): number;
 	invalidCount(): number;
 	invalidBindings(): ReadonlyArray<InvalidKeybinding>;
 	platformWarnings(): ReadonlyArray<PlatformKeybindingWarning>;
 	leaderTargets(): ReadonlyArray<LeaderTarget>;
-	hotkeyEntries(): ReadonlyArray<{ id: ClioKeybinding; keys: string; description: string; source: "default" | "user" }>;
+	hotkeyEntries(): ReadonlyArray<{ id: Keybinding; keys: string; description: string; source: "default" | "user" }>;
 }
 
 const BASE_SPECIAL_KEYS = new Set([
@@ -156,6 +163,15 @@ const MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
  * attempt to exercise pi-tui's matcher; we just reject identifiers that
  * would silently fail at match time.
  */
+function canonicalKey(key: string): string {
+	const parts = key.toLowerCase().split("+");
+	let base = parts.pop() ?? "";
+	if (base === "esc") base = "escape";
+	if (base === "return") base = "enter";
+	const modifiers = ["ctrl", "alt", "shift", "super"].filter((mod) => parts.includes(mod));
+	return [...modifiers, base].join("+");
+}
+
 function isValidKeyId(keyId: unknown): boolean {
 	if (typeof keyId !== "string" || keyId.length === 0) return false;
 	const parts = keyId.toLowerCase().split("+");
@@ -192,10 +208,13 @@ export function validateKeybindings(raw: Readonly<Record<string, string | string
 	const valid: KeybindingsConfig = {};
 	const invalid: InvalidKeybinding[] = [];
 	for (const [id, value] of Object.entries(raw)) {
+		if (!Object.hasOwn(CLIO_KEYBINDINGS, id)) {
+			invalid.push({ id, keys: ["unknown action ID; use /help"] });
+			continue;
+		}
 		if (typeof value === "string") {
-			if (value.length === 0) continue;
 			if (isValidKeyId(value)) {
-				valid[id] = value as KeyId;
+				valid[id] = canonicalKey(value) as KeyId;
 			} else {
 				invalid.push({ id, keys: [value] });
 			}
@@ -205,14 +224,17 @@ export function validateKeybindings(raw: Readonly<Record<string, string | string
 			const accepted: KeyId[] = [];
 			const rejected: string[] = [];
 			for (const entry of value) {
-				if (typeof entry !== "string" || entry.length === 0) continue;
+				if (typeof entry !== "string") {
+					rejected.push(String(entry));
+					continue;
+				}
 				if (isValidKeyId(entry)) {
-					accepted.push(entry as KeyId);
+					accepted.push(canonicalKey(entry) as KeyId);
 				} else {
 					rejected.push(entry);
 				}
 			}
-			if (accepted.length > 0) valid[id] = accepted;
+			if (accepted.length > 0 || value.length === 0) valid[id] = accepted;
 			if (rejected.length > 0) invalid.push({ id, keys: rejected });
 		}
 	}
@@ -329,8 +351,10 @@ function keyUsesAltLetter(keyId: string): boolean {
 
 function terminalReservedReason(keyId: string): string | null {
 	const key = normalizeKeyForRisk(keyId);
-	if (key === "ctrl+s" || key === "ctrl+q") return "terminal flow control may intercept this chord";
-	if (key === "ctrl+z") return "shell job control may suspend the process";
+	if (key === "ctrl+s")
+		return "an intermediary may intercept this chord; Node raw mode normally disables terminal flow control";
+	if (key === "ctrl+z")
+		return "an intermediary may intercept this chord; Node raw mode normally disables signal generation";
 	return null;
 }
 
@@ -342,7 +366,7 @@ function keyRiskReason(keyId: string, support: TerminalKeySupport): string | nul
 	return terminalReservedReason(key);
 }
 
-const MACOS_OPTION_DEFAULT_WARNING_ID = "clio.macos.option-letter.defaults";
+const MACOS_OPTION_DEFAULT_WARNING_ID = "clio-coder.macos.option-letter.defaults";
 
 export function detectPlatformKeybindingWarnings(
 	userBindings: Readonly<KeybindingsConfig>,
@@ -403,94 +427,144 @@ function joinKeys(keys: ReadonlyArray<KeyId>): string {
 	return keys.join(" / ");
 }
 
-function deriveLeaderTargets(inner: KeybindingsManager): LeaderTarget[] {
-	const targets: LeaderTarget[] = [];
-	for (const id of CLIO_APP_KEYBINDING_IDS) {
-		for (const key of inner.getKeys(id as Keybinding)) {
-			const base = altLetterBase(String(key));
-			if (base) targets.push({ key: base, id });
+const VIEWPORT_LEADER_TARGETS: LeaderTarget[] = [
+	{ key: "z", id: "tui.editor.undo" },
+	{ key: "r", id: "tui.altScreen.search" },
+	{ key: "p", id: "tui.altScreen.pageUp" },
+	{ key: "n", id: "tui.altScreen.pageDown" },
+	{ key: "home", id: "tui.altScreen.top" },
+	{ key: "end", id: "tui.altScreen.bottom" },
+	{ key: "", id: "tui.altScreen.previousPrompt" },
+	{ key: "", id: "tui.altScreen.nextPrompt" },
+];
+
+function keybindingScope(id: string): string {
+	if (id.startsWith("clio-coder.")) return "composer";
+	if (id.startsWith("tui.select.")) return "selection";
+	if (/tui.altScreen.search(Next|Previous|Close)/u.test(id)) return "search";
+	if (id.startsWith("tui.altScreen.")) return "fullscreen composer";
+	return "editable field";
+}
+
+function legacyKey(key: string): string {
+	const canonical = canonicalKey(key);
+	return (
+		({ "ctrl+i": "tab", "ctrl+m": "enter", "ctrl+[": "escape", "ctrl+_": "ctrl+-" } as Record<string, string>)[
+			canonical
+		] ?? canonical
+	);
+}
+
+/** Selection, search and editable input deliberately share delivered keys. */
+function scopesOverlap(a: string, b: string): boolean {
+	const left = keybindingScope(a),
+		right = keybindingScope(b);
+	if (left === "selection" || right === "selection") return left === right;
+	if (left === "search" || right === "search") return left === right;
+	if (
+		(a === "clio-coder.exit" && b === "tui.editor.deleteCharForward") ||
+		(b === "clio-coder.exit" && a === "tui.editor.deleteCharForward")
+	)
+		return false;
+	return true;
+}
+
+function effectiveConflicts(inner: KeybindingsManager): KeybindingConflict[] {
+	const keys = new Map<string, string[]>();
+	for (const id of Object.keys(CLIO_KEYBINDINGS) as Keybinding[]) {
+		for (const key of inner.getKeys(id)) {
+			const canonical = legacyKey(key);
+			const ids = keys.get(canonical) ?? [];
+			if (!ids.includes(id)) ids.push(id);
+			keys.set(canonical, ids);
 		}
 	}
-	return targets;
+	return [...keys]
+		.filter(
+			([, ids]) =>
+				ids.length > 1 && ids.some((id, index) => ids.slice(index + 1).some((other) => scopesOverlap(id, other))),
+		)
+		.map(([key, keybindings]) => ({ key: key as KeyId, keybindings }));
 }
 
 function buildManager(
-	inner: KeybindingsManager,
-	invalid: ReadonlyArray<InvalidKeybinding>,
-	platformWarnings: ReadonlyArray<PlatformKeybindingWarning>,
+	overrides: Readonly<Record<string, string | string[]>>,
+	env: Readonly<Record<string, string | undefined>>,
+	install: boolean,
 ): ClioKeybindingManager {
-	const frozen = invalid.map((entry) => ({ id: entry.id, keys: [...entry.keys] as ReadonlyArray<string> }));
-	const frozenPlatformWarnings = platformWarnings.map((entry) => ({
-		id: entry.id,
-		keys: [...entry.keys] as ReadonlyArray<string>,
-		terminal: entry.terminal,
-		reason: entry.reason,
-		source: entry.source,
-	}));
-	const frozenLeaderTargets = deriveLeaderTargets(inner).map((entry) => ({ ...entry }));
+	let validated = validateKeybindings(overrides);
+	const inner = new KeybindingsManager(CLIO_KEYBINDINGS, validated.valid);
+	if (install) setKeybindings(inner);
+	let generation = 0;
+	const listeners = new Set<() => void>();
+	const isDisabled = (id: Keybinding): boolean => {
+		const value = inner.getUserBindings()[id];
+		return Array.isArray(value) && value.length === 0;
+	};
+	const leaderTargets = (): LeaderTarget[] => {
+		if (inner.getKeys("clio-coder.leader").length === 0) return [];
+		const app = CLIO_APP_KEYBINDING_IDS.flatMap((id) => {
+			const descriptor = CLIO_APP_KEYBINDINGS[id];
+			return "leader" in descriptor ? [{ key: descriptor.leader, id }] : [];
+		});
+		return [...app, ...VIEWPORT_LEADER_TARGETS].filter(({ id }) => !isDisabled(id));
+	};
+	const actionLabel = (id: Keybinding): string => {
+		const keys = inner.getKeys(id);
+		const suffix = leaderTargets().find((entry) => entry.id === id)?.key;
+		return (
+			[keys.join(" / "), suffix ? `${inner.getKeys("clio-coder.leader")[0]} ${suffix}` : ""].filter(Boolean).join(" · ") ||
+			"unbound; see /help"
+		);
+	};
 	return {
-		matches(data, id) {
-			return inner.matches(data, id as Keybinding);
+		matches: (data, id) => inner.matches(data, id),
+		getKeys: (id) => inner.getKeys(id),
+		getDescription: (id) => inner.getDefinition(id).description ?? "",
+		getConflicts: () => effectiveConflicts(inner),
+		get generation() {
+			return generation;
 		},
-		getKeys(id) {
-			return inner.getKeys(id as Keybinding);
+		reload(next) {
+			validated = validateKeybindings(next);
+			inner.setUserBindings(validated.valid);
+			if (install) setKeybindings(inner);
+			generation += 1;
+			for (const listener of listeners) listener();
 		},
-		getDescription(id) {
-			return inner.getDefinition(id as Keybinding).description ?? "";
+		onReload(listener) {
+			listeners.add(listener);
+			return () => {
+				listeners.delete(listener);
+			};
 		},
-		getConflicts() {
-			return inner.getConflicts();
-		},
-		overrideCount() {
-			return Object.keys(inner.getUserBindings()).length;
-		},
-		invalidCount() {
-			return frozen.reduce((sum, entry) => sum + entry.keys.length, 0);
-		},
-		invalidBindings() {
-			return frozen;
-		},
-		platformWarnings() {
-			return frozenPlatformWarnings;
-		},
-		leaderTargets() {
-			return frozenLeaderTargets;
-		},
-		hotkeyEntries() {
-			const userBindings = inner.getUserBindings();
-			return CLIO_APP_KEYBINDING_IDS.map((id) => ({
+		isDisabled,
+		actionLabel,
+		overrideCount: () => Object.keys(validated.valid).length,
+		invalidCount: () => validated.invalid.reduce((sum, entry) => sum + entry.keys.length, 0),
+		invalidBindings: () => validated.invalid,
+		platformWarnings: () => detectPlatformKeybindingWarnings(validated.valid, detectTerminalKeySupport(env)),
+		leaderTargets,
+		hotkeyEntries: () =>
+			(Object.keys(CLIO_KEYBINDINGS) as Keybinding[]).map((id) => ({
 				id,
-				keys: joinKeys(inner.getKeys(id as Keybinding)),
-				description: inner.getDefinition(id as Keybinding).description ?? "",
-				source: userBindings[id] === undefined ? ("default" as const) : ("user" as const),
-			}));
-		},
+				keys: joinKeys(inner.getKeys(id)),
+				description: `${inner.getDefinition(id).description ?? ""} (${keybindingScope(id)}${isDisabled(id) ? "; disabled by user" : ""})${id === "tui.input.copy" ? "; composer Ctrl+C cancels; use native terminal clipboard" : ""}`,
+				source: validated.valid[id] === undefined ? "default" : "user",
+			})),
 	};
 }
 
-/**
- * Build a `ClioKeybindingManager` from the provided settings snapshot. The
- * resulting manager is also installed as pi-tui's global so editor and
- * select components pick up the same overrides. Callers are expected to
- * recreate the manager if `settings.interface.keybindings` is replaced wholesale;
- * partial live updates should instead go through `manager` state.
- */
 export function createKeybindingManager(
 	settings: Readonly<ClioSettings>,
-	env: NodeJS.ProcessEnv | Readonly<Record<string, string | undefined>> = process.env,
+	env: Readonly<Record<string, string | undefined>> = process.env,
 ): ClioKeybindingManager {
-	const { valid, invalid } = validateKeybindings(settings.interface.keybindings ?? {});
-	const inner = new KeybindingsManager(CLIO_KEYBINDINGS, valid);
-	setKeybindings(inner);
-	return buildManager(inner, invalid, detectPlatformKeybindingWarnings(valid, detectTerminalKeySupport(env)));
+	return buildManager(settings.interface.keybindings ?? {}, env, true);
 }
 
-/** Pure test hook: build a manager from a raw settings snapshot without touching the pi-tui global. */
 export function createKeybindingManagerForTesting(
 	overrides: Readonly<Record<string, string | string[]>> = {},
-	env: NodeJS.ProcessEnv | Readonly<Record<string, string | undefined>> = {},
+	env: Readonly<Record<string, string | undefined>> = {},
 ): ClioKeybindingManager {
-	const { valid, invalid } = validateKeybindings(overrides);
-	const inner = new KeybindingsManager(CLIO_KEYBINDINGS, valid);
-	return buildManager(inner, invalid, detectPlatformKeybindingWarnings(valid, detectTerminalKeySupport(env)));
+	return buildManager(overrides, env, false);
 }

@@ -11,8 +11,8 @@ export interface FollowUpQueuePanelOptions {
 }
 
 /**
- * Keybindings are stored lowercase (`alt+up`), but the hint vocabulary spells
- * modifiers and keys in title case (`[Alt+Up]`). Format the bound key for
+ * Keybindings are stored lowercase (`alt+q`), but the hint vocabulary spells
+ * modifiers and keys in title case (`[Alt+Q]`). Format the bound key for
  * display so the panel reads the same whether or not the binding is customized.
  */
 function displayKey(key: string): string {
@@ -52,7 +52,7 @@ export function createFollowUpQueuePanel(options: FollowUpQueuePanelOptions = {}
 				message.kind === "steer" ? theme.fg("action", `${GLYPH.user} steer`) : theme.fg("muted", `${GLYPH.queued} queued`);
 			lines.push(`${marker} ${theme.fg("muted", preview)}`);
 		}
-		const restoreKey = key && key.length > 0 ? displayKey(key) : "Alt+Up";
+		const restoreKey = key && key.length > 0 ? displayKey(key) : "see /help";
 		lines.push(theme.fg("dim", `[${restoreKey}] restore to editor`));
 
 		cachedLines = frame(theme, "Steering Queue", lines, bodyWidth + 4);

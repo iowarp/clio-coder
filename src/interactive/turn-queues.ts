@@ -70,7 +70,7 @@ export function createTurnQueues(deps: TurnQueuesDeps): TurnQueues {
 	const { state } = deps;
 	// UI mirror of both engine queues, in enqueue order. Entries leave when
 	// the engine injects them into the transcript (message_end →
-	// appendQueuedUserTurn), when alt+up restores them to the editor, or when
+	// appendQueuedUserTurn), when Alt+Q restores them to the editor, or when
 	// a cancel clears the run.
 	const queuedMirror: QueuedChatMessage[] = [];
 	const persistedUserEchoes: string[] = [];

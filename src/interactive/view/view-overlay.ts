@@ -1,6 +1,7 @@
 import {
 	type Component,
 	fuzzyFilter,
+	Input,
 	Markdown,
 	matchesKey,
 	type OverlayHandle,
@@ -10,6 +11,7 @@ import {
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
 import { clockLocal } from "../format-time.js";
+import { localKey } from "../keyboard-owner.js";
 import { buildHint, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, markdownTheme, padAnsi } from "../theme/index.js";
 import {
@@ -425,6 +427,17 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 export class ViewOverlayView implements Component {
 	private artifacts: ViewArtifact[] = [];
 	private filterText = "";
+	private readonly filterInput = new Input();
+	get keyboardScope(): "edit" | "review" {
+		return this.focus === "list" ? "edit" : "review";
+	}
+	undoInput(): boolean {
+		if (this.focus !== "list") return false;
+		this.filterInput.applyEdit("undo");
+		this.filterText = this.filterInput.getValue();
+		this.selectInitialFilterMatch();
+		return true;
+	}
 	private selectedIndex = 0;
 	private listScrollOffset = 0;
 	private contentScrollOffset = 0;
@@ -439,6 +452,7 @@ export class ViewOverlayView implements Component {
 
 	constructor(private readonly options: ViewOverlayOptions) {
 		this.filterText = options.initialFilter ?? "";
+		this.filterInput.setValue(this.filterText);
 	}
 
 	refresh(): void {
@@ -637,6 +651,7 @@ export class ViewOverlayView implements Component {
 	}
 
 	handleInput(data: string): void {
+		data = localKey(data);
 		if (
 			matchesKey(data, "tab") ||
 			matchesKey(data, "shift+tab") ||
@@ -688,20 +703,10 @@ export class ViewOverlayView implements Component {
 			if (filtered.length > 0) this.selectIndex(this.selectedIndex + 1);
 			return true;
 		}
-		if (matchesKey(data, "ctrl+u")) {
-			this.filterText = "";
-			this.selectInitialFilterMatch();
-			return true;
-		}
-		if (matchesKey(data, "backspace")) {
-			if (this.filterText.length > 0) {
-				this.filterText = this.filterText.slice(0, -1);
-				this.selectInitialFilterMatch();
-			}
-			return true;
-		}
-		if (data.length === 1 && data >= " " && data !== "\x7f") {
-			this.filterText += data;
+		const previous = this.filterText;
+		this.filterInput.handleInput(data);
+		this.filterText = this.filterInput.getValue();
+		if (previous !== this.filterText) {
 			this.selectInitialFilterMatch();
 			return true;
 		}

@@ -1,0 +1,199 @@
+diff --git a/dist/alt-screen-search.d.ts b/dist/alt-screen-search.d.ts
+index 7bdab98c02b263c26ae44bf70b41772d2c4a26b7..3e9bf40e6048a126918842d1552ea8022fd8f2cf 100644
+--- a/dist/alt-screen-search.d.ts
++++ b/dist/alt-screen-search.d.ts
+@@ -39,6 +39,7 @@ export declare class AltScreenSearchComponent implements Component, Focusable {
+     setResult(index: number, count: number): void;
+     getNavigationDirectionAt(row: number, column: number): -1 | 1 | undefined;
+     setHoveredNavigationDirection(direction: -1 | 1 | undefined): boolean;
++    applyEdit(operation: "undo"): void;
+     handleInput(data: string): void;
+     invalidate(): void;
+     render(width: number): string[];
+diff --git a/dist/alt-screen-search.js b/dist/alt-screen-search.js
+index 29318b3224bb8346991569caa0fc6277fda4117b..b11f8b3bb5cd369907c625170c89df71d2cff42e 100644
+--- a/dist/alt-screen-search.js
++++ b/dist/alt-screen-search.js
+@@ -205,6 +205,10 @@ export class AltScreenSearchComponent {
+         this.hoveredNavigationDirection = direction;
+         return true;
+     }
++    applyEdit(operation) {
++        this.input.applyEdit(operation);
++        this.onQueryChange(this.input.getValue());
++    }
+     handleInput(data) {
+         const previous = this.input.getValue();
+         this.input.handleInput(data);
+diff --git a/dist/components/editor.d.ts b/dist/components/editor.d.ts
+index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb65dd140fe 100644
+--- a/dist/components/editor.d.ts
++++ b/dist/components/editor.d.ts
+@@ -98,6 +98,7 @@ export declare class Editor implements Component, Focusable {
+     protected renderBottomBorder(width: number, hiddenLineCount: number): string;
+     render(width: number): string[];
+     handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
++    applyEdit(operation: "undo" | "deleteCharBackward" | "deleteCharForward" | "deleteWordBackward" | "deleteWordForward" | "deleteToLineStart" | "deleteToLineEnd"): void;
+     handleInput(data: string): void;
+     private layoutText;
+     getText(): string;
+diff --git a/dist/components/editor.js b/dist/components/editor.js
+index ab8b7eaeaf165369805841b30b0ffc87aa9beb1e..1b1e712359444bc4e4f4985ea08088f4643a5023 100644
+--- a/dist/components/editor.js
++++ b/dist/components/editor.js
+@@ -541,6 +541,18 @@ export class Editor {
+             this.updateAutocomplete();
+         return { handled: true, focus: true };
+     }
++    /** Semantic edits bypass submit and all keybinding resolution. */
++    applyEdit(operation) {
++        switch (operation) {
++            case "undo": this.undo(); break;
++            case "deleteCharBackward": this.handleBackspace(); break;
++            case "deleteCharForward": this.handleForwardDelete(); break;
++            case "deleteWordBackward": this.deleteWordBackwards(); break;
++            case "deleteWordForward": this.deleteWordForward(); break;
++            case "deleteToLineStart": this.deleteToStartOfLine(); break;
++            case "deleteToLineEnd": this.deleteToEndOfLine(); break;
++        }
++    }
+     handleInput(data) {
+         const kb = getKeybindings();
+         // Handle character jump mode (awaiting next character to jump to)
+diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
+index 982a3d9888fa79ed008f643beaf9461b068aed9e..b0166fca1076ab108f88874f9c7767347e819743 100644
+--- a/dist/components/input.d.ts
++++ b/dist/components/input.d.ts
+@@ -26,6 +26,7 @@ export declare class Input implements Component, Focusable {
+     constructor(options?: InputOptions);
+     getValue(): string;
+     setValue(value: string): void;
++    applyEdit(operation: "undo" | "deleteCharBackward" | "deleteCharForward" | "deleteWordBackward" | "deleteWordForward" | "deleteToLineStart" | "deleteToLineEnd"): void;
+     handleInput(data: string): void;
+     handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
+     private insertCharacter;
+diff --git a/dist/components/input.js b/dist/components/input.js
+index 5e7fffa205390c2b2ff906a5386275c9197490fa..e572c2b3ec0b05710141fb752cddd8f1fcf4b134 100644
+--- a/dist/components/input.js
++++ b/dist/components/input.js
+@@ -40,6 +40,18 @@ export class Input {
+         this.value = value;
+         this.cursor = Math.min(this.cursor, value.length);
+     }
++    /** Semantic edits bypass submit and all keybinding resolution. */
++    applyEdit(operation) {
++        switch (operation) {
++            case "undo": this.undo(); break;
++            case "deleteCharBackward": this.handleBackspace(); break;
++            case "deleteCharForward": this.handleForwardDelete(); break;
++            case "deleteWordBackward": this.deleteWordBackwards(); break;
++            case "deleteWordForward": this.deleteWordForward(); break;
++            case "deleteToLineStart": this.deleteToLineStart(); break;
++            case "deleteToLineEnd": this.deleteToLineEnd(); break;
++        }
++    }
+     handleInput(data) {
+         // Handle bracketed paste mode
+         // Start of paste: \x1b[200~
+diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
+index 4cc739e48496a2c0c05979b12443d383ea1b962d..89bfcae5f6d739e27dd16e491681c14fd3300d90 100644
+--- a/dist/tui-alt-screen.d.ts
++++ b/dist/tui-alt-screen.d.ts
+@@ -97,11 +97,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+     scrollBy(lines: number): void;
+     scrollToTop(): void;
+     scrollToBottom(): void;
+-    private scrollToPrompt;
+-    private toggleSearch;
+-    private closeSearch;
++    scrollToPrompt(direction: -1 | 1): void;
++    readonly isSearchFocused: boolean;
++    undoSearchQuery(): void;
++    toggleSearch(): void;
++    closeSearch(): void;
+     private updateSearchQuery;
+-    private navigateSearch;
++    navigateSearch(direction: -1 | 1): void;
+     private getSearchNavigationDirectionAt;
+     private handleSearchMouseEvent;
+     private refreshSearch;
+diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
+index 08dc17e0c44140a5ee5ca7ceac0cd58824e63435..14b5dd0eda65c031ac6c3d63d155ef65af951366 100644
+--- a/dist/tui-alt-screen.js
++++ b/dist/tui-alt-screen.js
+@@ -300,6 +300,13 @@ export class TuiAltScreen extends TuiBase {
+             return;
+         }
+     }
++    get isSearchFocused() {
++        return this.activeSearch?.overlay?.isFocused() === true;
++    }
++    undoSearchQuery() {
++        this.activeSearch?.component.applyEdit("undo");
++        this.requestRender();
++    }
+     toggleSearch() {
+         if (this.activeSearch) {
+             this.closeSearch();
+diff --git a/dist/tui.d.ts b/dist/tui.d.ts
+index 8c770ec6e4125baa138a46999bc576cd60e9bf1e..329ca2951967f20e07ec60abe96916bf48186bb3 100644
+--- a/dist/tui.d.ts
++++ b/dist/tui.d.ts
+@@ -231,6 +231,8 @@ export interface TUI extends Component {
+     stop(options?: TuiStopOptions): void;
+     renderNow(force?: boolean): void;
+     requestRender(force?: boolean): void;
++    /** One application policy, before viewport listeners; releases are filtered first. */
++    setApplicationInputPolicy(policy: TuiInputListener): () => void;
+     addInputListener(listener: TuiInputListener): () => void;
+     removeInputListener(listener: TuiInputListener): void;
+     onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
+@@ -328,6 +330,8 @@ export declare abstract class TuiBase extends Container implements TUI {
+     private getTopmostVisibleOverlay;
+     invalidate(): void;
+     start(): void;
++    /** One application policy, before viewport listeners; releases are filtered first. */
++    setApplicationInputPolicy(policy: TuiInputListener): () => void;
+     addInputListener(listener: TuiInputListener): () => void;
+     removeInputListener(listener: TuiInputListener): void;
+     onTerminalColorSchemeChange(listener: (scheme: TerminalColorScheme) => void): () => void;
+diff --git a/dist/tui.js b/dist/tui.js
+index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..17ece264d1c7970f2b37877e7680df3029cef653 100644
+--- a/dist/tui.js
++++ b/dist/tui.js
+@@ -160,6 +160,7 @@ export class TuiBase extends Container {
+     terminal;
+     focusedComponent = null;
+     inputListeners = new Set();
++    applicationInputPolicy;
+     /** Global callback for debug key (Shift+Ctrl+D). Called before input is forwarded to focused component. */
+     onDebug;
+     renderRequested = false;
+@@ -546,6 +547,12 @@ export class TuiBase extends Container {
+         this.queryCellSize();
+         this.requestRender();
+     }
++    setApplicationInputPolicy(policy) {
++        this.applicationInputPolicy = policy;
++        return () => {
++            if (this.applicationInputPolicy === policy) this.applicationInputPolicy = undefined;
++        };
++    }
+     addInputListener(listener) {
+         this.inputListeners.add(listener);
+         return () => {
+@@ -659,6 +666,14 @@ export class TuiBase extends Container {
+         if (this.consumeTerminalColorSchemeReport(data)) {
+             return;
+         }
++        // Application ownership precedes viewport shortcuts and focused input.
++        // Bracketed paste is literal data, including event-looking bytes.
++        const paste = data.includes("\x1b[200~");
++        if (!paste && isKeyRelease(data)) return;
++        const policy = this.applicationInputPolicy?.(data);
++        if (policy?.consume) return;
++        if (policy?.data !== undefined) data = policy.data;
++        if (data.length === 0) return;
+         if (this.inputListeners.size > 0) {
+             let current = data;
+             for (const listener of this.inputListeners) {

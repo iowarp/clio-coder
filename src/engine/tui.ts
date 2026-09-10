@@ -80,11 +80,13 @@ export {
 	getKeybindings,
 	Input,
 	isKeyRelease,
+	isKeyRepeat,
 	KeybindingsManager,
 	Markdown,
 	Marked,
 	matchesKey,
 	ProcessTerminal,
+	parseKey,
 	ScrollView,
 	setKeybindings,
 	stripTerminalSequences,
@@ -97,6 +99,7 @@ export {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+export { decodePrintableKey } from "@earendil-works/pi-tui/dist/keys.js";
 export {
 	InstrumentedTuiAltScreen,
 	InstrumentedTuiMainScreen,

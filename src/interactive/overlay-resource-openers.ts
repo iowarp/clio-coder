@@ -118,7 +118,7 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 		openExtensionPanelState(owner, panel, valid) {
 			if (deps.transitions.state !== "closed") return false;
 			deps.transitions.state = "extensions";
-			deps.transitions.handle = openExtensionPanel(deps.tui, owner, panel, valid);
+			deps.transitions.handle = openExtensionPanel(deps.tui, owner, panel, valid, deps.closeOverlay);
 			deps.tui.requestRender();
 			return true;
 		},

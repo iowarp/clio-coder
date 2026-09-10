@@ -11,6 +11,7 @@ import {
 	truncateToWidth,
 	visibleWidth,
 } from "../engine/tui.js";
+import { keyboardOwner } from "./keyboard-owner.js";
 import { enterModal, type ModalMarkerSink } from "./modal-marker.js";
 import { type ClioToken, clioTheme, padAnsi, screenTitle, selectListTheme, settingsListTheme } from "./theme/index.js";
 
@@ -41,6 +42,13 @@ export class FocusBox extends Box {
 		for (const child of childList) this.addChild(child);
 		this.inputTarget = options?.inputTarget === undefined ? (childList[0] ?? null) : options.inputTarget;
 		this.onInput = options?.onInput;
+	}
+
+	get keyboardScope() {
+		return keyboardOwner(this.inputTarget).keyboardScope;
+	}
+	undoInput(): boolean {
+		return keyboardOwner(this.inputTarget).undoInput?.() ?? false;
 	}
 
 	handleInput(data: string): void {
@@ -425,6 +433,13 @@ export class ClioOverlayFrame implements Component {
 		})();
 		this.cachedRender = { width, rowBudget: this.rowBudget, childLines, title: titleText, hint, tone, lines };
 		return lines;
+	}
+
+	get keyboardScope() {
+		return keyboardOwner(this.child).keyboardScope;
+	}
+	undoInput(): boolean {
+		return keyboardOwner(this.child).undoInput?.() ?? false;
 	}
 
 	handleInput(data: string): void {

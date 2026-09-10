@@ -69,7 +69,6 @@ import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
 
 export {
 	IDLE_LEADER_STATE,
-	LEADER_TIMEOUT_MS,
 	type LeaderKeyController,
 	type LeaderKeyControllerDeps,
 	type LeaderKeyRouteDeps,
@@ -374,7 +373,7 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	return "arm-shutdown";
 }
 
-function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
+export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
 	switch (id) {
 		case "clio-coder.output.cycle":
 			deps.cycleOutputStyle();
@@ -742,6 +741,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		appendTranscriptNotice: (level, text) => appendNotice(level, text, busNoticeSink),
 		refreshSettingsOverlay: () => overlayLifecycle.refreshSettingsOverlay(),
 		onConfigHotReload: (settings) => {
+			keybindings.reload(settings.interface.keybindings ?? {});
+			footer.refresh();
+			tui.requestRender();
 			const mode = settings.interface.smoothStreaming;
 			const autoAllowed = processAutoPacingAllowed(shell.hasObservedBackpressure());
 			chatRenderer.setSmoothStreamingMode(mode);
@@ -757,6 +759,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const toolRegistry = deps.toolRegistry;
 	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	const slashRuntime = createInteractiveSlashRuntime({
+		keyboardActions: {
+			background: () => backgroundActiveDispatch(),
+			editor: (text) => editorSubmit.openExternalEditorForInput(text),
+			interrupt: (text) => editorSubmit.interruptFromEditor(text),
+			dismiss: (all) => applicationController.dismissNotifications(all),
+			outputLabel: () => keybindings.actionLabel("clio-coder.output.cycle"),
+		},
 		...(operatorExtensions ? { operatorExtensions } : {}),
 		showExtensionOutput: (invocation, output) => {
 			const generation = operatorExtensions?.activeGeneration;
@@ -982,8 +991,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		// performs. cancel() then finds both queues already empty.
 		const restored = deps.chat.clearQueuedFollowUps();
 		if (restored.length > 0) {
-			const current = editor.getText();
-			editor.setText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
+			const current = editor.getExpandedText();
+			editor.setLiteralText([restored.join("\n\n"), current].filter((part) => part.trim().length > 0).join("\n\n"));
 		}
 		chatRenderer.flush();
 		deps.chat.cancel();
@@ -1008,19 +1017,19 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 	/**
-	 * Alt+J and Alt+K with nothing to step to. The help center documents both
+	 * Explicit model-cycle bindings with nothing to step to. The help center documents both
 	 * keys, so a keypress that changes no pixel reads as a broken binding rather
-	 * than as an empty set; the set itself is chosen in `/scoped-models`.
+	 * than as an empty set; the set itself is chosen in `/settings chat model-picker`.
 	 */
 	const announceEmptyScopedSet = (): void => {
 		notify(
 			"info",
-			"scoped models: nothing to cycle to; run /scoped-models to choose the set Alt+J and Alt+K step through",
+			"scoped models: nothing to cycle to; run /settings chat model-picker to choose the configured cycle set",
 			"scoped-models:empty",
 		);
 	};
 	/**
-	 * Alt+S / Ctrl+Alt+B. The dispatch tool owns the conversion and answers with
+	 * Ctrl+G s / /background. The dispatch tool owns the conversion and answers with
 	 * the line to show, so the refusal a review-gated or compete call returns is
 	 * rendered verbatim rather than restated here.
 	 */
@@ -1133,10 +1142,42 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	});
 
 	applicationController = createInteractiveInputRuntime({
+		tui,
+		hasQueuedMessages: () => {
+			const queue = deps.chat.queuedMessages();
+			return queue.steer.length + queue.followUp.length > 0;
+		},
+		explainProtectedExit: () =>
+			notify(
+				"info",
+				`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
+				"keyboard:exit",
+			),
+		explainThinkingUnavailable: () => notify("info", "This model supports only thinking off", "keyboard:thinking"),
+		explainSearchUnavailable: () =>
+			notify("info", "Clio transcript search requires fullscreen; use your terminal's Find", "keyboard:search"),
 		keybindings,
 		dispatchAction: dispatchInteractiveAction,
 		actions: {
-			canExit: () => editor.getText().length === 0,
+			canExit: () => {
+				if (editor.getText().length > 0) return false;
+				const queue = deps.chat.queuedMessages();
+				if (
+					deps.chat.isStreaming() ||
+					deps.chat.turnPreparation().phase !== "idle" ||
+					editorSubmit.hasActiveEditorBash() ||
+					operatorExtensions?.busy ||
+					queue.steer.length + queue.followUp.length > 0
+				) {
+					notify(
+						"info",
+						`Work or queued messages remain. Cancel with Ctrl+C, recover with ${keybindings.actionLabel("clio-coder.message.dequeue")}, or use /quit.`,
+						"keyboard:exit",
+					);
+					return false;
+				}
+				return true;
+			},
 			cycleOutputStyle: () => {
 				const settings = deps.getSettings?.();
 				if (!settings || !deps.commitSetting) return;
@@ -1200,7 +1241,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
 		isStreaming: () =>
-			deps.chat.isStreaming() || deps.chat.turnPreparation().phase === "compacting" || (operatorExtensions?.busy ?? false),
+			deps.chat.isStreaming() || deps.chat.turnPreparation().phase !== "idle" || (operatorExtensions?.busy ?? false),
 		cancelActiveRun,
 		editor,
 		editorSubmit,
@@ -1257,7 +1298,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		},
 		registerInputListener: (listener) => {
 			if (lease) lease.registerApplicationInput(listener);
-			else tui.addInputListener(listener);
+			else tui.setApplicationInputPolicy(listener);
 		},
 		...(lease
 			? {

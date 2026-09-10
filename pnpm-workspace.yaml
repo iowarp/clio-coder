@@ -2,10 +2,6 @@ packages:
   - "."
   - "apps/*"
 
-# Keep dependency overrides effective across every workspace importer.
-overrides:
-  esbuild: "0.28.1"
-
 # Preserve the existing build fallback before `pnpm test`.
 enablePrePostScripts: true
 
@@ -16,3 +12,9 @@ onlyBuiltDependencies:
   - fsevents
   - node-pty
   - protobufjs
+
+# Keep dependency overrides effective across every workspace importer.
+overrides:
+  esbuild: "0.28.1"
+patchedDependencies:
+  '@earendil-works/pi-tui@0.85.1': patches/@earendil-works__pi-tui@0.85.1.patch

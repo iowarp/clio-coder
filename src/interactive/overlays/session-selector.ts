@@ -131,7 +131,13 @@ function createSessionOverlayBox(
 	let list = buildList(filtered);
 	let pendingEscape = "";
 	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
-	const box = new FocusBox([], { onInput: handleInput }) as FocusBox & { dispose(): void };
+	const box = new FocusBox(input, { onInput: handleInput }) as FocusBox & { dispose(): void };
+	box.undoInput = () => {
+		input.applyEdit("undo");
+		lastQuery = input.getValue();
+		applyFilter();
+		return true;
+	};
 	box.dispose = (): void => {
 		clearPendingEscape();
 	};
@@ -218,11 +224,11 @@ function createSessionOverlayBox(
 			moveSelectionByPage(1);
 			return;
 		}
-		if (matchesKey(data, "up") || matchesKey(data, "down")) {
+		if (keybindings.matches(data, "tui.select.up") || keybindings.matches(data, "tui.select.down")) {
 			list.handleInput(data);
 			return;
 		}
-		if (matchesKey(data, "enter") || data === "\n") {
+		if (keybindings.matches(data, "tui.select.confirm") || data === "\n") {
 			list.handleInput(data);
 			return;
 		}

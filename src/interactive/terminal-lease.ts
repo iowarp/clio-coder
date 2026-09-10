@@ -10,7 +10,17 @@
 
 import type { ClioSettings } from "../core/config.js";
 import { getTerminationCoordinator } from "../core/termination.js";
-import { type Component, Container, matchesKey, ScrollView, Text, type TUI, VStack } from "../engine/tui.js";
+import {
+	type Component,
+	Container,
+	isKeyRelease,
+	isKeyRepeat,
+	matchesKey,
+	ScrollView,
+	Text,
+	type TUI,
+	VStack,
+} from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
@@ -182,7 +192,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			[settings.chat.target, settings.chat.model].filter((part) => part && part.length > 0).join("·") || "starting",
 		getThinkingLabel: () => settings.chat.thinkingLevel ?? "off",
 		getSubmitKeyLabel: () => keybindings.getKeys("tui.input.submit")[0] ?? "Enter",
-		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Shift+Enter",
+		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Ctrl+J",
 	};
 	const editorChromeProxy: EditorChrome = {
 		getModelLabel: () => editorChrome.getModelLabel(),
@@ -193,7 +203,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getTurnPreparation: () => editorChrome.getTurnPreparation?.() ?? "idle",
 		willEnterSteer: (text) => editorChrome.willEnterSteer?.(text) ?? false,
 		getSubmitKeyLabel: () => editorChrome.getSubmitKeyLabel?.() ?? "Enter",
-		getNewlineKeyLabel: () => editorChrome.getNewlineKeyLabel?.() ?? "Shift+Enter",
+		getNewlineKeyLabel: () => editorChrome.getNewlineKeyLabel?.() ?? "Ctrl+J",
 	};
 	const shell =
 		options.testing?.shell ??
@@ -271,6 +281,12 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			tui.requestRender();
 			return;
 		}
+		if (submissions.length > 0) {
+			shutdownArmed = false;
+			lastCtrlCAt = 0;
+			tui.requestRender();
+			return;
+		}
 		const pressedAt = now();
 		if (lastCtrlCAt > 0 && pressedAt - lastCtrlCAt <= DOUBLE_TAP_MS) {
 			lastCtrlCAt = 0;
@@ -283,11 +299,19 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	};
 
 	inputDelegate = (data) => {
+		if (isKeyRelease(data)) return { consume: true };
+		if (
+			isKeyRepeat(data) &&
+			(matchesKey(data, "ctrl+c") ||
+				keybindings.matches(data, "clio-coder.exit") ||
+				keybindings.matches(data, "tui.input.submit"))
+		)
+			return { consume: true };
 		if (matchesKey(data, "ctrl+c")) {
 			handleStage0CtrlC();
 			return { consume: true };
 		}
-		if (keybindings.matches(data, "clio-coder.exit") && editor.getText().length === 0) {
+		if (keybindings.matches(data, "clio-coder.exit") && editor.getText().length === 0 && submissions.length === 0) {
 			requestShutdown();
 			return { consume: true };
 		}
@@ -302,7 +326,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	};
 
 	const stableInput = (data: string) => inputDelegate(data);
-	const removeStableInput = tui.addInputListener(stableInput);
+	const removeStableInput = tui.setApplicationInputPolicy(stableInput);
 	const stableSignal = (): void => {
 		if (applicationSignal) applicationSignal();
 		else handleStage0CtrlC();

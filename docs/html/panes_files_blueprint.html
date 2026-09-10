@@ -43,9 +43,10 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Panes and the Files Pane</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="panes_files_blueprint.html">Panes and the Files Pane visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/panes_files_blueprint.html">Panes and the Files Pane visual reference</a>.</p>
 </blockquote>
 <p>This page is the operator&#39;s path from a clean machine to a working files pane
 beside a Clio Coder session: what to install, how a session joins its pane
@@ -61,7 +62,7 @@ panes were asked for.</p>
 when it quits:</p>
 <ul>
 <li><strong>The files pane.</strong> A file view docked below the session. <code>/files</code> or
-<code>Alt+E</code> opens it and moves the keyboard into it; the same key or command
+<code>Alt+E</code> opens it and moves the keyboard into it; after Ctrl+Y returns focus to Clio, the same key or command
 closes it. Picking a file sends it back to the composer as an <code>@file</code>
 mention and returns the keyboard to the prompt. The engine behind it is a
 vendored file manager, installed on request with
@@ -73,7 +74,7 @@ event journal with <code>tail -F</code>.</li>
 workspace.</li>
 <li><strong>The workers watch pane.</strong> Enter on a live run in the <code>Alt+W</code> board renders
 that run&#39;s stream in a pane to the right. It is documented with the fleet
-in <a href="fleet_dispatch_blueprint.html">Fleet Dispatch</a>; this page covers the utility panes.</li>
+in <a href="fleet-dispatch.md">Fleet Dispatch</a>; this page covers the utility panes.</li>
 </ul>
 <p>Outside herdr, <code>/files</code> still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
@@ -165,7 +166,7 @@ version, or the theme changed since, and the next open regenerates it.</p>
 </tr>
 <tr>
 <td><code>Alt+E</code></td>
-<td>The same toggle as a key (<code>clio-coder.files.toggle</code>; <code>Ctrl+G</code> then <code>e</code> on terminals without Alt).</td>
+<td>Toggle from Clio focus (<code>clio-coder.files.toggle</code>; <code>Ctrl+G</code> then <code>e</code> on terminals without Alt).</td>
 </tr>
 <tr>
 <td><code>/files open</code></td>
@@ -210,7 +211,7 @@ version, or the theme changed since, and the next open regenerates it.</p>
 </tbody></table>
 <p>The model has the same doors with one exception: its <code>panes</code> tool opens only
 the three presets (<code>files</code>, <code>logs</code>, <code>shell</code>) and never arbitrary argv. See
-<a href="tool_usage_blueprint.html">Tool Usage</a>.</p>
+<a href="tool-usage.md#panes-manage-clio-owned-terminal-panes">Tool Usage</a>.</p>
 <h3>Picking a file</h3>
 <p>The pane opens on the workspace directory with the keyboard in it. Move with
 the arrow keys or <code>j</code>/<code>k</code>, enter a directory with <code>l</code> or <code>Enter</code>, go up with
@@ -225,21 +226,24 @@ counts what was inserted. The run on this machine, after picking
 the keyboard back in it and the notice <code>1 path from the files pane added to the draft</code>.</p>
 <h3>What closes what</h3>
 <ul>
-<li><code>/files</code>, <code>Alt+E</code>, and <code>/files close</code> close the files pane. A pane the
+<li><p>From Clio focus, <code>/files</code>, <code>Alt+E</code>, and <code>/files close</code> close the files pane. Yazi owns its own keys until Ctrl+Y returns the selection and focus. A pane the
 operator closed from herdr is treated as closed the moment herdr reports
 it, so the next toggle opens rather than trying to close a pane that is
-not there.</li>
-<li><code>/panes close shell</code>, <code>/panes close logs</code>, <code>/panes close all</code> close the
-utility panes.</li>
-<li><code>/quit</code> closes the docks Clio manages, the files pane and the workers
+not there.</p>
+</li>
+<li><p><code>/panes close shell</code>, <code>/panes close logs</code>, <code>/panes close all</code> close the
+utility panes.</p>
+</li>
+<li><p><code>/quit</code> closes the docks Clio manages, the files pane and the workers
 watch pane, and leaves a shell or logs pane you opened. That is the
 decided policy (#272): a dock is a Clio surface and goes with the session,
 while a utility pane is a terminal you may be typing in, and Clio does not
 kill it behind your back. The next session does not reclaim it either, so
-<code>/quit</code> prints what it left, one line after the terminal is restored:
+<code>/quit</code> prints what it left, one line after the terminal is restored:</p>
 <pre><code class="language-text">Clio left 1 pane open in herdr: bash in panes (wK:p2A). Utility panes stay when a session ends; the docks closed with it. Next time run `/panes close all` before `/quit` to take them with you, or close it now with `herdr pane close &lt;paneId&gt;`.
 </code></pre>
-Nothing is printed when only docks were open.</li>
+<p>Nothing is printed when only docks were open.</p>
+</li>
 </ul>
 <h2>Settings</h2>
 <table>
@@ -297,7 +301,7 @@ Nothing is printed when only docks were open.</li>
 </tr>
 </tbody></table>
 <p>Every key is live through <code>/settings</code> under Terminal, files pane, and in the
-<a href="configuration_reference_blueprint.html">Configuration Reference</a>.</p>
+<a href="configuration-reference.md">Configuration Reference</a>.</p>
 <h2>Theme</h2>
 <p>The files pane is themed from Clio&#39;s own palette. Every color in the
 engine&#39;s generated theme comes from the theme tokens in
@@ -377,7 +381,7 @@ what&quot; above.</p>
 </tr>
 </tbody></table>
 <p>Resolve <code>&lt;data&gt;</code>, <code>&lt;cache&gt;</code>, and <code>&lt;state&gt;</code> with <code>clio-coder paths</code>.</p>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="commands_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Commands and Modes</span></a>
           <a class="nav-link-card next" href="tool_usage_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Tool Usage Reference</span></a>

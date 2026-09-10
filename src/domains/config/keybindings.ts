@@ -9,7 +9,7 @@
  * complains.
  */
 
-import type { KeybindingDefinitions } from "../../engine/tui.js";
+import type { KeybindingDefinitions, KeyId } from "../../engine/tui.js";
 import { TUI_KEYBINDINGS } from "../../engine/tui.js";
 
 /**
@@ -53,133 +53,188 @@ declare module "@earendil-works/pi-tui" {
 	interface Keybindings extends ClioAppKeybindings {}
 }
 
-/**
- * Built-in defaults. Users override via `settings.yaml.keybindings`; the
- * manager reads those and patches this table before the TUI starts.
- *
- * Clio's app bindings follow one scheme: `Alt + <key>` (with `shift+tab`,
- * `ctrl+d`, and the portable `ctrl+g` leader retained because every terminal
- * already transmits them). `Alt + <letter>` decodes from the legacy
- * `ESC <letter>` sequence on meta-capable terminals. The chosen letters avoid
- * pi-tui's editor reserves except for the approved `Alt+B` and `Alt+D`
- * application-boundary overrides. They open the task and decision boards
- * before the editor can interpret those chords as word-back or word-delete.
- * The CSI-u/reserved-key detector in `keybinding-manager.ts` stays as a safety
- * net for user rebinds.
- */
+/** Stable application descriptors. Fixed leader suffixes never derive from overrides. */
+interface AppActionDescriptor {
+	defaultKeys: KeyId | KeyId[];
+	description: string;
+	scope: "composer";
+	kind: "toggle" | "cycle" | "send" | "exit" | "edit" | "dismiss";
+	repeat: false;
+	leader?: string;
+}
 export const CLIO_APP_KEYBINDINGS = {
-	"clio-coder.thinking.cycle": {
-		defaultKeys: "shift+tab",
-		description: "Cycle orchestrator thinking level",
-	},
-	"clio-coder.exit": {
-		defaultKeys: "ctrl+d",
-		description: "Exit when the editor is empty",
-	},
-	"clio-coder.status.toggle": {
-		defaultKeys: "alt+u",
-		description: "Toggle the footer dashboard (compact / expanded)",
-	},
-	"clio-coder.session.tree": {
-		defaultKeys: "alt+t",
-		description: "Open the /tree navigator",
-	},
-	"clio-coder.dispatchBoard.toggle": {
-		defaultKeys: "alt+w",
-		description: "Toggle the dispatch (workers) board overlay",
-	},
-	"clio-coder.files.toggle": {
-		// Alt+F is a pi-tui editor reserve (word-forward), so the files pane
-		// takes the next letter that reads as "explorer" and stays inside the
-		// Alt+<letter> scheme, which also earns it the Ctrl+G leader fallback.
-		defaultKeys: "alt+e",
-		description: "Toggle the files pane beside the session (a --with-panes session inside herdr)",
-	},
-	"clio-coder.tasks.open": {
-		// Approved application-boundary override of pi-tui editor word-back.
-		defaultKeys: "alt+b",
-		description: "Open the composite session and operator task board",
-	},
-	"clio-coder.decisions.open": {
-		// Approved application-boundary override of pi-tui editor word-delete.
-		defaultKeys: "alt+d",
-		description: "Open the settled interview decision board",
-	},
-	"clio-coder.dispatch.background": {
-		// Ctrl+B alone is pi-tui's editor cursor-left, so the Claude Code chord
-		// cannot be the primary here. Alt+S ("send to background") keeps the app
-		// scheme and earns the Ctrl+G leader fallback, which only alt+<letter>
-		// bindings get; Ctrl+Alt+B stays for the b-for-background muscle memory.
-		defaultKeys: ["alt+s", "ctrl+alt+b"],
-		description: "Send the running attached dispatch to the background as a detached batch",
+	"clio-coder.library.toggle": {
+		defaultKeys: "alt+l",
+		description: "Library",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "l",
 	},
 	"clio-coder.model.select": {
 		defaultKeys: "alt+m",
-		description: "Open the model + targets selector",
-	},
-	"clio-coder.library.toggle": {
-		defaultKeys: "alt+l",
-		description: "Open or close the library of skills, agents, prompts, fleets and plugins",
-	},
-	"clio-coder.model.cycleForward": {
-		defaultKeys: "alt+j",
-		description: "Cycle to next scoped model",
-	},
-	"clio-coder.model.cycleBackward": {
-		defaultKeys: "alt+k",
-		description: "Cycle to previous scoped model",
+		description: "Model picker",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "m",
 	},
 	"clio-coder.output.cycle": {
 		defaultKeys: "alt+o",
-		description: "Cycle output style: Compact, Standard, Detailed",
+		description: "Output style",
+		scope: "composer",
+		kind: "cycle",
+		repeat: false,
+		leader: "o",
 	},
-	"clio-coder.editor.external": {
-		defaultKeys: "alt+g",
-		description: "Open the current input in an external editor",
+	"clio-coder.status.toggle": {
+		defaultKeys: "alt+u",
+		description: "Dashboard",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "u",
+	},
+	"clio-coder.dispatchBoard.toggle": {
+		defaultKeys: "alt+w",
+		description: "Workers",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "w",
+	},
+	"clio-coder.files.toggle": {
+		defaultKeys: "alt+e",
+		description: "Files (from Clio focus)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+		leader: "e",
+	},
+	"clio-coder.thinking.cycle": {
+		defaultKeys: "shift+tab",
+		description: "Thinking effort",
+		scope: "composer",
+		kind: "cycle",
+		repeat: false,
+		leader: "t",
 	},
 	"clio-coder.message.followUp": {
-		defaultKeys: "alt+enter",
-		description:
-			"End of turn: queue the current input for delivery when the active run settles (Enter delivers it at the next slot, between tool batches)",
-	},
-	"clio-coder.message.interrupt": {
-		// Alt+I keeps the app scheme and earns the Ctrl+G leader fallback. A
-		// Ctrl+Enter chord was rejected because legacy terminals send it as a
-		// plain Enter, which would turn every send into a cancel.
-		defaultKeys: "alt+i",
-		description:
-			"Interrupt: cancel the active run and deliver the current input now (refused while an attached dispatch runs or a permission ask is parked; the input then queues for the next slot)",
+		defaultKeys: "ctrl+q",
+		description: "Send after the active run",
+		scope: "composer",
+		kind: "send",
+		repeat: false,
+		leader: "f",
 	},
 	"clio-coder.message.dequeue": {
-		defaultKeys: "alt+up",
-		description: "Restore queued steering and follow-up messages to the editor",
+		defaultKeys: "alt+q",
+		description: "Restore queued messages",
+		scope: "composer",
+		kind: "send",
+		repeat: false,
+		leader: "q",
 	},
-	"clio-coder.notifications.dismiss": {
-		defaultKeys: "alt+x",
-		description: "Dismiss footer notifications",
+	"clio-coder.exit": {
+		defaultKeys: "ctrl+d",
+		description: "Exit empty idle composer with no queued messages",
+		scope: "composer",
+		kind: "exit",
+		repeat: false,
 	},
 	"clio-coder.leader": {
 		defaultKeys: "ctrl+g",
-		description: "Start portable leader-key fallback for Alt shortcuts",
+		description: "Open contextual action menu",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
 	},
-} as const satisfies KeybindingDefinitions;
+	"clio-coder.tasks.open": {
+		defaultKeys: [],
+		description: "Tasks (/tasks)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+	},
+	"clio-coder.decisions.open": {
+		defaultKeys: [],
+		description: "Decisions (/decisions)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+	},
+	"clio-coder.session.tree": {
+		defaultKeys: [],
+		description: "Session tree (/tree)",
+		scope: "composer",
+		kind: "toggle",
+		repeat: false,
+	},
+	"clio-coder.model.cycleForward": {
+		defaultKeys: [],
+		description: "Next scoped model",
+		scope: "composer",
+		kind: "cycle",
+		repeat: false,
+	},
+	"clio-coder.model.cycleBackward": {
+		defaultKeys: [],
+		description: "Previous scoped model",
+		scope: "composer",
+		kind: "cycle",
+		repeat: false,
+	},
+	"clio-coder.dispatch.background": {
+		defaultKeys: [],
+		description: "Background attached dispatch",
+		scope: "composer",
+		kind: "send",
+		repeat: false,
+		leader: "s",
+	},
+	"clio-coder.message.interrupt": {
+		defaultKeys: [],
+		description: "Interrupt with draft",
+		scope: "composer",
+		kind: "send",
+		repeat: false,
+		leader: "i",
+	},
+	"clio-coder.editor.external": {
+		defaultKeys: [],
+		description: "Edit expanded draft externally",
+		scope: "composer",
+		kind: "edit",
+		repeat: false,
+		leader: "g",
+	},
+	"clio-coder.notifications.dismiss": {
+		defaultKeys: [],
+		description: "Dismiss oldest notification",
+		scope: "composer",
+		kind: "dismiss",
+		repeat: false,
+		leader: "x",
+	},
+} as const satisfies Record<ClioKeybinding, AppActionDescriptor>;
 
-/**
- * Full definition table = pi-tui editor/select defaults + Clio app ids.
- * pi-tui 0.84 supplies dedicated prompt-history actions but leaves them
- * unbound for applications to place. Clio uses the readline-style Ctrl+P and
- * Ctrl+N pair because its model cycling already lives on Alt+J and Alt+K.
- */
 export const CLIO_KEYBINDINGS = {
 	...TUI_KEYBINDINGS,
-	"tui.editor.historyPrevious": {
-		...TUI_KEYBINDINGS["tui.editor.historyPrevious"],
-		defaultKeys: "ctrl+p",
+	"tui.editor.historyPrevious": { ...TUI_KEYBINDINGS["tui.editor.historyPrevious"], defaultKeys: "ctrl+p" },
+	"tui.editor.historyNext": { ...TUI_KEYBINDINGS["tui.editor.historyNext"], defaultKeys: "ctrl+n" },
+	"tui.editor.deleteWordBackward": {
+		...TUI_KEYBINDINGS["tui.editor.deleteWordBackward"],
+		defaultKeys: ["ctrl+w", "alt+backspace", "ctrl+backspace"],
 	},
-	"tui.editor.historyNext": {
-		...TUI_KEYBINDINGS["tui.editor.historyNext"],
-		defaultKeys: "ctrl+n",
-	},
+	"tui.editor.undo": { ...TUI_KEYBINDINGS["tui.editor.undo"], defaultKeys: "ctrl+_" },
+	"tui.input.newLine": { ...TUI_KEYBINDINGS["tui.input.newLine"], defaultKeys: ["ctrl+j", "shift+enter"] },
+	"tui.altScreen.top": { ...TUI_KEYBINDINGS["tui.altScreen.top"], defaultKeys: [] },
+	"tui.altScreen.bottom": { ...TUI_KEYBINDINGS["tui.altScreen.bottom"], defaultKeys: [] },
+	"tui.altScreen.previousPrompt": { ...TUI_KEYBINDINGS["tui.altScreen.previousPrompt"], defaultKeys: "ctrl+up" },
+	"tui.altScreen.nextPrompt": { ...TUI_KEYBINDINGS["tui.altScreen.nextPrompt"], defaultKeys: "ctrl+down" },
+	"tui.altScreen.search": { ...TUI_KEYBINDINGS["tui.altScreen.search"], defaultKeys: "ctrl+r" },
+	"tui.altScreen.searchNext": { ...TUI_KEYBINDINGS["tui.altScreen.searchNext"], defaultKeys: "enter" },
+	"tui.altScreen.searchPrevious": { ...TUI_KEYBINDINGS["tui.altScreen.searchPrevious"], defaultKeys: "up" },
 	...CLIO_APP_KEYBINDINGS,
 } as const satisfies KeybindingDefinitions;
 

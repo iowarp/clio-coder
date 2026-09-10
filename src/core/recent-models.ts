@@ -3,7 +3,7 @@
  *
  * Recents are runtime state, not user configuration, so they live in the state
  * dir (recent-models.json) and never in settings.yaml. Keeping them out
- * of the settings file means an Alt+L model pick does not rewrite settings.yaml
+ * of the settings file means an Alt+M model pick does not rewrite settings.yaml
  * just to bump a recency list, which would fire the config watcher in every
  * other running session. Favorites (modelSelector.favorites) remain in
  * settings.yaml because they are deliberate user configuration.
@@ -72,7 +72,7 @@ export function rememberRecentModel(ref: string, limit: number): string[] {
 	const next = [ref, ...base.filter((entry) => entry !== ref)].slice(0, max);
 	cache = next;
 	cachePath = path;
-	// An Alt+L model pick in a session outliving `clio-coder uninstall` must not
+	// An Alt+M model pick in a session outliving `clio-coder uninstall` must not
 	// rebuild the state root around recent-models.json. The in-memory list still
 	// updates so the picker behaves for the rest of the run; see stateRootRemoved().
 	if (stateRootRemoved()) return next;

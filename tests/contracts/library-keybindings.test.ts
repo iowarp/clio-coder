@@ -21,7 +21,10 @@ it("routes Library and model defaults independently and closes Library with its 
 	strictEqual(routeOverlayKey("\u001bl", "skills-hub", overlay, manager.matches), true);
 	deepStrictEqual(actions, ["library", "model", "workers", "close"]);
 	deepStrictEqual(
-		manager.leaderTargets().filter((target) => target.key === "l" || target.key === "m"),
+		manager
+			.leaderTargets()
+			.filter((target) => target.key === "l" || target.key === "m")
+			.sort((a, b) => b.key.localeCompare(a.key)),
 		[
 			{ key: "m", id: "clio-coder.model.select" },
 			{ key: "l", id: "clio-coder.library.toggle" },

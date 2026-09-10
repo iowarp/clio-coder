@@ -113,7 +113,7 @@ export interface SessionTreeNode {
 
 ### Active Path Lineage Selection
 
-When an operator branches or switches turns using `/tree` or `Alt+T`, the next append point changes without mutating or deleting historical entries in `current.jsonl`.
+When an operator branches or switches turns using `/tree`, the next append point changes without mutating or deleting historical entries in `current.jsonl`.
 
 The active path filter (`src/domains/session/tree/active-path.ts`) traces ancestry back from the active leaf:
 1. Resolves all `turnId` identifiers tracing back to the root `null` parent.

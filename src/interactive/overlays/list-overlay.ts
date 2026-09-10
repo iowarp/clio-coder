@@ -10,6 +10,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
+import { localKey } from "../keyboard-owner.js";
 import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
@@ -708,7 +709,24 @@ export class ListOverlayView implements Component {
 		return this.detailPaneDrawn;
 	}
 
+	get keyboardScope(): "edit" | "browse" {
+		return this.isFilterFocused ? "edit" : "browse";
+	}
+	undoInput(): boolean {
+		if (!this.isFilterFocused) return false;
+		this.input.applyEdit("undo");
+		this.filterText = this.input.getValue();
+		this.inputEpoch += 1;
+		this.selectIndex(0);
+		this.onChange();
+		return true;
+	}
 	handleInput(data: string): void {
+		data = localKey(data);
+		if (matchesKey(data, "escape")) {
+			this.clearFilterOrClose();
+			return;
+		}
 		if (this.options.filterable && this.options.explicitSearch && !this.isFilterFocused && data === "/") {
 			this.isFilterFocused = true;
 			this.onChange();
@@ -787,20 +805,6 @@ export class ListOverlayView implements Component {
 				this.clearFilterOrClose();
 				return;
 			}
-
-			// The footer advertises the action keys from the moment the overlay opens
-			// and the filter input holds focus then, so the first `d` an operator
-			// pressed in /interop landed in the filter box instead of declining the
-			// selected row. An empty query has nothing to narrow, so a bound key acts
-			// on the selection. Once a query is typed the letters belong to it, and
-			// ↑/↓ hands focus back to the list where the same keys act again.
-			if (
-				!this.options.explicitSearch &&
-				this.filterText.length === 0 &&
-				data.length === 1 &&
-				this.runAction(data, filteredItems)
-			)
-				return;
 
 			this.inputEpoch += 1;
 			this.input.handleInput(data);

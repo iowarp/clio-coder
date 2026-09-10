@@ -193,7 +193,7 @@ The words carry the meaning when color is disabled. Permission copy states the e
 
 The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. `interface.mode` chooses the renderer at startup. The default `regular` mode uses terminal scrollback. Opt-in `fullscreen` mode uses the alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.
 
-In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Home` and `End` jump to its bounds, `Ctrl+Shift+Up` and `Ctrl+Shift+Down` jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `interface.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
+In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Ctrl+G Home` and `Ctrl+G End` jump to its bounds, `Ctrl+Up` and `Ctrl+Down` jump between semantic prompts; plain Home/End edit the composer, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `interface.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
 `interface.smoothStreaming` controls presentation-only pacing of derived assistant text and thinking. The shipped `off` value uses the immediate 16 ms coalescer. `auto` paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. `on` explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.
 
@@ -213,7 +213,7 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
   - When the draft scrolls, the active mode folds into the scroll indicator row so the orange warning remains visible.
 - **Top Rail Metadata**: The top rail right displays target/model and thinking level with two-step color hierarchy: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
 - **Empty-State Placeholder**: Displays dim prompt `Ask Clio…  / for commands`.
-- **Lower Rail Affordance**: On terminals at or above 60 columns, the bottom rail displays `Enter send · Shift+Enter newline` (or resolved keybindings).
+- **Lower Rail Affordance**: On terminals at or above 60 columns, the bottom rail displays `Enter send · Ctrl+J newline` (or resolved keybindings).
 
 ### 5.3 Progressively Disclosed Footer
 
@@ -226,7 +226,7 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
   3. `Session`: Session cost, throughput, total token breakdown, leader key state.
   4. `Workspace`: CWD, branch, target, git dirty status.
   Empty rows collapse rather than occupying blank grid space.
-- **Notification Badge & Degradation Ladder**: The footer notification badge reserves the severity head (`ℹ 1 notice`, `⚠ 1 warning`, `✗ 1 error`), separator, and `[Alt+X] dismiss` tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (`head · [Alt+X] dismiss` → `head · [Alt+X]` → `head` → glyph alone) without clipping the action key.
+- **Notification Badge & Degradation Ladder**: The footer notification badge reserves the severity head (`ℹ 1 notice`, `⚠ 1 warning`, `✗ 1 error`), separator, and `[Ctrl+G x] dismiss` tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (`head · [Ctrl+G x] dismiss` → `head · [Ctrl+G x]` → `head` → glyph alone) without clipping the action key.
 
 ### 5.4 State Choreography Table
 
@@ -338,9 +338,9 @@ Wrapping happens before the row cap, so the block is at most six rows tall at an
 
 ### 7.3 Task and Decision Boards
 
-- **Composite Tasks Board (`/tasks`, `Alt+B`)**: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered `/view` path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.
-- **Settled Decisions Board (`/decisions`, `Alt+D`)**: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.
-- **Approved editor overrides**: `Alt+B` and `Alt+D` are deliberate application-input boundary overrides of Pi's editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in `settings.yaml`.
+- **Composite Tasks Board (`/tasks`)**: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered `/view` path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.
+- **Settled Decisions Board (`/decisions`)**: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.
+- **Editing and focus**: Alt+B/D keep word movement/deletion. Ctrl+G shows a persistent contextual action menu. The application policy runs before viewport shortcuts; release events are discarded first. Search and modal children own cancellation. Permission deletions and local undo use semantic component operations. See the complete [keyboard contract](../guide/commands-and-modes.md#keybindings).
 
 ### 7.4 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
@@ -379,3 +379,14 @@ Global scope requires a second `g` press on the same entry after the warning
 line appears. Status rows are labeled private and neither action can promote
 them. Both actions create unapproved durable proposals, show the resulting
 memory ID, and leave approval to the separate reviewed memory lifecycle.
+
+## Keyboard engine compatibility
+
+Clio pins pi-tui 0.85.1 with a tracked pnpm patch for one pre-viewport input
+policy, public existing search focus/operations, and semantic Editor/Input
+edits. Production consumes these only through src/engine. The patch adds no
+renderer, decoder or search implementation. Published dist bundles patched
+JavaScript and the pure JavaScript transitive dependencies; the pinned installed
+Pi package supplies native Darwin/Windows helpers through its package resolver.
+MIT notices ship beside the bundle. A frozen contributor install and an ordinary
+npm consumer install are separate acceptance checks.

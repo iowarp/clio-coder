@@ -43,11 +43,12 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Clio TUI Design System</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="tui_design_blueprint.html">Clio TUI Design System visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/tui_design_blueprint.html">Clio TUI Design System visual reference</a>.</p>
 </blockquote>
-<p>This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive">src/interactive/</a>.</p>
+<p>This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior. It describes color semantics, the glyph vocabulary, structural recipes, and state choreography for all surfaces under <a href="../../src/interactive/">src/interactive/</a>.</p>
 <p>The governing principle: <strong>the user reads state from color, structure from frames, and identity from brand marks.</strong> Everything that is not state or structure remains visually quiet.</p>
 <hr>
 <h2>Output styles</h2>
@@ -122,7 +123,7 @@
 <p>The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent&#39;s current phase; a completed worker cannot clear a sibling&#39;s active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker&#39;s successful execution remains separate from its validation result.</p>
 <hr>
 <h2>1. Color System</h2>
-<p>All color styling is defined in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/tokens.ts">src/interactive/theme/tokens.ts</a>. No raw SGR sequences, <code>38;2;</code>/<code>38;5;</code> ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.</p>
+<p>All color styling is defined in <a href="../../src/interactive/theme/tokens.ts">src/interactive/theme/tokens.ts</a>. No raw SGR sequences, <code>38;2;</code>/<code>38;5;</code> ANSI escape fragments, or hardcoded hex colors are allowed outside this theme module.</p>
 <h3>1.1 Color Tokens</h3>
 <table>
 <thead>
@@ -208,7 +209,7 @@
 </ul>
 <hr>
 <h2>2. Glyph Vocabulary</h2>
-<p>All symbols are defined as constants in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/glyphs.ts">src/interactive/theme/glyphs.ts</a>. Rendering code reference these names instead of embedding hardcoded glyph literals.</p>
+<p>All symbols are defined as constants in <a href="../../src/interactive/theme/glyphs.ts">src/interactive/theme/glyphs.ts</a>. Rendering code reference these names instead of embedding hardcoded glyph literals.</p>
 <table>
 <thead>
 <tr>
@@ -401,7 +402,7 @@
 </tbody></table>
 <hr>
 <h2>3. Formatting Rules</h2>
-<p>Standardized formatters live in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/labels.ts">src/interactive/theme/labels.ts</a> and other shared UI modules:</p>
+<p>Standardized formatters live in <a href="../../src/interactive/theme/labels.ts">src/interactive/theme/labels.ts</a> and other shared UI modules:</p>
 <ul>
 <li><strong>Duration</strong>: <code>formatCompactMs</code> is the unified duration formatter, yielding compact outputs (<code>860ms</code>, <code>4.2s</code>, <code>42s</code>, <code>1m36s</code>).</li>
 <li><strong>Token Counts</strong>: <code>formatFooterTokens</code> formats footer and chip counts (<code>842</code>, <code>12.4k</code>, <code>1.2M</code>). Full numeric strings via <code>toLocaleString</code> are reserved for detailed tables like the context legend.</li>
@@ -411,7 +412,7 @@
 <hr>
 <h2>4. Structural Layouts</h2>
 <h3>4.1 The Island (Framed Block)</h3>
-<p>Rendered via <code>frame()</code> in <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/theme/rules.ts">src/interactive/theme/rules.ts</a>:</p>
+<p>Rendered via <code>frame()</code> in <a href="../../src/interactive/theme/rules.ts">src/interactive/theme/rules.ts</a>:</p>
 <pre><code>┌─ Title ──────────────────────────── meta ─┐
 │ body line                                 │
 │ body line                                 │
@@ -503,7 +504,7 @@
 <hr>
 <h2>5. Screen Surfaces &amp; State Choreography</h2>
 <p>The Clio screen maintains a responsive, four-zone structure: the launchpad / session header, transcript, composer, and footer. <code>interface.mode</code> chooses the renderer at startup. The default <code>regular</code> mode uses terminal scrollback. Opt-in <code>fullscreen</code> mode uses the alternate screen: the launchpad/header and transcript occupy an independently scrollable viewport while the follow-up queue, composer, and footer remain docked at the bottom.</p>
-<p>In fullscreen mode, <code>PageUp</code> and <code>PageDown</code> scroll one viewport, <code>Home</code> and <code>End</code> jump to its bounds, <code>Ctrl+Shift+Up</code> and <code>Ctrl+Shift+Down</code> jump between semantic prompts, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. <code>interface.fullscreenScrollbar</code> is <code>hidden</code>, <code>auto</code> (visible during interaction), or <code>always</code>. Manual scrolling suspends follow-end so new output does not steal the operator&#39;s position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.</p>
+<p>In fullscreen mode, <code>PageUp</code> and <code>PageDown</code> scroll one viewport, <code>Ctrl+G Home</code> and <code>Ctrl+G End</code> jump to its bounds, <code>Ctrl+Up</code> and <code>Ctrl+Down</code> jump between semantic prompts; plain Home/End edit the composer, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. <code>interface.fullscreenScrollbar</code> is <code>hidden</code>, <code>auto</code> (visible during interaction), or <code>always</code>. Manual scrolling suspends follow-end so new output does not steal the operator&#39;s position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.</p>
 <p><code>interface.smoothStreaming</code> controls presentation-only pacing of derived assistant text and thinking. The shipped <code>off</code> value uses the immediate 16 ms coalescer. <code>auto</code> paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. <code>on</code> explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.</p>
 <p>Interactive startup uses one terminal lease across both boot stages. Stage 0 owns the terminal, renderer, root host, exact editor instance, input decoder, raw mode, resize subscription, protocol queries, signals, and stop lifecycle, and commits a measured minimal frame while services hydrate. Hydration synchronously swaps the root and input/signal delegates without reconstructing the editor or initializing terminal protocols again. Early Enter submissions become immutable, visibly queued admissions and drain once through the ordinary command pipeline; a later draft and cursor stay in the same editor. Boot failure or an early signal closes the lease exactly once, restores the terminal, and prints recoverable queued input and draft text. <code>CLIO_CODER_INSTANT_SHELL=0</code> selects the legacy fully hydrated first frame; ACP, headless, ordinary non-TTY invocation, and subcommand execution never acquire the lease. An explicit <code>CLIO_CODER_INTERACTIVE=1</code> retains its established force-interactive behavior on a non-TTY stream.</p>
 <h3>5.1 Welcome Launchpad &amp; Session Header</h3>
@@ -522,7 +523,7 @@
 </li>
 <li><strong>Top Rail Metadata</strong>: The top rail right displays target/model and thinking level with two-step color hierarchy: <code>off</code> (dim), <code>minimal</code>/<code>low</code> (muted), <code>medium</code>/<code>high</code> (<code>reason</code> purple), and <code>xhigh</code>/<code>max</code>/<code>on</code> (bold <code>reason</code> purple).</li>
 <li><strong>Empty-State Placeholder</strong>: Displays dim prompt <code>Ask Clio…  / for commands</code>.</li>
-<li><strong>Lower Rail Affordance</strong>: On terminals at or above 60 columns, the bottom rail displays <code>Enter send · Shift+Enter newline</code> (or resolved keybindings).</li>
+<li><strong>Lower Rail Affordance</strong>: On terminals at or above 60 columns, the bottom rail displays <code>Enter send · Ctrl+J newline</code> (or resolved keybindings).</li>
 </ul>
 <h3>5.3 Progressively Disclosed Footer</h3>
 <ul>
@@ -539,7 +540,7 @@
 Empty rows collapse rather than occupying blank grid space.</li>
 </ol>
 </li>
-<li><strong>Notification Badge &amp; Degradation Ladder</strong>: The footer notification badge reserves the severity head (<code>ℹ 1 notice</code>, <code>⚠ 1 warning</code>, <code>✗ 1 error</code>), separator, and <code>[Alt+X] dismiss</code> tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (<code>head · [Alt+X] dismiss</code> → <code>head · [Alt+X]</code> → <code>head</code> → glyph alone) without clipping the action key.</li>
+<li><strong>Notification Badge &amp; Degradation Ladder</strong>: The footer notification badge reserves the severity head (<code>ℹ 1 notice</code>, <code>⚠ 1 warning</code>, <code>✗ 1 error</code>), separator, and <code>[Ctrl+G x] dismiss</code> tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (<code>head · [Ctrl+G x] dismiss</code> → <code>head · [Ctrl+G x]</code> → <code>head</code> → glyph alone) without clipping the action key.</li>
 </ul>
 <h3>5.4 State Choreography Table</h3>
 <p>State is signaled through the status pill in the footer and matches the following table:</p>
@@ -641,7 +642,7 @@ Empty rows collapse rather than occupying blank grid space.</li>
 <h3>6.6 Output Style Receipts</h3>
 <p>Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.</p>
 <h3>6.7 Code Ink (Syntax Highlighting)</h3>
-<p>Syntax highlighting within code blocks is handled by <a href="https://github.com/iowarp/clio-coder/blob/main/src/interactive/renderers/code-ink.ts">src/interactive/renderers/code-ink.ts</a>. It maps a restricted set of four tokens to stay quiet:</p>
+<p>Syntax highlighting within code blocks is handled by <a href="../../src/interactive/renderers/code-ink.ts">src/interactive/renderers/code-ink.ts</a>. It maps a restricted set of four tokens to stay quiet:</p>
 <ul>
 <li><strong>Comments</strong>: <code>dim</code></li>
 <li><strong>String Literals</strong>: <code>success</code></li>
@@ -695,9 +696,9 @@ so partial fences never flicker into incomplete diagrams while streaming.</p>
 <p>Wrapping happens before the row cap, so the block is at most six rows tall at any width and a streaming answer cannot make the card grow under the operator. Detail follows the cursor rather than pinning to a run, and closing the board closes it. Reasoning text is never rendered; the <code>thinking</code> phase word is the whole of what the board says about it.</p>
 <h3>7.3 Task and Decision Boards</h3>
 <ul>
-<li><strong>Composite Tasks Board (<code>/tasks</code>, <code>Alt+B</code>)</strong>: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered <code>/view</code> path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.</li>
-<li><strong>Settled Decisions Board (<code>/decisions</code>, <code>Alt+D</code>)</strong>: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.</li>
-<li><strong>Approved editor overrides</strong>: <code>Alt+B</code> and <code>Alt+D</code> are deliberate application-input boundary overrides of Pi&#39;s editor word-back and word-delete chords. Clio routes them before the editor so the two global boards remain one chord away. They are explicit exceptions to the general rule that Clio app bindings avoid Pi editor reserves, and users may rebind the Clio actions in <code>settings.yaml</code>.</li>
+<li><strong>Composite Tasks Board (<code>/tasks</code>)</strong>: Presents four sections in one reopenable overlay: the live session board, terminal task history, successful workspace artifacts, and project-scoped operator tasks. Selecting a workspace artifact opens the filtered <code>/view</code> path. Operator rows support add, hand, done, and drop actions; refresh is explicit for captured history and artifacts, while lightweight repaint reads the current board snapshot.</li>
+<li><strong>Settled Decisions Board (<code>/decisions</code>)</strong>: Groups completed and cancelled interviews on the active branch, expands source questions and answers, and lets the operator supersede a value or submit a correction. Corrections travel through the ordinary operator-turn path after the durable decision snapshot is updated.</li>
+<li><strong>Editing and focus</strong>: Alt+B/D keep word movement/deletion. Ctrl+G shows a persistent contextual action menu. The application policy runs before viewport shortcuts; release events are discarded first. Search and modal children own cancellation. Permission deletions and local undo use semantic component operations. See the complete <a href="../guide/commands-and-modes.md#keybindings">keyboard contract</a>.</li>
 </ul>
 <h3>7.4 Slash Autocomplete Command Palette</h3>
 <ul>
@@ -765,6 +766,15 @@ Global scope requires a second <code>g</code> press on the same entry after the 
 line appears. Status rows are labeled private and neither action can promote
 them. Both actions create unapproved durable proposals, show the resulting
 memory ID, and leave approval to the separate reviewed memory lifecycle.</p>
+<h2>Keyboard engine compatibility</h2>
+<p>Clio pins pi-tui 0.85.1 with a tracked pnpm patch for one pre-viewport input
+policy, public existing search focus/operations, and semantic Editor/Input
+edits. Production consumes these only through src/engine. The patch adds no
+renderer, decoder or search implementation. Published dist bundles patched
+JavaScript and the pure JavaScript transitive dependencies; the pinned installed
+Pi package supplies native Darwin/Windows helpers through its package resolver.
+MIT notices ship beside the bundle. A frozen contributor install and an ordinary
+npm consumer install are separate acceptance checks.</p>
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="trace_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Trace store contract</span></a>

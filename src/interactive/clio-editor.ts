@@ -112,7 +112,7 @@ function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 function lowerRailHint(theme: ClioTheme, chrome: EditorChrome): string {
 	return theme.fg(
 		"dim",
-		`${chrome.getSubmitKeyLabel?.() ?? "Enter"} send · ${chrome.getNewlineKeyLabel?.() ?? "Shift+Enter"} newline`,
+		`${chrome.getSubmitKeyLabel?.() ?? "Enter"} send · ${chrome.getNewlineKeyLabel?.() ?? "Ctrl+J"} newline`,
 	);
 }
 
@@ -205,6 +205,25 @@ function startsWithPastedOperator(text: string, pastedBangOffsets: ReadonlySet<n
 export class ClioEditor extends Editor {
 	private pastedBangOffsets = new Set<number>();
 	private bracketedPasteActive = false;
+	private revision = 0;
+	private pastedExpandedOperator = false;
+
+	get draftRevision(): number {
+		return this.revision;
+	}
+
+	/** Restored queues and external buffers are literal editor content. */
+	setLiteralText(text: string): void {
+		this.setText(text);
+		this.pastedBangOffsets = new Set([...text.matchAll(/!/gu)].map((match) => match.index));
+	}
+
+	override applyEdit(operation: Parameters<Editor["applyEdit"]>[0]): void {
+		const before = this.getText();
+		super.applyEdit(operation);
+		this.revision += 1;
+		this.pastedBangOffsets = remapPastedBangOffsets(before, this.getText(), this.pastedBangOffsets, operation === "undo");
+	}
 
 	constructor(
 		tui: TUI,
@@ -270,18 +289,14 @@ export class ClioEditor extends Editor {
 	 */
 	getTextForSubmit(): string {
 		const text = this.getExpandedText();
-		return startsWithPastedOperator(this.getText(), this.pastedBangOffsets) ? guardPastedEditorOperator(text) : text;
+		return this.pastedExpandedOperator || startsWithPastedOperator(this.getText(), this.pastedBangOffsets)
+			? guardPastedEditorOperator(text)
+			: text;
 	}
 
-	/**
-	 * pi-tui's bracketed-paste handling inserts pasted text (including a
-	 * trailing newline the paste carried) without submitting: a pasted
-	 * `/model\n` lands as two lines in the buffer and just sits there. Once
-	 * the base handler has applied a chunk that closed a paste, check whether
-	 * the buffer now reads as a completed slash command and, if so, submit it
-	 * through the same handler the typed-Enter path uses.
-	 */
+	/** Paste is always literal; a later deliberate key submits it. */
 	override handleInput(data: string): void {
+		this.revision += 1;
 		const openedPaste = data.includes("\x1b[200~");
 		const closedPaste = data.includes("\x1b[201~");
 		const pasteMutation = this.bracketedPasteActive || openedPaste;
@@ -292,7 +307,7 @@ export class ClioEditor extends Editor {
 		// distinguish it from a typed operator; the submit controller unwraps it
 		// before sending the literal prompt onward.
 		if (
-			startsWithPastedOperator(textBeforeInput, this.pastedBangOffsets) &&
+			(this.pastedExpandedOperator || startsWithPastedOperator(textBeforeInput, this.pastedBangOffsets)) &&
 			keybindings.matches(data, "tui.input.submit")
 		) {
 			const pastedText = this.getTextForSubmit();
@@ -322,16 +337,12 @@ export class ClioEditor extends Editor {
 		);
 		if (openedPaste) this.bracketedPasteActive = true;
 		if (closedPaste) this.bracketedPasteActive = false;
-		if (!closedPaste) return;
-		const text = this.getText();
-		if (!text.endsWith("\n")) return;
-		const command = text.trimEnd();
-		if (!command.startsWith("/")) return;
-		this.setText("");
-		this.onSubmit?.(command);
+		if (pasteMutation && this.getExpandedText().trimStart().startsWith("!")) this.pastedExpandedOperator = true;
 	}
 
 	override setText(text: string): void {
+		this.revision += 1;
+		this.pastedExpandedOperator = false;
 		this.pastedBangOffsets.clear();
 		this.bracketedPasteActive = false;
 		super.setText(text);

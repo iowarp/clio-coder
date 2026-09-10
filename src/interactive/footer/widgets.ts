@@ -1195,13 +1195,13 @@ function buildMetricStrip(
 	// Ranked above every measurement: the strip is cut by dropping the
 	// lowest-ranked chip, and these two are the answer to "did that key
 	// register". The quit hint outranks the leader because its window is
-	// 500ms wide and the leader's is open until the next keystroke.
+	// 500ms wide and the leader remains visible until dismissed.
 	// Two rungs rather than one: the strip drops a chip it cannot fit whole, and
 	// a terminal narrow enough to lose the sentence is exactly the one where the
 	// operator most needs to be told the press registered.
 	const shutdownHint = safeMaxWidth >= 20 ? "Ctrl+C again to quit" : "Ctrl+C again";
 	pushChip(chips, shutdownArmed ? theme.fg("warning", shutdownHint) : null, CHIP_RANK_SHUTDOWN);
-	pushChip(chips, leaderArmed ? theme.fg("accent", "leader armed") : null, CHIP_RANK_LEADER);
+	pushChip(chips, leaderArmed ? theme.fg("accent", "action menu") : null, CHIP_RANK_LEADER);
 	for (const chip of candidates) pushChip(chips, chip, CHIP_RANK_DETAIL);
 	pushChip(chips, totalChip, CHIP_RANK_TOTALS);
 	pushChip(chips, costChip, CHIP_RANK_DETAIL);

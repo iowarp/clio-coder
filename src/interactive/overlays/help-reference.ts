@@ -62,42 +62,50 @@ export function openHelpOverlay(
 		})),
 	);
 
-	const conflicts = manager.getConflicts();
-	const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
-		const formattedKeys = formatKey(row.keys);
-		const keysPart = formattedKeys.length >= 24 ? `${formattedKeys} ` : formattedKeys.padEnd(24);
-		const label = `${keysPart}${row.description}`;
+	const keyItems = (): ListOverlayItem[] => {
+		const conflicts = manager.getConflicts();
+		const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {
+			const formattedKeys = formatKey(manager.actionLabel(row.id));
+			const keysPart = formattedKeys.length >= 24 ? `${formattedKeys} ` : formattedKeys.padEnd(24);
+			const label = `${keysPart}${row.description}`;
 
-		const item: ListOverlayItem = {
-			id: row.id,
-			label,
-			group: "Keys",
-			detail: (width) => {
-				const warnings = manager
-					.platformWarnings()
-					.filter((w) => w.id === row.id)
-					.map((w) => `${w.keys.map(formatKey).join(" / ")} may not fire: ${w.reason}`);
-				const detailEntry = {
-					id: row.id,
-					keys: formattedKeys,
-					action: row.description,
-					source: row.source,
-					warnings,
-				};
-				return formatKeybindingDetailBodyLines(detailEntry, width);
-			},
-		};
+			const item: ListOverlayItem = {
+				id: row.id,
+				label,
+				group: "Keys",
+				detail: (width) => {
+					const warnings = manager
+						.platformWarnings()
+						.filter((w) => w.id === row.id)
+						.map((w) => `${w.keys.map(formatKey).join(" / ")} may not fire: ${w.reason}`);
+					for (const conflict of conflicts.filter((entry) => entry.keybindings.includes(row.id)))
+						warnings.push(
+							`${conflict.key}: ${conflict.keybindings.join(", ")}. Focus owner wins; composer history precedes application actions, then editing. For two app actions, use distinct keys.`,
+						);
+					const detailEntry = {
+						id: row.id,
+						keys: formattedKeys,
+						action: row.description,
+						source: row.source,
+						warnings,
+					};
+					return formatKeybindingDetailBodyLines(detailEntry, width);
+				},
+			};
 
-		const metaParts: string[] = [];
-		if (row.source === "user") metaParts.push("user");
-		const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
-		if (hasConflict) metaParts.push("conflict");
-		if (metaParts.length > 0) {
-			item.meta = metaParts.join(", ");
-		}
+			const metaParts: string[] = [];
+			if (row.source === "user") metaParts.push("user");
+			const hasConflict = conflicts.some((c) => c.keybindings.includes(row.id));
+			if (hasConflict) metaParts.push("conflict");
+			if (metaParts.length > 0) {
+				item.meta = metaParts.join(", ");
+			}
 
-		return item;
-	});
+			return item;
+		});
+
+		return keys;
+	};
 
 	// Static concept topics. Unlike commands and keys these are not generated
 	// from a registry; keep each detail consistent with the enforced behavior
@@ -109,7 +117,7 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Fleet runs & steering",
-				"**Fleet Runs board**: open it with the configured Dispatch Board key (Alt+W by default). Use Up/Down or `j`/`k` to select a live or recent run.",
+				`**Fleet Runs board**: ${manager.actionLabel("clio-coder.dispatchBoard.toggle")}. Use Up/Down or j/k to select a live or recent run.`,
 				"**Enter**: on a live run in a `--with-panes` session, Enter opens (or retargets) the watch pane beside Clio, rendering that run's stream; the arrow keys then move it between runs. On a finished run, or without panes, Enter toggles the inline worker-progress detail instead.",
 				"**Steer**: press `s` on a live native run to close the board and prefill `@<runId> `. Add guidance and submit it normally. The first notice means queued; a received notice confirms worker delivery.",
 				"**Cancel**: press `x` on a running, stale, queued, or retry-waiting run. The row changes to cancelling while the worker or retry is being stopped.",
@@ -124,7 +132,7 @@ export function openHelpOverlay(
 			detail: () => [
 				"# Panes & files",
 				"**Where it works**: a session started inside a herdr pane with `clio-coder --with-panes` (or `interface.panes.enabled: auto`). Outside herdr `/files` still works as a full-screen pick that returns to the composer; `/panes open logs|shell` do not.",
-				"**Files pane**: `/files` or the Files toggle key (Alt+E by default) opens the file view below the session and moves the keyboard into it; the same key or command closes it. `/files pick` borrows it for one selection. It is off until `interface.panes.files.enabled` is `true`.",
+				`**Files pane**: /files or ${manager.actionLabel("clio-coder.files.toggle")} opens Yazi from Clio focus. Yazi and the host own keys until Ctrl+Y returns selected paths and focus. Close the pane from Clio with the same action. /files pick borrows it for one selection.`,
 				"**Picking**: navigate, select with Space for several, then Ctrl+Y (or Enter in pick mode). The paths land in the composer as `@file` mentions and the keyboard returns to the composer.",
 				"**Logs and shell**: `/panes open logs` follows the newest dispatched run's journal; `/panes open shell` opens a shell in the workspace. A second open focuses the pane that is already there. `/panes close <name|all>` closes them; `/quit` closes the docks it manages (files, workers), leaves a shell or logs pane you opened, and prints which panes it left and how to close them.",
 				"**Engine**: the files pane runs a vendored file manager installed with `clio-coder tools install yazi`; `clio-coder doctor` and `/panes` say whether it resolved.",
@@ -138,10 +146,10 @@ export function openHelpOverlay(
 				"# Steering modes",
 				"While Clio is running, the key that submits a message chooses when it lands. The default is next slot.",
 				"**Next slot** (Enter): the message is delivered between tool batches, mid-run. The agent keeps going and reads it before its next model call.",
-				"**End of turn** (Alt+Enter by default): the message waits until the whole run settles and Clio would hand control back, then starts the next round.",
-				"**Interrupt** (Alt+I by default, or Ctrl+G then i): cancels the in-flight work the way Esc does, including a running bash child, then delivers the message as a fresh prompt. Anything already queued returns to the editor.",
+				`**End of turn** (${manager.actionLabel("clio-coder.message.followUp")}): wait until the whole run settles, then start the next round.`,
+				`**Interrupt** (${manager.actionLabel("clio-coder.message.interrupt")} or /interrupt <text>): settle active work and deliver a fresh prompt. Queued messages return ahead of any newer draft.`,
 				"**Interrupt is refused** while an attached dispatch is running (the abort would kill the worker's run with no receipt; steer it with `@<agent>` or cancel it with Esc) and while a permission ask is parked (it is already waiting on you). In both cases the message is queued for the next slot and a notice says why.",
-				"**Alt+Up** restores queued messages to the editor. Workers accept next-slot steering only, through `@<agent>`.",
+				`**Recover queues**: ${manager.actionLabel("clio-coder.message.dequeue")}. Workers accept next-slot steering through @<agent>.`,
 			],
 		},
 		{
@@ -167,9 +175,9 @@ export function openHelpOverlay(
 		},
 	];
 
-	const items = [...commands, ...keys, ...topics];
+	const items = [...commands, ...keyItems(), ...topics];
 
-	return openListOverlay(tui, {
+	const handle = openListOverlay(tui, {
 		markerId: "help",
 		title: "Help Center",
 		items,
@@ -177,4 +185,12 @@ export function openHelpOverlay(
 		...(initialFilter ? { initialFilter } : {}),
 		onClose,
 	});
+	const unsubscribe = manager.onReload(() => handle.setItems([...commands, ...keyItems(), ...topics]));
+	return {
+		...handle,
+		hide() {
+			unsubscribe();
+			handle.hide();
+		},
+	};
 }

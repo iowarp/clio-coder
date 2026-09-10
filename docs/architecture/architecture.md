@@ -85,7 +85,7 @@ decision.
 
 Clio maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state (`src/core/session-routing.ts`).
 
-1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via Alt+J / Alt+K) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
+1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via explicit model-cycle keys) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
 2. **Lifecycle Flow**:
    - `seedSessionRouting`: Seeds runtime fields from configuration at startup.
    - `applyRoutingPatch`: Applies surgical routing mutations (such as changing active model or target in the TUI).

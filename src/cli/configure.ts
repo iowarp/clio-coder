@@ -1372,7 +1372,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				["Chat thinking", settings.chat.thinkingLevel],
 				["Fleet thinking", settings.fleet.default.thinkingLevel],
 				["Favorites", listOr(settings.chat.modelPicker.favorites)],
-				["Cycle set (Alt+J/K)", listOr(settings.chat.modelPicker.cycleSet)],
+				["Model cycle set", listOr(settings.chat.modelPicker.cycleSet)],
 			];
 		},
 		actions: [
@@ -1437,7 +1437,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			},
 			{
 				label: "Cycle set",
-				hint: "comma-separated, Alt+J/K walks it",
+				hint: "comma-separated models for the scoped cycle actions",
 				run: async (io) => {
 					await askList(io, "Cycle set", readSettings().chat.modelPicker.cycleSet, (values) => {
 						updateSettings((draft) => {

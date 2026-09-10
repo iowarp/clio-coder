@@ -20,7 +20,7 @@ Inside a herdr session, Clio can open panes beside itself and close them
 when it quits:
 
 - **The files pane.** A file view docked below the session. `/files` or
-  `Alt+E` opens it and moves the keyboard into it; the same key or command
+  `Alt+E` opens it and moves the keyboard into it; after Ctrl+Y returns focus to Clio, the same key or command
   closes it. Picking a file sends it back to the composer as an `@file`
   mention and returns the keyboard to the prompt. The engine behind it is a
   vendored file manager, installed on request with
@@ -140,7 +140,7 @@ version, or the theme changed since, and the next open regenerates it.
 | Surface | What it does |
 | --- | --- |
 | `/files` | Toggle the files pane: open it below the session and move the keyboard into it, or close it and return the keyboard to the composer. |
-| `Alt+E` | The same toggle as a key (`clio-coder.files.toggle`; `Ctrl+G` then `e` on terminals without Alt). |
+| `Alt+E` | Toggle from Clio focus (`clio-coder.files.toggle`; `Ctrl+G` then `e` on terminals without Alt). |
 | `/files open` | Open the pane, or focus it when it is already open. |
 | `/files close` | Close the pane. |
 | `/files pick` | Borrow the pane for one selection, then close it. Outside herdr, `/files` always behaves this way. |
@@ -174,7 +174,7 @@ the draft`.
 
 ### What closes what
 
-- `/files`, `Alt+E`, and `/files close` close the files pane. A pane the
+- From Clio focus, `/files`, `Alt+E`, and `/files close` close the files pane. Yazi owns its own keys until Ctrl+Y returns the selection and focus. A pane the
   operator closed from herdr is treated as closed the moment herdr reports
   it, so the next toggle opens rather than trying to close a pane that is
   not there.

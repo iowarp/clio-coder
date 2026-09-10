@@ -43,9 +43,10 @@
       </aside>
       <main class="reference-main" id="reference-content">
         <article class="reference-prose glass-card">
+<h1>Session Lifecycle</h1>
 <blockquote>
 <p><strong>Visual blueprint:</strong> The source checkout includes the complete
-<a href="session_lifecycle_blueprint.html">Session Lifecycle visual reference</a>.</p>
+<a href="https://github.com/iowarp/clio-coder/blob/main/docs/html/session_lifecycle_blueprint.html">Session Lifecycle visual reference</a>.</p>
 </blockquote>
 <p>This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.</p>
 <p>Source implementations: <code>src/engine/session.ts</code> and <code>src/domains/session/</code>.</p>
@@ -127,7 +128,7 @@
 }
 </code></pre>
 <h3>Active Path Lineage Selection</h3>
-<p>When an operator branches or switches turns using <code>/tree</code> or <code>Alt+T</code>, the next append point changes without mutating or deleting historical entries in <code>current.jsonl</code>.</p>
+<p>When an operator branches or switches turns using <code>/tree</code>, the next append point changes without mutating or deleting historical entries in <code>current.jsonl</code>.</p>
 <p>The active path filter (<code>src/domains/session/tree/active-path.ts</code>) traces ancestry back from the active leaf:</p>
 <ol>
 <li>Resolves all <code>turnId</code> identifiers tracing back to the root <code>null</code> parent.</li>
@@ -235,7 +236,7 @@ reported to <code>/cost</code> under a handoffs row and excluded from the turn c
 <li><strong>Usage Accounting</strong> (<code>src/domains/session/usage.ts</code>): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.</li>
 <li><strong>Aborted Turn Persistence</strong>: When a turn is interrupted by <code>Ctrl+C</code> or a SIGINT signal, partial assistant output and completed tool executions are committed to <code>current.jsonl</code> with <code>interrupted: true</code> before yielding the prompt.</li>
 </ul>
-        </article>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="safety_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Clio Coder Safety Model</span></a>
           <a class="nav-link-card next" href="time_conventions_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Time and Clock Conventions</span></a>

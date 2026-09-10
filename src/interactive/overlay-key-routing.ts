@@ -1,5 +1,5 @@
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease, matchesKey } from "../engine/tui.js";
+import { isKeyRelease, isKeyRepeat, matchesKey } from "../engine/tui.js";
 import { MUTATION_PREVIEW_KEY, PERMISSION_TERMS_KEY } from "./permission-hint.js";
 
 export type OverlayState =
@@ -46,7 +46,7 @@ export interface PermissionOverlayKeyDeps {
 	 * so the draft that makes Enter inert can be cleared without first denying
 	 * the call. Only the deletion keys in `isDraftEditKey` arrive here.
 	 */
-	editDraft?: (data: string) => void;
+	editDraft?: (operation: DraftEditOperation) => void;
 	/** Whether this card has a mutation the operator can read locally (issue #254). */
 	canInspectMutation?: () => boolean;
 	isInspectingMutation?: () => boolean;
@@ -80,24 +80,29 @@ export interface AskUserOverlayKeyDeps {
 	cancelAskUser: () => void;
 }
 
-export interface OverlayKeyDeps extends PermissionOverlayKeyDeps, DispatchBoardOverlayKeyDeps, AskUserOverlayKeyDeps {}
+export interface OverlayKeyDeps extends PermissionOverlayKeyDeps, DispatchBoardOverlayKeyDeps, AskUserOverlayKeyDeps {
+	canToggleOwner?: () => boolean;
+}
 
 export function isEscapeKey(data: string): boolean {
 	return matchesKey(data, "escape") && !isKeyRelease(data);
 }
 
-const DRAFT_EDIT_KEYS = ["backspace", "delete", "ctrl+u", "ctrl+w", "alt+backspace", "ctrl+k"] as const;
-
-/**
- * The keys that only ever remove text from the composer. They are the one
- * class of input a pending permission prompt lets through, because they
- * cannot type a command, cannot submit, and are the way out of the inert-Enter
- * state a draft puts the prompt in.
- */
-function isDraftEditKey(data: string): boolean {
-	return !isKeyRelease(data) && DRAFT_EDIT_KEYS.some((key) => matchesKey(data, key));
-}
-
+export type DraftEditOperation =
+	| "deleteCharBackward"
+	| "deleteCharForward"
+	| "deleteToLineStart"
+	| "deleteToLineEnd"
+	| "deleteWordBackward";
+const DRAFT_EDITS: ReadonlyArray<readonly [import("../engine/tui.js").KeyId, DraftEditOperation]> = [
+	["backspace", "deleteCharBackward"],
+	["delete", "deleteCharForward"],
+	["ctrl+u", "deleteToLineStart"],
+	["ctrl+k", "deleteToLineEnd"],
+	["ctrl+w", "deleteWordBackward"],
+	["alt+backspace", "deleteWordBackward"],
+	["ctrl+backspace", "deleteWordBackward"],
+];
 /** Rows one page key moves the open mutation. Matches the window the card renders. */
 const MUTATION_PAGE_ROWS = 16;
 
@@ -119,8 +124,9 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		if (!(deps.composerHasDraft?.() ?? false)) deps.confirmPermission();
 		return true;
 	}
-	if (deps.editDraft && isDraftEditKey(data)) {
-		deps.editDraft(data);
+	const edit = DRAFT_EDITS.find(([key]) => matchesKey(data, key));
+	if (deps.editDraft && edit) {
+		deps.editDraft(edit[1]);
 		return true;
 	}
 	// Reading the mutation is the one thing this dialog does that is not an
@@ -136,7 +142,11 @@ function routePermissionOverlayKey(data: string, deps: PermissionOverlayKeyDeps)
 		deps.toggleMutationInspection();
 		return true;
 	}
-	if (data === PERMISSION_TERMS_KEY && deps.togglePermissionTerms && !(deps.isInspectingMutation?.() ?? false)) {
+	if (
+		matchesKey(data, PERMISSION_TERMS_KEY) &&
+		deps.togglePermissionTerms &&
+		!(deps.isInspectingMutation?.() ?? false)
+	) {
 		deps.togglePermissionTerms();
 		return true;
 	}
@@ -212,28 +222,10 @@ function routeCostOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	return false;
 }
 
-/** Pure overlay key router for the /model overlay. Esc closes; arrows and Enter fall through. */
-function routeModelOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
 /** Pure overlay key router for the /fork message-picker. */
 function routeMessagePickerOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
-		return true;
-	}
-	return false;
-}
-
-/** Pure overlay key router for ask_user. */
-function routeAskUserOverlayKey(data: string, deps: AskUserOverlayKeyDeps): boolean {
-	if (isEscapeKey(data)) {
-		deps.cancelAskUser();
 		return true;
 	}
 	return false;
@@ -250,13 +242,17 @@ export function routeOverlayKey(
 	matches: (data: string, id: ClioKeybinding) => boolean,
 ): boolean {
 	if (overlayState === "closed") return false;
+	if (isKeyRelease(data)) return true;
+	if (data.includes("\x1b[200~") && overlayState === "permission-confirm") return true;
 	if (
-		(overlayState === "dispatch-board" && matches(data, "clio-coder.dispatchBoard.toggle")) ||
-		(overlayState === "tasks" && matches(data, "clio-coder.tasks.open")) ||
-		(overlayState === "tree" && matches(data, "clio-coder.session.tree")) ||
-		(overlayState === "model" && matches(data, "clio-coder.model.select")) ||
-		(overlayState === "skills-hub" && matches(data, "clio-coder.library.toggle")) ||
-		(overlayState === "help" && matches(data, "clio-coder.leader"))
+		!isKeyRepeat(data) &&
+		(deps.canToggleOwner?.() ?? true) &&
+		((overlayState === "dispatch-board" && matches(data, "clio-coder.dispatchBoard.toggle")) ||
+			(overlayState === "tasks" && matches(data, "clio-coder.tasks.open")) ||
+			(overlayState === "tree" && matches(data, "clio-coder.session.tree")) ||
+			(overlayState === "model" && matches(data, "clio-coder.model.select")) ||
+			(overlayState === "skills-hub" && matches(data, "clio-coder.library.toggle")) ||
+			false)
 	) {
 		deps.closeOverlay();
 		return true;
@@ -292,7 +288,7 @@ export function routeOverlayKey(
 	if (overlayState === "decisions") return false;
 	if (overlayState === "memory") return false;
 	if (overlayState === "view") return false;
-	if (overlayState === "model") return routeModelOverlayKey(data, deps);
+	if (overlayState === "model") return false;
 	// The scope dialog owns Esc itself: cancelling it must leave the model where
 	// it was, and a router-level close cannot say that to the caller waiting on it.
 	if (overlayState === "model-scope") return false;
@@ -304,7 +300,7 @@ export function routeOverlayKey(
 	if (overlayState === "tree") return false;
 	if (overlayState === "message-picker") return routeMessagePickerOverlayKey(data, deps);
 	if (overlayState === "cwd-fallback") return false;
-	if (overlayState === "ask-user") return routeAskUserOverlayKey(data, deps);
+	if (overlayState === "ask-user") return false;
 	if (
 		overlayState === "help" ||
 		overlayState === "extensions" ||

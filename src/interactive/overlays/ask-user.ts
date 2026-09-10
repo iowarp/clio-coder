@@ -6,6 +6,7 @@ import {
 import {
 	type Component,
 	Editor,
+	getKeybindings,
 	Input,
 	matchesKey,
 	type OverlayHandle,
@@ -318,6 +319,7 @@ class AnswerEditor extends Editor {
 interface TextControl {
 	render(width: number): string[];
 	handleInput(data: string): void;
+	applyEdit?(operation: "undo"): void;
 	getText(): string;
 	setText(text: string): void;
 	invalidate(): void;
@@ -339,6 +341,9 @@ class InputTextControl implements TextControl {
 		return [fitLine(theme.fg("dim", this.caption), width), ...rows];
 	}
 
+	applyEdit(operation: "undo"): void {
+		this.input.applyEdit(operation);
+	}
 	handleInput(data: string): void {
 		this.input.handleInput(data);
 	}
@@ -535,6 +540,14 @@ class AskUserOverlayView implements Component {
 		this.text?.invalidate();
 	}
 
+	get keyboardScope(): "edit" | "review" {
+		return this.currentState()?.mode === "text" ? "edit" : "review";
+	}
+	undoInput(): boolean {
+		if (this.currentState()?.mode !== "text") return false;
+		this.text?.applyEdit?.("undo");
+		return true;
+	}
 	handleInput(data: string): void {
 		if (this.phase !== "asking") return;
 		const question = this.currentQuestion();
@@ -548,14 +561,6 @@ class AskUserOverlayView implements Component {
 		if (state.mode === "text") {
 			if (matchesKey(data, "escape")) {
 				this.escapeFromTextInput(question, state);
-				return;
-			}
-			if (this.isTextModePreviousKey(data)) {
-				this.goToRelativeQuestion(-1);
-				return;
-			}
-			if (this.isTextModeNextKey(data)) {
-				this.goToRelativeQuestion(1);
 				return;
 			}
 			this.text?.handleInput(data);
@@ -697,8 +702,7 @@ class AskUserOverlayView implements Component {
 			// leaves the interview. The footer says which one this is.
 			const escapeVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
 			const entries: HintEntry[] = [{ key: "Enter", verb: recordAnswer }];
-			if (this.deps.tui) entries.push({ key: "Shift+Enter", verb: "newline" });
-			if (this.questions.length > 1) entries.push({ key: "Alt+Left/Right", verb: "question" });
+			if (this.deps.tui) entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline" });
 			return buildHint([...entries, ...scroll], escapeVerb);
 		}
 		const entries: HintEntry[] = [];
@@ -799,14 +803,6 @@ class AskUserOverlayView implements Component {
 
 	private isNextQuestionKey(data: string): boolean {
 		return this.questions.length > 1 && matchesKey(data, "right");
-	}
-
-	private isTextModePreviousKey(data: string): boolean {
-		return this.questions.length > 1 && (matchesKey(data, "alt+left") || matchesKey(data, "ctrl+left"));
-	}
-
-	private isTextModeNextKey(data: string): boolean {
-		return this.questions.length > 1 && (matchesKey(data, "alt+right") || matchesKey(data, "ctrl+right"));
 	}
 
 	/**

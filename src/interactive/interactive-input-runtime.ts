@@ -1,6 +1,13 @@
 import { getTerminationCoordinator } from "../core/termination.js";
-import type { ClioKeybinding } from "../domains/config/keybindings.js";
-import { isKeyRelease, type Keybinding } from "../engine/tui.js";
+import { CLIO_APP_KEYBINDING_IDS, type ClioKeybinding } from "../domains/config/keybindings.js";
+import {
+	decodePrintableKey,
+	isKeyRelease,
+	type Keybinding,
+	matchesKey,
+	type TUI,
+	TuiAltScreen,
+} from "../engine/tui.js";
 import {
 	type ApplicationClock,
 	type ApplicationController,
@@ -10,7 +17,9 @@ import {
 	type ApplicationSignalCoordinator,
 	createApplicationController,
 } from "./application-controller.js";
+import { focusedComponent, keyboardOwner } from "./keyboard-owner.js";
 import { createLeaderKeyController, type LeaderTarget } from "./leader-key.js";
+import { createLeaderMenu } from "./leader-menu.js";
 import { type OverlayState, routeOverlayKey } from "./overlay-lifecycle.js";
 import type { RenderInputAction } from "./render-trace.js";
 
@@ -39,9 +48,17 @@ export interface InteractiveInputKeyActionDeps {
 }
 
 export interface InteractiveInputRuntimeDeps {
+	tui?: TUI;
+	hasQueuedMessages?: () => boolean;
+	explainProtectedExit?: () => void;
+	explainSearchUnavailable?: () => void;
+	explainThinkingUnavailable?: () => void;
 	keybindings: {
 		matches(data: string, id: Keybinding): boolean;
 		leaderTargets(): ReadonlyArray<LeaderTarget>;
+		getKeys?(id: Keybinding): ReadonlyArray<string>;
+		getDescription?(id: Keybinding): string;
+		onReload?(listener: () => void): () => void;
 	};
 	dispatchAction: (id: ClioKeybinding, deps: InteractiveInputKeyActionDeps) => boolean;
 	actions: {
@@ -92,7 +109,13 @@ export interface InteractiveInputRuntimeDeps {
 	cancelActiveEditorBash: () => boolean;
 	isStreaming: () => boolean;
 	cancelActiveRun: () => void;
-	editor: { getText(): string; setText(text: string): void; handleInput?(data: string): void };
+	editor: {
+		getText(): string;
+		setText(text: string): void;
+		handleInput?(data: string): void;
+		applyEdit?(operation: import("./overlay-key-routing.js").DraftEditOperation | "undo"): void;
+		isShowingAutocomplete?(): boolean;
+	};
 	editorSubmit: {
 		openExternalEditorForInput(): void;
 		queueFollowUpFromEditor(): void;
@@ -141,6 +164,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		cycleThinking: () => {
 			const available = deps.actions.availableThinkingLevels();
 			if (!(available.length === 1 && available[0] === "off")) deps.actions.onCycleThinking();
+			else deps.explainThinkingUnavailable?.();
 			deps.refreshFooter();
 			deps.requestRender();
 		},
@@ -171,10 +195,98 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		interruptWithMessage: deps.editorSubmit.interruptFromEditor,
 		restoreQueuedFollowUps: deps.editorSubmit.restoreQueuedFollowUpsToEditor,
 	});
+	const focused = () => (deps.tui ? focusedComponent(deps.tui) : null);
+	const search = () => (deps.tui instanceof TuiAltScreen && deps.tui.isSearchFocused ? deps.tui : null);
+	const owner = () => keyboardOwner(focused());
+	const ownerAction = (): ClioKeybinding | undefined =>
+		(
+			({
+				"skills-hub": "clio-coder.library.toggle",
+				model: "clio-coder.model.select",
+				tree: "clio-coder.session.tree",
+				"dispatch-board": "clio-coder.dispatchBoard.toggle",
+			}) as Partial<Record<OverlayState, ClioKeybinding>>
+		)[deps.overlay.getState()];
+	const canToggleOwner = () => deps.overlay.getState() === "dispatch-board" || owner().keyboardScope === "browse";
+	const targets = (): ReadonlyArray<LeaderTarget> => {
+		const all = deps.keybindings.leaderTargets();
+		const filtered = search()
+			? all.filter(({ id }) => id === "tui.editor.undo" || id === "tui.altScreen.search")
+			: deps.overlay.getState() === "closed"
+				? all
+				: all.filter(
+						({ id }) =>
+							(id === ownerAction() && canToggleOwner()) ||
+							(id === "tui.editor.undo" &&
+								(owner().keyboardScope === "edit" || deps.overlay.getState() === "permission-confirm")),
+					);
+		return filtered.map((entry) => ({
+			...entry,
+			label: deps.keybindings.getDescription?.(entry.id) ?? entry.id,
+			...(entry.id === "clio-coder.thinking.cycle" &&
+			deps.actions.availableThinkingLevels().every((level) => level === "off")
+				? { disabledReason: "This model supports only off" }
+				: {}),
+		}));
+	};
+	const menu = deps.tui
+		? createLeaderMenu(
+				deps.tui,
+				() => (search() ? "Transcript search" : overlayScopeLabel(deps.overlay.getState())),
+				(id) => deps.keybindings.getKeys?.(id).join(" / ") ?? "",
+			)
+		: undefined;
+	const dispatchLeader = (id: Keybinding): boolean => {
+		if (id === "tui.editor.undo") {
+			if (search()) search()?.undoSearchQuery();
+			else if (deps.overlay.getState() === "closed" || deps.overlay.getState() === "permission-confirm")
+				deps.editor.applyEdit?.("undo");
+			else owner().undoInput?.();
+			deps.requestRender();
+			return true;
+		}
+		if (id.startsWith("tui.altScreen.")) {
+			const tui = deps.tui;
+			if (!(tui instanceof TuiAltScreen)) {
+				deps.explainSearchUnavailable?.();
+				return true;
+			}
+			switch (id) {
+				case "tui.altScreen.search":
+					tui.toggleSearch();
+					break;
+				case "tui.altScreen.pageUp":
+					tui.scrollBy(-Math.max(1, tui.terminal.rows - 3));
+					break;
+				case "tui.altScreen.pageDown":
+					tui.scrollBy(Math.max(1, tui.terminal.rows - 3));
+					break;
+				case "tui.altScreen.top":
+					tui.scrollToTop();
+					break;
+				case "tui.altScreen.bottom":
+					tui.scrollToBottom();
+					break;
+				case "tui.altScreen.previousPrompt":
+					tui.scrollToPrompt(-1);
+					break;
+				case "tui.altScreen.nextPrompt":
+					tui.scrollToPrompt(1);
+					break;
+			}
+			return true;
+		}
+		if (deps.overlay.getState() !== "closed") {
+			if (id === ownerAction() && canToggleOwner()) deps.overlay.closeOverlay();
+			return true;
+		}
+		return deps.dispatchAction(id as ClioKeybinding, keyActionDeps());
+	};
 	const leaderKeys = createLeaderKeyController({
 		matchesLeader: (input) => deps.keybindings.matches(input, "clio-coder.leader"),
-		leaderTargets: () => deps.keybindings.leaderTargets(),
-		dispatchAction: (id) => deps.dispatchAction(id, keyActionDeps()),
+		leaderTargets: targets,
+		dispatchAction: dispatchLeader,
+		...(menu ? { onMenuChange: menu } : {}),
 		isRelease: isKeyRelease,
 		onStateChange: (pending) => {
 			deps.onLeaderStateChange?.(pending);
@@ -183,7 +295,98 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 	});
 
+	const removeReload = deps.keybindings.onReload?.(() => leaderKeys.reset());
 	controller = createApplicationController({
+		routeComposerKey: (data) => {
+			if (deps.keybindings.matches(data, "tui.altScreen.search") && !(deps.tui instanceof TuiAltScreen)) {
+				deps.explainSearchUnavailable?.();
+				return true;
+			}
+			return false;
+		},
+		isSearchFocused: () => search() !== null,
+		closeSearch: () => search()?.closeSearch(),
+		isAutocompleteVisible: () => deps.editor.isShowingAutocomplete?.() ?? false,
+		hasQueuedMessages: () => deps.hasQueuedMessages?.() ?? false,
+		explainProtectedExit: () => deps.explainProtectedExit?.(),
+		forwardFocusedInput: (data) => {
+			const active = search();
+			if (active) {
+				if (
+					deps.keybindings.matches(data, "tui.altScreen.search") ||
+					deps.keybindings.matches(data, "tui.altScreen.searchClose") ||
+					matchesKey(data, "escape")
+				)
+					active.closeSearch();
+				else if (deps.keybindings.matches(data, "tui.altScreen.searchNext")) active.navigateSearch(1);
+				else if (deps.keybindings.matches(data, "tui.altScreen.searchPrevious")) active.navigateSearch(-1);
+				else focused()?.handleInput?.(data);
+			} else focused()?.handleInput?.(data);
+			deps.requestRender();
+		},
+		cancelFocusedOwner: () => {
+			const state = deps.overlay.getState();
+			if (["permission-confirm", "cost", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
+				deps.overlay.closeOverlay();
+			else if (focused()?.handleInput) {
+				focused()?.handleInput?.("\x1b");
+				deps.requestRender();
+			} else deps.overlay.closeOverlay();
+		},
+		matchesRepeatableInput: (data) => {
+			// Safety takes precedence over hostile user collisions.
+			if (CLIO_APP_KEYBINDING_IDS.some((id) => id !== "clio-coder.exit" && deps.keybindings.matches(data, id)))
+				return false;
+			if (deps.keybindings.matches(data, "clio-coder.exit"))
+				return matchesKey(data, "ctrl+d") && deps.editor.getText().length > 0 && deps.overlay.getState() === "closed";
+			if (
+				["clio-coder.exit", "clio-coder.leader", "tui.input.submit", "tui.select.confirm", "tui.select.cancel"].some((id) =>
+					deps.keybindings.matches(data, id as Keybinding),
+				) ||
+				matchesKey(data, "ctrl+c") ||
+				matchesKey(data, "escape")
+			)
+				return false;
+			const editable = deps.overlay.getState() === "closed" || search() !== null || owner().keyboardScope === "edit";
+			if (editable && (decodePrintableKey(data) !== undefined || deps.keybindings.matches(data, "tui.input.newLine")))
+				return true;
+			const navigation = ["up", "down", "left", "right", "home", "end", "pageUp", "pageDown"] as const;
+			if (navigation.some((key) => matchesKey(data, key))) return true;
+			if (
+				deps.overlay.getState() !== "closed" &&
+				["tui.select.up", "tui.select.down"].some((id) => deps.keybindings.matches(data, id as Keybinding))
+			)
+				return true;
+			if (
+				deps.overlay.getState() === "closed" &&
+				["pageUp", "pageDown", "top", "bottom", "previousPrompt", "nextPrompt"].some((name) =>
+					deps.keybindings.matches(data, `tui.altScreen.${name}` as Keybinding),
+				)
+			)
+				return true;
+			return (
+				(deps.overlay.getState() === "closed" ||
+					search() !== null ||
+					owner().keyboardScope === "edit" ||
+					deps.overlay.getState() === "permission-confirm") &&
+				[
+					"cursorLeft",
+					"cursorRight",
+					"cursorWordLeft",
+					"cursorWordRight",
+					"cursorLineStart",
+					"cursorLineEnd",
+					"deleteCharBackward",
+					"deleteCharForward",
+					"deleteWordBackward",
+					"deleteWordForward",
+					"deleteToLineStart",
+					"deleteToLineEnd",
+					"historyPrevious",
+					"historyNext",
+				].some((name) => deps.keybindings.matches(data, `tui.editor.${name}` as Keybinding))
+			);
+		},
 		clock: deps.clock ?? { now: Date.now },
 		signals: deps.signals ?? {
 			takeInterruptOwnership: () => getTerminationCoordinator().releaseInterruptOwnership(),
@@ -211,8 +414,9 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 					toggleMutationInspection: () => deps.overlay.toggleMutationInspection(),
 					scrollMutationInspection: (delta) => deps.overlay.scrollMutationInspection(delta),
 					togglePermissionTerms: () => deps.overlay.togglePermissionTerms(),
-					editDraft: (data) => {
-						deps.editor.handleInput?.(data);
+					canToggleOwner,
+					editDraft: (operation) => {
+						deps.editor.applyEdit?.(operation);
 						deps.requestRender();
 					},
 					closeOverlay: () => deps.overlay.closeOverlay(),
@@ -264,6 +468,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		shutdownDisposers: [
 			() => deps.shutdown.stopTickers(),
 			() => leaderKeys.dispose(),
+			() => removeReload?.(),
 			() => deps.shutdown.disposeInteractiveTickers(),
 			() => deps.shutdown.disposeBeforeStatus(),
 			() => deps.shutdown.disposeProjectionPrimary(),
@@ -292,6 +497,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 	});
 	deps.registerInputListener((data) => {
 		deps.onInputIngress?.(classifyInputAction(data, deps), data);
+
 		return controller.handleInput(data);
 	});
 	return controller;
@@ -313,4 +519,37 @@ function classifyInputAction(data: string, deps: InteractiveInputRuntimeDeps): R
 	}
 	if (deps.overlay.getState() !== "closed") return "overlay";
 	return "editor";
+}
+
+/** Operator-facing scope names; overlay state IDs stay inside routing. */
+function overlayScopeLabel(state: OverlayState): string {
+	const names: Record<OverlayState, string> = {
+		closed: "Composer",
+		"permission-confirm": "Permission",
+		"dispatch-board": "Workers",
+		auth: "Authentication",
+		cost: "Usage",
+		"context-view": "Context",
+		"context-reset": "Context reset",
+		tasks: "Tasks",
+		decisions: "Decisions",
+		memory: "Memory",
+		view: "View",
+		model: "Model",
+		"model-scope": "Model cycle set",
+		settings: "Settings",
+		resume: "Resume",
+		tree: "Session tree",
+		"message-picker": "Messages",
+		"cwd-fallback": "Working directory",
+		"ask-user": "Interview",
+		help: "Help",
+		extensions: "Extensions",
+		interop: "Interop",
+		"skills-hub": "Library",
+		"side-question": "Side question",
+		"handoff-review": "Handoff review",
+		"fleet-run-approval": "Run approval",
+	};
+	return names[state];
 }
