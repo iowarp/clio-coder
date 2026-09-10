@@ -483,6 +483,15 @@ function runSkillsScope(
 		visible.find((item) => item.name === name) ??
 		list.items.find((item) => item.name === name && operatorRequestedManualSkill(item, pendingRequest));
 	if (!skill) {
+		const unavailable = list.items.find((item) => item.name === name);
+		if (unavailable) {
+			return {
+				kind: "error",
+				message: unavailable.trusted
+					? `context: skill "${name}" requires explicit operator activation with /skill ${name}; it disables model invocation. Do not retry this load.`
+					: `context: skill "${name}" was discovered in an untrusted ${unavailable.source}/${unavailable.scope} source and cannot be activated. Open /library to inspect its source and trust or install a reviewed native package. Do not retry this load.`,
+			};
+		}
 		// A marketplace entry is a skill that exists and is not installed. Saying
 		// "unknown skill" about it denies the operator a thing the listing just
 		// offered; name the state and the one move that changes it.

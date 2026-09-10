@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -52,10 +52,10 @@ function scratchHome(): Scratch {
 
 async function runCli(
 	args: string[],
-	options: { env: NodeJS.ProcessEnv; timeoutMs?: number },
+	options: { env: NodeJS.ProcessEnv; timeoutMs?: number; cwd?: string },
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
 	const child = spawn(process.execPath, [CLI, ...args], {
-		cwd: ROOT,
+		cwd: options.cwd ?? ROOT,
 		env: options.env,
 		stdio: ["pipe", "pipe", "pipe"],
 	});
@@ -160,6 +160,36 @@ async function headlessSkillTurn(
 }
 
 describe("headless skill activation by autonomy level", () => {
+	it("loads a Library-installed skill through the built model tool despite a project compatibility copy", async () => {
+		const scratch = scratchHome();
+		const cwd = join(scratch.root, "project");
+		const env = { ...scratch.env, HOME: scratch.root };
+		const foreign = join(cwd, ".claude/skills/herdr");
+		cpSync(join(ROOT, "library/skills/meta/herdr"), foreign, { recursive: true });
+		writeFileSync(
+			join(foreign, "SKILL.md"),
+			`${readFileSync(join(foreign, "SKILL.md"), "utf8")}\nFOREIGN_COPY_MUST_NOT_LOAD\n`,
+		);
+		const fixed = await runCli(["doctor", "--fix"], { env, cwd });
+		strictEqual(fixed.code, 0, fixed.stderr);
+		const installed = await runCli(["library", "install", "skill:herdr", "--user", "--json"], { env, cwd });
+		strictEqual(installed.code, 0, installed.stderr);
+		const fixture = await startOpenAICompatFixture("done", {
+			toolCall: { name: "context", arguments: { scope: "skills", name: "herdr" } },
+		});
+		fixtures.push(fixture);
+		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, "full-auto");
+		const turn = await runCli(
+			["--no-context-files", "run", "--autonomy", "full-auto", "--json-events", "full", "Load the installed Herdr skill."],
+			{ env, cwd },
+		);
+		strictEqual(turn.code, 0, turn.stderr);
+		const result = contextToolResult(jsonEvents(turn.stdout));
+		match(result, /# Herdr/);
+		match(result, /plugin:user:herdr/);
+		ok(!result.includes("FOREIGN_COPY_MUST_NOT_LOAD"));
+	});
+
 	it("activates an installed skill on a model call at full-auto", async () => {
 		const turn = await headlessSkillTurn("full-auto", "headless-interview");
 		strictEqual(turn.code, 0, turn.stderr);

@@ -835,12 +835,16 @@ function loadExplicitSkillPath(
 
 /**
  * Ascending order for a set of candidates competing for one name or one
- * canonical file, so the last entry is the winner. Precedence decides first.
+ * canonical file, so the last entry is the winner. Trusted candidates win
+ * before scope precedence: an untrusted compatibility copy cannot hide an
+ * admitted native skill and then disappear from model-visible discovery.
  * Two compatibility roots share a precedence tier, and ranking those by path
  * spelling made the winner depend on what the agents happen to be called, so
- * the second key is the registry's own agent order.
+ * equal-precedence candidates use the registry's own agent order.
  */
 function compareSkillCandidates(a: Skill, b: Skill): number {
+	const trust = Number(a.trusted) - Number(b.trusted);
+	if (trust !== 0) return trust;
 	const precedence = a.precedence - b.precedence;
 	if (precedence !== 0) return precedence;
 	const rank = interopSourceRank(b.source) - interopSourceRank(a.source);
@@ -880,7 +884,7 @@ function dedupeCanonicalSkillPaths(
 	return winners;
 }
 
-/** Resolve name collisions by precedence (higher wins), tiebroken by registry order. */
+/** Resolve name collisions by trust, then precedence and registry order. */
 function resolveSkillCollisions(candidates: ReadonlyArray<SkillCandidate>): {
 	winners: Skill[];
 	diagnostics: ResourceDiagnostic[];

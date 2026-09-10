@@ -39,6 +39,8 @@ Draft outside active roots, for example `draft-skills/example/`. The operator ca
 
 Model-visible skills must be trusted and permit model invocation. Foreign project resources and all interop-adopted foreign skills require `integrations.projectResources.trustProjectImports`. A project resource adopted into user scope retains foreign trust. Disabled, incompatible or drifted package resources do not load. `/library reload` refreshes an active session after a lifecycle change.
 
+For duplicate skill names or paths, trusted candidates take precedence over untrusted candidates. An untrusted `.claude/skills` or `.agents/skills` copy cannot hide a trusted Library installation. Normal scope precedence still decides between trusted copies, including project compatibility roots the operator explicitly trusts. A named load of an untrusted or manual-only skill reports that restriction instead of claiming the skill is unknown.
+
 ## Matching, authoring and evals
 
 Authored whole-phrase triggers rank before incidental name or description overlap. Matches are lexical suggestions, not evidence that a model will offer or successfully use a skill. Headless sessions emit passive library-install guidance and do not open an interview. Interactive offers require a bound operator answer.
