@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { ExtensionReloadOutcome } from "../../src/entry/extension-reload.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
+	commandReference,
 	dispatchSlashCommand,
 	formatExtensionReloadNotice,
 	parseSlashCommand,
@@ -51,30 +52,40 @@ function context(overrides: Partial<SlashCommandContext>): {
 	return { ctx, notices, opened: () => opened };
 }
 
-describe("/library extensions reload", () => {
-	it("parses through the existing resources grammar and refuses unknown actions", () => {
-		deepStrictEqual(parseSlashCommand("/library extensions reload"), {
+describe("/extensions reload", () => {
+	it("uses the canonical harness route and refuses retired library spellings", () => {
+		deepStrictEqual(parseSlashCommand("/extensions"), { kind: "resources", family: "extensions" });
+		deepStrictEqual(parseSlashCommand("/extensions reload"), {
 			kind: "resources",
 			family: "extensions",
 			action: "reload",
 		});
-		deepStrictEqual(parseSlashCommand("/library extensions"), { kind: "resources", family: "extensions" });
-		const unknown = parseSlashCommand("/library extensions frobnicate");
-		strictEqual(unknown.kind, "usage-error");
-		const spec = BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "library");
-		deepStrictEqual(spec?.args?.positionals?.[1]?.values, ["reload"]);
+		for (const input of [
+			"/library extensions",
+			"/library extensions reload",
+			"/extensions install",
+			"/extensions reload extra",
+		]) {
+			strictEqual(parseSlashCommand(input).kind, "usage-error", input);
+		}
+		strictEqual(
+			commandReference().some((entry) => entry.name === "extensions"),
+			true,
+		);
+		const spec = BUILTIN_SLASH_COMMANDS.find((entry) => entry.name === "extensions");
+		deepStrictEqual(spec?.args?.positionals?.[0]?.values, ["reload"]);
 	});
 
 	it("runs the coordinator, reports the outcome, and reopens the overlay only on commit", () => {
 		const success = context({ reloadExtensions: () => committed });
-		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), success.ctx);
+		dispatchSlashCommand(parseSlashCommand("/extensions reload"), success.ctx);
 		deepStrictEqual(success.notices, [
 			["success", "extensions: generation 3 committed (changed: +1 -0 ~1); hooks: 2 registered"],
 		]);
 		strictEqual(success.opened(), 1);
 
 		const failure = context({ reloadExtensions: () => rejected });
-		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), failure.ctx);
+		dispatchSlashCommand(parseSlashCommand("/extensions reload"), failure.ctx);
 		deepStrictEqual(failure.notices, [
 			["error", "extensions: reload rejected (build-failed); generation 2 stays active"],
 			["warn", "[clio-coder:extensions] listing failed"],
@@ -82,12 +93,12 @@ describe("/library extensions reload", () => {
 		strictEqual(failure.opened(), 0);
 
 		const absent = context({});
-		dispatchSlashCommand(parseSlashCommand("/library extensions reload"), absent.ctx);
+		dispatchSlashCommand(parseSlashCommand("/extensions reload"), absent.ctx);
 		strictEqual(absent.notices[0]?.[0], "warn");
 		strictEqual(absent.opened(), 0);
 
 		const browse = context({ reloadExtensions: () => committed });
-		dispatchSlashCommand(parseSlashCommand("/library extensions"), browse.ctx);
+		dispatchSlashCommand(parseSlashCommand("/extensions"), browse.ctx);
 		deepStrictEqual(browse.notices, []);
 		strictEqual(browse.opened(), 1);
 	});

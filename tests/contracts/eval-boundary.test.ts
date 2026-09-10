@@ -32,7 +32,7 @@ import { resolveSuiteForRun } from "../../src/domains/eval/suites/resolve.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("context metrics distinguish path coverage from current source content", async () => {
-	const isolated = await isolateClioEnv("clio-context-metrics-");
+	const isolated = await isolateClioEnv("clio-coder-context-metrics-");
 	try {
 		const path = join(isolated.dir, "source.ts");
 		writeFileSync(path, "export function before() {}\n");

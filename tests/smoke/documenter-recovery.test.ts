@@ -57,7 +57,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 // sealed receipts. They prove transport/settlement, not live model reliability.
 for (const scenario of ["dependent-repair", "independent-recovery", "exhausted"] as const) {
 	test(`built Documenter recovery: ${scenario}`, { timeout: 60_000 }, async (t) => {
-		const scratch = makeScratchHome("clio-documenter-recovery-");
+		const scratch = makeScratchHome("clio-coder-documenter-recovery-");
 		const requests: Array<{ role: string; history: string }> = [];
 		const fixtureErrors: string[] = [];
 		let documenterRounds = 0;

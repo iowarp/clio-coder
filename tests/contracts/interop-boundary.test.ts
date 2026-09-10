@@ -57,7 +57,7 @@ describe("contracts/interop boundary", () => {
 	let isolated: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-interop-boundary-");
+		isolated = await isolateClioEnv("clio-coder-interop-boundary-");
 		initializeClioHome();
 	});
 

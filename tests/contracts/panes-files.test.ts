@@ -146,7 +146,7 @@ describe("contracts/panes files surface", () => {
 
 	it("explains an empty logs preset by the journal root it watched", async () => {
 		const { mux } = fakeMux();
-		const root = mkdtempSync(join(tmpdir(), "clio-panes-journal-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-panes-journal-"));
 		try {
 			const panes = createPanesRuntime({
 				mux,
@@ -415,7 +415,7 @@ describe("contracts/files pane bridge", () => {
 
 describe("contracts/files pane session transport", () => {
 	it("labels the pane files and removes its transport files when the session ends", async () => {
-		const cacheDir = mkdtempSync(join(tmpdir(), "clio-files-session-"));
+		const cacheDir = mkdtempSync(join(tmpdir(), "clio-coder-files-session-"));
 		try {
 			const host = fakeMux();
 			let label = "";
@@ -456,7 +456,7 @@ describe("contracts/files pane session transport", () => {
 
 describe("contracts/files pane transport sweep", () => {
 	it("removes transport files older than a day and leaves live ones", () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-files-sweep-"));
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-files-sweep-"));
 		try {
 			const old = join(dir, "old.stream");
 			const fresh = join(dir, "fresh.chooser");

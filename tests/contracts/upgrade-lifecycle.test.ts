@@ -31,7 +31,7 @@ async function upgrade(
 
 /** A home whose migration manifest and recorded version are already up to date. */
 function currentHome(): LifecycleHome {
-	const temp = createLifecycleHome("clio-test-upgrade-");
+	const temp = createLifecycleHome("clio-coder-test-upgrade-");
 	writeFileSync(join(temp.stateDir, "migrations.json"), JSON.stringify({ applied: [...MIGRATION_IDS] }), "utf8");
 	writeFileSync(join(temp.stateDir, "install.json"), JSON.stringify({ version: getVersionInfo().clio }), "utf8");
 	return temp;
@@ -87,7 +87,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	});
 
 	it("previews the install step and every pending migration by id, changing nothing", async () => {
-		const temp = createLifecycleHome("clio-test-upgrade-dry-");
+		const temp = createLifecycleHome("clio-coder-test-upgrade-dry-");
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"], NO_NETWORK);
 			strictEqual(code, 0);
@@ -102,7 +102,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	});
 
 	it("puts the dry-run plan in the JSON report, not only in the prose", async () => {
-		const temp = createLifecycleHome("clio-test-upgrade-json-");
+		const temp = createLifecycleHome("clio-coder-test-upgrade-json-");
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run", "--json"], NO_NETWORK);
 			strictEqual(code, 0);
@@ -126,7 +126,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	});
 
 	it("applies pending migrations and reports the count", async () => {
-		const temp = createLifecycleHome("clio-test-upgrade-run-");
+		const temp = createLifecycleHome("clio-coder-test-upgrade-run-");
 		try {
 			const { code, stdout } = await upgrade(temp, [], NO_NETWORK);
 			strictEqual(code, 0);
@@ -161,7 +161,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	});
 
 	it("names the command to run by hand when a migration fails, and says so in JSON", async () => {
-		const temp = createLifecycleHome("clio-test-upgrade-fail-");
+		const temp = createLifecycleHome("clio-coder-test-upgrade-fail-");
 		try {
 			const plain = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_FAIL: "migration" });
 			strictEqual(plain.code, 1);
@@ -185,7 +185,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	});
 
 	it("ignores test seams when NODE_ENV is unset", async () => {
-		const temp = createLifecycleHome("clio-test-upgrade-ungated-");
+		const temp = createLifecycleHome("clio-coder-test-upgrade-ungated-");
 		const savedArgv1 = process.argv[1] ?? "";
 		process.argv[1] = resolve("dist/cli/index.js");
 		try {

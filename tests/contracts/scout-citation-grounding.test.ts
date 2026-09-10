@@ -25,7 +25,7 @@ const fixture = JSON.parse(
 };
 
 test("retained Scout citation: actual reads exclude the trailing newline and unread source", async () => {
-	const scratch = makeScratchHome("clio-scout-grounding-");
+	const scratch = makeScratchHome("clio-coder-scout-grounding-");
 	try {
 		mkdirSync(join(scratch.dir, "findiff"));
 		for (const [path, content] of Object.entries(fixture.files)) {

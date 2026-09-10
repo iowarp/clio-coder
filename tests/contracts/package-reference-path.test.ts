@@ -7,7 +7,7 @@ import { it } from "node:test";
 import { resolvePackagePathReference } from "../../src/domains/resources/package-references.js";
 
 it("validates complete package argument paths instead of a prefix before spaces or Unicode", () => {
-	const scratch = mkdtempSync(join(tmpdir(), "clio-package-path-"));
+	const scratch = mkdtempSync(join(tmpdir(), "clio-coder-package-path-"));
 	try {
 		const root = join(scratch, "package 'quoted' α");
 		mkdirSync(join(root, "safe"), { recursive: true });

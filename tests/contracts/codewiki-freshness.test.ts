@@ -22,7 +22,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 describe("codewiki global freshness", () => {
 	let isolated: IsolatedClioEnv;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-codewiki-freshness-");
+		isolated = await isolateClioEnv("clio-coder-codewiki-freshness-");
 	});
 	afterEach(() => isolated.restore());
 

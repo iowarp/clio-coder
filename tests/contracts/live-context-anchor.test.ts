@@ -60,7 +60,7 @@ function entry(
 describe("live measured context anchor", () => {
 	let isolated: IsolatedClioEnv;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-live-anchor-");
+		isolated = await isolateClioEnv("clio-coder-live-anchor-");
 	});
 	afterEach(() => isolated.restore());
 	function fixture(overrides: Partial<TurnContextDeps> = {}) {

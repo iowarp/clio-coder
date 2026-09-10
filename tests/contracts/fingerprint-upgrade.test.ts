@@ -64,7 +64,7 @@ async function assertSecondEnsureDoesNotRewrite(cwd: string, expected: Codewiki)
 describe("context fingerprint upgrade", () => {
 	let isolated: IsolatedClioEnv;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-fingerprint-upgrade-");
+		isolated = await isolateClioEnv("clio-coder-fingerprint-upgrade-");
 	});
 	afterEach(() => isolated.restore());
 

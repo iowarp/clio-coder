@@ -83,7 +83,7 @@ it("accepts only bounded string argument vectors and whole-token variables", () 
 });
 
 it("passes shell metacharacters and placeholder-looking values as literal argv exactly once", async () => {
-	const workspaceRoot = mkdtempSync(join(tmpdir(), "clio-fleet-args-"));
+	const workspaceRoot = mkdtempSync(join(tmpdir(), "clio-coder-fleet-args-"));
 	try {
 		const command = {
 			id: "echo-json",
@@ -149,7 +149,7 @@ Verify task output.
 });
 
 it("keeps legacy commands fixed and rejects eval flags before admission and direct execution", async () => {
-	const workspaceRoot = mkdtempSync(join(tmpdir(), "clio-fixed-command-"));
+	const workspaceRoot = mkdtempSync(join(tmpdir(), "clio-coder-fixed-command-"));
 	try {
 		const marker = join(workspaceRoot, "changed-authority.txt");
 		const registry = parseFleetCommands(

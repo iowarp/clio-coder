@@ -41,7 +41,7 @@ const skill = "---\nname: example\ndescription: A fixture skill\n---\nRead the t
 
 describe("interop discovery and adoption", () => {
 	beforeEach(async () => {
-		env = await isolateClioEnv("clio-interop-adopt-");
+		env = await isolateClioEnv("clio-coder-interop-adopt-");
 		home = path.join(env.dir, "foreign");
 		cwd = path.join(env.dir, "project");
 		mkdirSync(home);
@@ -211,7 +211,20 @@ describe("interop discovery and adoption", () => {
 		strictEqual(plugins[0]?.marketplace, "test-market");
 		strictEqual(plugins[0]?.version, "1.2.3");
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
-		ok(plan.entries[0]?.reason.includes("root plugin.json"));
+		strictEqual(plan.entries[0]?.action, "install", plan.entries[0]?.reason);
+		strictEqual(plan.entries[0]?.format, "claude-code");
+		strictEqual(plan.entries[0]?.outcomes?.[0]?.status, "converted");
+		deepStrictEqual(applyInteropAdoption(plan, true).installed, ["example"]);
+		const record = readPluginInstallRecord("example", { cwd, scope: "user" });
+		strictEqual(record?.trust, "foreign");
+		deepStrictEqual(record?.origin, {
+			kind: "interop",
+			host: "claude-code",
+			source: path.dirname(path.dirname(root)),
+			format: "claude-code",
+			marketplace: "test-market",
+		});
+		strictEqual(readFileSync(root, "utf8"), JSON.stringify({ name: "example", version: "1.2.3" }));
 	});
 	it("reports malformed configuration and symlink roots as unknown", () => {
 		file(".claude/settings.json", "invalid json");
@@ -313,6 +326,7 @@ describe("interop discovery and adoption", () => {
 
 	it("preserves plugin package requirements, refuses missing dependencies, and rechecks after approval", () => {
 		const source = path.join(home, "requires-package");
+		file("requires-package/skills/consumer/SKILL.md", skill.replace("name: example", "name: consumer"));
 		file(
 			"requires-package/plugin.json",
 			JSON.stringify({
@@ -397,7 +411,8 @@ describe("interop discovery and adoption", () => {
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd });
 		strictEqual(plan.entries[0]?.action, "install");
 		strictEqual(plan.entries[1]?.action, "skip");
-		ok(plan.entries[0]?.omitted?.includes("hooks"));
+		ok(plan.entries[0]?.omitted?.includes("hooks/hooks.json"));
+		ok(plan.entries[0]?.omitted?.includes("scripts/run.sh"));
 		ok(plan.entries[0]?.omitted?.includes(".mcp.json"));
 		const installed = applyInteropAdoption(plan, true);
 		deepStrictEqual(installed.diagnostics, []);
@@ -405,7 +420,7 @@ describe("interop discovery and adoption", () => {
 		const again = planInteropAdoption({ host: "claude-code", inventory: found, cwd });
 		ok(again.entries.every((entry) => entry.action === "skip"));
 	});
-	it("adopts the real WTF-P Claude portable bundle as a data-only wtfp plugin", {
+	it("refuses the real WTF-P Claude portable bundle whose prompts need omitted JSON companions", {
 		skip: existsSync(path.join(realWtfpBundle, "plugin.json"))
 			? false
 			: "Set WTFP_CLAUDE_BUNDLE to a generated Claude bundle to run this external integration contract.",
@@ -420,17 +435,13 @@ describe("interop discovery and adoption", () => {
 			items: [{ kind: "plugin", name: "wtfp", scope: "user", path: source, marketplace: "wtfp" }],
 		};
 		const plan = planInteropAdoption({ host: "claude-code", inventory: found, cwd, kind: "plugin" });
-		strictEqual(plan.entries[0]?.action, "install", plan.entries[0]?.reason);
-		const result = applyInteropAdoption(plan, true);
-		deepStrictEqual(result.diagnostics, []);
-		deepStrictEqual(result.installed, ["wtfp"]);
-		const pkg = listInstalledPlugins(cwd, { all: true })[0];
-		ok(pkg);
-		strictEqual(pkg.valid, true);
-		strictEqual(pkg.trust, "foreign");
-		ok(!existsSync(path.join(pkg.rootPath, "hooks")));
-		ok(!existsSync(path.join(pkg.rootPath, "tools")));
-		strictEqual(JSON.parse(readFileSync(path.join(pkg.rootPath, "plugin.json"), "utf8")).$schema, PLUGIN_SCHEMA);
+		// The bundle's prompts resolve ${pluginRoot}/actions/*.json at run time; a data-only copy cannot claim they work.
+		strictEqual(plan.entries[0]?.action, "skip");
+		ok(plan.entries[0]?.reason.includes("references omitted companions"), plan.entries[0]?.reason);
+		ok(plan.entries[0]?.reason.includes("actions/"), plan.entries[0]?.reason);
+		ok(plan.entries[0]?.reason.includes("library install"));
+		deepStrictEqual(applyInteropAdoption(plan, true).installed, []);
+		strictEqual(listInstalledPlugins(cwd, { all: true }).length, 0);
 		strictEqual(readFileSync(path.join(source, "plugin.json"), "utf8"), before);
 	});
 });

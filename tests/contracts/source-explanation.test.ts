@@ -81,7 +81,7 @@ test("source explanation: explicit Coder delivers 1200 cited words inline and re
 
 test("source explanation: separately selected Scout delivers 1200 cited words within the receipt bound", async () => {
 	const { assessExplanation } = await grader();
-	const scratch = makeScratchHome("clio-source-explanation-");
+	const scratch = makeScratchHome("clio-coder-source-explanation-");
 	try {
 		const ranges = new Map<string, Array<readonly [number, number]>>();
 		for (const [path, content] of Object.entries(fixture.files)) {
@@ -159,7 +159,7 @@ test("source explanation corpus keeps explicit Coder and Scout cases separate an
 });
 
 test("source explanation grader exits failed for limitation and incomplete content, and passes full delivery", () => {
-	const scratch = makeScratchHome("clio-source-grader-");
+	const scratch = makeScratchHome("clio-coder-source-grader-");
 	try {
 		for (const [path, content] of Object.entries(fixture.files)) {
 			mkdirSync(dirname(join(scratch.dir, path)), { recursive: true });

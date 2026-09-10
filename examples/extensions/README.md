@@ -15,7 +15,7 @@ clio-coder extensions run lab-status dashboard
 clio-coder extensions run lab-status dashboard --json
 ```
 
-In Clio, reload through `/library extensions reload`, then invoke
+In Clio, reload through `/extensions reload`, then invoke
 `/ext:lab-status:dashboard`. Core renders the panel, owns scrolling and Escape,
 and displays the status with the extension's owner label. The default record is
 `jobs.synthetic.json`: **SYNTHETIC FIXTURE**, two completed jobs and one running

@@ -41,7 +41,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 test("operator promotion persists a convention and only approval admits it into a fresh process prompt", {
 	timeout: 120_000,
 }, async (t) => {
-	const home = await isolateClioEnv("clio-convention-workflow-");
+	const home = await isolateClioEnv("clio-coder-convention-workflow-");
 	// This server returns a constant acknowledgement. Consumption is proved by
 	// the incoming prompt, never by a scripted answer claiming to remember.
 	const fixture = await startOpenAICompatFixture("Fixture acknowledged.");

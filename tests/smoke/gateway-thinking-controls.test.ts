@@ -27,7 +27,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 test("built Clio preserves declared gateway thinking controls through startup and native persistence", {
 	timeout: 40_000,
 }, async () => {
-	const home = makeScratchHome("clio-gateway-thinking-");
+	const home = makeScratchHome("clio-coder-gateway-thinking-");
 	const fixture = await startGatewayThinkingFixture();
 	try {
 		const workspace = join(home.dir, "repo");

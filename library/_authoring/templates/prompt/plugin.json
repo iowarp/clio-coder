@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "paper-summary",
+	"version": "1.0.0",
+	"description": "Structured prompt template for summarizing scientific papers and research methodologies.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "prompt",
+			"resources": {
+				"prompts": "prompts"
+			},
+			"components": [
+				{
+					"kind": "prompt",
+					"id": "paper-summary",
+					"path": "prompts/paper-summary.md"
+				}
+			]
+		}
+	}
+}

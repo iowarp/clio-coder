@@ -115,7 +115,7 @@ function promptPlugin(root: string, namespace: string, body: string): void {
 }
 
 it("loads installed plugin prompts, bound skills, recipes and fleets with contained references and stable names", async () => {
-	const env = await isolateClioEnv("clio-plugin-quote'-load-");
+	const env = await isolateClioEnv("clio-coder-plugin-quote'-load-");
 	try {
 		const cwd = join(env.dir, "workspace");
 		mkdirSync(cwd);
@@ -158,7 +158,7 @@ it("loads installed plugin prompts, bound skills, recipes and fleets with contai
 });
 
 it("keeps peer plugin namespaces and user overrides; disabled project plugin suppresses its user copy", async () => {
-	const env = await isolateClioEnv("clio-plugin-precedence-");
+	const env = await isolateClioEnv("clio-coder-plugin-precedence-");
 	try {
 		const cwd = join(env.dir, "workspace");
 		mkdirSync(cwd);
@@ -190,7 +190,7 @@ it("keeps peer plugin namespaces and user overrides; disabled project plugin sup
 });
 
 it("rejects missing and escaping package references without changing non-package content", async () => {
-	const env = await isolateClioEnv("clio-plugin-reference-");
+	const env = await isolateClioEnv("clio-coder-plugin-reference-");
 	try {
 		const root = join(env.dir, "source");
 		fixture(root);
@@ -213,7 +213,7 @@ it("rejects missing and escaping package references without changing non-package
 });
 
 it("refreshes admitted plugin resources after drift and does not bind another owner's skill", async () => {
-	const env = await isolateClioEnv("clio-plugin-admission-");
+	const env = await isolateClioEnv("clio-coder-plugin-admission-");
 	try {
 		const cwd = join(env.dir, "workspace");
 		mkdirSync(cwd);
@@ -253,7 +253,7 @@ it("refreshes admitted plugin resources after drift and does not bind another ow
 });
 
 it("publishes plugin generations before refreshing cached recipes and unsubscribes on stop", async () => {
-	const env = await isolateClioEnv("clio-plugin-reload-");
+	const env = await isolateClioEnv("clio-coder-plugin-reload-");
 	const oldCwd = process.cwd();
 	const bus = createSafeEventBus();
 	const agents = createAgentsBundle({ bus, getContract: () => undefined });

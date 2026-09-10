@@ -101,7 +101,7 @@ describe("session commit seam", () => {
 	});
 
 	function outsideGit(): string {
-		const root = mkdtempSync(join(tmpdir(), "clio-commit-decisions-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-commit-decisions-"));
 		roots.push(root);
 		return root;
 	}

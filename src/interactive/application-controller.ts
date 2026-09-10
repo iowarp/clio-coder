@@ -24,6 +24,7 @@ export const GLOBAL_ACTION_ORDER = [
 	"clio-coder.decisions.open",
 	"clio-coder.dispatch.background",
 	"clio-coder.model.select",
+	"clio-coder.library.toggle",
 	// Backward stays ahead of forward so prefix-overlapping user bindings keep
 	// the same more-specific-first behavior as the original input listener.
 	"clio-coder.model.cycleBackward",

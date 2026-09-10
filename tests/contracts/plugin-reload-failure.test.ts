@@ -32,7 +32,7 @@ function packageFixture(root: string, name: string, agent: string): void {
 
 for (const mutation of ["disable", "remove"] as const) {
 	it(`withdraws ${mutation}d cached package authority after namespace failure and retries an unchanged snapshot`, async () => {
-		const env = await isolateClioEnv(`clio-reload-failure-${mutation}-`);
+		const env = await isolateClioEnv(`clio-coder-reload-failure-${mutation}-`);
 		const originalCwd = process.cwd();
 		const bus = createSafeEventBus();
 		let delegates = [{ id: "reload-clash" }];

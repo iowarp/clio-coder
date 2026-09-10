@@ -23,7 +23,7 @@ import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 async function setup(runtime = "lm-studio", beforeMetadata?: () => Promise<void>, responseText = "323") {
-	const env = await isolateClioEnv("clio-background-thinking-");
+	const env = await isolateClioEnv("clio-coder-background-thinking-");
 	const fixture = await startGatewayThinkingFixture(runtime, "zbook/ornith-1.5-35b-a3b", beforeMetadata, responseText);
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = [

@@ -524,13 +524,33 @@ when Clio is already inside a reachable herdr session.</p>
 </tr>
 <tr>
 <td><code>/skill</code></td>
-<td><code>/skill [name] [task]</code></td>
-<td>Open the Skills Hub or invoke a skill</td>
+<td><code>/skill &lt;name&gt; [task]</code> or <code>/skill off</code></td>
+<td>Invoke a skill or clear its active tool surface; <code>/skills</code> opens the browser.</td>
 </tr>
 <tr>
 <td><code>/library</code></td>
-<td><code>/library [plugin|skill|agent|prompt|fleet|reload|prompts|extensions [reload]]</code></td>
-<td>Browse packages in all five kind tabs; refresh package resources, inspect runtime prompts or manage executable harness extensions.</td>
+<td><code>/library [inspect | install | remove &lt;ref&gt;] [import &lt;path-or-url&gt;] [reload]</code></td>
+<td>Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; <code>install</code>, <code>remove</code> and <code>import</code> show a reviewed plan first and write nothing until it is accepted. <code>reload</code> refreshes installed recipe resources. Alt+L opens the same browser.</td>
+</tr>
+<tr>
+<td><code>/skills</code></td>
+<td><code>/skills</code></td>
+<td>Open the Library on Skills.</td>
+</tr>
+<tr>
+<td><code>/prompts</code></td>
+<td><code>/prompts</code></td>
+<td>Open the Library on Prompts.</td>
+</tr>
+<tr>
+<td><code>/extensions</code></td>
+<td><code>/extensions [reload]</code></td>
+<td>Inspect harness extensions or reload their hooks and operator runtimes.</td>
+</tr>
+<tr>
+<td><code>/interop</code></td>
+<td><code>/interop</code></td>
+<td>Inspect another local coding agent and review adoption of supported resources.</td>
 </tr>
 <tr>
 <td><code>/share</code></td>
@@ -569,8 +589,8 @@ when Clio is already inside a reachable herdr session.</p>
 </tr>
 <tr>
 <td><code>/agents</code></td>
-<td><code>/agents [list|connect]</code></td>
-<td>List native and external agents, or review detected external-agent proposals</td>
+<td><code>/agents</code></td>
+<td>Open the Library on Agents.</td>
 </tr>
 <tr>
 <td><code>/cost</code></td>
@@ -679,7 +699,7 @@ must record a passing validation receipt for every named check or a successful
 <code>limitation</code> receipt whose <code>paths</code> array includes the exact check id. A task's
 completion note alone does not satisfy acceptance. <code>clio-coder tasks list</code>,
 <code>hand &lt;uN&gt;</code>, <code>done &lt;uN&gt;</code>, and <code>drop &lt;uN&gt;</code> manage the same inbox as <code>/tasks</code>.</p>
-<p>Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as <code>/settings targets</code>, <code>/settings chat model-picker</code>, and the corresponding <code>/library</code> subcommand. Unrecognized commands are not sent to the model as prompt text.</p>
+<p>Retired commands are rejected before model submission. Old Library browsing forms, including <code>/resources</code>, <code>/library &lt;kind&gt;</code> and <code>/agents connect</code>, explain the canonical route. Browse with <code>/library</code>, <code>/skills</code>, <code>/agents</code> or <code>/prompts</code>; use <code>/interop</code> for local-agent adoption and <code>/extensions</code> for harness extensions.</p>
 <p><code>/context</code> with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
 The subcommands own the durable project-context noun: <code>compact</code> summarizes older
@@ -767,7 +787,7 @@ wrong by the time it was read.</p>
 <p>Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
 Built-in command names are reserved across interactive and headless modes; a
-template with the same basename is omitted from <code>/library prompts</code> with a collision
+template with the same basename is omitted from <code>/prompts</code> with a collision
 diagnostic instead of shadowing a command on one surface and expanding on another.
 If a matching template is found in an untrusted project root, Clio prints that the
 prompt template comes from an untrusted project root and directs the operator to set
@@ -861,7 +881,7 @@ tier, and current bank size.
 After <code>/resume</code>, Clio offers <code>/memory seed</code> when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 <code>context.memory.enabled</code> is false.</p>
-<p>The <code>/interop</code> and <code>/agents connect</code> overlay lists the other coding agents Clio found on this machine,
+<p>The <code>/interop</code> overlay lists the other coding agents Clio found on this machine,
 grouped <code>Detected</code>, <code>Configured</code>, <code>Declined</code>, and <code>Inventory</code>. A detected row's detail pane
 shows the exact <code>integrations.externalAgents.entries</code> entry that connecting it would append, plus
 the two facts a new peer inherits: <code>projectContext: none</code>, so the peer receives
@@ -869,7 +889,7 @@ the task text and never the project projection, and <code>toolGovernance: clio-c
 one or <code>d</code> to decline. Opening the overlay refreshes the disk inventory and runs
 bounded version probes; navigation and plan approval start no agent session. Accepting applies to the live session,
 because <code>delegation</code> hot-reloads.</p>
-<p>Boot adds at most one line about interop. <code>/interop</code> and <code>/agents connect</code> open the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.</p>
+<p>Boot adds at most one line about interop. <code>/interop</code> opens the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.</p>
 <p><code>clio-coder interop inspect [--json]</code> reports host resources and wiring. <code>clio-coder interop adopt &lt;host&gt; [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]</code> shows a plan and requires approval before installing safe resources through the library. <code>/interop</code> offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See <a href="https://github.com/iowarp/clio-coder/blob/main/docs/guide/interop.md">Coding agent interoperability</a> for layouts, limits, and trust semantics.</p>
 <p><code>clio-coder doctor</code> reports interop and never proposes anything. It emits one
 <code>ok</code> row per detected agent naming its version, its path, and whether it is
@@ -935,6 +955,10 @@ editor reserves and can be rebound through <code>settings.yaml.keybindings</code
 </tr>
 <tr>
 <td><code>Alt+L</code></td>
+<td>Open or close the Library.</td>
+</tr>
+<tr>
+<td><code>Alt+M</code></td>
 <td>Open the model and targets selector.</td>
 </tr>
 <tr>
@@ -1567,7 +1591,7 @@ usage instructions and exits with code 0.</p>
 <p>Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.</p>
 <h2>Package evals</h2>
 <p><code>clio-coder eval validate --package &lt;path|kind:name&gt; --eval &lt;name&gt;</code> validates a named package suite. <code>clio-coder eval run</code> with the same package flags runs it; <code>--user</code> or <code>--project</code> selects the installed copy. Materio declares <code>scripts</code> for its offline Python contracts. The experimental skill-scenario lane is <code>clio-coder eval skill &lt;name|path&gt; [--scenario &lt;id&gt;]</code>. See <a href="resource_library_blueprint.html">Library packages</a>.</p>
-<p>The retired top-level <code>skills</code> and <code>plugins</code> groups and <code>/resources</code> slash spelling are unrecognized in this version. <code>/skill</code> remains the skill activation surface; <code>/interop</code> remains discovery and reviewed adoption.</p>
+<p>The old top-level CLI <code>skills</code> and <code>plugins</code> groups are retired; use <code>clio-coder library</code>. In the editor, <code>/library</code>, <code>/skills</code>, <code>/agents</code> and <code>/prompts</code> open the shared browser. <code>/resources</code> and <code>/plugins</code> give a replacement hint. <code>/skill &lt;name&gt;</code> activates a skill; <code>/interop</code> handles local-agent discovery and reviewed adoption.</p>
 
 </article>
         <nav class="related-nav" aria-label="Adjacent references">

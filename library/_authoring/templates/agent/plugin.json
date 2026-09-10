@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "benchmark-scout",
+	"version": "1.0.0",
+	"description": "Inspect computational benchmarks, scaling configurations, and performance harnesses.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "agent",
+			"resources": {
+				"agents": "agents"
+			},
+			"components": [
+				{
+					"kind": "agent",
+					"id": "benchmark-scout",
+					"path": "agents/benchmark-scout.md"
+				}
+			]
+		}
+	}
+}

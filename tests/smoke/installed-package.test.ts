@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
 import {
 	copyFileSync,
@@ -12,9 +12,16 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
+import { resetXdgCache } from "../../src/core/xdg.js";
+import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
+import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
+import { clearPluginSnapshots } from "../../src/domains/plugins/resources.js";
+import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { loadSkills } from "../../src/domains/resources/skills/loader.js";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const TREE_SITTER_MARKER = "node_modules/@vscode/tree-sitter-wasm/wasm/tree-sitter.js";
@@ -31,13 +38,51 @@ function isolatedEnv(root: string): NodeJS.ProcessEnv {
 		...process.env,
 		NODE_ENV: "test",
 		NO_COLOR: "1",
+		HOME: root,
+		USERPROFILE: root,
 		CLIO_CODER_HOME: root,
 		CLIO_CODER_CONFIG_DIR: join(root, "config"),
 		CLIO_CODER_DATA_DIR: join(root, "data"),
 		CLIO_CODER_STATE_DIR: join(root, "state"),
 		CLIO_CODER_CACHE_DIR: join(root, "cache"),
 		CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
+		CLIO_CODER_PACKAGE_ROOT: "",
 	};
+}
+
+function withIsolatedState<T>(root: string, fn: () => T): T {
+	const savedEnv = {
+		HOME: process.env.HOME,
+		USERPROFILE: process.env.USERPROFILE,
+		CLIO_CODER_HOME: process.env.CLIO_CODER_HOME,
+		CLIO_CODER_CONFIG_DIR: process.env.CLIO_CODER_CONFIG_DIR,
+		CLIO_CODER_DATA_DIR: process.env.CLIO_CODER_DATA_DIR,
+		CLIO_CODER_STATE_DIR: process.env.CLIO_CODER_STATE_DIR,
+		CLIO_CODER_CACHE_DIR: process.env.CLIO_CODER_CACHE_DIR,
+		CLIO_CODER_REQUIRE_HOME_PREFIX: process.env.CLIO_CODER_REQUIRE_HOME_PREFIX,
+		CLIO_CODER_PACKAGE_ROOT: process.env.CLIO_CODER_PACKAGE_ROOT,
+	};
+	process.env.HOME = root;
+	process.env.USERPROFILE = root;
+	process.env.CLIO_CODER_HOME = root;
+	process.env.CLIO_CODER_CONFIG_DIR = join(root, "config");
+	process.env.CLIO_CODER_DATA_DIR = join(root, "data");
+	process.env.CLIO_CODER_STATE_DIR = join(root, "state");
+	process.env.CLIO_CODER_CACHE_DIR = join(root, "cache");
+	process.env.CLIO_CODER_REQUIRE_HOME_PREFIX = "1";
+	process.env.CLIO_CODER_PACKAGE_ROOT = "";
+	resetXdgCache();
+	clearPluginSnapshots();
+	try {
+		return fn();
+	} finally {
+		for (const [key, val] of Object.entries(savedEnv)) {
+			if (val === undefined) delete process.env[key];
+			else process.env[key] = val;
+		}
+		resetXdgCache();
+		clearPluginSnapshots();
+	}
 }
 
 async function run(bin: string, args: string[], cwd: string, env: NodeJS.ProcessEnv): Promise<Result> {
@@ -101,7 +146,9 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
-	it("packs once, installs once, and loads a lazy codewiki chunk from a foreign cwd", { timeout: 120_000 }, async () => {
+	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
+		timeout: 120_000,
+	}, async () => {
 		const work = mkdtempSync(join(tmpdir(), "clio-coder-installed-package-"));
 		const prefix = join(work, "prefix");
 		const foreign = join(work, "foreign-project");
@@ -218,6 +265,146 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				"source=clio must load and resolve paths from the explicit package-root override",
 			);
 
+			const libraryHome = join(work, "isolated library home with spaces");
+			const libraryProject = join(work, "isolated library project with spaces");
+			mkdirSync(libraryHome, { recursive: true });
+			mkdirSync(libraryProject, { recursive: true });
+			const libraryEnv = isolatedEnv(libraryHome);
+			const libraryJson = async (args: string[], cwd = libraryProject, env = libraryEnv): Promise<unknown> => {
+				const result = await run(bin, [...args, "--json"], cwd, env);
+				strictEqual(result.code, 0, `${args.join(" ")}\n${result.stdout}\n${result.stderr}`);
+				return JSON.parse(result.stdout);
+			};
+
+			// 1. Pristine isolated home/project check BEFORE installing any library package:
+			// The pristine agents CLI before install is the decisive packaged-runtime assertion.
+			// It verifies the packaged binary in an isolated child environment, ensuring that
+			// the packaged runtime discovers all 14 built-in agent recipes and resolves their
+			// bound skills against the installed package library/skills root before any
+			// library packages are installed.
+			const pristineBuiltinSpecs = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
+			const builtinSourceDir = join(packageRoot, "src", "domains", "agents", "builtins");
+			const builtinSourceIds = readdirSync(builtinSourceDir)
+				.filter((name) => name.endsWith(".md"))
+				.map((name) => name.slice(0, -3))
+				.sort();
+			strictEqual(builtinSourceIds.length, 14, "expected 14 built-in agent recipes");
+			deepStrictEqual(
+				pristineBuiltinSpecs.map((spec) => spec.id).sort(),
+				builtinSourceIds,
+				"pristine environment must list all 14 built-in agent recipes",
+			);
+			const builtinSpecsWithSkills = pristineBuiltinSpecs.filter((spec) => spec.skills.length > 0);
+			ok(builtinSpecsWithSkills.length > 0, "built-in recipes must declare bound skills");
+
+			// Direct loader check in isolated environment:
+			withIsolatedState(libraryHome, () => {
+				const pristineDiagnostics: AgentRecipeDiagnostic[] = [];
+				const pristineRecipes = loadRecipesFromDir(
+					{
+						source: "builtin",
+						dir: builtinSourceDir,
+						cwd: libraryProject,
+					},
+					pristineDiagnostics,
+				);
+				deepStrictEqual(pristineDiagnostics, [], "loading built-in recipes must emit no diagnostics");
+				strictEqual(pristineRecipes.length, 14, "must load all 14 built-in agent recipes through actual loader");
+
+				for (const recipe of pristineRecipes) {
+					if (recipe.skills.length > 0) {
+						strictEqual(
+							recipe.boundSkillPaths.length,
+							recipe.skills.length,
+							`recipe ${recipe.id} must resolve all declared bound skills`,
+						);
+						for (const boundPath of recipe.boundSkillPaths) {
+							ok(existsSync(boundPath), `bound skill path must exist: ${boundPath}`);
+							ok(
+								boundPath.startsWith(join(packageRoot, "library", "skills")),
+								`bound skill path must resolve strictly within package library/skills: ${boundPath}`,
+							);
+						}
+					} else {
+						strictEqual(recipe.boundSkillPaths.length, 0);
+					}
+				}
+			});
+
+			// 2. Install all 34 bundled packages:
+			interface CatalogEntry {
+				kind: string;
+				name: string;
+				sourceUrl: string;
+				sha256: string;
+			}
+			const authored = parseYaml(readFileSync(join(ROOT, "library", "registry.yaml"), "utf8")) as {
+				entries: CatalogEntry[];
+			};
+			const discovered = (await libraryJson(["library", "search"])) as {
+				entries: CatalogEntry[];
+				diagnostics: string[];
+			};
+			deepStrictEqual(discovered.diagnostics, []);
+			deepStrictEqual(
+				discovered.entries.map((entry) => `${entry.kind}:${entry.name}`).sort(),
+				authored.entries.map((entry) => `${entry.kind}:${entry.name}`).sort(),
+				"the installed marketplace must expose every bundled package",
+			);
+			strictEqual(authored.entries.length, 34, "bundled catalog must contain 34 packages");
+
+			for (const entry of authored.entries) {
+				const packedSource = resolve(packageRoot, "library", entry.sourceUrl);
+				strictEqual(discovered.entries.find((item) => item.name === entry.name)?.sourceUrl, packedSource);
+				strictEqual(
+					relative(packageRoot, packedSource).split(sep)[0],
+					"library",
+					`package source ${packedSource} must resolve strictly beneath installed package library/`,
+				);
+				const installed = (await libraryJson(["library", "install", `${entry.kind}:${entry.name}`, "--project"])) as {
+					path: string;
+					sha256: string;
+				};
+				strictEqual(installed.path, join(libraryProject, ".clio-coder", "plugins", entry.name));
+				strictEqual(installed.sha256, entry.sha256, `packed bytes must match the full-tree pin for ${entry.name}`);
+			}
+
+			// 3. Verify 39 skill resources, 20 agent recipes total, Materio's 17 prompts and fleet through actual loaders:
+			const allAgents = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
+			strictEqual(allAgents.length, 20, "must expose exactly 20 agent recipes total");
+
+			withIsolatedState(libraryHome, () => {
+				const loadedSkills = loadSkills({ cwd: libraryProject, home: libraryHome, configDir: join(libraryHome, "config") });
+				deepStrictEqual(loadedSkills.diagnostics, []);
+				strictEqual(loadedSkills.items.length, 39, "actual skill loader must return 39 skill resources");
+
+				const availableSkills = new Set(loadedSkills.items.map((skill) => skill.name));
+				for (const agent of allAgents) {
+					for (const skill of agent.skills) {
+						ok(availableSkills.has(skill), `${agent.id} references unavailable skill ${skill}`);
+					}
+				}
+
+				const loadedPrompts = loadPromptTemplates({ cwd: libraryProject, home: libraryHome });
+				deepStrictEqual(loadedPrompts.diagnostics, []);
+				const materioPrompts = loadedPrompts.items.filter((prompt) => prompt.name.startsWith("materio:"));
+				strictEqual(materioPrompts.length, 17, "must load all 17 Materio prompts through prompt loader");
+				for (const prompt of materioPrompts) {
+					ok(!prompt.unavailable, `prompt ${prompt.name} must not be unavailable`);
+					ok(prompt.content.length > 0, `prompt ${prompt.name} content must not be empty`);
+					ok(!prompt.content.includes("${component:"), `unresolved component ref in ${prompt.name}`);
+				}
+
+				const fleetListings = listFleetContracts(libraryProject);
+				const materioFleet = fleetListings.find(
+					(fleet) => fleet.source === "plugin" && fleet.name === "materio-execute-task",
+				);
+				ok(materioFleet, "Materio fleet contract must be discovered through listFleetContracts");
+				strictEqual(materioFleet.error, null, materioFleet.error ?? undefined);
+				ok(materioFleet.contract, "fleet contract must be parsed");
+				strictEqual(materioFleet.contract.steps.length, 2, "Materio fleet must define 2 steps");
+			});
+
 			const lazyChunks = emittedFilesContaining(packageRoot, TREE_SITTER_MARKER);
 			ok(lazyChunks.size > 0, "packed dist must contain the tree-sitter implementation chunk");
 			writeFileSync(join(foreign, "generator.ts"), "export function* installedLazySymbol() { yield 1; }\n");
@@ -237,7 +424,6 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				symbols: Array<{ name: string }>;
 			};
 			ok(codewiki.symbols.some((symbol) => symbol.name === "installedLazySymbol"));
-
 			// Operator examples and the plain-JS bootstrap must work outside the source checkout.
 			const extensionInstall = await run(
 				bin,

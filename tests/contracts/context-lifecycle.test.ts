@@ -53,7 +53,7 @@ describe("contracts/context lifecycle", () => {
 	let isolated: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-context-lifecycle-");
+		isolated = await isolateClioEnv("clio-coder-context-lifecycle-");
 	});
 
 	afterEach(() => isolated.restore());

@@ -15,7 +15,7 @@ describe("contracts/state-file-lock", () => {
 	let lockPath = "";
 
 	beforeEach(() => {
-		dir = mkdtempSync(join(tmpdir(), "clio-file-lock-"));
+		dir = mkdtempSync(join(tmpdir(), "clio-coder-file-lock-"));
 		target = join(dir, "state.json");
 		lockPath = `${target}.lock`;
 	});

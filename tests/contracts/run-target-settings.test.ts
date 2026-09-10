@@ -8,7 +8,7 @@ import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/core
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
 test("explicit run target uses project layers and leaves malformed user settings to the strict boot gate", async () => {
-	const scratch = await isolateClioEnv("clio-run-target-layers-");
+	const scratch = await isolateClioEnv("clio-coder-run-target-layers-");
 	const originalCwd = process.cwd();
 	try {
 		const repo = join(scratch.dir, "repo");

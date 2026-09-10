@@ -6,7 +6,14 @@ import { parse as parseYaml } from "yaml";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { buildSafeToolEnv } from "../../core/safe-exec.js";
 import { isSemanticVersion } from "../extensions/compatibility.js";
-import { isLibraryKind, type LibraryPackageEntry, type LibraryRequirementRef } from "../resources/library-types.js";
+import {
+	isLibraryKind,
+	isLibraryResourceKind,
+	LIBRARY_PROVIDES_LIMITS,
+	type LibraryPackageEntry,
+	type LibraryProvidedResource,
+	type LibraryRequirementRef,
+} from "../resources/library-types.js";
 import { isPluginId } from "./discovery.js";
 
 export type PluginCatalogEntry = LibraryPackageEntry;
@@ -68,6 +75,47 @@ export function fetchPluginSource(source: string, cwd = process.cwd()): PluginSo
 	}
 }
 
+const PROVIDED_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+
+/**
+ * Parse optional `provides` hints. A malformed hint list is dropped with a
+ * diagnostic and the row stays valid: hints support discovery, never admission,
+ * so a bad hint must not hide an otherwise installable package.
+ */
+function providedResources(value: unknown, name: string, diagnostics: string[]): LibraryProvidedResource[] | undefined {
+	if (value === undefined) return undefined;
+	if (!Array.isArray(value) || value.length > LIBRARY_PROVIDES_LIMITS.entries) {
+		diagnostics.push(`library index provides ignored (not a bounded list): ${name}`);
+		return undefined;
+	}
+	const hints: LibraryProvidedResource[] = [];
+	const seen = new Set<string>();
+	for (const raw of value) {
+		const item = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : undefined;
+		if (
+			!item ||
+			!isLibraryResourceKind(item.kind) ||
+			typeof item.name !== "string" ||
+			item.name.length > LIBRARY_PROVIDES_LIMITS.name ||
+			!PROVIDED_NAME.test(item.name) ||
+			(item.description !== undefined &&
+				(typeof item.description !== "string" || item.description.length > LIBRARY_PROVIDES_LIMITS.description))
+		) {
+			diagnostics.push(`library index provides ignored (malformed hint): ${name}`);
+			return undefined;
+		}
+		const key = `${item.kind}:${item.name}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
+		hints.push({
+			kind: item.kind,
+			name: item.name,
+			...(typeof item.description === "string" ? { description: item.description } : {}),
+		});
+	}
+	return hints;
+}
+
 export function readPluginCatalog(file: string, diagnostics: string[]): LibraryPackageEntry[] {
 	if (!existsSync(file)) return [];
 	try {
@@ -112,6 +160,7 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 				diagnostics.push(`unsupported library index source: ${item.sourceUrl}`);
 				return [];
 			}
+			const provides = providedResources(item.provides, item.name, diagnostics);
 			return [
 				{
 					kind: item.kind,
@@ -129,6 +178,8 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 						? { triggers: item.triggers.filter((value): value is string => typeof value === "string") }
 						: {}),
 					...(Array.isArray(item.requires) ? { requires: item.requires as LibraryRequirementRef[] } : {}),
+					...(provides ? { provides } : {}),
+					index: path.resolve(file),
 				},
 			];
 		});
@@ -138,9 +189,14 @@ export function readPluginCatalog(file: string, diagnostics: string[]): LibraryP
 	}
 }
 
+/** The index shipped inside this Clio-Coder package; rows from it are the only "bundled" evidence. */
+export function bundledLibraryIndexPath(): string {
+	return path.join(resolvePackageRoot(), "library", "registry.yaml");
+}
+
 export function bundledPluginCatalog(diagnostics: string[]): LibraryPackageEntry[] {
 	try {
-		return readPluginCatalog(path.join(resolvePackageRoot(), "library", "registry.yaml"), diagnostics);
+		return readPluginCatalog(bundledLibraryIndexPath(), diagnostics);
 	} catch (error) {
 		diagnostics.push(`library index unavailable: ${error instanceof Error ? error.message : String(error)}`);
 		return [];

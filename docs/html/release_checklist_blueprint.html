@@ -105,6 +105,9 @@ fail the smoke run.</p>
 <li><p>Inspect the npm package contents with a dry run:</p>
 <pre><code class="language-bash">npm pack --dry-run
 </code></pre>
+<p>Confirm the complete <code>library/</code> tree and <code>.claude-plugin/marketplace.json</code>
+accompany <code>dist/</code>, <code>src/</code>, and the documented runtime resources. The repository's
+<code>.agents/skills/</code> symlinks are clone conveniences and are not tarball contents.</p>
 </li>
 <li><p>Validate an installed tarball in a clean temporary directory:</p>
 <p>Create a temporary directory, pack the tarball, install it via npm, and verify

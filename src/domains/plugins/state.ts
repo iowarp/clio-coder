@@ -17,19 +17,24 @@ import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
-import { isLibraryKind } from "../resources/library-types.js";
+import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { isPluginId, pluginPathContained, readPluginManifest } from "./discovery.js";
 import { pluginContentDigest } from "./integrity.js";
 import type {
 	InstalledPlugin,
 	LibraryPackageInstallInput,
+	PluginDiagnosticCode,
+	PluginExpectedCopy,
+	PluginExpectedState,
 	PluginInstallOptions,
 	PluginInstallRecord,
 	PluginListOptions,
+	PluginMutationOptions,
 	PluginMutationResult,
 	PluginScope,
 	PluginState,
 } from "./types.js";
+import { isForeignPluginOrigin } from "./types.js";
 
 /** sourcePath is a prepared package root containing plugin.json for the declared kind. */
 export function installLibraryPackage(input: LibraryPackageInstallInput): PluginMutationResult {
@@ -85,21 +90,44 @@ function readState(scope: PluginScope, cwd: string): { state: PluginState; bytes
 			!/^[a-f0-9]{64}$/u.test(entry.contentDigest)
 		)
 			throw new Error(`invalid plugin install record: ${id}`);
-		if (
-			entry.origin !== undefined &&
-			typeof entry.origin !== "string" &&
-			(!record(entry.origin) ||
-				!["local", "catalog", "github", "interop"].includes(String(entry.origin.kind)) ||
-				typeof entry.origin.source !== "string" ||
-				(entry.origin.kind === "interop" &&
-					(typeof entry.origin.host !== "string" || !path.isAbsolute(entry.origin.source))))
-		)
+		if (entry.origin !== undefined && typeof entry.origin !== "string" && !validOrigin(entry.origin))
 			throw new Error(`invalid plugin origin: ${id}`);
 		if (entry.kind !== undefined && !isLibraryKind(entry.kind)) throw new Error(`invalid package kind: ${id}`);
 		if (entry.trust !== undefined && entry.trust !== "trusted" && entry.trust !== "foreign")
 			throw new Error(`invalid package trust: ${id}`);
 	}
 	return { state: raw as unknown as PluginState, bytes };
+}
+
+const FOREIGN_FORMATS = new Set(["portable", "claude-code", "codex"]);
+/** Persisted provenance is validated on every read so a hand-edited record cannot invent an origin. */
+function validOrigin(origin: unknown): boolean {
+	if (!record(origin) || typeof origin.source !== "string") return false;
+	const optional =
+		(origin.marketplace === undefined || typeof origin.marketplace === "string") &&
+		(origin.host === undefined || typeof origin.host === "string");
+	switch (origin.kind) {
+		case "local":
+		case "catalog":
+		case "github":
+			return true;
+		case "interop":
+			return (
+				typeof origin.host === "string" &&
+				path.isAbsolute(origin.source) &&
+				optional &&
+				(origin.format === undefined || FOREIGN_FORMATS.has(String(origin.format)))
+			);
+		case "import":
+			return (
+				FOREIGN_FORMATS.has(String(origin.format)) &&
+				optional &&
+				((origin.transport === "local" && path.isAbsolute(origin.source)) ||
+					(origin.transport === "github" && /^https:\/\/github\.com\//u.test(origin.source)))
+			);
+		default:
+			return false;
+	}
 }
 
 function assertUnchangedState(file: string, expected: string | undefined): void {
@@ -133,35 +161,210 @@ function assertManagedBase(scope: PluginScope, cwd: string): void {
 	}
 }
 
-function withMutation(scope: PluginScope, cwd: string, work: () => PluginMutationResult): PluginMutationResult {
-	let lock: string | undefined;
-	let fd: number | undefined;
+/** A writer refusal with a machine-readable reason; the message is what operators see. */
+export class PluginWriterRefusal extends Error {
+	constructor(
+		readonly code: PluginDiagnosticCode,
+		message: string,
+		readonly changed?: {
+			scope: PluginScope;
+			id: string;
+			fact: keyof PluginExpectedCopy;
+			expected: unknown;
+			observed: unknown;
+		},
+	) {
+		super(message);
+		this.name = "PluginWriterRefusal";
+	}
+}
+
+function acquireScopeLock(scope: PluginScope, cwd: string): () => void {
+	assertManagedBase(scope, cwd);
+	mkdirSync(pluginBaseDir(scope, cwd), { recursive: true });
+	const lock = path.join(pluginBaseDir(scope, cwd), ".mutation.lock");
+	let fd: number;
 	try {
-		assertManagedBase(scope, cwd);
-		mkdirSync(pluginBaseDir(scope, cwd), { recursive: true });
-		lock = path.join(pluginBaseDir(scope, cwd), ".mutation.lock");
 		fd = openSync(lock, "wx", 0o600);
-		return work();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "EEXIST")
+			throw new PluginWriterRefusal("locked", "another plugin operation holds the installation lock");
+		throw error;
+	}
+	return () => {
+		closeSync(fd);
+		rmSync(lock, { force: true });
+	};
+}
+
+/**
+ * Hold one scope's cooperative `.mutation.lock` around `fn`. Non-blocking: a
+ * held lock throws a `locked` refusal immediately, so two holders can never
+ * deadlock. A composer that reviewed peer-scope facts holds the peer lock here
+ * and lets the writer take its own; the same scope must never be nested.
+ */
+export function withPluginScopeLock<T>(scope: PluginScope, cwd: string, fn: () => T): T {
+	const release = acquireScopeLock(scope, cwd);
+	try {
+		return fn();
+	} finally {
+		release();
+	}
+}
+
+function withMutation(scope: PluginScope, cwd: string, work: () => PluginMutationResult): PluginMutationResult {
+	try {
+		return withPluginScopeLock(scope, cwd, work);
 	} catch (error) {
 		return {
 			diagnostics: [
 				{
 					type: "error",
-					message:
-						(error as NodeJS.ErrnoException).code === "EEXIST" && fd === undefined
-							? "another plugin operation holds the installation lock"
-							: error instanceof Error
-								? error.message
-								: String(error),
+					message: error instanceof Error ? error.message : String(error),
+					...(error instanceof PluginWriterRefusal ? { code: error.code } : {}),
+					...(error instanceof PluginWriterRefusal && error.changed ? { changed: error.changed } : {}),
 				},
 			],
 		};
-	} finally {
-		if (fd !== undefined) {
-			closeSync(fd);
-			if (lock) rmSync(lock, { force: true });
+	}
+}
+
+/** Observe the facts a plan reviews for one copy. Throws when that scope's state cannot be read. */
+export function observePluginCopy(scope: PluginScope, id: string, cwd: string): PluginExpectedCopy {
+	const saved = readState(scope, cwd).state.installed[id];
+	const target = path.join(pluginBaseDir(scope, cwd), id);
+	let tree: string = "absent";
+	if (existsSync(target)) {
+		try {
+			tree = pluginContentDigest(target);
+		} catch {
+			tree = "unreadable";
 		}
 	}
+	return {
+		scope,
+		id,
+		recorded: saved !== undefined,
+		tree,
+		enabled: !readState(scope, cwd).state.disabled.includes(id),
+		...(saved ? { recordedDigest: saved.contentDigest } : {}),
+		...(saved?.kind ? { kind: saved.kind } : {}),
+		...(saved?.trust ? { trust: saved.trust } : {}),
+		...(saved?.origin !== undefined ? { origin: saved.origin } : {}),
+	};
+}
+
+/**
+ * Recheck reviewed facts. Called inside the mutated scope's lock; peer-scope
+ * facts are only as protected as the lock the composer holds for that scope.
+ */
+function assertExpectedState(expect: PluginExpectedState | undefined, cwd: string): void {
+	for (const expected of expect?.copies ?? []) {
+		let observed: PluginExpectedCopy;
+		try {
+			observed = observePluginCopy(expected.scope, expected.id, cwd);
+		} catch (error) {
+			throw new PluginWriterRefusal(
+				"stale_plan",
+				`reviewed state for ${expected.scope}:${expected.id} is no longer readable: ${error instanceof Error ? error.message : String(error)}; review a fresh plan`,
+			);
+		}
+		// A reviewed snapshot is complete: a fact that appears or disappears
+		// (absent origin becoming foreign, trust or kind recorded later) is a
+		// change, so compare the union of both key sets.
+		const facts = new Set(
+			expected.partial ? Object.keys(expected) : [...Object.keys(expected), ...Object.keys(observed)],
+		) as Set<keyof PluginExpectedCopy>;
+		for (const fact of facts) {
+			if (fact === "scope" || fact === "id" || fact === "partial") continue;
+			const want = JSON.stringify(expected[fact] ?? null);
+			const have = JSON.stringify(observed[fact] ?? null);
+			if (want !== have)
+				throw new PluginWriterRefusal(
+					"stale_plan",
+					`reviewed ${fact} changed for ${expected.scope}:${expected.id} (expected ${want}, observed ${have}); review a fresh plan`,
+					{ scope: expected.scope, id: expected.id, fact, expected: expected[fact], observed: observed[fact] },
+				);
+		}
+	}
+}
+
+/** The one precedence rule: valid, compatible copies compete and project wins. */
+export function resolvePluginPrecedence(entries: InstalledPlugin[]): void {
+	for (const entry of entries) {
+		const winner = entries
+			.filter((peer) => peer.id === entry.id && peer.valid && peer.compatible)
+			.sort((a, b) => Number(a.scope === "project") - Number(b.scope === "project"))
+			.at(-1);
+		entry.effective = entry === winner;
+		entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
+		delete entry.overriddenBy;
+		if (winner && winner !== entry) entry.overriddenBy = winner.scope;
+	}
+}
+
+export interface PluginDependentBreak {
+	ref: LibraryRequirementRef;
+	scope: PluginScope;
+	missing: LibraryRequirementRef[];
+}
+
+function unmetRequirementsOf(entry: InstalledPlugin, entries: ReadonlyArray<InstalledPlugin>): LibraryRequirementRef[] {
+	return (entry.manifest?.clio.requires ?? []).filter(
+		(requirement) => !entries.some((peer) => peer.loadable && `${peer.kind ?? "plugin"}:${peer.id}` === requirement),
+	);
+}
+
+/**
+ * Project the effective set after exactly one disable or removal and report
+ * enabled effective dependents that are satisfied now and would not be.
+ * Pre-existing breakage is listed separately and never refuses.
+ */
+export function newlyBrokenDependents(
+	entries: ReadonlyArray<InstalledPlugin>,
+	mutation: { scope: PluginScope; id: string; operation: "disable" | "remove" },
+): { newlyBroken: PluginDependentBreak[]; preexisting: PluginDependentBreak[]; effectiveAfter?: InstalledPlugin } {
+	const before = entries.map((entry) => ({ ...entry }));
+	resolvePluginPrecedence(before);
+	const after = before
+		.filter((entry) => !(mutation.operation === "remove" && entry.id === mutation.id && entry.scope === mutation.scope))
+		.map((entry) => ({
+			...entry,
+			enabled:
+				mutation.operation === "disable" && entry.id === mutation.id && entry.scope === mutation.scope
+					? false
+					: entry.enabled,
+		}));
+	resolvePluginPrecedence(after);
+	const newlyBroken: PluginDependentBreak[] = [];
+	const preexisting: PluginDependentBreak[] = [];
+	for (const entry of before) {
+		if (entry.id === mutation.id && entry.scope === mutation.scope) continue;
+		const later = after.find((peer) => peer.id === entry.id && peer.scope === entry.scope);
+		if (!later?.loadable) continue;
+		const missingBefore = entry.loadable ? unmetRequirementsOf(entry, before) : [];
+		const missingAfter = unmetRequirementsOf(later, after);
+		const ref: LibraryRequirementRef = `${entry.kind ?? "plugin"}:${entry.id}`;
+		const fresh = missingAfter.filter((requirement) => !missingBefore.includes(requirement));
+		if (fresh.length) newlyBroken.push({ ref, scope: entry.scope, missing: fresh });
+		else if (missingAfter.length) preexisting.push({ ref, scope: entry.scope, missing: missingAfter });
+	}
+	const effectiveAfter = after.find((entry) => entry.id === mutation.id && entry.effective);
+	return { newlyBroken, preexisting, ...(effectiveAfter ? { effectiveAfter } : {}) };
+}
+
+function refuseBrokenDependents(
+	cwd: string,
+	mutation: { scope: PluginScope; id: string; operation: "disable" | "remove" },
+): void {
+	const { newlyBroken } = newlyBrokenDependents(listInstalledPlugins(cwd, { all: true }), mutation);
+	if (newlyBroken.length)
+		throw new PluginWriterRefusal(
+			"dependents",
+			`${mutation.operation} of ${mutation.scope}:${mutation.id} would break ${newlyBroken
+				.map((item) => `${item.scope}:${item.ref} (missing ${item.missing.join(", ")})`)
+				.join("; ")}; disable or remove those dependents first`,
+		);
 }
 
 function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
@@ -253,8 +456,7 @@ function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
 		entries.push({
 			id,
 			kind: saved?.kind ?? manifest?.clio.kind ?? "plugin",
-			trust:
-				saved?.trust ?? (typeof saved?.origin === "object" && saved.origin.kind === "interop" ? "foreign" : "trusted"),
+			trust: saved?.trust ?? (isForeignPluginOrigin(saved?.origin) ? "foreign" : "trusted"),
 			name: manifest?.name ?? id,
 			version: manifest?.version ?? "0.0.0",
 			description: manifest?.description ?? "",
@@ -290,15 +492,7 @@ function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
 export function listInstalledPlugins(cwd = process.cwd(), options: PluginListOptions = {}): InstalledPlugin[] {
 	const scopes: PluginScope[] = options.scope ? [options.scope] : ["user", "project"];
 	const entries = scopes.flatMap((scope) => scopeEntries(scope, cwd));
-	for (const entry of entries) {
-		const winner = entries
-			.filter((peer) => peer.id === entry.id && peer.valid && peer.compatible)
-			.sort((a, b) => Number(a.scope === "project") - Number(b.scope === "project"))
-			.at(-1);
-		entry.effective = entry === winner;
-		entry.loadable = entry.valid && entry.compatible && entry.enabled && entry.effective;
-		if (winner && winner !== entry) entry.overriddenBy = winner.scope;
-	}
+	resolvePluginPrecedence(entries);
 	return entries
 		.filter((entry) => options.all || entry.effective || !entry.valid || !entry.compatible)
 		.sort((a, b) => a.id.localeCompare(b.id) || a.scope.localeCompare(b.scope));
@@ -366,10 +560,11 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 		return { diagnostics: [{ type: "error", message: "plugin source overlaps its managed installation destination" }] };
 	return withMutation(scope, cwd, () => {
 		const { state, bytes } = readState(scope, cwd);
+		assertExpectedState(options.expect, cwd);
 		const previouslyInstalled = Object.hasOwn(state.installed, manifest.name);
 		const previousDigest = state.installed[manifest.name]?.contentDigest;
 		const previousOrigin = state.installed[manifest.name]?.origin;
-		if (typeof previousOrigin === "object" && previousOrigin.kind === "interop")
+		if (isForeignPluginOrigin(previousOrigin))
 			throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
 		const previousKind = state.installed[manifest.name]?.kind ?? readPluginManifest(target).manifest?.clio.kind;
 		if (previousKind && previousKind !== (manifest.clio.kind ?? "plugin"))
@@ -405,10 +600,9 @@ export function installPlugin(sourcePath: string, options: PluginInstallOptions 
 			published = true;
 			if (pluginContentDigest(target) !== digest) throw new Error("plugin changed during publication");
 			const origin = options.origin ?? { kind: "local" as const, source };
-			const trust =
-				typeof origin === "object" && origin.kind === "interop"
-					? "foreign"
-					: (options.trust ?? state.installed[manifest.name]?.trust ?? "trusted");
+			const trust = isForeignPluginOrigin(origin)
+				? "foreign"
+				: (options.trust ?? state.installed[manifest.name]?.trust ?? "trusted");
 			state.installed[manifest.name] = {
 				kind: manifest.clio.kind ?? "plugin",
 				installedAt: new Date().toISOString(),
@@ -461,7 +655,7 @@ export function updatePlugin(id: string, options: PluginInstallOptions = {}): Pl
 		const scope = selectedScope(id, options);
 		const installed = readPluginInstallRecord(id, { ...options, scope });
 		if (!installed) throw new Error(`plugin ${id} is not installed`);
-		if (typeof installed.origin === "object" && installed.origin.kind === "interop")
+		if (isForeignPluginOrigin(installed.origin))
 			throw new Error("interop packages require a new reviewed adoption; remove the installed copy and adopt it again");
 		const current = listInstalledPlugins(options.cwd ?? process.cwd(), { scope, all: true }).find(
 			(entry) => entry.id === id,
@@ -484,16 +678,18 @@ export function updatePlugin(id: string, options: PluginInstallOptions = {}): Pl
 	}
 }
 
-function setEnabled(id: string, enabled: boolean, options: PluginListOptions): PluginMutationResult {
+function setEnabled(id: string, enabled: boolean, options: PluginMutationOptions): PluginMutationResult {
 	if (!isPluginId(id)) return { diagnostics: [{ type: "error", message: "invalid plugin id" }] };
 	const cwd = options.cwd ?? process.cwd();
 	const scope = selectedScope(id, options);
 	return withMutation(scope, cwd, () => {
 		const { state, bytes } = readState(scope, cwd);
+		assertExpectedState(options.expect, cwd);
 		const plugin = listInstalledPlugins(cwd, { scope, all: true }).find((entry) => entry.id === id);
 		if (!plugin) throw new Error(`plugin ${id} is not installed`);
 		if (enabled && (!plugin.valid || !plugin.compatible))
 			throw new Error(`plugin ${id} cannot be enabled: ${plugin.diagnostics.map((entry) => entry.message).join("; ")}`);
+		if (!enabled && plugin.enabled) refuseBrokenDependents(cwd, { scope, id, operation: "disable" });
 		state.disabled = state.disabled.filter((value) => value !== id);
 		if (!enabled) state.disabled.push(id);
 		writeState(scope, cwd, state, bytes);
@@ -502,22 +698,24 @@ function setEnabled(id: string, enabled: boolean, options: PluginListOptions): P
 	});
 }
 
-export function enablePlugin(id: string, options: PluginListOptions = {}): PluginMutationResult {
+export function enablePlugin(id: string, options: PluginMutationOptions = {}): PluginMutationResult {
 	return setEnabled(id, true, options);
 }
-export function disablePlugin(id: string, options: PluginListOptions = {}): PluginMutationResult {
+export function disablePlugin(id: string, options: PluginMutationOptions = {}): PluginMutationResult {
 	return setEnabled(id, false, options);
 }
 
-export function removePlugin(id: string, options: PluginListOptions = {}): PluginMutationResult {
+export function removePlugin(id: string, options: PluginMutationOptions = {}): PluginMutationResult {
 	if (!isPluginId(id)) return { diagnostics: [{ type: "error", message: "invalid plugin id" }] };
 	const cwd = options.cwd ?? process.cwd();
 	const scope = selectedScope(id, options);
 	return withMutation(scope, cwd, () => {
 		const { state, bytes } = readState(scope, cwd);
+		assertExpectedState(options.expect, cwd);
 		const target = path.join(pluginBaseDir(scope, cwd), id);
 		const previousDigest = state.installed[id]?.contentDigest;
 		if (!existsSync(target) && !state.installed[id]) throw new Error(`plugin ${id} is not installed`);
+		refuseBrokenDependents(cwd, { scope, id, operation: "remove" });
 		const backup = uniqueSibling(target, "removed");
 		const moved = existsSync(target);
 		let preserve = false;

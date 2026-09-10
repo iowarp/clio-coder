@@ -6,7 +6,7 @@ import { showClioOverlayFrame } from "./overlay-frame.js";
 import { createOverlayGeneralOpeners } from "./overlay-general-openers.js";
 import { createOverlayModelSelectors } from "./overlay-model-selectors.js";
 import { createOverlayPermissionLifecycle, type OverlayPermissionLifecycle } from "./overlay-permission-lifecycle.js";
-import { createOverlayResourceOpeners } from "./overlay-resource-openers.js";
+import { createOverlayResourceOpeners, type LibraryOpenRequest } from "./overlay-resource-openers.js";
 import { createOverlaySessionLifecycle } from "./overlay-session-lifecycle.js";
 import { createOverlayTransitions } from "./overlay-transitions.js";
 import {
@@ -124,9 +124,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openMemoryOverlay?: typeof import("./memory-overlay.js").openMemoryOverlay;
 	openViewOverlay?: typeof import("./view/view-overlay.js").openViewOverlay;
 	openHelpOverlay?: typeof import("./overlays/help-reference.js").openHelpOverlay;
-	openAgentsOverlay?: typeof import("./overlays/agents.js").openAgentsOverlay;
 	openSkillsHub?: typeof import("./overlays/library.js").openLibraryOverlay;
-	openPromptsOverlay?: typeof import("./overlays/prompts.js").openPromptsOverlay;
 	openExtensionsOverlay?: typeof import("./overlays/extensions.js").openExtensionsOverlay;
 	openInteropOverlay?: typeof import("./overlays/interop.js").openInteropOverlay;
 }
@@ -162,9 +160,7 @@ export interface OverlayLifecycleController {
 	openTreeOverlayState(): void;
 	openMessagePickerOverlayState(): void;
 	openHelpOverlayState(query?: string): void;
-	openAgentsOverlayState(): void;
-	openSkillsHubState(tab?: LibraryEntryKind): void;
-	openPromptsOverlayState(): void;
+	openSkillsHubState(request?: LibraryOpenRequest | LibraryEntryKind): void;
 	openExtensionsOverlayState(): void;
 	openInteropOverlayState(): void;
 	toggleDispatchBoardOverlay(): void;
@@ -218,9 +214,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlay: openMemoryOverlayFactory,
 		openViewOverlay: openViewOverlayFactory,
 		openHelpOverlay: openHelpOverlayFactory,
-		openAgentsOverlay: openAgentsOverlayFactory,
 		openSkillsHub: openSkillsHubFactory,
-		openPromptsOverlay: openPromptsOverlayFactory,
 		openExtensionsOverlay: openExtensionsOverlayFactory,
 		openInteropOverlay: openInteropOverlayFactory,
 	} = deps;
@@ -382,9 +376,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.resources ? { resources: deps.app.resources } : {}),
 		closeOverlay,
 		...(openHelpOverlayFactory ? { openHelpOverlay: openHelpOverlayFactory } : {}),
-		...(openAgentsOverlayFactory ? { openAgentsOverlay: openAgentsOverlayFactory } : {}),
 		...(openSkillsHubFactory ? { openSkillsHub: openSkillsHubFactory } : {}),
-		...(openPromptsOverlayFactory ? { openPromptsOverlay: openPromptsOverlayFactory } : {}),
 		...(openExtensionsOverlayFactory ? { openExtensionsOverlay: openExtensionsOverlayFactory } : {}),
 		...(openInteropOverlayFactory ? { openInteropOverlay: openInteropOverlayFactory } : {}),
 	});
@@ -508,9 +500,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
 		openHelpOverlayState: overlayResourceOpeners.openHelpOverlayState,
-		openAgentsOverlayState: overlayResourceOpeners.openAgentsOverlayState,
 		openSkillsHubState: overlayResourceOpeners.openSkillsHubState,
-		openPromptsOverlayState: overlayResourceOpeners.openPromptsOverlayState,
 		openExtensionsOverlayState: overlayResourceOpeners.openExtensionsOverlayState,
 		openExtensionPanelState: overlayResourceOpeners.openExtensionPanelState,
 		openInteropOverlayState: overlayResourceOpeners.openInteropOverlayState,

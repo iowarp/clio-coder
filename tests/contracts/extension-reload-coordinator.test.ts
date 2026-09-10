@@ -34,7 +34,7 @@ const roots: string[] = [];
 const domainContext: DomainContext = { bus: {} as DomainContext["bus"], getContract: () => undefined };
 
 function scratch(): string {
-	const root = mkdtempSync(path.join(tmpdir(), "clio-extension-reload-"));
+	const root = mkdtempSync(path.join(tmpdir(), "clio-coder-extension-reload-"));
 	roots.push(root);
 	return root;
 }

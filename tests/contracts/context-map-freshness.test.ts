@@ -20,7 +20,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 async function fixture(run: (cwd: string, env: NodeJS.ProcessEnv) => Promise<void>, withGit = true): Promise<void> {
-	const cwd = mkdtempSync(join(tmpdir(), "clio-map-freshness-"));
+	const cwd = mkdtempSync(join(tmpdir(), "clio-coder-map-freshness-"));
 	const home = makeScratchHome();
 	try {
 		mkdirSync(join(cwd, "app"));

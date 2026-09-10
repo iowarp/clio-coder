@@ -50,7 +50,6 @@ export const COMPLETION_SLOT_NAMES = [
 	"pane-runs-agents",
 	"pane-presets",
 	"pane-targets",
-	"library-tabs",
 	"thinking-levels",
 	"settings-areas",
 	"settings-groups",

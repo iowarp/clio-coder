@@ -60,10 +60,10 @@ Deno.test("the layout follows XDG defaults without a prefix and stays inside the
 	equal(xdg.manifest, "/home/researcher/data/clio-coder-gui/install.json");
 	equal(xdg.stateDir, "/home/researcher/.local/state/clio-coder-gui");
 
-	const prefixed = resolveLayout({ prefix: "/opt/clio" }, env);
-	equal(prefixed.bin, "/opt/clio/bin");
-	equal(prefixed.applications, "/opt/clio/share/applications");
-	equal(prefixed.data, "/opt/clio/share/clio-coder-gui");
+	const prefixed = resolveLayout({ prefix: "/opt/clio-coder" }, env);
+	equal(prefixed.bin, "/opt/clio-coder/bin");
+	equal(prefixed.applications, "/opt/clio-coder/share/applications");
+	equal(prefixed.data, "/opt/clio-coder/share/clio-coder-gui");
 	equal(prefixed.stateDir, "/home/researcher/.local/state/clio-coder-gui");
 
 	const explicitState = resolveLayout(

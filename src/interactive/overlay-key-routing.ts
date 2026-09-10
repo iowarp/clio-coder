@@ -23,8 +23,6 @@ export type OverlayState =
 	| "cwd-fallback"
 	| "ask-user"
 	| "help"
-	| "agents"
-	| "prompts"
 	| "extensions"
 	| "interop"
 	| "skills-hub"
@@ -257,6 +255,7 @@ export function routeOverlayKey(
 		(overlayState === "tasks" && matches(data, "clio-coder.tasks.open")) ||
 		(overlayState === "tree" && matches(data, "clio-coder.session.tree")) ||
 		(overlayState === "model" && matches(data, "clio-coder.model.select")) ||
+		(overlayState === "skills-hub" && matches(data, "clio-coder.library.toggle")) ||
 		(overlayState === "help" && matches(data, "clio-coder.leader"))
 	) {
 		deps.closeOverlay();
@@ -308,8 +307,6 @@ export function routeOverlayKey(
 	if (overlayState === "ask-user") return routeAskUserOverlayKey(data, deps);
 	if (
 		overlayState === "help" ||
-		overlayState === "agents" ||
-		overlayState === "prompts" ||
 		overlayState === "extensions" ||
 		overlayState === "interop" ||
 		overlayState === "skills-hub"

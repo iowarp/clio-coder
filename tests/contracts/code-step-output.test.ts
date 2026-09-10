@@ -16,7 +16,7 @@ afterEach(() => {
 });
 
 async function run(script: string) {
-	const root = mkdtempSync(join(tmpdir(), "clio-code-step-output-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-code-step-output-"));
 	roots.push(root);
 	return runCodeStep({
 		stepId: "measurement",

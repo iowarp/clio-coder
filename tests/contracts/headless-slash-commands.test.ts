@@ -10,7 +10,7 @@ const CLI = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
 const TSX = import.meta.resolve("tsx");
 
 it("headless commands refuse interactive actions before boot while preserving skills, templates, and prose", () => {
-	const root = mkdtempSync(join(tmpdir(), "clio-headless-slash-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-headless-slash-"));
 	const config = join(root, "config");
 	mkdirSync(join(config, "prompts"), { recursive: true });
 	writeFileSync(join(config, "prompts", "local-check.md"), "---\ndescription: Local check\n---\nInspect $ARGUMENTS\n");
@@ -77,7 +77,7 @@ it("headless commands refuse interactive actions before boot while preserving sk
 });
 
 it("headless run prints a display-only template to stdout and exits without booting", () => {
-	const root = mkdtempSync(join(tmpdir(), "clio-headless-display-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-headless-display-"));
 	const config = join(root, "config");
 	mkdirSync(join(config, "prompts", "pkg"), { recursive: true });
 	writeFileSync(

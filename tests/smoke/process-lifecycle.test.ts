@@ -125,7 +125,7 @@ function processExists(pid: number): boolean {
 
 describe("smoke/process lifecycle", { concurrency: false, skip: process.platform === "win32" }, () => {
 	it("coordinates SIGINT through the real tool child and leaves no orphan", async () => {
-		const root = mkdtempSync(join(tmpdir(), "clio-process-lifecycle-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-process-lifecycle-"));
 		const env = environment(root);
 		const project = join(root, "project");
 		const pidFile = join(project, ".tool-child.pid");

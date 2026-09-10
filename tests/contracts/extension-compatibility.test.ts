@@ -15,7 +15,7 @@ import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
 const roots: string[] = [];
 
 function scratch(name: string): string {
-	const root = mkdtempSync(path.join(tmpdir(), `clio-extension-${name}-`));
+	const root = mkdtempSync(path.join(tmpdir(), `clio-coder-extension-${name}-`));
 	roots.push(root);
 	return root;
 }

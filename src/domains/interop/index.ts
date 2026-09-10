@@ -8,8 +8,14 @@ export const InteropDomainModule: DomainModule<InteropContract> = {
 	createExtension: createInteropBundle,
 };
 
-export type { AdoptionKind, InteropAdoptionPlan } from "./adopt.js";
-export { applyInteropAdoption, planInteropAdoption, renderInteropAdoptionPlan } from "./adopt.js";
+export type { AdoptionKind, InteropAdoptionEntry, InteropAdoptionPlan, PreparedAdoption } from "./adopt.js";
+export {
+	applyInteropAdoption,
+	planInteropAdoption,
+	prepareForeignPackage,
+	preparePortablePackage,
+	renderInteropAdoptionPlan,
+} from "./adopt.js";
 export {
 	acceptInteropAgents,
 	declineInteropAgents,
@@ -21,6 +27,21 @@ export {
 } from "./consent.js";
 export type { InteropContract } from "./contract.js";
 export { detectInteropAgents, resolveOnPath } from "./detect.js";
+export type {
+	ForeignPluginDetection,
+	ForeignPluginFormat,
+	ForeignPluginProjection,
+	ForeignResourceOutcome,
+} from "./foreign.js";
+export { detectForeignPlugin, FOREIGN_MANIFESTS, projectForeignPlugin } from "./foreign.js";
+export type { LibraryImportApplyResult, LibraryImportPlan, LibraryImportSource } from "./import.js";
+export {
+	applyLibraryImport,
+	libraryImportPlanSummary,
+	planLibraryImport,
+	releaseLibraryImport,
+	renderLibraryImportPlan,
+} from "./import.js";
 export { discoverInteropInventory } from "./inventory.js";
 export { InteropManifest } from "./manifest.js";
 export { foreignAgentDirs, INTEROP_AGENT_KINDS, interopAgentKind, interopSourceRank } from "./registry.js";

@@ -52,7 +52,7 @@ export type CustomizationCategory =
 	| "safety"
 	| "memory";
 
-/** `reload` means an explicit `/library extensions reload` (or a restart) publishes the change. */
+/** `reload` means an explicit `/extensions reload` (or a restart) publishes the change. */
 export type ReloadClass = "hot" | "next-turn" | "reload" | "restart" | "n/a";
 
 export interface CustomizationEntry {

@@ -144,7 +144,7 @@ describe("trace-store runs.source column and its migration", () => {
 	let dir: string;
 
 	before(() => {
-		dir = mkdtempSync(join(tmpdir(), "clio-trace-source-"));
+		dir = mkdtempSync(join(tmpdir(), "clio-coder-trace-source-"));
 	});
 	after(() => {
 		rmSync(dir, { recursive: true, force: true });

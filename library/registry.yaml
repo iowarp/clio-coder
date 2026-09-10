@@ -19,8 +19,15 @@ entries:
       - state machine diagram
       - visualize the architecture
     version: 0.1.0
-    sourceUrl: ../skills/planning/archify
-    sha256: 41bb16d9cf826b47654515101b9d78b02f14eb21370e8ff853e70757e8105bae
+    sourceUrl: skills/planning/archify
+    sha256: 9f4d748ab34bda2c7253f678f36ef0c48f049adfbe13e1a79280fd811c303929
+    provides:
+      - kind: skill
+        name: archify
+        description: "Validated interactive system maps and diagrams as standalone HTML
+          from a typed JSON spec, for one of five diagram types (architecture,
+          workflow, sequence, dataflow, lifecycle). Use when the user asks to
+          visualize architecture, a workflow, a call sequence, "
   - kind: skill
     name: architecture
     description: "Decides the engineering approach for an intent in an interactive
@@ -38,8 +45,15 @@ entries:
       - decide the engineering approach
       - compare architecture options
     version: 0.4.1
-    sourceUrl: ../skills/planning/architecture
-    sha256: 43406b3a328c82a1c34843464aaa77a7a95764f714efb07dddbeb35b7657d39d
+    sourceUrl: skills/planning/architecture
+    sha256: 47ad4039ac2029e6190a43b09a3d137ee8017ee6948fa06b380b74a3472f2ee6
+    provides:
+      - kind: skill
+        name: architecture
+        description: "Decides the engineering approach for an intent in an interactive
+          session: investigates, proposes two or three genuinely different
+          approaches with trade-offs, recommends, lets the user decide, and
+          writes the decision doc. Not a task-by-task plan; use cut-it"
   - kind: skill
     name: arxiv-literature
     description: Searches arXiv, summarizes or compares papers, and builds a compact
@@ -54,8 +68,14 @@ entries:
       - find recent research papers
       - build a literature survey
     version: 0.5.1
-    sourceUrl: ../skills/research/arxiv-literature
-    sha256: 0e6051bbfabab97dc4f6ddff386b096fa0f559cd7593aa567cd189acb3abdb8a
+    sourceUrl: skills/research/arxiv-literature
+    sha256: a4bfdeb4b84486dfddc2ba3f98f67a0028842d4093fcecc45bdb2a251eafc452
+    provides:
+      - kind: skill
+        name: arxiv-literature
+        description: Searches arXiv, summarizes or compares papers, and builds a compact
+          literature survey as citation-ready, source-linked paper cards. Prefer
+          the Researcher shadow agent for noisy multi-paper retrieval.
   - kind: skill
     name: ast-grep
     description: "Structural code search with ast-grep rules: finds code by shape
@@ -70,8 +90,14 @@ entries:
       - find code inside a function
       - grep returns too much noise
     version: 0.3.0
-    sourceUrl: ../skills/coding/ast-grep
-    sha256: 3697f36b4bed40c6161e6f227e3c6a85c83d0480ca082dfbef593dbee5cff3c6
+    sourceUrl: skills/coding/ast-grep
+    sha256: a722fb6b5974f2863e623a20b8b61f3a7d5bae803da611526fc2eb2432417be6
+    provides:
+      - kind: skill
+        name: ast-grep
+        description: "Structural code search with ast-grep rules: finds code by shape
+          when grep on text is too noisy, and never rewrites it. Not for plain
+          string or filename lookups; use grep or find."
   - kind: skill
     name: backlog
     description: Turns a finished PRD or architecture doc into a ticket backlog of
@@ -87,8 +113,15 @@ entries:
       - decompose this plan into tickets
       - create GitHub issues from this architecture
     version: 0.4.1
-    sourceUrl: ../skills/planning/backlog
-    sha256: 78b7f6d3912683c2dc88817b60cf937ed5419436d532acd639883dec45127e9f
+    sourceUrl: skills/planning/backlog
+    sha256: 3b75a6ff84afe3a2900d35ed05c2dbb679ef3bdbbdc46a84d95da59e5ff448b5
+    provides:
+      - kind: skill
+        name: backlog
+        description: Turns a finished PRD or architecture doc into a ticket backlog of
+          small stories with verifiable acceptance criteria, confirmed, then
+          created as GitHub issues or in another configured tracker. Not for
+          local sprint slicing into a SPRINT.md; use cut-it.
   - kind: skill
     name: branch-closeout
     description: Proves merged work on the canonical base, inspects and removes
@@ -104,8 +137,15 @@ entries:
       - closeout branch
       - branch-closeout
     version: 0.1.0
-    sourceUrl: ../skills/git/branch-closeout
-    sha256: 868f719d177d1903cf3685b6d26f79786ca47bdd9c4f55ddf16ff4bc1eb93c2e
+    sourceUrl: skills/git/branch-closeout
+    sha256: 374f181d586e9cad92caa0e8a4387dee7e6b299a07e1613274b9e76546f15f1e
+    provides:
+      - kind: skill
+        name: branch-closeout
+        description: Proves merged work on the canonical base, inspects and removes
+          associated worktrees through Git, deletes local branches safely, and
+          audits surviving repository refs. Not for creating worktrees; use
+          worktree-create. Not for integrating branches; use worktre
   - kind: skill
     name: clio-coder-dev
     description: "Governs changes to Clio Coder's own source and harness (TUI,
@@ -122,8 +162,15 @@ entries:
       - evolve Clio tools or prompts
       - Clio contribution boundary
     version: 0.4.0
-    sourceUrl: ../skills/meta/clio-coder-dev
-    sha256: f1809d2855fbbca7afe73813ea86a67f399f07712cf1fb64b4b59c64a4feba34
+    sourceUrl: skills/meta/clio-coder-dev
+    sha256: d72e2dcd441600f927738d352766a7472e2340bb60b1a23b6894f921079e4243
+    provides:
+      - kind: skill
+        name: clio-coder-dev
+        description: "Governs changes to Clio Coder's own source and harness (TUI,
+          skills, agents, tools, prompts, domains): what may change freely, what
+          needs explicit user intent, and how to change it without breaking the
+          architecture. Not for verifying a change against the h"
   - kind: skill
     name: clio-coder-test
     description: Verifies a Clio Coder source change against the current contract,
@@ -139,8 +186,15 @@ entries:
       - test ACP over stdio
       - Clio mock provider harness
     version: 0.3.0
-    sourceUrl: ../skills/meta/clio-coder-test
-    sha256: ce10e2c4cd69a46aa6471255e4516bee85b34547aa9931718a71f25c0a87d72f
+    sourceUrl: skills/meta/clio-coder-test
+    sha256: 8832464dfd5e5d827c770f1dddc860a1cb397748435ae61e8e68a0032add249e
+    provides:
+      - kind: skill
+        name: clio-coder-test
+        description: Verifies a Clio Coder source change against the current contract,
+          smoke, boundary, and application test lanes, including temporary-state
+          and local-provider harnesses. Not for deciding what may change; use
+          clio-coder-dev.
   - kind: skill
     name: coding-standards
     description: Correct-by-construction TypeScript rules (errors as values, parse
@@ -156,8 +210,15 @@ entries:
       - illegal states unrepresentable
       - functional core imperative shell
     version: 0.4.0
-    sourceUrl: ../skills/coding/coding-standards
-    sha256: c5a1369e9343d50738d501efa52f845e22e123f82e3dc6aaab3388787010e173
+    sourceUrl: skills/coding/coding-standards
+    sha256: acc6fba9b167f5aed949bbe35924d7f4be45afec69941561642e585b76236c68
+    provides:
+      - kind: skill
+        name: coding-standards
+        description: Correct-by-construction TypeScript rules (errors as values, parse
+          don't validate, illegal states unrepresentable, deep modules) for
+          writing or refactoring TypeScript when the project has not pinned its
+          own standards.
   - kind: skill
     name: context-handoff
     description: Writes a durable, redacted, reference-not-copy handoff document
@@ -173,8 +234,15 @@ entries:
       - context is about to be lost
       - write a continuation brief
     version: 0.5.1
-    sourceUrl: ../skills/context/context-handoff
-    sha256: c33af39bcc6ac8840df4c5bbb25663381d174c4523e836171f69ad3dcfa4c9bf
+    sourceUrl: skills/context/context-handoff
+    sha256: f5d32418c95dcc9766b5564b00e9d27de6c86662b742666792f1ef984921ad24
+    provides:
+      - kind: skill
+        name: context-handoff
+        description: Writes a durable, redacted, reference-not-copy handoff document
+          when a session winds down or context is about to be compacted or lost,
+          so the next session or agent can continue. Not for orienting at the
+          start of a session; use context-prime.
   - kind: skill
     name: context-prime
     description: Orients a fresh session in a repository by loading the last
@@ -189,8 +257,14 @@ entries:
       - get up to speed
       - resume repository work after a break
     version: 0.4.1
-    sourceUrl: ../skills/context/context-prime
-    sha256: 8f1d319d2ae8c7b58a1778b3ce26022095d8a31a5e7f3ca41849e6b46d5aae38
+    sourceUrl: skills/context/context-prime
+    sha256: a8f36ad128279eaccbd8d8dddfcbc25319367af61fc2e1e415d80229dc761b78
+    provides:
+      - kind: skill
+        name: context-prime
+        description: Orients a fresh session in a repository by loading the last
+          handoff, git state, the project constitution, and active-work signals
+          before acting. Not for writing the handoff; use context-handoff.
   - kind: skill
     name: credentials
     description: Handles API keys, tokens, and facility credentials (kerberos
@@ -208,8 +282,15 @@ entries:
       - add a secret
       - secret leaked
     version: 0.2.0
-    sourceUrl: ../skills/meta/credentials
-    sha256: 05de834bcfa6aa3fb2cc2cc4c5938eb3e8a73159d594e447add331f8fbda363b
+    sourceUrl: skills/meta/credentials
+    sha256: ff99f5be5773b767cc384772caf9b87d57a8ffd884e1acc002e60b0ebf185953
+    provides:
+      - kind: skill
+        name: credentials
+        description: Handles API keys, tokens, and facility credentials (kerberos
+          tickets, globus and scheduler tokens, ssh agents, netrc) before a tool
+          needs one, after an auth error, when a new secret is supplied, or when
+          one may have leaked. Not for provider target configur
   - kind: skill
     name: cut-it
     description: Slices an existing plan, PRD, or milestone into an executable
@@ -225,8 +306,15 @@ entries:
       - turn this milestone into a sprint
       - write dependency-ordered vertical slices
     version: 0.4.1
-    sourceUrl: ../skills/workflow/cut-it
-    sha256: 52c9fd285ec876699f4476ddc98c5d7411ce3bad8a2e7b84eb402d31e98d89b4
+    sourceUrl: skills/workflow/cut-it
+    sha256: 0d096a8d2125216a57494918c652e823baa6b4957090727146a8fcbe43ecda41
+    provides:
+      - kind: skill
+        name: cut-it
+        description: Slices an existing plan, PRD, or milestone into an executable
+          sprint of dependency-ordered vertical slices sized for one agent run
+          each, with done-when verification per slice; never fabricates a plan.
+          Not for deciding the approach; use architecture.
   - kind: skill
     name: design-council
     description: Convenes several expert perspectives that challenge each other on a
@@ -243,8 +331,15 @@ entries:
       - weigh the architecture options
       - what would experts say
     version: 0.6.0
-    sourceUrl: ../skills/workflow/design-council
-    sha256: 67eff1a3ae9e2846ce05b28233473eb2949be4ceb627b68b63cad623706e61a4
+    sourceUrl: skills/workflow/design-council
+    sha256: 9dce47b705e4df1cc8992522d7a1597b50e8d221a7357161ef8a3cffab018216
+    provides:
+      - kind: skill
+        name: design-council
+        description: Convenes several expert perspectives that challenge each other on a
+          design decision with real trade-offs before code is written; quick
+          mode runs a single round. Not for a one-question-at-a-time
+          interrogation of a plan; use grill-me. Not for splitting imple
   - kind: skill
     name: experiment-protocol
     description: "Pre-registers a performance study, numerical comparison, parameter
@@ -261,8 +356,15 @@ entries:
       - reproduce these results
       - compare solver accuracy
     version: 0.3.1
-    sourceUrl: ../skills/research/experiment-protocol
-    sha256: 4a713179f00c0ff0b0b474b3751a29910769e653dcbd93205a61a7c3be598857
+    sourceUrl: skills/research/experiment-protocol
+    sha256: aa3f692a48ef8a4a7e027cc98bc63a0bc629f2f24546f8bf2e4edaeebde15b52
+    provides:
+      - kind: skill
+        name: experiment-protocol
+        description: "Pre-registers a performance study, numerical comparison, parameter
+          sweep, or benchmark: thresholds, tolerances, environment pins, and
+          verdict conditions locked into the validation contract before any
+          measurement. Not for diagnosing a stalled bug; use scien"
   - kind: skill
     name: file-ticket
     description: "Turns something noticed mid-session into a tracker issue: captures
@@ -279,14 +381,20 @@ entries:
       - ticket this behavior
       - create a tracker issue
     version: 0.3.0
-    sourceUrl: ../skills/git/file-ticket
-    sha256: 80b1a5955f318ddbc27cc30f28faaecaf434dc29beadd9e44ca34de823f4e521
+    sourceUrl: skills/git/file-ticket
+    sha256: b7a86e89817323e28aea0432a93f8457da18b1fc372c2e886278669c968a77d6
+    provides:
+      - kind: skill
+        name: file-ticket
+        description: "Turns something noticed mid-session into a tracker issue: captures
+          evidence, dedups against existing issues, composes a labeled issue
+          with acceptance criteria, confirms, and creates it via gh. Not for
+          batch ticket creation from a PRD; use backlog. Not for "
   - kind: skill
     name: find-skills
-    description: Finds and installs published skills when the user asks whether a
-      capability exists as a skill, searching with clio-coder library search and
-      installing only through clio-coder library install. Not for authoring a
-      new skill; use skill-craft.
+    description: Finds published skills and prepares their Library installation for
+      the operator when the user asks whether a capability exists as a skill.
+      Not for authoring a new skill; use skill-craft.
     category: meta
     audit: pass
     triggers:
@@ -295,9 +403,15 @@ entries:
       - install a skill
       - add an agent skill
       - search the skills marketplace
-    version: 0.2.0
-    sourceUrl: ../skills/meta/find-skills
-    sha256: 5028890780f672807c0ede28a8a4be062210bb6814f3c97a6866ca9833b9fe5c
+    version: 0.2.1
+    sourceUrl: skills/meta/find-skills
+    sha256: e04b432bbdac8bfc5d47b4e089ab74e07cc01789b848d3c0227f0b0147cf015c
+    provides:
+      - kind: skill
+        name: find-skills
+        description: Finds published skills and prepares their Library installation for
+          the operator when the user asks whether a capability exists as a
+          skill. Not for authoring a new skill; use skill-craft.
   - kind: skill
     name: fix-issue
     description: "Resolves a tracker issue end to end: fetches it, diagnoses only
@@ -313,8 +427,15 @@ entries:
       - implement this tracker issue
       - fix a GitHub issue end to end
     version: 0.3.0
-    sourceUrl: ../skills/git/fix-issue
-    sha256: eb04f56276a30df15bc881c02fba8bd4efa3e3ee4e50ec8acf00bb5af707f17e
+    sourceUrl: skills/git/fix-issue
+    sha256: 1a2bae6bebcde3951e09d32d6abfc3bf85132da915b8e1c4295850fe9fc94b57
+    provides:
+      - kind: skill
+        name: fix-issue
+        description: "Resolves a tracker issue end to end: fetches it, diagnoses only
+          when the issue does not name the code, fixes test-first, and
+          self-reviews against the acceptance criteria, leaving a verified
+          uncommitted change. Not for filing; use file-ticket. Not for commi"
   - kind: skill
     name: grill-me
     description: Stress-tests a plan, design, or idea through a phased
@@ -330,8 +451,15 @@ entries:
       - poke holes in this idea
       - clarify this plan one question at a time
     version: 0.5.1
-    sourceUrl: ../skills/workflow/grill-me
-    sha256: d990c456499c568fa2dd8fb99b422c52d421d09fabd33ad6da0587a69185ab5c
+    sourceUrl: skills/workflow/grill-me
+    sha256: 2ad71505b8f114ffc34385dce03d6327c8479033165f152b0c876b002b244a07
+    provides:
+      - kind: skill
+        name: grill-me
+        description: Stress-tests a plan, design, or idea through a phased
+          one-question-at-a-time interview before code is written, ending in a
+          compact decision log. Not for a multi-perspective debate; use
+          design-council.
   - kind: skill
     name: herdr
     description: Launches, drives, or inspects another agent or command in a Herdr
@@ -347,15 +475,136 @@ entries:
       - start a second Clio Coder instance
       - drive a command in a Herdr workspace
     version: 0.2.0
-    sourceUrl: ../skills/meta/herdr
-    sha256: 5bf67887568008e92fd4df0e8c01caf610f9f77f3e24783ea73914d90ff772ea
+    sourceUrl: skills/meta/herdr
+    sha256: 8d0d0337dbc716074b070453e0feae1420faa344283e3044101e43acfd1d08b5
+    provides:
+      - kind: skill
+        name: herdr
+        description: Launches, drives, or inspects another agent or command in a Herdr
+          pane, tab, or workspace, including a second Clio Coder instance;
+          requires HERDR_ENV=1. Not for background work a plain shell or
+          dispatch already covers.
   - kind: plugin
     name: materio
     description: "Materio: materials research interviews, supplied-corpus synthesis,
       lab feasibility, task execution and verified paper handoff."
     version: 0.1.0
-    sourceUrl: ../plugins/materio
-    sha256: 46392d8019bdc76a815d68c2bad726a835fb43cb30e5430f78a15e53df9aa9a7
+    sourceUrl: plugins/materio
+    sha256: d80edd0fd25f826163aa8813b1f597490f666816dfbab8613c299478a42aa08f
+    provides:
+      - kind: agent
+        name: materio-lab-definer
+        description: Structure resource interviews into a feasibility map with gaps and
+          alternatives.
+      - kind: agent
+        name: materio-literature-reviewer
+        description: Review supplied materials and provided URLs with citation
+          provenance and explicit gaps.
+      - kind: agent
+        name: materio-research-explorer
+        description: Synthesize candidate materials-science questions and write
+          researcher-confirmed identity.
+      - kind: agent
+        name: materio-task-executor
+        description: Produce type-specific artifacts for one approved materials-science
+          task and verify the files.
+      - kind: agent
+        name: materio-task-verifier
+        description: Independently read task artifacts and validate completeness,
+          assumptions, and supported claims.
+      - kind: agent
+        name: materio-workflow-planner
+        description: Build a resource-aware dependency plan with researcher assumptions
+          and tagged defaults.
+      - kind: fleet
+        name: materio-execute-task
+        description: Execute one pre-approved research task and independently inspect
+          its output files.
+      - kind: prompt
+        name: materio:add-task
+        description: Add a new task to the research workflow
+      - kind: prompt
+        name: materio:archive-task
+        description: Archive a task; moves it to the Archived section of WORKFLOW.md,
+          out of active execution
+      - kind: prompt
+        name: materio:checkpoint
+        description: Save, inspect, or restore a validated research checkpoint archive.
+      - kind: prompt
+        name: materio:define-research-tasks
+        description: Build a research workflow; select from traditional templates or
+          create from scratch, with assumption interviews per task
+      - kind: prompt
+        name: materio:define-virtual-lab
+        description: Interview to map all available lab resources; equipment, HPC,
+          software, collaborations; into a VIRTUAL-LAB.md that guides feasible
+          task planning
+      - kind: prompt
+        name: materio:execute-task
+        description: Execute a specific research task or the entire workflow
+      - kind: prompt
+        name: materio:help
+        description: Overview of Materio commands, workflow, and philosophy
+      - kind: prompt
+        name: materio:identify-research
+        description: Start exploring a research subject; guided interview to select
+          fields, define scope, and generate a research prompt
+      - kind: prompt
+        name: materio:literature-review
+        description: Conduct literature review, identify research gaps, and define
+          search keywords
+      - kind: prompt
+        name: materio:pause-research
+        description: Save the current research position and pause active work.
+      - kind: prompt
+        name: materio:progress
+        description: Show research progress with statusline, recent work, and smart
+          routing to next action
+      - kind: prompt
+        name: materio:remove-task
+        description: Remove a task from the research workflow permanently
+      - kind: prompt
+        name: materio:resume-research
+        description: Resume research from a paused state; shows current position and
+          suggests next action
+      - kind: prompt
+        name: materio:settings
+        description: Inspect or update research network, checkpoint, and commit settings.
+      - kind: prompt
+        name: materio:status
+        description: Show full research project dashboard; identity, workflow progress,
+          data, and next action
+      - kind: prompt
+        name: materio:upload-data
+        description: Register and index data files, papers, or datasets for use in
+          research tasks
+      - kind: prompt
+        name: materio:wtfp
+        description: Prepare a reviewed research-to-paper handoff for the wtf-p workflow.
+      - kind: skill
+        name: materio-lab-definer
+        description: Structure resource interviews into a feasibility map with gaps and
+          alternatives.
+      - kind: skill
+        name: materio-literature-reviewer
+        description: Review supplied materials and provided URLs with citation
+          provenance and explicit gaps.
+      - kind: skill
+        name: materio-research-explorer
+        description: Synthesize candidate materials-science questions and write
+          researcher-confirmed identity.
+      - kind: skill
+        name: materio-task-executor
+        description: Produce type-specific artifacts for one approved materials-science
+          task and verify the files.
+      - kind: skill
+        name: materio-task-verifier
+        description: Independently inspect research task outputs against their approved
+          assumptions, artifacts, and evidence.
+      - kind: skill
+        name: materio-workflow-planner
+        description: Build a resource-aware dependency plan with researcher assumptions
+          and tagged defaults.
   - kind: skill
     name: prd
     description: Turns an idea into a product requirements document through a
@@ -371,8 +620,15 @@ entries:
       - structure this product brain dump
       - create milestone prompts
     version: 0.4.1
-    sourceUrl: ../skills/planning/prd
-    sha256: 820393dcf9f1a99451620589692dbd06d3cb7ecf352ee32ee2b0abc70965875d
+    sourceUrl: skills/planning/prd
+    sha256: 1e20b78445516f9f5386ce697cf25cf0ef1402038deffff038e37e751ef77eee
+    provides:
+      - kind: skill
+        name: prd
+        description: Turns an idea into a product requirements document through a
+          phase-gated interview, ending in PRD.md plus per-milestone prompt
+          files ready to drive a coding agent. Not for the problem-first product
+          thesis; use product-intent.
   - kind: skill
     name: product-intent
     description: "Writes a problem-first product document for a greenfield effort:
@@ -389,8 +645,15 @@ entries:
       - define a falsifiable product hypothesis
       - greenfield product intent
     version: 0.4.1
-    sourceUrl: ../skills/planning/product-intent
-    sha256: 668b7eb18844b7c86849557059ada8d4ae4d7950622e70d5c02de2cb924f145d
+    sourceUrl: skills/planning/product-intent
+    sha256: e1b6b18cf22697dfed8d177926f88913989450ce23c7f635a01fbdb25a19f8e2
+    provides:
+      - kind: skill
+        name: product-intent
+        description: "Writes a problem-first product document for a greenfield effort:
+          interviews for the problem, evidence, and a falsifiable hypothesis,
+          with zero engineering decisions. Not for engineering decisions; use
+          architecture. Not for turning a locked idea into milest"
   - kind: skill
     name: prototype
     description: "Answers a design question with throwaway code: a clearly marked,
@@ -406,8 +669,15 @@ entries:
       - sanity-check this logic
       - what should this UI look like
     version: 0.4.0
-    sourceUrl: ../skills/coding/prototype
-    sha256: f8e3e6a91ac6ef30da08411bcd0d3244e9411ba22d710979e297674fbc8f47d9
+    sourceUrl: skills/coding/prototype
+    sha256: c05a4f272858095842ceaed952649969ec08fd00e953a2c6998ef93b57ed17ad
+    provides:
+      - kind: skill
+        name: prototype
+        description: "Answers a design question with throwaway code: a clearly marked,
+          runnable, no-persistence prototype whose verdict is kept and whose
+          code is discarded. Not for pre-registered performance experiments; use
+          experiment-protocol. Not for production implementatio"
   - kind: skill
     name: resolve-merge-conflicts
     description: Resolves a merge, rebase, or cherry-pick stopped on conflicts by
@@ -423,8 +693,15 @@ entries:
       - finish the rebase
       - resolve conflict markers
     version: 0.4.0
-    sourceUrl: ../skills/git/resolve-merge-conflicts
-    sha256: 99ba35f1464643af3b03d537c973ef114be73b9889d09a20c03e3a7d6150ee13
+    sourceUrl: skills/git/resolve-merge-conflicts
+    sha256: c1c0999db9e664ecab27d16760c5fe883f468e0c8ba6df9ed97fc28ac01f1414
+    provides:
+      - kind: skill
+        name: resolve-merge-conflicts
+        description: Resolves a merge, rebase, or cherry-pick stopped on conflicts by
+          reconstructing both sides' intent, validating with the project's own
+          checks, and completing the operation. Not for integrating many
+          branches; use worktree-merge.
   - kind: skill
     name: scientific-debugging
     description: Diagnoses stalled or cross-system failures and wrong, NaN,
@@ -442,8 +719,16 @@ entries:
       - debug with falsifiable hypotheses
       - scientific root cause
     version: 0.3.1
-    sourceUrl: ../skills/research/scientific-debugging
-    sha256: 72249a7eadac42c07e45d5492e01154cca4736186229853ab51b6760030db5e8
+    sourceUrl: skills/research/scientific-debugging
+    sha256: fc77eed8b58a1c3e02920c2d591b0ee4c6139d5a9a4f1f4331b015bed0e26c6c
+    provides:
+      - kind: skill
+        name: scientific-debugging
+        description: "Diagnoses stalled or cross-system failures and wrong, NaN,
+          nondeterministic, or unexpectedly slow scientific results through
+          falsifiable hypotheses across distinct fault classes, with
+          evidence-cited verdicts before any fix. Not for designing benchmarks
+          or "
   - kind: skill
     name: scientific-modernization
     description: Modernizes, ports, rewrites, packages, or replaces established
@@ -462,8 +747,15 @@ entries:
       - create a maintained fork
       - preserve scientific parity
     version: 0.4.1
-    sourceUrl: ../skills/research/scientific-modernization
-    sha256: b53a78caae7adae83bd41e3c3c6f3ae2c2dd591bd5cebb81fd41a6fe355a820b
+    sourceUrl: skills/research/scientific-modernization
+    sha256: 9b6e995b76aadff8c509995fd3e21291b4c62d476a4d6c3bb017ca44820facc6
+    provides:
+      - kind: skill
+        name: scientific-modernization
+        description: Modernizes, ports, rewrites, packages, or replaces established
+          scientific software in independently validated stages against an
+          external scientific oracle, settling compatibility and upstream
+          stewardship before calling it complete. Not for an isolated benc
   - kind: skill
     name: ship
     description: "Ships finished work: writes one reviewed atomic commit, keeps
@@ -479,8 +771,15 @@ entries:
       - push and open a pull request
       - get this up for review
     version: 0.5.0
-    sourceUrl: ../skills/git/ship
-    sha256: f7f73a0c01e9885e4748680c7f80901c91615eaf3d48b15337e9cf7c948c2fac
+    sourceUrl: skills/git/ship
+    sha256: a70df2c1f3546262557372ece5733722f6eb737b85ec92902fcc0b5cf94cc123
+    provides:
+      - kind: skill
+        name: ship
+        description: "Ships finished work: writes one reviewed atomic commit, keeps
+          maintainer branches local, or pushes a contributor branch to their
+          fork and opens a PR only on explicit intent. Not for producing the
+          change; use fix-issue."
   - kind: skill
     name: skill-craft
     description: Writes, reviews, or prunes a SKILL.md, judging whether its
@@ -494,9 +793,15 @@ entries:
       - improve this skill
       - why isn't this skill firing
       - prune a skill body
-    version: 0.3.0
-    sourceUrl: ../skills/meta/skill-craft
-    sha256: 66580eca3b64fe8c1b2b4e366abf880b18278555e45ac6bf7cded4187c53f09d
+    version: 0.3.1
+    sourceUrl: skills/meta/skill-craft
+    sha256: 03fe426b34c7cf39096cde9cdbb2c7770524aad39de3e3e968e7684fb08e2201
+    provides:
+      - kind: skill
+        name: skill-craft
+        description: Writes, reviews, or prunes a SKILL.md, judging whether its
+          description, body, and length earn their cost. Not for packaging a
+          workflow that just happened; use workflow-distiller.
   - kind: skill
     name: tdd
     description: Builds a feature or fix test-first, red to green at pre-agreed
@@ -511,8 +816,14 @@ entries:
       - build this test-first
       - reproduce the bug with a test
     version: 0.4.0
-    sourceUrl: ../skills/coding/tdd
-    sha256: c68f3d6a3466b0fdbd9b62121fcb956247e4f046465a38c8661d97ea37dc14df
+    sourceUrl: skills/coding/tdd
+    sha256: ddc1ba867bb277acb8056180370968a521243d90a850a56d3faa0c11103e402e
+    provides:
+      - kind: skill
+        name: tdd
+        description: Builds a feature or fix test-first, red to green at pre-agreed
+          public seams, one vertical slice at a time. Not for designing
+          benchmark criteria; use experiment-protocol.
   - kind: skill
     name: tech-spec
     description: "Writes a typed call-stack architecture handoff: code-shaped
@@ -528,8 +839,15 @@ entries:
       - implementation-ready technical specification
       - specify execution flows
     version: 0.3.1
-    sourceUrl: ../skills/planning/tech-spec
-    sha256: 1a6f7c07e3c0d6a619c58bbaf313bcdb7b511a39880ed46f6480aa07cfe8eedb
+    sourceUrl: skills/planning/tech-spec
+    sha256: 666b93ae62bcb1e5d9d2ffd2260ac442860eeafafa8dd63244dcffb65034eb41
+    provides:
+      - kind: skill
+        name: tech-spec
+        description: "Writes a typed call-stack architecture handoff: code-shaped
+          contracts plus execution flows, implementation-ready for another
+          engineer. User-invoked only. Not for weighing approaches or deciding
+          the design; use architecture first."
   - kind: skill
     name: workflow-distiller
     description: "Packages a workflow that just happened into a reusable SKILL.md:
@@ -544,9 +862,16 @@ entries:
       - turn this into a reusable workflow
       - distill this repeated process
       - create a skill from this session
-    version: 0.4.1
-    sourceUrl: ../skills/workflow/workflow-distiller
-    sha256: 1099df6f331e7b9f382c12161b28c475b7fd41b39d7f490a2e1ffdf555ce4577
+    version: 0.4.2
+    sourceUrl: skills/workflow/workflow-distiller
+    sha256: 5a58318ef207cf379aad6af3a057053c068bb960794025545e7db110740c9937
+    provides:
+      - kind: skill
+        name: workflow-distiller
+        description: "Packages a workflow that just happened into a reusable SKILL.md:
+          reconstructs it from the session record, checks overlap with installed
+          skills, gates on approval, then writes it following skill-craft. Not
+          for authoring a skill with no prior workflow; use s"
   - kind: skill
     name: worktree-create
     description: Stands up one or more git worktrees for parallel work, each on its
@@ -561,8 +886,15 @@ entries:
       - spin up parallel branches
       - prepare parallel worktrees
     version: 0.6.0
-    sourceUrl: ../skills/git/worktree-create
-    sha256: 768a6688ad582926e9ccd7f42742c1aec657d10fc10239dd4666c4b9f577f705
+    sourceUrl: skills/git/worktree-create
+    sha256: baa4c4aba06d4b0b95faf67882f24f8e162ddf0197945e2896fd3b6cd502f5f7
+    provides:
+      - kind: skill
+        name: worktree-create
+        description: Stands up one or more git worktrees for parallel work, each on its
+          own branch with gitignored config copied in, dependencies installed,
+          and a verified health check. Not for merging finished worktrees; use
+          worktree-merge. Not for closeout; use branch-closeo
   - kind: skill
     name: worktree-merge
     description: Integrates finished worktree branches through one throwaway
@@ -578,5 +910,12 @@ entries:
       - combine parallel branches
       - land finished worktrees
     version: 0.6.0
-    sourceUrl: ../skills/git/worktree-merge
-    sha256: 05857328a0a9324cdc308aa1d7622795073decd5904e2592279ecb7d97e61613
+    sourceUrl: skills/git/worktree-merge
+    sha256: f62b643dc900d26d19b5ba4c4e5f2fc7f4669963d506a10234084dd99159936e
+    provides:
+      - kind: skill
+        name: worktree-merge
+        description: Integrates finished worktree branches through one throwaway
+          integration branch, testing after each merge and running the full
+          suite before the main line moves, with exact rollback on failure. Not
+          for creating worktrees; use worktree-create. Not for closeou

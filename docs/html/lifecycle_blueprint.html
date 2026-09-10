@@ -234,9 +234,16 @@ overlay column below says how.</li>
 <tr>
 <td align="left"><code>.clio-coder/skills/**</code></td>
 <td align="left">Overlay</td>
-<td align="left">Project skills, trusted as repository-local. This is where <code>clio-coder library install skill:&lt;name&gt; --project</code> lands a catalog skill; the shipped catalog under the package&#39;s <code>skills/</code> is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it.</td>
-<td align="left">Yes; the shipped catalog remains installable.</td>
+<td align="left">Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below.</td>
+<td align="left">Yes; loose skills must be restored by the operator.</td>
 <td align="left">Kept, and named</td>
+</tr>
+<tr>
+<td align="left"><code>.clio-coder/plugins/&lt;name&gt;/</code>, <code>.clio-coder/plugins/state.json</code></td>
+<td align="left">Operator input</td>
+<td align="left">Complete installed library packages of all five kinds and their scoped state. <code>clio-coder library install skill:&lt;name&gt; --project</code> installs here. The bundled <code>library/</code> remains the catalog source.</td>
+<td align="left">Use <code>clio-coder library remove &lt;kind&gt;:&lt;name&gt; --project</code> to keep package state consistent.</td>
+<td align="left">Kept, not named</td>
 </tr>
 <tr>
 <td align="left"><code>CLIO-CODER.md</code> (repository root)</td>
@@ -298,8 +305,8 @@ overlay column below says how.</li>
 <p><code>~/.config/clio-coder/runtimes/</code> holds third-party runtime plugins. It lives under the
 user configuration directory, not in any repository.</p>
 <p>None of <code>.clio-coder/</code> is published by Clio&#39;s own package. The directories Clio ships
-(<code>src/domains/agents/builtins/</code>, <code>src/domains/agents/fleets/</code>, the whole <code>skills/</code> catalog
-with its <code>registry.yaml</code> and <code>skill-marketplace.json</code>, <code>src/domains/prompts/fragments/</code>,
+(<code>src/domains/agents/builtins/</code>, <code>src/domains/agents/fleets/</code>, the whole <code>library/</code> catalog
+with its registry, recipe packages and skill provenance records, <code>src/domains/prompts/fragments/</code>,
 <code>src/domains/providers/models/</code>) are read from the installed package root; the <code>.clio-coder/</code>
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator&#39;s own session reaches the same

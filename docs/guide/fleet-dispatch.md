@@ -254,7 +254,7 @@ runs never acquire it.
 
 A singular writer or an item in `tasks` may declare `worktree: true` and
 `apply: "merge" | "preserve"`. The default is `merge`. Clio creates
-`.clio-coder/worktrees/<runId>/` on `clio/task/<runId>`, maps the worker cwd and
+`.clio-coder/worktrees/<runId>/` on `clio-coder/task/<runId>`, maps the worker cwd and
 protected artifacts into that checkout, and runs declared host verification
 there. The approved execution snapshot renders both fields and freezes the
 parent checkout as the merge destination.
@@ -414,7 +414,7 @@ and surfaces as an explicit operator decision, never a silent failure.
 
 N candidate builders (2 to 4) run the same task, each in its own scratch git
 worktree under `.clio-coder/worktrees/<group>/` on its own
-`clio/compete/<group>/<n>` branch. Each candidate's work is committed on its
+`clio-coder/compete/<group>/<n>` branch. Each candidate's work is committed on its
 branch; a read-only judge ranks the branches and names a winner
 (`WINNER: <n>`). At full-auto the winning branch is merged. At supervised
 levels the winner's branch and worktree are preserved and the operator

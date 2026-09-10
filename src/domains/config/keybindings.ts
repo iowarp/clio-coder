@@ -30,6 +30,7 @@ export interface ClioAppKeybindings {
 	"clio-coder.decisions.open": true;
 	"clio-coder.dispatch.background": true;
 	"clio-coder.model.select": true;
+	"clio-coder.library.toggle": true;
 	"clio-coder.model.cycleForward": true;
 	"clio-coder.model.cycleBackward": true;
 	"clio-coder.editor.external": true;
@@ -113,8 +114,12 @@ export const CLIO_APP_KEYBINDINGS = {
 		description: "Send the running attached dispatch to the background as a detached batch",
 	},
 	"clio-coder.model.select": {
-		defaultKeys: "alt+l",
+		defaultKeys: "alt+m",
 		description: "Open the model + targets selector",
+	},
+	"clio-coder.library.toggle": {
+		defaultKeys: "alt+l",
+		description: "Open or close the library of skills, agents, prompts, fleets and plugins",
 	},
 	"clio-coder.model.cycleForward": {
 		defaultKeys: "alt+j",

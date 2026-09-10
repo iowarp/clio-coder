@@ -17,7 +17,7 @@ import {
 	type ThinkingLevel,
 	thinkingLevelChoiceLabel,
 } from "../domains/providers/index.js";
-import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
+import type { ResourcesContract } from "../domains/resources/index.js";
 import { installSkill } from "../domains/resources/skills/marketplace.js";
 import { foldDecisionBoard } from "../domains/session/decision-board.js";
 import type { SessionContract, SessionEntry } from "../domains/session/index.js";
@@ -44,6 +44,7 @@ import {
 	type CouncilDispatchOutcome,
 	dispatchSlashCommand,
 	type InitCommandOptions,
+	type LibraryBrowseRequest,
 	parseSlashCommand,
 	type RunIo,
 	type SettingsAreaId,
@@ -124,7 +125,7 @@ export interface InteractiveSlashRuntimeDeps {
 	session?: Pick<SessionContract, "tree" | "current" | "appendEntry">;
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
-	openSkillsHub: (tab?: LibraryEntryKind) => void;
+	openSkillsHub: (request?: LibraryBrowseRequest) => void;
 	openCost: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
@@ -160,8 +161,6 @@ export interface InteractiveSlashRuntimeDeps {
 	openTree: () => void;
 	openMessagePicker: () => void;
 	openHelp: (query?: string) => void;
-	openAgents: () => void;
-	openPrompts: () => void;
 	openExtensions: () => void;
 	openInterop?: () => void;
 	openContextReset: () => void;
@@ -560,8 +559,6 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openTree: deps.openTree,
 		openMessagePicker: deps.openMessagePicker,
 		openHelp: deps.openHelp,
-		openAgents: deps.openAgents,
-		openPrompts: deps.openPrompts,
 		openExtensions: deps.openExtensions,
 		...(deps.reloadExtensions ? { reloadExtensions: deps.reloadExtensions } : {}),
 		...(deps.reloadPlugins ? { reloadPlugins: deps.reloadPlugins } : {}),

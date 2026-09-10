@@ -644,7 +644,7 @@ function withStagedExtensionPackage<T>(
 	input: { id: string; files: ReadonlyArray<{ relativePath: string; buffer: Buffer }> },
 	fn: (root: string) => T,
 ): T {
-	const stagingParent = mkdtempSync(path.join(tmpdir(), "clio-share-extension-"));
+	const stagingParent = mkdtempSync(path.join(tmpdir(), "clio-coder-share-extension-"));
 	const root = path.join(stagingParent, input.id);
 	try {
 		mkdirSync(root, { recursive: true });

@@ -120,7 +120,7 @@ describe("fleet lifecycle boundary", () => {
 	});
 
 	it("persists an operator drain and clears it explicitly", async () => {
-		scratch = await newScratchClioHome("clio-fleet-lifecycle-");
+		scratch = await newScratchClioHome("clio-coder-fleet-lifecycle-");
 		const now = Date.parse("2026-08-23T12:00:00.000Z");
 		const drain = setCapacityDraining(true, { nowMs: now, ttlMs: 60_000 });
 		deepStrictEqual(capacityDrain(now + 1), drain);
@@ -170,7 +170,7 @@ describe("fleet lifecycle boundary", () => {
 	});
 
 	it("writes canonical gate seals and accepts released decision and pending seals", async () => {
-		scratch = await newScratchClioHome("clio-gate-naming-");
+		scratch = await newScratchClioHome("clio-coder-gate-naming-");
 		const stateDir = join(scratch, "state");
 		const handle = stagePendingGateDecision(
 			{
@@ -235,7 +235,7 @@ describe("fleet lifecycle boundary", () => {
 	});
 
 	it("creates canonical task and compete refs while retaining exact legacy cleanup ownership", async () => {
-		scratch = await newScratchClioHome("clio-git-naming-");
+		scratch = await newScratchClioHome("clio-coder-git-naming-");
 		const root = join(scratch, "repository");
 		initGitRepository(root);
 
@@ -271,7 +271,7 @@ describe("fleet lifecycle boundary", () => {
 	});
 
 	it("emits the canonical fleet preflight protocol and accepts the released spelling", async () => {
-		scratch = await newScratchClioHome("clio-preflight-naming-");
+		scratch = await newScratchClioHome("clio-coder-preflight-naming-");
 		const canonicalSsh = join(scratch, "canonical-ssh.sh");
 		writeFileSync(
 			canonicalSsh,

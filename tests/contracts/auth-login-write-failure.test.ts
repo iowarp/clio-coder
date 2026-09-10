@@ -46,7 +46,7 @@ describe("contracts/auth login against an unwritable credentials store", () => {
 	const asRoot = process.getuid?.() === 0;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-auth-write-failure-");
+		scratch = await isolateClioEnv("clio-coder-auth-write-failure-");
 		configDir = join(scratch.dir, "config");
 		credentials = join(configDir, "credentials.yaml");
 	});

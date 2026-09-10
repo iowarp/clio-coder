@@ -26,7 +26,7 @@ describe("session durability boundary", () => {
 	let scratch: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-session-contract-");
+		scratch = await isolateClioEnv("clio-coder-session-contract-");
 	});
 
 	afterEach(() => scratch.restore());

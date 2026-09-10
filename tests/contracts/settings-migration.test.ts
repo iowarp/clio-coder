@@ -40,7 +40,7 @@ describe("settings and migration boundary", () => {
 	let stateDir: string;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-settings-contract-");
+		scratch = await isolateClioEnv("clio-coder-settings-contract-");
 		settingsFile = join(scratch.dir, "config", "settings.yaml");
 		stateDir = join(scratch.dir, "state");
 		mkdirSync(join(scratch.dir, "config"), { recursive: true });

@@ -33,9 +33,13 @@ import {
 	resolveLibraryPackage,
 	resolveLibraryRequirements,
 } from "../../src/domains/resources/library.js";
+import {
+	applyLibraryLifecycle,
+	planLibraryLifecycle,
+	releaseLibraryLifecycle,
+} from "../../src/domains/resources/library-actions.js";
 import { resolveLibraryEval } from "../../src/domains/resources/library-evals.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/marketplace.js";
-import { runLibraryAction } from "../../src/interactive/overlays/library-actions.js";
 import { LIBRARY_TABS } from "../../src/interactive/overlays/library-tabs.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
@@ -94,7 +98,7 @@ async function captureCli(args: string[]): Promise<{ code: number; output: strin
 
 describe("plugin library lifecycle", () => {
 	beforeEach(() => {
-		root = mkdtempSync(path.join(tmpdir(), "clio-plugin-library-"));
+		root = mkdtempSync(path.join(tmpdir(), "clio-coder-plugin-library-"));
 		previousConfig = process.env.CLIO_CODER_CONFIG_DIR;
 		previousCwd = process.cwd();
 		process.env.CLIO_CODER_CONFIG_DIR = path.join(root, "config");
@@ -208,26 +212,31 @@ describe("plugin library lifecycle", () => {
 		throws(() => planLibraryUpdate("fixture", { force: true }), /plugin_pin_mismatch/);
 	});
 
-	it("CLI and interactive actions share install, toggle, pin, drift, cancellation and removal behavior", async () => {
+	it("CLI and the reviewed lifecycle share install, disable, cancellation and removal behavior", async () => {
 		const source = bundle();
 		const installed = await captureCli(["install", source]);
 		equal(installed.code, 0, installed.output);
 		const item = entry(source);
-		match(await runLibraryAction(item, "toggle", async () => true), /disabled/);
+
+		const disable = planLibraryLifecycle({ operation: "disable", ref: "plugin:fixture", scope: "user", cwd: root });
+		equal(disable.applicable, true, JSON.stringify(disable.diagnostics));
+		equal(applyLibraryLifecycle(disable).committed, 1);
 		equal(listInstalledPlugins(root)[0]?.enabled, false);
 		equal((await captureCli(["enable", "fixture"])).code, 0);
-		match(await runLibraryAction(item, "pin", async () => true), /pinned [a-f0-9]{64}/);
-		match(await runLibraryAction(item, "drift", async () => true), /clean/);
-		match(await runLibraryAction(item, "remove", async () => false), /cancelled/);
+
+		// Cancel is the whole contract of the review gate: a released plan leaves
+		// the installation exactly as it found it.
+		const cancelled = planLibraryLifecycle({ operation: "remove", ref: "plugin:fixture", scope: "user", cwd: root });
+		releaseLibraryLifecycle(cancelled);
 		equal(libraryEntryInstalled(item), true);
-		match(
-			await runLibraryAction(item, "remove", async (subject) => {
-				equal(subject.action, "remove");
-				equal(subject.writes[0]?.path, libraryInstallPath(item));
-				return true;
-			}),
-			/removed/,
-		);
+
+		const remove = planLibraryLifecycle({ operation: "remove", ref: "plugin:fixture", scope: "user", cwd: root });
+		equal(remove.steps[0]?.identity.scope, "user");
+		equal(remove.steps[0]?.destination, libraryInstallPath(item));
+		const result = applyLibraryLifecycle(remove);
+		equal(result.committed, 1, JSON.stringify(result.outcomes));
+		equal(result.outcomes[0]?.verification?.tree, "absent");
+		equal(result.refresh.status, "not-applicable");
 		equal(libraryEntryInstalled(item), false);
 		ok(LIBRARY_TABS.some((tab) => tab.id === "plugin"));
 	});
@@ -321,7 +330,7 @@ describe("plugin library lifecycle", () => {
 
 	it("routes the plugin tab and reload command through the library slash surface", () => {
 		deepStrictEqual(parseSlashCommand("/library"), { kind: "resources", tab: "plugin" });
-		deepStrictEqual(parseSlashCommand("/library plugin"), { kind: "resources", tab: "plugin" });
+		equal(parseSlashCommand("/library plugin").kind, "usage-error");
 		deepStrictEqual(parseSlashCommand("/library reload"), {
 			kind: "resources",
 			family: "plugins",
@@ -333,9 +342,9 @@ describe("plugin library lifecycle", () => {
 	it("completes plugin browsing and reload through the ordinary slash grammar", async () => {
 		const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
 		for (const [line, expected] of [
-			["/library pl", "plugin"],
+			["/lib", "library"],
 			["/library re", "reload"],
-			["/library extensions re", "reload"],
+			["/extensions re", "reload"],
 		]) {
 			ok(line);
 			ok(expected);
@@ -491,12 +500,15 @@ describe("plugin library lifecycle", () => {
 		equal(readFileSync(file, "utf8"), before);
 	});
 
-	it("rejects unsupported dry-run flags without changing installed state", async () => {
+	it("plans a dry-run disable without changing installed state and rejects dry-run elsewhere", async () => {
 		installLibraryPlan(planLibraryInstall(entry(bundle())));
 		const result = await captureCli(["disable", "fixture", "--dry-run"]);
-		equal(result.code, 1);
-		match(result.output, /supported only/);
+		equal(result.code, 0, result.output);
+		equal(JSON.parse(result.output).apply.unattempted, 1);
 		equal(listInstalledPlugins(root)[0]?.enabled, true);
+		const pinned = await captureCli(["pin", "fixture", "--dry-run"]);
+		equal(pinned.code, 1);
+		match(pinned.output, /supported only/);
 	});
 
 	it("uses the authored prompt path even when package and component names differ", () => {
@@ -600,5 +612,76 @@ describe("plugin library lifecycle", () => {
 		equal(listed.code, 0, listed.output);
 		ok(JSON.parse(listed.output).entries.find((e: LibraryEntry) => e.name === item.name));
 		equal(readFileSync(state, "utf8"), "{broken");
+	});
+
+	it("updates catalog-origin packages when catalog repoints to relocated source, while refusing to redirect dead explicit sources", () => {
+		// 1. Catalog-origin migration: install old indexed source, remove old source
+		const oldSource = bundle("migrated-pkg", "1.0.0");
+		catalog([entry(oldSource)]);
+		const initialPlan = planLibraryInstall(resolveLibraryPackage("migrated-pkg"));
+		installLibraryPlan(initialPlan);
+		equal(listInstalledPlugins(root)[0]?.version, "1.0.0");
+
+		rmSync(oldSource, { recursive: true, force: true });
+		equal(existsSync(oldSource), false);
+
+		// With old source removed from disk and default catalog still pointing to it, update fails
+		throws(
+			() => planLibraryUpdate("migrated-pkg"),
+			/unsupported plugin source|neither an existing local directory nor a catalog entry|unavailable/i,
+		);
+
+		// 2. Configured catalog override repoints package to relocated canonical source
+		const newSource = path.join(root, "library", "plugins", "migrated-pkg");
+		mkdirSync(path.join(newSource, "assets"), { recursive: true });
+		writeFileSync(
+			path.join(newSource, "plugin.json"),
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "migrated-pkg",
+				version: "2.0.0",
+				description: "Relocated catalog package",
+			}),
+		);
+		writeFileSync(path.join(newSource, "assets", "evidence.txt"), "relocated evidence 2.0.0");
+
+		const overrideCatalog = path.join(root, "override-catalog.yaml");
+		writeFileSync(overrideCatalog, stringify({ entries: [entry(newSource)] }));
+
+		// Configured catalog override takes precedence over default catalog
+		const resolved = resolveLibraryPackage("migrated-pkg", { catalog: overrideCatalog });
+		equal(resolved.version, "2.0.0");
+		equal(resolved.sourceUrl, newSource);
+
+		const updatePlan = planLibraryUpdate("migrated-pkg", { catalog: overrideCatalog });
+		installLibraryPlan(updatePlan);
+		equal(listInstalledPlugins(root).find((p) => p.name === "migrated-pkg")?.version, "2.0.0");
+
+		// 3. Explicit direct-source case: refuses dead direct source instead of redirecting to catalog
+		const directSource = bundle("direct-pkg", "1.0.0");
+		installLibraryPlan(planLibraryInstall(resolveLibraryPackage(directSource)));
+		equal(listInstalledPlugins(root).find((p) => p.name === "direct-pkg")?.version, "1.0.0");
+
+		rmSync(directSource, { recursive: true, force: true });
+		equal(existsSync(directSource), false);
+
+		const catalogSubstitute = path.join(root, "library", "plugins", "direct-pkg");
+		mkdirSync(path.join(catalogSubstitute, "assets"), { recursive: true });
+		writeFileSync(
+			path.join(catalogSubstitute, "plugin.json"),
+			JSON.stringify({
+				$schema: "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+				name: "direct-pkg",
+				version: "2.0.0",
+				description: "Unwanted redirect attempt",
+			}),
+		);
+		writeFileSync(path.join(catalogSubstitute, "assets", "evidence.txt"), "substitute");
+		catalog([entry(newSource), entry(catalogSubstitute)]);
+
+		throws(
+			() => planLibraryUpdate("direct-pkg"),
+			/neither an existing local directory nor a catalog entry|unavailable|no update source/i,
+		);
 	});
 });

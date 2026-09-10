@@ -1,12 +1,12 @@
 /**
- * Regenerate skills/registry.yaml: the local pinned manifest of marketplace
+ * Regenerate library/skills/registry.yaml: the local pinned manifest of marketplace
  * skill content hashes (provenance-stripped, so installed copies stamped with
  * install-lifecycle frontmatter still compare equal to their audited source).
- * Run with `pnpm run skills:pin` after editing any skills/<name>/SKILL.md.
+ * Run with `pnpm run skills:pin` after editing any library/skills/<name>/SKILL.md.
  *
- * The same run publishes `skill-marketplace.json`: the index a Clio install
- * outside this repo points `CLIO_CODER_SKILL_MARKETPLACE_INDEX` at so bare-name
- * installs resolve to the catalog's GitHub source URLs.
+ * The same run publishes `skill-marketplace.json` for skill authoring and
+ * provenance inspection. Runtime package discovery and installation use the
+ * shared `library/registry.yaml`; this is not a second installation authority.
  *
  * Modes:
  *   default          rewrite the manifest and the published index from the catalog
@@ -20,40 +20,45 @@
  *
  * Malformed frontmatter is a hard failure in both modes: a skill file whose
  * YAML cannot be parsed must never be silently pinned under its folder name.
- * The catalog publishing contract (skills/README.md) is enforced here too:
+ * The catalog publishing contract (library/skills/README.md) is enforced here too:
  * every catalog skill must carry the required provenance frontmatter with
  * `audit: pass` and ship an evals.md beside its SKILL.md.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import yaml from "yaml";
 import { ALL_TOOL_NAMES } from "../src/core/tool-names.js";
 import { normalizedSkillHash } from "../src/domains/resources/skills/content-hash.js";
 
-/** Top-level frontmatter every published catalog skill must carry (skills/README.md). */
+/** Top-level frontmatter every published catalog skill must carry (library/skills/README.md). */
 const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
-/** Keys required inside the reserved nested `clio-coder:` block (skills/README.md). */
+/** Keys required inside the reserved nested `clio-coder:` block (library/skills/README.md). */
 const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
-/** The provenance vocabulary skills/README.md defines; anything else is a typo, not a new category. */
+/** The provenance vocabulary library/skills/README.md defines; anything else is a typo, not a new category. */
 const PROVENANCE_VALUES = new Set(["designed", "adapted", "imported"]);
 /** Tool-surface keys whose values must name Clio tools in canonical spelling. */
 const TOOL_SURFACE_KEYS = ["allowed-tools", "disallowed-tools"] as const;
 const CLIO_TOOL_NAMES = new Set<string>(ALL_TOOL_NAMES);
 
-const argv = process.argv.slice(2);
-const checkMode = argv.includes("--check");
-const dirFlagIndex = argv.indexOf("--dir");
-const repoRoot = path.resolve(import.meta.dirname, "..");
-const catalogDir =
-	dirFlagIndex >= 0 && argv[dirFlagIndex + 1]
-		? path.resolve(argv[dirFlagIndex + 1] as string)
-		: path.join(repoRoot, "skills");
-const manifestPath = path.join(catalogDir, "registry.yaml");
-const indexPath = path.join(catalogDir, "skill-marketplace.json");
-const remotePath = path.join(catalogDir, "remote.yaml");
-/** Overlay paths in remote.yaml are relative to the directory the catalog sits in (the package root). */
-const packageRoot = path.dirname(catalogDir);
+export interface PinSkillsOptions {
+	catalogDir?: string;
+	check?: boolean;
+}
+
+export interface PinSkillsResult {
+	ok: boolean;
+	entries: CatalogEntry[];
+	errors: string[];
+	manifestPath: string;
+	indexPath: string;
+	manifest: string;
+	index: string;
+	manifestDrift: boolean;
+	indexDrift: boolean;
+	manifestDriftLines: string[];
+}
 
 interface PinEntry {
 	name: string;
@@ -66,7 +71,7 @@ interface PinEntry {
 /** A pin entry plus the fields the published marketplace index carries. */
 interface CatalogEntry extends PinEntry {
 	description: string;
-	/** `clio-coder.source-url`: where `clio-coder skills install <name>` fetches this skill from. */
+	/** `clio-coder.source-url`: the published upstream source for this skill's authoring record. */
 	sourceUrl: string;
 	audit: string;
 	/** Catalog category folder, or null in a flat catalog. */
@@ -156,7 +161,7 @@ function toolSurfaceErrors(skillPath: string, fm: Record<string, unknown>): stri
 	return errors;
 }
 
-function readRemoteEntries(errors: string[]): Map<string, RemoteEntry> {
+function readRemoteEntries(remotePath: string, packageRoot: string, errors: string[]): Map<string, RemoteEntry> {
 	const byOverlay = new Map<string, RemoteEntry>();
 	if (!existsSync(remotePath)) return byOverlay;
 	let parsed: unknown;
@@ -205,10 +210,14 @@ function readRemoteEntries(errors: string[]): Map<string, RemoteEntry> {
 	return byOverlay;
 }
 
-function collectEntries(): { entries: CatalogEntry[]; errors: string[] } {
+function collectEntries(
+	catalogDir: string,
+	packageRoot: string,
+	remotePath: string,
+): { entries: CatalogEntry[]; errors: string[] } {
 	const entries: CatalogEntry[] = [];
 	const errors: string[] = [];
-	const remotes = readRemoteEntries(errors);
+	const remotes = readRemoteEntries(remotePath, packageRoot, errors);
 	const matchedOverlays = new Set<string>();
 	for (const relPath of collectPackageDirs(catalogDir, "")) {
 		const skillPath = path.join(catalogDir, relPath, "SKILL.md");
@@ -477,18 +486,6 @@ function describeDrift(current: string, expected: ReadonlyArray<PinEntry>): stri
 	return lines;
 }
 
-const { entries, errors } = collectEntries();
-if (errors.length > 0) {
-	for (const error of errors) process.stderr.write(`pin-skills: ${error}\n`);
-	process.stderr.write(
-		`pin-skills: ${errors.length} catalog contract violation(s); nothing was ${checkMode ? "checked" : "pinned"}\n`,
-	);
-	process.exit(1);
-}
-
-const manifest = renderManifest(entries);
-const index = renderIndex(entries);
-
 function readOrNull(file: string): string | null {
 	try {
 		return readFileSync(file, "utf8");
@@ -497,26 +494,106 @@ function readOrNull(file: string): string | null {
 	}
 }
 
-if (checkMode) {
-	const currentManifest = readOrNull(manifestPath);
-	const currentIndex = readOrNull(indexPath);
-	if (currentManifest === manifest && currentIndex === index) {
-		process.stdout.write(`registry pin check ok (${entries.length} skills)\n`);
-		process.exit(0);
+export function pinSkillsCatalog(options: PinSkillsOptions = {}): PinSkillsResult {
+	const repoRoot = path.resolve(import.meta.dirname, "..");
+	const catalogDir = options.catalogDir ? path.resolve(options.catalogDir) : path.join(repoRoot, "library", "skills");
+	const manifestPath = path.join(catalogDir, "registry.yaml");
+	const indexPath = path.join(catalogDir, "skill-marketplace.json");
+	const remotePath = path.join(catalogDir, "remote.yaml");
+	const bundledSkillsDir = path.join(repoRoot, "library", "skills");
+	const isBundledCatalog = path.resolve(catalogDir) === bundledSkillsDir;
+	const packageRoot = isBundledCatalog ? repoRoot : path.dirname(catalogDir);
+	const checkMode = options.check === true;
+
+	const { entries, errors } = collectEntries(catalogDir, packageRoot, remotePath);
+	const manifest = renderManifest(entries);
+	const index = renderIndex(entries);
+
+	let manifestDrift = false;
+	let indexDrift = false;
+	let manifestDriftLines: string[] = [];
+	let ok = errors.length === 0;
+
+	if (errors.length > 0) {
+		return {
+			ok: false,
+			entries,
+			errors,
+			manifestPath,
+			indexPath,
+			manifest,
+			index,
+			manifestDrift: false,
+			indexDrift: false,
+			manifestDriftLines: [],
+		};
 	}
-	if (currentManifest !== manifest) {
-		process.stderr.write(`pin-skills: ${manifestPath} does not match the catalog content hashes\n`);
-		for (const line of describeDrift(currentManifest ?? "", entries)) {
-			process.stderr.write(`pin-skills:   ${line}\n`);
+
+	if (checkMode) {
+		const currentManifest = readOrNull(manifestPath);
+		const currentIndex = readOrNull(indexPath);
+		if (currentManifest !== manifest) {
+			manifestDrift = true;
+			ok = false;
+			manifestDriftLines = describeDrift(currentManifest ?? "", entries);
 		}
+		if (currentIndex !== index) {
+			indexDrift = true;
+			ok = false;
+		}
+	} else {
+		writeFileSync(manifestPath, manifest, "utf8");
+		writeFileSync(indexPath, index, "utf8");
 	}
-	if (currentIndex !== index) {
-		process.stderr.write(`pin-skills: ${indexPath} does not match the catalog\n`);
-	}
-	process.stderr.write("pin-skills: run `pnpm run skills:pin` and commit the result\n");
-	process.exit(1);
+
+	return {
+		ok,
+		entries,
+		errors,
+		manifestPath,
+		indexPath,
+		manifest,
+		index,
+		manifestDrift,
+		indexDrift,
+		manifestDriftLines,
+	};
 }
 
-writeFileSync(manifestPath, manifest, "utf8");
-writeFileSync(indexPath, index, "utf8");
-process.stdout.write(`pinned ${entries.length} skills -> ${manifestPath}\npublished index -> ${indexPath}\n`);
+if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1])) {
+	const argv = process.argv.slice(2);
+	const checkMode = argv.includes("--check");
+	const dirFlagIndex = argv.indexOf("--dir");
+	const dir = dirFlagIndex >= 0 && argv[dirFlagIndex + 1] ? (argv[dirFlagIndex + 1] as string) : undefined;
+	const result = pinSkillsCatalog({ catalogDir: dir, check: checkMode });
+
+	if (result.errors.length > 0) {
+		for (const error of result.errors) process.stderr.write(`pin-skills: ${error}\n`);
+		process.stderr.write(
+			`pin-skills: ${result.errors.length} catalog contract violation(s); nothing was ${checkMode ? "checked" : "pinned"}\n`,
+		);
+		process.exit(1);
+	}
+
+	if (checkMode) {
+		if (result.ok) {
+			process.stdout.write(`registry pin check ok (${result.entries.length} skills)\n`);
+			process.exit(0);
+		}
+		if (result.manifestDrift) {
+			process.stderr.write(`pin-skills: ${result.manifestPath} does not match the catalog content hashes\n`);
+			for (const line of result.manifestDriftLines) {
+				process.stderr.write(`pin-skills:   ${line}\n`);
+			}
+		}
+		if (result.indexDrift) {
+			process.stderr.write(`pin-skills: ${result.indexPath} does not match the catalog\n`);
+		}
+		process.stderr.write("pin-skills: run `pnpm run skills:pin` and commit the result\n");
+		process.exit(1);
+	}
+
+	process.stdout.write(
+		`pinned ${result.entries.length} skills -> ${result.manifestPath}\npublished index -> ${result.indexPath}\n`,
+	);
+}

@@ -14,7 +14,7 @@ import { probeWorkspace } from "../../src/domains/session/workspace/snapshot.js"
 const roots: string[] = [];
 
 function scratch(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-project-bootstrap-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-project-bootstrap-"));
 	roots.push(root);
 	return root;
 }

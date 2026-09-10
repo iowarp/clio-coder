@@ -48,7 +48,8 @@ import { contextToolSurface } from "./surface.js";
  * workspace snapshot, scope=docs retrieves cited sections from Clio's bundled
  * documentation, scope=skills lists available skills or loads a requested
  * skill body (the skill-activation and pending-request contracts are
- * unchanged from the absorbed read_skill tool), scope=recall readmits an
+ * unchanged from the absorbed read_skill tool), scope=library reads the bounded
+ * body-free recipe catalog (see ./library.ts), scope=recall readmits an
  * evicted tool-result body by ref and records the `contextRecall` entry.
  */
 
@@ -688,20 +689,27 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 		...contextToolSurface,
 		async run(args, options): Promise<ToolResult> {
 			const scope = typeof args.scope === "string" ? args.scope : "";
-			if (scope !== "workspace" && scope !== "docs" && scope !== "skills" && scope !== "recall") {
-				return { kind: "error", message: `context: scope must be workspace, docs, skills, or recall; got '${scope}'` };
+			if (scope !== "workspace" && scope !== "docs" && scope !== "skills" && scope !== "library" && scope !== "recall") {
+				return {
+					kind: "error",
+					message: `context: scope must be workspace, docs, skills, library, or recall; got '${scope}'`,
+				};
 			}
 			const selfCap =
 				scope === "docs"
 					? OBSERVE_SELF_CAPS.contextDocs
 					: scope === "skills"
 						? OBSERVE_SELF_CAPS.contextSkills
-						: OBSERVE_SELF_CAPS.contextWorkspace;
+						: scope === "library"
+							? OBSERVE_SELF_CAPS.contextLibrary
+							: OBSERVE_SELF_CAPS.contextWorkspace;
+			// Reserved before any scope handler runs, so an exhausted pool answers
+			// with the notice and the library inventory is never walked at all.
 			const reservation = reserveObservation(selfCap, options);
 			if (reservation.exhausted) {
 				return observationBudgetExhausted({
 					tool: ToolNames.Context,
-					unit: scope === "docs" ? "sections" : scope === "skills" ? "entries" : "results",
+					unit: scope === "docs" ? "sections" : scope === "skills" || scope === "library" ? "entries" : "results",
 					reservation,
 					subject: `scope=${scope}`,
 					hint: "Continue in a follow-up turn.",
@@ -710,6 +718,19 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);
 			if (scope === "docs") return runDocsScope(args, reservation, options);
 			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
+			if (scope === "library") {
+				const { runLibraryScope } = await import("./library.js");
+				return runLibraryScope(
+					{
+						getCwd: () => cwdFromDeps(deps),
+						...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
+						...(deps.getSkillLoaderOptions ? { skillLoaderOptions: deps.getSkillLoaderOptions() } : {}),
+					},
+					args,
+					reservation,
+					options,
+				);
+			}
 			return runSkillsScope(deps, args, reservation, options);
 		},
 	};

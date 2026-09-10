@@ -9,7 +9,7 @@
  *
  * Two ownership rules run through the whole file. Clio acts only on panes it
  * created, tracked in `pane-registry.ts` and tagged with the `clio_coder_owner`
- * metadata token so `clio doctor` can find orphans. The one documented
+ * metadata token so `clio-coder doctor` can find orphans. The one documented
  * exception is Clio's own hosting pane in guest mode, which `reportSelf`
  * writes to under SA-3 of the v0.4.0 cycle plan.
  *

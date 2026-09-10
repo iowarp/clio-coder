@@ -29,7 +29,7 @@ function approve(workspace: string, surface: "safety" | "hooks" | "settings"): s
 }
 
 test("S3-01: a real boot names skipped safety and settings files and the review command", async () => {
-	const home = await isolateClioEnv("clio-trust-boot-");
+	const home = await isolateClioEnv("clio-coder-trust-boot-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
@@ -53,7 +53,7 @@ test("S3-01: a real boot names skipped safety and settings files and the review 
 });
 
 test("S3-01: approved safety, settings, and hooks take effect, and changed bytes restore defaults", async () => {
-	const home = await isolateClioEnv("clio-trust-cycle-");
+	const home = await isolateClioEnv("clio-coder-trust-cycle-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		const config = join(workspace, ".clio-coder");
@@ -90,7 +90,7 @@ test("S3-01: approved safety, settings, and hooks take effect, and changed bytes
 });
 
 test("S3-01: trust survives a fresh process and canonical aliases without extending to another workspace or surface", async () => {
-	const home = await isolateClioEnv("clio-trust-identity-");
+	const home = await isolateClioEnv("clio-coder-trust-identity-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
@@ -128,7 +128,7 @@ test("S3-01: trust survives a fresh process and canonical aliases without extend
 });
 
 test("S3-01: local-file addition invalidates the entire surface and revocation stops published hooks", async () => {
-	const home = await isolateClioEnv("clio-trust-local-");
+	const home = await isolateClioEnv("clio-coder-trust-local-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		const config = join(workspace, ".clio-coder");
@@ -165,7 +165,7 @@ test("S3-01: local-file addition invalidates the entire surface and revocation s
 });
 
 test("S3-01: CLI review is read-only and approval refuses a stale digest", async () => {
-	const home = await isolateClioEnv("clio-trust-cli-");
+	const home = await isolateClioEnv("clio-coder-trust-cli-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
@@ -204,7 +204,7 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 });
 
 test("S3-01: untrusted project hooks and settings cannot acquire operator authority", async () => {
-	const home = await isolateClioEnv("clio-trust-gate-");
+	const home = await isolateClioEnv("clio-coder-trust-gate-");
 	try {
 		const workspace = join(home.dir, "workspace");
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
@@ -227,7 +227,7 @@ test("S3-01: untrusted project hooks and settings cannot acquire operator author
 });
 
 test("S3-02: a registered command hook receives a safe environment and preserves attribution opt-out", async () => {
-	const home = await isolateClioEnv("clio-hook-environment-");
+	const home = await isolateClioEnv("clio-coder-hook-environment-");
 	try {
 		process.env.ANTHROPIC_API_KEY = "fixture-anthropic-secret";
 		process.env.OPENAI_API_KEY = "fixture-openai-secret";
@@ -287,7 +287,7 @@ test("S3-03: npm ACP recipes approve exact versions", () => {
 });
 
 test("S3-03: a real ACP child excludes inherited credentials and accepts only explicit extra environment", async () => {
-	const home = await isolateClioEnv("clio-acp-environment-");
+	const home = await isolateClioEnv("clio-coder-acp-environment-");
 	try {
 		process.env.ANTHROPIC_API_KEY = "fixture-parent-secret";
 		process.env.OPENAI_API_KEY = "fixture-parent-openai";

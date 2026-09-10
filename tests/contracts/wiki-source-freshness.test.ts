@@ -14,7 +14,7 @@ describe("wiki source freshness without a usable Git comparison", () => {
 	let isolated: IsolatedClioEnv;
 	let cwd: string;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-wiki-source-freshness-");
+		isolated = await isolateClioEnv("clio-coder-wiki-source-freshness-");
 		cwd = join(isolated.dir, "repo");
 		mkdirSync(join(cwd, "src"), { recursive: true });
 		writeFileSync(join(cwd, ".gitignore"), ".clio-coder/\n");

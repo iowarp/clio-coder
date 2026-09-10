@@ -56,7 +56,7 @@ describe("memory scope boundary", () => {
 	});
 
 	it("creates a redacted, review-required promotion with source provenance", () => {
-		const root = mkdtempSync(join(tmpdir(), "clio-memory-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-memory-scope-"));
 		roots.push(root);
 		const repository = canonicalMemoryRepositoryIdentity(root);
 		ok(repository);

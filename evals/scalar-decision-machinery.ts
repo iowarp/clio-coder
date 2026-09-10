@@ -24,7 +24,7 @@ if (!python) throw new Error("Pass an existing Python interpreter with NumPy; th
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/scalar-decision.json", import.meta.url), "utf8"));
 const grader = fileURLToPath(new URL("./scalar-decision-grader.py", import.meta.url));
 const { restore } = await isolateClioEnv();
-const root = mkdtempSync(join(tmpdir(), "clio-scalar-decision-"));
+const root = mkdtempSync(join(tmpdir(), "clio-coder-scalar-decision-"));
 
 function grade(source: string, value: string) {
 	const policy = value === fixture.pythonPolicy ? "python-int" : value === fixture.numpyPolicy ? "numpy-integer" : null;

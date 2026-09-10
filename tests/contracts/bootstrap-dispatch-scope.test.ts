@@ -11,7 +11,7 @@ import { resolveDispatchPathScope } from "../../src/domains/dispatch/path-scope.
 
 for (const schemaFallback of [false, true]) {
 	test(`bootstrap treats serialized handbook text as evidence with ${schemaFallback ? "parser fallback" : "native schema"}`, async () => {
-		const cwd = mkdtempSync(join(tmpdir(), "clio-bootstrap-scope-"));
+		const cwd = mkdtempSync(join(tmpdir(), "clio-coder-bootstrap-scope-"));
 		const output = {
 			projectName: "Harbor Batches",
 			identity: "A sensor upload project.",

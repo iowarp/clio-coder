@@ -1,7 +1,7 @@
 /**
  * Local-first skill provenance pinning.
  *
- * `skills/registry.yaml` (regenerated with `npm run skills:pin`) pins the
+ * `library/skills/registry.yaml` (regenerated with `pnpm run skills:pin`) pins the
  * provenance-stripped sha256 of every marketplace skill's SKILL.md. At
  * activation time, a skill carrying marketplace provenance (`registry-id`
  * frontmatter) is compared against the pinned entry on the same normalized
@@ -16,6 +16,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import yaml from "yaml";
+import { resolvePackageRoot } from "../../../core/package-root.js";
 
 export const SKILL_PIN_MANIFEST_FILENAME = "registry.yaml";
 
@@ -34,9 +35,21 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 /** Resolve the manifest path using the same catalog resolution as the marketplace. */
 function resolveSkillPinManifestPath(cwd: string): string | null {
 	const fromEnv = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
-	const catalogDir = fromEnv && fromEnv.trim().length > 0 ? path.resolve(fromEnv.trim()) : path.join(cwd, "skills");
-	const manifestPath = path.join(catalogDir, SKILL_PIN_MANIFEST_FILENAME);
-	return existsSync(manifestPath) ? manifestPath : null;
+	if (fromEnv && fromEnv.trim().length > 0) {
+		const manifestPath = path.join(path.resolve(fromEnv.trim()), SKILL_PIN_MANIFEST_FILENAME);
+		return existsSync(manifestPath) ? manifestPath : null;
+	}
+	const repoLibraryManifest = path.join(cwd, "library", "skills", SKILL_PIN_MANIFEST_FILENAME);
+	if (existsSync(repoLibraryManifest)) return repoLibraryManifest;
+	const repoManifest = path.join(cwd, "skills", SKILL_PIN_MANIFEST_FILENAME);
+	if (existsSync(repoManifest)) return repoManifest;
+	try {
+		const bundledManifest = path.join(resolvePackageRoot(), "library", "skills", SKILL_PIN_MANIFEST_FILENAME);
+		if (existsSync(bundledManifest)) return bundledManifest;
+	} catch {
+		// Package root may be unavailable in isolated harnesses.
+	}
+	return null;
 }
 
 function loadSkillPinManifest(manifestPath: string): Map<string, SkillPinEntry> | null {

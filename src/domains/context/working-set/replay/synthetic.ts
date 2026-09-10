@@ -25,6 +25,7 @@
  * clock, no filesystem, no `Math.random`.
  */
 
+import { CLIO_PROJECT_DIR } from "../../../../core/artifact-paths.js";
 import type { SessionEntry } from "../../../session/entries.js";
 import type { ReplayLoadCascade } from "./load-clio.js";
 import { countReplayTurns, type Trace } from "./trace.js";
@@ -181,7 +182,7 @@ class Ledger {
 		this.entries.push({ kind: "message", ...this.next("call"), role: "tool_call", payload: { toolCallId, name, args } });
 		const details =
 			options.offload === true
-				? { resultDisposition: { offloadPath: `${this.cwd}/.clio-state/scratch/${toolCallId}.txt` } }
+				? { resultDisposition: { offloadPath: `${this.cwd}/${CLIO_PROJECT_DIR}/scratch/${toolCallId}.txt` } }
 				: undefined;
 		this.entries.push({
 			kind: "message",

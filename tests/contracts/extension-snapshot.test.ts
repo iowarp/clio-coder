@@ -20,7 +20,7 @@ import {
 const roots: string[] = [];
 
 function scratch(): string {
-	const root = mkdtempSync(path.join(tmpdir(), "clio-extension-snapshot-"));
+	const root = mkdtempSync(path.join(tmpdir(), "clio-coder-extension-snapshot-"));
 	roots.push(root);
 	return root;
 }

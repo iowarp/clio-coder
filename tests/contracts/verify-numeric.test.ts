@@ -17,7 +17,7 @@ const roots: string[] = [];
 const originalCwd = process.cwd();
 
 function workspace(files: Record<string, string>): string {
-	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-verify-numeric-")));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-verify-numeric-")));
 	roots.push(root);
 	for (const [relative, text] of Object.entries(files)) {
 		mkdirSync(join(root, relative, ".."), { recursive: true });

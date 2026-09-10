@@ -57,7 +57,7 @@ describe("contracts/docs server", () => {
 	});
 
 	function fixture(): { handler: ReturnType<typeof createDocsRequestHandler>; root: string; html: string } {
-		const root = mkdtempSync(join(tmpdir(), "clio-docs-server-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-docs-server-"));
 		const html = join(root, "html");
 		mkdirSync(html);
 		writeFileSync(join(html, "index.html"), "<h1>Clio docs</h1>\n", "utf8");
@@ -107,7 +107,7 @@ describe("contracts/docs server", () => {
 	});
 
 	it("refuses a missing HTML build and cleans up shutdown signal listeners", async () => {
-		const root = mkdtempSync(join(tmpdir(), "clio-docs-missing-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-docs-missing-"));
 		roots.push(root);
 		throws(() => createDocsRequestHandler(join(root, "missing-html")), /ENOENT/u);
 

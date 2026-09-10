@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 function scratch(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-remote-skill-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-remote-skill-"));
 	roots.push(root);
 	return root;
 }

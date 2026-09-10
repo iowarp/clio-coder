@@ -59,7 +59,7 @@ describe("contracts/trace code-steps reads the deterministic code-step records b
 	let home = "";
 	let previousHome: string | undefined;
 	before(() => {
-		home = mkdtempSync(join(tmpdir(), "clio-trace-code-steps-"));
+		home = mkdtempSync(join(tmpdir(), "clio-coder-trace-code-steps-"));
 		previousHome = process.env.CLIO_CODER_HOME;
 		process.env.CLIO_CODER_HOME = home;
 	});

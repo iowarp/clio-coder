@@ -101,7 +101,7 @@ function seed(home: ReturnType<typeof makeScratchHome>, url: string): string {
 
 describe("smoke/configure on a real terminal", { skip: process.platform === "win32" }, () => {
 	it("quick-connects a fresh home with one model, supports Back, and uses the shipped defaults", async () => {
-		const home = makeScratchHome("clio-quick-tty-");
+		const home = makeScratchHome("clio-coder-quick-tty-");
 		const server = createServer((request, response) => {
 			response.setHeader("content-type", "application/json");
 			if (request.url === "/api/version") response.end('{"version":"0.9.0"}');
@@ -157,7 +157,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("quick-connects a keyed gateway without inheriting an unrelated key or saving a draft", async () => {
-		const home = makeScratchHome("clio-quick-gateway-");
+		const home = makeScratchHome("clio-coder-quick-gateway-");
 		mkdirSync(join(home.dir, "config"), { recursive: true });
 		const credentialsFile = join(home.dir, "config/credentials.yaml");
 		const originalCredentials = stringify({
@@ -242,7 +242,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("offers a key for APIs whose model catalog is public", async () => {
-		const home = makeScratchHome("clio-quick-public-");
+		const home = makeScratchHome("clio-coder-quick-public-");
 		const server = createServer((request, response) => {
 			response.setHeader("content-type", "application/json");
 			if (request.url === "/v1/models") response.end(JSON.stringify({ data: [{ id: "solo" }] }));
@@ -275,7 +275,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("quick reconnect preserves an existing target, fleet, preferences, and stored credential", async () => {
-		const home = makeScratchHome("clio-quick-existing-");
+		const home = makeScratchHome("clio-coder-quick-existing-");
 		const server = createServer((request, response) => {
 			response.setHeader("content-type", "application/json");
 			if (request.headers.authorization !== "Bearer existing-key") {
@@ -325,7 +325,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("edits settings after arrow menus, clears a value, and returns to the selected row", async () => {
-		const home = makeScratchHome("clio-configure-tty-");
+		const home = makeScratchHome("clio-coder-configure-tty-");
 		const file = seed(home, "http://127.0.0.1:1");
 		const tty = terminal(home);
 		try {
@@ -364,7 +364,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("adds and edits targets through Save while preserving existing roles and unrelated capabilities", async () => {
-		const home = makeScratchHome("clio-configure-tty-");
+		const home = makeScratchHome("clio-coder-configure-tty-");
 		const observedAuth = new Set<string | undefined>();
 		const server = createServer((request, response) => {
 			observedAuth.add(request.headers.authorization);
@@ -482,7 +482,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("backs out of new-user setup without creating settings or credentials", async () => {
-		const home = makeScratchHome("clio-configure-tty-");
+		const home = makeScratchHome("clio-coder-configure-tty-");
 		const tty = terminal(home);
 		try {
 			await tty.expect("Quick Connect");
@@ -501,7 +501,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 	});
 
 	it("repairs malformed settings in the editor, rejecting an invalid draft before a reviewed save", async () => {
-		const home = makeScratchHome("clio-configure-editor-");
+		const home = makeScratchHome("clio-coder-configure-editor-");
 		const file = seed(home, "http://127.0.0.1:1");
 		const original = "version: [broken YAML\n";
 		writeFileSync(file, original);

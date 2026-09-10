@@ -13,7 +13,7 @@ const CLI = join(ROOT, "dist", "cli", "index.js");
 type Home = { root: string; env: NodeJS.ProcessEnv; cleanup(): void };
 type Inbound = { id: number; method: string; params: Record<string, unknown> };
 function home(): Home {
-	const root = mkdtempSync(join(tmpdir(), "clio-acp-boundary-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-acp-boundary-"));
 	return {
 		root,
 		env: {

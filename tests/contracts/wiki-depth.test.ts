@@ -17,7 +17,7 @@ describe("wiki coverage depth", () => {
 	let isolated: IsolatedClioEnv;
 	let cwd: string;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-wiki-depth-");
+		isolated = await isolateClioEnv("clio-coder-wiki-depth-");
 		cwd = join(isolated.dir, "repo");
 		mkdirSync(join(cwd, "src"), { recursive: true });
 		writeFileSync(join(cwd, ".gitignore"), ".clio-coder/\n");

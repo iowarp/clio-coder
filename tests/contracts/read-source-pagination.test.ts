@@ -10,7 +10,7 @@ import { makeScratchHome, type ScratchHome } from "../harness/scratch-env.js";
 describe("read source-line pagination through the source tool API", () => {
 	let scratch: ScratchHome;
 	beforeEach(() => {
-		scratch = makeScratchHome("clio-read-pagination-");
+		scratch = makeScratchHome("clio-coder-read-pagination-");
 		configureGuardrails({ readMaxBytes: 1024 });
 	});
 	afterEach(() => {

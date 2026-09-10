@@ -1,0 +1,42 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "data-curation",
+	"version": "1.0.0",
+	"description": "Scientific dataset curation bundle with curation skill, curator agent, and inspection prompt.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"resources": {
+				"skills": "skills",
+				"agents": "agents",
+				"prompts": "prompts"
+			},
+			"components": [
+				{
+					"kind": "resource",
+					"id": "guidelines",
+					"path": "assets/curation-guide.md"
+				},
+				{
+					"kind": "skill",
+					"id": "dataset-curation",
+					"path": "skills/dataset-curation/SKILL.md",
+					"requires": ["resource:guidelines"]
+				},
+				{
+					"kind": "agent",
+					"id": "data-curator",
+					"path": "agents/data-curator.md",
+					"requires": ["skill:dataset-curation"]
+				},
+				{
+					"kind": "prompt",
+					"id": "inspect-dataset",
+					"path": "prompts/inspect-dataset.md",
+					"requires": ["agent:data-curator"]
+				}
+			]
+		}
+	}
+}

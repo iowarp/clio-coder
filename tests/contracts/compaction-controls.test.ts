@@ -53,7 +53,7 @@ describe("production compaction controls", () => {
 	let scratch: IsolatedClioEnv;
 	let faux: ReturnType<typeof registerEngineFauxProvider>;
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-compaction-controls-");
+		scratch = await isolateClioEnv("clio-coder-compaction-controls-");
 		faux = registerEngineFauxProvider({
 			api: "compaction-fixture",
 			models: [{ id: "chat" }, { id: "summary" }],

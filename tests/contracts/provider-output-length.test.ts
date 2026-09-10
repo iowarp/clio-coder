@@ -95,7 +95,7 @@ for (const abortRecovery of [false, true]) {
 	it(`real worker refuses every truncated write and ${abortRecovery ? "honors explicit abort" : "continues to a grounded artifact result"}`, {
 		timeout: 10000,
 	}, async () => {
-		const env = await isolateClioEnv("clio-output-length-");
+		const env = await isolateClioEnv("clio-coder-output-length-");
 		const originalCwd = process.cwd();
 		process.chdir(env.dir);
 		const output = join(env.dir, "page.md");

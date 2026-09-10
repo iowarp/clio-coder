@@ -169,8 +169,12 @@ The registry table below lists the available interactive slash commands. On a ba
 | --- | --- | --- |
 | `/quit` | `/quit` | Exit Clio Coder |
 | `/help` | `/help [query]` | Open the interactive help center showing commands and keys |
-| `/skill` | `/skill [name] [task]` | Open the Skills Hub or invoke a skill |
-| `/library` | `/library [plugin\|skill\|agent\|prompt\|fleet\|reload\|prompts\|extensions [reload]]` | Browse packages in all five kind tabs; refresh package resources, inspect runtime prompts or manage executable harness extensions. |
+| `/skill` | `/skill <name> [task]` or `/skill off` | Invoke a skill or clear its active tool surface; `/skills` opens the browser. |
+| `/library` | `/library [inspect \| install \| remove <ref>] [import <path-or-url>] [reload]` | Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; `install`, `remove` and `import` show a reviewed plan first and write nothing until it is accepted. `reload` refreshes installed recipe resources. Alt+L opens the same browser. |
+| `/skills` | `/skills` | Open the Library on Skills. |
+| `/prompts` | `/prompts` | Open the Library on Prompts. |
+| `/extensions` | `/extensions [reload]` | Inspect harness extensions or reload their hooks and operator runtimes. |
+| `/interop` | `/interop` | Inspect another local coding agent and review adoption of supported resources. |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
@@ -178,7 +182,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
-| `/agents` | `/agents [list\|connect]` | List native and external agents, or review detected external-agent proposals |
+| `/agents` | `/agents` | Open the Library on Agents. |
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet run [--var <key=value>] <name>` | Open Settings → Fleet, or run a fleet contract with an approval preview |
@@ -214,7 +218,7 @@ must record a passing validation receipt for every named check or a successful
 completion note alone does not satisfy acceptance. `clio-coder tasks list`,
 `hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
-Retired spellings are unrecognized commands and use the standard unknown-command diagnostic; they do not print automatic replacement hints. Use supported spellings such as `/settings targets`, `/settings chat model-picker`, and the corresponding `/library` subcommand. Unrecognized commands are not sent to the model as prompt text.
+Retired commands are rejected before model submission. Old Library browsing forms, including `/resources`, `/library <kind>` and `/agents connect`, explain the canonical route. Browse with `/library`, `/skills`, `/agents` or `/prompts`; use `/interop` for local-agent adoption and `/extensions` for harness extensions.
 
 `/context` with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
@@ -314,7 +318,7 @@ The `/resume` picker accepts Page Up and Page Down to move by its 12 visible row
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
 Built-in command names are reserved across interactive and headless modes; a
-template with the same basename is omitted from `/library prompts` with a collision
+template with the same basename is omitted from `/prompts` with a collision
 diagnostic instead of shadowing a command on one surface and expanding on another.
 If a matching template is found in an untrusted project root, Clio prints that the
 prompt template comes from an untrusted project root and directs the operator to set
@@ -424,7 +428,7 @@ After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
 structured snapshot. Seeding is explicit, deduplicated, and unavailable while
 `context.memory.enabled` is false.
 
-The `/interop` and `/agents connect` overlay lists the other coding agents Clio found on this machine,
+The `/interop` overlay lists the other coding agents Clio found on this machine,
 grouped `Detected`, `Configured`, `Declined`, and `Inventory`. A detected row's detail pane
 shows the exact `integrations.externalAgents.entries` entry that connecting it would append, plus
 the two facts a new peer inherits: `projectContext: none`, so the peer receives
@@ -434,7 +438,7 @@ one or `d` to decline. Opening the overlay refreshes the disk inventory and runs
 bounded version probes; navigation and plan approval start no agent session. Accepting applies to the live session,
 because `delegation` hot-reloads.
 
-Boot adds at most one line about interop. `/interop` and `/agents connect` open the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.
+Boot adds at most one line about interop. `/interop` opens the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.
 
 `clio-coder interop inspect [--json]` reports host resources and wiring. `clio-coder interop adopt <host> [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]` shows a plan and requires approval before installing safe resources through the library. `/interop` offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See [Coding agent interoperability](interop.md) for layouts, limits, and trust semantics.
 
@@ -471,7 +475,8 @@ editor reserves and can be rebound through `settings.yaml.keybindings`.
 | `Shift+Tab` | Cycle orchestrator thinking level (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`). |
 | `Alt+T` | Open the session tree navigator (`/tree`). |
 | `Alt+U` | Toggle the footer dashboard between compact (quiet 2-zone) and expanded (4-zone urgency) layouts. |
-| `Alt+L` | Open the model and targets selector. |
+| `Alt+L` | Open or close the Library. |
+| `Alt+M` | Open the model and targets selector. |
 | `Alt+J` / `Alt+K` | Cycle forward / backward through the configured model set (when empty, directs the operator to `/settings chat model-picker`). |
 | `Alt+W` | Toggle the Fleet Runs board (task, run ID, live telemetry, retry, and terminal history). Inside it, `Enter` opens the selected run's live worker detail, `s` steers, and `x` cancels. |
 | `Alt+E` | Toggle the files pane docked below the session in a `--with-panes` session inside herdr; the same as `/files`. Rebind through `clio-coder.files.toggle`. |
@@ -869,4 +874,4 @@ Task-board guidance and ordinary continuation preserve proposal-only scope. Defe
 
 `clio-coder eval validate --package <path|kind:name> --eval <name>` validates a named package suite. `clio-coder eval run` with the same package flags runs it; `--user` or `--project` selects the installed copy. Materio declares `scripts` for its offline Python contracts. The experimental skill-scenario lane is `clio-coder eval skill <name|path> [--scenario <id>]`. See [Library packages](resource-library.md).
 
-The retired top-level `skills` and `plugins` groups and `/resources` slash spelling are unrecognized in this version. `/skill` remains the skill activation surface; `/interop` remains discovery and reviewed adoption.
+The old top-level CLI `skills` and `plugins` groups are retired; use `clio-coder library`. In the editor, `/library`, `/skills`, `/agents` and `/prompts` open the shared browser. `/resources` and `/plugins` give a replacement hint. `/skill <name>` activates a skill; `/interop` handles local-agent discovery and reviewed adoption.

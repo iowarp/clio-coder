@@ -20,7 +20,7 @@ for (const scenario of [
 	{ agentId: "external-fixture", tier: "none", acp: true },
 ] as const) {
 	test(`dispatch delivers authored prose: ${scenario.agentId} ${scenario.tier}`, async () => {
-		const env = await isolateClioEnv("clio-worker-handbook-");
+		const env = await isolateClioEnv("clio-coder-worker-handbook-");
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.fleet.retry.maxRetries = 0;
 		settings.integrations.externalAgents.entries = [
@@ -86,7 +86,7 @@ for (const scenario of [
 }
 
 test("worker authored prefixes retain safe text, disclose omissions, and honor read capability", async () => {
-	const env = await isolateClioEnv("clio-worker-prefix-");
+	const env = await isolateClioEnv("clio-coder-worker-prefix-");
 	try {
 		const path = join(env.dir, "CLIO-CODER.md");
 		writeFileSync(path, prose + "Rule sentence.\n\n".repeat(500));
@@ -124,7 +124,7 @@ test("worker authored prefixes retain safe text, disclose omissions, and honor r
 });
 
 test("derived verification remains gated while authored verification prose is unchanged", async () => {
-	const env = await isolateClioEnv("clio-worker-verification-");
+	const env = await isolateClioEnv("clio-coder-worker-verification-");
 	try {
 		const authored =
 			"## Verification expectations\n\nRun focused tests.\n\nVerification expectations:\nKeep this authored line.\n";

@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "citation-check",
+	"version": "1.0.0",
+	"description": "Verify citation keys, DOIs, and bibliography entries against source files in research software.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "citation-check",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

@@ -10,7 +10,7 @@ import { shapeToolResult } from "../../src/tools/result-shaping.js";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a5X8AAAAASUVORK5CYII=";
 
 test("read returns bounded image content for vision and a named limitation otherwise", async () => {
-	const dir = mkdtempSync(join(tmpdir(), "clio-images-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-images-"));
 	const path = join(dir, "image.bin");
 	writeFileSync(path, Buffer.from(PNG, "base64"));
 	try {
@@ -61,7 +61,7 @@ test("image result shaping preserves valid images and bounds combined payload", 
 test("browser screenshot survives scratch cleanup only on vision routes", async () => {
 	const { chmodSync, existsSync, readFileSync } = await import("node:fs");
 	const { runFrontendCheck } = await import("../../src/tools/verify/frontend.js");
-	const dir = mkdtempSync(join(tmpdir(), "clio-image-browser-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-image-browser-"));
 	const previousCwd = process.cwd(),
 		previousPath = process.env.PATH;
 	try {
@@ -166,7 +166,7 @@ test("read surface advertises supported images with an explicit vision condition
 
 test("image reads charge encoded pixels to the shared observation pool", async () => {
 	const { reserveObservation } = await import("../../src/tools/observation.js");
-	const dir = mkdtempSync(join(tmpdir(), "clio-image-budget-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-image-budget-"));
 	const path = join(dir, "plot.png");
 	writeFileSync(path, Buffer.from(PNG, "base64"));
 	const options = { supportsImages: true, sessionId: "s7-budget", turnId: dir };

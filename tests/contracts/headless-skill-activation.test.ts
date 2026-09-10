@@ -30,7 +30,7 @@ interface Scratch {
 }
 
 function scratchHome(): Scratch {
-	const root = mkdtempSync(join(tmpdir(), "clio-headless-skill-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-headless-skill-"));
 	roots.push(root);
 	return {
 		root,

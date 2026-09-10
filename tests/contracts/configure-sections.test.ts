@@ -23,7 +23,7 @@ function isolatedEnv(): {
 	cleanup: () => void;
 } {
 	const rand = Math.random().toString(36).slice(2, 8);
-	const root = join(tmpdir(), `clio-test-configure-${rand}`);
+	const root = join(tmpdir(), `clio-coder-test-configure-${rand}`);
 	const configDir = join(root, ".config", "clio-coder");
 	const dataDir = join(root, ".local", "share", "clio-coder");
 	const stateDir = join(root, ".local", "state", "clio-coder");
@@ -182,7 +182,7 @@ async function captureConfigure(
  */
 function unconfiguredEnv(): { root: string; settingsFile: string; env: Record<string, string>; cleanup: () => void } {
 	const rand = Math.random().toString(36).slice(2, 8);
-	const root = join(tmpdir(), `clio-test-onboarding-${rand}`);
+	const root = join(tmpdir(), `clio-coder-test-onboarding-${rand}`);
 	const configDir = join(root, ".config", "clio-coder");
 	mkdirSync(configDir, { recursive: true });
 	return {

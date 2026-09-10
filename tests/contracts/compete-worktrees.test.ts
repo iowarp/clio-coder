@@ -47,7 +47,7 @@ for (const agent of ["scout", "coder"] as const) {
 	}, async (t) => {
 		const writer = agent === "coder";
 		const authoredPaths = [".clio-coder/profile.yaml", "new.txt", "removed.txt", "tracked.txt"];
-		const env = await isolateClioEnv("clio-compete-state-");
+		const env = await isolateClioEnv("clio-coder-compete-state-");
 		const root = join(env.dir, "project");
 		mkdirSync(root);
 		const previousCwd = process.cwd();
@@ -335,7 +335,7 @@ for (const agent of ["scout", "coder"] as const) {
 
 for (const trackedState of [false, true]) {
 	it(`candidate finalization omits ${trackedState ? "tracked" : "untracked"} staged runtime state and preserves conflicting caller edits`, async (t) => {
-		const env = await isolateClioEnv("clio-compete-staging-");
+		const env = await isolateClioEnv("clio-coder-compete-staging-");
 		const root = join(env.dir, "project");
 		mkdirSync(join(root, ".clio-coder"), { recursive: true });
 		git(root, "init", "-q", "-b", "main");
@@ -388,7 +388,7 @@ for (const trackedState of [false, true]) {
 for (const phase of ["candidates", "judge"] as const) {
 	for (const stopKind of ["timeout", "cancel"] as const) {
 		it(`compete retains settled receipts after ${phase} ${stopKind}`, { timeout: 15_000 }, async () => {
-			const env = await isolateClioEnv("clio-compete-stop-");
+			const env = await isolateClioEnv("clio-coder-compete-stop-");
 			const root = join(env.dir, "project");
 			mkdirSync(root);
 			const previousCwd = process.cwd();

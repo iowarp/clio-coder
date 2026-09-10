@@ -262,7 +262,7 @@ for (const name of readdirSync(recipeDir)
  * must not be described as dependencies of the published CLI.
  */
 function checkShippedAdvisories() {
-	const auditRoot = mkdtempSync(join(tmpdir(), "clio-release-audit-"));
+	const auditRoot = mkdtempSync(join(tmpdir(), "clio-coder-release-audit-"));
 	try {
 		const lockfile = parseYaml(readFileSync(join(root, "pnpm-lock.yaml"), "utf8"));
 		if (!lockfile?.importers?.["."]) throw new Error("pnpm lockfile has no root importer");

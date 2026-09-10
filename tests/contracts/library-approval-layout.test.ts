@@ -3,21 +3,18 @@ import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import type { FleetRunPreview } from "../../src/interactive/fleet-run-preview.js";
 import { formatFleetRunApprovalBody } from "../../src/interactive/overlays/fleet-run-approval.js";
-import { formatLibraryInstallConfirmBody } from "../../src/interactive/overlays/library-install-confirm.js";
+import { formatLibraryPlanReview } from "../../src/interactive/overlays/library-review.js";
+import { libraryPlanFixture } from "../harness/library-plan-fixture.js";
 
 for (const columns of [80, 120, 160])
 	test(`approval retains complete source, path, digest and argv at ${columns} columns`, () => {
 		const path = `/project/${"long-directory/".repeat(20)}DESTINATION_SUFFIX`;
 		const sourceUrl = `https://example.org/${"source/".repeat(20)}SOURCE_SUFFIX`;
 		const sha256 = "1234567890abcdef".repeat(4);
-		const rows = formatLibraryInstallConfirmBody(
-			{
-				entryRef: "plugin:fixture",
-				writes: [{ ref: "plugin:fixture", path, sourceUrl, sha256 }],
-				requirements: [],
-				satisfied: [],
-			},
+		const rows = formatLibraryPlanReview(
+			libraryPlanFixture({ operation: "install", ref: "plugin:fixture", destination: path, sourceUrl, sha256 }),
 			columns - 12,
+			{ detail: true },
 		).map(stripTerminalSequences);
 		for (const row of rows) ok(visibleWidth(row) <= columns - 12);
 		const text = rows.join("").replace(/\s/g, "");

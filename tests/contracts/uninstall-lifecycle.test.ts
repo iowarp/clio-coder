@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
-const home = () => createLifecycleHome("clio-test-uninstall-");
+const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 
 /** The launcher path uninstall resolves, from CLIO_CODER_BIN_DIR. */
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");

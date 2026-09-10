@@ -10,7 +10,7 @@ import {
 	visibleWidth,
 	wrapTextWithAnsi,
 } from "../../engine/tui.js";
-import { buildHint, FILTER_HINT, type HintEntry, showClioOverlayFrame } from "../overlay-frame.js";
+import { buildHint, FILTER_HINT, type HintEntry, type OverlayEscVerb, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, listGroupHeader, markdownTheme, rule, selectListTheme } from "../theme/index.js";
 
 const ELLIPSIS = "…";
@@ -48,6 +48,8 @@ export interface ListOverlayTab {
 
 export interface ListOverlayOptions {
 	title: string;
+	/** Opt-in terminal-sized layout; ordinary list modals retain their compact size. */
+	fullScreen?: boolean;
 	items: ReadonlyArray<ListOverlayItem>;
 	/**
 	 * Tabs, drawn as a bar above the filter row and switched with ←/→, which is
@@ -62,12 +64,31 @@ export interface ListOverlayOptions {
 	onTabChange?: (tabId: string) => void;
 	/** Enables the type-to-filter input row. */
 	filterable?: boolean;
-	/** Pre-applied filter text (e.g. /skill <query> in milestone 04). */
+	/** Start in the list; / enters search, whose letters and arrows belong to the input. */
+	explicitSearch?: boolean;
+	/** Persistent, width-aware scope/mode text, including when the selected tab is empty. */
+	status?: (width: number) => string;
+	/** Actions that do not require a selected row, such as scope or view mode. */
+	globalActions?: Record<string, () => void>;
+	globalHints?: ReadonlyArray<HintEntry>;
+	/**
+	 * An inner level Esc leaves before it closes the overlay, such as a package's
+	 * member list. `active` is asked by the footer so the key it advertises is the
+	 * key the operator gets; `back` is called only when Esc actually fires.
+	 */
+	onBack?: { active: () => boolean; back: () => void };
+	/** Pre-applied filter text. */
 	initialFilter?: string;
-	/** Extra hint entries beyond movement/filter/Esc (builder appends Esc). */
-	hints?: ReadonlyArray<{ key: string; verb: string }>;
-	/** Custom message when list is empty. */
-	emptyMessage?: string;
+	/**
+	 * Extra hint entries beyond movement/filter/Esc (builder appends Esc). A
+	 * function is asked per frame and is handed the selected row, so a footer can
+	 * advertise the keys that row actually offers rather than a fixed set.
+	 */
+	hints?:
+		| ReadonlyArray<{ key: string; verb: string }>
+		| ((selected: ListOverlayItem | undefined) => ReadonlyArray<{ key: string; verb: string }>);
+	/** Custom message when list is empty; a function is asked per frame. */
+	emptyMessage?: string | (() => string);
 	/** Layout mode: stack (detail below list) or split (detail to the right). */
 	layout?: "stack" | "split";
 	/** Primary action; omitted means Enter toggles the detail pane. */
@@ -78,6 +99,7 @@ export interface ListOverlayOptions {
 }
 
 export class ListOverlayView implements Component {
+	private viewportRows = 24;
 	private selectedIndex = 0;
 	private filterText = "";
 	private isFilterFocused = false;
@@ -125,7 +147,7 @@ export class ListOverlayView implements Component {
 		private readonly options: ListOverlayOptions,
 		private readonly onChange: () => void,
 	) {
-		this.isFilterFocused = !!options.filterable;
+		this.isFilterFocused = !!options.filterable && !options.explicitSearch;
 		this.filterText = options.initialFilter ?? "";
 		this.items = options.items;
 		this.detailPaneDrawn = options.layout === "split";
@@ -168,6 +190,28 @@ export class ListOverlayView implements Component {
 		this.setItems(activeItems);
 	}
 
+	/**
+	 * Move the cursor onto a row by id, reporting whether that row is here.
+	 *
+	 * A command that names one package opens the browser on it rather than at the
+	 * top of a list the operator then has to search. A miss is reported instead of
+	 * silently landing on row zero, because "not found" and "found, first" are
+	 * different answers.
+	 */
+	selectById(id: string): boolean {
+		const index = this.filteredItems().findIndex((item) => item.id === id);
+		if (index === -1) return false;
+		this.selectIndex(index);
+		this.renderMemo = null;
+		return true;
+	}
+
+	/** Show or hide the stacked detail pane, for callers that bind their own key to it. */
+	toggleDetail(): void {
+		this.showDetail = !this.showDetail;
+		this.renderMemo = null;
+	}
+
 	/** Switch tabs and rebuild. A tab id this overlay does not carry is ignored. */
 	setActiveTab(tabId: string): void {
 		const tabs = this.options.tabs;
@@ -198,8 +242,11 @@ export class ListOverlayView implements Component {
 		const current = tabs.findIndex((tab) => tab.id === this.activeTabId);
 		const next = tabs[((((current === -1 ? 0 : current) + delta) % tabs.length) + tabs.length) % tabs.length];
 		if (!next || next.id === this.activeTabId) return false;
-		this.setActiveTab(next.id);
+		// The owner is told first: it keeps its own view state keyed on the tab, and
+		// rebuilding the rows before it knew which tab they were for built one tab's
+		// rows against the previous tab's subjects.
 		this.options.onTabChange?.(next.id);
+		this.setActiveTab(next.id);
 		this.onChange();
 		return true;
 	}
@@ -215,7 +262,23 @@ export class ListOverlayView implements Component {
 				? theme.style("accent", `${GLYPH.cursor} ${text}`, { bold: true })
 				: theme.fg("dim", `  ${text}`);
 		});
-		return [this.padLine(parts.join(theme.fg("frame", " │ ")), width)];
+		const full = parts.join(theme.fg("frame", " │ "));
+		if (visibleWidth(full) > width) {
+			const active = this.activeTab();
+			if (active) {
+				const position = tabs.findIndex((tab) => tab.id === active.id) + 1;
+				return [
+					this.padLine(
+						theme.fg(
+							"accent",
+							`${GLYPH.cursor} ${active.label} ${this.tabCounts.get(active.id) ?? 0} · ${position}/${tabs.length} ←→`,
+						),
+						width,
+					),
+				];
+			}
+		}
+		return [this.padLine(full, width)];
 	}
 
 	/**
@@ -260,6 +323,12 @@ export class ListOverlayView implements Component {
 	 * than letting one fall through to the filter.
 	 */
 	private runAction(data: string, filteredItems: ReadonlyArray<ListOverlayItem>): boolean {
+		const global = this.options.globalActions?.[data];
+		if (global) {
+			global();
+			this.onChange();
+			return true;
+		}
 		const action = this.options.actions?.[data];
 		if (!action) return false;
 		const selectedItem = filteredItems[this.selectedIndex];
@@ -268,8 +337,8 @@ export class ListOverlayView implements Component {
 	}
 
 	/**
-	 * Esc semantics shared by every list overlay regardless of which pane has
-	 * focus: first Esc clears a nonempty filter, second Esc closes.
+	 * Esc clears a nonempty filter first. Explicit search then returns to the
+	 * list before a further Esc closes the overlay.
 	 */
 	private clearFilterOrClose(): void {
 		if (this.filterText.length > 0) {
@@ -279,7 +348,27 @@ export class ListOverlayView implements Component {
 			this.onChange();
 			return;
 		}
+		if (this.options.explicitSearch && this.isFilterFocused) {
+			this.isFilterFocused = false;
+			this.onChange();
+			return;
+		}
+		// An inner level is left before the overlay is. Drilling into a package's
+		// members and pressing Esc should return to the packages, not close the
+		// Library and lose the category, mode and scope the operator set.
+		if (this.options.onBack?.active()) {
+			this.options.onBack.back();
+			this.onChange();
+			return;
+		}
 		this.options.onClose();
+	}
+
+	/** The verb Esc carries right now, following clearFilterOrClose exactly. */
+	private escapeVerb(): OverlayEscVerb {
+		if (this.filterText.length > 0) return "clear filter";
+		if (this.options.onBack?.active()) return "back";
+		return "close";
 	}
 
 	/**
@@ -295,18 +384,26 @@ export class ListOverlayView implements Component {
 	}
 
 	getHint(): string {
+		if (this.options.explicitSearch && this.isFilterFocused) {
+			return buildHint(
+				[{ key: "Enter", verb: "back to list", critical: true }],
+				this.filterText.length > 0 ? "clear filter" : "back",
+			);
+		}
 		const tabEntry = this.tabHintEntry();
 		// A list with no rows has no row to select, invoke, or act on. Offering
 		// those keys anyway is the same lie the empty state exists to stop telling.
 		// A tab key is the exception: on an empty tab it is the way to a full one.
-		if (this.items.length === 0) return buildHint(tabEntry ? [tabEntry] : [], "close");
+		if (this.items.length === 0)
+			return buildHint([...(tabEntry ? [tabEntry] : []), ...(this.options.globalHints ?? [])], this.escapeVerb());
 
 		const hintEntries: HintEntry[] = [];
 		if (tabEntry) hintEntries.push(tabEntry);
 		hintEntries.push({ key: "↑↓", verb: "select" });
 		if (this.options.filterable) {
-			hintEntries.push(FILTER_HINT);
+			hintEntries.push(this.options.explicitSearch ? { key: "/", verb: "search", critical: true } : FILTER_HINT);
 		}
+		hintEntries.push(...(this.options.globalHints ?? []));
 
 		// Navigation before actions, which is the order a narrowing footer drops in:
 		// droppable entries go left to right, so the last one written is the last one
@@ -322,14 +419,18 @@ export class ListOverlayView implements Component {
 			hintEntries.push({ key: this.options.onSelect ? "Tab" : "Enter/Tab", verb: "detail" });
 		}
 
-		if (this.options.hints) {
-			hintEntries.push(...this.options.hints);
+		const hints =
+			typeof this.options.hints === "function"
+				? this.options.hints(this.filteredItems()[this.selectedIndex])
+				: this.options.hints;
+		if (hints) {
+			hintEntries.push(...hints);
 		}
 
 		// The footer follows clearFilterOrClose(). With a filter typed, Esc does
 		// not close, and saying it does sent operators out of an overlay they were
 		// still in and back in again to find out.
-		return buildHint(hintEntries, this.filterText.length > 0 ? "clear filter" : "close");
+		return buildHint(hintEntries, this.escapeVerb());
 	}
 
 	private padLine(line: string, targetWidth: number): string {
@@ -391,7 +492,9 @@ export class ListOverlayView implements Component {
 			// A list with nothing in it and a filter that matched nothing are
 			// different states. Only the first one is the caller's empty state, and
 			// it wraps rather than truncating so a remedy survives a narrow pane.
-			const text = allItems.length === 0 ? (this.options.emptyMessage ?? "No matches found") : "No matches found";
+			const empty =
+				typeof this.options.emptyMessage === "function" ? this.options.emptyMessage() : this.options.emptyMessage;
+			const text = allItems.length === 0 ? (empty ?? "No matches found") : "No matches found";
 			for (const wrapped of wrapTextWithAnsi(text, Math.max(1, width - 2))) {
 				lines.push(this.padLine(clioTheme().fg("muted", `  ${wrapped}`), width));
 			}
@@ -426,7 +529,20 @@ export class ListOverlayView implements Component {
 					const prefix = isSelected ? theme.selectedPrefix(`${GLYPH.cursor} `) : "  ";
 					const prefixLen = 2;
 					const availableWidth = width - prefixLen;
-					const metaStr = item.meta ?? "";
+					// The name comes first at every width. Metadata used to take whatever
+					// it wanted, so at 48 columns a row of origin, scope and state left
+					// the package name as a single ellipsis: a list of rows nobody could
+					// identify. The label keeps at least half the row, and the metadata
+					// compacts into what is left or drops out entirely.
+					const rawMeta = item.meta ?? "";
+					const reservedLabel = Math.min(visibleWidth(item.label), Math.max(8, Math.floor(availableWidth * 0.5)));
+					const maxMetaWidth = Math.max(0, availableWidth - reservedLabel - 2);
+					const metaStr =
+						rawMeta.length === 0 || maxMetaWidth === 0
+							? ""
+							: visibleWidth(rawMeta) > maxMetaWidth
+								? truncateToWidth(rawMeta, maxMetaWidth, ELLIPSIS, true)
+								: rawMeta;
 					const metaLen = metaStr ? visibleWidth(metaStr) : 0;
 
 					const maxLabelWidth = Math.max(1, availableWidth - (metaLen > 0 ? metaLen + 2 : 0));
@@ -497,8 +613,14 @@ export class ListOverlayView implements Component {
 		return padded;
 	}
 
+	/** Called by the mounted overlay's visibility callback before each render. */
+	setViewportRows(rows: number): void {
+		this.viewportRows = Math.max(1, Math.floor(rows));
+	}
+
 	render(width: number): string[] {
 		const filteredItems = this.filteredItems();
+		const status = this.options.status?.(width);
 
 		if (this.selectedIndex >= filteredItems.length) {
 			this.selectIndex(Math.max(0, filteredItems.length - 1));
@@ -515,6 +637,7 @@ export class ListOverlayView implements Component {
 		// overlay frame's childLines identity cache short-circuit the whole frame.
 		const memoKey = [
 			width,
+			this.options.fullScreen ? this.viewportRows : 0,
 			this.filterText,
 			this.selectedIndex,
 			this.isFilterFocused,
@@ -524,12 +647,14 @@ export class ListOverlayView implements Component {
 			this.inputEpoch,
 			this.itemsEpoch,
 			this.activeTabId,
+			status,
 		].join("|");
 		if (this.renderMemo?.key === memoKey) return this.renderMemo.lines;
 
 		const lines: string[] = [];
 
 		lines.push(...this.renderTabBar(width));
+		if (status !== undefined) lines.push(this.padLine(status, width));
 
 		if (this.options.filterable) {
 			this.input.focused = this.isFilterFocused;
@@ -537,8 +662,9 @@ export class ListOverlayView implements Component {
 			lines.push(...inputLines);
 		}
 
+		const availableRows = Math.max(1, this.viewportRows - 2 - lines.length);
 		if (isSplit) {
-			const listMaxLines = 14;
+			const listMaxLines = this.options.fullScreen ? availableRows : 14;
 			const detailWidth = Math.max(32, Math.floor(width * 0.45));
 			const listWidth = width - detailWidth - 1;
 
@@ -552,30 +678,45 @@ export class ListOverlayView implements Component {
 				lines.push(`${left}${separator}${right}`);
 			}
 		} else {
-			const listMaxLines = this.showDetail && hasDetail ? 6 : 12;
+			const showDetail = this.showDetail && hasDetail;
+			const listMaxLines = this.options.fullScreen
+				? showDetail
+					? Math.max(1, Math.floor((availableRows - 1) / 2))
+					: availableRows
+				: showDetail
+					? 6
+					: 12;
 			const listLines = this.renderList(width, listMaxLines, filteredItems, false);
 			lines.push(...listLines);
 
 			if (this.showDetail && hasDetail) {
 				lines.push(rule(clioTheme(), width));
-				const detailLines = this.renderDetail(width, 10, selectedItem);
+				const detailRows = this.options.fullScreen ? Math.max(1, availableRows - listMaxLines - 1) : 10;
+				const detailLines = this.renderDetail(width, detailRows, selectedItem);
 				lines.push(...detailLines);
 			}
 		}
 
+		if (this.options.fullScreen) {
+			while (lines.length < this.viewportRows - 2) lines.push(" ".repeat(width));
+		}
 		this.renderMemo = { key: memoKey, lines };
 		return lines;
 	}
 
 	private detailPaneVisible(): boolean {
-		return this.options.layout === "split" || this.showDetail;
+		return this.detailPaneDrawn;
 	}
 
 	handleInput(data: string): void {
-		// ←/→ switch tabs from either pane, ahead of the filter input, which is
-		// the arrangement the Settings Center already uses to move between
-		// sections. On an untabbed overlay both keys fall through untouched.
-		if (this.options.tabs && this.options.tabs.length > 0) {
+		if (this.options.filterable && this.options.explicitSearch && !this.isFilterFocused && data === "/") {
+			this.isFilterFocused = true;
+			this.onChange();
+			return;
+		}
+		// Explicit search owns its cursor arrows. Otherwise ←/→ switch tabs,
+		// matching the Settings Center's section navigation.
+		if (this.options.tabs && this.options.tabs.length > 0 && !(this.options.explicitSearch && this.isFilterFocused)) {
 			if (matchesKey(data, "left")) {
 				this.stepTab(-1);
 				return;
@@ -588,7 +729,7 @@ export class ListOverlayView implements Component {
 
 		// PgDn / Ctrl+D and PgUp / Ctrl+U scroll the detail pane, but only
 		// while one is visible; otherwise the keys fall through untouched.
-		if (this.detailPaneVisible()) {
+		if (this.detailPaneVisible() && !(this.options.explicitSearch && this.isFilterFocused)) {
 			if (data === "\x1b[6~" || data === "\x04") {
 				this.detailScrollOffset += 5;
 				this.onChange();
@@ -621,6 +762,11 @@ export class ListOverlayView implements Component {
 				return;
 			}
 			if (matchesKey(data, "enter") || data === "\n") {
+				if (this.options.explicitSearch) {
+					this.isFilterFocused = false;
+					this.onChange();
+					return;
+				}
 				if (this.options.onSelect) {
 					const selectedItem = filteredItems[this.selectedIndex];
 					if (selectedItem) {
@@ -648,7 +794,13 @@ export class ListOverlayView implements Component {
 			// selected row. An empty query has nothing to narrow, so a bound key acts
 			// on the selection. Once a query is typed the letters belong to it, and
 			// ↑/↓ hands focus back to the list where the same keys act again.
-			if (this.filterText.length === 0 && data.length === 1 && this.runAction(data, filteredItems)) return;
+			if (
+				!this.options.explicitSearch &&
+				this.filterText.length === 0 &&
+				data.length === 1 &&
+				this.runAction(data, filteredItems)
+			)
+				return;
 
 			this.inputEpoch += 1;
 			this.input.handleInput(data);
@@ -656,8 +808,8 @@ export class ListOverlayView implements Component {
 			if (next !== this.filterText) {
 				this.filterText = next;
 				this.selectIndex(0);
-				this.onChange();
 			}
+			this.onChange();
 		} else {
 			if (matchesKey(data, "up") || data === "k") {
 				if (filteredItems.length > 0) {
@@ -697,7 +849,7 @@ export class ListOverlayView implements Component {
 
 			if (this.runAction(data, filteredItems)) return;
 
-			if (this.options.filterable && matchesKey(data, "backspace")) {
+			if (this.options.filterable && !this.options.explicitSearch && matchesKey(data, "backspace")) {
 				this.isFilterFocused = true;
 				this.inputEpoch += 1;
 				this.input.handleInput(data);
@@ -707,7 +859,7 @@ export class ListOverlayView implements Component {
 				return;
 			}
 
-			if (this.options.filterable && data.length === 1 && !matchesKey(data, "space")) {
+			if (this.options.filterable && !this.options.explicitSearch && data.length === 1 && !matchesKey(data, "space")) {
 				this.isFilterFocused = true;
 				this.inputEpoch += 1;
 				this.input.handleInput(data);
@@ -740,6 +892,10 @@ export interface ListOverlayHandle extends OverlayHandle {
 	setActiveTab(tabId: string): void;
 	/** The active tab's id, or the empty string on an untabbed overlay. */
 	activeTabId(): string;
+	/** Move the cursor onto a row by id; false when this view has no such row. */
+	selectById(id: string): boolean;
+	/** Show or hide the stacked detail pane. */
+	toggleDetail(): void;
 }
 
 /**
@@ -754,7 +910,17 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 	const view = new ListOverlayView(options, () => tui.requestRender());
 	const handle = showClioOverlayFrame(tui, view, {
 		anchor: "center",
-		width: 100,
+		width: options.fullScreen ? "100%" : 100,
+		...(options.fullScreen
+			? {
+					margin: 0,
+					maxHeight: "100%" as const,
+					visible: (_width: number, rows: number) => {
+						view.setViewportRows(rows);
+						return true;
+					},
+				}
+			: {}),
 		markerId: options.markerId,
 		// A function, not the string: on a tabbed overlay the title names the tab
 		// and must be re-read after every switch.
@@ -776,6 +942,15 @@ export function openListOverlay(tui: TUI, options: ListOverlayOptions & { marker
 		},
 		activeTabId(): string {
 			return view.activeTab()?.id ?? "";
+		},
+		selectById(id: string): boolean {
+			const found = view.selectById(id);
+			if (found) tui.requestRender();
+			return found;
+		},
+		toggleDetail(): void {
+			view.toggleDetail();
+			tui.requestRender();
 		},
 	});
 }

@@ -89,7 +89,7 @@ These two take a path, not `1`. Setting either to `1` writes a file named `1` in
 Example:
 
 ```bash
-CLIO_CODER_RENDER_TRACE=/tmp/clio-render.jsonl clio-coder
+CLIO_CODER_RENDER_TRACE=/tmp/clio-coder-render.jsonl clio-coder
 ```
 
 ## Internal plumbing

@@ -11,7 +11,7 @@ describe("contracts/result-shaping", () => {
 	let scratch: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-sweep-contract-");
+		scratch = await isolateClioEnv("clio-coder-sweep-contract-");
 	});
 
 	afterEach(() => scratch.restore());

@@ -63,7 +63,7 @@ Return:
 Use in the TUI:
 
 ```text
-/library prompts
+/prompts
 /bugfix src/parser.ts empty input crashes
 ```
 
@@ -87,14 +87,14 @@ Display the following:
 ```
 ```
 
-Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/library prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
+Submitting `/pkg:help` renders the template locally as an operator card in the transcript, headed by the command name and its source package. Nothing is sent to the model, nothing is recorded in the model-facing session context, and no tokens are spent. The card shows the first fenced code block when the body has one, otherwise the whole body, wrapped to the terminal width with no truncation and scrollable like any other transcript output. Arguments after the command name are ignored. The composer's autocomplete lists such a template with a `reference` marker, and `/prompts` marks it the same way. Headless `clio-coder run /pkg:help` prints the same text to stdout and exits 0 without booting a provider or a session.
 
 ### Foreign prompt roots
 
 A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
 
 User-scope foreign prompts are trusted because they came from the operator's
-machine. A project-scope prompt lists in `/library prompts` with an
+machine. A project-scope prompt lists in `/prompts` with an
 `untrusted` marker and refuses substitution until
 `integrations.projectResources.trustProjectImports: true` opts in. An untrusted
 template sends nothing to the model. A token naming neither a command nor a
@@ -288,7 +288,7 @@ Installed packages are admitted only when their current tree matches the SHA-256
 
 A running session does not read installed packages on every load. While domains start, the extensions domain publishes nothing: readers use an ephemeral generation-0 projection. The composition root then asks the extensions domain to build an immutable candidate for the session's working directory and builds the matching user-hook registration table from it. After validating that both candidates are still current, the composition root publishes the snapshot and hooks with two adjacent reference assignments. That paired boot snapshot is generation 1. It contains package identity and provenance, the command-tool declarations of each loadable package, and the parsed `hooks.yaml` declarations captured from the exact bytes the install digest covered. Every consumer in the process then reads the committed generation, so consecutive loads within one turn agree on the package set.
 
-`/library extensions reload` is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against `state.json`, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the `extensions.reloaded` event run only after both references are live. Observers therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.
+`/extensions reload` is the only in-session way to publish a later generation. It rebuilds the snapshot from disk, re-verifies every installed tree against `state.json`, builds the user-hook registrations for the candidate, validates both candidates, and then performs the same two adjacent assignment-only publications. No callback, event, log, or refusal sits between them; conflict diagnostics and the `extensions.reloaded` event run only after both references are live. Observers therefore see the previous hooks or the new ones, never an intermediate pairing. The command reports the new generation, which packages were added, removed, or modified, and how many hooks were registered, dropped, or rejected. A tree that no longer verifies is listed as inactive and contributes nothing until it is reinstalled. A build failure or stale candidate publishes neither side and reports why.
 
 Reloading an unchanged tree still publishes a new generation with the same content digest; content identity is the digest, not the generation number. Installs, enables, disables, and removes performed by `clio-coder extensions` in another process are invisible to a running session until the operator reloads or restarts. There is no filesystem watcher, so a CLI mutation never becomes an implicit mid-turn hook change. Command-tool schemas are frozen when a session registry is created, so a reload never changes a live model's tool surface; restart the session for that. Plugin resources have their own generation and their own `/library reload`.
 
@@ -296,12 +296,12 @@ If extension state is corrupt, loading remains fail-closed. A normal reinstall r
 
 ### Skill pack distribution
 
-Clio Coder should not grow built-in skills in the harness. Distribute reusable Clio skills as plugins instead. A `iowarp/clio-kit` bundle carries a root `plugin.json` plus a `skills/` directory, and users install it with `clio-coder library install <path> --project` or without the flag for user scope.
+Reusable skill packs belong in the Library. Clio-Coder currently bundles its canonical recipes under this repository's `library/`; no separate `iowarp/clio-kit` marketplace is required. A shareable skill pack carries a root `plugin.json` plus a `skills/` directory, and users install it with `clio-coder library install <path> --project` or without the flag for user scope. Harness tools, hooks, commands, and UI belong in the separate extension system.
 
 Recommended layout:
 
 ```text
-clio-kit/
+lab-skills/
   plugin.json
   skills/
     hpc-review/

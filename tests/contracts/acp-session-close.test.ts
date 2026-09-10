@@ -4,7 +4,7 @@ import { createStdioTransport } from "../../src/engine/acp/transport.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 test("ACP child accepts a new session after closing its bound session", async () => {
-	const home = makeScratchHome("clio-acp-session-close-");
+	const home = makeScratchHome("clio-coder-acp-session-close-");
 	const transport = createStdioTransport(
 		process.execPath,
 		[

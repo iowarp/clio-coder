@@ -76,7 +76,7 @@ describe("authored handbook fidelity", { concurrency: false }, () => {
 	let path: string;
 
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-handbook-fidelity-");
+		isolated = await isolateClioEnv("clio-coder-handbook-fidelity-");
 		cwd = isolated.dir;
 		path = join(cwd, "CLIO-CODER.md");
 		mkdirSync(join(cwd, "src"));

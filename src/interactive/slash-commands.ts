@@ -33,6 +33,7 @@ import type {
 	ResourceList,
 } from "../domains/resources/index.js";
 import { parseSkillCommand, SKILL_SURFACE_CLEAR_ARG } from "../domains/resources/index.js";
+import { isLibraryKind } from "../domains/resources/library-types.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { ShareImportPlan } from "../domains/share/index.js";
@@ -59,7 +60,6 @@ import {
 	type OracleDigestSources,
 	packOracleDigest,
 } from "./oracle.js";
-import { isLibraryTab, LIBRARY_TABS } from "./overlays/library-tabs.js";
 import { promptSourceLabel } from "./prompt-source-label.js";
 import type { CommandArgsSpec, CommandPositionalSpec, ParsedArgs } from "./slash-spec.js";
 import { matchFromSpec, usageLine } from "./slash-spec.js";
@@ -89,9 +89,9 @@ import type { WorkerEntryState } from "./worker-stream.js";
  * `../engine/tui.js`. Those modules share one bundle chunk with the instant
  * shell's Stage 0 closure, and a second, disjoint reacher makes esbuild split
  * it, which is a startup-latency regression rather than a style problem. The
- * parse-time data tables the registry needs live in leaves for that reason:
- * `./overlays/library-tabs.js` and `COUNCIL_SYNTHESIS_LABEL` in
- * `./council.js`. Import from those, not from overlays that re-export them.
+ * parse-time data tables the registry needs live in leaves for that reason,
+ * such as `COUNCIL_SYNTHESIS_LABEL` in `./council.js`. Import from those,
+ * not from overlays that re-export them.
  *
  * Boundaries rule6 in `tests/boundaries/check-boundaries.ts` refuses a violation
  * at lint time; `tests/contracts/instant-shell-import-graph.test.ts` is the
@@ -116,6 +116,24 @@ export const SETTINGS_AREA_IDS = [
 ] as const;
 export type SettingsAreaId = (typeof SETTINGS_AREA_IDS)[number];
 
+/** What `/library <verb> <ref>` asks the browser to review once it is open. */
+export type LibraryBrowseIntent = "install" | "update" | "enable" | "disable" | "remove";
+
+/**
+ * How a command opens the Library.
+ *
+ * A reference is a selection, never a write. `/library install <ref>` opens the
+ * browser on that row with its review armed, so the operator reads the plan
+ * that command produced before any of it lands.
+ */
+export interface LibraryBrowseRequest {
+	tab?: LibraryEntryKind;
+	focus?: string;
+	intent?: LibraryBrowseIntent;
+	importSource?: string;
+	scope?: "user" | "project";
+}
+
 type SlashCommandVariant =
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
@@ -124,12 +142,19 @@ type SlashCommandVariant =
 	| { kind: "context-refresh" }
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
-	| { kind: "skill-selector" }
 	| {
 			kind: "resources";
-			family?: "skills" | "prompts" | "extensions" | "plugins";
+			family?: "extensions" | "plugins";
 			tab?: LibraryEntryKind;
 			action?: "reload";
+			/** A package ref or resource key the browser selects on open. */
+			focus?: string;
+			/** An operation to review on that row. Nothing is written before the review. */
+			intent?: LibraryBrowseIntent;
+			/** A path or URL `/library import` asks the import surface to review. */
+			importSource?: string;
+			/** Explicit `--user`/`--project`; absent leaves the browser's own selection. */
+			scope?: "user" | "project";
 	  }
 	| { kind: "skill-invocation"; text: string }
 	/** `/skill off`: drop the tool surface an activated skill armed for the session. */
@@ -626,7 +651,7 @@ export interface SlashCommandContext {
 	 * until the host wires a session.
 	 */
 	runContextRecall?: (ref: string) => void;
-	openSkillsHub?: (tab?: LibraryEntryKind) => void;
+	openSkillsHub?: (request?: LibraryBrowseRequest) => void;
 	/**
 	 * `/skill off`: drop the tool surface an activated skill armed for the
 	 * session. Returns the names that were armed. Absent on a host with no
@@ -642,7 +667,7 @@ export interface SlashCommandContext {
 	expandPromptTemplate?: (text: string) => PromptTemplateExpansion;
 	listExtensions?: () => ReadonlyArray<InstalledExtension>;
 	/**
-	 * `/library extensions reload`: build, validate, and commit the next
+	 * `/extensions reload`: build, validate, and commit the next
 	 * extension generation together with its user hooks, or report why it was
 	 * refused. Absent on a host without the reload coordinator, in which case
 	 * the command says so instead of pretending.
@@ -765,8 +790,6 @@ export interface SlashCommandContext {
 	openTree: () => void;
 	openMessagePicker: () => void;
 	openHelp: (query?: string) => void;
-	openAgents: () => void;
-	openPrompts: () => void;
 	openExtensions: () => void;
 	openInterop?: () => void;
 	setEditorText?: (text: string) => void;
@@ -943,18 +966,22 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "skill",
-		description: "Invoke a skill, browse library skills, or `off` to clear its tool surface",
+		description: "Invoke a skill, or use `off` to clear its tool surface",
 		group: "Work",
-		kinds: ["skill-selector", "skill-invocation", "skill-surface-clear"],
+		kinds: ["skill-invocation", "skill-surface-clear"],
 		args: {
 			positionals: [
-				{ name: "name", required: false },
+				{ name: "name", required: true },
 				{ name: "task", required: false, rest: true },
 			],
 		},
 		match(trimmed) {
 			if (trimmed === "/skill") {
-				return { kind: "skill-selector" };
+				return {
+					kind: "usage-error",
+					command: "skill",
+					reason: "Choose /skills to browse, /skill <name> to invoke, or /skill off to clear the active tool surface",
+				};
 			}
 			const command = parseSkillCommand(trimmed);
 			if (!command) return null;
@@ -967,9 +994,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			return { kind: "skill-invocation", text: trimmed };
 		},
 		handle(command, ctx) {
-			if (command.kind === "skill-selector") {
-				ctx.openSkillsHub?.();
-			} else if (command.kind === "skill-invocation") {
+			if (command.kind === "skill-invocation") {
 				ctx.submitChat(command.text);
 			} else if (command.kind === "skill-surface-clear") {
 				const cleared = ctx.clearSkillSurface?.() ?? [];
@@ -982,38 +1007,83 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "library",
-		description: "Browse installed and available packages; reload library resources",
+		description: "Open the full-screen recipe library, review a package operation, or reload installed recipes",
 		group: "Inspect",
 		kinds: ["resources"],
+		subcommandDescriptions: {
+			inspect: "Open the Library on one package or recipe",
+			install: "Review installing one package, then apply it",
+			remove: "Review removing one package, then apply it",
+			import: "Review a plugin source from a path or URL",
+			reload: "Refresh installed recipe resources in this session",
+		},
 		args: {
-			positionals: [
-				{
-					name: "kind|reload|prompts|extensions",
-					required: false,
-					values: ["plugin", "skill", "agent", "prompt", "fleet", "reload", "prompts", "extensions"],
+			subcommands: {
+				inspect: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
 				},
-				{ name: "action", required: false, values: ["reload"] },
-			],
+				install: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				remove: {
+					positionals: [{ name: "ref", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				import: {
+					positionals: [{ name: "path-or-url", required: true }],
+					flags: [{ name: "--user" }, { name: "--project" }],
+				},
+				reload: {},
+			},
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "library", reason: parsed.error };
-			const [selection, action] = parsed.positionals;
-			if (selection === "extensions") {
-				if (action && action !== "reload")
-					return { kind: "usage-error", command: "library", reason: "extensions accepts only reload" };
-				return { kind: "resources", family: "extensions", ...(action ? { action: "reload" as const } : {}) };
+			if (parsed.flags.has("--user") && parsed.flags.has("--project"))
+				return { kind: "usage-error", command: "library", reason: "Choose one destination: --user or --project" };
+			const scope = parsed.flags.has("--project")
+				? ("project" as const)
+				: parsed.flags.has("--user")
+					? ("user" as const)
+					: undefined;
+			const subcommand = parsed.subcommand;
+			if (subcommand === "reload") return { kind: "resources", family: "plugins", action: "reload" };
+			if (subcommand === "import") {
+				const source = parsed.rest ?? parsed.positionals[0];
+				if (!source)
+					return {
+						kind: "usage-error",
+						command: "library",
+						reason: "/library import needs a directory path or a source URL to review",
+					};
+				return { kind: "resources", tab: "plugin", importSource: source, ...(scope ? { scope } : {}) };
 			}
-			if (action) return { kind: "usage-error", command: "library", reason: "expected one package kind or reload" };
-			if (selection === "reload") return { kind: "resources", family: "plugins", action: "reload" };
-			if (selection === "prompts") return { kind: "resources", family: "prompts" };
-			if (!selection) return { kind: "resources", tab: "plugin" };
-			if (!isLibraryTab(selection))
+			if (subcommand === "inspect" || subcommand === "install" || subcommand === "remove") {
+				const ref = parsed.positionals[0];
+				if (!ref)
+					return {
+						kind: "usage-error",
+						command: "library",
+						reason: `/library ${subcommand} needs a kind:name reference, such as plugin:materio, or a recipe name`,
+					};
+				const prefix = ref.split(":", 1)[0] ?? "";
+				return {
+					kind: "resources",
+					tab: isLibraryKind(prefix) && ref.includes(":") ? prefix : "plugin",
+					focus: ref,
+					...(subcommand === "inspect" ? {} : { intent: subcommand as LibraryBrowseIntent }),
+					...(scope ? { scope } : {}),
+				};
+			}
+			if (parsed.error || parsed.positionals.length > 0)
 				return {
 					kind: "usage-error",
 					command: "library",
-					reason: `Unknown kind: ${selection} (one of ${LIBRARY_TABS.map((item) => item.id).join(", ")})`,
+					reason:
+						"Use /library to browse, /library inspect|install|remove <ref>, /library import <path-or-url>, or /library reload; /skills, /agents and /prompts open the same browser on their category",
 				};
-			return { kind: "resources", tab: selection };
+			return { kind: "resources", tab: "plugin" };
 		},
 		handle(command, ctx) {
 			if (command.kind !== "resources") return;
@@ -1028,11 +1098,61 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						ctx.notice("error", `library: reload failed: ${error instanceof Error ? error.message : String(error)}`);
 					}
 				}
-			} else if (command.family === "prompts") ctx.openPrompts();
-			else if (command.family === "extensions") {
+				return;
+			}
+			if (command.family === "extensions") {
 				if (command.action === "reload") reloadExtensionsCommand(ctx);
 				else ctx.openExtensions();
-			} else ctx.openSkillsHub?.(command.tab);
+				return;
+			}
+			ctx.openSkillsHub?.({
+				...(command.tab ? { tab: command.tab } : {}),
+				...(command.focus ? { focus: command.focus } : {}),
+				...(command.intent ? { intent: command.intent } : {}),
+				...(command.importSource ? { importSource: command.importSource } : {}),
+				...(command.scope ? { scope: command.scope } : {}),
+			});
+		},
+	},
+	{
+		name: "skills",
+		description: "Open the Library on Skills",
+		group: "Inspect",
+		kinds: [],
+		args: {},
+		fromArgs: fromArgsOrUsage("skills", { kind: "resources", tab: "skill" }),
+		handle(_command, ctx) {
+			ctx.openSkillsHub?.({ tab: "skill" });
+		},
+	},
+	{
+		name: "prompts",
+		description: "Open the Library on Prompts",
+		group: "Inspect",
+		kinds: [],
+		args: {},
+		fromArgs: fromArgsOrUsage("prompts", { kind: "resources", tab: "prompt" }),
+		handle(_command, ctx) {
+			ctx.openSkillsHub?.({ tab: "prompt" });
+		},
+	},
+	{
+		name: "extensions",
+		description: "Inspect harness extensions or reload their commands, hooks and operator UI",
+		group: "Inspect",
+		// Harness navigation uses the shared overlay dispatcher, independently of recipe reload.
+		kinds: [],
+		args: { positionals: [{ name: "action", required: false, values: ["reload"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "extensions", reason: parsed.error };
+			if (parsed.positionals[0] && parsed.positionals[0] !== "reload")
+				return { kind: "usage-error", command: "extensions", reason: "extensions accepts only reload" };
+			return { kind: "resources", family: "extensions", ...(parsed.positionals[0] ? { action: "reload" as const } : {}) };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "resources" || command.family !== "extensions") return;
+			if (command.action === "reload") reloadExtensionsCommand(ctx);
+			else ctx.openExtensions();
 		},
 	},
 	{
@@ -1377,7 +1497,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "interop",
 		description: "Inspect coding agents and adopt safe resources",
 		group: "Inspect",
-		kinds: [],
+		kinds: ["agents"],
 		args: {},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "interop", reason: parsed.error };
@@ -1389,22 +1509,21 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	},
 	{
 		name: "agents",
-		description: "List agents or connect a detected external agent",
+		description: "Open the Library on Agents",
 		group: "Inspect",
-		kinds: ["agents"],
-		subcommandDescriptions: {
-			list: "List native and external agents",
-			connect: "Review detected external-agent proposals",
-		},
-		args: { subcommands: { list: {}, connect: {} } },
+		kinds: [],
+		args: {},
 		fromArgs(parsed) {
-			if (parsed.error) return { kind: "usage-error", command: "agents", reason: parsed.error };
-			return { kind: "agents", ...(parsed.subcommand === "connect" ? { connect: true } : {}) };
+			if (parsed.error)
+				return {
+					kind: "usage-error",
+					command: "agents",
+					reason: "Use /agents to browse recipes, or /interop to inspect another local agent's resources",
+				};
+			return { kind: "resources", tab: "agent" };
 		},
-		handle(command, ctx) {
-			if (command.kind !== "agents") return;
-			if (command.connect) ctx.openInterop?.();
-			else ctx.openAgents();
+		handle(_command, ctx) {
+			ctx.openSkillsHub?.({ tab: "agent" });
 		},
 	},
 	{
@@ -2217,6 +2336,14 @@ function reloadExtensionsCommand(ctx: SlashCommandContext): void {
 export function parseSlashCommand(input: string): SlashCommand {
 	const trimmed = input.trim();
 	if (trimmed.length === 0) return { kind: "empty" };
+	const retiredLibrary = /^\/(resources|plugins)(?:\s|$)/u.exec(trimmed);
+	if (retiredLibrary) {
+		return {
+			kind: "usage-error",
+			command: retiredLibrary[1] ?? "library",
+			reason: "Use /library to browse and manage recipes; use /extensions for harness extensions",
+		};
+	}
 	if (/^\/output(?:\s|$)/u.test(trimmed)) {
 		return {
 			kind: "usage-error",
@@ -2350,6 +2477,9 @@ const COMMAND_ORDER = [
 	"cost",
 	"decisions",
 	"library",
+	"skills",
+	"prompts",
+	"extensions",
 	"help",
 	"model",
 	"thinking",

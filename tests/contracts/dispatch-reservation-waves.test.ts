@@ -23,7 +23,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: Awaited<ReturnType<typeof isolateClioEnv>>;
 beforeEach(async () => {
-	env = await isolateClioEnv("clio-reservation-waves-");
+	env = await isolateClioEnv("clio-coder-reservation-waves-");
 });
 afterEach(() => env.restore());
 

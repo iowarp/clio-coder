@@ -21,10 +21,10 @@ import {
 } from "../../src/interactive/interactive-slash-runtime.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
-const source = fileURLToPath(new URL("../../plugins/materio/", import.meta.url));
+const source = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
 
 it("reloads the actual materials bundle through the interactive slash runtime and refreshes native bound roles", async () => {
-	const env = await isolateClioEnv("clio-materio-runtime-");
+	const env = await isolateClioEnv("clio-coder-materio-runtime-");
 	const originalCwd = process.cwd();
 	const bus = createSafeEventBus();
 	const agents = createAgentsBundle({ bus, getContract: () => undefined });
@@ -78,7 +78,7 @@ it("reloads the actual materials bundle through the interactive slash runtime an
 });
 
 it("executes registered fleet task arguments against synthetic supplied data and reads back persisted execution evidence", async () => {
-	const env = await isolateClioEnv("clio-materials-code-run-");
+	const env = await isolateClioEnv("clio-coder-materials-code-run-");
 	try {
 		const cwd = join(env.dir, "workspace");
 		const task = "task-01 with spaces";

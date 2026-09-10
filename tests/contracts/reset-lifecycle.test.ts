@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { runResetCommand } from "../../src/cli/reset.js";
 import { createLifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
-const home = () => createLifecycleHome("clio-test-reset-");
+const home = () => createLifecycleHome("clio-coder-test-reset-");
 
 describe("contracts/reset-lifecycle", () => {
 	it("previews the default state scope, names what survives, and writes nothing", async () => {
@@ -155,7 +155,7 @@ describe("contracts/reset-lifecycle", () => {
 	});
 
 	it("reports no work rather than a phantom result when the selected root is already gone", async () => {
-		const temp = createLifecycleHome("clio-test-reset-empty-", { populate: false });
+		const temp = createLifecycleHome("clio-coder-test-reset-empty-", { populate: false });
 		try {
 			const { code, stdout } = await runInHome(temp, () => runResetCommand(["--cache", "--force"]));
 			strictEqual(code, 0);

@@ -14,7 +14,7 @@ context) share one result envelope, implemented in `src/tools/observation.ts`.
 The OBSERVE policy plane also contains `credential_present`, whose deliberately
 minimal result does not use that envelope.
 
-Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and 50KB for scope=skills/workspace.
+Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and scope=library, and 50KB for scope=skills/workspace.
 
 Truncated text results append exactly one notice line:
 
@@ -428,16 +428,19 @@ git(op="diff", path="src/tools/safe-exec.ts")
 git(op="log", limit=10)
 ```
 
-## context: workspace snapshot, docs retrieval, and skills
+## context: workspace snapshot, docs retrieval, skills, and the library catalog
 
-One OBSERVE entry point for material about the working environment rather than the tree itself. Sources: `src/tools/context/index.ts`, `src/tools/context/docs-engine.ts`.
+One OBSERVE entry point for material about the working environment rather than the tree itself. Sources: `src/tools/context/index.ts`, `src/tools/context/docs-engine.ts`, `src/tools/context/library.ts`.
 
 Arguments:
 
-- `scope` (required). `workspace`, `docs`, or `skills`.
-- `query` (scope=docs). Question or terms; omit to list the corpus (files plus doc/section counts) instead of searching.
-- `limit` (scope=docs). Max sections; default 5, max 12.
+- `scope` (required). `workspace`, `docs`, `skills`, `library`, or `recall`.
+- `query` (scope=docs). Question or terms; omit to list the corpus (files plus doc/section counts) instead of searching. At scope=library, name, owner, or description terms.
+- `limit` (scope=docs). Max sections; default 5, max 12. At scope=library, max rows; default 20, max 50.
 - `name` (scope=skills). Skill to load; omit to list.
+- `kind` (scope=library). One of `skill`, `agent`, `prompt`, `fleet`, or `plugin`.
+- `ref` (scope=library). An exact `kind:name` package reference, a resource key, or a bare runtime name.
+- `offset` (scope=library, scope=recall). Zero-based; follow the reported `nextOffset`.
 - `include_tree` (scope=skills, boolean). List up to 50 files under the skill's base_dir.
 
 `scope="workspace"` returns the session's git/project snapshot as JSON, probing and caching it on first call. When model-visible skills are installed, the payload carries a one-line `skills` pointer (count plus the suggest protocol) so orientation surfaces the catalog; the pointer never includes catalog entries and never changes the load gate. It requires a bound session; worker registries without one get a clean error. 50KB cap.
@@ -449,11 +452,18 @@ vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload
 
 `scope="skills"` with no `name` lists installed skills with descriptions. A matching suggestion uses `Suggested skill: /skill <name>` and continues the task without activating a skill. At `read-only` and `suggest`, loading requires an explicit operator request; at `auto-edit` and `full-auto`, policy permits activation of installed skills without that request. Recipe-bound workers may load only their declared skills. Installation, availability, and activation are separate: even `full-auto` requires a bound operator acceptance for a marketplace installation. A pending request's task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a `skill_drift` warning but never blocks. 50KB cap; a truncated body offloads in full.
 
+`scope="library"` is the read-only recipe catalog, backed by the same bounded inventory `clio-coder library recipes --json` reads, and it activates, installs, registers and pins nothing. Rows are tagged and never mixed up with one another. A `resource` row is a recipe that actually loaded: its runtime name (skill frontmatter name, agent recipe id, prompt path with colons, fleet contract name), owning package or `core`/`user`/`project`/`compat` source class, scope, origin evidence, format, and the invocation that works. A `hint` row is a catalog claim about one member of a package: it names the owning package, that owner's installed copy states, and the member's own state (`not-installed` when the owner is not installed, `unknown` when the owner is installed and the member did not turn up), and it never carries an invocation because nothing loaded it. A `package` row is the install target itself with its version, origin, installed copies, and bounded `provides` hints; a package with no hints reports its contents as unknown until inspection rather than empty.
+
+The model view is the model audience: internal and shadow agents, untrusted, invalid, shadowed and manual-only resources are not listed. `kind="plugin"` returns plugin-kind install targets only; any recipe kind returns the loaded resources of that kind plus the installable owners that provide it, so an Agents or Prompts query finds the owning bundle before it is installed and without fetching its source. `ref` may match one exact resource key, several same-named records across kinds (the payload says so and each row carries its `key`), or a package, which opens that package's members. A run started with `--no-skills` lists no skill rows, because nothing in it can load one. Instruction bodies and absolute recipe paths are never returned. 16KB cap: the page is fitted to the remaining budget before it is rendered, so `limit` is an upper bound and `nextOffset` carries the remainder; `total` counts what the inventory returned and is flagged `totalIsLowerBound` when the inventory hit its own record cap. Worker registries have no library projection of their own and get a clean unavailable error.
+
 ```text
 context(scope="workspace")
 context(scope="docs", query="dispatch receipts evidence", limit=8)
 context(scope="skills")
 context(scope="skills", name="context-prime", include_tree=true)
+context(scope="library", kind="agent", query="materials")
+context(scope="library", ref="plugin:materio")
+context(scope="library", limit=20, offset=20)
 ```
 
 ## code_nav: navigate the codewiki index
@@ -747,7 +757,7 @@ Arguments:
 
 `kind=plan|review|report` writes a Markdown document to `.clio-coder/artifacts/PLAN.md`, `REVIEW.md`, or `REPORT.md` by default, so a turn nobody asked a file from never litters the working tree; `path` may override the destination but must stay inside the workspace. See [artifact-placement.md](../architecture/artifact-placement.md) for the full contract. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
 
-Skills are not artifacts. A skill is a `SKILL.md` folder written with the ordinary write tool into `.clio-coder/skills/<name>/` (or the user skill store) and validated by the skills loader; the `skill-craft` shipped skill documents the format and craft rules.
+Skills are not artifacts. A skill is a `SKILL.md` folder, and the active skill trees (`.clio-coder/skills/`, `.clio-coder/plugins/`, `.clio-coder/extensions/`, and their user-scope counterparts) are operator-owned: model-side writes and deletes there are refused, reads are not. Draft a skill somewhere else in the workspace, check it with `clio-coder library validate <path>`, and leave installation to the operator through `clio-coder library install` or `/library`. The `skill-craft` shipped skill documents the format and craft rules.
 
 ```text
 artifact(kind="plan", content="# Migration plan\n\n## Step 1 ...")

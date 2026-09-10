@@ -35,7 +35,7 @@ import { writeTool } from "../../src/tools/write.js";
 const roots: string[] = [];
 
 function scratchRoot(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-skill-surface-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-skill-surface-"));
 	roots.push(root);
 	return root;
 }
@@ -131,7 +131,10 @@ describe("skill tool surface lifetime", () => {
 		try {
 			const directory = join(root, "coding-standards");
 			mkdirSync(directory);
-			copyFileSync(new URL("../../skills/coding/coding-standards/SKILL.md", import.meta.url), join(directory, "SKILL.md"));
+			copyFileSync(
+				new URL("../../library/skills/coding/coding-standards/SKILL.md", import.meta.url),
+				join(directory, "SKILL.md"),
+			);
 			explicitPaths = [directory];
 			const policy = turnPolicy("/skill coding-standards update the fixture", root, undefined);
 			ok(policy);
@@ -228,7 +231,7 @@ describe("skill tool surface lifetime", () => {
 			const root = scratchRoot();
 			const directory = join(root, name);
 			mkdirSync(directory);
-			copyFileSync(new URL(`../../skills/coding/${name}/SKILL.md`, import.meta.url), join(directory, "SKILL.md"));
+			copyFileSync(new URL(`../../library/skills/coding/${name}/SKILL.md`, import.meta.url), join(directory, "SKILL.md"));
 			explicitPaths = [directory];
 			const policy = turnPolicy(`/skill ${name} inspect the fixture`, root, undefined);
 			strictEqual((await contextToolFor(root).run({ scope: "skills", name }, invokeOptions(policy))).kind, "ok");

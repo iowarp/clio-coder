@@ -101,7 +101,7 @@ protocols are restored. The retired PTY harness detected the visible Stage 0 byt
 Stage 1 frame directly, then parses those buffered timestamps after process
 exit. This keeps diagnostic output from corrupting the temporary shell without
 changing the measured endpoints.</p>
-<pre><code class="language-bash">CLIO_CODER_RENDER_TRACE=/tmp/clio-render.jsonl \
+<pre><code class="language-bash">CLIO_CODER_RENDER_TRACE=/tmp/clio-coder-render.jsonl \
 CLIO_CODER_TRACE_BOOT=1 \
 CLIO_CODER_INTERACTIVE=1 \
 node dist/cli/index.js

@@ -12,11 +12,11 @@ import { resolvePackageReferences } from "../../src/domains/resources/package-re
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
 
-const source = fileURLToPath(new URL("../../plugins/materio/", import.meta.url));
+const source = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
 const temporary: string[] = [];
 
 function scratch(): string {
-	const directory = mkdtempSync(path.join(tmpdir(), "clio materials bundle "));
+	const directory = mkdtempSync(path.join(tmpdir(), "clio-coder materials bundle "));
 	temporary.push(directory);
 	return directory;
 }

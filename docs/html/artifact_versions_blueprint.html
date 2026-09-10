@@ -273,12 +273,12 @@ normalization.</p>
 <td align="left">Fails closed with <code>UserTasksStoreError</code> on corrupt JSON, an unknown version or field, an invalid task, a duplicate id, or an unsafe <code>nextId</code>; missing files initialize as an empty list.</td>
 </tr>
 <tr>
-<td align="left"><strong>Library Pins</strong></td>
-<td align="left">unversioned YAML map</td>
-<td align="left"><code>readLibraryPins</code><br><code>src/domains/resources/library.ts</code></td>
-<td align="left"><code>&lt;configDir&gt;/library-pins.yaml</code></td>
-<td align="left">Typed ref (<code>skill:x</code>, <code>agent:y</code>, <code>prompt:p</code>, <code>fleet:z</code>) to <code>{sha256, sourceUrl}</code> for every resource <code>library install</code> or the Library installed.</td>
-<td align="left">Malformed YAML throws; a successfully parsed non-map reads as empty. Either a kind-qualified pin or the destination file makes an entry report installed, so a surviving pin still counts when its installed file is missing.</td>
+<td align="left"><strong>Library Package State</strong></td>
+<td align="left"><code>1</code></td>
+<td align="left"><code>PluginState</code>, <code>readPluginInstallRecord</code><br><code>src/domains/plugins/types.ts</code>, <code>state.ts</code></td>
+<td align="left"><code>&lt;configDir&gt;/plugins/state.json</code> or <code>&lt;workspace&gt;/.clio-coder/plugins/state.json</code></td>
+<td align="left">One scoped store for all five package kinds, with disabled IDs and installed records containing kind, source, origin, trust, installation time and full-tree content digest. Each complete package lives beside the state file in its own named directory.</td>
+<td align="left">Missing state initializes empty; malformed state, records or unsupported versions fail admission. A state record alone does not prove an installed or loadable package: discovery verifies the actual tree, manifest, compatibility, enablement and scope precedence. The retired <code>library-pins.yaml</code> is not an installation authority.</td>
 </tr>
 </tbody></table>
 <hr>

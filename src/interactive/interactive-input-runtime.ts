@@ -26,6 +26,7 @@ export interface InteractiveInputKeyActionDeps {
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
+	openLibrary: () => void;
 	openTree: () => void;
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
@@ -69,6 +70,7 @@ export interface InteractiveInputRuntimeDeps {
 		toggleFooterDashboardState(): void;
 		toggleDispatchBoardOverlay(): void;
 		openModelOverlayState(): void;
+		openSkillsHubState(): void;
 		openTreeOverlayState(): void;
 		openTasksOverlayState(): void;
 		openDecisionsOverlayState(): void;
@@ -150,6 +152,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		backgroundDispatch: deps.actions.backgroundActiveDispatch,
 		toggleFilesPane: deps.actions.toggleFilesPane,
 		openModelSelector: deps.overlay.openModelOverlayState,
+		openLibrary: deps.overlay.openSkillsHubState,
 		openTree: deps.overlay.openTreeOverlayState,
 		cycleScopedModelForward: () => {
 			deps.actions.cycleScopedModelForward();

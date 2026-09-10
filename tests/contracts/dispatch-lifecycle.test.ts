@@ -63,7 +63,7 @@ describe("dispatch assignment lifecycle", () => {
 	});
 
 	it("keeps detached lifecycle state durable and transition-idempotent", async () => {
-		scratch = await newScratchClioHome("clio-dispatch-lifecycle-");
+		scratch = await newScratchClioHome("clio-coder-dispatch-lifecycle-");
 		const started = await registerAssignment("assignment-1");
 		strictEqual(started.status, "running");
 		strictEqual(started.processOwner?.pid, process.pid);

@@ -118,7 +118,7 @@ function tryAcquire(lockPath: string): boolean {
 
 function timeoutError(lockPath: string, timeoutMs: number): Error {
 	return new Error(
-		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath)?.pid ?? "?"}); delete it if no other clio process is running`,
+		`timed out after ${timeoutMs}ms waiting for ${lockPath} (owner pid=${readLockOwner(lockPath)?.pid ?? "?"}); delete it if no other clio-coder process is running`,
 	);
 }
 

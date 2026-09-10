@@ -158,7 +158,7 @@ test("strict policies reject hidden history, misspellings, invalid bounds and is
 });
 
 test("wire validation and stored evidence bind both source metadata and exact transferred messages", async () => {
-	const env = await isolateClioEnv("clio-context-seed-");
+	const env = await isolateClioEnv("clio-coder-context-seed-");
 	try {
 		const seed = selectWorkerContext(captureWorkerContext(source, history()), { mode: "fork" });
 		deepStrictEqual(parseWorkerContextSeed(JSON.parse(JSON.stringify(seed))), seed);
@@ -335,7 +335,7 @@ test("receipt integrity binds inherited context and reports it as context proven
 });
 
 test("worker recall admits only this run's evictions, checks persisted digests, and uses the bounded context tool", async () => {
-	const env = await isolateClioEnv("clio-worker-recall-");
+	const env = await isolateClioEnv("clio-coder-worker-recall-");
 	try {
 		const store = createWorkerObservationStore();
 		const other = createWorkerObservationStore();

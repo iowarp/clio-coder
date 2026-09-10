@@ -10,7 +10,7 @@ import { makeScratchHome } from "../harness/scratch-env.js";
 
 for (const scenario of ["drain", "overflow", "initial", "initial-ascii", "write-error", "fast"] as const) {
 	test(`ACP guarded production stdout handles ${scenario}`, async () => {
-		const home = makeScratchHome("clio-acp-output-");
+		const home = makeScratchHome("clio-coder-acp-output-");
 		try {
 			const env = { ...process.env, ...home.env };
 			delete env.NODE_TEST_CONTEXT;

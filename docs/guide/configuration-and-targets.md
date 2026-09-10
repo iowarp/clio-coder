@@ -878,7 +878,7 @@ commands. Space selects peers and Enter confirms the selection. Without a
 TTY it prints the proposals and exits 0 with `settings.yaml` byte-identical.
 The full target wizard in Settings offers the same review after saving
 the first primary target; Quick Connect skips it. Also,
-`/agents connect` in the TUI opens the same flow.
+`/interop` in the TUI opens the same flow.
 
 No code path writes `integrations.externalAgents.entries` without an operator
 decision, and `doctor --fix` is not such a path. An accepted proposal appends

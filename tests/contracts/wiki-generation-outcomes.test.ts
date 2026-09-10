@@ -45,7 +45,7 @@ describe("wiki generation outcomes", () => {
 	let isolated: IsolatedClioEnv;
 	let cwd: string;
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-wiki-outcomes-");
+		isolated = await isolateClioEnv("clio-coder-wiki-outcomes-");
 		cwd = join(isolated.dir, "repo");
 		mkdirSync(join(cwd, "src"), { recursive: true });
 		writeFileSync(join(cwd, ".gitignore"), ".clio-coder/\n");

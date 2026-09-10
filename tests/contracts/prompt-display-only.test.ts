@@ -62,7 +62,7 @@ ${HELP_BLOCK}
 `;
 
 function fixtureRoots(): { dir: string; templates: PromptTemplateList } {
-	const dir = mkdtempSync(join(tmpdir(), "clio-display-only-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-display-only-"));
 	const prompts = join(dir, "prompts", "materio");
 	mkdirSync(prompts, { recursive: true });
 	writeFileSync(join(prompts, "help.md"), HELP_TEMPLATE);

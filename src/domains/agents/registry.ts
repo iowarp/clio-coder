@@ -17,6 +17,25 @@ export interface AgentRecipeDiagnostic {
 	source: RecipeSource["source"];
 	filepath: string;
 	message: string;
+	/**
+	 * Why a file is not in the catalog. `quarantine` is a parse/policy failure;
+	 * `ignored` is a reserved or protected id; `overridden` lost same-id
+	 * precedence to a later source. Absent on records from before this field.
+	 */
+	kind?: "quarantine" | "ignored" | "overridden";
+	/** Recipe id when it was parsed; quarantined files may not have one. */
+	id?: string;
+	/** Source that won, for `overridden`. */
+	by?: RecipeSource["source"];
+	/** Parsed audience of an ignored/overridden recipe, so listings can keep hiding internal ones. */
+	audience?: AgentRecipe["audience"];
+}
+
+/** Diagnostics are a bounded inspection aid, never a second catalog. */
+const MAX_AGENT_RECIPE_DIAGNOSTICS = 256;
+
+function recordDiagnostic(diagnostics: AgentRecipeDiagnostic[], diagnostic: AgentRecipeDiagnostic): void {
+	if (diagnostics.length < MAX_AGENT_RECIPE_DIAGNOSTICS) diagnostics.push(diagnostic);
 }
 
 function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRecipe {
@@ -24,7 +43,7 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	// Builtins may bind a package-owned skill. Custom recipes deliberately use
 	// only the operator's discovered skill roots; a recipe cannot smuggle an
 	// arbitrary filesystem path into worker context through a skill name.
-	const packageSkills = path.resolve(source.dir, "..", "..", "..", "..", "skills");
+	const packageSkills = path.resolve(source.dir, "..", "..", "..", "..", "library", "skills");
 	if (source.source === "plugin" && source.skillRoot === undefined) {
 		throw new Error(
 			`agent recipe: ${recipe.filepath}: ${source.source} declares bound skills but no skills resource root`,
@@ -103,7 +122,7 @@ export function loadRecipesFromDir(
 		} catch (error) {
 			if (source.source === "builtin") throw error;
 			const message = error instanceof Error ? error.message : String(error);
-			diagnostics.push({ source: source.source, filepath, message });
+			recordDiagnostic(diagnostics, { kind: "quarantine", source: source.source, filepath, message });
 			process.stderr.write(`[clio-coder:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
 		}
 	}
@@ -112,7 +131,21 @@ export function loadRecipesFromDir(
 	return recipes;
 }
 
-function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): ReadonlyArray<AgentRecipe> {
+function mergeRecipes(
+	diagnostics: AgentRecipeDiagnostic[],
+	...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>
+): ReadonlyArray<AgentRecipe> {
+	const ignored = (recipe: AgentRecipe, reason: string): void => {
+		process.stderr.write(`[clio-coder:agents] ignore id=${recipe.id} by=${recipe.source} reason=${reason}\n`);
+		recordDiagnostic(diagnostics, {
+			kind: "ignored",
+			id: recipe.id,
+			source: recipe.source,
+			audience: recipe.audience,
+			filepath: recipe.filepath,
+			message: `agent recipe ${recipe.id} from ${recipe.source} ignored: ${reason}`,
+		});
+	};
 	const byId = new Map<string, AgentRecipe>();
 	const builtinById = new Map<string, AgentRecipe>();
 	for (const group of sources) {
@@ -123,25 +156,35 @@ function mergeRecipes(...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>): Re
 	for (const group of sources) {
 		for (const recipe of group) {
 			if (recipe.source !== "builtin" && RESERVED_CUSTOM_AGENT_IDS.has(recipe.id)) {
-				process.stderr.write(`[clio-coder:agents] ignore id=${recipe.id} by=${recipe.source} reason=reserved-agent-id\n`);
+				ignored(recipe, "reserved-agent-id");
 				continue;
 			}
 			const builtin = builtinById.get(recipe.id);
 			if (recipe.source === "plugin" && builtin) {
-				process.stderr.write(
-					`[clio-coder:agents] ignore override id=${recipe.id} by=${recipe.source} reason=reserved-builtin\n`,
-				);
+				ignored(recipe, "reserved-builtin");
 				continue;
 			}
 			if (recipe.source === "user" && builtin && isShadowAgent(normalizeAgentSpec(builtin))) {
-				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=user reason=reserved-shadow\n`);
+				ignored(recipe, "reserved-shadow");
 				continue;
 			}
 			if (recipe.source === "project" && builtin) {
-				process.stderr.write(`[clio-coder:agents] ignore override id=${recipe.id} by=project reason=reserved-builtin\n`);
+				ignored(recipe, "reserved-builtin");
 				continue;
 			}
-			if (byId.has(recipe.id)) process.stderr.write(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
+			const previous = byId.get(recipe.id);
+			if (previous) {
+				process.stderr.write(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
+				recordDiagnostic(diagnostics, {
+					kind: "overridden",
+					id: previous.id,
+					source: previous.source,
+					audience: previous.audience,
+					by: recipe.source,
+					filepath: previous.filepath,
+					message: `agent recipe ${previous.id} from ${previous.source} overridden by ${recipe.source}`,
+				});
+			}
 			byId.set(recipe.id, recipe);
 		}
 	}
@@ -188,5 +231,5 @@ export function discoverAgentRecipes(
 		{ dir: path.join(cwd, ".clio-coder", "agents"), source: "project", cwd },
 		diagnostics,
 	);
-	return mergeRecipes(builtin, ...pluginRecipes, user, project);
+	return mergeRecipes(diagnostics, builtin, ...pluginRecipes, user, project);
 }

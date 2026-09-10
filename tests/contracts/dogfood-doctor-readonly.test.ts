@@ -72,7 +72,7 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 	let root: string;
 	let path: string;
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "clio-dogfood-doctor-"));
+		root = mkdtempSync(join(tmpdir(), "clio-coder-dogfood-doctor-"));
 		path = join(root, "config", "credentials.yaml");
 	});
 	afterEach(() => rmSync(root, { recursive: true, force: true }));

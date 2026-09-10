@@ -37,7 +37,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 
 for (const mode of ["durable calls", "eval first call"] as const) {
 	test(`built native timing includes delayed response headers: ${mode}`, async () => {
-		const scratch = makeScratchHome("clio-native-call-timing-");
+		const scratch = makeScratchHome("clio-coder-native-call-timing-");
 		// This is controlled HTTP evidence. Output arrives immediately after
 		// delayed headers, exposing providers whose start event arrives too late
 		// to serve as an invocation clock. The write forces a second real call.

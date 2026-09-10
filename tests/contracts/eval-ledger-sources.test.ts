@@ -67,7 +67,7 @@ for (const mode of [
 	"failed-run",
 ] as const) {
 	test(`eval ledger sources: ${mode}`, async () => {
-		const env = await isolateClioEnv("clio-eval-sources-");
+		const env = await isolateClioEnv("clio-coder-eval-sources-");
 		try {
 			const workspace = join(env.dir, "workspace");
 			mkdirSync(workspace);
@@ -177,7 +177,7 @@ if (${mode === "failed-run"}) process.exit(1);
 }
 
 test("stream call accounting survives bounded stdout and repeated identical usage", async () => {
-	const env = await isolateClioEnv("clio-eval-bounded-");
+	const env = await isolateClioEnv("clio-coder-eval-bounded-");
 	try {
 		const script = join(env.dir, "verbose.cjs");
 		writeFileSync(

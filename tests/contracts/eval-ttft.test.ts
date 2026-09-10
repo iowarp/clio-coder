@@ -63,7 +63,7 @@ test("TTFT chooses the chronological first call and never borrows a later timing
 });
 
 test("TTFT chronology crosses session-directory order", async () => {
-	const env = await isolateClioEnv("clio-eval-ttft-");
+	const env = await isolateClioEnv("clio-coder-eval-ttft-");
 	try {
 		for (const [sessionId, entries] of [
 			["a-later-session", [call("late", LATE, { ttftMs: 91 })]],

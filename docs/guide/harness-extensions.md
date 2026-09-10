@@ -88,7 +88,7 @@ clio-coder extensions remove local-analysis --user
 
 Installation records and verifies the entire package tree. Each invocation rechecks the effective installed package, enabled state, canonical root, and digest. Disabling, removing, replacing, or modifying a package revokes existing tool calls. A disabled project installation also suppresses the user installation with the same ID.
 
-Tool schemas are frozen when a session or worker registry is created. Restart the session after installing, enabling, or updating capabilities; `/library extensions reload` refreshes extension snapshots, hooks, and operator runtimes at idle. It does not change a live model's tool schemas. Recipe resources have the independent `/library reload` path. A new native worker constructs its own verified registry, and the ordinary allowed-tool surface and worker attestation apply. External command-line worker runtimes do not gain Clio command tools.
+Tool schemas are frozen when a session or worker registry is created. Restart the session after installing, enabling, or updating capabilities; `/extensions reload` refreshes extension snapshots, hooks, and operator runtimes at idle. It does not change a live model's tool schemas. Recipe resources have the independent `/library reload` path. A new native worker constructs its own verified registry, and the ordinary allowed-tool surface and worker attestation apply. External command-line worker runtimes do not gain Clio command tools.
 
 ## Operator commands, status, and panels
 
@@ -195,8 +195,8 @@ clio-coder extensions run lab-status dashboard --json -- /path/to/local-record.j
 ```
 
 Inside an interactive session, invoke `/ext:lab-status:dashboard` or append a
-local JSON filename. Browse `/library extensions` and use
-`/library extensions reload` after a reviewed reinstall or enable. The library
+local JSON filename. Browse `/extensions` and use
+`/extensions reload` after a reviewed reinstall or enable. The library
 navigation work may expose `/extensions [reload]` as the primary route while
 retaining these compatibility routes; both must use the same extension reload
 callback. `/library reload` never loads runtime code.

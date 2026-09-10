@@ -94,6 +94,7 @@ Tool calls appear as they run, and edits appear as diffs.
 | --- | --- |
 | Find commands | `/help` |
 | Change models or settings | `/settings` |
+| Browse reusable recipes | `Alt+L` or `/library` |
 | Check context use or cost | `/context`, `/cost` |
 | Include a project file | Type `@` and choose a path |
 | See delegated tasks | `/tasks` |
@@ -111,7 +112,7 @@ Tool calls appear as they run, and edits appear as diffs.
 | Delegate a focused task | `/run tester "Run the parser tests and explain any failure."` |
 | Branch or resume a conversation | `/tree`, `/fork`, `/resume`, `/new` |
 | Carry current state into a fresh session | `/handoff <goal>` |
-| Browse agents, prompts, and skills | `/resources` |
+| Open a Library category | `/skills`, `/agents`, `/prompts` |
 | Load a specialized skill | `/skill <name>` |
 | Export the transcript | `/export` |
 
@@ -210,7 +211,7 @@ Install a complete workflow with its prompts, agents, skills, scripts and refere
 
 ```bash
 clio-coder library search
-clio-coder library install materio --user
+clio-coder library install plugin:materio --user
 ```
 
 In a new session, start with `/materio:help` or
@@ -219,8 +220,12 @@ supplied-paper literature review, lab feasibility, research tasks, verified
 execution, and a text handoff to WTF-P for paper planning. Researchers retain
 control of assumptions and scientific decisions.
 
-The library verifies complete bundle pins and supports previews, updates,
-removal and drift checks. [Plugin usage](docs/guide/plugins.md),
+The [Library](library/README.md) bundles skills, agent recipes, prompts, fleets,
+and plugins with Clio-Coder. It verifies complete package pins and supports
+previews, updates, removal and drift checks. Its portable skills can also be
+installed in Claude Code and discovered by Codex; Clio-Coder can review and
+import supported packages from those hosts. The [interop guide](docs/guide/interop.md)
+documents the measured formats and their limits. [Plugin usage](docs/guide/plugins.md),
 [package authoring](docs/guide/authoring-plugins.md), and
 [harness extensions](docs/guide/harness-extensions.md) describe the plugin and
 harness-extension contracts. WTF-P installs as a plugin with `clio-coder library

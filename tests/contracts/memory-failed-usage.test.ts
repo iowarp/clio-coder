@@ -43,7 +43,7 @@ const USAGE = {
 for (const ending of ["error", "aborted", "stop", "no-usage"] as const) {
 	for (const switched of [false, true]) {
 		test(`memory engine usage: ${ending}, ${switched ? "switched origin" : "current origin"}`, async (t) => {
-			const env = await isolateClioEnv("clio-memory-engine-");
+			const env = await isolateClioEnv("clio-coder-memory-engine-");
 			t.after(() => {
 				registerEngineFauxProvider({ api: "memory-usage-fixture" }).unregister();
 				env.restore();
@@ -222,7 +222,7 @@ test("engine text callers still reject failures rather than returning their cont
 
 for (const unavailable of ["available", "down", "missing-model", "unloaded"] as const) {
 	test(`production memory route prefers dedicated then chat for ${unavailable}`, async (t) => {
-		const env = await isolateClioEnv("clio-memory-route-");
+		const env = await isolateClioEnv("clio-coder-memory-route-");
 		t.after(() => env.restore());
 		const settings = structuredClone(DEFAULT_SETTINGS);
 		settings.targets = [
@@ -310,7 +310,7 @@ function routingFixture() {
 }
 
 test("production callbacks use gateway capacity evidence and count foreground, leases and reservations", async (t) => {
-	const env = await isolateClioEnv("clio-memory-capacity-");
+	const env = await isolateClioEnv("clio-coder-memory-capacity-");
 	t.after(() => env.restore());
 	const { settings, providers } = routingFixture();
 	const callbacks = createBackgroundMemoryRouting(providers, () => settings, null);
@@ -364,7 +364,7 @@ test("production callbacks use gateway capacity evidence and count foreground, l
 });
 
 test("production runtime fallback calls chat once and keeps failed and fallback spend with their routes", async (t) => {
-	const env = await isolateClioEnv("clio-memory-fallback-");
+	const env = await isolateClioEnv("clio-coder-memory-fallback-");
 	t.after(() => env.restore());
 	const { settings, providers, faux } = routingFixture();
 	t.after(() => registerEngineFauxProvider({ api: "memory-fallback-fixture" }).unregister());

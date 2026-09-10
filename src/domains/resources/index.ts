@@ -20,6 +20,7 @@ export { resolveResourceCollisions } from "./collision.js";
 export type { ResourceList, ResourcesContract } from "./contract.js";
 export {
 	classifyLibraryRequirements,
+	commitLibraryInstallPlan,
 	confirmLibraryRemote,
 	discoverLibrary,
 	installLibraryPlan,
@@ -42,6 +43,65 @@ export {
 	resolveLibraryRequirements,
 	syncLibrary,
 } from "./library.js";
+export {
+	applyLibraryLifecycle,
+	type LibraryApplyResult,
+	type LibraryExpectedCopy,
+	type LibraryLifecyclePlan,
+	type LibraryLifecycleRequest,
+	type LibraryOperation,
+	type LibraryPackageIdentity,
+	type LibraryPlanStep,
+	type LibraryRefreshHost,
+	type LibraryRefreshResult,
+	type LibraryStepOutcome,
+	type LibraryStepStatus,
+	type LibraryStepVerification,
+	libraryImportOutcome,
+	libraryLifecyclePlanSummary,
+	planLibraryLifecycle,
+	pluginSnapshotRefreshHost,
+	releaseLibraryLifecycle,
+	retryLibraryRefresh,
+	verifyLibraryStep,
+} from "./library-actions.js";
+export {
+	classifyLibraryOrigin,
+	inspectLibraryCopy,
+	LIBRARY_INVENTORY_LIMITS,
+	type LibraryCopy,
+	type LibraryCopyInspection,
+	type LibraryCopyState,
+	type LibraryInventory,
+	type LibraryInventoryOptions,
+	type LibraryOrigin,
+	type LibraryOriginEvidence,
+	type LibraryPackageFormat,
+	type LibraryPackageRecord,
+	type LibraryResource,
+	type LibraryResourceAvailability,
+	type LibraryResourceKeyParts,
+	type LibraryResourceSourceClass,
+	libraryCopyState,
+	libraryResourceKey,
+	parseLibraryResourceKey,
+	readLibraryInventory,
+} from "./library-inventory.js";
+export {
+	isLibraryResourceKind,
+	LIBRARY_RESOURCE_KINDS,
+	type LibraryProvidedResource,
+	type LibraryResourceKind,
+} from "./library-types.js";
+export {
+	type LibraryPackageValidation,
+	type LibraryPackageValidationResult,
+	type LibraryResourceValidationRecord,
+	type LibraryValidationDiagnostic,
+	type LibraryValidationPrerequisite,
+	type LibraryValidationSeverity,
+	validateLibraryPackage,
+} from "./library-validation.js";
 export { createResourcesLoader, type ResourceLoaderOptions } from "./loader.js";
 export { ResourcesManifest } from "./manifest.js";
 export {

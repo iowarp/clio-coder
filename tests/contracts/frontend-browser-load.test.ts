@@ -8,7 +8,7 @@ import { runFrontendCheck } from "../../src/tools/verify/frontend.js";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a9ioAAAAASUVORK5CYII=";
 
 async function withBrowser(body: string, check: (dir: string) => Promise<void>): Promise<void> {
-	const dir = mkdtempSync(path.join(tmpdir(), "clio-frontend-browser-"));
+	const dir = mkdtempSync(path.join(tmpdir(), "clio-coder-frontend-browser-"));
 	const oldCwd = process.cwd();
 	const oldPath = process.env.PATH;
 	try {

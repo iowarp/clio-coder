@@ -81,7 +81,13 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 	[ToolNames.CodeNav, () => OBSERVE_SELF_CAPS.codeNav],
 	[
 		ToolNames.Context,
-		() => Math.max(OBSERVE_SELF_CAPS.contextDocs, OBSERVE_SELF_CAPS.contextSkills, OBSERVE_SELF_CAPS.contextWorkspace),
+		() =>
+			Math.max(
+				OBSERVE_SELF_CAPS.contextDocs,
+				OBSERVE_SELF_CAPS.contextSkills,
+				OBSERVE_SELF_CAPS.contextWorkspace,
+				OBSERVE_SELF_CAPS.contextLibrary,
+			),
 	],
 ];
 

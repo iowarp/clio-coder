@@ -99,7 +99,7 @@ let fallbackProjectCwd: string | null = null;
 function customizationCwd(inputCwd: string | undefined): string {
 	if (inputCwd !== undefined && inputCwd !== process.cwd()) return inputCwd;
 	if (isolated) return join(isolated.dir, "project");
-	fallbackProjectCwd ??= mkdtempSync(join(tmpdir(), "clio-dispatch-project-"));
+	fallbackProjectCwd ??= mkdtempSync(join(tmpdir(), "clio-coder-dispatch-project-"));
 	return fallbackProjectCwd;
 }
 
@@ -117,7 +117,7 @@ function customizationCwd(inputCwd: string | undefined): string {
  */
 export async function isolateDispatchState(): Promise<void> {
 	isolated?.restore();
-	isolated = await isolateClioEnv("clio-dispatch-state-");
+	isolated = await isolateClioEnv("clio-coder-dispatch-state-");
 }
 
 export function restoreDispatchState(): void {

@@ -44,6 +44,8 @@ Interop adoption records `{kind: "interop", host, source}` and `trust: "foreign"
 
 The bundled index is `library/registry.yaml`. Clio also reads the user index selected by `integrations.library.catalog` (default `<configDir>/library.yaml`) and the project `.clio-coder/library.yaml`. Project rows override user and bundled rows with the same typed reference; `--from <index>` has highest priority.
 
+Clio Coder ships the index together with its curated `library/skills/` packages and `library/plugins/` bundles in the npm package. Bundled sources resolve relative to the installed index, so they remain available from any working directory without a GitHub fetch. Built-in subagent recipes ship separately under `src/domains/agents/builtins/`; installed plugins can contribute additional recipes and bound skills. The manifest's `ai.iowarp.clio` extension key identifies Clio-specific declarations inside a package, not a marketplace address.
+
 ```yaml
 entries:
   - kind: plugin
@@ -63,21 +65,42 @@ An index is JSON or YAML, either an `entries` object or a list. Every row requir
 ## Register and publish
 
 ```bash
+clio-coder library validate ./lab-workflow --json
 clio-coder library register ./lab-workflow --project --json
 clio-coder library install plugin:lab-workflow --project
 pnpm library:pin
 pnpm library:check
 ```
 
-Registration validates a local package and writes its identity, version, digest and source into the selected scoped index without installing it. Replacing an existing registration requires `--force`. The maintainer pin command regenerates the bundled index from complete packages in `skills/` and `plugins/`; `library:check` is part of hygiene. See [authoring a package](authoring-plugins.md) and the [architecture invariants](../architecture/library.md).
+Working authoring templates for all five package kinds live in `library/_authoring/templates/`. Registration validates a local package and writes its identity, version, digest and source into the selected scoped index without installing it. Replacing an existing registration requires `--force`. The maintainer pin command regenerates the bundled index from complete packages in `library/` (`library/skills/` and `library/plugins/`); `library:check` is part of hygiene and verifies all distributed bytes against `library/registry.yaml`. For curated skills, `skills:pin` records normalized skill-body hashes as provenance evidence. See [authoring a package](authoring-plugins.md) and the [architecture invariants](../architecture/library.md).
+
+`library:pin` also regenerates `.claude-plugin/marketplace.json` from those pins, which is what lets another agent install these packages from the repository: `claude plugin marketplace add iowarp/clio-coder`, then `claude plugin install <name>@clio-coder`. Codex reads the same canonical directories through `.agents/skills`. Neither surface holds a copied recipe body, and `library:check` fails on a stale one. A package publishes there only when a peer host would load a real skill surface from it and nothing it would default-scan into a native component; the pin run prints which packages it left out and why, and leaving one out is not a failure. See [coding agent interoperability](interop.md).
 
 Private index repositories may opt into Git synchronization. Set `integrations.library.sync: true`, configure a remote named `library`, and review `clio-coder library remote confirm <url>`. `library sync` fetches that remote and merges `FETCH_HEAD` with `--ff-only`; `library push` pushes it. Disabled synchronization or an unconfirmed/mismatched remote refuses before mutation. These commands synchronize the private repository; they do not automatically update installed packages.
 
 ## Interactive library and evals
 
-`/library` opens the plugin tab; `/library skill`, `/library agent`, `/library prompt`, and `/library fleet` select the other tabs. `s` switches the action scope between user and project. `i` reviews installation, `u` reviews update, `e` toggles enabled state, `r` reviews removal, `p` verifies the pin, and `d` checks drift. Long approval paths and digests wrap and scroll. `/library reload` refreshes resources in the active session. A headless `library reload` refreshes only its own process.
+**Alt+L** or `/library` opens the fullscreen Library; `/skills`, `/agents`, and `/prompts` open its corresponding category. The five tabs cover skills, agents, prompts, fleets, and plugins. `b` switches Browse/Installed, and `s` selects User/Project for management. Mode and scope remain visible on empty tabs. Left/right changes category; `/` focuses search, where letters and left/right edit the query. Enter returns from search to the list; Esc clears search or returns before closing.
 
-`/skill` opens the skill tab; `/skill <name>` activates a skill or offers its package installation. `library skills --all --json` lists runtime skills, including unmanaged files; `library inventory --json` is the fixed body-free GUI read. `library validate <SKILL.md>` validates an unmanaged draft. Installed package lifecycle remains in `library`; the retired top-level `skills`, `plugins`, and `/resources` spellings are unrecognized.
+Enter opens a package's members. `v` uses an available recipe by preparing its invocation in the composer; a fleet opens its existing approval preview. `i` reviews installation, `u` update, `e` enable/disable, and `r` removal. A member's management action names its whole owning package and the selected scope. Core and loose recipes have no package removal action. `o` opens local-agent discovery and reviewed adoption; `R` rereads the browser inventory. Pin and drift inspection remain available through the CLI.
+
+`/library inspect <ref>`, `/library install <ref>`, `/library remove <ref>`, and `/library import <path-or-url>` open the same browser and review flow; use typed references such as `skill:tdd` and an explicit `--user` or `--project` when needed. Import reviews the supplied source, its supported recipes and omitted features. Origin, vendor format, trust, scope and actual availability are separate facts; an installed foreign package may still have recipes withheld by the trust setting.
+
+Every managed change is reviewed before writing. The review shows dependencies, affected dependents, fallback behavior and recovery, with `d` revealing paths and digests. Esc cancels and releases staged sources. Outcomes report committed, failed and unattempted steps, disk verification, resource admission and session refresh separately. A failed refresh does not undo a committed write; `R` in the outcome retries refresh without repeating the mutation. `/library reload` refreshes recipes in the active session; a headless `library reload` refreshes only its own process. Harness reload stays under `/extensions reload`.
+
+`/skills` opens the skill tab; `/skill <name>` activates a skill or offers its package installation. `library skills --all --json` lists runtime skills, including unmanaged files; `library inventory --json` is the fixed body-free GUI read. `clio-coder library validate <path>` validates an unmanaged draft or a complete package candidate. Installed package lifecycle remains in `library`; the retired top-level `skills` and `plugins` commands and the `/resources` and `/plugins` slash spellings are unrecognized. `/extensions` is the harness extension surface and is separate from the recipe library.
+
+## One inventory for the operator and the model
+
+```bash
+clio-coder library recipes --json
+clio-coder library recipes materials --kind agent
+clio-coder library recipes --source core --all
+```
+
+`library recipes` is the versioned, body-free read of the recipes actually discovered here, across every source: bundled core recipes, loose user and project files, installed package members, and foreign files in interop compatibility roots. Each row carries its actual runtime name, its owning package or source class, its scope, its origin evidence, its availability and, where it is usable, its invocation. It never fetches a remote source and never writes. `library list` and `library search` stay package-oriented and answer with install targets; `--kind agent` there also matches packages whose generated `provides` hints include an agent, so a kind query finds the owning bundle before installation. `library inventory --json` is unchanged: it remains the fixed skills wire contract that GUI hosts read.
+
+Clio reads the same inventory through `context(scope="library")`. That scope is a read: bounded `kind`, `query` and `ref` selection with `limit`/`offset` pages, tagged rows for loaded resources, catalog hints and install targets, and no activation, installation, registration or pin write anywhere in it. Skill activation stays under `context(scope="skills")` and `/skill <name>`. A hint row names its installable owner and that member's honest state and never carries an invocation, because nothing has loaded it. Internal and shadow agents, untrusted resources and instruction bodies are not in the model's view at all, and a worker run has no library projection of its own. See [tool usage](tool-usage.md) for the argument surface and the row shapes.
 
 A package declares named suite paths in `extensions["ai.iowarp.clio"].evals`. Run the same eval interface for every kind:
 

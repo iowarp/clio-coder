@@ -83,6 +83,31 @@ function collectFiles(dirs: string[], extensions: string[]): string[] {
 	return found;
 }
 
+// Include hidden instructions and newly authored files, while respecting the
+// repository's ignored state, dependency trees, and generated build output.
+function checkProductNamespace(): void {
+	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+		cwd: root,
+		encoding: "utf8",
+		maxBuffer: 10 * 1024 * 1024,
+	}).split("\0");
+	const legacyProjectPath = /(?:^|[\s"'`/\\])\.clio(?:-(?!coder\b)|(?=$|[\s/\\"'`.,;:)\]}]))/iu;
+	for (const file of new Set(files)) {
+		if (!/\.(?:[cm]?[jt]sx?|md|json|ya?ml|toml|sh|html|txt)$/u.test(file)) continue;
+		if (file === "CHANGELOG.md" || file.startsWith("docs/history/") || file.startsWith(".github/releases/")) continue;
+		if (!existsSync(join(root, file))) continue;
+		if (legacyProjectPath.test(file)) {
+			fail("product-namespace", `${file}: project state directories must use the clio-coder namespace`);
+		}
+		const lines = readRoot(file).split("\n");
+		for (const [index, line] of lines.entries()) {
+			if (legacyProjectPath.test(line)) {
+				fail("product-namespace", `${file}:${index + 1}: project state paths must use the clio-coder namespace`);
+			}
+		}
+	}
+}
+
 const IDENTIFIER = /[A-Za-z0-9_]+/g;
 const EXPORTED_FUNCTION = /^export (?:async )?function ([A-Za-z0-9_]+)/gm;
 
@@ -120,7 +145,7 @@ function checkExportHygiene(): void {
 // wording. Was tests/boundaries/boundaries.test.ts.
 // ---------------------------------------------------------------------------
 function fixtureProject(files: Record<string, string>): string {
-	const dir = mkdtempSync(join(tmpdir(), "clio-boundary-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-boundary-"));
 	for (const [file, content] of Object.entries(files)) {
 		const full = join(dir, file);
 		mkdirSync(dirname(full), { recursive: true });
@@ -497,22 +522,12 @@ function checkCiScripts(): void {
 }
 
 // ---------------------------------------------------------------------------
-// skills-pin: skills/registry.yaml must match the catalog content hashes.
-// be2b5ccb rewrote a skill's instructions and never repinned; `pnpm run
-// skills:check` (`pin-skills.ts --check`) only ran inside the full `ci`
-// chain, and `pnpm run lint` never called it, so nothing caught the drift
-// until the full gate ran. This delegates to the same `--check` mode `lint`
-// now runs, rather than reimplementing the hash comparison, so there is one
-// definition of "stale".
+// library-pin: package payloads, templates, normalized skill evidence, and
+// full-tree pins in library/registry.yaml must match the repository content.
 // ---------------------------------------------------------------------------
 async function checkLibraryPin(): Promise<void> {
 	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-library.ts", "--check"], {});
 	if (result.status !== 0) fail("library-pin", result.output.trim());
-}
-
-async function checkSkillsPin(): Promise<void> {
-	const result = await runProcess("node", ["--import", "tsx", "scripts/pin-skills.ts", "--check"], {});
-	if (result.status !== 0) fail("skills-pin", result.output.trim());
 }
 
 // ---------------------------------------------------------------------------
@@ -949,7 +964,7 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	if (!verify) {
 		fail("readme-install-block", "the block no longer verifies the install");
 	} else {
-		if (!(verify.includes("/clio") && !/^clio-coder --version/u.test(verify.trim()))) {
+		if (!(verify.includes("/clio-coder") && !/^clio-coder --version/u.test(verify.trim()))) {
 			fail("readme-install-block", `verification must name the installed launcher by path: ${verify}`);
 		}
 		const binDir = installerBinDir();
@@ -966,7 +981,7 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	if (!section.includes("command -v clio-coder")) {
 		fail("readme-install-block", "the README no longer asks which file the bare name reaches");
 	}
-	if (/`clio-coder --version` and\s+`[^`]*\/clio" --version` agree/u.test(section)) {
+	if (/`clio-coder --version` and\s+`[^`]*\/clio-coder" --version` agree/u.test(section)) {
 		fail(
 			"readme-install-block",
 			"the README must not treat agreeing versions as proof the bare name resolves to this install",
@@ -1717,10 +1732,10 @@ function checkPiSurface(): void {
 }
 
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
+	["product-namespace", checkProductNamespace],
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
-	["skills-pin", checkSkillsPin],
 	["library-pin", checkLibraryPin],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],

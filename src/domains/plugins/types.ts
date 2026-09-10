@@ -7,6 +7,39 @@ export interface PluginDiagnostic {
 	type: "warning" | "error";
 	message: string;
 	path?: string;
+	/** Machine-readable reason for writer refusals; message text is unchanged. */
+	code?: PluginDiagnosticCode;
+	/** The reviewed fact that changed, for `stale_plan`. */
+	changed?: { scope: PluginScope; id: string; fact: keyof PluginExpectedCopy; expected: unknown; observed: unknown };
+}
+export type PluginDiagnosticCode = "stale_plan" | "locked" | "dependents";
+
+/**
+ * One reviewed copy fact. Every field present is rechecked inside the writer's
+ * lock before any write; a mismatch refuses with `stale_plan`.
+ */
+export interface PluginExpectedCopy {
+	scope: PluginScope;
+	id: string;
+	/**
+	 * A full snapshot (default) also fails when a fact appears or disappears.
+	 * `partial` checks only the facts listed; reserved for the legacy
+	 * digest-only update path that never reviewed the other facts.
+	 */
+	partial?: boolean;
+	/** Install record present in that scope's state.json. */
+	recorded: boolean;
+	/** Observed full-tree digest, or absent. */
+	tree: "absent" | string;
+	enabled?: boolean;
+	recordedDigest?: string;
+	kind?: LibraryEntryKind;
+	trust?: PackageTrust;
+	/** Compared JSON-equal, so identical bytes with a different origin still stale a plan. */
+	origin?: PluginOrigin;
+}
+export interface PluginExpectedState {
+	copies: PluginExpectedCopy[];
 }
 
 export interface PluginComponent {
@@ -53,10 +86,27 @@ export interface PluginCandidate {
 	manifestDigest?: string;
 }
 
+/** Format of a foreign package as it was found on disk; author labels never set this. */
+export type ForeignPackageFormat = "portable" | "claude-code" | "codex";
+/**
+ * `interop` is a package imported from an installed local agent; `import` is an
+ * explicit source path or GitHub tree. Both always carry foreign trust.
+ */
 export type PluginOrigin =
 	| string
 	| { kind: "local" | "catalog" | "github"; source: string }
-	| { kind: "interop"; host: string; source: string };
+	| { kind: "interop"; host: string; source: string; format?: ForeignPackageFormat; marketplace?: string }
+	| {
+			kind: "import";
+			source: string;
+			transport: "local" | "github";
+			format: ForeignPackageFormat;
+			host?: string;
+			marketplace?: string;
+	  };
+export function isForeignPluginOrigin(origin: PluginOrigin | undefined): boolean {
+	return typeof origin === "object" && (origin.kind === "interop" || origin.kind === "import");
+}
 export type PackageTrust = "trusted" | "foreign";
 
 export interface PluginProvenance {
@@ -108,7 +158,11 @@ export interface PluginListOptions {
 	all?: boolean;
 }
 
-export interface PluginInstallOptions extends PluginListOptions {
+export interface PluginMutationOptions extends PluginListOptions {
+	expect?: PluginExpectedState;
+}
+
+export interface PluginInstallOptions extends PluginMutationOptions {
 	force?: boolean;
 	expectedDigest?: string;
 	expectedId?: string;

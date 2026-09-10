@@ -106,7 +106,7 @@ describe("bash execution without cancellation", () => {
 		}
 	});
 	it("preserves the original ENOENT spawn error for a nonexistent cwd", { timeout: 15_000 }, async () => {
-		const home = makeScratchHome("clio-bash-spawn-error-");
+		const home = makeScratchHome("clio-coder-bash-spawn-error-");
 		try {
 			const result = await runBashCommand("printf unreachable", { cwd: join(home.dir, "absent"), timeoutMs: 2000 });
 			assert.equal(result.error?.code, "ENOENT");

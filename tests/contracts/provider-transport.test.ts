@@ -492,7 +492,7 @@ describe("provider transport boundary", () => {
 	});
 
 	it("loads a valid runtime plugin from a directory", async () => {
-		const directory = mkdtempSync(join(tmpdir(), "clio-runtime-plugin-"));
+		const directory = mkdtempSync(join(tmpdir(), "clio-coder-runtime-plugin-"));
 		temporaryDirectories.push(directory);
 		writeFileSync(
 			join(directory, "contract-plugin.js"),

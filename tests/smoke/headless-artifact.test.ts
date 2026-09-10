@@ -36,7 +36,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 
 for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error"] as const) {
 	test(`built headless artifact and eval: ${scenario}`, async () => {
-		const scratch = makeScratchHome("clio-headless-artifact-");
+		const scratch = makeScratchHome("clio-coder-headless-artifact-");
 		const fixture = await startOpenAICompatFixture("unexpected follow-up", {
 			toolCall: { name: "artifact", arguments: { kind: "report", content: "fixture report\n" } },
 			usage: {
@@ -222,7 +222,7 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 // main agent dispatches one worker whose terminal text satisfies its result
 // contract, then ends the turn with the artifact tool.
 test("built headless artifact: a completed dispatch builds its evidence under a fresh pinned state dir", async () => {
-	const scratch = makeScratchHome("clio-headless-artifact-dispatch-");
+	const scratch = makeScratchHome("clio-coder-headless-artifact-dispatch-");
 	const hasTool = (request: Record<string, unknown>, name: string): boolean =>
 		Array.isArray(request.tools) &&
 		request.tools.some((tool) => (tool as { function?: { name?: string } })?.function?.name === name);
@@ -284,7 +284,7 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 // the deadline cancels the turn and the receipt records that cancellation
 // with the exit status the runner reports.
 test("built headless artifact and eval: task deadline ends the Clio run it is timing", async () => {
-	const scratch = makeScratchHome("clio-headless-artifact-deadline-");
+	const scratch = makeScratchHome("clio-coder-headless-artifact-deadline-");
 	// The model answers the artifact call only long after the deadline. A run
 	// the deadline never reached would go on to write the artifact.
 	const fixture = await startOpenAICompatFixture("unexpected follow-up", {

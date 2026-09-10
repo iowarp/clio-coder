@@ -96,7 +96,8 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 | `.clio-coder/profile.yaml` | Operator input | Operator profile; closed enums and bounded path lists. | Yes. | Kept |
 | `.clio-coder/fleets/*.md`, `.clio-coder/fleets/commands.yaml` | Overlay | Fleet contracts and their command registry. Adds to the fleets shipped under `src/domains/agents/fleets/`. | Yes; shipped fleets remain. | Kept |
 | `.clio-coder/agents/*.md` | Overlay | Project agent recipes. Composes with shipped builtins and the user's `~/.config/clio-coder/agents`; a project recipe reusing a builtin id is **ignored**, not applied, with a note on stderr. | Yes; shipped agents remain. | Kept, and named |
-| `.clio-coder/skills/**` | Overlay | Project skills, trusted as repository-local. This is where `clio-coder library install skill:<name> --project` lands a catalog skill; the shipped catalog under the package's `skills/` is a marketplace to install from, not a discovery root, so nothing appears here until the operator installs it. | Yes; the shipped catalog remains installable. | Kept, and named |
+| `.clio-coder/skills/**` | Overlay | Loose project skills placed here by the operator, trusted as repository-local. Library installations use the managed package store below. | Yes; loose skills must be restored by the operator. | Kept, and named |
+| `.clio-coder/plugins/<name>/`, `.clio-coder/plugins/state.json` | Operator input | Complete installed library packages of all five kinds and their scoped state. `clio-coder library install skill:<name> --project` installs here. The bundled `library/` remains the catalog source. | Use `clio-coder library remove <kind>:<name> --project` to keep package state consistent. | Kept, not named |
 | `CLIO-CODER.md` (repository root) | Runtime state | The generated project handbook. Human-reviewable, but written by `context init`. | Yes; regenerate with `clio-coder context init`. | Kept unless `--all` |
 | `.clio-coder/codewiki.json` | Runtime state | Structural index, schema v5. | Yes; rebuilt by `clio-coder context index`. | **Removed** |
 | `.clio-coder/state.json` | Runtime state | Index fingerprint and freshness stamps. | Yes; forces a rebuild. | **Removed** |
@@ -110,8 +111,8 @@ The tables above cover the per-user roots. A repository Clio works in also grows
 user configuration directory, not in any repository.
 
 None of `.clio-coder/` is published by Clio's own package. The directories Clio ships
-(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, the whole `skills/` catalog
-with its `registry.yaml` and `skill-marketplace.json`, `src/domains/prompts/fragments/`,
+(`src/domains/agents/builtins/`, `src/domains/agents/fleets/`, the whole `library/` catalog
+with its registry, recipe packages and skill provenance records, `src/domains/prompts/fragments/`,
 `src/domains/providers/models/`) are read from the installed package root; the `.clio-coder/`
 entries above compose with them and never replace them on disk. Builtin agent recipes bind
 skills straight out of the package catalog; the operator's own session reaches the same

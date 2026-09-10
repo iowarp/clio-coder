@@ -50,7 +50,7 @@ function git(root: string, ...args: string[]): void {
  * unrelated file (issue #205, `tests/harness/tmp-git-guard.ts`).
  */
 function makeScratch(): Scratch {
-	const root = mkdtempSync(join(tmpdir(), "clio-host-verification-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-host-verification-"));
 	scratches.push(root);
 	const project = join(root, "project");
 	const stateDir = join(root, "state");

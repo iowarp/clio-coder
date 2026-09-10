@@ -66,7 +66,7 @@ if (scenario.exitLeader) {
 `;
 
 function scratch(): { root: string; binary: string; home: string } {
-	const root = mkdtempSync(join(tmpdir(), "clio-fake-claude-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-fake-claude-"));
 	scratchDirectories.push(root);
 	const binary = join(root, "claude");
 	const home = join(root, "home");

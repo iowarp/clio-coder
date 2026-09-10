@@ -67,35 +67,35 @@ under pressure; git mechanics alone never justify a stage.</p>
 </thead>
 <tbody><tr>
 <td>1. File</td>
-<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/file-ticket/"><code>file-ticket</code></a></td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket/"><code>file-ticket</code></a></td>
 <td>A labeled GitHub issue with evidence and acceptance criteria</td>
 </tr>
 <tr>
 <td>2. Fix</td>
-<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/fix-issue/"><code>fix-issue</code></a></td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/fix-issue/"><code>fix-issue</code></a></td>
 <td>An uncommitted, verified change where failing tests preceded the fix, self-reviewed against the issue&#39;s acceptance criteria</td>
 </tr>
 <tr>
 <td>3. Ship</td>
-<td><a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/ship/"><code>ship</code></a></td>
+<td><a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/ship/"><code>ship</code></a></td>
 <td>An atomic conventional commit referencing the issue (<code>fixes #N</code>); contributors push it to their fork and open a PR, while maintainer work stays local for gated integration; merge is a human decision</td>
 </tr>
 </tbody></table>
 <p>Releases follow <a href="release_checklist_blueprint.html">release-cut-checklist.md</a> as a
 human-gated checklist, not a skill. Worktrees
-(<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-create/"><code>worktree-create</code></a>,
-<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/worktree-merge/"><code>worktree-merge</code></a>),
-<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/branch-closeout/"><code>branch-closeout</code></a>,
-<a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/resolve-merge-conflicts/"><code>resolve-merge-conflicts</code></a>, and
-<a href="https://github.com/iowarp/clio-coder/tree/main/skills/coding/tdd/"><code>tdd</code></a> are à-la-carte tools reached for when the
+(<a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/worktree-create/"><code>worktree-create</code></a>,
+<a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/worktree-merge/"><code>worktree-merge</code></a>),
+<a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/branch-closeout/"><code>branch-closeout</code></a>,
+<a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/resolve-merge-conflicts/"><code>resolve-merge-conflicts</code></a>, and
+<a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/coding/tdd/"><code>tdd</code></a> are à-la-carte tools reached for when the
 situation calls for them, not stages every change passes through. An RCA
 written as the closing comment on the issue (<code>rca</code> label) is an artifact of
 hard bugs, not a mandatory toll booth. Batch ticket creation from a PRD
-bypasses stage 1 and uses <a href="https://github.com/iowarp/clio-coder/tree/main/skills/planning/backlog/"><code>backlog</code></a>
+bypasses stage 1 and uses <a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/planning/backlog/"><code>backlog</code></a>
 instead; everything downstream is identical.</p>
 <h2>Closeout</h2>
 <p>A merged PR is not operationally finished until its local scaffolding is
-closed. The reusable <a href="https://github.com/iowarp/clio-coder/tree/main/skills/git/branch-closeout/"><code>branch-closeout</code></a> skill automates this verification and teardown safely. After the human merge decision:</p>
+closed. The reusable <a href="https://github.com/iowarp/clio-coder/tree/main/library/skills/git/branch-closeout/"><code>branch-closeout</code></a> skill automates this verification and teardown safely. After the human merge decision:</p>
 <ol>
 <li>Fetch and prune, confirm the PR&#39;s merged state, and identify the resulting
 commit on <code>origin/main</code>. Direct ancestry proves an ordinary merge; a squash
@@ -206,11 +206,11 @@ assigning an issue to a milestone or explicitly leaving it in the backlog.
 A release cut requires every issue in its milestone to be closed
 or bumped; the milestone closes when the tag is published.</p>
 <h2>Dogfooding setup</h2>
-<p>The marketplace copy under <code>skills/git/</code> is the committed source of truth,
-pinned in <code>skills/registry.yaml</code> by <code>pnpm run skills:pin</code>. Runtime roots are
+<p>The marketplace copy under <code>library/skills/git/</code> is the committed source of truth,
+pinned in <code>library/skills/registry.yaml</code> by <code>pnpm run skills:pin</code>. Runtime roots are
 gitignored, so each developer installs locally:</p>
-<pre><code class="language-bash">cp -r skills/git/file-ticket .clio-coder/skills/   # Clio Coder
-cp -r skills/git/file-ticket .claude/skills/       # Claude Code
+<pre><code class="language-bash">cp -r library/skills/git/file-ticket .clio-coder/skills/   # Clio Coder
+cp -r library/skills/git/file-ticket .claude/skills/       # Claude Code
 </code></pre>
 <p>The other pipeline skills are model-invoked from the marketplace catalog the
 same way. When a skill changes, re-run <code>pnpm run skills:pin</code> and re-copy;

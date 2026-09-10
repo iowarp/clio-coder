@@ -73,7 +73,7 @@ describe("eval artifact writers do not share an output path for the same id", ()
 	let dataDir: string;
 
 	before(() => {
-		dataDir = mkdtempSync(join(tmpdir(), "clio-eval-namespacing-"));
+		dataDir = mkdtempSync(join(tmpdir(), "clio-coder-eval-namespacing-"));
 	});
 	after(() => {
 		rmSync(dataDir, { recursive: true, force: true });

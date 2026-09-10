@@ -201,7 +201,7 @@ for (const scenario of [
 				stderr += String(chunk);
 				return true;
 			});
-			const scratch = await isolateClioEnv("clio-headless-settlement-");
+			const scratch = await isolateClioEnv("clio-coder-headless-settlement-");
 			try {
 				let listener: ((event: ChatLoopEvent) => void) | undefined;
 				let drain: (() => void | Promise<void>) | undefined;
@@ -316,7 +316,7 @@ for (const scenario of [
 // stand-in entry script shows both halves without a model: its own exit code
 // is reported, and the deadline signal reaches it rather than a shell.
 test("eval clio-coder-run runner: the deadline and the exit code belong to the Clio process", async () => {
-	const scratch = await isolateClioEnv("clio-run-runner-");
+	const scratch = await isolateClioEnv("clio-coder-run-runner-");
 	try {
 		const entry = join(scratch.dir, "fake-clio.mjs");
 		writeFileSync(

@@ -27,7 +27,7 @@ describe("contracts/auth storage durability", () => {
 	const open = (): AuthStorage => new AuthStorage(new FileAuthStorageBackend(path));
 
 	beforeEach(() => {
-		root = mkdtempSync(join(tmpdir(), "clio-auth-durability-"));
+		root = mkdtempSync(join(tmpdir(), "clio-coder-auth-durability-"));
 		path = join(root, "credentials.yaml");
 	});
 	afterEach(() => {

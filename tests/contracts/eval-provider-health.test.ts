@@ -174,7 +174,7 @@ test("provider retry phases and terminal reasons remain distinct across retry ch
 });
 
 test("external commands preserve provider facts from truncated middles and failed final commands", async () => {
-	const env = await isolateClioEnv("clio-provider-stream-");
+	const env = await isolateClioEnv("clio-coder-provider-stream-");
 	try {
 		const first = join(env.dir, "first.cjs");
 		const second = join(env.dir, "second.cjs");
@@ -208,7 +208,7 @@ test("external commands preserve provider facts from truncated middles and faile
 });
 
 test("suite health assertions opt in while thresholds gate measured recovery without rewriting task success", async () => {
-	const env = await isolateClioEnv("clio-provider-gates-");
+	const env = await isolateClioEnv("clio-coder-provider-gates-");
 	try {
 		const runner = join(env.dir, "runner.cjs");
 		writeFileSync(runner, `process.stdout.write(${JSON.stringify(jsonl(recovered))});`);

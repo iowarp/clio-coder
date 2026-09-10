@@ -386,14 +386,14 @@ Deno.test("localAcpLaunch builds the frozen node CLI argv and validates every ca
 });
 
 Deno.test("wslAcpLaunch is an argv-only typed seam and makes no descendant-ownership claim", () => {
-	const launch = wslAcpLaunch("wsl.exe", "Ubuntu-24.04", "/opt/clio/bin/clio-coder", "/work/project", 9_001);
+	const launch = wslAcpLaunch("wsl.exe", "Ubuntu-24.04", "/opt/clio-coder/bin/clio-coder", "/work/project", 9_001);
 	deepStrictEqual(launch, {
 		command: "wsl.exe",
 		args: [
 			"--distribution",
 			"Ubuntu-24.04",
 			"--exec",
-			"/opt/clio/bin/clio-coder",
+			"/opt/clio-coder/bin/clio-coder",
 			"acp",
 			"--cwd",
 			"/work/project",
@@ -401,21 +401,21 @@ Deno.test("wslAcpLaunch is an argv-only typed seam and makes no descendant-owner
 			"9001",
 		],
 		terminationScope: "direct-child",
-		redact: ["/work/project", "/opt/clio/bin/clio-coder"],
+		redact: ["/work/project", "/opt/clio-coder/bin/clio-coder"],
 	});
 
 	const invalidCalls: Array<() => unknown> = [
-		() => wslAcpLaunch("wsl.exe", "Ubuntu 24.04", "/opt/clio", "/work/project", 1),
-		() => wslAcpLaunch("wsl.exe", "Ubuntu;evil", "/opt/clio", "/work/project", 1),
-		() => wslAcpLaunch("wsl.exe", "Ubuntu", "opt/clio", "/work/project", 1),
-		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio", "work/project", 1),
-		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio\0bad", "/work/project", 1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu 24.04", "/opt/clio-coder", "/work/project", 1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu;evil", "/opt/clio-coder", "/work/project", 1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu", "opt/clio-coder", "/work/project", 1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio-coder", "work/project", 1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio-coder\0bad", "/work/project", 1),
 	];
 	for (const invoke of invalidCalls) {
 		throws(invoke, (error: unknown) => assertClientError(error, AcpClientError, "invalid-launch"));
 	}
 	throws(
-		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio", "/work/project", -1),
+		() => wslAcpLaunch("wsl.exe", "Ubuntu", "/opt/clio-coder", "/work/project", -1),
 		(error: unknown) => assertClientError(error, AcpClientError, "invalid-timeout"),
 	);
 });

@@ -162,7 +162,7 @@ export function inspectInstalledNamingResources(options: NamingResourceOptions =
 				});
 				continue;
 			}
-			const canonicalBundleDir = path.join(packageRoot, "skills", "meta", canonicalName);
+			const canonicalBundleDir = path.join(packageRoot, "library", "skills", "meta", canonicalName);
 			if (!existingDirectory(canonicalBundleDir) || !provesUnmodifiedShippedCopy(legacyPath, canonicalBundleDir)) {
 				reports.push({
 					kind: "skill",

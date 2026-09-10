@@ -7,7 +7,7 @@ import { it } from "node:test";
 
 it("checks configuration rows through real hygiene in a disposable package fixture", () => {
 	const root = resolve(import.meta.dirname, "../..");
-	const fixture = mkdtempSync(join(tmpdir(), "clio-configuration-reference-"));
+	const fixture = mkdtempSync(join(tmpdir(), "clio-coder-configuration-reference-"));
 	try {
 		for (const entry of readdirSync(root)) {
 			if (!["node_modules", ".git", "dist"].includes(entry))

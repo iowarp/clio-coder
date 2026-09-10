@@ -62,6 +62,10 @@ export const OBSERVE_SELF_CAPS = {
 	contextDocs: 16 * 1024,
 	contextSkills: 50 * 1024,
 	contextWorkspace: 50 * 1024,
+	// Library rows are metadata: name, owner, origin, availability, invocation.
+	// A full page of 50 stays well inside this, and a smaller cap than the
+	// skills catalog is what keeps a catalog read from crowding out the turn.
+	contextLibrary: 16 * 1024,
 } as const;
 
 // Per-turn observation budget pool. One pool per sessionId:turnId shared by

@@ -126,7 +126,7 @@ export interface InteractiveDeps {
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
 	extensions?: ExtensionsContract;
-	/** `/library extensions reload` seam; the composition root supplies the coordinator. */
+	/** `/extensions reload` seam; the composition root supplies the coordinator. */
 	reloadExtensions?: SlashCommandContext["reloadExtensions"];
 	reloadPlugins?: SlashCommandContext["reloadPlugins"];
 	interop?: InteropContract;
@@ -340,6 +340,7 @@ export interface KeyBindingDeps {
 	openDecisions: () => void;
 	backgroundDispatch: () => void;
 	openModelSelector: () => void;
+	openLibrary: () => void;
 	openTree: () => void;
 	cycleScopedModelForward: () => void;
 	cycleScopedModelBackward: () => void;
@@ -420,6 +421,9 @@ function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): bo
 		case "clio-coder.model.select":
 			deps.openModelSelector();
 			return true;
+		case "clio-coder.library.toggle":
+			deps.openLibrary();
+			return true;
 		case "clio-coder.model.cycleBackward":
 			deps.cycleScopedModelBackward();
 			return true;
@@ -447,6 +451,7 @@ export function routeInteractiveKey(data: string, deps: KeyBindingDeps): boolean
 		"clio-coder.decisions.open",
 		"clio-coder.dispatch.background",
 		"clio-coder.model.select",
+		"clio-coder.library.toggle",
 		// Match cycleBackward before cycleForward so a user rebind where one key
 		// is a prefix of the other resolves to the more specific binding first.
 		// The defaults (alt+k / alt+j) do not prefix-match each other.
@@ -808,7 +813,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		readStructuredEntries,
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
-		openSkillsHub: (tab) => openSkillsHubState(tab),
+		openSkillsHub: (request) => openSkillsHubState(request),
 		openCost: () => openCostOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),
@@ -845,8 +850,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openTree: () => openTreeOverlayState(),
 		openMessagePicker: () => openMessagePickerOverlayState(),
 		openHelp: (query) => openHelpOverlayState(query),
-		openAgents: () => openAgentsOverlayState(),
-		openPrompts: () => openPromptsOverlayState(),
 		openExtensions: () => openExtensionsOverlayState(),
 		openInterop: () => openInteropOverlayState(),
 		openContextReset: () => openContextResetOverlayState(),
@@ -956,9 +959,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openTreeOverlayState,
 		openMessagePickerOverlayState,
 		openHelpOverlayState,
-		openAgentsOverlayState,
 		openSkillsHubState,
-		openPromptsOverlayState,
 		openExtensionsOverlayState,
 		openInteropOverlayState,
 		toggleDispatchBoardOverlay,

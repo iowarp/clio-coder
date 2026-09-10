@@ -10,7 +10,7 @@ describe("dispatch run ledger state", () => {
 	let scratch: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-dispatch-state-");
+		scratch = await isolateClioEnv("clio-coder-dispatch-state-");
 	});
 
 	afterEach(() => scratch.restore());

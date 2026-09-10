@@ -58,7 +58,7 @@ function record(candidate: RouteCandidate, digest: string): RouteHistoryRecord {
 }
 
 function store() {
-	return createRouteHistoryStore({ stateDir: mkdtempSync(join(tmpdir(), "clio-route-identity-")) });
+	return createRouteHistoryStore({ stateDir: mkdtempSync(join(tmpdir(), "clio-coder-route-identity-")) });
 }
 
 describe("contracts/route identity keying", () => {
@@ -104,7 +104,7 @@ describe("contracts/route identity keying", () => {
 	});
 
 	it("replay still resolves the exact sealed drift guard", () => {
-		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-identity-replay-"));
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-identity-replay-"));
 		const original = route({ promptCompositionHash: hash("prompt-sealed") });
 		createRouteHistoryStore({ stateDir }).upsert(record(original, "sealed"));
 
@@ -120,7 +120,7 @@ describe("contracts/route identity keying", () => {
 	});
 
 	it("a retired history version is rejected rather than read", () => {
-		const stateDir = mkdtempSync(join(tmpdir(), "clio-route-identity-retire-"));
+		const stateDir = mkdtempSync(join(tmpdir(), "clio-coder-route-identity-retire-"));
 		const path = join(stateDir, "route-history.json");
 		writeFileSync(path, JSON.stringify({ version: 2, records: [{ version: 2, receiptDigest: hash("old") }] }));
 

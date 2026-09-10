@@ -1,7 +1,7 @@
 /**
  * One scratch root per test run, removed when the run ends.
  *
- * Tests call `mkdtemp(join(tmpdir(), "clio-<something>-"))` in roughly 274
+ * Tests call `mkdtemp(join(tmpdir(), "clio-coder-<something>-"))` in roughly 274
  * places and clean up in most of them. The exceptions are the ones that throw,
  * time out, or hand the directory to a child that outlives the assertion, and
  * they never clean up: this machine had 23,397 `clio-*` directories in /tmp,
@@ -36,7 +36,7 @@ const ROOT_ENV = "CLIO_CODER_TEST_TMP_ROOT";
 delete process.env.FORCE_COLOR;
 delete process.env.NO_COLOR;
 /** Names every root this harness makes, and the only names it will remove. */
-export const TEST_TMP_ROOT_PREFIX = "clio-tests-";
+export const TEST_TMP_ROOT_PREFIX = "clio-coder-tests-";
 
 /** The real temp dir, read before TMPDIR is repointed at the run root. */
 const systemTmp = resolve(tmpdir());

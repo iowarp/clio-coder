@@ -19,7 +19,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 const roots: string[] = [];
 
 function scratchRoot(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-skill-contract-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-skill-contract-"));
 	roots.push(root);
 	return root;
 }
@@ -90,7 +90,7 @@ describe("skill install and activation boundary", () => {
 		const project = join(root, "project");
 		const legacy = join(project, ".clio-coder", "skills", "clio-dev");
 		const packageRoot = process.cwd();
-		cpSync(join(packageRoot, "skills", "meta", "clio-coder-dev"), legacy, { recursive: true });
+		cpSync(join(packageRoot, "library", "skills", "meta", "clio-coder-dev"), legacy, { recursive: true });
 		rewriteTextTree(legacy, (raw, file) => {
 			let released = raw
 				.replaceAll("clio-coder-dev", "clio-dev")
@@ -216,13 +216,13 @@ describe("skill install and activation boundary", () => {
 	});
 
 	it("separates context-prime installation, explicit-path availability, suggestion and slash activation", async () => {
-		const isolated = await isolateClioEnv("clio-prime-stages-");
+		const isolated = await isolateClioEnv("clio-coder-prime-stages-");
 		try {
 			const project = join(isolated.dir, "project");
 			mkdirSync(project);
 			// A local scratch copy exercises the installer without changing any real skill inventory.
 			const source = join(isolated.dir, "source", "context-prime");
-			cpSync(join(process.cwd(), "skills", "context", "context-prime"), source, { recursive: true });
+			cpSync(join(process.cwd(), "library", "skills", "context", "context-prime"), source, { recursive: true });
 			strictEqual(
 				loadSkills({ cwd: project, home: isolated.dir }).items.some((skill) => skill.name === "context-prime"),
 				false,

@@ -26,9 +26,9 @@ describe("safety gate boundary", () => {
 	let isolated: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-skill-authority-");
+		isolated = await isolateClioEnv("clio-coder-skill-authority-");
 		originalCwd = process.cwd();
-		scratch = mkdtempSync(join(tmpdir(), "clio-safety-contract-"));
+		scratch = mkdtempSync(join(tmpdir(), "clio-coder-safety-contract-"));
 		mkdirSync(join(scratch, ".clio-coder"), { recursive: true });
 		mkdirSync(join(scratch, "pkg"), { recursive: true });
 		process.chdir(scratch);
@@ -223,7 +223,7 @@ describe("safety gate boundary", () => {
 			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder skills update --all --force",
 			"command clio-coder library install skill:example --yes",
 			"sh -lc 'clio-coder skills install example --user'",
-			"node /opt/clio/dist/cli/index.js skills install example",
+			"node /opt/clio-coder/dist/cli/index.js skills install example",
 			"npx @iowarp/clio-coder skills install example",
 			"npm exec -- clio-coder skills update example",
 			"clio-coder plugins install ./draft-plugin --project",
@@ -261,7 +261,7 @@ describe("safety gate boundary", () => {
 				"clio-coder",
 				"env X=1 clio-coder",
 				"command clio-coder",
-				"node /opt/clio/dist/cli/index.js",
+				"node /opt/clio-coder/dist/cli/index.js",
 				"npx --yes @iowarp/clio-coder",
 				"npm exec -- clio-coder",
 			]) {
@@ -327,8 +327,8 @@ describe("safety gate boundary", () => {
 				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder skills sync --force",
 				"command clio-coder skills sync",
 				"sh -lc 'clio-coder skills sync --force'",
-				"node /opt/clio/dist/cli/index.js skills sync --force",
-				"tsx /opt/clio/src/cli/index.ts skills sync --force",
+				"node /opt/clio-coder/dist/cli/index.js skills sync --force",
+				"tsx /opt/clio-coder/src/cli/index.ts skills sync --force",
 				"npx --yes @iowarp/clio-coder skills sync --force",
 				"npm exec -- clio-coder skills sync --force",
 			]) {
@@ -358,7 +358,7 @@ describe("safety gate boundary", () => {
 				"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library install skill:example --yes",
 				"command clio-coder library install skill:example --yes",
 				"sh -lc 'clio-coder library install skill:example --yes'",
-				"node /opt/clio/dist/cli/index.js library install skill:example --yes",
+				"node /opt/clio-coder/dist/cli/index.js library install skill:example --yes",
 				"npx --yes @iowarp/clio-coder library install skill:example --yes",
 				"npm exec -- clio-coder library install skill:example --yes",
 			]) {
@@ -393,7 +393,7 @@ describe("safety gate boundary", () => {
 			"env CLIO_CODER_CONFIG_DIR=/tmp/elsewhere clio-coder library list",
 			"command clio-coder library install --dry-run skill:example",
 			"sh -lc 'clio-coder library install --dry-run skill:example --with-requirements'",
-			"node /opt/clio/dist/cli/index.js library install --dry-run skill:example --json",
+			"node /opt/clio-coder/dist/cli/index.js library install --dry-run skill:example --json",
 			"npx --yes @iowarp/clio-coder library install --dry-run skill:example",
 			"npm exec -- clio-coder library search example",
 		])

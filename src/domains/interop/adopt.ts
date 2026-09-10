@@ -1,23 +1,24 @@
-import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { parse as parseToml } from "smol-toml";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
-import { parseAgentRecipeSchema } from "../agents/index.js";
 import {
 	listInstalledPlugins,
 	PLUGIN_EXTENSION_KEY,
 	PLUGIN_SCHEMA,
 	pluginBaseDir,
+	readPluginInstallRecord,
 	readPluginManifest,
 } from "../plugins/index.js";
+import type { PluginOrigin } from "../plugins/types.js";
+import { validateLibraryPackage } from "../resources/library-validation.js";
 import { loadPromptTemplates } from "../resources/prompts/loader.js";
 import { normalizedSkillHash } from "../resources/skills/content-hash.js";
 import { loadSkills } from "../resources/skills/loader.js";
+import { detectForeignPlugin, type ForeignResourceOutcome, projectForeignPlugin } from "./foreign.js";
 import { installInteropPackage } from "./install.js";
 import { inventoryText } from "./inventory.js";
+import { digest, projectAgent, projectPrompt, projectSkill, prose, safeName, tree } from "./projection.js";
 import type { InteropAgentId, InteropInventory, InteropInventoryItem } from "./types.js";
 
 export type AdoptionKind = "skill" | "agent" | "prompt" | "plugin";
@@ -30,6 +31,12 @@ export interface InteropAdoptionEntry {
 	digest?: string;
 	omitted?: string[];
 	requirements?: string[];
+	/** Manifest format the package was read as; absent for loose resources. */
+	format?: "portable" | "claude-code" | "codex";
+	/** Per-resource conversion results for foreign-format packages. */
+	outcomes?: ForeignResourceOutcome[];
+	/** Host features present in the source that adoption never activates. */
+	unsupported?: string[];
 	/** Immutable bytes reviewed by the operator. Never serialized by the CLI. */
 	files?: Readonly<Record<string, string>>;
 }
@@ -39,240 +46,239 @@ export interface InteropAdoptionPlan {
 	scope: "user" | "project";
 	entries: InteropAdoptionEntry[];
 }
-const DATA_EXTENSIONS = new Set([".md", ".txt", ".rst", ".csv", ".bib"]);
-const FORBIDDEN_PARTS = new Set([
-	"hooks",
-	"output-styles",
-	"scripts",
-	"tools",
-	"node_modules",
-	".git",
-	".claude-plugin",
-	".codex-plugin",
-]);
-function safeName(name: string): string {
-	const value = name
-		.toLowerCase()
-		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-|-$/g, "")
-		.slice(0, 45)
-		.replace(/-$/u, "");
-	if (!value) throw new Error("No safe resource identifier.");
-	return value;
-}
-function tree(root: string, dataOnly = false, omitted: string[] = []): Record<string, string> {
-	const files: Record<string, string> = {};
-	let bytes = 0;
-	const visit = (dir: string, depth: number): void => {
-		if (depth > 12) throw new Error("Source tree exceeds depth limit.");
-		if (lstatSync(dir).isSymbolicLink()) throw new Error("Symbolic links are not adoptable.");
-		for (const name of readdirSync(dir).sort()) {
-			const file = path.join(dir, name);
-			const relative = path.relative(root, file).split(path.sep).join("/");
-			if (dataOnly && relative.split("/").some((part) => FORBIDDEN_PARTS.has(part) || part === "fleets")) {
-				omitted.push(relative);
-				continue;
-			}
-			const stat = lstatSync(file);
-			if (stat.isSymbolicLink() || (!stat.isDirectory() && !stat.isFile()))
-				throw new Error("Symbolic links and special files are not adoptable.");
-			if (stat.isDirectory()) visit(file, depth + 1);
-			else {
-				if (dataOnly && relative !== "plugin.json" && (!safeData(relative) || (stat.mode & 0o111) !== 0)) {
-					omitted.push(relative);
-					continue;
-				}
-				if ((stat.mode & 0o111) !== 0) throw new Error(`Executable file is not adoptable: ${path.relative(root, file)}`);
-				const text = inventoryText(file);
-				bytes += Buffer.byteLength(text);
-				if (bytes > 16 * 1024 * 1024 || Object.keys(files).length >= 2048)
-					throw new Error("Source tree exceeds adoption limits.");
-				files[path.relative(root, file).split(path.sep).join("/")] = text;
-			}
-		}
-	};
-	visit(root, 0);
-	return files;
-}
-function digest(files: Readonly<Record<string, string>>): string {
-	const hash = createHash("sha256");
-	for (const key of Object.keys(files).sort())
-		hash
-			.update(key)
-			.update("\0")
-			.update(files[key] ?? "")
-			.update("\0");
-	return hash.digest("hex");
-}
-function prose(text: string): { metadata: Record<string, unknown>; body: string } {
-	const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)([\s\S]*)$/.exec(text);
-	if (!match) return { metadata: {}, body: text };
-	const metadata: unknown = parseYaml(match[1] ?? "");
-	if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
-		throw new Error("Invalid resource frontmatter.");
-	return { metadata: metadata as Record<string, unknown>, body: match[2] ?? "" };
-}
-function safeData(file: string): boolean {
-	return !file.split("/").some((part) => FORBIDDEN_PARTS.has(part)) && DATA_EXTENSIONS.has(path.extname(file));
-}
-function prepared(
-	item: InteropInventoryItem,
-	host: InteropAgentId,
-): {
+export interface PreparedAdoption {
 	id: string;
 	version: string;
 	files: Record<string, string>;
 	note: string;
 	omitted: string[];
 	requirements: string[];
-} {
+	format?: "portable" | "claude-code" | "codex";
+	outcomes?: ForeignResourceOutcome[];
+	unsupported?: string[];
+}
+/** Portable data-only projection shared by local adoption and explicit import. */
+export function preparePortablePackage(root: string): PreparedAdoption {
+	const candidate = readPluginManifest(root);
+	if (!candidate.valid || !candidate.manifest)
+		throw new Error(
+			`Not adoptable: invalid portable root plugin.json (${candidate.diagnostics.map((d) => d.message).join("; ")}).`,
+		);
+	const manifest = candidate.manifest;
 	const omitted: string[] = [];
-	let requirements: string[] = [];
-	let files: Record<string, string>;
-	let id: string;
-	let version = "0.0.0";
-	let note = "Text only; foreign execution settings are not imported.";
+	// Do not silently change the meaning of portable packages by removing dependencies.
+	const files = tree(root, true, omitted);
+	const raw = JSON.parse(files["plugin.json"] ?? "{}") as Record<string, unknown>;
+	const resources = Object.fromEntries(
+		Object.entries(manifest.clio.resources).filter(([key]) => ["skills", "agents", "prompts"].includes(key)),
+	);
+	const components = manifest.clio.components.filter(
+		(component) =>
+			["skill", "agent", "prompt", "resource"].includes(component.kind) && files[component.path] !== undefined,
+	);
+	const retained = new Set(components.map((component) => `${component.kind}:${component.id}`));
+	if (components.some((component) => component.requires?.some((ref) => !retained.has(ref))))
+		throw new Error("Not adoptable: retained resources require omitted executable components.");
+	// Preserve the declared package kind; a kind whose only public component is dropped is not a useful plugin.
+	const kind = manifest.clio.kind ?? "plugin";
+	if (!["plugin", "skill", "agent", "prompt"].includes(kind))
+		throw new Error(
+			`Not adoptable: ${kind} packages have no data-only projection; install them through the library instead.`,
+		);
+	if (kind !== "plugin" && !components.some((component) => component.kind === kind))
+		throw new Error(`Not adoptable: the ${kind} package's public ${kind} component is not projectable.`);
+	// The portable skills/ convention needs no Clio component graph. Enumerate
+	// through the shared readers so implicit recipes and actual runtime names
+	// get the same checks as explicitly declared components.
+	const validation = validateLibraryPackage(root);
+	if (!validation.valid)
+		throw new Error(
+			`Not adoptable: invalid recipe content (${validation.validation.diagnostics
+				.filter((item) => item.severity === "error")
+				.map((item) => item.message)
+				.join("; ")}).`,
+		);
+	const recipes = validation.validation.resources.filter(
+		(resource) => ["skill", "agent", "prompt"].includes(resource.kind) && files[resource.path] !== undefined,
+	);
+	if (recipes.length === 0) throw new Error("Not adoptable: the portable package has no supported data-only recipes.");
+	// Retained recipe text that names an omitted companion cannot be claimed working.
+	const outcomes: ForeignResourceOutcome[] = [];
+	for (const resource of recipes) {
+		const component = components.find((item) => item.kind === resource.kind && item.path === resource.path);
+		// A root SKILL.md owns the whole package as its companion scope.
+		const skillDir = resource.kind === "skill" ? path.posix.dirname(resource.path) : undefined;
+		const dir = skillDir === undefined ? undefined : skillDir === "." ? "" : `${skillDir}/`;
+		const texts = Object.entries(files)
+			.filter(([file]) => file !== "plugin.json" && (dir === undefined ? file === resource.path : file.startsWith(dir)))
+			.map(([, text]) => text);
+		// Own companions match by package path or basename; shared assets elsewhere only by explicit package path.
+		const needed = omitted.filter((file) => {
+			const own = dir !== undefined && file.startsWith(dir);
+			const base = path.posix.basename(file);
+			return texts.some((text) => text.includes(file) || (own && base.includes(".") && text.includes(base)));
+		});
+		if (needed.length)
+			throw new Error(
+				`Not adoptable: ${resource.kind} ${resource.name} references omitted companions (${needed.join(", ")}); the data-only import cannot claim it works. Use library install for script-bearing packages.`,
+			);
+		outcomes.push({
+			kind: resource.kind as ForeignResourceOutcome["kind"],
+			name: resource.name,
+			source: resource.path,
+			status: "converted",
+			...(component ? { id: component.id } : {}),
+			destination: resource.path,
+		});
+	}
+	raw.extensions = {
+		[PLUGIN_EXTENSION_KEY]: {
+			manifestVersion: 1,
+			...(kind !== "plugin" ? { kind } : {}),
+			...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
+			resources,
+			components,
+			...(manifest.clio.compatibility ? { compatibility: manifest.clio.compatibility } : {}),
+		},
+	};
+	files["plugin.json"] = JSON.stringify(raw, null, 2);
+	return {
+		id: manifest.name,
+		version: manifest.version ?? "0.0.0",
+		files,
+		note:
+			"Data-only portable projection; hooks, MCP, scripts, tools, fleets and host settings are skipped. References to omitted files are unavailable.",
+		omitted,
+		requirements: [...(manifest.clio.requires ?? [])],
+		format: "portable",
+		outcomes,
+	};
+}
+/** Foreign-format (Claude Code / Codex) package normalized at the import boundary. */
+export function prepareForeignPackage(
+	root: string,
+	format?: "claude-code" | "codex",
+): PreparedAdoption & { format: "claude-code" | "codex" } {
+	const detection = detectForeignPlugin(root, format);
+	if (detection.format === "portable") throw new Error("Portable root plugin.json present; use the portable route.");
+	if (detection.format === "none") throw new Error(`Not adoptable: ${detection.diagnostics.join(" ")}`);
+	const projection = projectForeignPlugin({
+		root,
+		format: detection.format,
+		...(detection.manifestPath ? { manifestPath: detection.manifestPath } : {}),
+	});
+	if (!projection.outcomes.some((outcome) => outcome.status === "converted"))
+		throw new Error(
+			`Not adoptable: no supported recipe converted from ${detection.manifestPath}${
+				projection.outcomes.length
+					? ` (${projection.outcomes.map((o) => `${o.kind} ${o.name}: ${o.reason ?? "unsupported"}`).join("; ")})`
+					: ""
+			}.`,
+		);
+	return {
+		id: projection.id,
+		version: projection.version,
+		files: projection.files,
+		note: `${detection.format === "claude-code" ? "Claude Code" : "Codex"} plugin normalized to a portable Clio package; hooks, MCP, LSP, scripts and host settings are never activated.${
+			projection.notes.length ? ` ${projection.notes.join(" ")}` : ""
+		}`,
+		omitted: projection.omitted,
+		requirements: projection.requirements,
+		format: detection.format,
+		outcomes: projection.outcomes,
+		unsupported: projection.unsupported,
+	};
+}
+function prepared(item: InteropInventoryItem, host: InteropAgentId): PreparedAdoption {
+	let value: PreparedAdoption;
 	if (item.kind === "plugin") {
-		const candidate = readPluginManifest(item.path);
-		if (!candidate.valid || !candidate.manifest)
-			throw new Error("Not adoptable: a valid portable root plugin.json is required.");
-		const manifest = candidate.manifest;
-		requirements = [...(manifest.clio.requires ?? [])];
-		id = manifest.name;
-		version = manifest.version ?? "0.0.0";
-		// Do not silently change the meaning of portable packages by removing dependencies.
-		files = tree(item.path, true, omitted);
-		const raw = JSON.parse(files["plugin.json"] ?? "{}") as Record<string, unknown>;
-		const resources = Object.fromEntries(
-			Object.entries(manifest.clio.resources).filter(([key]) => ["skills", "agents", "prompts"].includes(key)),
-		);
-		const components = manifest.clio.components.filter(
-			(component) =>
-				["skill", "agent", "prompt", "resource"].includes(component.kind) && files[component.path] !== undefined,
-		);
-		const retained = new Set(components.map((component) => `${component.kind}:${component.id}`));
-		if (components.some((component) => component.requires?.some((ref) => !retained.has(ref))))
-			throw new Error("Not adoptable: retained resources require omitted executable components.");
-		raw.extensions = {
-			[PLUGIN_EXTENSION_KEY]: {
-				manifestVersion: 1,
-				...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
-				resources,
-				components,
-				...(manifest.clio.compatibility ? { compatibility: manifest.clio.compatibility } : {}),
-			},
-		};
-		files["plugin.json"] = JSON.stringify(raw, null, 2);
-		note =
-			"Data-only portable projection; hooks, MCP, scripts, tools, fleets and host settings are skipped. References to omitted files are unavailable.";
+		const detection = detectForeignPlugin(item.path);
+		// An invalid portable manifest is diagnosed; it is never hidden by a foreign fallback.
+		value =
+			detection.format === "portable" || detection.format === "none"
+				? preparePortablePackage(item.path)
+				: prepareForeignPackage(item.path, detection.format);
 	} else {
-		id = safeName(`${host}-${item.kind}-${item.name}`);
-		const resourceId = safeName(item.name);
+		const id = safeName(`${host}-${item.kind}-${item.name}`);
 		const plural = `${item.kind}s`;
-		let componentPath: string;
-		if (item.kind === "skill") {
-			const source = tree(path.dirname(item.path));
-			if (Object.keys(source).some((file) => !safeData(file)))
-				throw new Error("Not adoptable: skill contains executable or non-text companion files.");
-			const skill = prose(source["SKILL.md"] ?? "");
-			if (typeof skill.metadata.name !== "string" || typeof skill.metadata.description !== "string")
-				throw new Error("Skill requires name and description frontmatter.");
-			// Never carry a foreign audit stamp across the approval boundary.
-			delete skill.metadata["clio-coder"];
-			delete skill.metadata.clio;
-			for (const key of [
-				"audit",
-				"installed-hash",
-				"source-url",
-				"installed-by",
-				"hooks",
-				"mcpServers",
-				"allowed-tools",
-				"tools",
-				"context",
-				"agent",
-			])
-				delete skill.metadata[key];
-			source["SKILL.md"] =
-				`---\n${stringifyYaml({ ...skill.metadata, "clio-coder": { audit: "unknown" } })}---\n${skill.body}`;
-			files = Object.fromEntries(Object.entries(source).map(([file, text]) => [`skills/${resourceId}/${file}`, text]));
-			componentPath = `skills/${resourceId}/SKILL.md`;
-		} else {
-			if ((lstatSync(item.path).mode & 0o111) !== 0) throw new Error("Executable files are not adoptable.");
-			const raw = inventoryText(item.path);
-			const parsed = item.path.endsWith(".toml")
-				? (() => {
-						const data = parseToml(raw);
-						if (typeof data.developer_instructions !== "string") throw new Error("Agent developer_instructions is unknown.");
-						return { metadata: data as Record<string, unknown>, body: data.developer_instructions };
-					})()
-				: prose(raw);
-			if (!parsed.body.trim()) throw new Error("Empty resource body.");
-			let metadata: Record<string, unknown> = {
-				description:
-					typeof parsed.metadata.description === "string"
-						? parsed.metadata.description
-						: `Adopted ${item.kind} ${item.name}`,
-			};
-			if (item.kind === "agent") {
-				metadata = {
-					...metadata,
-					version: 1,
-					name: item.name,
-					tools: { required: ["read"], optional: ["grep", "find", "ls"] },
-					skills: [],
-					audience: "custom",
-					category: "research",
-					capabilityClass: "read-only",
-					latencyClass: "balanced",
-					projectContextTier: "bounded",
-					budget: { toolCalls: 24, readReserve: 4, synthesis: true },
-					resultContract: { kind: "artifact-report" },
-					tags: ["interop"],
-				};
-				note =
-					"Persona copied into a read-only Clio recipe; host tools, permissions, model, hooks and skill bindings are omitted.";
-			}
-			if (item.kind === "agent")
-				parseAgentRecipeSchema({
-					id: resourceId,
-					source: "plugin",
-					filepath: item.path,
-					body: parsed.body,
-					frontmatter: metadata,
-				});
-			componentPath = `${plural}/${resourceId}.md`;
-			files = { [componentPath]: `---\n${stringifyYaml(metadata)}---\n${parsed.body}` };
-		}
+		let note = "Text only; foreign execution settings are not imported.";
+		const resource =
+			item.kind === "skill"
+				? projectSkill({ skillDir: path.dirname(item.path), fallbackName: item.name })
+				: item.kind === "agent"
+					? projectAgent({ file: item.path, name: item.name })
+					: projectPrompt({ file: item.path, name: item.name });
+		if (item.kind === "agent")
+			note =
+				"Persona copied into a read-only Clio recipe; host tools, permissions, model, hooks and skill bindings are omitted.";
+		const files = { ...resource.files };
 		files["plugin.json"] = JSON.stringify(
 			{
 				$schema: PLUGIN_SCHEMA,
 				name: id,
-				version,
+				version: "0.0.0",
 				description: `Adopted ${item.kind} from ${host}`,
 				extensions: {
 					[PLUGIN_EXTENSION_KEY]: {
 						manifestVersion: 1,
 						kind: item.kind,
 						resources: { [plural]: plural },
-						components: [{ kind: item.kind, id: resourceId, path: componentPath }],
+						components: [{ kind: item.kind, id: resource.id, path: resource.componentPath }],
 					},
 				},
 			},
 			null,
 			2,
 		);
+		value = {
+			id,
+			version: "0.0.0",
+			files,
+			note,
+			omitted: [],
+			requirements: [],
+			...(resource.omittedFields.length
+				? {
+						outcomes: [
+							{
+								kind: item.kind as "skill" | "agent" | "prompt",
+								name: resource.name,
+								source: item.path,
+								status: "converted",
+								id: resource.id,
+								destination: resource.componentPath,
+								omittedFields: resource.omittedFields,
+							},
+						],
+					}
+				: {}),
+		};
 	}
-	const manifest = JSON.parse(files["plugin.json"] ?? "{}") as { extensions?: Record<string, unknown> };
+	const manifest = JSON.parse(value.files["plugin.json"] ?? "{}") as { extensions?: Record<string, unknown> };
 	manifest.extensions = {
 		...manifest.extensions,
-		"ai.iowarp.clio.interop": { host, source: item.path, sourceScope: item.scope, untrusted: true },
+		"ai.iowarp.clio.interop": {
+			host,
+			source: item.path,
+			sourceScope: item.scope,
+			untrusted: true,
+			...(value.format ? { format: value.format } : {}),
+		},
 	};
-	files["plugin.json"] = `${JSON.stringify(manifest, null, 2)}\n`;
-	return { id, version, files, note, omitted, requirements };
+	value.files["plugin.json"] = `${JSON.stringify(manifest, null, 2)}\n`;
+	return value;
 }
 /** Requirements must already be usable; adoption never expands the reviewed import set. */
-function unmetRequirements(requirements: ReadonlyArray<string>, cwd: string, scope: "user" | "project"): string[] {
+export function vendorOf(format: PreparedAdoption["format"]): "claude-code" | "codex" | undefined {
+	return format === "claude-code" || format === "codex" ? format : undefined;
+}
+export function unmetRequirements(
+	requirements: ReadonlyArray<string>,
+	cwd: string,
+	scope: "user" | "project",
+	/** When set, direct requirements came from vendor dependencies and need matching import provenance. */
+	vendor?: "claude-code" | "codex",
+): string[] {
 	if (requirements.length === 0) return [];
 	const available = new Map(
 		listInstalledPlugins(cwd, { all: true, ...(scope === "user" ? { scope } : {}) })
@@ -280,6 +286,18 @@ function unmetRequirements(requirements: ReadonlyArray<string>, cwd: string, sco
 			.map((pkg) => [`${pkg.kind ?? "plugin"}:${pkg.id}`, pkg]),
 	);
 	const problems = new Set<string>();
+	if (vendor)
+		for (const ref of requirements) {
+			const pkg = available.get(ref);
+			if (!pkg) continue;
+			const origin = readPluginInstallRecord(pkg.id, { cwd, scope: pkg.scope })?.origin;
+			const provenance =
+				typeof origin === "object" && (origin.kind === "import" || origin.kind === "interop") ? origin.format : undefined;
+			if (provenance !== vendor)
+				problems.add(
+					`${ref} (installed package is not an imported ${vendor} plugin; a same-named native package does not satisfy a vendor dependency)`,
+				);
+		}
 	const visiting = new Set<string>();
 	const checked = new Set<string>();
 	const visit = (ref: string): void => {
@@ -387,7 +405,7 @@ export function planInteropAdoption(input: {
 				continue;
 			}
 			const value = prepared(item, input.host);
-			const missing = unmetRequirements(value.requirements, cwd, scope);
+			const missing = unmetRequirements(value.requirements, cwd, scope, vendorOf(value.format));
 			if (missing.length) {
 				skip(
 					`Unsatisfied package requirements: ${missing.join(", ")}. Install dependencies through the library and review a new plan; no extra resources are imported.`,
@@ -423,12 +441,27 @@ export function planInteropAdoption(input: {
 				reason: value.note,
 				omitted: value.omitted,
 				requirements: value.requirements,
+				...(value.format ? { format: value.format } : {}),
+				...(value.outcomes?.length ? { outcomes: value.outcomes } : {}),
+				...(value.unsupported?.length ? { unsupported: value.unsupported } : {}),
 			});
 		} catch (error) {
 			skip(error instanceof Error ? error.message : String(error));
 		}
 	}
 	return plan;
+}
+function renderOutcomes(outcomes: ReadonlyArray<ForeignResourceOutcome> | undefined): string[] {
+	return (outcomes ?? []).map((outcome) => {
+		const detail = [
+			...(outcome.omittedFields?.length ? [`omitted frontmatter: ${outcome.omittedFields.join(", ")}`] : []),
+			...(outcome.omittedFiles?.length ? [`omitted files: ${outcome.omittedFiles.join(", ")}`] : []),
+			...(outcome.reason ? [outcome.reason] : []),
+		];
+		return outcome.status === "converted"
+			? `  CONVERT ${outcome.kind} ${outcome.name} -> ${outcome.destination}${detail.length ? ` (${detail.join("; ")})` : ""}`
+			: `  UNSUPPORTED ${outcome.kind} ${outcome.name} (${outcome.source}): ${detail.join("; ")}`;
+	});
 }
 export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 	return [
@@ -438,12 +471,28 @@ export function renderInteropAdoptionPlan(plan: InteropAdoptionPlan): string {
 			`  Source: ${entry.item.path}`,
 			...(entry.destination ? [`  Destination: ${entry.destination}`, `  SHA-256: ${entry.digest}`] : []),
 			`  ${entry.reason}`,
+			...(entry.format && entry.format !== "portable"
+				? [`  Format: ${entry.format} (normalized to a portable Clio package)`]
+				: []),
 			...(entry.requirements?.length ? [`  Requires installed packages: ${entry.requirements.join(", ")}`] : []),
+			...renderOutcomes(entry.outcomes),
+			...(entry.unsupported ?? []).map((feature) => `  UNSUPPORTED ${feature}`),
 			...(entry.omitted ?? []).map((file) => `  SKIP ${file}: executable, host-specific, or non-text data.`),
 		]),
 		"Foreign resources remain untrusted until the project-import trust setting is enabled.",
 		"Host files are never changed. Approval applies only to the displayed content.",
 	].join("\n");
+}
+function interopOrigin(host: InteropAgentId, entry: InteropAdoptionEntry): PluginOrigin {
+	const marketplace =
+		entry.item.marketplace && entry.item.marketplace !== "unknown" ? entry.item.marketplace : undefined;
+	return {
+		kind: "interop",
+		host,
+		source: path.resolve(entry.item.path),
+		...(entry.format ? { format: entry.format } : {}),
+		...(marketplace ? { marketplace } : {}),
+	};
 }
 export function applyInteropAdoption(
 	plan: InteropAdoptionPlan,
@@ -461,12 +510,12 @@ export function applyInteropAdoption(
 			const current = prepared(entry.item, plan.host);
 			if (digest(entry.files) !== entry.digest || digest(current.files) !== entry.digest)
 				throw new Error("Source or plan changed after review; inspect a new plan.");
-			const missing = unmetRequirements(current.requirements, plan.cwd, plan.scope);
+			const missing = unmetRequirements(current.requirements, plan.cwd, plan.scope, vendorOf(current.format));
 			if (missing.length)
 				throw new Error(
 					`Unsatisfied package requirements after review: ${missing.join(", ")}. No extra resources are imported.`,
 				);
-			staging = mkdtempSync(path.join(tmpdir(), "clio-interop-adopt-"));
+			staging = mkdtempSync(path.join(tmpdir(), "clio-coder-interop-adopt-"));
 			for (const [file, text] of Object.entries(entry.files)) {
 				const target = path.join(staging, file);
 				mkdirSync(path.dirname(target), { recursive: true });
@@ -483,7 +532,7 @@ export function applyInteropAdoption(
 				scope: plan.scope,
 				expectedId: entry.id,
 				expectedDigest: candidate.contentDigest,
-				origin: { kind: "interop", host: plan.host, source: path.resolve(entry.item.path) },
+				origin: interopOrigin(plan.host, entry),
 			});
 			if (installed.plugin) result.installed.push(installed.plugin.id);
 			result.diagnostics.push(...installed.diagnostics.map((d) => d.message));

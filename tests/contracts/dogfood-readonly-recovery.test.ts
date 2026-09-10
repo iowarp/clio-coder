@@ -16,7 +16,7 @@ describe("read-only denial permits independent native inspection without authori
 	const original = "UNCHANGED-SENTINEL\n";
 
 	beforeEach(async () => {
-		isolated = await isolateClioEnv("clio-readonly-recovery-");
+		isolated = await isolateClioEnv("clio-coder-readonly-recovery-");
 		workspace = join(isolated.dir, "workspace");
 		mkdirSync(workspace);
 		previousCwd = process.cwd();

@@ -76,7 +76,7 @@ export interface DiscoverMarketplaceOptions {
  */
 function packageCatalogDir(): string | null {
 	try {
-		return path.join(resolvePackageRoot(), "skills");
+		return path.join(resolvePackageRoot(), "library", "skills");
 	} catch {
 		return null;
 	}
@@ -84,7 +84,7 @@ function packageCatalogDir(): string | null {
 
 function packageIndexPath(): string | null {
 	try {
-		return path.join(resolvePackageRoot(), "skills", "skill-marketplace.json");
+		return path.join(resolvePackageRoot(), "library", "skills", "skill-marketplace.json");
 	} catch {
 		return null;
 	}
@@ -230,6 +230,8 @@ function resolveCatalogDir(options: DiscoverMarketplaceOptions): string | null {
 	if (options.catalogDir) return path.resolve(options.catalogDir);
 	const fromEnv = process.env.CLIO_CODER_SKILL_CATALOG_DIR;
 	if (fromEnv && fromEnv.trim().length > 0) return path.resolve(fromEnv.trim());
+	const repoLibraryCatalog = path.join(options.cwd ?? process.cwd(), "library", "skills");
+	if (looksLikeSkillCatalog(repoLibraryCatalog)) return repoLibraryCatalog;
 	const repoCatalog = path.join(options.cwd ?? process.cwd(), "skills");
 	if (looksLikeSkillCatalog(repoCatalog)) return repoCatalog;
 	// The package's own catalog: rows resolve to local files, so a bare-name

@@ -38,7 +38,7 @@ describe("tool boundary contract", () => {
 	let scratch: IsolatedClioEnv;
 
 	beforeEach(async () => {
-		scratch = await isolateClioEnv("clio-tool-contract-");
+		scratch = await isolateClioEnv("clio-coder-tool-contract-");
 	});
 
 	afterEach(() => scratch.restore());

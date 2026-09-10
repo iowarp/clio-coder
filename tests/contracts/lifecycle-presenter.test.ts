@@ -40,7 +40,7 @@ describe("contracts/lifecycle-presenter", () => {
 		const fakeHome = "/user/home/tester";
 		strictEqual(shortenPath("/user/home/tester/.config/clio-coder", fakeHome), "~/.config/clio-coder");
 		strictEqual(shortenPath("/user/home/tester", fakeHome), "~");
-		strictEqual(shortenPath("/var/log/clio.log", fakeHome), "/var/log/clio.log");
+		strictEqual(shortenPath("/var/log/clio-coder.log", fakeHome), "/var/log/clio-coder.log");
 	});
 
 	it("measures files, directories, and absent entries", () => {

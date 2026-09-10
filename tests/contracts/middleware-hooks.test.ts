@@ -31,7 +31,7 @@ function registration(
 const roots: string[] = [];
 
 function scratch(): string {
-	const root = mkdtempSync(path.join(tmpdir(), "clio-middleware-extension-"));
+	const root = mkdtempSync(path.join(tmpdir(), "clio-coder-middleware-extension-"));
 	roots.push(root);
 	return root;
 }

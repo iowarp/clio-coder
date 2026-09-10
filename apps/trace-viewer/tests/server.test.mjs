@@ -15,7 +15,7 @@ import {
 	ViewerDatabase,
 } from "../server.mjs";
 
-const scratch = mkdtempSync(join(tmpdir(), "clio-trace-viewer-"));
+const scratch = mkdtempSync(join(tmpdir(), "clio-coder-trace-viewer-"));
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 function fixture(version = 1) {
@@ -105,7 +105,7 @@ describe("trace viewer server", () => {
 	});
 
 	it("refuses symlinks that escape either static root", async () => {
-		const root = mkdtempSync(join(tmpdir(), "clio-trace-static-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-trace-static-"));
 		const pages = join(root, "public");
 		const assets = join(root, "assets");
 		mkdirSync(pages);
@@ -136,7 +136,7 @@ describe("trace viewer server", () => {
 
 describe("receipt sidecars", () => {
 	function stateDir() {
-		const dir = mkdtempSync(join(tmpdir(), "clio-trace-receipts-"));
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-trace-receipts-"));
 		return dir;
 	}
 
@@ -224,7 +224,7 @@ describe("receipt sidecars", () => {
 	});
 
 	it("serves the receipt endpoint over HTTP and degrades path-traversal runIds to a safe response, never a 5xx", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "clio-trace-http-"));
+		const dir = mkdtempSync(join(tmpdir(), "clio-coder-trace-http-"));
 		const dbPath = join(dir, "trace.sqlite");
 		const db = new DatabaseSync(dbPath);
 		db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);

@@ -81,7 +81,7 @@ async function probeVersion(binary: string): Promise<string | undefined> {
 	let scratch: string | undefined;
 	try {
 		// Even --version may create aliases or logs. Keep host and project profiles read-only.
-		scratch = mkdtempSync(path.join(tmpdir(), "clio-interop-version-"));
+		scratch = mkdtempSync(path.join(tmpdir(), "clio-coder-interop-version-"));
 		const env: Record<string, string> = { HOME: scratch, USERPROFILE: scratch };
 		for (const key of [
 			"XDG_CONFIG_HOME",

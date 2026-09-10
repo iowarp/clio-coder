@@ -35,14 +35,14 @@ const ORIENTATION_PROMPT =
 	"Prime this repository for a fresh coding session: review existing handoff, git state and project rules, and give a brief orientation. Do not edit files or start implementation.";
 
 function shippedCatalog(): MarketplaceSkill[] {
-	return discoverMarketplaceSkills({ catalogDir: join(process.cwd(), "skills"), indexPath: null }).skills;
+	return discoverMarketplaceSkills({ catalogDir: join(process.cwd(), "library", "skills"), indexPath: null }).skills;
 }
 afterEach(() => {
 	for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
 function tempDir(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-promotion-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-promotion-"));
 	roots.push(root);
 	return root;
 }
@@ -52,7 +52,7 @@ function entry(overrides: Partial<MarketplaceSkill> = {}): MarketplaceSkill {
 		kind: "skill",
 		name: "resolve-merge-conflicts",
 		description: "Resolve git merge conflicts hunk by hunk with semantic verification.",
-		sourceUrl: "/opt/clio/skills/git/resolve-merge-conflicts",
+		sourceUrl: "/opt/clio-coder/skills/git/resolve-merge-conflicts",
 		origin: "catalog",
 		triggers: ["merge conflict", "resolve conflicts"],
 		...overrides,
@@ -129,7 +129,7 @@ describe("contracts/marketplace-offer own-marketplace gate", () => {
 		ok(isOwnMarketplaceSource(entry()));
 		ok(
 			isOwnMarketplaceSource(
-				entry({ origin: "index", sourceUrl: "https://github.com/iowarp/clio-coder/tree/main/skills/git/ship" }),
+				entry({ origin: "index", sourceUrl: "https://github.com/iowarp/clio-coder/tree/main/library/skills/git/ship" }),
 			),
 		);
 	});

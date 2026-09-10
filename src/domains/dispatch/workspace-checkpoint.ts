@@ -14,7 +14,7 @@ export function workspaceCheckpointRef(kind: "loop" | "compete", identity: strin
  * The immutable ref makes retries idempotent and keeps the object alive across GC. */
 export function captureWorkspaceCheckpoint(cwd: string, ref: string, message: string): string {
 	if (!/^refs\/clio-coder\/(loop|compete)\/[a-f0-9]{64}$/.test(ref)) throw new Error("invalid workspace checkpoint ref");
-	const directory = mkdtempSync(join(tmpdir(), "clio-checkpoint-index-"));
+	const directory = mkdtempSync(join(tmpdir(), "clio-coder-checkpoint-index-"));
 	const env = buildSafeToolEnv({
 		GIT_INDEX_FILE: join(directory, "index"),
 		GIT_AUTHOR_NAME: "Clio checkpoint",

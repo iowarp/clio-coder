@@ -17,6 +17,8 @@ import {
 import {
 	installPlugin,
 	listInstalledPlugins,
+	type PluginExpectedState,
+	type PluginMutationResult,
 	type PluginScope,
 	pluginBaseDir,
 	pluginContentDigest,
@@ -148,6 +150,8 @@ export interface LibraryInstallPlan {
 	scope?: PluginScope;
 	force?: boolean;
 	expectedInstalledDigest?: string;
+	/** Reviewed facts rechecked inside the writer's lock. */
+	expect?: PluginExpectedState;
 }
 
 export interface LibraryScopeOptions {
@@ -213,7 +217,7 @@ export function registerLibraryPackage(
 		);
 		if ((existsSync(file) ? readFileSync(file, "utf8") : undefined) !== before)
 			throw new Error("library index changed during registration");
-		safeResourceWrite(file, stringifyYaml({ entries: next.map(({ origin: _origin, ...item }) => item) }), {
+		safeResourceWrite(file, stringifyYaml({ entries: next.map(({ origin: _origin, index: _index, ...item }) => item) }), {
 			encoding: "utf8",
 		});
 	});
@@ -387,31 +391,56 @@ export interface LibraryInstallResult {
 	recovery?: { stateBackup?: string; packageBackup?: string };
 }
 
+/**
+ * Commit a staged plan through the package writer without releasing it. The
+ * destination digest reviewed before the lock is also rechecked inside it when
+ * the plan carries `expect`. Returns the writer's structured result.
+ */
+export function commitLibraryInstallPlan(plan: LibraryInstallPlan): PluginMutationResult {
+	if (existsSync(plan.path) && !plan.force) throw new Error(`library destination already exists: ${plan.path}`);
+	if (!plan.sourceRoot) throw new Error("plugin install plan has no staged source");
+	if (plan.expectedInstalledDigest && pluginContentDigest(plan.path) !== plan.expectedInstalledDigest)
+		throw new Error(`plugin_destination_changed: ${plan.entry.name}`);
+	const expect: PluginExpectedState | undefined =
+		plan.expect ??
+		(plan.expectedInstalledDigest
+			? {
+					copies: [
+						{
+							scope: plan.scope ?? "user",
+							id: plan.entry.name,
+							partial: true,
+							recorded: true,
+							tree: plan.expectedInstalledDigest,
+						},
+					],
+				}
+			: undefined);
+	return installPlugin(plan.sourceRoot, {
+		...(plan.cwd ? { cwd: plan.cwd } : {}),
+		scope: plan.scope ?? "user",
+		force: plan.force ?? false,
+		expectedDigest: plan.sha256,
+		expectedId: plan.entry.name,
+		expectedKind: plan.entry.kind,
+		...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
+		...(expect ? { expect } : {}),
+		origin: {
+			kind:
+				plan.entry.origin === "catalog" || plan.entry.origin === "index"
+					? "catalog"
+					: parsePluginGithubSource(plan.entry.sourceUrl)
+						? "github"
+						: "local",
+			source: plan.entry.sourceUrl,
+		},
+	});
+}
+
 export function installLibraryPlan(plan: LibraryInstallPlan): LibraryInstallResult {
 	let recovery: LibraryInstallResult["recovery"];
 	try {
-		if (existsSync(plan.path) && !plan.force) throw new Error(`library destination already exists: ${plan.path}`);
-		if (!plan.sourceRoot) throw new Error("plugin install plan has no staged source");
-		if (plan.expectedInstalledDigest && pluginContentDigest(plan.path) !== plan.expectedInstalledDigest)
-			throw new Error(`plugin_destination_changed: ${plan.entry.name}`);
-		const result = installPlugin(plan.sourceRoot, {
-			...(plan.cwd ? { cwd: plan.cwd } : {}),
-			scope: plan.scope ?? "user",
-			force: plan.force ?? false,
-			expectedDigest: plan.sha256,
-			expectedId: plan.entry.name,
-			expectedKind: plan.entry.kind,
-			...(plan.entry.version ? { expectedVersion: plan.entry.version } : {}),
-			origin: {
-				kind:
-					plan.entry.origin === "catalog" || plan.entry.origin === "index"
-						? "catalog"
-						: parsePluginGithubSource(plan.entry.sourceUrl)
-							? "github"
-							: "local",
-				source: plan.entry.sourceUrl,
-			},
-		});
+		const result = commitLibraryInstallPlan(plan);
 		if (!result.plugin || result.diagnostics.some((item) => item.type === "error"))
 			throw new Error(
 				`${result.diagnostics.map((item) => item.message).join("; ") || "plugin install failed"}${result.recovery ? `; recovery: ${JSON.stringify(result.recovery)}` : ""}`,
@@ -498,7 +527,7 @@ export function planLibraryUpdate(
 
 export function removeLibraryEntry(
 	entry: Pick<LibraryEntry, "kind" | "name">,
-	options: { cwd?: string; scope?: PluginScope } = {},
+	options: { cwd?: string; scope?: PluginScope; expect?: PluginExpectedState } = {},
 ): LibraryInstallResult {
 	const installed = installedPlugin(entry, options);
 	if (!installed) throw new Error(`package not installed: ${libraryEntryRef(entry)}`);

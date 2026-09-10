@@ -269,7 +269,7 @@ describe("dispatch admission boundary", () => {
 		// out of test/store.test.ts and admission failed the whole dispatch with
 		// legacy_scope_path_malformed. Inference never sees the quote's origin, so
 		// the remainder is probed against the dispatch root instead of refused.
-		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
 		try {
 			mkdirSync(join(root, "src"), { recursive: true });
 			writeFileSync(join(root, "src", "store.js"), "export const store = 1;\n", "utf8");
@@ -300,7 +300,7 @@ describe("dispatch admission boundary", () => {
 	it("names a ../ token once when the task and the briefing both quote it", () => {
 		// An orchestrator restating the file it is asking about quotes the same
 		// specifier twice; two of the notice's twelve slots must not go to one token.
-		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
 		try {
 			const scope = resolveDispatchPathScope({
 				cwd: root,
@@ -322,7 +322,7 @@ describe("dispatch admission boundary", () => {
 		// criterion 1 (never reject) decides and criterion 2 (refuse an escape)
 		// cannot. Both outcomes stay off the write boundary, which is what makes
 		// the leniency safe.
-		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
 		try {
 			const leaves = resolveDispatchPathScope({
 				cwd: root,
@@ -356,7 +356,7 @@ describe("dispatch admission boundary", () => {
 		// branch and must leave it refused: a later "..", a later ".", and a run
 		// with no remainder to probe at all. The fourth token never reaches that
 		// branch and is here to pin the pre-existing refusal it keeps.
-		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
 		try {
 			for (const task of [
 				"read ../src/../../etc/passwd now",
@@ -380,7 +380,7 @@ describe("dispatch admission boundary", () => {
 		// probe the root the run will probe. Rendered against process.cwd() it
 		// showed no line at all for a token the dispatch anchors into working
 		// context.
-		const root = mkdtempSync(join(tmpdir(), "clio-plan-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-plan-scope-"));
 		try {
 			mkdirSync(join(root, "src"), { recursive: true });
 			writeFileSync(join(root, "src", "store-probe.js"), "export const store = 1;\n", "utf8");
@@ -426,7 +426,7 @@ describe("dispatch admission boundary", () => {
 		// A declaration is the scope, so no "../" token changed what the worker
 		// sees and the legacy notice has nothing to add. The dropped token still
 		// reaches the replacement notice through inferredOnlyPaths.
-		const root = mkdtempSync(join(tmpdir(), "clio-path-scope-"));
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-path-scope-"));
 		try {
 			const scope = resolveDispatchPathScope({
 				cwd: root,

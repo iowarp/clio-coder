@@ -32,7 +32,7 @@ interface Result {
 	stderr: string;
 }
 
-function home(label = "clio-cli-core-"): Home {
+function home(label = "clio-coder-cli-core-"): Home {
 	const root = mkdtempSync(join(tmpdir(), label));
 	return {
 		root,
@@ -118,7 +118,7 @@ describe("CLI targets use role selection", { concurrency: false }, () => {
 		);
 	});
 	function fixture() {
-		const scratch = home("clio-target-roles-");
+		const scratch = home("clio-coder-target-roles-");
 		mkdirSync(join(scratch.root, "config"), { recursive: true });
 		const path = join(scratch.root, "config", "settings.yaml");
 		const initial = {
@@ -209,7 +209,7 @@ describe("CLI targets use role selection", { concurrency: false }, () => {
 });
 
 it("CLI tasks hand retains JSON state and emits the explicit headless pickup turn", async () => {
-	const scratch = home("clio-task-handoff-");
+	const scratch = home("clio-coder-task-handoff-");
 	try {
 		const options = { env: scratch.env, cwd: scratch.root };
 		const added = await runCli(["tasks", "add", "Inspect validation results"], options);
@@ -345,7 +345,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 	});
 
 	it("reports custom eval artifacts using the printed command without importing or changing bytes", async () => {
-		const scratch = home("clio-eval-custom-");
+		const scratch = home("clio-coder-eval-custom-");
 		try {
 			// Artifact location does not require rerunning every recipe. Keep the
 			// full shipped-corpus roundtrip in its dedicated test below.
@@ -399,7 +399,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 	});
 
 	it("round-trips all shipped machinery cases through eval report and self-comparison", async () => {
-		const scratch = home("clio-eval-machinery-");
+		const scratch = home("clio-coder-eval-machinery-");
 		try {
 			const run = await runCli(["eval", "run", "--suite", "evals/behavioral-machinery.yaml", "--clio-coder-entry", CLI], {
 				env: scratch.env,
@@ -516,7 +516,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 
 	it("keeps doctor/configure outcomes and both configure cancellation codes", async () => {
 		const scratch = home();
-		const firstRun = home("clio-first-run-cancel-");
+		const firstRun = home("clio-coder-first-run-cancel-");
 		try {
 			const untouched = await runCli(["doctor", "--json"], { env: scratch.env });
 			strictEqual(untouched.code, 0, untouched.stderr);

@@ -50,7 +50,7 @@ notes: |
 const roots: string[] = [];
 
 function workspace(files: Record<string, string>): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-validation-contract-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-validation-contract-"));
 	roots.push(root);
 	for (const [relative, text] of Object.entries(files)) {
 		const target = join(root, relative);

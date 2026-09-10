@@ -100,11 +100,16 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki (workspace only).",
 	},
 	[ToolNames.Context]: {
-		objective: "Return workspace, bundled-docs, or skill context.",
+		objective: "Return workspace, bundled-docs, skill, or library-catalog context.",
 		uiLabel: "Context",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
-			Math.max(OBSERVE_SELF_CAPS.contextDocs, OBSERVE_SELF_CAPS.contextSkills, OBSERVE_SELF_CAPS.contextWorkspace),
+			Math.max(
+				OBSERVE_SELF_CAPS.contextDocs,
+				OBSERVE_SELF_CAPS.contextSkills,
+				OBSERVE_SELF_CAPS.contextWorkspace,
+				OBSERVE_SELF_CAPS.contextLibrary,
+			),
 			"Use a narrower query or scope to inspect omitted content.",
 		),
 		costLatency: "local_fast",

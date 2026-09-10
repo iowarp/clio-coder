@@ -1009,7 +1009,7 @@ function builtinFleetsDir(): string {
 	return join(resolvePackageRoot(), "src", "domains", "agents", "fleets");
 }
 
-function resolveFleetReferences(
+export function resolveFleetReferences(
 	contract: FleetContract,
 	source: { source: FleetContractSource; rootPath?: string },
 ): FleetContract {

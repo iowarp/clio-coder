@@ -82,7 +82,7 @@ function runtime(): AgentRuntime {
 describe("session prompt source snapshot", { concurrency: false }, () => {
 	it("freezes real bundle disk inputs across production cache misses and refreshes at explicit boundaries", async () => {
 		const originalCwd = process.cwd();
-		const scratch = mkdtempSync(join(tmpdir(), "clio-prompt-snapshot-"));
+		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-prompt-snapshot-"));
 		const bus = createSafeEventBus();
 		let sessionId = "snapshot-session-one";
 		let compileCalls = 0;
@@ -201,7 +201,7 @@ describe("session prompt source snapshot", { concurrency: false }, () => {
 });
 
 async function contextPromptFixture() {
-	const isolated = await isolateClioEnv("clio-context-prompt-");
+	const isolated = await isolateClioEnv("clio-coder-context-prompt-");
 	const originalCwd = process.cwd();
 	const cwd = join(isolated.dir, "workspace");
 	mkdirSync(join(cwd, "src"), { recursive: true });

@@ -38,7 +38,7 @@ let env: IsolatedClioEnv;
 let project: string;
 const roots: string[] = [];
 function scratch(): string {
-	const dir = mkdtempSync(join(tmpdir(), "clio-plugin-contract-"));
+	const dir = mkdtempSync(join(tmpdir(), "clio-coder-plugin-contract-"));
 	roots.push(dir);
 	return dir;
 }
@@ -103,6 +103,29 @@ describe("agent plugin engine", () => {
 			strictEqual(readPluginManifest(root).valid, false);
 			strictEqual(installPlugin(root, { cwd: project }).plugin, undefined);
 		}
+	});
+
+	it("loads native resources into the namespaced project installation", () => {
+		const root = fixture();
+		mkdirSync(join(root, "ai.iowarp.clio", "prompts"), { recursive: true });
+		writeFileSync(join(root, "ai.iowarp.clio", "prompts", "review.md"), "Review the evidence.\n");
+		rewriteManifest(root, (manifest) => {
+			manifest.extensions = {
+				"ai.iowarp.clio": {
+					manifestVersion: 1,
+					resources: { prompts: "ai.iowarp.clio/prompts" },
+					components: [{ kind: "prompt", id: "review", path: "ai.iowarp.clio/prompts/review.md" }],
+				},
+			};
+		});
+		const installed = installPlugin(root, { cwd: project, scope: "project" }).plugin;
+		ok(installed);
+		strictEqual(installed?.loadable, true);
+		strictEqual(installed?.rootPath, join(project, ".clio-coder", "plugins", "research-kit"));
+		strictEqual(
+			enabledPluginResourceRoots("prompts", project)[0]?.path,
+			join(installed.rootPath, "ai.iowarp.clio", "prompts"),
+		);
 	});
 
 	it("covers siblings, empty directories and contained links in full-tree pins", () => {

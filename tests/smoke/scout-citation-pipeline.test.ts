@@ -77,7 +77,7 @@ function run(args: string[], cwd: string, env: NodeJS.ProcessEnv, entry = CLI) {
 // that any configured model follows the recipe; root owns that acceptance.
 for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 	test(`Scout citation pipeline: ${scenario}`, { timeout: 60_000 }, async (context) => {
-		const scratch = makeScratchHome("clio-scout-pipeline-");
+		const scratch = makeScratchHome("clio-coder-scout-pipeline-");
 		const server = await startOpenAICompatFixture(
 			(request) => {
 				if (isMain(request)) return "Pipeline outcomes are recorded in the dispatch receipt.";

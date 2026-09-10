@@ -131,7 +131,7 @@ const response: TaskMemoryModelResponse = {
 
 for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as const) {
 	test(`real session ${transition} invalidates before mutation and preserves originating spend`, async () => {
-		const env = await isolateClioEnv("clio-memory-lifecycle-");
+		const env = await isolateClioEnv("clio-coder-memory-lifecycle-");
 		const bus = createSafeEventBus();
 		const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 		const bank = new TaskMemoryBank();
@@ -216,7 +216,7 @@ for (const transition of ["new", "resume", "roundtrip", "fork", "branch"] as con
 }
 
 test("tree reads, same-session resume, forward turns and compaction preserve memory authority", async () => {
-	const env = await isolateClioEnv("clio-memory-continuity-");
+	const env = await isolateClioEnv("clio-coder-memory-continuity-");
 	const bus = createSafeEventBus();
 	const { contract: session } = createSessionBundle({ bus, getContract: () => undefined });
 	const bank = new TaskMemoryBank();

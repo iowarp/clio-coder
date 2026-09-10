@@ -79,7 +79,7 @@ export interface ScratchHome {
  * CLIO_* env to hand a spawned binary (including CLIO_CODER_REQUIRE_HOME_PREFIX), and a
  * cleanup. Does not touch process.env — the child reads env fresh.
  */
-export function makeScratchHome(prefix = "clio-e2e-"): ScratchHome {
+export function makeScratchHome(prefix = "clio-coder-e2e-"): ScratchHome {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	return {
 		dir,
@@ -106,7 +106,7 @@ const openScratchHomeReleases = new Map<string, () => void>();
  * `beforeEach` must `await` it so a concurrently-scheduled suite's own window
  * can't open while this one is still live.
  */
-export async function newScratchClioHome(prefix = "clio-scratch-"): Promise<string> {
+export async function newScratchClioHome(prefix = "clio-coder-scratch-"): Promise<string> {
 	const release = await acquireEnvLock();
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	openScratchHomeReleases.set(dir, release);
@@ -141,7 +141,7 @@ export interface IsolatedClioEnv {
  * Async for the same reason as newScratchClioHome(): it queues behind the
  * process-wide env lock, so `beforeEach` must `await` it.
  */
-export async function isolateClioEnv(prefix = "clio-scratch-"): Promise<IsolatedClioEnv> {
+export async function isolateClioEnv(prefix = "clio-coder-scratch-"): Promise<IsolatedClioEnv> {
 	const release = await acquireEnvLock();
 	const envBackup: NodeJS.ProcessEnv = { ...process.env };
 	const dir = mkdtempSync(join(tmpdir(), prefix));

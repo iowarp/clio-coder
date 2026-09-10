@@ -208,7 +208,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 	});
 
 	it("upgrades the exact v1 release home once, keeps its backup, and boots it", async () => {
-		const home = isolatedHome("clio-migrated-boot-");
+		const home = isolatedHome("clio-coder-migrated-boot-");
 		try {
 			mkdirSync(join(home.root, "config"), { recursive: true });
 			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
@@ -250,7 +250,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 	});
 
 	it("takes a genuinely empty home through first-run setup to the editor over ordinary process I/O", async () => {
-		const home = isolatedHome("clio-fresh-boot-");
+		const home = isolatedHome("clio-coder-fresh-boot-");
 		let cli: RunningCli | undefined;
 		try {
 			deepStrictEqual(readdirSync(home.root), []);

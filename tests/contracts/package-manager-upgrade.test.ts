@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 test("post-install upgrade previews local migrations without registry lookup or package replacement", () => {
-	const home = makeScratchHome("clio-manager-upgrade-");
+	const home = makeScratchHome("clio-coder-manager-upgrade-");
 	try {
 		const result = spawnSync(
 			process.execPath,

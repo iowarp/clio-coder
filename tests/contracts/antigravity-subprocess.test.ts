@@ -36,7 +36,7 @@ before(() => {
 	if (process.platform !== "win32") return;
 	const windowsRoot = process.env.SystemRoot;
 	ok(windowsRoot, "SystemRoot must locate the Windows .NET Framework compiler");
-	windowsLauncher = join(mkdtempSync(join(tmpdir(), "clio-agy-launcher-")), "agy.exe");
+	windowsLauncher = join(mkdtempSync(join(tmpdir(), "clio-coder-agy-launcher-")), "agy.exe");
 	// windows-latest includes this compiler. A real executable keeps the
 	// production shell-free spawn path intact; Node refuses .cmd launchers.
 	execFileSync(
@@ -87,7 +87,7 @@ if (scenario.hang) {
 `;
 
 function scratch(): { root: string; binary: string; home: string } {
-	const root = mkdtempSync(join(tmpdir(), "clio fake agy-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder fake agy-"));
 	scratchDirectories.push(root);
 	const binary = join(root, process.platform === "win32" ? "agy.exe" : "agy");
 	const home = join(root, "home");
@@ -312,7 +312,7 @@ describe("Antigravity external subprocess contract", () => {
 	});
 
 	it("lets a successful live account catalog outrank descriptor hints and rejects a disappeared model", async () => {
-		isolated = await isolateClioEnv("clio-agy-catalog-");
+		isolated = await isolateClioEnv("clio-coder-agy-catalog-");
 		const runtime = {
 			...antigravityCodeRuntime,
 			probe: async () => ({
@@ -330,7 +330,7 @@ describe("Antigravity external subprocess contract", () => {
 	});
 
 	it("keeps a static catalog authoritative for runtimes that do not declare live discovery", async () => {
-		isolated = await isolateClioEnv("clio-catalog-first-");
+		isolated = await isolateClioEnv("clio-coder-catalog-first-");
 		let probed = 0;
 		const { externalAgentLoop: _external, ...base } = antigravityCodeRuntime;
 		const runtime = {

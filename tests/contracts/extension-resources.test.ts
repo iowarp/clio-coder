@@ -37,7 +37,7 @@ import { createShareArchive, importShareArchive, planShareImport } from "../../s
 const roots: string[] = [];
 
 function scratch(): string {
-	const root = mkdtempSync(join(tmpdir(), "clio-extension-resources-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-extension-resources-"));
 	roots.push(root);
 	return root;
 }

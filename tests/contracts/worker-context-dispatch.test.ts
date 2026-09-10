@@ -22,7 +22,7 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 for (const mode of ["isolated", "fork", "splice"] as const) {
 	test(`production dispatch and native HTTP worker deliver ${mode} context exactly once`, async () => {
-		const env = await isolateClioEnv("clio-worker-context-dispatch-");
+		const env = await isolateClioEnv("clio-coder-worker-context-dispatch-");
 		const parent: AgentMessage[] = [{ role: "user", content: "PARENT_CONSTRAINT_42", timestamp: 1 }];
 		let captures = 0;
 		const fixture = await startGatewayThinkingFixture("lm-studio", "zbook/ornith-1.5-35b-a3b", async () => {
@@ -147,7 +147,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 }
 
 test("ACP receives one portable splice, seals its context provenance, and refuses native fork", async () => {
-	const env = await isolateClioEnv("clio-acp-worker-context-");
+	const env = await isolateClioEnv("clio-coder-acp-worker-context-");
 	const peer = `
 const send = (message) => process.stdout.write(JSON.stringify({jsonrpc:"2.0", ...message}) + "\\n");
 require("node:readline").createInterface({input: process.stdin}).on("line", (line) => {

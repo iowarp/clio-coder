@@ -9,7 +9,7 @@ describe("contracts/safe-resource-write", () => {
 	let scratch: string;
 
 	beforeEach(() => {
-		scratch = mkdtempSync(path.join(tmpdir(), "clio-safe-resource-write-"));
+		scratch = mkdtempSync(path.join(tmpdir(), "clio-coder-safe-resource-write-"));
 	});
 
 	afterEach(() => {

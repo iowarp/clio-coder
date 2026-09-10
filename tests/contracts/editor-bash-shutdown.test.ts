@@ -45,7 +45,7 @@ describe("operator shell and wiki shutdown", { concurrency: false, skip: process
 			it(`${mode} awaits ${resistance} resistance termination of its owned group`, {
 				timeout: 25_000,
 			}, async (t) => {
-				const home = makeScratchHome("clio-shutdown-");
+				const home = makeScratchHome("clio-coder-shutdown-");
 				const owned: Identity[] = [];
 				writeFileSync(
 					join(home.dir, "descendant.mjs"),
@@ -160,7 +160,7 @@ describe("operator shell and wiki shutdown", { concurrency: false, skip: process
 		}
 	}
 	it("keeps the default hook budget while allowing one internal override", { timeout: 10_000 }, async () => {
-		const home = makeScratchHome("clio-shutdown-budget-");
+		const home = makeScratchHome("clio-coder-shutdown-budget-");
 		const child = spawn(process.execPath, ["--import", "tsx", fixture, "budget", home.dir, "unused"], {
 			env: { ...process.env, ...home.env, CLIO_CODER_SHUTDOWN_HOOK_MS: "50" },
 			stdio: ["ignore", "ignore", "pipe"],

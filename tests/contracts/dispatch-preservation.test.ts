@@ -20,7 +20,7 @@ function git(root: string, ...args: string[]) {
 	return execFileSync("git", ["-C", root, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 }
 function repo() {
-	const root = mkdtempSync(join(tmpdir(), "clio-dispatch-retain-"));
+	const root = mkdtempSync(join(tmpdir(), "clio-coder-dispatch-retain-"));
 	git(root, "init", "-q");
 	git(root, "config", "user.name", "Contract");
 	git(root, "config", "user.email", "contract@example.invalid");
@@ -118,7 +118,7 @@ test("a two-cycle fleet loop persists independently recoverable states before re
 	const { executeFleetRun } = await import("../../src/domains/dispatch/fleet-run.js");
 	const { workspaceCheckpointRef } = await import("../../src/domains/dispatch/workspace-checkpoint.js");
 	const { isolateClioEnv } = await import("../harness/scratch-env.js");
-	const env = await isolateClioEnv("clio-loop-ref-");
+	const env = await isolateClioEnv("clio-coder-loop-ref-");
 	const root = repo();
 	try {
 		const head = git(root, "rev-parse", "HEAD"),

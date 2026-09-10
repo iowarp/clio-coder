@@ -69,7 +69,7 @@ Usage:
   clio-coder usage report         cross-session usage facts and opportunities (experimental)
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
-  clio-coder library              register, install, update, inspect, and manage packages of every kind
+  clio-coder library              register, install, update, import, inspect, and manage packages of every kind
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
