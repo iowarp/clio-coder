@@ -63,6 +63,44 @@ WorkerSpec version **4** is required. Rebuild/update remote workers together wit
 
 No extra LLM request is needed for capture or selection. Optional splice budgeting uses additive size estimates and one final serialization, rather than serializing the growing packet for every candidate. Stable projections help repeated requests retain an unchanged prefix, but provider cache reuse is measured behavior, not guaranteed: worker system prompts, tool surfaces, models, and provider cache rules can differ from the parent.
 
+## A worker's output token limit
+
+A worker is a separate process. It does not inherit the parent session's live
+settings; it reads layered settings from disk for its own working directory
+(`startWorkerRun`, `src/engine/worker-runtime.ts`). An unsaved `/settings` or
+`/model` override in the parent session therefore does not reach it. Those
+resolved settings also govern the worker's observation caps and working-set
+eviction, not just its output cap. External vendor runtimes, such as Claude CLI
+or Antigravity delegation, return before this native path and are not governed by
+the native request adapter at all.
+
+Precedence for `chat.maxOutputTokens`, highest first: `.clio-coder/settings.local.yaml`,
+`.clio-coder/settings.yaml`, the user `settings.yaml`, then the compiled default.
+**The compiled default is `0`** (`src/core/defaults.ts`), which is not a token
+count. `0` means "use the resolved model's advertised output limit", falling back
+to the product floor when the model does not advertise one.
+
+Both project layers are gated on workspace trust (`src/core/workspace-trust.ts`).
+An untrusted project, a project whose configuration changed after trust was
+recorded, or a malformed settings file all drop the project layers and fall back
+to user settings or the compiled default. This is why a worker can legitimately
+run with a different cap than the project file appears to ask for.
+
+Whatever the resolved number is, it is a request, not a promise. `remainingContextMaxTokens`
+(`src/engine/apis/output-budget.ts`) clamps it to the model's advertised output
+limit and to the remaining context window, and each provider then maps the budget
+onto its own wire contract. On the OpenAI-compatible LiteLLM path,
+`reasoning_effort` is forwarded under `allowed_openai_params` when thinking
+effort is enabled (`src/engine/apis/openai-completions.ts`); that is a LiteLLM
+compatibility allowance and not a universal provider contract. A per-response cap
+also caps one response, not a task: it does not bound total task tokens or
+guarantee the task finishes.
+
+`tests/contracts/worker-output-settings.test.ts` covers the eight combinations of
+trust state and layer (trusted project at low/medium/xhigh effort, trusted local
+override, untrusted, changed-after-trust, malformed, and user settings only).
+
 ## Validation
 
 The worker-context contract tests cover incomplete multi-tool batches, copy isolation, path and explicit-ref selection, stale duplicate reads, mandatory constraints and errors, images, admission freezing, active-branch eviction replay, receipt tampering, scoped recall, and provider-usage reconciliation after eviction. Dispatch integration tests run the actual Pi worker against a controlled HTTP provider and verify single delivery, exclusion of later parent turns, absence of inherited fork events, wire validation, and rejection before a provider call when context is oversized. The normal full CI gate also exercises existing dispatch, session replay, worker transport, and operator behavior.
+

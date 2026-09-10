@@ -163,12 +163,43 @@ checks:
 <p>Clio Coder integrates scientific validation contracts directly into its safety model to raise the evidence standard automatically:</p>
 <ul>
 <li><strong>Parsed contract escalates</strong>: At startup and at every finish-gate decision, <code>rigorResolution()</code> in <code>src/domains/safety/rigor.ts</code> loads the contract. A contract that parses raises the session&#39;s rigor level from <code>normal</code> to <code>high</code> with source <code>validation-contract</code>. An unparseable contract yields <code>normal</code> with source <code>invalid-contract</code> and the fault as the diagnostic; a Markdown-only workspace yields <code>normal</code> with source <code>markdown-advisory</code>. <code>CLIO_CODER_RIGOR</code> still overrides both directions.</li>
-<li><strong>High-Rigor Gate Requirements</strong>: Once the rigor is <code>high</code>, the finish gate is active. It engages on a settled <code>turn_end</code> only when the recent window contains successful workspace mutation evidence and no validation evidence or <code>limitation</code> receipt. The window is entries since the last user message, capped at 80 entries:<ul>
+<li>High-Rigor Gate Requirements: Once the rigor is <code>high</code>, the finish gate is active. It engages on a settled <code>turn_end</code> only when the recent window contains successful workspace mutation evidence and no validation evidence or <code>limitation</code> receipt. The window is entries since the last user message, capped at 80 entries:<ul>
 <li>Clio issues a <code>request_continuation</code> middleware effect to keep the session running.</li>
 <li>Clio injects a dynamic warning reminder (<code>HIGH_RIGOR_REVALIDATION_MESSAGE</code>) instructing the agent to run a verification command or to call <code>limitation</code> before it can conclude the turn.</li>
 </ul>
 </li>
 </ul>
+<h2>Verification boundaries and limitation receipts</h2>
+<p>File readback establishes artifact inspection, not executed scientific validation. When an agent or worker modifies files but cannot execute the outstanding checks with its admitted tools and approved scope:</p>
+<ol>
+<li><strong>The generic <code>limitation</code> tool</strong>:
+<ul>
+<li>Clio provides the pure canonical <code>limitation</code> tool (<code>src/tools/limitation.ts</code>), recording a <code>limitation</code> tool_call and tool_result receipt in the session ledger.</li>
+<li>Arguments:
+<ul>
+<li><code>scope</code> (required string): What could not be verified, in one sentence.</li>
+<li><code>reason</code> (required enum): One of <code>no-runner</code>, <code>blocked</code>, <code>out-of-scope</code>, <code>environment</code>, or <code>other</code>.</li>
+<li><code>paths</code> (optional array of strings): Repository-relative file paths left unverified.</li>
+</ul>
+</li>
+<li>A prose disclaimer or text summary in conversation is not a limitation receipt; only a successful <code>limitation</code> tool call registers a typed receipt in the session ledger.</li>
+</ul>
+</li>
+<li><strong>Recipe instructions vs generic harness</strong>:
+<ul>
+<li>Bundled scientific recipes (such as Materio research agents in <code>library/plugins/materio</code>) explicitly instruct workers via <code>&lt;clio_verification_boundary&gt;</code> in their recipe bodies to call <code>limitation</code> when external checks cannot run. This boundary instruction is authored recipe content, not an unconditional harness envelope injected into every worker.</li>
+</ul>
+</li>
+<li><strong>Finish gate enforcement</strong>:
+<ul>
+<li>At high rigor (such as when a valid <code>validation.yaml</code> contract is present), the finish gate monitors workspace mutations within the recent active turn window (up to 80 entries since the last user message).</li>
+<li>If mutating tool calls occurred in that window without executed validation evidence or a <code>limitation</code> receipt, <code>finishContractRegistration</code> (<code>src/domains/safety/finish-contract-registration.ts</code>) emits a <code>request_continuation</code> middleware effect accompanied by a reminder (<code>HIGH_RIGOR_REVALIDATION_MESSAGE</code>). At normal rigor, it emits an advisory reminder without blocking.</li>
+<li>The gate checks structural evidence presence; it does not grade the empirical correctness of scientific code. Runtime turn budgets, deadline limits, operator cancellation, and tool failures still apply.</li>
+<li>A limitation receipt never converts missing or failing checks into a pass; it formally records the limitation so callers and operators know the scientific result is incomplete.</li>
+<li>Verified by contracts <code>tests/contracts/materio-plugin.test.ts</code> and <code>tests/contracts/safety-policy-remediation.test.ts</code>.</li>
+</ul>
+</li>
+</ol>
         </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="performance_methodology_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Performance Measurement Methodology</span></a>

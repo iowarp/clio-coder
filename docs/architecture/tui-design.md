@@ -201,8 +201,96 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 
 ### 5.1 Welcome Launchpad & Session Header
 
-- **Pre-Submit Launchpad**: Before the first prompt, renders a compact launchpad at line 0 with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness state, and a context-sensitive next action (e.g. `ctx missing · /context init`, `ctx checking…`, or `ctx ready · type a task`). Asynchronous repository probes use height-stable dim placeholders (`factsPending`).
-- **Session Header Collapse**: On first user submission, the launchpad deliberately collapses into an immutable, single-line session header (`>C_ Clio Coder vX.Y.Z · <workspace · git branch> · <target·model · ready> · ctx ready · type a task`) so the conversation transcript owns the viewport while the header keeps naming where Clio works, which route answers, and what the context is ready for.
+The header has two shapes and no box. Source: `src/interactive/welcome-dashboard.ts`;
+contracts: `tests/contracts/welcome-boot-header.test.ts`.
+
+- **Launchpad (before the first prompt): exactly three rows.** A masthead with
+  identity flush left and workspace flush right separated by a `frame`-token
+  rule, then the route, then one next step.
+
+  ```
+  >C_ Clio Coder v0.4.7 ──────────────────── ~/iowarp/clio-coder · main*
+    ✓ dynamo · qwen3.8-27b
+    describe a task · Enter to send · / for commands
+  ```
+
+  Under width pressure the identity drops its version, then its name; the
+  workspace drops its branch, then head-truncates the path keeping the leaf
+  (`…/clio-coder`). The product name outranks the version, and the branch is
+  given up before the path's leaf is obscured.
+
+- **Route row.** `✓ <target> · <model>` healthy, `! …` degraded, `✗ …`
+  unavailable, `◌ …` configured but not yet probed, `not configured` when
+  neither is set. A healthy route prints no probe latency; the glyph carries the
+  verdict and `/doctor` owns the timing. A failing route prints its reason,
+  sanitized to one line. The row reserves room for that reason where it can,
+  shrinking the route text to keep it, and drops it only when the width cannot
+  hold even the floors. The action row still names the route problem either way.
+
+- **Action row: one line, chosen by what actually blocks work.** First match
+  wins: no route (`no route selected · /model`), no model
+  (`no model selected · /model`), route unavailable or degraded
+  (`… · /settings targets`), `CLIO-CODER.md` malformed
+  (`CLIO-CODER.md malformed · /context to inspect`), no handbook
+  (`describe a task · /context init to index this repo`), stale handbook
+  (`describe a task · /context refresh to update it`), otherwise
+  `describe a task · <SubmitKey> to send · / for commands`. Missing project
+  context is guidance, not a blocker; the line still invites work. A *malformed*
+  handbook is pointed at inspection rather than regeneration, since the file
+  needs repair before it needs rebuilding. `<SubmitKey>` comes from the live
+  `tui.input.submit` binding and is omitted when that action is unbound.
+
+- **Session header (after the first prompt): exactly one row, and live.**
+
+  ```
+  >C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*
+  ```
+
+  It follows a mid-session model change rather than freezing at collapse. It
+  carries identity, route and workspace and deliberately drops readiness,
+  latency, project-context state and onboarding text, which the footer and the
+  composer rail own. When the row will not fit, the survival order is the `>C_`
+  wordmark, then the route, then the workspace path, then the branch, then
+  `Clio Coder v<version>`. **The route is the last fact given up**, and it
+  outlives the workspace and the product name; below roughly the width of the
+  wordmark itself the row is the truncated wordmark alone.
+
+- **Transitions.** The first submit collapses the launchpad exactly once, before
+  any handler appends transcript output, on all three submit paths (ordinary
+  submit, admission of a queued boot submission, interrupt-submit). `/new`
+  returns to the launchpad. `/resume`, `/tree`, `/fork` and `/handoff` collapse
+  it, so a rebuilt transcript is never shown under fresh-start onboarding, and
+  `clio-coder --continue` / `--session <id>` opens directly in the collapsed
+  header once `session.resume()` has actually succeeded. Transitions are
+  idempotent.
+
+- **No filesystem work on the render path**, in any state, including the first
+  frame and render-cache hits. Project-context state comes from the context
+  domain's own reader, refreshed off the frame; until the first reading lands
+  the header shows `describe a task` rather than asserting a state it does not
+  know. A read that throws never becomes `ok` or `none` and never renews the
+  trust window, so once reads have been failing longer than the 10s window the
+  header stops asserting the last value, and a reading is only ever served for
+  the directory it was taken in. This is a change to per-frame render I/O; it is
+  not a claim that process startup got faster.
+
+- **Text safety.** Provider reasons, model ids, branch names and paths pass
+  through the project's one-line sanitizer (`sanitizeCallTargetText`,
+  `src/domains/safety/call-target.ts`) before styling: OSC and CSI stripped, C0
+  and DEL neutralized, whitespace collapsed. A hostile upstream error cannot
+  retitle the terminal, clear the screen, move the cursor, or inject colour
+  through the header. Wide Unicode, emoji and ZWJ sequences are preserved and
+  measured in terminal columns.
+
+Stage 0, before hydration, renders the same wordmark helper over three rows so
+the footprint matches the hydrated header, then the editor, then a footer line
+that stays blank until `Ctrl+C` arms the exit:
+
+```
+>C_ Clio Coder
+Starting Clio · you can type now
+
+```
 
 ### 5.2 Composer (ClioEditor)
 

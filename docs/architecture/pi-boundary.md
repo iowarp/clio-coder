@@ -97,10 +97,28 @@ behavior and should not grow another implementation of an SDK primitive.
 - `src/interactive/chat-renderer.ts` consumes Pi's compaction, branch, and bash replay wording through `src/engine/messages.ts`.
 - Interactive Markdown, Mermaid, LaTeX, fullscreen, alternate-screen, and keybinding glue should continue to compose pi-tui primitives.
 
+## Architecture boundary enforcement and tests
+
+The rule keys on the `@earendil-works/pi-` prefix, and it is a single rule with
+no exceptions: only files under `src/engine/**` may import a `@earendil-works/pi-*`
+package, type-only imports included. The allowlist of type-only exceptions
+(`allowedPiTypeImportSpecifiersOutsideEngine`) is deliberately empty. Everything
+else, `src/interactive/**` included, reaches Pi through engine re-exports such as
+`src/engine/tui-primitives.ts`, and domains take erased engine shapes
+(`EngineModel`, `Api`, `Model`) from `src/engine/types.ts` and `src/engine/ai.ts`.
+
+`tests/boundaries/check-boundaries.ts` enforces this statically over the import
+graph, alongside five other isolation rules including the Stage 0 instant-shell
+closure (`STAGE_0_OWNER`, `STAGE0_SEAMS`). `tests/contracts/engine-lifecycle.test.ts`
+covers agent-loop ordering, reset, tool-argument normalization, the keybinding
+table and alt-screen render seams; `tests/contracts/tool-boundaries.test.ts`
+covers tool schema admission and execution isolation across runtimes.
+
 ## Pi regression net
 
 Run these contracts first on a Pi bump, before the full gate:
 
+- `tests/boundaries/check-boundaries.ts` (static architecture boundaries and Stage 0 seams)
 - `tests/contracts/engine-lifecycle.test.ts` (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)
 - `tests/contracts/provider-transport.test.ts`
 - `tests/contracts/openrouter-transport.test.ts`

@@ -203,9 +203,29 @@ override the applicable setting.
   route. Stable session ids, request tags, optional request-level timeouts, and
   observed server retry/fallback headers remain supported. Residency is
   observe-only because LiteLLM owns loading and eviction behind the route.
-- **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the `reasoning_content` parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.
+- **OpenAI Completions (`openai-completions`):** The OpenAI-compatible completions provider preserves thinking blocks within assistant messages. Where thinking is enabled and the provider supports thinking signatures (`reasoning_content`, `reasoning`, `reasoning_text`), it preserves thinking blocks across turns.
 - **Anthropic OAuth / API (`anthropic-max`):** Uses the `anthropic-extended` thinking format. The engine supports Anthropic's native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.
 - **Reasoning-Never Models (`thinking.mechanism: none`):** When a model is configured or cataloged with `thinking.mechanism: none`, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.
+
+### Output token limit interruption during reasoning and thinking replay
+
+When an LLM response is interrupted because it hits an output token limit during reasoning (`stopReason: "length"` / `finish_reason: "length"`), Clio applies a bounded request repair rather than universal across-the-board replay (`src/engine/apis/openai-completions.ts` `preserveInterruptedReasoning`):
+
+1. **Activation conditions**:
+   - Thinking is active and `requiresThinkingAsText` is not configured.
+   - The assistant turn stopped due to length (`stopReason === "length"`).
+   - Provider, API, and model all match the previous turn.
+   - All content blocks are nonempty, non-redacted thinking blocks.
+   - Thinking signatures are raw `reasoning`, `reasoning_content`, or `reasoning_text`.
+
+2. **Replay and wire propagation**:
+   - The adapter appends a request-local visible interruption notice to prevent upstream Pi from dropping a reasoning-only assistant turn.
+   - In the next request (turn continuation or bounded repair via `stream` or `streamSimple`), the adapter retains the truncated thought trace and replays it on the wire under `assistant[signature]` (for example `reasoning_content: reasoning`).
+   - The request-local notice contains no private reasoning, and private reasoning is never sent as user-visible answer text.
+   - Replay repair does not mutate saved session transcripts, original stop reasons, usage metrics, or thinking signatures.
+   - If target model, provider, or API switches, or reasoning is turned off, this narrow request repair is skipped and existing conversion policy applies; opaque signatures and cross-model conversions retain their original provider semantics.
+   - A per-response output-token cap does not cap total task tokens or guarantee completed task execution; existing repair and deadline limits continue to apply.
+   - Verified by contract suite `tests/contracts/reasoning-length-replay.test.ts`.
 
 ---
 

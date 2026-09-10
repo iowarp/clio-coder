@@ -205,6 +205,31 @@
     shape --&gt; receipt[Receipts, audit, evidence]
 </code></pre>
 <p>Net <code>confirm</code> is never auto-allowed by autonomy, including full-auto. Net <code>block</code> is never downgraded by anything. A tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass this path before it can run.</p>
+<h3>Interplay of autonomy, protected paths, and one-shot permission approval</h3>
+<p>The three enforcement layers interact with strict precedence to ensure safety invariants cannot be bypassed:</p>
+<ol>
+<li><strong>Zero-access protected paths outrank all autonomy levels</strong>:
+<ul>
+<li>Zero-access paths (including <code>.git/config</code>, <code>credentials.yaml</code>, <code>.env</code>, and sensitive SSH keys) are hard-blocked by the safety net with canonicalized symlink path resolution.</li>
+<li>Even <code>full-auto</code> autonomy cannot read, write, or modify zero-access paths; <code>block</code> verdicts are final and never park for approval cards.</li>
+<li>Built-in path protections cannot be overridden by malformed or permissive project <code>.clio-coder/safety.yaml</code> rules.</li>
+</ul>
+</li>
+<li><strong>One-shot permission approval cards</strong>:
+<ul>
+<li>When an action requires operator consent (under <code>suggest</code> for writes and commands, under <code>auto-edit</code> for unrecognized bash, or at any autonomy level for <code>system_modify</code> confirm rails), Clio pauses execution and displays a focused interactive permission card.</li>
+<li>Operator approval is strictly <strong>one-shot</strong>: approving a command or write grants authority <em>only</em> for that single execution instance. It does not grant blanket approval for future calls, does not loosen the active autonomy level, and cannot downgrade safety-net blocks.</li>
+<li>In headless mode, calls requiring interactive permission fail closed immediately.</li>
+</ul>
+</li>
+<li><strong>Worker escalation and autonomy boundaries</strong>:
+<ul>
+<li>Dispatched workers run non-interactively and inherit the resolved execution autonomy.</li>
+<li>When a worker encounters a permission gate, <code>fleet.permissions.mode</code> dictates whether it fails immediately (<code>fail</code>), returns a structured rejection (<code>deny</code>), or parks and escalates (<code>escalate</code>).</li>
+<li>Under <code>escalate</code>, the parked call emits a <code>clio_coder_permission_escalated</code> event to stdout, which surfaces in the interactive orchestrator as an operator permission card. No model-facing tool can approve a worker permission; approvals are human-only.</li>
+</ul>
+</li>
+</ol>
 <h3>Worker permission escalation</h3>
 <p>Dispatched workers run non-interactively, so step 3 resolves per <code>fleet.permissions.mode</code>: <code>deny</code> turns the parked call into a structured denial, <code>fail</code> ends the run, and <code>escalate</code> hands the ask up to the interactive operator. Under <code>escalate</code> the worker parks the call, emits a <code>clio_coder_permission_escalated</code> event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker&#39;s stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch <code>resolveWorkerPermission</code> method is reachable only from the interactive layer. This preserves the receipt&#39;s honesty, since a model approving its own fleet&#39;s asks would collapse the audit trail.</p>
 <p>Escalation can never hang a run. Every escalated ask resolves by an operator decision or by the <code>fleet.permissions.escalation</code> timeout fallback (<code>{ timeoutMs, fallback }</code>, defaults 120000 ms and <code>deny</code>); a headless session has no subscriber, so the timeout fallback always governs there. The worker keeps emitting heartbeats while parked, so the reconciler does not reap it, and every escalation and its resolution source (operator or timeout) is recorded on the receipt.</p>
