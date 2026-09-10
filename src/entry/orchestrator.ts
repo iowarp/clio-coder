@@ -2453,6 +2453,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getSettings: getCurrentSettings,
 		getFleetNodes: () => result.getContract<SchedulingContract>("scheduling")?.fleet?.list() ?? [],
 		onBackgroundDispatch: () => dispatchBackground.backgroundNewest(),
+		// A boot-time resume opens onto an existing conversation, so the welcome
+		// header starts collapsed rather than offering fresh-start onboarding.
+		...(resumedSessionAtBoot ? { startsResumed: true } : {}),
 		...(session ? { getSessionId: () => session.current()?.id ?? null } : {}),
 		...(contextDomain
 			? {

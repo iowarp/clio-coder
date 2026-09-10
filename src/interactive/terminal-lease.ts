@@ -24,7 +24,7 @@ import {
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
 import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
-import { clioTheme, GLYPH } from "./theme/index.js";
+import { brandMark, clioTheme, GLYPH } from "./theme/index.js";
 
 export const INSTANT_SHELL_ENV = "CLIO_CODER_INSTANT_SHELL";
 const DOUBLE_TAP_MS = 500;
@@ -143,17 +143,25 @@ function stageZeroRoot(
 	shutdownArmed: () => boolean,
 ): Component {
 	const theme = clioTheme();
+	// The same wordmark the hydrated header paints, through the same helper, so
+	// the `>C_` does not change color at adoption. `brandMark` and the theme
+	// tokens are Stage-0-safe: pure string composition with no I/O and no import
+	// outside the theme leaf this module already depends on.
+	// Three lines, matching the hydrated header's footprint so adoption does not
+	// shift the editor down the screen. The third is deliberately blank: it costs
+	// nothing and asserts nothing, where any real fact here would need I/O the
+	// boot path must not do.
 	const heading = new Text(
-		`${theme.style("title", ">C_ Clio Coder", { bold: true })}\n${theme.fg("muted", "Hydrating session services…")}`,
+		`${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })}\n${theme.fg("muted", "Starting Clio · you can type now")}\n`,
 		0,
 		0,
 	);
+	// Only the armed-exit warning lives here. The reassurance that typing works
+	// is already the second heading line, and printing it twice on a two-line
+	// screen was the loudest thing on it.
 	const footer: Component = {
-		render: () => [
-			shutdownArmed()
-				? theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")
-				: theme.fg("dim", "Warming up · typing and submit are ready"),
-		],
+		render: () =>
+			shutdownArmed() ? [theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")] : [""],
 		invalidate: () => {},
 	};
 	if (mode === "fullscreen") {

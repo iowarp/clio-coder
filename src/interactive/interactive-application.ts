@@ -204,6 +204,12 @@ export interface InteractiveDeps {
 	/** Live CLIO-CODER.md and memory state for the footer Context quadrant. */
 	getContextState?: (cwd?: string) => ContextState;
 	/**
+	 * True when this process resumed an existing session at boot (`--continue`,
+	 * `--session <id>`). The welcome header opens collapsed so a conversation
+	 * with history is not topped by fresh-start onboarding.
+	 */
+	startsResumed?: boolean;
+	/**
 	 * Persist a thinking level set by `/thinking <level>` or `/model <pattern>:<level>`.
 	 * Scope "session" leaves settings.yaml alone; omitted means the historical
 	 * write-through, which is what the Shift+Tab cycle and `/thinking` still want.
@@ -638,6 +644,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getTaskMemorySeedOffer ? { getTaskMemorySeedOffer: deps.getTaskMemorySeedOffer } : {}),
 		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
+		...(deps.startsResumed === true ? { startsResumed: true } : {}),
 	});
 	const {
 		keybindings,
@@ -915,6 +922,21 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			interactiveSubscriptions.workers.reset();
 		});
 	};
+	/**
+	 * The same reset, plus the header collapse that adopting an existing
+	 * conversation implies. `/resume`, `/tree`, `/fork` and `/handoff` all rebuild
+	 * the transcript from a session that already has turns, so the launchpad's
+	 * fresh-start onboarding must not survive above it. `/new` deliberately calls
+	 * the bare reset above and re-expands the launchpad instead.
+	 *
+	 * Collapsing here rather than at each overlay call site keeps one seam for
+	 * all four paths; `collapseToSessionHeader` is idempotent, so a resume that is
+	 * immediately submitted to cannot produce a second transition.
+	 */
+	const adoptExistingConversation = (): void => {
+		presentation.collapseWelcomeDashboard();
+		resetTranscript();
+	};
 	overlayLifecycle = createOverlayLifecycle({
 		app: deps,
 		tui,
@@ -927,7 +949,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		dispatchBoard,
 		setFleetRunPhase: (runId, phase) => dispatchBoardStore.setFleetPhase(runId, phase),
 		chatPanel,
-		resetTranscript,
+		resetTranscript: adoptExistingConversation,
 		io,
 		readStructuredEntries,
 		announceTaskMemorySeedOffer,

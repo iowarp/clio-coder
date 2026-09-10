@@ -109,6 +109,12 @@ export interface InteractivePresentationDeps {
 	/** Whether that prompt has a mutation to inspect, and whether it is open (issue #254). */
 	getPermissionInspection?: () => import("./permission-hint.js").PermissionInspectionHint;
 	getCwd?: () => string;
+	/**
+	 * True when this process resumed an existing session at boot (`--continue`,
+	 * `--session <id>`). The header opens collapsed rather than showing
+	 * fresh-start onboarding above a conversation that already has history.
+	 */
+	startsResumed?: boolean;
 	resolveVisibleEventSequence?: (event: ChatLoopEvent) => number | null;
 	resolveStreamIngress?: (
 		event: ChatLoopEvent,
@@ -222,19 +228,33 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const keybindings = deps.keybindings ?? factories.createKeybindings(settings);
 	const { getExtensionStats, getLiveWorkspaceSnapshot, getWorkspaceSnapshot, refreshLiveWorkspaceGit } =
 		deps.workspaceFacts;
+	/**
+	 * The submit binding as the operator has it, or null when it is unbound or
+	 * disabled. The header prints a key only when pressing it would actually
+	 * submit, so a rebound or removed binding silently drops the hint instead of
+	 * advertising a default that does nothing.
+	 */
+	const effectiveSubmitKeyLabel = (): string | null => {
+		if (keybindings.isDisabled("tui.input.submit")) return null;
+		const key = keybindings.getKeys("tui.input.submit")[0];
+		return key === undefined || key.length === 0 ? null : formatKeyLabel(key, "");
+	};
 
 	const banner = factories.createBanner({
 		providers: deps.providers,
-		observability: deps.observability,
-		getContextUsage: () => deps.chat.contextUsage(),
 		getWorkspaceSnapshot,
-		getExtensionStats,
-		// The repository probe runs off the render path now, so the frame that
-		// shows its result has to be asked for when the probe lands.
+		// The authoritative project-context reader. It is synchronous on a cache
+		// miss, so the banner refreshes it off the frame rather than calling it
+		// during render; the frame that shows the result is asked for below.
+		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
+		getSubmitKeyLabel: () => effectiveSubmitKeyLabel(),
 		onFactsRefreshed: requestRender,
-		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
+	// A boot-time `--continue`/`--session` resume opens onto an existing
+	// conversation, so the launchpad's fresh-start onboarding would be a lie
+	// before the operator has typed anything.
+	if (deps.startsResumed === true) banner.collapseToSessionHeader();
 	const renderTrace = getActiveRenderTrace();
 	const chatPanel = factories.createChatPanel({
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
@@ -605,6 +625,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const disposeBeforeStatus = (): void => {
 		if (beforeStatusDisposed) return;
 		beforeStatusDisposed = true;
+		// Before the subscriptions go: a project-context refresh already in flight
+		// must not land afterwards and ask a torn-down presentation for a frame.
+		banner.dispose();
 		footer.dispose();
 		unsubscribeObservability();
 		contextActivityStore.unsubscribe();
