@@ -203,3 +203,29 @@ it("four command bridges reuse owners once and reject correctable arguments", ()
 	for (const line of ["/background extra", "/interrupt", "/notifications dismiss typo"])
 		assert.equal(dispatchSlashCommand(parseSlashCommand(line), context), "rejected");
 });
+it("clearing pasted input lets a newly typed bang become an intentional command", () => {
+	const f = fixture();
+	f.editor.handleInput("\x1b[200~!literal\x1b[201~");
+	f.editor.applyEdit("deleteToLineStart");
+	assert.equal(f.editor.getText(), "");
+	f.editor.handleInput("!echo typed");
+	assert.deepEqual(parseEditorBashCommand(f.editor.getTextForSubmit()), {
+		command: "echo typed",
+		excludeFromContext: false,
+	});
+});
+
+it("undo restores a large pasted bang token as literal while a typed prefix remains deliberate", () => {
+	const f = fixture();
+	const pasted = `!echo ${"literal ".repeat(2000)}`;
+	f.editor.handleInput(`\x1b[200~${pasted}\x1b[201~`);
+	assert.notEqual(f.editor.getText(), pasted);
+	f.editor.applyEdit("deleteToLineStart");
+	assert.equal(f.editor.getText(), "");
+	f.editor.applyEdit("undo");
+	assert.equal(f.editor.getExpandedText(), pasted);
+	assert.equal(parseEditorBashCommand(f.editor.getTextForSubmit()), null);
+	f.editor.handleInput("\x1b[H");
+	f.editor.handleInput("!typed ");
+	assert.ok(parseEditorBashCommand(f.editor.getTextForSubmit()));
+});

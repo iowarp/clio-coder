@@ -459,7 +459,7 @@ it("honors resume selection overrides and refreshes help while it remains open",
 	let resumed = "";
 	f.mount("resume", () =>
 		openSessionOverlay(f.tui, {
-			session: { history: () => sessions } as SessionContract,
+			session: { history: () => sessions } as unknown as SessionContract,
 			onResume: (id) => {
 				resumed = id;
 			},
@@ -488,7 +488,7 @@ it("keeps the menu above the draft at normal and small sizes, with live human-fa
 	for (const [columns, rows] of [
 		[120, 42],
 		[80, 24],
-	]) {
+	] as const) {
 		const f = fixture();
 		f.terminal.columns = columns;
 		f.terminal.rows = rows;

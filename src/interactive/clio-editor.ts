@@ -206,7 +206,7 @@ export class ClioEditor extends Editor {
 	private pastedBangOffsets = new Set<number>();
 	private bracketedPasteActive = false;
 	private revision = 0;
-	private pastedExpandedOperator = false;
+	private pastedOperatorTokens = new Set<string>();
 
 	get draftRevision(): number {
 		return this.revision;
@@ -289,9 +289,15 @@ export class ClioEditor extends Editor {
 	 */
 	getTextForSubmit(): string {
 		const text = this.getExpandedText();
-		return this.pastedExpandedOperator || startsWithPastedOperator(this.getText(), this.pastedBangOffsets)
-			? guardPastedEditorOperator(text)
-			: text;
+		return this.startsWithLiteralOperator() ? guardPastedEditorOperator(text) : text;
+	}
+
+	private startsWithLiteralOperator(): boolean {
+		const visible = this.getText();
+		return (
+			startsWithPastedOperator(visible, this.pastedBangOffsets) ||
+			[...this.pastedOperatorTokens].some((token) => visible.trimStart().startsWith(token))
+		);
 	}
 
 	/** Paste is always literal; a later deliberate key submits it. */
@@ -306,10 +312,7 @@ export class ClioEditor extends Editor {
 		// pasted bang draft for that synchronous handoff so the Bash parser can
 		// distinguish it from a typed operator; the submit controller unwraps it
 		// before sending the literal prompt onward.
-		if (
-			(this.pastedExpandedOperator || startsWithPastedOperator(textBeforeInput, this.pastedBangOffsets)) &&
-			keybindings.matches(data, "tui.input.submit")
-		) {
+		if (this.startsWithLiteralOperator() && keybindings.matches(data, "tui.input.submit")) {
 			const pastedText = this.getTextForSubmit();
 			this.pastedBangOffsets.clear();
 			this.bracketedPasteActive = false;
@@ -337,12 +340,34 @@ export class ClioEditor extends Editor {
 		);
 		if (openedPaste) this.bracketedPasteActive = true;
 		if (closedPaste) this.bracketedPasteActive = false;
-		if (pasteMutation && this.getExpandedText().trimStart().startsWith("!")) this.pastedExpandedOperator = true;
+		if (
+			pasteMutation &&
+			this.getExpandedText().trimStart().startsWith("!") &&
+			!textAfterInput.trimStart().startsWith("!")
+		) {
+			// A large paste is represented by an opaque visible token. Remember the
+			// inserted token through edits and undo, without depending on its format.
+			let start = 0;
+			while (
+				start < textBeforeInput.length &&
+				start < textAfterInput.length &&
+				textBeforeInput[start] === textAfterInput[start]
+			)
+				start++;
+			let oldEnd = textBeforeInput.length,
+				end = textAfterInput.length;
+			while (oldEnd > start && end > start && textBeforeInput[oldEnd - 1] === textAfterInput[end - 1]) {
+				oldEnd--;
+				end--;
+			}
+			const token = textAfterInput.slice(start, end).trimStart();
+			if (token) this.pastedOperatorTokens.add(token);
+		}
 	}
 
 	override setText(text: string): void {
 		this.revision += 1;
-		this.pastedExpandedOperator = false;
+		this.pastedOperatorTokens.clear();
 		this.pastedBangOffsets.clear();
 		this.bracketedPasteActive = false;
 		super.setText(text);
