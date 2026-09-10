@@ -82,7 +82,7 @@ at or after it is protected whatever a policy concludes.
 
 Eviction never breaks the call/result envelope. It replaces the observation
 *body* with a marker and leaves the pairing intact: `toolCallId`, `toolName`,
-`details` and the outcome and error flags survive untouched
+the existing `details` are retained
 (`projectToolResult`, `src/domains/context/working-set/project.ts`), so replay
 still matches each result to its call and the renderer still knows what the call
 was. Only the text the model reads changes. The `workingSet` stamp on `details`
