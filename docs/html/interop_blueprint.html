@@ -245,15 +245,20 @@ installed package content is skipped; identifier collisions are not replaced.
 Library integrity checks, drift detection, disable, and removal apply normally.
 To refresh a foreign source, remove the old library package and review a new adoption plan; no host files are ever
 moved, removed, or modified.</p>
-<h2>Import an explicit foreign package</h2>
-<p>Adoption above starts from what an installed host already has. When you have a
-specific package instead, a local directory or a GitHub tree URL, import it
-directly:</p>
+<h2>Inbound: Install or import an explicit foreign package (Claude Code, Codex)</h2>
+<p>Adoption above starts from what an installed host already has. To install or import an explicit Claude Code plugin or Codex package directly—whether from a local directory or a GitHub repository tree—use <code>clio-coder library import</code>:</p>
 <pre><code class="language-bash">clio-coder library import ./vendor/some-plugin --dry-run
 clio-coder library import https://github.com/owner/repo/tree/main/plugins/thing --project
 clio-coder library import ./vendor/some-plugin --format claude --yes
 </code></pre>
-<p>In a session, <code>/library import &lt;path-or-url&gt;</code> reviews that exact source in the Library. The review names the projected resources, every unsupported host feature and every omitted file before anything is written; cancelling releases the staged copy of the vendor tree and writes nothing. The Library's <code>o</code> key is the separate route into the local-agent discovery surface below, which starts from what an installed host already has rather than from a source you name.</p>
+<p>In an active session, <code>/library import &lt;path-or-url&gt;</code> stages and reviews that exact foreign package in the Library. When installing a Claude Code plugin or Codex package, Clio parses the vendor manifest (e.g. <code>.claude-plugin/plugin.json</code>) and presents an interactive review before any managed installation or workspace mutation occurs (staging writes temporary inspection files prior to acceptance). The review details four critical facets:</p>
+<ol>
+<li><strong>Source and Provenance</strong>: Displays the verified package source path or repository tree URL, format (<code>claude-code</code> or <code>codex</code>), and transport.</li>
+<li><strong>Projected Declarative Resources</strong>: Converts text skills (with markdown instructions), commands (converted into prompts), and basic agent personas into native library recipes.</li>
+<li><strong>Foreign Trust Tier</strong>: Marks the package with foreign trust (<code>trust: &quot;foreign&quot;</code>). Under Clio's safety model, foreign package skills and prompts—whether installed at project scope or user scope—remain untrusted and withheld from model turns until <code>integrations.projectResources.trustProjectImports</code> (<code>skills.trustProjectCompatRoots</code>) is enabled. Bound agent recipes require all referenced skills to be trusted.</li>
+<li><strong>Unsupported and Omitted Components</strong>: All executable foreign mechanisms—including MCP servers (<code>.mcp.json</code>), lifecycle hooks (<code>hooks/</code>), shell scripts (<code>scripts/</code>), and daemon runners—are explicitly omitted and listed in the review plan. They are never registered as harness tools or executed.</li>
+</ol>
+<p>Cancelling the review cleans up temporary staging files without modifying managed package state or workspace files. The Library's <code>o</code> key is the separate route into the local-agent discovery surface below, which starts from what an installed host already has rather than from a source you name.</p>
 <p>Detection is deterministic. A root <code>plugin.json</code> always takes precedence; an invalid root is refused before any vendor fallback. With no root manifest, <code>.claude-plugin/plugin.json</code>
 selects the Claude Code format and <code>.codex-plugin/plugin.json</code> selects Codex. When
 both hidden manifests are present the import is ambiguous and <code>--format</code> is

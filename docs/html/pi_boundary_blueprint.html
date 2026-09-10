@@ -369,9 +369,13 @@ behavior and should not grow another implementation of an SDK primitive.</p>
 <li><code>src/interactive/chat-renderer.ts</code> consumes Pi&#39;s compaction, branch, and bash replay wording through <code>src/engine/messages.ts</code>.</li>
 <li>Interactive Markdown, Mermaid, LaTeX, fullscreen, alternate-screen, and keybinding glue should continue to compose pi-tui primitives.</li>
 </ul>
+<h2>Architecture boundary enforcement and tests</h2>
+<p>The rule keys on the <code>@earendil-works/pi-</code> prefix, and it is a single rule with no exceptions: only files under <code>src/engine/**</code> may import a <code>@earendil-works/pi-*</code> package, type-only imports included. The allowlist of type-only exceptions (<code>allowedPiTypeImportSpecifiersOutsideEngine</code>) is deliberately empty. Everything else, <code>src/interactive/**</code> included, reaches Pi through engine re-exports such as <code>src/engine/tui-primitives.ts</code>, and domains take erased engine shapes (<code>EngineModel</code>, <code>Api</code>, <code>Model</code>) from <code>src/engine/types.ts</code> and <code>src/engine/ai.ts</code>.</p>
+<p><code>tests/boundaries/check-boundaries.ts</code> enforces this statically over the import graph, alongside five other isolation rules including the Stage 0 instant-shell closure (<code>STAGE_0_OWNER</code>, <code>STAGE0_SEAMS</code>). <code>tests/contracts/engine-lifecycle.test.ts</code> covers agent-loop ordering, reset, tool-argument normalization, the keybinding table and alt-screen render seams; <code>tests/contracts/tool-boundaries.test.ts</code> covers tool schema admission and execution isolation across runtimes.</p>
 <h2>Pi regression net</h2>
 <p>Run these contracts first on a Pi bump, before the full gate:</p>
 <ul>
+<li><code>tests/boundaries/check-boundaries.ts</code> (static architecture boundaries and Stage 0 seams)</li>
 <li><code>tests/contracts/engine-lifecycle.test.ts</code> (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)</li>
 <li><code>tests/contracts/provider-transport.test.ts</code></li>
 <li><code>tests/contracts/openrouter-transport.test.ts</code></li>

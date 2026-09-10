@@ -2,7 +2,7 @@
 
 > **Visual blueprint:** See the [Skills visual reference](../html/skills_blueprint.html) in the source checkout.
 
-Skills are one kind of [library package](resource-library.md). `/library skill` and bare `/skill` open the Library overlay's skill tab. The other four tabs are plugins, agents, prompts and fleets. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package.
+Skills are one kind of [library package](resource-library.md). `/skills` opens the Library overlay's skill tab directly, while `/library` opens the full overlay (covering skills, plugins, agents, prompts, and fleets). `/skill <name>` invokes a skill, and `/skill off` clears the session's active tool surface; bare `/skill` returns usage guidance pointing to `/skills`. Skill packages use the same manifest, version, full-tree digest, origins, scope and lifecycle as every other package.
 
 ```bash
 clio-coder library search grill --kind skill

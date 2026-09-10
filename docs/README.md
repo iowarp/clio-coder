@@ -178,6 +178,43 @@ local dogfooding instructions do not collide with public documentation. If the
 file exists in your checkout, read it before making changes; if it does not,
 the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
+## Where Clio finds these docs when it is running in someone else's project
+
+Clio's documentation ships with Clio, not with your workspace. Everything below
+resolves from the installed package root (`resolvePackageRoot()`,
+`src/core/package-root.ts`), never from the directory you launched in.
+
+**What is indexed.** Every `.md` file under `<package-root>/docs/`, excluding
+`docs/html/`, plus root `README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each
+of those exists. The npm package ships `docs/**/*.md`, `README.md` and
+`CHANGELOG.md`; it does not ship `docs/html/` or a root `CLIO-CODER.md`, so in an
+npm install the blueprints are absent and the handbook is indexed only when you
+are running from a source checkout. The index is deterministic and needs no
+network or embedding service (`src/tools/context/docs-engine.ts`).
+
+**Searching and then reading.** `context(scope="docs", query="…")` returns
+section headings with citations such as `docs/architecture/safety-model.md`.
+Citations are **package-relative**, and this is the step that matters when the
+workspace is someone else's repository: reading `docs/architecture/safety-model.md`
+as a plain relative path reads *that project's* `docs/`, if it has one. Clio's
+own system prompt names the installed documentation directory as
+`{CLIO_DOCS_PATH}`, substituted as `join(packageRoot, "docs")`
+(`src/domains/prompts/compiler.ts`). Resolve the citation against the **package
+root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
+
+- `docs/guide/foo.md` → `/pkg/docs/guide/foo.md`
+- `CHANGELOG.md` → `/pkg/CHANGELOG.md`, not `/pkg/docs/CHANGELOG.md`
+
+Do not duplicate the `docs/` segment, and do not resolve a citation against the
+workspace. Omitting `query` lists the corpus instead of searching it.
+
+**The blueprint viewer.** `clio-coder docs` serves `docs/html/` from the package
+root on `127.0.0.1:<port>`. It does not look at your current directory and does
+not check whether you are in a Git checkout: the only question is whether the
+installed package has those files. When it does not, the command prints the
+packaged Markdown path and a link to the blueprints on GitHub instead of starting
+a server.
+
 ## Interactive blueprints
 
 Every Markdown page has a dedicated visual blueprint under `docs/html/`, and

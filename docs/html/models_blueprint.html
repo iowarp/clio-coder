@@ -224,10 +224,34 @@ OpenAI SDK retries, and LiteLLM failures bypass Clio's interactive transient ret
 so the operator can select another route. Stable session ids, request tags, optional
 request-level timeouts, and observed server retry/fallback headers remain supported.
 Residency is observe-only because LiteLLM owns loading and eviction behind the route.</li>
-<li><strong>OpenAI Completions (<code>openai-completions</code>):</strong> The OpenAI-compatible completions provider preserves reasoning blocks within assistant messages. It replays thinking blocks via the <code>reasoning_content</code> parameter in the message history, ensuring that the model maintains its chain-of-thought across conversational turns without stripping the data.</li>
+<li><strong>OpenAI Completions (<code>openai-completions</code>):</strong> The OpenAI-compatible completions provider preserves thinking blocks within assistant messages. Where thinking is enabled and the provider supports thinking signatures (<code>reasoning_content</code>, <code>reasoning</code>, <code>reasoning_text</code>), it preserves thinking blocks across turns.</li>
 <li><strong>Anthropic OAuth / API (<code>anthropic-max</code>):</strong> Uses the <code>anthropic-extended</code> thinking format. The engine supports Anthropic&#39;s native extended thinking block protocol, streaming thinking increments and outputting them wrapped appropriately or natively depending on target capabilities.</li>
 <li><strong>Reasoning-Never Models (<code>thinking.mechanism: none</code>):</strong> When a model is configured or cataloged with <code>thinking.mechanism: none</code>, it is treated as a reasoning-never model. For these models, Clio must not send any thinking fields or parameters in requests, must not replay thinking blocks, must not surface thinking events to the TUI, and must not preserve or log reasoning token usage in metrics.</li>
 </ul>
+<h3>Output token limit interruption during reasoning and thinking replay</h3>
+<p>When an LLM response is interrupted because it hits an output token limit during reasoning (<code>stopReason: &quot;length&quot;</code> / <code>finish_reason: &quot;length&quot;</code>), Clio applies a bounded request repair rather than universal across-the-board replay (<code>src/engine/apis/openai-completions.ts</code> <code>preserveInterruptedReasoning</code>):</p>
+<ol>
+<li><strong>Activation conditions</strong>:
+<ul>
+<li>Thinking is active and <code>requiresThinkingAsText</code> is not configured.</li>
+<li>The assistant turn stopped due to length (<code>stopReason === &quot;length&quot;</code>).</li>
+<li>Provider, API, and model all match the previous turn.</li>
+<li>All content blocks are nonempty, non-redacted thinking blocks.</li>
+<li>Thinking signatures are raw <code>reasoning</code>, <code>reasoning_content</code>, or <code>reasoning_text</code>.</li>
+</ul>
+</li>
+<li><strong>Replay and wire propagation</strong>:
+<ul>
+<li>The adapter appends a request-local visible interruption notice to prevent upstream Pi from dropping a reasoning-only assistant turn.</li>
+<li>In the next request (turn continuation or bounded repair via <code>stream</code> or <code>streamSimple</code>), the adapter retains the truncated thought trace and replays it on the wire under <code>assistant[signature]</code> (for example <code>reasoning_content: reasoning</code>).</li>
+<li>Private reasoning is never sent as user-visible answer text (<code>assistant.content</code> never contains private reasoning).</li>
+<li>Replay repair does not mutate saved session transcripts, original stop reasons, usage metrics, or thinking signatures.</li>
+<li>If target model, provider, or API switches, or reasoning is turned off, raw thought is not injected into plain content and no synthetic &quot;interrupted before&quot; notes are created; Pi converts cross-model thought into context without restoring raw fields.</li>
+<li>A per-response output-token cap does not cap total task tokens or guarantee completed task execution; existing repair and deadline limits continue to apply.</li>
+<li>Verified by contract suite <code>tests/contracts/reasoning-length-replay.test.ts</code>.</li>
+</ul>
+</li>
+</ol>
 <hr>
 <h2>Subscription Catalog Models</h2>
 <p>Subscription models are registered and managed as standard HTTP/cloud targets:</p>

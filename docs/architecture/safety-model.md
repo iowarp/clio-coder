@@ -86,6 +86,25 @@ graph TD
 
 Net `confirm` is never auto-allowed by autonomy, including full-auto. Net `block` is never downgraded by anything. A tool hidden by target capability or explicit suppression is not shown to the model; a tool that is shown still must pass this path before it can run.
 
+### Interplay of autonomy, protected paths, and one-shot permission approval
+
+The three enforcement layers interact with strict precedence to ensure safety invariants cannot be bypassed:
+
+1. **Zero-access protected paths outrank all autonomy levels**:
+   - Zero-access paths (including `.git/config`, `credentials.yaml`, `.env`, and sensitive SSH keys) are hard-blocked by the safety net with canonicalized symlink path resolution.
+   - Even `full-auto` autonomy cannot read, write, or modify zero-access paths; `block` verdicts are final and never park for approval cards.
+   - Built-in path protections cannot be overridden by malformed or permissive project `.clio-coder/safety.yaml` rules.
+
+2. **One-shot permission approval cards**:
+   - When an action requires operator consent (under `suggest` for writes and commands, under `auto-edit` for unrecognized bash, or at any autonomy level for `system_modify` confirm rails), Clio pauses execution and displays a focused interactive permission card.
+   - Operator approval is strictly **one-shot**: approving a command or write grants authority *only* for that single execution instance. It does not grant blanket approval for future calls, does not loosen the active autonomy level, and cannot downgrade safety-net blocks.
+   - In headless mode, calls requiring interactive permission fail closed immediately.
+
+3. **Worker escalation and autonomy boundaries**:
+   - Dispatched workers run non-interactively and inherit the resolved execution autonomy.
+   - When a worker encounters a permission gate, `fleet.permissions.mode` dictates whether it fails immediately (`fail`), returns a structured rejection (`deny`), or parks and escalates (`escalate`).
+   - Under `escalate`, the parked call emits a `clio_coder_permission_escalated` event to stdout, which surfaces in the interactive orchestrator as an operator permission card. No model-facing tool can approve a worker permission; approvals are human-only.
+
 ### Worker permission escalation
 
 Dispatched workers run non-interactively, so step 3 resolves per `fleet.permissions.mode`: `deny` turns the parked call into a structured denial, `fail` ends the run, and `escalate` hands the ask up to the interactive operator. Under `escalate` the worker parks the call, emits a `clio_coder_permission_escalated` event, and waits; dispatch republishes the ask on the bus tagged with the run id; the operator resolves it in the same permission overlay used for the main agent; and the decision returns down the worker's stdin. Resolution is human-only by construction: no model-facing tool can approve a worker permission, and the dispatch `resolveWorkerPermission` method is reachable only from the interactive layer. This preserves the receipt's honesty, since a model approving its own fleet's asks would collapse the audit trail.

@@ -69,6 +69,40 @@ A summary that reaches its model output limit is incomplete and cannot replace t
 
 Manual `/context compact`, `CLIO_CODER_FORCE_COMPACT=1`, and overflow recovery force the summary path directly and skip every pre-stage. The overflow guard runs before the user turn is committed, so a blocked oversized request does not leave an unanswered user entry in the ledger.
 
+### What working-set eviction will not take
+
+Only two things ever leave the working set: a tool result's body and an assistant
+turn's thinking. Operator words, summaries, skill activations, ledgers, worker
+runs and bash executions are the session's record of itself and are never
+candidates (`isProtected`, `src/domains/context/working-set/protect.ts`).
+
+Within that, the recent window is untouchable for both kinds:
+`context.workingSet.protectLastTurns` (default 6) fixes a cutoff, and any entry
+at or after it is protected whatever a policy concludes.
+
+Eviction never breaks the call/result envelope. It replaces the observation
+*body* with a marker and leaves the pairing intact: `toolCallId`, `toolName`,
+`details` and the outcome and error flags survive untouched
+(`projectToolResult`, `src/domains/context/working-set/project.ts`), so replay
+still matches each result to its call and the renderer still knows what the call
+was. Only the text the model reads changes. The `workingSet` stamp on `details`
+is how a reader tells a marker from a genuinely small tool result. Batch
+indivisibility is a separate guarantee belonging to the summarization checkpoint,
+not to body eviction.
+
+Recall then readmits an exact body. **Main-session recall reads the session
+ledger**, not a separate store: `context(scope="recall", ref="<turnId>")` or
+`/context recall <ref>` folds the ledger at the live leaf and returns the body
+through the ordinary observation envelope. A ref that is unknown or sits on an
+abandoned branch is refused rather than guessed at. Native workers are the
+separate case, with their own digest-checked store and `worker:<digest>` refs;
+[worker-context.md](worker-context.md) describes it.
+
+These are structural guarantees about eviction and replay. They are not a claim
+about summary quality: as above, a summary that reaches its model output limit is
+incomplete and cannot replace the checkpoint it was meant to stand in for. The
+durable ledger is not rewritten either way.
+
 ### The legacy mask escape hatch
 
 `CLIO_CODER_LEGACY_MASK=1` restores the destructive pre-stage working-set eviction replaced. It calls `session.replaceEntries` and rewrites the persisted bodies, so masked content is gone for the operator as well as the model. It uses the old marker format:

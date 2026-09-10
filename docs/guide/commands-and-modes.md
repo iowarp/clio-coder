@@ -540,6 +540,39 @@ controls remain upstream. Clio does not own keys while Yazi, an external editor
 or the host mux holds focus. Physical Windows/macOS acceptance is separate from
 Linux PTY and protocol tests; no terminal profile is installed automatically.
 
+### What Ctrl+C does
+
+`Ctrl+C` is not a single action. It resolves against the current input boundary,
+first match wins (`resolveApplicationCtrlCAction`, `src/interactive/application-controller.ts`):
+
+| State | What Ctrl+C does |
+| --- | --- |
+| An overlay owns input (transcript search, Library, Settings, model picker, a permission card) | Closes that overlay. It does not cancel a running turn and does not exit. Any armed shutdown is disarmed. |
+| Streaming or running a tool | Cancels the in-flight run. The turn seals its partial output in ledger order and the session stays open. |
+| Idle with text in the composer | Clears the draft. The press is consumed as an editor action, so it cannot become the hidden first half of an exit. |
+| Idle with messages queued | Protects the queue and says how to recover it with the bound dequeue key (`Alt+Q` by default). |
+| Idle, empty composer, nothing queued | Arms shutdown. A second `Ctrl+C` within 500 ms (`APPLICATION_DOUBLE_TAP_MS`) exits. |
+
+Closing a permission card without approving it is a decision, not a dismissal:
+the parked call is cancelled with `User cancelled this tool call from the
+permission confirmation prompt`, and a parked *worker* permission resolves as
+`deny`. The session itself keeps running.
+
+### Typing before Clio has finished starting
+
+Interactive startup mounts the editor before it loads its services, so the
+composer accepts input from the first frame. Type and press Enter during
+startup and the submission is held in a visible pending list, in order. When
+hydration completes it adopts that same editor rather than rebuilding it, and
+the held submissions drain once, in the order you sent them, through the
+ordinary slash/bash/chat pipeline. A draft you have not submitted stays in the
+composer with its cursor.
+
+If startup fails or you interrupt it before hydration finishes, the terminal is
+restored and any pending submissions and draft text are printed to stderr rather
+than discarded. `CLIO_CODER_INSTANT_SHELL=0` opts out and waits for a fully
+hydrated first frame. The seam is `src/interactive/terminal-lease.ts`.
+
 ## Live Steering
 
 While a run is active, the key that submits a message chooses when it lands.
@@ -550,6 +583,19 @@ There are three modes, chosen per message; the default is next slot.
 | Next slot | `Enter` | Between tool batches, mid-run, through `agent.steer`. The agent keeps going and reads the message before its next model call. |
 | End of turn | `Ctrl+Q` | When the whole run settles and Clio would hand control back, through `agent.followUp`. A turn is the whole run, not one model round. |
 | Interrupt | `Ctrl+G`, `i` or `/interrupt <text>` | Cancels the in-flight work the way `Esc` does (generation aborts; a running bash child gets SIGTERM, then SIGKILL), waits for the cancelled run to seal its tool results in ledger order, then submits the message as a fresh prompt. Anything already queued returns to the editor. |
+
+### The same three modes against a background worker
+
+The table above describes the main agent. Against a dispatched worker the three
+modes are not symmetric:
+
+- **Steer** reaches a worker. `@<agent> <text>` sends the message across the
+  worker channel; the worker acknowledges it and keeps running.
+- **Follow-up** does not. A worker has no follow-up queue, so a new goal for it
+  is a new dispatch.
+- **Interrupt** is refused while an attached dispatch is running, for the reason
+  given below. Cancel the worker itself with `Esc`, which stops the run and
+  still leaves a receipt.
 
 Interrupt is refused in two states and the message is queued for the next slot
 instead, with a notice saying why: while an attached dispatch is running (the
@@ -827,7 +873,7 @@ The footer owns live activity. Transcript actions have static running or outcome
 
 The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:
 
-- **Adaptive Welcome Launchpad:** Before the first prompt, renders a compact launchpad with bold CAPS section tags (`WORKSPACE`, `ROUTE`, `NEXT`), honest readiness indicators, and context-sensitive next actions. Upon first prompt submission, it deliberately collapses into a single-line session header (`>C_ Clio Coder vX.Y.Z · <workspace · git branch> · <target·model · ready> · ctx ready · type a task`) so the conversation transcript owns the viewport.
+- **Welcome header:** Before your first prompt the header is three rows and no box: a masthead (`>C_ Clio Coder v0.4.7` on the left, `~/iowarp/clio-coder · main*` on the right), the route (`✓ dynamo · qwen3.8-27b`), and one next step (`describe a task · Enter to send · / for commands`). The next step names whatever actually blocks work first: no route or model sends you to `/model`, an unavailable or degraded route to `/settings targets`, a missing or stale `CLIO-CODER.md` to `/context init` or `/context refresh`. A healthy route shows no latency; a failing one shows its reason. Your first submit collapses the header to one live row, `>C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*`, which follows a mid-session model change. `/new` returns to the three-row form; `/resume`, `/tree`, `/fork`, `/handoff` and `--continue` open collapsed. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header) for the width-degradation order and route vocabulary.
 - **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Ctrl+J newline` at wider widths.
 - **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Ctrl+G x] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.

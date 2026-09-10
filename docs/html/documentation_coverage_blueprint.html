@@ -398,6 +398,11 @@ HTML index.</p>
 Markdown pages. The table preserves what the audit found at <code>ff56ea3e</code>; it does
 not describe outstanding Markdown debt. Every HTML blueprint now renders the
 complete corrected counterpart and identifies its Markdown source explicitly.</p>
+<h2>Clio Coder 0.4.7 documentation refresh</h2>
+<p>The 0.4.7 pass was a source-alignment pass, not a re-measurement of the 0.4.2 audit above, whose table stands as the historical record.</p>
+<p>Pages carrying new or rewritten sections in this pass: <code>README.md</code>, <code>architecture/context-engine.md</code>, <code>architecture/library.md</code>, <code>architecture/model-catalog.md</code>, <code>architecture/pi-boundary.md</code>, <code>architecture/safety-model.md</code>, <code>architecture/session-lifecycle.md</code>, <code>architecture/tui-design.md</code>, <code>architecture/worker-context.md</code>, <code>guide/commands-and-modes.md</code>, <code>guide/configuration-reference.md</code>, <code>guide/extensions-and-sharing.md</code>, <code>guide/harness-extensions.md</code>, <code>guide/interop.md</code>, <code>guide/plugins.md</code>, <code>guide/resource-library.md</code>, <code>guide/skills-marketplace.md</code>, and <code>process/scientific-validation.md</code>, each with its paired blueprint.</p>
+<p>Two standing rules this pass reaffirmed. Every asserted behavior is anchored to the function or contract that implements it, named inline, rather than inferred from a UI label or a neighbouring paragraph. And a value that appears only in a test fixture is not a product default: the compiled defaults in <code>src/core/defaults.ts</code> are the authority for what ships unset.</p>
+<p>Per-run verification evidence for the refresh lives with the maintenance records for that sprint, not in this page. This page tracks documentation coverage, and run logs age out of usefulness faster than the docs they checked.</p>
 </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="development_pipeline_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Development Pipeline</span></a>

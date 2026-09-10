@@ -187,6 +187,17 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
 
 When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through `src/engine/messages.ts`. Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
 
+## How new sessions, resume and fork differ in history and workspace
+
+Clio provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:
+
+| Operation | Session ID & Ledger | History Lineage | Workspace (`cwd`) Behavior |
+| --- | --- | --- | --- |
+| **New session (`/new` or fresh launch)** | Mints a new UUIDv7 `<sessionId>` in `<stateDir>/sessions/<cwdHash>/<sessionId>/` with an empty `current.jsonl` containing only the session header. | Starts at turn 0 with a clean context window. Previous session turns, compactions, and memory working sets are not carried forward. Shared project tasks remain accessible on disk in `.clio-coder/user-tasks.json`. | Uses the active process working directory (`process.cwd()`). Computes a fresh `<cwdHash>` for the session directory. |
+| **Resumed session (`/resume <id>`, `--continue`, `--session`)** | Reopens the existing session directory and writer. Continues appending new turns directly to the existing `current.jsonl` ledger. | Reconstructs the exact message history, compaction summaries, task board snapshots (`taskLedger`), and decision board states along the active leaf path (`meta.pinnedLeafTurnId` or latest tip). | Probes recorded `meta.cwd` against the filesystem (`resolveSessionCwd`). If the recorded directory was moved or deleted, triggers the `cwd-fallback` interactive prompt before resuming. |
+| **Forked session (`/fork` or `/tree` branch fork)** | Mints a brand new UUIDv7 `<sessionId>` in a new session directory. Stamps `parentSession` and `parentTurnId` in the new session header. Leaves the parent ledger closed and immutable. | Copies the exact active path lineage up to `parentTurnId` from the parent ledger into the new session ledger, excluding later turns, abandoned sibling branches, and unanchored sidecars. Subsequent turns append only to the new ledger. | Inherits the parent session's `cwd`, `model`, and `target` settings. Operates in the same workspace directory without creating a duplicate disk workspace. |
+| **Handoff (`/handoff <goal>`)** | Mints a brand new session with a new ID. The previous session receives an immutable `handoffNote` entry and closes. | Replaces raw conversation turns with a single synthesized `handoffSeed` context message containing a reviewed distillation of settled decisions and validated read-ledger paths. Loaded skill activations are replayed so skills carry forward. | Operates in the current project workspace directory, carrying forward validated project context while shedding conversation token weight. |
+
 ---
 
 ## 6. Session Export

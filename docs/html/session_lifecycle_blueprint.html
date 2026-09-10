@@ -193,6 +193,42 @@ reported to <code>/cost</code> under a handoffs row and excluded from the turn c
 </ol>
 <h3>Model-Facing Custom Entry Replay</h3>
 <p>When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through <code>src/engine/messages.ts</code>. Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with <code>context(scope=&quot;recall&quot;)</code> and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.</p>
+<h2>How new sessions, resume and fork differ in history and workspace</h2>
+<p>Clio provides distinct lifecycle operations for managing conversation continuity, history lineage, and workspace directories:</p>
+<table>
+<thead>
+<tr>
+<th>Operation</th>
+<th>Session ID &amp; Ledger</th>
+<th>History Lineage</th>
+<th>Workspace (<code>cwd</code>) Behavior</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>New session (<code>/new</code> or fresh launch)</strong></td>
+<td>Mints a new UUIDv7 <code>&lt;sessionId&gt;</code> in <code>&lt;stateDir&gt;/sessions/&lt;cwdHash&gt;/&lt;sessionId&gt;/</code> with an empty <code>current.jsonl</code> containing only the session header.</td>
+<td>Starts at turn 0 with a clean context window. Previous session turns, compactions, and memory working sets are not carried forward. Shared project tasks remain accessible on disk in <code>.clio-coder/user-tasks.json</code>.</td>
+<td>Uses the active process working directory (<code>process.cwd()</code>). Computes a fresh <code>&lt;cwdHash&gt;</code> for the session directory.</td>
+</tr>
+<tr>
+<td><strong>Resumed session (<code>/resume &lt;id&gt;</code>, <code>--continue</code>, <code>--session</code>)</strong></td>
+<td>Reopens the existing session directory and writer. Continues appending new turns directly to the existing <code>current.jsonl</code> ledger.</td>
+<td>Reconstructs the exact message history, compaction summaries, task board snapshots (<code>taskLedger</code>), and decision board states along the active leaf path (<code>meta.pinnedLeafTurnId</code> or latest tip).</td>
+<td>Probes recorded <code>meta.cwd</code> against the filesystem (<code>resolveSessionCwd</code>). If the recorded directory was moved or deleted, triggers the <code>cwd-fallback</code> interactive prompt before resuming.</td>
+</tr>
+<tr>
+<td><strong>Forked session (<code>/fork</code> or <code>/tree</code> branch fork)</strong></td>
+<td>Mints a brand new UUIDv7 <code>&lt;sessionId&gt;</code> in a new session directory. Stamps <code>parentSession</code> and <code>parentTurnId</code> in the new session header. Leaves the parent ledger closed and immutable.</td>
+<td>Copies the exact active path lineage up to <code>parentTurnId</code> from the parent ledger into the new session ledger, excluding later turns, abandoned sibling branches, and unanchored sidecars. Subsequent turns append only to the new ledger.</td>
+<td>Inherits the parent session&#39;s <code>cwd</code>, <code>model</code>, and <code>target</code> settings. Operates in the same workspace directory without creating a duplicate disk workspace.</td>
+</tr>
+<tr>
+<td><strong>Handoff (<code>/handoff &lt;goal&gt;</code>)</strong></td>
+<td>Mints a brand new session with a new ID. The previous session receives an immutable <code>handoffNote</code> entry and closes.</td>
+<td>Replaces raw conversation turns with a single synthesized <code>handoffSeed</code> context message containing a reviewed distillation of settled decisions and validated read-ledger paths. Loaded skill activations are replayed so skills carry forward.</td>
+<td>Operates in the current project workspace directory, carrying forward validated project context while shedding conversation token weight.</td>
+</tr>
+</tbody></table>
 <hr>
 <h2>6. Session Export</h2>
 <p><code>/export</code> replays the active branch through the same transcript projection used by the live TUI and <code>/resume</code>. With no path, it writes <code>.clio-coder/exports/&lt;sessionId&gt;-&lt;local-date&gt;.html</code>. The HTML document is self-contained, carries the active Clio theme through converted ANSI styles, renders tool calls as semantic tool rows, references no external assets, and is capped at 2 MiB. If the transcript exceeds that limit, the export ends at a complete rendered row and states that later rows were omitted.</p>

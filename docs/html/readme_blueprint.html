@@ -410,6 +410,16 @@ audit.</p>
 local dogfooding instructions do not collide with public documentation. If the
 file exists in your checkout, read it before making changes; if it does not,
 the architecture guide and <code>CONTRIBUTING.md</code> are the public starting points.</p>
+<h2>Where Clio finds these docs when it is running in someone else's project</h2>
+<p>Clio's documentation ships with Clio, not with your workspace. Everything below resolves from the installed package root (<code>resolvePackageRoot()</code>, <code>src/core/package-root.ts</code>), never from the directory you launched in.</p>
+<p><strong>What is indexed.</strong> Every <code>.md</code> file under <code>&lt;package-root&gt;/docs/</code>, excluding <code>docs/html/</code>, plus root <code>README.md</code>, <code>CHANGELOG.md</code> and <code>CLIO-CODER.md</code> when each of those exists. The npm package ships <code>docs/**/*.md</code>, <code>README.md</code> and <code>CHANGELOG.md</code>; it does not ship <code>docs/html/</code> or a root <code>CLIO-CODER.md</code>, so in an npm install the blueprints are absent and the handbook is indexed only when you are running from a source checkout. The index is deterministic and needs no network or embedding service (<code>src/tools/context/docs-engine.ts</code>).</p>
+<p><strong>Searching and then reading.</strong> <code>context(scope="docs", query="…")</code> returns section headings with citations such as <code>docs/architecture/safety-model.md</code>. Citations are <strong>package-relative</strong>, and this is the step that matters when the workspace is someone else's repository: reading <code>docs/architecture/safety-model.md</code> as a plain relative path reads <em>that project's</em> <code>docs/</code>, if it has one. Clio's own system prompt names the installed documentation directory as <code>{CLIO_DOCS_PATH}</code>, substituted as <code>join(packageRoot, "docs")</code> (<code>src/domains/prompts/compiler.ts</code>). Resolve the citation against the <strong>package root</strong>, which is that directory's parent. So when the prompt names <code>/pkg/docs</code>:</p>
+<ul>
+<li><code>docs/guide/foo.md</code> &rarr; <code>/pkg/docs/guide/foo.md</code></li>
+<li><code>CHANGELOG.md</code> &rarr; <code>/pkg/CHANGELOG.md</code>, not <code>/pkg/docs/CHANGELOG.md</code></li>
+</ul>
+<p>Do not duplicate the <code>docs/</code> segment, and do not resolve a citation against the workspace. Omitting <code>query</code> lists the corpus instead of searching it.</p>
+<p><strong>The blueprint viewer.</strong> <code>clio-coder docs</code> serves <code>docs/html/</code> from the package root on <code>127.0.0.1:&lt;port&gt;</code>. It does not look at your current directory and does not check whether you are in a Git checkout: the only question is whether the installed package has those files. When it does not, the command prints the packaged Markdown path and a link to the blueprints on GitHub instead of starting a server.</p>
 <h2>Interactive blueprints</h2>
 <p>Every Markdown page has a dedicated visual blueprint under <code>docs/html/</code>, and
 the separate <code>docs/html/index.html</code> landing page mirrors this documentation

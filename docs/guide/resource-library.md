@@ -78,7 +78,17 @@ Working authoring templates for all five package kinds live in `library/_authori
 
 Private index repositories may opt into Git synchronization. Set `integrations.library.sync: true`, configure a remote named `library`, and review `clio-coder library remote confirm <url>`. `library sync` fetches that remote and merges `FETCH_HEAD` with `--ff-only`; `library push` pushes it. Disabled synchronization or an unconfirmed/mismatched remote refuses before mutation. These commands synchronize the private repository; they do not automatically update installed packages.
 
-## Interactive library and evals
+## Keyboard shortcuts: Alt+L for Library and Alt+M for Model picker
+
+Clio provides default top-level keyboard shortcuts from the composer:
+- **Alt+L**: Toggles the Library overlay (`clio-coder.library.toggle`). Pressing **Alt+L** while inside the Library closes it and returns focus to your active composer draft.
+- **Alt+M**: Toggles the Model picker overlay (`clio-coder.model.select`), allowing you to switch models, view token budgets, or configure reasoning effort.
+- **Alt+W**: Toggles the Workers / dispatch board overlay (`clio-coder.dispatchBoard.toggle`).
+- **Ctrl+G**: Opens the contextual leader action menu when focused in the composer, offering single-key actions (such as `l` for Library, `m` for Model picker, `w` for Workers dispatch board, and `s` to background attached dispatch).
+
+These are default shortcuts subject to configured keybinding overrides and focused modal ownership (see [Commands and Modes](commands-and-modes.md#keybindings)).
+
+## Interactive library navigation
 
 **Alt+L** or `/library` opens the fullscreen Library; `/skills`, `/agents`, and `/prompts` open its corresponding category. The five tabs cover skills, agents, prompts, fleets, and plugins. `b` switches Browse/Installed, and `s` selects User/Project for management. Mode and scope remain visible on empty tabs. Left/right changes category; `/` focuses search, where letters and left/right edit the query. Enter returns from search to the list; Esc clears search or returns before closing.
 
@@ -86,9 +96,21 @@ Enter opens a package's members. `v` uses an available recipe by preparing its i
 
 `/library inspect <ref>`, `/library install <ref>`, `/library remove <ref>`, and `/library import <path-or-url>` open the same browser and review flow; use typed references such as `skill:tdd` and an explicit `--user` or `--project` when needed. Import reviews the supplied source, its supported recipes and omitted features. Origin, vendor format, trust, scope and actual availability are separate facts; an installed foreign package may still have recipes withheld by the trust setting.
 
-Every managed change is reviewed before writing. The review shows dependencies, affected dependents, fallback behavior and recovery, with `d` revealing paths and digests. Esc cancels and releases staged sources. Outcomes report committed, failed and unattempted steps, disk verification, resource admission and session refresh separately. A failed refresh does not undo a committed write; `R` in the outcome retries refresh without repeating the mutation. `/library reload` refreshes recipes in the active session; a headless `library reload` refreshes only its own process. Harness reload stays under `/extensions reload`.
+Every managed change is reviewed before writing. The review shows dependencies, affected dependents, fallback behavior and recovery, with `d` revealing paths and digests. Esc cancels and releases staged sources. Outcomes report committed, failed and unattempted steps, disk verification, resource admission and session refresh separately. A failed refresh does not undo a committed write; `R` in the outcome retries refresh without repeating the mutation.
 
-`/skills` opens the skill tab; `/skill <name>` activates a skill or offers its package installation. `library skills --all --json` lists runtime skills, including unmanaged files; `library inventory --json` is the fixed body-free GUI read. `clio-coder library validate <path>` validates an unmanaged draft or a complete package candidate. Installed package lifecycle remains in `library`; the retired top-level `skills` and `plugins` commands and the `/resources` and `/plugins` slash spellings are unrecognized. `/extensions` is the harness extension surface and is separate from the recipe library.
+## Session reload and package disable behavior
+
+`/library reload` refreshes installed recipes (skills, prompts, agents, fleets) in the active running session. If an external CLI command or file edit changes installed recipes, `/library reload` reloads the inventory without needing a restart. In headless mode, `library reload` refreshes only its own process.
+
+When you disable a package (via `library disable <ref>` or pressing `e` in the Library overlay):
+- The package state in `plugins/state.json` is updated with `enabled: false`. No files are deleted.
+- Resource discovery and admission exclude disabled recipes on subsequent reads (`enabledPluginResourceRoots` in `src/domains/plugins/resources.ts` rechecks current installation state on the next read, even before a manual session reload). A CLI disable does not broadcast cancellation into other running processes, stop an in-flight tool, or erase instructions already in model context.
+- If a project-scope copy of a package is disabled, it explicitly suppresses any matching user-scope copy as well, ensuring that the project's intent to disable the capability is honored.
+- Re-enabling the package with `library enable <ref>` restores resource discovery. Adding or replacing recipes requires a session refresh; active UI management actions report their own refresh results, while `/library reload` reloads the inventory for the current session.
+
+Contrast with harness extensions: executable harness extensions carry Node operator runtimes, command tools (Node or Python), and lifecycle hooks. Running `/extensions reload` refreshes extension runtime handlers, hooks, and panels at idle (subject to integrity verification), but command-tool schemas are frozen at session boot and cannot change mid-session.
+
+`/skills` opens the skill tab; `/skill <name>` activates a skill, `/skill off` clears the active skill's armed tool surface (without erasing instructions already loaded in transcript or context), and bare `/skill` returns usage guidance pointing to `/skills`. `library skills --all --json` lists runtime skills, including unmanaged files; `library inventory --json` is the fixed body-free GUI read. `clio-coder library validate <path>` validates an unmanaged draft or a complete package candidate. Installed package lifecycle remains in `library`; retired slash commands `/plugins` and `/resources` return an explicit usage error directing operators to `/library` for recipe packages and `/extensions` for harness extensions.
 
 ## One inventory for the operator and the model
 
