@@ -10,6 +10,8 @@ it("checks configuration rows through real hygiene in a disposable package fixtu
 	const fixture = mkdtempSync(join(tmpdir(), "clio-coder-configuration-reference-"));
 	try {
 		for (const entry of readdirSync(root)) {
+			// Agent scratch and nested worktrees are not package inputs.
+			if (entry === ".superpowers") continue;
 			if (!["node_modules", ".git", "dist"].includes(entry))
 				cpSync(join(root, entry), join(fixture, entry), { recursive: true });
 			else symlinkSync(join(root, entry), join(fixture, entry));
