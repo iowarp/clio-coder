@@ -385,6 +385,46 @@ function stripThinkingFromContext(context: Context): Context {
 	};
 }
 
+/**
+ * Pi 0.85 drops assistant turns with neither text nor tools, even when it has
+ * serialized their raw reasoning field. Give only an interrupted, same-model
+ * raw-reasoning turn a request-local notice so a continuation retains its work.
+ * Never turn private reasoning into answer text or modify the saved transcript.
+ * Opaque signatures and cross-model conversion remain the provider's concern.
+ */
+function preserveInterruptedReasoning(
+	context: Context,
+	model: Model<"openai-completions">,
+	resolved: ResolvedModelRuntimeCapabilities,
+): Context {
+	if (!resolved.thinking.thinkingActive || model.compat?.requiresThinkingAsText) return context;
+	return {
+		...context,
+		messages: context.messages.map((message) => {
+			if (
+				message.role !== "assistant" ||
+				message.stopReason !== "length" ||
+				message.provider !== model.provider ||
+				message.api !== model.api ||
+				message.model !== model.id ||
+				message.content.length === 0 ||
+				!message.content.every(
+					(block) =>
+						block.type === "thinking" &&
+						!block.redacted &&
+						block.thinking.trim().length > 0 &&
+						["reasoning", "reasoning_content", "reasoning_text"].includes(block.thinkingSignature ?? ""),
+				)
+			)
+				return message;
+			return {
+				...message,
+				content: [...message.content, { type: "text" as const, text: "Response interrupted before its answer." }],
+			};
+		}),
+	};
+}
+
 function withStrippedPartial<TEvent extends AssistantMessageEvent>(event: TEvent): TEvent {
 	if (!("partial" in event)) return event;
 	return { ...event, partial: stripThinkingFromMessage(event.partial as AssistantMessage) };
@@ -1041,7 +1081,12 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 											...(options?.signal !== undefined ? { signal: options.signal } : {}),
 										},
-										(requestModel) => piOpenAICompletions.stream(requestModel, effectiveContext, capturedOptions),
+										(requestModel) =>
+											piOpenAICompletions.stream(
+												requestModel,
+												preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
+												capturedOptions,
+											),
 									),
 								),
 							),
@@ -1078,7 +1123,12 @@ export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions
 											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
 											...(options?.signal !== undefined ? { signal: options.signal } : {}),
 										},
-										(requestModel) => piOpenAICompletions.streamSimple(requestModel, effectiveContext, capturedOptions),
+										(requestModel) =>
+											piOpenAICompletions.streamSimple(
+												requestModel,
+												preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
+												capturedOptions,
+											),
 									),
 								),
 							),

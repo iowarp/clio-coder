@@ -11,17 +11,21 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
 import { clearPluginSnapshots } from "../../src/domains/plugins/resources.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const TREE_SITTER_MARKER = "node_modules/@vscode/tree-sitter-wasm/wasm/tree-sitter.js";
@@ -121,6 +125,97 @@ function emittedFilesContaining(packageRoot: string, marker: string): Set<string
 		if (readFileSync(path, "utf8").includes(marker)) matches.add(realpathSync(path));
 	}
 	return matches;
+}
+
+async function assertInstalledReasoningReplay(bin: string, cwd: string, home: string): Promise<void> {
+	const modelId = "dynamo/qwen3.8-27b";
+	const thought = "Private packaged fixture calculation: coefficient = 0.002.";
+	const requests: Array<{
+		messages: Array<{ role: string; content?: unknown; reasoning_content?: string }>;
+		max_tokens: number;
+	}> = [];
+	const server = createServer(async (req, res) => {
+		res.setHeader("content-type", "application/json");
+		if (req.method === "GET" && req.url === "/health/liveliness") {
+			res.end(JSON.stringify({ status: "healthy" }));
+			return;
+		}
+		if (req.method === "GET" && req.url === "/v1/models") {
+			res.end(JSON.stringify({ data: [{ id: modelId }] }));
+			return;
+		}
+		if (req.method !== "POST" || req.url !== "/v1/chat/completions") {
+			res.writeHead(404);
+			res.end();
+			return;
+		}
+		const request = JSON.parse(await readRequestBody(req));
+		requests.push(request);
+		const retained = request.messages.some(
+			(message: { reasoning_content?: string }) => message.reasoning_content === thought,
+		);
+		const delta =
+			requests.length === 1 ? { reasoning_content: thought } : { content: retained ? "The coefficient is 0.002." : "" };
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			`data: ${JSON.stringify({ model: modelId, choices: [{ index: 0, delta, finish_reason: requests.length === 1 ? "length" : "stop" }] })}\n\ndata: [DONE]\n\n`,
+		);
+	});
+	try {
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.targets = [
+			{
+				id: "replay",
+				runtime: "litellm",
+				url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+				defaultModel: modelId,
+				auth: { apiKeyEnvVar: "CLIO_CODER_REPLAY_FIXTURE_KEY" },
+			},
+		];
+		settings.chat.target = "replay";
+		settings.chat.model = modelId;
+		settings.chat.maxOutputTokens = 16384;
+		settings.fleet.profiles = { replay: { target: "replay", model: modelId, thinkingLevel: "xhigh" } };
+		settings.context.memory.enabled = false;
+		mkdirSync(join(home, "config/agents"), { recursive: true });
+		writeFileSync(join(home, "config/settings.yaml"), JSON.stringify(settings));
+		writeFileSync(
+			join(home, "config/agents/replay-fixture.md"),
+			`---
+version: 1
+name: Packaged replay fixture
+description: Exercise a scripted local reasoning continuation.
+tools: {required: [read], optional: []}
+skills: []
+audience: custom
+category: research
+capabilityClass: read-only
+latencyClass: balanced
+projectContextTier: bounded
+budget: {toolCalls: 10, readReserve: 0, synthesis: true}
+resultContract: {kind: artifact-report}
+tags: [fixture]
+---
+Compute the requested coefficient and report the value in one line.
+`,
+		);
+		const result = await run(
+			bin,
+			["run", "--agent", "replay-fixture", "--agent-profile", "replay", "--json", "Compute the coefficient."],
+			cwd,
+			{ ...isolatedEnv(home), CLIO_CODER_REPLAY_FIXTURE_KEY: "fixture" },
+		);
+		strictEqual(result.code, 0, `${result.stdout}\n${result.stderr}`);
+		strictEqual(requests.length, 2, "installed native worker retains thought through one bounded repair");
+		for (const request of requests) strictEqual(request.max_tokens, 16384);
+		const replay = requests[1]?.messages.find((message) => message.reasoning_content === thought);
+		ok(replay);
+		strictEqual(JSON.stringify(replay.content).includes(thought), false);
+		match(result.stdout, /The coefficient is 0.002/u);
+	} finally {
+		await closeServer(server);
+	}
 }
 
 function coveredFiles(directory: string): Set<string> {
@@ -517,6 +612,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const publicTypes = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).exports["./extensions"]
 				.types;
 			ok(existsSync(join(packageRoot, publicTypes)), "installed extension author types exist");
+			await assertInstalledReasoningReplay(bin, libraryProject, join(work, "replay-home"));
 		} finally {
 			rmSync(work, { recursive: true, force: true });
 		}

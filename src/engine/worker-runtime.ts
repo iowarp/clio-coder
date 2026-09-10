@@ -16,7 +16,6 @@ import { estimateInputTokensFromContext, resolveReservedOutputTokens } from "./a
  */
 
 import path from "node:path";
-import { validateSettingsFile } from "../core/config.js";
 import {
 	configureGuardrails,
 	guardrailValuesFromSettings,
@@ -24,6 +23,7 @@ import {
 	isWorkerToolCallCapSynthesisReason,
 } from "../core/guardrails.js";
 import { runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
+import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
@@ -391,11 +391,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// so it must register them here before any agent.prompt() touches a local
 	// runtime (lmstudio, ollama-native).
 	registerClioApiProviders();
-	// The worker is a fresh process; mirror the orchestrator's global output
-	// budget so dispatched runs honor settings.defaults.maxTokens too. Use the
-	// non-throwing read: a worker must not abort over a settings issue the parent
-	// already surfaced.
-	const workerSettings = validateSettingsFile().settings;
+	// The worker is a fresh process. Resolve its workspace's trusted settings
+	// layers so project output limits and guardrails survive dispatch. Keep the
+	// best-effort read: the parent already surfaced settings diagnostics, and
+	// untrusted or changed project settings must still fall back to lower layers.
+	const workerSettings = readLayeredSettings(input.cwd ?? process.cwd()).settings;
 	setGlobalDefaultMaxOutputTokens(workerSettings.chat.maxOutputTokens);
 	// Same mirroring for guardrail policy: the fresh process needs its settings
 	// projection installed before any registry or tool construction reads it.
