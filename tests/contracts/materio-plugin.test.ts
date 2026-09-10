@@ -7,6 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseFleetContract } from "../../src/domains/agents/fleet-contract.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
+import { normalizeAgentSpec, resolveAgentToolCompatibility } from "../../src/domains/agents/spec.js";
 import { installPlugin, pluginContentDigest, readPluginManifest } from "../../src/domains/plugins/index.js";
 import { resolvePackageReferences } from "../../src/domains/resources/package-references.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
@@ -74,6 +75,16 @@ describe("materio plugin", () => {
 		for (const recipe of recipes) {
 			strictEqual(recipe.boundSkillPaths.length, 1);
 			ok(recipe.boundSkillPaths[0]?.startsWith(path.join(root, "skills")));
+			if (recipe.capabilityClass === "workspace-edit") {
+				const spec = normalizeAgentSpec(recipe);
+				strictEqual(resolveAgentToolCompatibility(spec, spec.tools, { mediatesDispatch: false }).compatible, true);
+				const withoutLimitation = resolveAgentToolCompatibility(
+					spec,
+					spec.tools.filter((tool) => tool !== "limitation"),
+					{ mediatesDispatch: false },
+				);
+				deepStrictEqual(withoutLimitation.missingRequired, ["limitation"], recipe.id);
+			}
 		}
 		const verifier = recipes.find((recipe) => recipe.id === "materio-task-verifier");
 		strictEqual(verifier?.capabilityClass, "read-only");

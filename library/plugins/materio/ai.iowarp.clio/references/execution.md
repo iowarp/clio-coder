@@ -46,3 +46,11 @@ record exit status, stdout/stderr and coverage. A missing Python installation or
 checker is a skipped check, never a pass. Default citation checks to --offline;
 allow network only if effective config permits it and the supplied source scope
 is authorized. Preserve findings for researcher decisions, with no automatic deletion.
+
+For writing workers that cannot execute the outstanding checks, require a typed
+limitation receipt naming the output paths and verification scope before their
+final response. Readback is artifact inspection, not command-backed scientific
+validation. Inspect the receipt outcome as well as the summary: a failed finish
+gate remains a failed run even when an output file exists. Retain partial files
+and the failure; reconcile the specific limitation in a fresh bounded assignment
+before continuing. Independent operator checks remain separate evidence.
