@@ -1,0 +1,14 @@
+{
+	"id": "lab-status",
+	"name": "Local experiment status",
+	"version": "1.0.0",
+	"description": "Inspect a local experiment record; default data is explicitly synthetic.",
+	"compatibility": { "clio": ">=0.4.7" },
+	"runtime": {
+		"api": 1,
+		"entrypoint": "extension.mjs",
+		"commands": [{ "name": "dashboard", "description": "Show synthetic jobs or a named local JSON experiment file." }],
+		"events": ["session_open", "turn_end"],
+		"ui": ["status", "panel"]
+	}
+}

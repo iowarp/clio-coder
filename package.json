@@ -43,7 +43,10 @@
 		"clio-coder": "dist/cli/index.js"
 	},
 	"exports": {
-		"./package.json": "./package.json"
+		"./package.json": "./package.json",
+		"./extensions": {
+			"types": "./src/domains/extensions/public-api.ts"
+		}
 	},
 	"files": [
 		"dist",
@@ -63,7 +66,8 @@
 		"CODE_OF_CONDUCT.md",
 		"NOTICE",
 		"LICENSE",
-		"damage-control-rules.yaml"
+		"damage-control-rules.yaml",
+		"examples/extensions/**"
 	],
 	"publishConfig": {
 		"access": "public"

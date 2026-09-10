@@ -2,6 +2,12 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Added
+- Add optional operator extension runtimes with declared namespaced slash commands, bounded session/turn observations, additive footer status, host-rendered panels and an explicit headless `extensions run` path. Verified private package copies run in disposable Node processes with readiness, cancellation, scope/digest revocation and idle reload; existing tools, hooks and frozen model schemas retain their admission contracts.
+- Ship local experiment-status and measurement-summary extension examples with explicitly synthetic demonstration evidence, narrow author types, real process lifecycle contracts and installed-package verification.
+
 ## 0.4.7 - 2026-09-09
 
 ### Added

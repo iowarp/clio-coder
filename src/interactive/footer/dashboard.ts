@@ -86,6 +86,7 @@ export type { ToolTallySnapshot } from "./widgets.js";
 export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
+	getExtensionStatus?: () => ReadonlyArray<string>;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
 	getAgentStatus?: () => AgentStatus;
@@ -500,7 +501,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		if (current.agent.statusText) frame = (frame + 1) % 10;
 		const grid = renderFooterDashboardLines(current, width, dashboardMode);
 		const notices = renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
-		view.setText([...grid, ...notices].join("\n"));
+		const contributed = deps.getExtensionStatus?.() ?? [];
+		const extensionLine = contributed.length ? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)] : [];
+		view.setText([...grid, ...extensionLine, ...notices].join("\n"));
 		view.invalidate();
 	};
 	const setExpanded = (expanded: boolean): void => {

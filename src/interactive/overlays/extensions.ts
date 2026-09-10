@@ -17,12 +17,13 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 				: !ext.enabled
 					? "disabled"
 					: ext.loadable
-						? "active"
+						? "eligible"
 						: `shadowed:${ext.overriddenBy ?? "higher"}`;
 
-		let meta = state;
-		if (state === "active") {
-			meta = clioTheme().fg("success", "active");
+		const runtime = ctx.operatorExtensions?.entries().find((entry) => entry.id === ext.id && entry.scope === ext.scope);
+		let meta = ext.runtime ? `${state}; runtime ${runtime?.state ?? "not started"}` : state;
+		if (state === "eligible") {
+			meta = clioTheme().fg("success", meta);
 		} else if (state === "disabled") {
 			meta = clioTheme().fg("dim", "disabled");
 		} else {
@@ -44,6 +45,22 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					`**Description:** ${ext.description}`,
 					`**State:** ${state}`,
 				];
+				if (ext.runtime) {
+					lines.push(
+						`**Operator runtime:** ${runtime?.state ?? "not started"}; generation ${runtime?.generation ?? 0}`,
+						"Runtime code executes on interactive startup/reload after installation. It has your user account's authority; it is not an OS sandbox.",
+					);
+					if (runtime?.reason) lines.push(runtime.reason);
+					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);
+					for (const command of ctx.operatorExtensions
+						?.commands(ctx.listPrompts().items.map((prompt) => prompt.name))
+						.filter((row) => row.extensionId === ext.id) ?? [])
+						lines.push(`/${command.invocation}: ${command.description} (${command.available ? "ready" : command.reason})`);
+				}
+				if (ext.capabilities?.tools.length)
+					lines.push(`**Tool evidence:** ${runtime?.toolEvidence ?? "registry binding unknown in this view"}`);
+				for (const reason of runtime?.newSessionReasons ?? []) lines.push(reason);
+				lines.push(`Manage this copy: clio-coder extensions enable|disable|remove ${ext.id} --${ext.scope}`);
 				if (ext.capabilities?.tools.length)
 					lines.push(
 						`**Command tools:** ${ext.capabilities.tools.map((tool) => tool.name).join(", ")}`,

@@ -1,3 +1,4 @@
+import { type ExtensionCommandRow, resolveExtensionCommands } from "../domains/extensions/operator-commands.js";
 import {
 	type AutocompleteItem,
 	type AutocompleteProvider,
@@ -81,6 +82,7 @@ export interface PromptCommandTemplate {
 export const REFERENCE_TEMPLATE_MARKER = "reference";
 
 export interface SlashAutocompleteOptions {
+	extensionCommands?: () => ReadonlyArray<ExtensionCommandRow>;
 	basePath?: string;
 	fdPath?: string | null;
 	/**
@@ -327,6 +329,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		sources: CompletionSources,
 		fileReferenceSource?: FileReferenceCompletionSource,
 		promptTemplates?: () => ReadonlyArray<PromptCommandTemplate>,
+		private extensionCommands: () => ReadonlyArray<ExtensionCommandRow> = () => [],
 	) {
 		this.files = new CombinedAutocompleteProvider([], basePath, fdPath);
 		this.fileReferences = fileReferenceSource ?? createFileReferenceCompletionSource({ basePath });
@@ -484,6 +487,25 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					end: context.commandEnd,
 				}),
 			);
+			const promptNames = this.promptTemplates().map((prompt) => prompt.name);
+			for (const row of resolveExtensionCommands(this.extensionCommands(), promptNames)) {
+				if (
+					!row.invocation.toLowerCase().startsWith(prefix.toLowerCase()) ||
+					promptNames.some((name) => name.toLowerCase() === row.invocation.toLowerCase())
+				)
+					continue;
+				items.push({
+					id: `extension:${row.invocation}`,
+					kind: "command",
+					value: row.invocation,
+					label: row.invocation,
+					description: `extension (${row.scope}): ${row.description}`,
+					effectDescription: "Runs installed operator extension code; output is local to you",
+					replacement: { start: context.commandStart, end: context.commandEnd },
+					appendSpace: true,
+					...(!row.available ? { disabledReason: row.reason ?? "runtime unavailable" } : {}),
+				});
+			}
 			return items.length ? { items, prefix } : null;
 		}
 
@@ -618,5 +640,6 @@ export function createSlashCommandAutocompleteProvider(options: SlashAutocomplet
 		options.completionSources ?? {},
 		options.fileReferenceSource,
 		options.promptTemplates,
+		options.extensionCommands,
 	);
 }

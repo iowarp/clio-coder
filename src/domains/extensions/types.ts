@@ -1,5 +1,13 @@
 export type ExtensionScope = "user" | "project";
 
+export interface ExtensionRuntimeDeclaration {
+	api: 1;
+	entrypoint: string;
+	commands: Array<{ name: string; description: string; timeoutMs: number }>;
+	events: Array<"session_open" | "turn_end">;
+	ui: Array<"status" | "panel">;
+}
+
 export interface ExtensionCommandTool {
 	name: string;
 	description: string;
@@ -21,6 +29,7 @@ export interface ExtensionCapabilities {
  * fleets, and reference files are plugin content and have no manifest key.
  */
 export interface ClioExtensionManifest {
+	runtime?: ExtensionRuntimeDeclaration;
 	id: string;
 	name: string;
 	version: string;
@@ -50,6 +59,7 @@ export interface ExtensionProvenance {
 }
 
 export interface InstalledExtension {
+	runtime?: ExtensionRuntimeDeclaration;
 	id: string;
 	name: string;
 	version: string;

@@ -72,6 +72,8 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
+	getExtensionStatus?: () => ReadonlyArray<string>;
 	bus: SafeEventBus;
 	providers: ProvidersContract;
 	dispatch: Pick<DispatchContract, "snapshot">;
@@ -397,6 +399,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			: {}),
 		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		getExtensionStats,
+		...(deps.getExtensionStatus ? { getExtensionStatus: deps.getExtensionStatus } : {}),
 		getSessionInfo: () => {
 			const meta = deps.session?.current();
 			return {
@@ -447,6 +450,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
 		promptTemplates: () => deps.resources?.prompts(getCwd()).items ?? [],
+		...(deps.extensionCommands ? { extensionCommands: deps.extensionCommands } : {}),
 		completionSources: {
 			agents: async () =>
 				(deps.agents?.listSpecs() ?? []).filter(isUserVisibleAgent).map((agent) => ({

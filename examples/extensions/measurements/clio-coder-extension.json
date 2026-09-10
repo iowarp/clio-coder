@@ -1,0 +1,28 @@
+{
+	"id": "measurements",
+	"name": "Measurement summary",
+	"version": "1.0.0",
+	"description": "Count, mean, min, max and sample standard deviation of supplied finite measurements.",
+	"compatibility": { "clio": ">=0.4.7" },
+	"capabilities": {
+		"tools": [
+			{
+				"name": "summarize",
+				"description": "Summarize supplied measurements without inventing physical units or provenance.",
+				"runtime": "node",
+				"entrypoint": "summarize.cjs",
+				"timeoutMs": 10000,
+				"maxOutputBytes": 16384,
+				"inputSchema": {
+					"type": "object",
+					"properties": {
+						"values": { "type": "array", "items": { "type": "number" }, "minItems": 1, "maxItems": 1000 },
+						"units": { "type": "string", "maxLength": 40 }
+					},
+					"required": ["values"],
+					"additionalProperties": false
+				}
+			}
+		]
+	}
+}

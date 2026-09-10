@@ -102,7 +102,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
 	it("packs once, installs once, and loads a lazy codewiki chunk from a foreign cwd", { timeout: 120_000 }, async () => {
-		const work = mkdtempSync(join(tmpdir(), "clio-installed-package-"));
+		const work = mkdtempSync(join(tmpdir(), "clio-coder-installed-package-"));
 		const prefix = join(work, "prefix");
 		const foreign = join(work, "foreign-project");
 		const home = join(work, "home");
@@ -237,6 +237,42 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				symbols: Array<{ name: string }>;
 			};
 			ok(codewiki.symbols.some((symbol) => symbol.name === "installedLazySymbol"));
+
+			// Operator examples and the plain-JS bootstrap must work outside the source checkout.
+			const extensionInstall = await run(
+				bin,
+				["extensions", "install", join(packageRoot, "examples/extensions/lab-status"), "--project", "--json"],
+				foreign,
+				isolatedEnv(home),
+			);
+			strictEqual(extensionInstall.code, 0, extensionInstall.stderr);
+			const extensionRun = await run(
+				bin,
+				["extensions", "run", "lab-status", "dashboard", "--json"],
+				foreign,
+				isolatedEnv(home),
+			);
+			strictEqual(extensionRun.code, 0, extensionRun.stderr);
+			const extensionOutput = JSON.parse(extensionRun.stdout) as {
+				output: { text: string; panel?: unknown };
+				provenance: { contentDigest: string };
+			};
+			match(extensionOutput.output.text, /SYNTHETIC FIXTURE/);
+			ok(extensionOutput.output.panel);
+			match(extensionOutput.provenance.contentDigest, /^[a-f0-9]{64}$/);
+			const disabledExtension = await run(
+				bin,
+				["extensions", "disable", "lab-status", "--project"],
+				foreign,
+				isolatedEnv(home),
+			);
+			strictEqual(disabledExtension.code, 0, disabledExtension.stderr);
+			const disabledRun = await run(bin, ["extensions", "run", "lab-status", "dashboard"], foreign, isolatedEnv(home));
+			strictEqual(disabledRun.code, 1, disabledRun.stderr);
+			strictEqual(disabledRun.stdout, "");
+			const publicTypes = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).exports["./extensions"]
+				.types;
+			ok(existsSync(join(packageRoot, publicTypes)), "installed extension author types exist");
 		} finally {
 			rmSync(work, { recursive: true, force: true });
 		}

@@ -1,9 +1,11 @@
+import type { ExtensionPanel } from "../domains/extensions/public-api.js";
 import type { LibraryEntryKind, ResourcesContract } from "../domains/resources/index.js";
 import type { TUI } from "../engine/tui.js";
 import type { ClioEditor } from "./clio-editor.js";
 import type { ClioKeybindingManager } from "./keybinding-manager.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openAgentsOverlay } from "./overlays/agents.js";
+import { openExtensionPanel } from "./overlays/extension-panel.js";
 import { openExtensionsOverlay } from "./overlays/extensions.js";
 import { openHelpOverlay } from "./overlays/help-reference.js";
 import { openInteropOverlay } from "./overlays/interop.js";
@@ -28,6 +30,7 @@ export interface OverlayResourceOpenersDeps {
 }
 
 export interface OverlayResourceOpeners {
+	openExtensionPanelState(owner: string, panel: ExtensionPanel, valid: () => boolean): boolean;
 	openHelpOverlayState(query?: string): void;
 	openAgentsOverlayState(): void;
 	openSkillsHubState(tab?: LibraryEntryKind): void;
@@ -47,7 +50,14 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 	const openHelpOverlayState = (query?: string): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "help";
-		deps.transitions.handle = openHelp(deps.tui, deps.keybindings, deps.closeOverlay, query);
+		const ctx = deps.getSlashContext();
+		deps.transitions.handle = openHelp(
+			deps.tui,
+			deps.keybindings,
+			deps.closeOverlay,
+			query,
+			ctx.operatorExtensions?.commands(ctx.listPrompts().items.map((prompt) => prompt.name)),
+		);
 		deps.tui.requestRender();
 	};
 
@@ -104,6 +114,13 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 	};
 
 	return {
+		openExtensionPanelState(owner, panel, valid) {
+			if (deps.transitions.state !== "closed") return false;
+			deps.transitions.state = "extensions";
+			deps.transitions.handle = openExtensionPanel(deps.tui, owner, panel, valid);
+			deps.tui.requestRender();
+			return true;
+		},
 		openHelpOverlayState,
 		openAgentsOverlayState,
 		openSkillsHubState,

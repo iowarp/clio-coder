@@ -1,3 +1,4 @@
+import type { ExtensionCommandRow } from "../../domains/extensions/operator-commands.js";
 import type { OverlayHandle, TUI } from "../../engine/tui.js";
 import type { ClioKeybindingManager } from "../keybinding-manager.js";
 import { commandReference, SLASH_COMMAND_GROUPS } from "../slash-commands.js";
@@ -25,6 +26,7 @@ export function openHelpOverlay(
 	manager: ClioKeybindingManager,
 	onClose: () => void,
 	initialFilter?: string,
+	extensionCommands: readonly ExtensionCommandRow[] = [],
 ): OverlayHandle {
 	// Commands are grouped by the verb they perform, in SLASH_COMMAND_GROUPS
 	// order, and keep registry order inside each group.
@@ -45,6 +47,20 @@ export function openHelpOverlay(
 			};
 			return item;
 		});
+
+	commands.push(
+		...extensionCommands.map((row) => ({
+			id: `extension:${row.invocation}`,
+			label: `/${row.invocation}  ${row.description}`,
+			group: "Operator extensions",
+			meta: row.available ? "ready" : "unavailable",
+			detail: () => [
+				`# /${row.invocation}`,
+				`Owner: ${row.extensionId} (${row.scope}); operator generation ${row.generation}`,
+				row.available ? "Runs installed operator code; results stay local to you." : (row.reason ?? "Runtime unavailable"),
+			],
+		})),
+	);
 
 	const conflicts = manager.getConflicts();
 	const keys: ListOverlayItem[] = manager.hotkeyEntries().map((row) => {

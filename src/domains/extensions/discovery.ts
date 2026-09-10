@@ -3,10 +3,11 @@ import path from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { parseExtensionCapabilities, resolveExtensionEntrypoint } from "./command-schema.js";
 import { evaluateClioCompatibility } from "./compatibility.js";
+import { parseExtensionRuntime } from "./runtime-schema.js";
 import type { ClioExtensionManifest, ExtensionCandidate, ExtensionDiagnostic } from "./types.js";
 
 const MANIFEST_NAMES = ["clio-coder-extension.yaml", "clio-coder-extension.yml", "clio-coder-extension.json"] as const;
-const MANIFEST_KEYS = new Set(["id", "name", "version", "description", "compatibility", "capabilities"]);
+const MANIFEST_KEYS = new Set(["id", "name", "version", "description", "compatibility", "capabilities", "runtime"]);
 const COMPATIBILITY_KEYS = new Set(["clio"]);
 /**
  * Keys a domain package used to declare here. They are named so the refusal
@@ -98,6 +99,18 @@ export function parseExtensionManifest(
 	if (!version) diagnostics.push({ type: "error", message: "version is required", path: manifestPath });
 	if (!description) diagnostics.push({ type: "error", message: "description is required", path: manifestPath });
 	let capabilities: ClioExtensionManifest["capabilities"];
+	let runtime: ClioExtensionManifest["runtime"];
+	if (value.runtime !== undefined) {
+		try {
+			runtime = parseExtensionRuntime(value.runtime);
+		} catch (error) {
+			diagnostics.push({
+				type: "error",
+				message: error instanceof Error ? error.message : String(error),
+				path: manifestPath,
+			});
+		}
+	}
 	if (value.capabilities !== undefined) {
 		try {
 			capabilities = parseExtensionCapabilities(value.capabilities, id ?? "");
@@ -144,6 +157,7 @@ export function parseExtensionManifest(
 		return { diagnostics };
 	}
 	const manifest: ClioExtensionManifest = { id, name, version, description };
+	if (runtime) manifest.runtime = runtime;
 	if (capabilities) manifest.capabilities = capabilities;
 	if (compatibility && Object.keys(compatibility).length > 0) manifest.compatibility = compatibility;
 	const clioRange = manifest.compatibility?.clio;
@@ -183,6 +197,17 @@ export function loadManifestFromRoot(root: string): ExtensionCandidate {
 	}
 	try {
 		const parsed = parseExtensionManifest(readJsonOrYaml(manifestPath), manifestPath);
+		if (parsed.manifest?.runtime) {
+			try {
+				resolveExtensionEntrypoint(root, parsed.manifest.runtime.entrypoint);
+			} catch (error) {
+				parsed.diagnostics.push({
+					type: "error",
+					message: `runtime: ${error instanceof Error ? error.message : String(error)}`,
+					path: manifestPath,
+				});
+			}
+		}
 		for (const tool of parsed.manifest?.capabilities?.tools ?? []) {
 			try {
 				resolveExtensionEntrypoint(root, tool.entrypoint);

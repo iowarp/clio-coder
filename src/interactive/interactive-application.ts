@@ -1,4 +1,4 @@
-import type { PermissionRequestedPayload } from "../core/bus-events.js";
+import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -11,6 +11,7 @@ import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
+import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
 import type { InteropContract } from "../domains/interop/index.js";
 import type { TaskMemoryOperatorStatus } from "../domains/memory/index.js";
 import { openDetachedBatchViews } from "../domains/middleware/index.js";
@@ -552,9 +553,49 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * rail reads it through the optional chain before then as "no prompt".
 	 */
 	let overlayLifecycle: OverlayLifecycleController;
+	let refreshOperatorUi = (): void => {};
+	let scheduleOperatorMaintenance = (): void => {};
+	let operatorTimer: ReturnType<typeof setTimeout> | undefined;
+	let operatorPanelValid: (() => boolean) | undefined;
+	const operatorExtensions = deps.extensions
+		? new OperatorExtensionRuntime({
+				context: () => ({
+					workspace: process.cwd(),
+					sessionId: deps.session?.current()?.id ?? deps.getSessionId?.() ?? null,
+					mode: "interactive",
+				}),
+				isIdle: () =>
+					!deps.chat.isStreaming() &&
+					deps.chat.turnPreparation().phase === "idle" &&
+					(overlayLifecycle?.getState() ?? "closed") === "closed" &&
+					!editorSubmit?.hasActiveEditorBash(),
+				list: (cwd) => deps.extensions?.list(cwd, { all: true }) ?? [],
+				...(deps.reloadExtensions ? { commitHooks: deps.reloadExtensions } : {}),
+				onChange: () => refreshOperatorUi(),
+				...(deps.toolRegistry
+					? {
+							frozenTools: deps.toolRegistry
+								.listAll()
+								.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : [])),
+						}
+					: {}),
+				onDiagnostic: (message) => notify("warning", message, "operator-extensions:observation"),
+				onReload: (result) => {
+					if (result.status !== "deferred")
+						notify(result.status === "rejected" ? "error" : "info", result.message, "operator-extensions:reload");
+				},
+			})
+		: undefined;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
 		getLeaderArmed: () => leaderArmed,
+		extensionCommands: () => operatorExtensions?.commands() ?? [],
+		getExtensionStatus: () =>
+			overlayLifecycle?.getState() === "permission-confirm"
+				? []
+				: (operatorExtensions?.entries() ?? []).flatMap((entry) =>
+						entry.status ? [`${entry.id}: ${entry.status.text}`] : [],
+					),
 		getShutdownArmed: () => shutdownArmed,
 		isAwaitingApproval: () => overlayLifecycle?.getState() === "permission-confirm",
 		getPermissionInspection: () => {
@@ -637,6 +678,15 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			: null;
 	const detachYaziBridge = yaziBridge ? deps.attachYaziBridge?.(yaziBridge) : undefined;
 	refreshPresentationFooter = () => footer.refresh();
+	refreshOperatorUi = () => {
+		scheduleOperatorMaintenance();
+		if (operatorPanelValid && !operatorPanelValid() && overlayLifecycle?.getState() === "extensions") {
+			operatorPanelValid = undefined;
+			overlayLifecycle.closeOverlay();
+		}
+		footer.refresh();
+		tui.requestRender();
+	};
 	const agentProgress = createAgentProgress(terminal);
 	// Desktop notifications are a protocol write on the terminal owner, issued
 	// outside any render transaction, so the sequence carries frameId null and
@@ -675,7 +725,10 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		setLastTurnSummary: (summary) => presentation.setLastTurnSummary(summary),
 		startTerminalProgress: () => agentProgress.start(),
 		stopTerminalProgress: () => agentProgress.stop(),
-		onTurnEnded: () => desktopNotifications.turnEnded(),
+		onTurnEnded: () => {
+			desktopNotifications.turnEnded();
+			operatorExtensions?.observe({ event: "turn_end", reason: "completed" });
+		},
 		refreshLiveWorkspaceGit,
 		refreshFooter: () => footer.refresh(),
 		requestRender: () => tui.requestRender(),
@@ -699,6 +752,23 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const toolRegistry = deps.toolRegistry;
 	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
 	const slashRuntime = createInteractiveSlashRuntime({
+		...(operatorExtensions ? { operatorExtensions } : {}),
+		showExtensionOutput: (invocation, output) => {
+			const generation = operatorExtensions?.activeGeneration;
+			const id = invocation.split(":")[1];
+			const valid = () =>
+				operatorExtensions
+					?.entries()
+					.some((entry) => entry.id === id && entry.state === "ready" && entry.generation === generation) ?? false;
+			if (!valid()) return;
+			if (
+				output.panel &&
+				!deps.chat.isStreaming() &&
+				overlayLifecycle.openExtensionPanelState(id ?? invocation, output.panel, valid)
+			)
+				operatorPanelValid = valid;
+			else slashRuntime.context.showReference?.({ command: invocation, source: "operator extension", text: output.text });
+		},
 		io,
 		bus: deps.bus,
 		dispatch: deps.dispatch,
@@ -905,6 +975,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const { cancelSelectedDispatch, steerSelectedDispatch } = dispatchSteering;
 
 	const cancelActiveRun = (): void => {
+		operatorExtensions?.cancel();
 		// Esc must not eat typed work: queued steers and follow-ups return to the
 		// editor before the abort, the same restore the reference implementation
 		// performs. cancel() then finds both queues already empty.
@@ -1127,7 +1198,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		steerSelectedDispatch,
 		cancelSelectedDispatch,
 		cancelActiveEditorBash: () => editorSubmit.cancelActiveEditorBash(),
-		isStreaming: () => deps.chat.isStreaming() || deps.chat.turnPreparation().phase === "compacting",
+		isStreaming: () =>
+			deps.chat.isStreaming() || deps.chat.turnPreparation().phase === "compacting" || (operatorExtensions?.busy ?? false),
 		cancelActiveRun,
 		editor,
 		editorSubmit,
@@ -1144,6 +1216,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			stopAgentProgress: agentProgress.stop,
 			disposeChat: () => deps.chat.dispose(),
 			disposeSubscriptions: () => {
+				clearTimeout(operatorTimer);
+				for (const unsubscribe of operatorSubscriptions) unsubscribe();
+				void operatorExtensions?.dispose();
 				detachYaziBridge?.();
 				yaziBridge?.dispose();
 				detachWatchPane?.();
@@ -1172,6 +1247,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			if (leftBehind !== null) process.stderr.write(`${leftBehind}\n`);
 			try {
 				if (dumpInputWedgeOnTerminate) process.off("SIGTERM", dumpInputWedgeOnTerminate);
+				await operatorExtensions?.dispose();
 				await deps.onShutdown();
 			} finally {
 				if (lease) await lease.close();
@@ -1197,6 +1273,36 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			: {}),
 	});
 
+	const operatorSubscriptions = operatorExtensions
+		? [
+				BusChannels.SessionStart,
+				BusChannels.SessionEnd,
+				BusChannels.SessionParked,
+				BusChannels.SessionResumed,
+				BusChannels.SessionTurnSwitched,
+			].map((channel) => deps.bus.on(channel, () => operatorExtensions.invalidateContext()))
+		: [];
+	scheduleOperatorMaintenance = () => {
+		clearTimeout(operatorTimer);
+		const delay = operatorExtensions?.maintenanceDelayMs;
+		if (delay === undefined || delay === null) return;
+		operatorTimer = setTimeout(() => {
+			operatorExtensions?.maintenance();
+			scheduleOperatorMaintenance();
+		}, delay);
+		operatorTimer.unref();
+	};
+	queueMicrotask(() => {
+		void operatorExtensions?.reload("startup");
+	});
+	getTerminationCoordinator().onDrain(
+		async () => {
+			clearTimeout(operatorTimer);
+			for (const unsubscribe of operatorSubscriptions) unsubscribe();
+			await operatorExtensions?.dispose();
+		},
+		{ timeoutMs: 6500 },
+	);
 	if (lease) {
 		const adopted = lease.adopt({
 			root: presentation.root,

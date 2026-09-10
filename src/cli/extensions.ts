@@ -10,6 +10,7 @@ import {
 	listInstalledExtensions,
 	removeExtension,
 } from "../domains/extensions/index.js";
+import { extensionInvocation, OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
 import { formatColumns, printError, printOk } from "./shared.js";
 
 const HELP = `clio-coder extensions <command>
@@ -19,6 +20,7 @@ Manage Clio extension packages.
 Commands:
   clio-coder extensions list [--all] [--json] [--user|--project]
   clio-coder extensions discover <path> [--json]
+  clio-coder extensions run <id> <command> [--json] -- [arguments]
   clio-coder extensions install <path> [--user|--project] [--force] [--json]
   clio-coder extensions enable <id> [--user|--project] [--json]
   clio-coder extensions disable <id> [--user|--project] [--json]
@@ -37,7 +39,16 @@ interface Parsed {
 
 function parse(argv: ReadonlyArray<string>): Parsed {
 	const out: Parsed = { positional: [], json: false, all: false, force: false, help: false };
+	let argumentsOnly = false;
 	for (const arg of argv) {
+		if (argumentsOnly) {
+			out.positional.push(arg);
+			continue;
+		}
+		if (arg === "--") {
+			argumentsOnly = true;
+			continue;
+		}
 		if (!out.command && !arg.startsWith("-")) {
 			out.command = arg;
 			continue;
@@ -95,7 +106,7 @@ function stateLabel(extension: InstalledExtension): string {
 	if (!extension.compatible) return "incompatible";
 	if (!extension.enabled) return "disabled";
 	if (!extension.effective) return `shadowed:${extension.overriddenBy ?? "higher"}`;
-	return extension.loadable ? "active" : "inactive";
+	return extension.loadable ? "eligible" : "inactive";
 }
 
 function printList(items: ReadonlyArray<InstalledExtension>): void {
@@ -118,7 +129,7 @@ function printList(items: ReadonlyArray<InstalledExtension>): void {
 	);
 }
 
-export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
+export function runExtensionsCommand(argv: ReadonlyArray<string>): number | Promise<number> {
 	let parsed: Parsed;
 	try {
 		parsed = parse(argv);
@@ -142,6 +153,8 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 	}
 	const scopeOptions = { ...(parsed.scope ? { scope: parsed.scope } : {}) };
 	switch (parsed.command) {
+		case "run":
+			return runOperatorCommand(parsed);
 		case "list": {
 			const items = listInstalledExtensions(process.cwd(), { ...scopeOptions, all: parsed.all });
 			if (parsed.json) process.stdout.write(`${JSON.stringify({ extensions: items }, null, 2)}\n`);
@@ -178,7 +191,13 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 			if (parsed.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
 			else {
 				printDiagnostics(result.diagnostics);
-				if (result.extension) printOk(`installed ${result.extension.id} (${result.extension.scope})`);
+				if (result.extension) {
+					printOk(`installed ${result.extension.id} (${result.extension.scope})`);
+					if (result.extension.runtime)
+						process.stderr.write(
+							"Operator runtime code starts on the next interactive startup/reload or explicit extensions run. Install only code you trust; it runs with your user account authority.\n",
+						);
+				}
 			}
 			return hasErrors(result.diagnostics) ? 1 : 0;
 		}
@@ -215,5 +234,52 @@ export function runExtensionsCommand(argv: ReadonlyArray<string>): number {
 			printError(`unknown extensions command: ${parsed.command}`);
 			process.stderr.write(HELP);
 			return 2;
+	}
+}
+
+async function runOperatorCommand(parsed: Parsed): Promise<number> {
+	const [id, command, ...args] = parsed.positional;
+	if (!id || !command || parsed.scope || parsed.force || parsed.all) {
+		process.stderr.write("usage: clio-coder extensions run <id> <command> [--json] -- [arguments]\n");
+		return 2;
+	}
+	const selected = listInstalledExtensions(process.cwd(), { all: true }).find(
+		(entry) => entry.id === id && entry.loadable,
+	);
+	if (!selected?.runtime?.commands.some((entry) => entry.name === command)) {
+		printError(`extension ${id} has no eligible operator command '${command}'`);
+		return 1;
+	}
+	const runtime = new OperatorExtensionRuntime({
+		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "headless" }),
+		isIdle: () => true,
+		onlyId: id,
+	});
+	const controller = new AbortController();
+	const cancel = (): void => {
+		controller.abort();
+		void runtime.dispose();
+	};
+	process.once("SIGINT", cancel);
+	process.once("SIGTERM", cancel);
+	try {
+		const reload = await runtime.reload("startup");
+		if (reload.status !== "committed") throw new Error(reload.message);
+		const provenance = runtime.entries().find((entry) => entry.id === id && entry.state === "ready")?.provenance;
+		const output = await runtime.invoke(extensionInvocation(id, command), args.join(" "), [], controller.signal);
+		if (!provenance) throw new Error("extension result has no activated provenance");
+		if (parsed.json)
+			process.stdout.write(
+				`${JSON.stringify({ extensionId: id, command, generation: reload.generation, provenance, output })}\n`,
+			);
+		else process.stdout.write(`${output.text}\n`);
+		return 0;
+	} catch (error) {
+		printError(error instanceof Error ? error.message : String(error));
+		return 1;
+	} finally {
+		process.off("SIGINT", cancel);
+		process.off("SIGTERM", cancel);
+		await runtime.dispose();
 	}
 }

@@ -16,7 +16,11 @@
 		"NOTICE",
 		"CHANGELOG.md",
 		"library/registry.yaml",
-		"plugins/materio/plugin.json"
+		"plugins/materio/plugin.json",
+		"src/domains/extensions/runtime-child.mjs",
+		"src/domains/extensions/public-api.ts",
+		"examples/extensions/lab-status/clio-coder-extension.json",
+		"examples/extensions/measurements/clio-coder-extension.json"
 	],
 	"requiredPrefixes": [
 		"dist/assets/grammars/",
@@ -25,6 +29,7 @@
 		"skills/",
 		"src/domains/providers/models/",
 		"plugins/",
-		"library/"
+		"library/",
+		"examples/extensions/"
 	]
 }

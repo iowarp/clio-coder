@@ -12,6 +12,9 @@ import type { RunReceipt } from "../domains/dispatch/types.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import type { ReceiptIntegrityOutcome } from "../domains/evidence/trust-status.js";
 import type { InstalledExtension } from "../domains/extensions/index.js";
+import { isExtensionCommandToken } from "../domains/extensions/operator-commands.js";
+import type { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
+import type { ExtensionOutput } from "../domains/extensions/public-api.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
 import {
 	PANES_PRESET_IDS,
@@ -575,6 +578,8 @@ export interface PromptReferenceCard {
  * the TUI, chat loop, or overlay module graph directly.
  */
 export interface SlashCommandContext {
+	operatorExtensions?: OperatorExtensionRuntime;
+	showExtensionOutput?: (invocation: string, output: ExtensionOutput) => void;
 	io: RunIo;
 	notice: (level: NoticeLevel, text: string) => void;
 	dispatch: DispatchContract;
@@ -2192,6 +2197,12 @@ export function formatExtensionReloadNotice(outcome: ExtensionReloadOutcome): [N
 }
 
 function reloadExtensionsCommand(ctx: SlashCommandContext): void {
+	if (ctx.operatorExtensions) {
+		void ctx.operatorExtensions.reload().then((result) => {
+			if (result.status === "deferred") ctx.notice("info", result.message);
+		});
+		return;
+	}
 	if (!ctx.reloadExtensions) {
 		ctx.notice("warn", "extensions: reload is unavailable in this session; restart to pick up installed changes");
 		return;
@@ -2220,7 +2231,8 @@ export function parseSlashCommand(input: string): SlashCommand {
 	}
 	if (trimmed.startsWith("/")) {
 		const token = trimmed.slice(1).split(/\s+/u)[0] ?? "";
-		if (COMMAND_SHAPED_TOKEN.test(token)) return { kind: "unknown-command", token, text: trimmed };
+		if (COMMAND_SHAPED_TOKEN.test(token) || isExtensionCommandToken(token))
+			return { kind: "unknown-command", token, text: trimmed };
 	}
 	return { kind: "unknown", text: trimmed };
 }
@@ -2265,6 +2277,32 @@ export function dispatchSlashCommand(command: SlashCommand, ctx: SlashCommandCon
 		// A template that exists and refused is not a typo. Its reason reaches the
 		// operator and nothing reaches the model.
 		const refusal = expansion?.expanded === false ? expansion.refusal : undefined;
+		if (!refusal && isExtensionCommandToken(command.token) && ctx.operatorExtensions) {
+			const runtime = ctx.operatorExtensions;
+			const promptNames = ctx.listPrompts().items.map((prompt) => prompt.name);
+			const row = runtime.commands(promptNames).find((row) => row.invocation === command.token);
+			if (!row?.available) {
+				ctx.notice("error", row?.reason ?? `/${command.token} is not an available extension command`);
+				ctx.render();
+				return "rejected";
+			}
+			const args = command.text.slice(command.token.length + 1).trim();
+			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
+			runLocal(async () => {
+				try {
+					const output = await runtime.invoke(
+						command.token,
+						args,
+						ctx.listPrompts().items.map((prompt) => prompt.name),
+					);
+					if (ctx.showExtensionOutput) ctx.showExtensionOutput(command.token, output);
+					else ctx.io.stdout(`${output.text}\n`);
+				} catch (error) {
+					ctx.notice("error", `${command.token}: ${error instanceof Error ? error.message : String(error)}`);
+				}
+			});
+			return "accepted";
+		}
 		ctx.notice("error", refusal ? refusal.message : `/${command.token} is not a command. Type /help for the list.`);
 		ctx.render();
 		return "rejected";

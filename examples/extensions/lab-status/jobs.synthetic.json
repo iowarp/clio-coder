@@ -1,0 +1,9 @@
+{
+	"synthetic": true,
+	"experiment": "Synthetic stencil scaling fixture",
+	"jobs": [
+		{ "id": "fixture-1", "ranks": 8, "state": "completed", "elapsedSeconds": 42 },
+		{ "id": "fixture-2", "ranks": 16, "state": "completed", "elapsedSeconds": 24 },
+		{ "id": "fixture-3", "ranks": 32, "state": "running", "elapsedSeconds": 9 }
+	]
+}

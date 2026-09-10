@@ -74,6 +74,8 @@ type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
 
 export interface InteractiveSlashRuntimeDeps {
+	operatorExtensions?: SlashCommandContext["operatorExtensions"];
+	showExtensionOutput?: SlashCommandContext["showExtensionOutput"];
 	io: RunIo;
 	bus: SafeEventBus;
 	dispatch: DispatchContract;
@@ -418,6 +420,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		openSkillsHub: deps.openSkillsHub,
 		clearSkillSurface: () => deps.chat.clearSkillSurface(),
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
+		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),
+		...(deps.showExtensionOutput ? { showExtensionOutput: deps.showExtensionOutput } : {}),
 		listAgents: () => deps.agents?.listSpecs().filter((spec) => spec.audience !== "internal") ?? [],
 		listDelegationAgents: () => deps.getSettings?.().integrations.externalAgents.entries ?? [],
 		exportShareArchive: (outPath) => {
