@@ -258,7 +258,10 @@ test("S4-01 registry search retains compiled protections after policy mutation a
 			for (const call of [
 				...(["content", "files", "count"] as const).map((mode) => ({
 					tool: "grep",
-					args: { path: workspace, pattern: "REVIEW_", mode },
+					// Scan the complete fixture regardless of ripgrep traversal order.
+					// The 100 public matches otherwise hit the default limit before
+					// private.txt is encountered, so there is no withheld path to count.
+					args: { path: workspace, pattern: "REVIEW_", mode, limit: 200 },
 				})),
 				{ tool: "find", args: { path: workspace, pattern: "*.txt" } },
 				{ tool: "ls", args: { path: workspace } },
