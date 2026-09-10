@@ -196,10 +196,9 @@ clio-coder extensions run lab-status dashboard --json -- /path/to/local-record.j
 
 Inside an interactive session, invoke `/ext:lab-status:dashboard` or append a
 local JSON filename. Browse `/extensions` and use
-`/extensions reload` after a reviewed reinstall or enable. The library
-navigation work may expose `/extensions [reload]` as the primary route while
-retaining these compatibility routes; both must use the same extension reload
-callback. `/library reload` never loads runtime code.
+`/extensions reload` after a reviewed reinstall or enable. These are the canonical
+harness routes; `/library extensions` and `/library extensions reload` are retired.
+`/library reload` refreshes recipe resources independently and never loads runtime code.
 
 Canonical commands use `/ext:<extension-id>:<command>`. Existing extension IDs
 are preserved, including dots and underscores. Local command names start with

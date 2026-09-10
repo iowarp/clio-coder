@@ -15,6 +15,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Reorganize shareable packages into canonical `library/` kind directories (`library/skills/`, `library/plugins/`) with a single source entry point, preserving five package kinds, the portable package engine, and the bundled npm index while keeping built-in core agent recipes and baseline fleets product-owned.
 
 ### Fixed
+- Align plugin and harness guides with the canonical Library and `/extensions` routes, and verify independent recipe/runtime lifecycles with bundled Materio, scientific extensions and foreign imports.
 - Finish the Clio Coder filesystem namespace cleanup: generated scratch paths and temporary directories use `clio-coder`, trace examples and fleet documentation use canonical paths and branch names, and lint guards against stale project-state paths.
 - Verify every bundled library package and subagent skill binding from the installed npm package, document the in-repository marketplace sources, and correct agent-list help to name plugin recipes.
 

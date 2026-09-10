@@ -424,19 +424,22 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				symbols: Array<{ name: string }>;
 			};
 			ok(codewiki.symbols.some((symbol) => symbol.name === "installedLazySymbol"));
-			// Operator examples and the plain-JS bootstrap must work outside the source checkout.
+			// Operator examples and the plain-JS bootstrap coexist with the installed
+			// recipe library in the same foreign project, outside the source checkout.
+			const recipesBeforeExtension = (await libraryJson(["library", "recipes", "materio"])) as { resources: unknown[] };
+			strictEqual(recipesBeforeExtension.resources.length, 30);
 			const extensionInstall = await run(
 				bin,
 				["extensions", "install", join(packageRoot, "examples/extensions/lab-status"), "--project", "--json"],
-				foreign,
-				isolatedEnv(home),
+				libraryProject,
+				libraryEnv,
 			);
 			strictEqual(extensionInstall.code, 0, extensionInstall.stderr);
 			const extensionRun = await run(
 				bin,
 				["extensions", "run", "lab-status", "dashboard", "--json"],
-				foreign,
-				isolatedEnv(home),
+				libraryProject,
+				libraryEnv,
 			);
 			strictEqual(extensionRun.code, 0, extensionRun.stderr);
 			const extensionOutput = JSON.parse(extensionRun.stdout) as {
@@ -449,13 +452,16 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const disabledExtension = await run(
 				bin,
 				["extensions", "disable", "lab-status", "--project"],
-				foreign,
-				isolatedEnv(home),
+				libraryProject,
+				libraryEnv,
 			);
 			strictEqual(disabledExtension.code, 0, disabledExtension.stderr);
-			const disabledRun = await run(bin, ["extensions", "run", "lab-status", "dashboard"], foreign, isolatedEnv(home));
+			const disabledRun = await run(bin, ["extensions", "run", "lab-status", "dashboard"], libraryProject, libraryEnv);
 			strictEqual(disabledRun.code, 1, disabledRun.stderr);
 			strictEqual(disabledRun.stdout, "");
+			const recipesAfterExtension = (await libraryJson(["library", "recipes", "materio"])) as { resources: unknown[] };
+			// Observation timestamps vary; recipe identity, ownership and availability do not.
+			deepStrictEqual(recipesAfterExtension.resources, recipesBeforeExtension.resources);
 			const publicTypes = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).exports["./extensions"]
 				.types;
 			ok(existsSync(join(packageRoot, publicTypes)), "installed extension author types exist");

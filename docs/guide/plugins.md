@@ -39,7 +39,7 @@ clio-coder library remove materio
 
 Every successful installation records a verified pin. `pin` reports and verifies it; it does not approve edited files. Drifted content is blocked from loading. Update refuses to replace local edits unless `--force` is supplied; the install result reports any recovery copies of edited content. Updating a catalog package uses the current catalog version and pin. Updating a local package uses its recorded source directory, even when the catalog contains the same plugin name. Updates and replacements preserve an existing disabled state; enable the plugin explicitly when ready. Removal preserves edited content and reports its recovery path.
 
-In an active session, open `/library plugin` or `/library plugin`. The Plugins tab shows catalog entries and local installations, their scope, state, resources, and diagnostics. Press `i` to review an installation, `u` to review an update, `e` to enable or disable, `r` to review removal, `p` to inspect the verified pin, or `d` to check drift. Run `/library reload` to refresh resources in that session after changes. The headless `library reload` command refreshes only its own process.
+In an active session, open `/library` or press Alt+L. Use the Plugins category, `b` for Browse or Installed, and `s` for User or Project scope. Enter opens a package's members; the selected row offers `i` to review installation, `u` to review an update, `e` to enable or disable, and `r` to review removal when those actions apply. Use the CLI `library pin` and `library drift` commands for pin and drift checks. Run `/library reload` to refresh resources in that session after changes. The headless `library reload` command refreshes only its own process.
 
 ## Private catalogs
 

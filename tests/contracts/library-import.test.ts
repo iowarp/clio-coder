@@ -1,9 +1,26 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
+import { OperatorExtensionRuntime } from "../../src/domains/extensions/operator-runtime.js";
+import {
+	disableExtension,
+	enableExtension,
+	installExtension,
+	listInstalledExtensions,
+	removeExtension,
+} from "../../src/domains/extensions/state.js";
 import { applyInteropAdoption, planInteropAdoption } from "../../src/domains/interop/adopt.js";
 import { detectForeignPlugin, projectForeignPlugin } from "../../src/domains/interop/foreign.js";
 import {
@@ -16,14 +33,27 @@ import {
 import type { InteropInventory } from "../../src/domains/interop/types.js";
 import {
 	clearPluginSnapshots,
+	disablePlugin,
+	enablePlugin,
 	installLibraryPackage,
+	installPlugin,
 	listInstalledPlugins,
 	PLUGIN_SCHEMA,
 	readPluginInstallRecord,
 	removePlugin,
 } from "../../src/domains/plugins/index.js";
-import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
+import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
+import { expandPromptTemplateInput, loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
+import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
+import {
+	dispatchSlashCommand,
+	parseSlashCommand,
+	type SlashCommandContext,
+} from "../../src/interactive/slash-commands.js";
+import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
+import { createRegistry } from "../../src/tools/registry.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
@@ -83,6 +113,175 @@ describe("library import of foreign plugin packages", () => {
 	afterEach(() => {
 		clearPluginSnapshots();
 		env.restore();
+	});
+
+	it("keeps Materio, foreign recipe imports and real harness runtimes independently owned across reloads", async () => {
+		for (const name of ["lab-status", "measurements"]) {
+			const installed = installExtension(path.resolve("examples/extensions", name), { cwd, scope: "project" });
+			ok(installed.extension?.loadable, JSON.stringify(installed.diagnostics));
+		}
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd }) });
+		registerHarnessExtensionTools(registry, cwd);
+		const frozenTools = registry
+			.listAll()
+			.flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : []));
+		deepStrictEqual(
+			frozenTools.map((tool) => tool.id),
+			["measurements"],
+		);
+		const runtime = new OperatorExtensionRuntime({
+			context: () => ({ workspace: cwd, sessionId: "joint-library-session", mode: "interactive" }),
+			isIdle: () => true,
+			frozenTools,
+		});
+		try {
+			const notices: string[] = [];
+			const references: string[] = [];
+			const resourceGenerations: number[] = [];
+			const prompts = () => loadPromptTemplates({ cwd, home: env.dir });
+			const ctx = {
+				operatorExtensions: runtime,
+				reloadPlugins: () => reloadPluginResourcesAndNotify(cwd, (event) => resourceGenerations.push(event.generation)),
+				listPrompts: prompts,
+				expandPromptTemplate: (text: string) => expandPromptTemplateInput(text, prompts()),
+				notice: (_level: string, text: string) => notices.push(text),
+				showReference: (card: { text: string }) => references.push(card.text),
+				render: () => {},
+				submitChat: () => {
+					throw new Error("an untrusted prompt must not start a model turn");
+				},
+				runLocalOperation: () => {
+					throw new Error("a prompt-owned command must not queue harness execution");
+				},
+			} as unknown as SlashCommandContext;
+			const reloadRecipes = () => {
+				const before = resourceGenerations.length;
+				strictEqual(dispatchSlashCommand(parseSlashCommand("/library reload"), ctx), "accepted");
+				strictEqual(resourceGenerations.length, before + 1, notices.join("\n"));
+			};
+			const materioResources = () =>
+				readLibraryInventory({ cwd, home: env.dir }).resources.filter((item) => item.owner?.ref === "plugin:materio");
+			const materioSource = path.resolve("library/plugins/materio");
+			const installMaterio = () => {
+				const result = installPlugin(materioSource, {
+					cwd,
+					scope: "project",
+					origin: { kind: "catalog", source: materioSource },
+				});
+				ok(result.plugin?.loadable, JSON.stringify(result.diagnostics));
+				return result.plugin.rootPath;
+			};
+			const materioRoot = installMaterio();
+			reloadRecipes();
+			strictEqual(runtime.activeGeneration, 0, "recipe installation/reload cannot activate an eligible runtime");
+			deepStrictEqual(runtime.entries(), []);
+			const recipes = materioResources();
+			for (const [kind, count] of [
+				["skill", 6],
+				["agent", 6],
+				["prompt", 17],
+				["fleet", 1],
+			] as const) {
+				strictEqual(recipes.filter((item) => item.kind === kind).length, count);
+			}
+			ok(recipes.every((item) => item.availability === "available" && item.owner?.scope === "project"));
+			const materioBytes = snapshot(materioRoot);
+			strictEqual((await runtime.reload("startup")).status, "committed");
+			const invocation = "ext:lab-status:dashboard";
+			const output = await runtime.invoke(invocation, "");
+			match(output.text, /SYNTHETIC FIXTURE/);
+			ok(output.panel && output.status);
+			const active = runtime.entries().find((entry) => entry.id === "lab-status");
+			strictEqual(active?.state, "ready");
+			strictEqual(active?.toolEvidence, "frozen-registry");
+			const generation = runtime.activeGeneration;
+
+			// Reuse the vendor fixture with executable omissions. A foreign refusal
+			// retains prompt ownership without granting model or harness execution.
+			const source = claudeBundle();
+			const sourceBytes = snapshot(source);
+			const plan = planLibraryImport(source, { cwd, scope: "project" });
+			strictEqual(plan.action, "install", plan.reasons.join("; "));
+			ok(plan.unsupported.some((line) => line.startsWith("hooks/hooks.json")));
+			ok(plan.unsupported.some((line) => line.startsWith(".mcp.json")));
+			ok(plan.omitted.includes("scripts/run.sh"));
+			const imported = applyLibraryImport(plan, true, { trustProjectImports: false });
+			strictEqual(imported.published, true, JSON.stringify(imported.diagnostics));
+			strictEqual(imported.admission?.trust, "foreign");
+			reloadRecipes();
+			const importedRoot = path.join(cwd, ".clio-coder/plugins/claude-pack");
+			ok(!existsSync(path.join(importedRoot, "hooks")) && !existsSync(path.join(importedRoot, "scripts")));
+			deepStrictEqual(snapshot(source), sourceBytes);
+			deepStrictEqual(
+				listInstalledExtensions(cwd, { all: true })
+					.map((entry) => entry.id)
+					.sort(),
+				["lab-status", "measurements"],
+			);
+			strictEqual(runtime.activeGeneration, generation);
+			deepStrictEqual(
+				runtime.entries().find((entry) => entry.id === "lab-status"),
+				active,
+			);
+			const loadedPrompt = prompts().items.find((item) => item.name === "deploy");
+			ok(loadedPrompt);
+			ok(loadedPrompt.filePath.startsWith(importedRoot));
+			strictEqual(loadedPrompt.trusted, false);
+			strictEqual(dispatchSlashCommand(parseSlashCommand("/deploy"), ctx), "rejected");
+			match(notices.at(-1) ?? "", /untrusted/);
+
+			// A real host-loaded display-only prompt also owns a canonical ext: token.
+			const collision = path.join(env.dir, "config/prompts/ext/lab-status/dashboard.md");
+			mkdirSync(path.dirname(collision), { recursive: true });
+			writeFileSync(collision, "---\ndescription: Local reference\ndisplay-only: true\n---\nRecipe-owned reference.\n");
+			strictEqual(dispatchSlashCommand(parseSlashCommand(`/${invocation}`), ctx), "accepted");
+			deepStrictEqual(references, ["Recipe-owned reference."]);
+			await rejects(
+				runtime.invoke(
+					invocation,
+					"",
+					prompts().items.map((item) => item.name),
+				),
+				/prompt/,
+			);
+			rmSync(collision);
+			ok(removePlugin("claude-pack", { cwd, scope: "project" }).removed);
+			reloadRecipes();
+
+			for (const operation of [disablePlugin, enablePlugin, removePlugin]) {
+				deepStrictEqual(operation("materio", { cwd, scope: "project" }).diagnostics, []);
+				reloadRecipes();
+				strictEqual(materioResources().length, operation === enablePlugin ? 30 : 0);
+				strictEqual(existsSync(materioRoot), operation !== removePlugin);
+				strictEqual(runtime.activeGeneration, generation);
+				deepStrictEqual(
+					runtime.entries().find((entry) => entry.id === "lab-status"),
+					active,
+				);
+				match((await runtime.invoke(invocation, "")).text, /SYNTHETIC FIXTURE/);
+			}
+			installMaterio();
+			reloadRecipes();
+			for (const operation of [disableExtension, enableExtension, removeExtension]) {
+				deepStrictEqual(operation("lab-status", { cwd, scope: "project" }).diagnostics, []);
+				strictEqual((await runtime.reload()).status, "committed");
+				strictEqual(
+					runtime.commands().some((row) => row.invocation === invocation && row.available),
+					operation === enableExtension,
+				);
+				deepStrictEqual(materioResources(), recipes);
+				deepStrictEqual(snapshot(materioRoot), materioBytes);
+			}
+			deepStrictEqual(
+				registry.listAll().flatMap((tool) => (tool.sourceInfo?.extension ? [tool.sourceInfo.extension] : [])),
+				frozenTools,
+			);
+			const measurement = registry.listAll().find((tool) => tool.sourceInfo?.extension?.id === "measurements");
+			ok(measurement);
+			strictEqual((await measurement.run({ values: [1, 2, 3], units: "seconds" })).kind, "ok");
+		} finally {
+			await runtime.dispose();
+		}
 	});
 
 	it("normalizes a Claude-only package, installs it with import provenance, and leaves the source untouched", () => {
