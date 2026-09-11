@@ -1,5 +1,6 @@
 import type { Problem } from "../../contracts/common.js";
 import type { Tool } from "../../contracts/toolchain.js";
+import type { TraceRequest } from "../../contracts/traces.js";
 
 export type WorkerKind = "reads" | "ops";
 export type WorkerSettings = {
@@ -12,6 +13,7 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
 	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };
 	"tools.remove": { params: { id: string }; result: { id: string; message: string } };

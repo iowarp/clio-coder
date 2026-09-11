@@ -1,6 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
+import { routes } from "../../contracts/routes.js";
 import { AppProblem } from "../services/problem.js";
+
+const streams = Object.values(routes)
+	.filter((route) => route.stream)
+	.map((route) => new RegExp(`^${route.path.replace(/:[A-Za-z0-9]+/g, "[^/]+")}$`));
 
 export function auth(token: string, origin: () => string): MiddlewareHandler {
 	return async (context, next) => {
@@ -16,7 +21,7 @@ export function auth(token: string, origin: () => string): MiddlewareHandler {
 			const authorization = context.req.header("authorization");
 			const supplied =
 				(authorization?.startsWith("Bearer ") ? authorization.slice(7) : undefined) ??
-				(context.req.path === "/api/events" ? context.req.query("token") : undefined) ??
+				(streams.some((pattern) => pattern.test(context.req.path)) ? context.req.query("token") : undefined) ??
 				"";
 			const a = Buffer.from(token),
 				b = Buffer.from(supplied);

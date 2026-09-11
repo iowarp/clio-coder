@@ -10,6 +10,7 @@ import { createApp } from "./app.js";
 import { EventHub } from "./services/event-hub.js";
 import { OperationRegistry } from "./services/operations.js";
 import { ToolchainService } from "./services/toolchain.js";
+import { TraceService } from "./services/traces.js";
 import { WorkerHost } from "./worker/host.js";
 
 export async function main() {
@@ -45,6 +46,7 @@ export async function main() {
 		hub,
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
+		traces: new TraceService(reads),
 		clientDir,
 	});
 	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {

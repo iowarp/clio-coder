@@ -9,7 +9,9 @@ export function staticClient(app: Hono, directory: string) {
 			throw new AppProblem("unsupported", "Only GET and HEAD are supported.", 405);
 		const root = await realpath(directory);
 		const path =
-			context.req.path === "/" || context.req.path === "/toolchain"
+			context.req.path === "/" ||
+			["/toolchain", "/traces"].includes(context.req.path) ||
+			/^\/traces\/[^/]+$/.test(context.req.path)
 				? "index.html"
 				: decodeURIComponent(context.req.path).slice(1);
 		let file: string;

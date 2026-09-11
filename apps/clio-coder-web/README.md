@@ -1,7 +1,7 @@
 # Clio Coder web
 
-The S1 checkout application serves a local toolchain inventory, pinned installation
-with streamed progress, and vendored-tool removal. The CLI, TUI, and ACP continue
+The checkout application serves a local toolchain inventory, pinned installation
+with streamed progress, vendored-tool removal, and a trace explorer. The CLI, TUI, and ACP continue
 to run independently. The packaged `clio-coder web` command belongs to R1.
 
 From the repository root:
@@ -13,7 +13,11 @@ pnpm --filter @iowarp/clio-coder-web build
 pnpm --filter @iowarp/clio-coder-web start
 ```
 
-Open the full loopback URL printed by the server, then choose **Toolchain**.
+Open the full loopback URL printed by the server, then choose **Toolchain** or
+**Traces**. Trace history includes server-side filters and pagination, run details,
+phase timelines, event payloads, gates, processes, receipts, and live tails. Trace
+reads use your configured Clio state directory; a missing database shows an empty
+state. Receipt summaries omit large payload fields until you request the full receipt.
 `--port 4317` selects a port; the default is an ephemeral port. Ctrl+C or SIGTERM
 closes the listener and both domain workers. Starting without a client build
 prints the build command and exits with failure.
@@ -81,4 +85,5 @@ Sessions will add their own projection buffer/replay rules in S3.
 See [SPRINT.md](SPRINT.md) for canonical status,
 [the S1 implementation handoff](notes/2026-09-11-S1.md) for acceptance evidence,
 and [the S1 closeout](notes/2026-09-11-S1-closeout.md) for the approved CI checker
-update and final verification. S1 is complete; S2 is the next slice.
+update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records trace
+coverage and browser checks. S1 and S2 are complete; S3 adds sessions next.

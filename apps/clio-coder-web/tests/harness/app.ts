@@ -6,6 +6,7 @@ import { parse } from "../../server/http/validate.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
+import { TraceService } from "../../server/services/traces.js";
 import { WorkerHost } from "../../server/worker/host.js";
 import type { WorkerSettings } from "../../server/worker/protocol.js";
 import { scratchHome } from "./scratch-home.js";
@@ -22,6 +23,7 @@ export async function harness(settings: WorkerSettings = {}) {
 		hub,
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
+		traces: new TraceService(reads),
 		diagnostics: true,
 	});
 	const request = (path: string, init: RequestInit = {}) =>

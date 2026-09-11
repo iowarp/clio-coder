@@ -16,9 +16,14 @@ const httpModules = new Map([
 	["src/core/process-identity.ts", new Set(["processAlive", "processBirthToken"])],
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
-const adapters = new Set(["src/domains/toolchain/index.ts"]);
+const adapters = new Set([
+	"src/domains/toolchain/index.ts",
+	"src/core/xdg.ts",
+	"src/domains/observability/trace-store.ts",
+	"src/domains/observability/evidence-index.ts",
+]);
 // Test-only root seams are intentionally enumerated independently of production.
-const testModules = new Set(["src/domains/toolchain/index.ts"]);
+const testModules = new Set(["src/domains/toolchain/index.ts", "src/domains/observability/trace-store.ts"]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
 		entry.name === "node_modules" || entry.name === "dist"

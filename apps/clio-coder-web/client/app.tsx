@@ -37,8 +37,11 @@ export function App({ client }: { client: Client }) {
 						<NavLink to="/" end>
 							Overview <span>01</span>
 						</NavLink>
+						<NavLink to="/traces">
+							Traces <span>02</span>
+						</NavLink>
 						<NavLink to="/toolchain">
-							Toolchain <span>02</span>
+							Toolchain <span>03</span>
 						</NavLink>
 					</nav>
 					<p className="local-note">

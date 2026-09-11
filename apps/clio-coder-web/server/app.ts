@@ -6,6 +6,7 @@ import { routes } from "../contracts/routes.js";
 import { getVersionInfo } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
+import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
@@ -13,6 +14,7 @@ import type { EventHub } from "./services/event-hub.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
 import type { ToolchainService } from "./services/toolchain.js";
+import type { TraceService } from "./services/traces.js";
 
 export function createApp(options: {
 	token: string;
@@ -20,6 +22,7 @@ export function createApp(options: {
 	hub: EventHub;
 	operations: OperationRegistry;
 	toolchain: ToolchainService;
+	traces: TraceService;
 	clientDir?: string;
 	diagnostics?: boolean;
 }) {
@@ -59,7 +62,14 @@ export function createApp(options: {
 		return record;
 	});
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
-	app.all("/api/*", () => {
+	traceRoutes(app, hub, options.traces);
+	app.all("/api/*", (context) => {
+		if (
+			Object.values(routes).some((route) =>
+				new RegExp(`^${route.path.replace(/:[A-Za-z0-9]+/g, "[^/]+")}$`).test(context.req.path),
+			)
+		)
+			throw new AppProblem("unsupported", "Method is not supported for this API route.", 405);
 		throw new AppProblem("not_found", "API route was not found.");
 	});
 	app.notFound((context) => problemResponse(new AppProblem("not_found", "Route was not found."), context));

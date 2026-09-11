@@ -4,6 +4,21 @@ import { EventCursor } from "./events.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { Install, Tools } from "./toolchain.js";
+import {
+	RowCursor,
+	TraceEnvelope,
+	TraceEventsPage,
+	TraceEventsQuery,
+	TraceGate,
+	TraceParams,
+	TracePhase,
+	TraceProcess,
+	TraceReceipt,
+	TraceRun,
+	TraceRunsPage,
+	TraceRunsQuery,
+	TraceStatus,
+} from "./traces.js";
 
 export interface Route<
 	P extends TSchema = TSchema,
@@ -37,6 +52,82 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	traceStatus: defineRoute({
+		...get,
+		path: "/api/traces/status",
+		response: TraceStatus,
+		summary: "Trace availability and retention",
+	}),
+	traceRuns: defineRoute({
+		...get,
+		path: "/api/traces/runs",
+		query: TraceRunsQuery,
+		response: TraceRunsPage,
+		summary: "Paginated trace history",
+	}),
+	traceRun: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId",
+		params: TraceParams,
+		response: TraceRun,
+		summary: "Trace run",
+	}),
+	tracePhases: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/phases",
+		params: TraceParams,
+		response: Type.Array(TracePhase),
+		summary: "Run phases",
+	}),
+	traceGates: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/gates",
+		params: TraceParams,
+		response: Type.Array(TraceGate),
+		summary: "Run gates",
+	}),
+	traceEnvelopes: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/envelopes",
+		params: TraceParams,
+		response: Type.Array(TraceEnvelope),
+		summary: "Run envelopes",
+	}),
+	traceProcesses: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/processes",
+		params: TraceParams,
+		response: Type.Array(TraceProcess),
+		summary: "Run processes",
+	}),
+	traceEvents: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/events",
+		params: TraceParams,
+		query: TraceEventsQuery,
+		response: TraceEventsPage,
+		summary: "Run events by rowid",
+	}),
+	traceReceipt: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/receipt",
+		params: TraceParams,
+		query: Type.Object({ include: Type.Optional(Type.Literal("full")) }, { additionalProperties: false }),
+		response: TraceReceipt,
+		summary: "Receipt and evidence summary; full payload on request",
+	}),
+	traceLive: defineRoute({
+		...get,
+		path: "/api/traces/runs/:runId/live",
+		params: TraceParams,
+		query: Type.Object(
+			{ after: Type.Optional(RowCursor), token: Type.Optional(Type.String({ maxLength: 256 })) },
+			{ additionalProperties: false },
+		),
+		response: Type.String(),
+		stream: true,
+		summary: "Live rowid event tail",
+	}),
 	meta: defineRoute({ ...get, path: "/api/meta", response: Meta, summary: "Application and Clio versions" }),
 	openapi: defineRoute({
 		...get,

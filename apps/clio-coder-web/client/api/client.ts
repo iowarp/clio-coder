@@ -1,5 +1,6 @@
 import type { Problem } from "../../contracts/common.js";
 import type { Input, Output, Route } from "../../contracts/routes.js";
+import { clock } from "./clock.js";
 
 export class ApiProblem extends Error {
 	constructor(readonly problem: Problem) {
@@ -39,6 +40,7 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 					instance: "browser",
 				});
 			}
+			clock.adopt(response.headers.get("date"));
 			if (!response.ok) throw new ApiProblem((await response.json()) as Problem);
 			return response.json() as Promise<Output<R>>;
 		},

@@ -6,6 +6,8 @@ import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { Home } from "./pages/home.js";
 import { Toolchain } from "./pages/toolchain.js";
+import { TraceRunPage } from "./pages/traces/run.js";
+import { TraceRuns } from "./pages/traces/runs.js";
 import "./styles.css";
 
 const client = createClient(launchToken());
@@ -15,6 +17,8 @@ const router = createBrowserRouter([
 		element: <App client={client} />,
 		children: [
 			{ path: "/", element: <Home /> },
+			{ path: "/traces", element: <TraceRuns client={client} /> },
+			{ path: "/traces/:runId", element: <TraceRunPage client={client} /> },
 			{ path: "/toolchain", element: <Toolchain client={client} /> },
 		],
 	},

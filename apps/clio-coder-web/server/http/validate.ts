@@ -31,6 +31,11 @@ export function register<R extends Route>(app: Hono, hub: EventHub, route: R, ha
 		for (const [key, values] of Object.entries(context.req.queries())) {
 			if (values.length !== 1) throw new AppProblem("validation", `Duplicate query parameter: ${key}`);
 			query[key] = values[0];
+			// TypeBox's integer conversion truncates decimal strings. HTTP cursors and
+			// limits must reject lossy conversion before schema validation.
+			const property = (route.query as { properties?: Record<string, { type?: string }> }).properties?.[key];
+			if (property?.type === "integer" && !/^-?\d+$/.test(values[0] ?? ""))
+				throw new AppProblem("validation", `Expected an integer query parameter: ${key}`);
 		}
 		let body: unknown = {};
 		if (route.method === "POST") {
@@ -48,6 +53,7 @@ export function register<R extends Route>(app: Hono, hub: EventHub, route: R, ha
 			query: parse(route.query, Value.Convert(route.query, query)),
 			body: parse(route.body, body),
 		} as Input<R>;
+		context.header("Date", new Date().toUTCString());
 		context.header("X-Clio-Epoch", hub.epoch);
 		context.header("X-Clio-Seq", String(hub.seq));
 		const result = await handler(input, context);
