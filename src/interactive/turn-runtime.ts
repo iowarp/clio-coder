@@ -25,6 +25,7 @@ import {
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
+import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
 import { sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
 import {
 	patchProviderThinkingPayload,
@@ -383,6 +384,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
+		// Preflight and the wire budget share the session's effective settings,
+		// including overrides that never reach the saved providers snapshot.
+		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 		context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
@@ -472,6 +476,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
 			onStreamInvocation: () => {
+				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				apiCallStartedAt = performance.now();
 				apiCallFirstDeltaAt = null;
 			},
