@@ -203,6 +203,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		try {
 			result = await round({
 				model: runtime.agent.state.model,
+				agent: runtime.agent,
 				state: {
 					systemPrompt: runtime.agent.state.systemPrompt,
 					messages: runtime.agent.state.messages,
