@@ -326,6 +326,8 @@ interface RunTokenMeter {
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
 	reasoningTokens: number;
+	/** Native calls are priced individually by the SDK, including cache TTLs and context tiers. */
+	costUsd?: number;
 }
 
 interface ActiveRun {
@@ -458,6 +460,7 @@ function sealRouteDecision(draft: RunReceiptDraft, decision: RouteDecisionV1): R
 export const UNKNOWN_PRICING_ADMISSION_ESTIMATE_USD = 1;
 
 function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["rates"]): number {
+	if (meter.costUsd !== undefined) return meter.costUsd;
 	if (pricing === null) return 0;
 	return (
 		(meter.inputTokens * pricing.input +
@@ -466,6 +469,37 @@ function calculateUsageCostUsd(meter: RunTokenMeter, pricing: EffectivePricing["
 			meter.cacheWriteTokens * pricing.cacheWrite) /
 		1_000_000
 	);
+}
+
+function accumulateNativeUsage(
+	meter: RunTokenMeter,
+	usage: Record<string, unknown>,
+	pricing: EffectivePricing["rates"],
+): void {
+	const count = (value: unknown): number =>
+		typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0;
+	const call: RunTokenMeter = {
+		inputTokens: count(usage.input),
+		outputTokens: count(usage.output),
+		cacheReadTokens: count(usage.cacheRead),
+		cacheWriteTokens: count(usage.cacheWrite),
+		reasoningTokens: extractReasoningTokenCount(usage),
+	};
+	const reported = isRecord(usage.cost) ? usage.cost.total : undefined;
+	// An SDK total is already priced with per-call tiers, service tier
+	// and cache-write lifetime. Never reprice it from an aggregate token count.
+	// Retain the target-rate fallback only for workers that omit calculated
+	// cost. Zero remains zero; its provenance still comes from the target.
+	const callCost =
+		typeof reported === "number" && Number.isFinite(reported) && reported >= 0
+			? reported
+			: calculateUsageCostUsd(call, pricing);
+	meter.costUsd = (meter.costUsd ?? 0) + callCost;
+	meter.inputTokens += call.inputTokens;
+	meter.outputTokens += call.outputTokens;
+	meter.cacheReadTokens += call.cacheReadTokens;
+	meter.cacheWriteTokens += call.cacheWriteTokens;
+	meter.reasoningTokens += call.reasoningTokens;
 }
 
 /**
@@ -5118,11 +5152,7 @@ export function createDispatchBundle(
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 				const u = event.message.usage;
-				tokenMeter.inputTokens += typeof u.input === "number" ? u.input : 0;
-				tokenMeter.outputTokens += typeof u.output === "number" ? u.output : 0;
-				tokenMeter.cacheReadTokens += typeof u.cacheRead === "number" ? u.cacheRead : 0;
-				tokenMeter.cacheWriteTokens += typeof u.cacheWrite === "number" ? u.cacheWrite : 0;
-				tokenMeter.reasoningTokens += extractReasoningTokenCount(u);
+				accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
 				const requestedModelId = readStringOrNull(event.message.model);
 				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
 				const differingResponseModelId = readStringOrNull(event.message.responseModel);
@@ -5556,7 +5586,10 @@ export function createDispatchBundle(
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
-				costProvenance: lifecycle.target.effectivePricing.provenance,
+				costProvenance:
+					lifecycle.target.effectivePricing.provenance === "unknown" && costUsd > 0
+						? "estimated"
+						: lifecycle.target.effectivePricing.provenance,
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -6806,6 +6839,7 @@ export function createDispatchBundle(
 			const meter = run.meter;
 			const totalTokens = meter.inputTokens + meter.outputTokens + meter.cacheReadTokens + meter.cacheWriteTokens;
 			const costUsd = calculateUsageCostUsd(meter, run.pricing);
+			const costProvenance = run.costProvenance === "unknown" && costUsd > 0 ? "estimated" : run.costProvenance;
 			const startedMs = Date.parse(run.startedAt);
 			const elapsedMs = Number.isFinite(startedMs) ? Math.max(0, tickNow - startedMs) : 0;
 			const timing = deriveRunPhaseDurations(run.timing, run.startedAt, new Date(tickNow).toISOString());
@@ -6823,14 +6857,14 @@ export function createDispatchBundle(
 				timing,
 				tokens: { input: meter.inputTokens, output: meter.outputTokens, total: totalTokens },
 				costUsd,
-				costProvenance: run.costProvenance,
+				costProvenance,
 				node: run.node !== null ? { ...run.node } : null,
 			});
 			totals.inputTokens += meter.inputTokens;
 			totals.outputTokens += meter.outputTokens;
 			totals.totalTokens += totalTokens;
 			totals.costUsd += costUsd;
-			costAmounts.push({ usd: costUsd, provenance: run.costProvenance });
+			costAmounts.push({ usd: costUsd, provenance: costProvenance });
 			totals.runtimeSeconds += elapsedMs / 1000;
 		}
 		const retrying = [...retryQueue.values()].map((entry) => ({
