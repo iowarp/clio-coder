@@ -97,8 +97,7 @@ The toolchain adapter admits only registry download/document URLs before calling
 its fetcher; upstream redirects follow the root installer's download behavior,
 and the domain verifies all asset and document checksums. Process creation enters
 `server/process-policy.ts`; source imports enter the explicit Clio shims and
-worker-only adapters. These are code-level controls; Node permission-mode
-evaluation is S9.
+worker-only adapters. These are code-level controls; the S9 permission-mode experiment is recorded below.
 
 Operations and idempotency keys live for this server epoch. Completed snapshots
 are retained in completion order up to 256 records and 16 MiB, while active operations are retained.
@@ -207,3 +206,84 @@ never foreign sessions or history. Version probes run only `--version`, bounded
 by the runtime to two seconds and 4 KiB per executable; resource walks retain the
 runtime's 4,096-file, depth-12 and 2 MiB/file limits and diagnostics. The API does
 not accept/decline agents or launch their work commands.
+
+The checkout server supports `--open`, `--idle-exit <milliseconds>`, `--port <0–65535>`,
+`--token <32–256 URL-safe characters>`, and `--log-file <path>`. Without `--token`, each
+launch generates a fresh 256-bit token. The authenticated URL is printed once;
+the optional private, append-only lifecycle log excludes it and request content.
+Existing log files must belong to the current user, have one link, and be regular
+files; symlinks are refused. Parent directories must already exist.
+
+`--idle-exit` is disabled by default. When enabled, all active HTTP responses,
+including global and resource SSE streams, keep the process alive. The last
+response closing starts the idle window. Turns (including permission waits),
+operations, CLI jobs, session setup/cleanup, and pending worker calls also keep
+it alive. Once these settle, a full idle window precedes shutdown and reaping of
+owned children. A disconnected browser does not cancel work. `--open` uses the
+OS browser opener with a single loopback URL argument; failure leaves the printed
+URL usable. Automatic browser opening is implemented for Linux and macOS;
+Windows currently requires opening the printed URL.
+
+From the checkout, install a Linux application entry with:
+
+```sh
+pnpm --filter @iowarp/clio-coder-web start launcher install
+pnpm --filter @iowarp/clio-coder-web start launcher status
+pnpm --filter @iowarp/clio-coder-web start launcher uninstall
+```
+
+Each command accepts `--prefix <absolute XDG data directory>` for an isolated
+installation. The default is `$XDG_DATA_HOME` or `~/.local/share`. The entry is
+`applications/io.iowarp.ClioCoder.desktop`, paired with a private
+`io.iowarp.ClioCoder.desktop.owner.json` manifest containing version, owner,
+content checksum, and absolute launch paths. It starts the checkout's Node,
+tsx loader, and server with `--open --idle-exit 60000`, independent of the working
+directory. `status` distinguishes absent, installed, unavailable launch targets,
+and conflicting ownership. Uninstall removes only the verified pair, including
+when the checkout has moved; modified or unowned files are preserved. Install
+is idempotent for identical content and refuses replacement until the owned
+entry is uninstalled. macOS and Windows desktop installation explicitly refuse.
+This source launcher requires the client build; packaged command integration is R1.
+
+The HTTP process and reads worker deny ambient `fetch`. The ops worker captures
+one downloader before installing that guard and passes it only to the pinned
+toolchain adapter. The test lane replaces ambient fetch before startup, so even
+that capability cannot use a real network during tests. Boundary tests reject
+direct socket imports and process creation outside the declared module. These
+controls govern the app; canonical CLI/ACP children retain the runtime's target,
+provider, and tool networking. Node's permission model does not supply a network
+allowlist or a complete sandbox for these children and native modules.
+
+E8 was measured on the exact Node 22.19.0 baseline and Node 24.20.0. Node 22 lacks
+`--permission-audit`; Node 24 supports it through diagnostics channels. The audit
+covered startup, system/tool reads, and a fabricated tool install: reads of the
+checkout/dependencies, scratch Clio roots and tsx cache, `/proc/<pid>/stat`, and a
+`/tsconfig.json` existence probe; writes within scratch state/data/cache; worker
+and inspector probes from tsx. No real download was involved. Enforce mode passed
+those calls on both versions with `--permission --allow-child-process --allow-worker`,
+read grants for the checkout, scratch root and `/proc`, and a write grant for the
+scratch root. The experiment exposed Node 22 worker loader inheritance: source
+workers now explicitly register tsx before importing TypeScript. Plain baseline
+startup and both worker calls pass as well. Permission flags are not a launcher
+default: these measured roots do not cover arbitrary workspaces selected later,
+and a valid directory outside those grants was explicitly refused with HTTP 422. Bundled-mode policy verification belongs to S10/R1. Logs and the exact access
+set are recorded outside the checkout in `/var/tmp/clio-web-verification/E8-*`.
+
+The Linux desktop check used WSLg/Weston and Chrome 152 with an isolated XDG
+application registry and browser profile. GLib listed the entry as visible and
+activated its absolute command from `/`; the authenticated app connected and
+closing the page stopped the server after **60,163 ms** on the monotonic clock.
+Status and uninstall then reported absent, preserving unrelated files. This
+exercises native application activation; a physical GNOME/KDE menu click was not
+performed on this Weston environment. Repeat the desktop check after R1 changes
+the launcher target to the installed command.
+
+**PWA deferred (E5).** After the desktop check passed, an isolated prototype used
+a fixed port, a token rewritten into the served page, a temporary manifest and
+icons, and Chrome's native PWA install/launch commands. Installation and the live
+launch succeeded. After closing the server, relaunch still created a browser
+target but the API connection was refused: the installed app cannot start Node.
+The prototype was confined to `/var/tmp/clio-web-verification/E5-pwa-*` and its
+private browser/XDG profile; it was uninstalled afterward. No manifest, service
+worker, token injection, or PWA installation prompt ships in the application.
+The desktop entry is the verified way to start the app without a terminal.

@@ -1,0 +1,29 @@
+import { isAbsolute } from "node:path";
+
+export const launcherId = "io.iowarp.ClioCoder";
+export const launcherUnsupported =
+	"Desktop installation is currently supported on Linux only. Start the web server with --open, or open its printed URL, on this platform.";
+
+/** Exec has freedesktop quoting, not shell quoting; percent signs are field codes even inside quotes. */
+export function desktopArgument(value: string) {
+	if ([...value].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))
+		throw new Error("Desktop entry paths cannot contain control characters.");
+	return `"${value.replace(/\\/g, "\\\\\\\\").replace(/["`$]/g, "\\\\$&").replace(/%/g, "%%")}"`;
+}
+export function desktopEntry(paths: { node: string; loader: string; entry: string }) {
+	if (![paths.node, paths.loader, paths.entry].every(isAbsolute)) throw new Error("Launcher paths must be absolute.");
+	const argv = [paths.node, "--import", paths.loader, paths.entry, "--open", "--idle-exit", "60000"];
+	return [
+		"[Desktop Entry]",
+		"Type=Application",
+		"Name=Clio Coder",
+		"Comment=Build and explore with Clio Coder",
+		`Exec=${argv.map(desktopArgument).join(" ")}`,
+		"Icon=applications-development",
+		"Terminal=false",
+		"Categories=Development;",
+		"Keywords=Clio;AI;Coding;",
+		"StartupNotify=false",
+		"",
+	].join("\n");
+}

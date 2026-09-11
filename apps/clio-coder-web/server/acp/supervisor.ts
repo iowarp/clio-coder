@@ -68,6 +68,12 @@ export class Supervisor {
 	list() {
 		return [...this.snapshots.values()].map((value) => structuredClone(value));
 	}
+	get busy() {
+		return (
+			!!(this.starting || this.opening.size || this.controls.size || this.loading.size || this.reapers.size) ||
+			[...this.entries.values()].some((entry) => entry.turnId !== null || !!entry.closing)
+		);
+	}
 	private publish(event: SessionDelta) {
 		const current = this.snapshots.get(event.payload.resource);
 		if (!current) return;

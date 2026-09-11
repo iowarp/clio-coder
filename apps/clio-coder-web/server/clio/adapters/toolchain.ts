@@ -29,12 +29,14 @@ export function pinnedFetcher(pins: readonly PinnedTool[], fetcher: ToolFetcher)
 		return fetcher(url);
 	};
 }
-async function download(url: string): Promise<Buffer> {
-	// GitHub's pinned release URLs redirect to signed asset URLs. Hash verification
-	// remains owned by installTool; arbitrary entry URLs never reach this function.
-	const response = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(300_000) });
-	if (!response.ok) throw new Error(`Pinned download returned HTTP ${response.status}.`);
-	return Buffer.from(await response.arrayBuffer());
+export function toolDownloader(network: typeof fetch): ToolFetcher {
+	return async (url: string): Promise<Buffer> => {
+		// GitHub's pinned release URLs redirect to signed asset URLs. Hash verification
+		// remains owned by installTool; arbitrary entry URLs never reach this function.
+		const response = await network(url, { redirect: "follow", signal: AbortSignal.timeout(300_000) });
+		if (!response.ok) throw new Error(`Pinned download returned HTTP ${response.status}.`);
+		return Buffer.from(await response.arrayBuffer());
+	};
 }
 function containedTool(id: string) {
 	const root = resolve(toolchainRoot());
@@ -49,7 +51,7 @@ function containedTool(id: string) {
 }
 export function toolchainAdapter(options: { pins?: readonly PinnedTool[]; fetcher?: ToolFetcher } = {}) {
 	const pins = options.pins ?? PINNED_TOOLS;
-	const fetcher = pinnedFetcher(pins, options.fetcher ?? download);
+	const fetcher = pinnedFetcher(pins, options.fetcher ?? toolDownloader(globalThis.fetch));
 	const known = (id: string) => {
 		const entry = pins.find((pin) => pin.id === id);
 		if (!entry || !findPinnedTool(id)) throw new AppProblem("not_found", "Unknown pinned tool.");

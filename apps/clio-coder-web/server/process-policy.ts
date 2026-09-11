@@ -14,11 +14,7 @@ export function startDomainWorker(
 	settings: WorkerSettings = {},
 	env: NodeJS.ProcessEnv = process.env,
 ): Worker {
-	const entry =
-		kind === "reads"
-			? new URL("./worker/reads-main.ts", import.meta.url)
-			: new URL("./worker/ops-main.ts", import.meta.url);
-	return new Worker(entry, { workerData: settings, env });
+	return new Worker(new URL("./worker/source-entry.mjs", import.meta.url), { workerData: { ...settings, kind }, env });
 }
 
 /** Fixed ACP command: the workspace path is already canonicalized by WorkspaceService. */
@@ -108,4 +104,40 @@ export function stopClioCommand(
 		return signalRecordedChild(child.pid, birthToken, signal);
 	// A live Node ChildProcess handle still owns the unreaped child; this is not a persisted PID lookup.
 	return child.kill(signal);
+}
+
+export function browserCommand(url: string, platform: NodeJS.Platform = process.platform) {
+	const parsed = new URL(url);
+	if (
+		parsed.protocol !== "http:" ||
+		parsed.hostname !== "127.0.0.1" ||
+		!parsed.port ||
+		parsed.username ||
+		parsed.password
+	)
+		throw new Error("The browser can only open this app's loopback HTTP URL.");
+	if (platform === "linux") return { file: "xdg-open", argv: [url] };
+	if (platform === "darwin") return { file: "open", argv: [url] };
+	// cmd.exe interprets shell metacharacters even with shell:false. Refuse until a native launcher is verified.
+	throw new Error("Automatic browser opening is supported on Linux and macOS. Open the printed URL in your browser.");
+}
+
+/** The OS opener owns the browser. Reap only our short-lived opener, never the user's browser. */
+export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.env) {
+	const command = browserCommand(url);
+	const child = spawn(command.file, command.argv, { env, shell: false, stdio: "ignore" });
+	await new Promise<void>((resolve, reject) => {
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+		}, 10_000);
+		child.once("error", (error) => {
+			clearTimeout(timer);
+			reject(error);
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			if (code === 0) resolve();
+			else reject(new Error("The desktop could not open a browser. Open the printed URL manually."));
+		});
+	});
 }

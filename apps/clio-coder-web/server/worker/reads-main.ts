@@ -3,11 +3,13 @@ import { DocsAdapter } from "../clio/adapters/docs.js";
 import { sessionHistory } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
 import { TraceAdapter } from "../clio/adapters/traces.js";
+import { restrictNetwork } from "../network-policy.js";
 import { AppProblem } from "../services/problem.js";
 import type { WorkerSettings } from "./protocol.js";
 import { serveWorker } from "./serve.js";
 
 const settings = workerData as WorkerSettings;
+restrictNetwork();
 const fixture = settings.fixture ? await import("../../tests/fixtures/toolchain.js") : undefined;
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
