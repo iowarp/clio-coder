@@ -11,7 +11,7 @@ export const navigation = [
 	{ label: "Fleet", path: "/fleet", available: true },
 	{ label: "Evidence", path: "/evidence", available: true },
 	{ label: "Evals", path: "/evals", available: true },
-	{ label: "Library", path: "/library", available: false },
+	{ label: "Library", path: "/library", available: true },
 	{ label: "System", path: "/system", available: false },
 ] as const;
 export function Navigation({ close }: { close?: () => void }) {

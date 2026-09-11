@@ -5,6 +5,8 @@ import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
 export const CliCommand = Type.Union([
+	Type.Object({ kind: Type.Literal("library.agents") }, closed),
+	Type.Object({ kind: Type.Literal("library.verifiers") }, closed),
 	Type.Object({ kind: Type.Literal("usage.report") }, closed),
 	Type.Object({ kind: Type.Literal("evidence.build"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("receipt.verify"), id: Id }, closed),
@@ -22,6 +24,10 @@ export function commandPlan(input: unknown, cwd?: string): { argv: string[]; out
 	if (!Value.Check(CliCommand, input))
 		throw new AppProblem("validation", "CLI command is outside the supported command table.");
 	switch (input.kind) {
+		case "library.agents":
+			return { argv: ["agents", "--json"], output: "json" };
+		case "library.verifiers":
+			return { argv: ["verifiers", "inspect", "--json"], output: "json" };
 		case "usage.report":
 			if (!cwd) throw new AppProblem("validation", "A canonical workspace is required for usage.");
 			return { argv: ["usage", "report", "--repo", cwd, "--days", "30", "--json"], output: "jsonl" };

@@ -6,6 +6,1029 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/workspaces/{id}/library": {
+			"get": {
+				"operationId": "library",
+				"summary": "Canonical library packages, installed copies and recipe resources",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"version",
+										"generatedAt",
+										"cwd",
+										"audience",
+										"packages",
+										"copies",
+										"resources",
+										"diagnostics",
+										"truncated"
+									],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"generatedAt": {
+											"type": "string"
+										},
+										"cwd": {
+											"type": "string"
+										},
+										"audience": {
+											"type": "string"
+										},
+										"packages": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["ref", "kind", "name", "description", "sourceUrl", "origin", "catalogOrigin", "copies"],
+												"properties": {
+													"ref": {
+														"type": "string"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"name": {
+														"type": "string"
+													},
+													"description": {
+														"type": "string"
+													},
+													"version": {
+														"type": "string"
+													},
+													"sha256": {
+														"type": "string"
+													},
+													"sourceUrl": {
+														"type": "string"
+													},
+													"requires": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"origin": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"format": {
+														"type": "string"
+													},
+													"provides": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"patternProperties": {
+																"^.*$": {}
+															}
+														}
+													},
+													"catalogOrigin": {
+														"type": "string"
+													},
+													"copies": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"patternProperties": {
+																"^.*$": {}
+															}
+														}
+													},
+													"refusal": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"copies": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"patternProperties": {
+													"^.*$": {}
+												}
+											}
+										},
+										"resources": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"key",
+													"kind",
+													"name",
+													"description",
+													"path",
+													"source",
+													"origin",
+													"availability",
+													"trusted",
+													"diagnostics"
+												],
+												"properties": {
+													"key": {
+														"type": "string"
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "agent"
+															},
+															{
+																"type": "string",
+																"const": "skill"
+															},
+															{
+																"type": "string",
+																"const": "prompt"
+															},
+															{
+																"type": "string",
+																"const": "fleet"
+															}
+														]
+													},
+													"name": {
+														"type": "string"
+													},
+													"description": {
+														"type": "string"
+													},
+													"invocation": {
+														"type": "string"
+													},
+													"path": {
+														"type": "string"
+													},
+													"source": {
+														"type": "object",
+														"required": ["class", "id", "scope"],
+														"properties": {
+															"class": {
+																"type": "string"
+															},
+															"id": {
+																"type": "string"
+															},
+															"scope": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"owner": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"origin": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"format": {
+														"type": "string"
+													},
+													"availability": {
+														"type": "string"
+													},
+													"reason": {
+														"type": "string"
+													},
+													"trusted": {
+														"type": "boolean"
+													},
+													"modelInvocable": {
+														"type": "boolean"
+													},
+													"audience": {
+														"type": "string"
+													},
+													"diagnostics": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"diagnostics": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										},
+										"truncated": {
+											"type": "object",
+											"required": ["packages", "copies", "resources"],
+											"properties": {
+												"packages": {
+													"type": "boolean"
+												},
+												"copies": {
+													"type": "boolean"
+												},
+												"resources": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/library/extensions": {
+			"get": {
+				"operationId": "libraryExtensions",
+				"summary": "Installed extensions and admission state",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["extensions"],
+									"properties": {
+										"extensions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"name",
+													"version",
+													"description",
+													"scope",
+													"enabled",
+													"valid",
+													"compatible",
+													"effective",
+													"loadable",
+													"capabilities",
+													"runtime",
+													"provenance",
+													"diagnostics"
+												],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"name": {
+														"type": "string"
+													},
+													"version": {
+														"type": "string"
+													},
+													"description": {
+														"type": "string"
+													},
+													"scope": {
+														"type": "string"
+													},
+													"enabled": {
+														"type": "boolean"
+													},
+													"valid": {
+														"type": "boolean"
+													},
+													"compatible": {
+														"type": "boolean"
+													},
+													"effective": {
+														"type": "boolean"
+													},
+													"loadable": {
+														"type": "boolean"
+													},
+													"capabilities": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runtime": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"provenance": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"diagnostics": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["type", "message"],
+															"properties": {
+																"type": {
+																	"type": "string"
+																},
+																"message": {
+																	"type": "string"
+																},
+																"path": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/library/agents": {
+			"get": {
+				"operationId": "libraryAgents",
+				"summary": "Resolved user-facing agent specifications",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["agents"],
+									"properties": {
+										"agents": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"name",
+													"description",
+													"source",
+													"audience",
+													"category",
+													"skills",
+													"tools",
+													"configuration"
+												],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"name": {
+														"type": "string"
+													},
+													"description": {
+														"type": "string"
+													},
+													"source": {
+														"type": "string"
+													},
+													"audience": {
+														"type": "string"
+													},
+													"category": {
+														"type": "string"
+													},
+													"skills": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"tools": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"configuration": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/library/verifiers": {
+			"get": {
+				"operationId": "libraryVerifiers",
+				"summary": "Verifier discovery without executing checks",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"version",
+										"generatedAt",
+										"catalogPresent",
+										"catalogValid",
+										"rejection",
+										"rejectedAt",
+										"discovery",
+										"blockedBy",
+										"checks",
+										"checksTruncated",
+										"diagnosticCount"
+									],
+									"properties": {
+										"version": {
+											"type": "number",
+											"const": 1
+										},
+										"generatedAt": {
+											"type": "string"
+										},
+										"catalogPresent": {
+											"type": "boolean"
+										},
+										"catalogValid": {
+											"anyOf": [
+												{
+													"type": "boolean"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"rejection": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"rejectedAt": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"discovery": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "complete"
+												},
+												{
+													"type": "string",
+													"const": "blocked"
+												}
+											]
+										},
+										"blockedBy": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"checks": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"description",
+													"origin",
+													"signal",
+													"authority",
+													"runner",
+													"argumentCount",
+													"runsAtRepositoryRoot",
+													"argvFixed",
+													"timeoutMs",
+													"tags"
+												],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"description": {
+														"type": "string"
+													},
+													"origin": {
+														"type": "string"
+													},
+													"signal": {
+														"type": "string"
+													},
+													"authority": {
+														"type": "string"
+													},
+													"runner": {
+														"type": "string"
+													},
+													"argumentCount": {
+														"type": "integer"
+													},
+													"runsAtRepositoryRoot": {
+														"type": "boolean"
+													},
+													"argvFixed": {
+														"type": "boolean"
+													},
+													"timeoutMs": {
+														"type": "number"
+													},
+													"tags": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"checksTruncated": {
+											"type": "boolean"
+										},
+										"diagnosticCount": {
+											"type": "integer"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/evals": {
 			"get": {
 				"operationId": "evals",

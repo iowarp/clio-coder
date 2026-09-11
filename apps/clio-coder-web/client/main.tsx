@@ -9,6 +9,7 @@ import { Docs } from "./pages/docs.js";
 import { EvidenceDetail, EvidencePage } from "./pages/evidence.js";
 import { FleetDetail, FleetPage } from "./pages/fleet.js";
 import { Home } from "./pages/home.js";
+import { LibraryPage } from "./pages/library.js";
 import { EvalDetail, EvalsPage, UsagePage } from "./pages/reports.js";
 import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { SettingsPage } from "./pages/settings.js";
@@ -38,6 +39,7 @@ const router = createBrowserRouter([
 			{ path: "/evals", element: <EvalsPage client={client} /> },
 			{ path: "/evals/:id", element: <EvalDetail client={client} /> },
 			{ path: "/usage", element: <UsagePage client={client} /> },
+			{ path: "/library", element: <LibraryPage client={client} /> },
 			{ path: "/fleet", element: <FleetPage client={client} /> },
 			{ path: "/fleet/:id", element: <FleetDetail client={client} /> },
 			{ path: "/fleet/dispatches/:id", element: <FleetDetail client={client} dispatch /> },

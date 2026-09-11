@@ -10,6 +10,7 @@ import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
+import { seedLibrary } from "../tests/harness/library-fixture.js";
 import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
@@ -25,6 +26,7 @@ await seedSettings(h.home.path, h.home.env);
 await seedFleet(h.home.path, h.home.env);
 await seedEvidence(h.home.path, h.home.env);
 const reportsSeed = await seedReports(h.home.path, h.home.env);
+await seedLibrary(h.home.path, h.home.env);
 const fixture = traceFixture(join(h.home.path, "state"));
 fixture.finish();
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
@@ -242,6 +244,17 @@ try {
 		await check("usage-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("usage");
+		await navigate("Library");
+		await page.getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
+		await check("library-skills");
+		for (const collection of ["Agents", "Prompts", "Fleets", "Plugins", "Extensions", "Verifiers"]) {
+			await page.getByRole("button", { name: new RegExp(`^${collection} · [1-9]`) }).click();
+			await page.locator(".config-entries article").first().waitFor();
+			await check(`library-${collection.toLowerCase()}`);
+		}
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("library-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await page.getByRole("button", { name: "New session", exact: true }).click();

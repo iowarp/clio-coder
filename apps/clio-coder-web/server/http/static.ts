@@ -14,6 +14,7 @@ export function staticClient(app: Hono, directory: string) {
 			[
 				"/toolchain",
 				"/fleet",
+				"/library",
 				"/evals",
 				"/usage",
 				"/evidence",

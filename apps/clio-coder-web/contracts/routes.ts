@@ -13,6 +13,7 @@ import {
 	FleetRootDetail,
 	FleetRoots,
 } from "./fleet.js";
+import { LibraryAgents, LibraryExtensions, LibraryInventory, LibraryVerifiers } from "./library.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
@@ -71,6 +72,34 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	library: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/library",
+		params: operationParams,
+		response: LibraryInventory,
+		summary: "Canonical library packages, installed copies and recipe resources",
+	}),
+	libraryExtensions: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/library/extensions",
+		params: operationParams,
+		response: LibraryExtensions,
+		summary: "Installed extensions and admission state",
+	}),
+	libraryAgents: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/library/agents",
+		params: operationParams,
+		response: LibraryAgents,
+		summary: "Resolved user-facing agent specifications",
+	}),
+	libraryVerifiers: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/library/verifiers",
+		params: operationParams,
+		response: LibraryVerifiers,
+		summary: "Verifier discovery without executing checks",
+	}),
 	evals: defineRoute({
 		...get,
 		path: "/api/evals",

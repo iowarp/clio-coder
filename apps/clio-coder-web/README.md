@@ -184,3 +184,12 @@ and distinguishes missing stores and unknown usage from measured zero. Clio
 filters sessions and dispatches to the workspace; audit, evidence and memory
 facts retain the CLI's installation-wide scope. Refreshing either view executes
 no evaluations or suggested actions.
+
+The workspace library is at `/library`. REST reads under
+`/api/workspaces/:id/library` expose canonical packages, installed copies, recipe
+resources, and discovery diagnostics. `/extensions` uses the existing installed
+extension reader; `/agents` bridges `agents --json` to preserve resolved specs;
+`/verifiers` bridges `verifiers inspect --json` because its discovery composes
+protected tool code. Viewing these collections runs no checks, extension commands,
+installs or removals. The library retains canonical truncation flags (512 packages,
+256 copies, 1,024 resources); verifier inspection retains its 64-check window.
