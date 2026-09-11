@@ -10,15 +10,15 @@ export function desktopArgument(value: string) {
 		throw new Error("Desktop entry paths cannot contain control characters.");
 	return `"${value.replace(/\\/g, "\\\\\\\\").replace(/["`$]/g, "\\\\$&").replace(/%/g, "%%")}"`;
 }
-export type LaunchPaths = { node: string; loader: string; entry: string; background?: string };
+export type LaunchPaths = { node: string; loader?: string; entry: string; icon?: string; background?: string };
 export function desktopEntry(paths: LaunchPaths) {
-	if (![paths.node, paths.loader, paths.entry].every(isAbsolute)) throw new Error("Launcher paths must be absolute.");
+	if (!Object.values(paths).every(isAbsolute)) throw new Error("Launcher paths must be absolute.");
 	if (paths.background !== undefined && !isAbsolute(paths.background))
 		throw new Error("Background directory must be absolute.");
+	if (paths.icon) desktopArgument(paths.icon);
 	const argv = [
 		paths.node,
-		"--import",
-		paths.loader,
+		...(paths.loader ? ["--import", paths.loader] : []),
 		paths.entry,
 		...(paths.background ? ["background", "open", "--directory", paths.background] : ["--open", "--idle-exit", "60000"]),
 	];
@@ -28,7 +28,7 @@ export function desktopEntry(paths: LaunchPaths) {
 		"Name=Clio Coder",
 		"Comment=Build and explore with Clio Coder",
 		`Exec=${argv.map(desktopArgument).join(" ")}`,
-		"Icon=applications-development",
+		`Icon=${paths.icon ? paths.icon.replace(/\\/g, "\\\\") : "applications-development"}`,
 		"Terminal=false",
 		"Categories=Development;",
 		"Keywords=Clio;AI;Coding;",

@@ -1,5 +1,5 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -13,10 +13,12 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
@@ -218,6 +220,333 @@ Compute the requested coefficient and report the value in one line.
 	}
 }
 
+/** 43 URL-safe characters, the exact shape the background configuration schema pins. */
+const WEB_TEST_TOKEN = "installed-web-smoke-token-0123456789abcdefg";
+const HONO_MARKER = "var Hono = class";
+
+/** A `clio-coder web` child: started from a foreign cwd, torn down with SIGTERM and a bounded SIGKILL fallback. */
+interface WebServer {
+	origin: string;
+	child: ChildProcess;
+	stdout: () => string;
+	stderr: () => string;
+	/** Returns the exit code and signal so the caller can assert a clean stop. */
+	close: () => Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+}
+
+async function startInstalledWeb(
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	readyPattern: RegExp,
+): Promise<WebServer> {
+	const child = spawn(process.execPath, [bin, "web", ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.setEncoding("utf8");
+	child.stderr?.setEncoding("utf8");
+	child.stdout?.on("data", (text: string) => {
+		stdout += text;
+	});
+	child.stderr?.on("data", (text: string) => {
+		stderr += text;
+	});
+	let spawnError: Error | undefined;
+	const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+		child.once("exit", (code, signal) => resolve({ code, signal }));
+		child.once("error", (error) => {
+			spawnError = error;
+			resolve({ code: null, signal: null });
+		});
+	});
+	const close = async () => {
+		if (!spawnError && child.exitCode === null && child.signalCode === null) {
+			child.kill("SIGTERM");
+			const fallback = setTimeout(() => child.kill("SIGKILL"), 10_000);
+			await exited;
+			clearTimeout(fallback);
+		}
+		return exited;
+	};
+	try {
+		const deadline = Date.now() + 10_000;
+		let found: RegExpMatchArray | null = null;
+		while (Date.now() < deadline) {
+			found = stdout.match(readyPattern);
+			if (found) break;
+			if (spawnError) throw spawnError;
+			if (child.exitCode !== null || child.signalCode !== null)
+				throw new Error(`installed web server exited before it was ready:\n${stdout}\n${stderr}`);
+			await delay(50);
+		}
+		ok(found, `installed web server did not print its launch line within 10s:\n${stdout}\n${stderr}`);
+		const url = found[0].match(/http:\/\/127\.0\.0\.1:\d+/u)?.[0];
+		ok(url, `ready line carries a loopback URL: ${found[0]}`);
+		return { origin: new URL(url).origin, child, stdout: () => stdout, stderr: () => stderr, close };
+	} catch (error) {
+		await close();
+		throw error;
+	}
+}
+
+function webRequest(origin: string, token: string | undefined, path: string, body?: unknown): Promise<Response> {
+	return fetch(`${origin}${path}`, {
+		method: body === undefined ? "GET" : "POST",
+		headers: {
+			...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+			"Content-Type": "application/json",
+			"Idempotency-Key": crypto.randomUUID(),
+		},
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+		signal: AbortSignal.timeout(15_000),
+	});
+}
+
+/** Files the CLI evaluated for one invocation, from a fresh V8 coverage directory. */
+function filesLoadedBy(
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	coverageDir: string,
+): Set<string> {
+	rmSync(coverageDir, { recursive: true, force: true });
+	mkdirSync(coverageDir, { recursive: true });
+	const result = execFileSync(process.execPath, [bin, ...args], {
+		cwd,
+		env: { ...env, NODE_V8_COVERAGE: coverageDir, NODE_DISABLE_COMPILE_CACHE: "1" },
+		encoding: "utf8",
+		timeout: 20_000,
+	});
+	ok(result.length > 0, `${args.join(" ")} printed nothing`);
+	return coveredFiles(coverageDir);
+}
+
+/**
+ * R1: the packaged `clio-coder web` runs from the installed prefix alone.
+ *
+ * Everything here goes through the installed CLI and plain HTTP; nothing imports
+ * the app's source modules, so the assertions hold for what npm shipped rather
+ * than for the checkout. A foreground server and one service-configuration
+ * server are started in turn; neither opens a browser or touches systemd.
+ */
+async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: string, work: string): Promise<void> {
+	strictEqual(WEB_TEST_TOKEN.length, 43, "the background configuration schema pins a 43-character token");
+	match(WEB_TEST_TOKEN, /^[\w-]+$/u);
+	const webDist = join(packageRoot, "dist", "web");
+	const foreign = join(work, "web foreign project");
+	const home = join(work, "web-home");
+	mkdirSync(foreign, { recursive: true });
+	const env: NodeJS.ProcessEnv = { ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" };
+
+	// The checkout's tsx loader must be unreachable from inside the install: a
+	// probe file under the prefix walks up through prefix/node_modules only.
+	ok(!existsSync(join(packageRoot, "apps")), "the source app tree does not ship");
+	const probe = join(prefix, "resolve-probe.mjs");
+	writeFileSync(
+		probe,
+		'try { import.meta.resolve("tsx"); process.exit(1); } catch (error) { if (error.code !== "ERR_MODULE_NOT_FOUND") throw error; }\n',
+	);
+	const resolved = execFileSync(process.execPath, [probe], { cwd: prefix, env, encoding: "utf8", timeout: 20_000 });
+	strictEqual(resolved, "", "tsx must not resolve from the installed prefix");
+
+	// Importing the server entry is inert: no listener, no output.
+	const entry = join(webDist, "server.js");
+	const imported = execFileSync(
+		process.execPath,
+		[
+			"--input-type=module",
+			"-e",
+			`const entry = await import(${JSON.stringify(pathToFileURL(entry).href)}); if (typeof entry.main !== "function") throw new Error("missing main");`,
+		],
+		{ cwd: foreign, env, encoding: "utf8", timeout: 20_000 },
+	);
+	strictEqual(imported, "", "importing dist/web/server.js must not start a server");
+
+	const server = await startInstalledWeb(
+		bin,
+		["--no-open", "--port", "0", "--token", WEB_TEST_TOKEN],
+		foreign,
+		env,
+		/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/u,
+	);
+	try {
+		const { origin } = server;
+		match(server.stdout(), new RegExp(`/#token=${WEB_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
+		const request = (path: string, body?: unknown) => webRequest(origin, WEB_TEST_TOKEN, path, body);
+
+		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires the launch token");
+		const meta = (await (await request("/api/meta")).json()) as { clio: string; apiVersion: number; pwa: boolean };
+		strictEqual(meta.clio, JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version);
+		strictEqual(meta.apiVersion, 1);
+		strictEqual(meta.pwa, false, "a foreground server is not installable");
+
+		const runtimeResponse = await request("/api/_diagnostics/runtime");
+		strictEqual(runtimeResponse.status, 200);
+		const runtime = (await runtimeResponse.json()) as Record<
+			"server" | "reads" | "ops",
+			{ entry: string; packageRoot: string; execArgv: string[]; threadId?: number }
+		>;
+		for (const [kind, file] of [
+			["server", "server.js"],
+			["reads", "reads-worker.js"],
+			["ops", "ops-worker.js"],
+		] as const) {
+			strictEqual(runtime[kind].entry, pathToFileURL(join(webDist, file)).href, `${kind} runs the emitted entry`);
+			strictEqual(runtime[kind].packageRoot, packageRoot, `${kind} resolves the installed package root`);
+			deepStrictEqual(
+				runtime[kind].execArgv.filter((arg) => arg === "--import" || arg.includes("tsx")),
+				[],
+				`${kind} runs without a loader`,
+			);
+		}
+		const threads = [runtime.reads.threadId, runtime.ops.threadId];
+		ok(
+			threads.every((id) => typeof id === "number" && id > 0),
+			`worker thread ids: ${threads.join(",")}`,
+		);
+		ok(threads[0] !== threads[1], "reads and ops are distinct worker threads");
+
+		const tools = await request("/api/toolchain/tools");
+		strictEqual(tools.status, 200);
+		strictEqual(((await tools.json()) as unknown[]).length, 3, "the reads worker lists the three pinned tools");
+
+		const removal = await request("/api/toolchain/tools/herdr/remove", {});
+		strictEqual(removal.status, 202);
+		const { operationId } = (await removal.json()) as { operationId: string };
+		let operation: { status: string } | undefined;
+		for (let attempt = 0; attempt < 100; attempt++) {
+			operation = (await (await request(`/api/operations/${operationId}`)).json()) as { status: string };
+			if (!["queued", "running"].includes(operation.status)) break;
+			await delay(50);
+		}
+		strictEqual(operation?.status, "succeeded", `ops worker removal on empty state: ${JSON.stringify(operation)}`);
+
+		const abort = new AbortController();
+		const events = await fetch(`${origin}/api/events`, {
+			headers: { Authorization: `Bearer ${WEB_TEST_TOKEN}` },
+			signal: abort.signal,
+		});
+		strictEqual(events.status, 200);
+		match(events.headers.get("content-type") ?? "", /text\/event-stream/u);
+		ok(events.body, "event stream has a body");
+		const reader = events.body.getReader();
+		const first = await Promise.race([reader.read(), delay(10_000).then(() => "timeout" as const)]);
+		ok(first !== "timeout", "the stream sends a hello event promptly");
+		match(new TextDecoder().decode(first.value), /^event: hello$/mu);
+		abort.abort();
+		await reader.cancel().catch(() => undefined);
+
+		const opened = await request("/api/workspaces", { path: foreign });
+		const openedText = await opened.text();
+		strictEqual(opened.status, 200, openedText);
+		const workspace = JSON.parse(openedText) as { id: string; path: string };
+		match(workspace.id, /^[a-f0-9]{32}$/u);
+		strictEqual(workspace.path, realpathSync(foreign));
+		const targets = await request(`/api/workspaces/${workspace.id}/targets`);
+		strictEqual(targets.status, 200, `targets through the installed CLI: ${await targets.text()}`);
+
+		const index = await request("/");
+		strictEqual(index.status, 200);
+		match(index.headers.get("content-type") ?? "", /^text\/html/u);
+		ok(!(await index.text()).includes('rel="manifest"'), "foreground index links no manifest");
+		const logo = await request("/clio-coder-logo.webp");
+		strictEqual(logo.status, 200);
+		strictEqual(logo.headers.get("content-type"), "image/webp");
+		strictEqual((await request("/manifest.webmanifest")).status, 404, "installable assets require background mode");
+	} finally {
+		const exit = await server.close();
+		deepStrictEqual(exit, { code: 0, signal: null }, `foreground server stops cleanly on SIGTERM:\n${server.stderr()}`);
+	}
+
+	// Service-configuration mode: the same file a background install would write,
+	// consumed by the installed CLI directly. No systemd, no browser.
+	const serviceDir = join(work, "web-service");
+	const serviceHome = join(work, "web-service-home");
+	mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
+	const roots = Object.fromEntries(
+		(["config", "data", "state", "cache"] as const).map((role) => {
+			const path = join(serviceHome, role);
+			mkdirSync(path, { recursive: true });
+			return [role, path];
+		}),
+	) as Record<"config" | "data" | "state" | "cache", string>;
+	const reserve = createTcpServer();
+	await new Promise<void>((resolve) => reserve.listen(0, "127.0.0.1", resolve));
+	const port = (reserve.address() as AddressInfo).port;
+	await new Promise<void>((resolve) => reserve.close(() => resolve()));
+	const configFile = join(serviceDir, "server.json");
+	writeFileSync(
+		configFile,
+		JSON.stringify({
+			v: 1,
+			port,
+			token: WEB_TEST_TOKEN,
+			roots,
+			packageRoot,
+			path: process.env.PATH ?? "",
+			launch: { node: process.execPath, entry },
+			desktopPrefix: serviceDir,
+		}),
+		{ mode: 0o600 },
+	);
+	const service = await startInstalledWeb(
+		bin,
+		["--persistent", configFile, "--no-open"],
+		foreign,
+		{ ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" },
+		/Background app ready at http:\/\/127\.0\.0\.1:\d+/u,
+	);
+	try {
+		const { origin } = service;
+		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
+		const request = (path: string) => webRequest(origin, WEB_TEST_TOKEN, path);
+		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
+		strictEqual(meta.pwa, true, "service configuration enables the installable app");
+		const index = await request("/");
+		strictEqual(index.status, 200);
+		ok((await index.text()).includes('<link rel="manifest" href="/manifest.webmanifest">'));
+		const assets: Array<[string, RegExp]> = [
+			["/manifest.webmanifest", /^application\/manifest\+json/u],
+			["/sw.js", /^text\/javascript/u],
+			["/offline.html", /^text\/html/u],
+			["/offline.js", /^text\/javascript/u],
+			["/offline.css", /^text\/css/u],
+			["/icon-192.png", /^image\/png$/u],
+			["/icon-512.png", /^image\/png$/u],
+		];
+		for (const [path, type] of assets) {
+			const response = await request(path);
+			strictEqual(response.status, 200, `${path} is served in service mode`);
+			match(response.headers.get("content-type") ?? "", type, `${path} content type`);
+			if (!path.endsWith(".png")) ok(!(await response.text()).includes(WEB_TEST_TOKEN), `${path} carries no token`);
+		}
+		const manifest = (await (await request("/manifest.webmanifest")).json()) as {
+			start_url: string;
+			icons: Array<{ src: string }>;
+		};
+		strictEqual(manifest.start_url, "/");
+		deepStrictEqual(
+			manifest.icons.map((icon) => icon.src),
+			["/icon-192.png", "/icon-512.png"],
+		);
+	} finally {
+		const exit = await service.close();
+		deepStrictEqual(exit, { code: 0, signal: null }, `service server stops cleanly on SIGTERM:\n${service.stderr()}`);
+	}
+
+	// Ordinary CLI invocations never evaluate the web server or its bundled Hono.
+	const honoChunks = emittedFilesContaining(packageRoot, HONO_MARKER);
+	ok(honoChunks.size > 0, "the packed dist bundles Hono somewhere");
+	const coverage = join(work, "web-coverage");
+	for (const args of [["--version"], ["--help"], ["web", "--help"]]) {
+		const loaded = filesLoadedBy(bin, args, foreign, isolatedEnv(home), coverage);
+		const webLoaded = [...loaded].filter((file) => file.startsWith(`${webDist}${sep}`) || honoChunks.has(file));
+		deepStrictEqual(webLoaded, [], `${args.join(" ")} must not load the web server: ${webLoaded.join(", ")}`);
+	}
+}
+
 function coveredFiles(directory: string): Set<string> {
 	const files = new Set<string>();
 	for (const name of readdirSync(directory)) {
@@ -241,8 +570,10 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
+	// The web checks below start two installed servers in turn and run three
+	// coverage-traced CLI invocations, which is why the budget grew from 120s.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
-		timeout: 120_000,
+		timeout: 180_000,
 	}, async () => {
 		const work = mkdtempSync(join(tmpdir(), "clio-coder-installed-package-"));
 		const prefix = join(work, "prefix");
@@ -613,6 +944,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				.types;
 			ok(existsSync(join(packageRoot, publicTypes)), "installed extension author types exist");
 			await assertInstalledReasoningReplay(bin, libraryProject, join(work, "replay-home"));
+			await assertInstalledWebApp(packageRoot, bin, prefix, work);
 		} finally {
 			rmSync(work, { recursive: true, force: true });
 		}

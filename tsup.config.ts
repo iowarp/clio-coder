@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { defineConfig } from "tsup";
@@ -55,12 +55,16 @@ function vendorGrammars(): void {
 
 const entries = {
 	"cli/index": "src/cli/index.ts",
+	"web/server": "apps/clio-coder-web/server/main.ts",
+	"web/reads-worker": "apps/clio-coder-web/server/worker/reads-main.ts",
+	"web/ops-worker": "apps/clio-coder-web/server/worker/ops-main.ts",
 	"worker/entry": "src/worker/entry.ts",
 	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
 };
 
 export default defineConfig({
 	entry: entries,
+	define: { __CLIO_WEB_BUNDLED__: "true" },
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
@@ -88,6 +92,8 @@ export default defineConfig({
 	// The pure-JS tail is bundled and tree-shaken into dist/ so an install does
 	// not pull these packages; they live in devDependencies.
 	noExternal: [
+		"hono",
+		"@hono/node-server",
 		"chalk",
 		"diff",
 		"uuid",
@@ -104,9 +110,24 @@ export default defineConfig({
 	banner: {
 		js: 'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);',
 	},
-	onSuccess() {
+	async onSuccess() {
+		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-web/package.json"));
+		const { build: buildClient } = await import(appRequire.resolve("vite"));
+		await buildClient({ configFile: "apps/clio-coder-web/vite.config.ts", configLoader: "runner" });
+		cpSync("apps/clio-coder-web/dist/client", "dist/web/client", { recursive: true });
 		vendorGrammars();
 		vendorTuiNotices();
+		const notices = join("dist", "assets", "web-notices");
+		mkdirSync(notices, { recursive: true });
+		for (const name of ["hono", "@hono/node-server"]) {
+			let directory = dirname(appRequire.resolve(name));
+			while (!existsSync(join(directory, "LICENSE"))) {
+				const parent = dirname(directory);
+				if (parent === directory) throw new Error(`Missing license for ${name}`);
+				directory = parent;
+			}
+			cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
+		}
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

@@ -41,8 +41,12 @@ const ENTRIES = ["dist/cli/index.js", "dist/worker/entry.js"];
 // carry this release's added source, and the tarball ceiling tightens to 10MB
 // because the measured artifact sits near 6MB and a jump past 10MB would mean
 // a packaging defect rather than growth.
-const MAX_TARBALL_BYTES = 10_000_000;
-const MAX_UNPACKED_BYTES = 50_000_000;
+// R1 adds the complete web client and shared server/worker entries. The first
+// integrated artifact measured 10.14MB packed / 50.80MB unpacked. Allow modest
+// growth for this deliberate surface addition; keep maps, fixtures and source
+// applications excluded and continue checking exact required runtime assets.
+const MAX_TARBALL_BYTES = 12_000_000;
+const MAX_UNPACKED_BYTES = 55_000_000;
 
 const FORBIDDEN = [
 	{

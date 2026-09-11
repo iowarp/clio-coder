@@ -15,7 +15,10 @@ const BackgroundConfig = Type.Object(
 		roots: Type.Object({ config: path, data: path, state: path, cache: path }, { additionalProperties: false }),
 		packageRoot: path,
 		path: Type.String({ maxLength: 8192 }),
-		launch: Type.Object({ node: path, loader: path, entry: path }, { additionalProperties: false }),
+		launch: Type.Object(
+			{ node: path, loader: Type.Optional(path), entry: path, icon: Type.Optional(path) },
+			{ additionalProperties: false },
+		),
 		desktopPrefix: path,
 	},
 	{ additionalProperties: false },
@@ -74,7 +77,8 @@ export async function newBackgroundConfig(
 		path: env.PATH ?? "",
 		launch: {
 			node: await realpath(launch.node),
-			loader: await realpath(launch.loader),
+			...(launch.loader ? { loader: await realpath(launch.loader) } : {}),
+			...(launch.icon ? { icon: await realpath(launch.icon) } : {}),
 			entry: await realpath(launch.entry),
 		},
 		desktopPrefix,
@@ -103,8 +107,7 @@ export function systemdArgument(value: string) {
 export function backgroundUnit(config: BackgroundConfig, directory: string) {
 	const argv = [
 		config.launch.node,
-		"--import",
-		config.launch.loader,
+		...(config.launch.loader ? ["--import", config.launch.loader] : []),
 		config.launch.entry,
 		"--persistent",
 		backgroundPaths(directory).config,

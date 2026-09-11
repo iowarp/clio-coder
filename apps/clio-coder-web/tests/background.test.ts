@@ -19,6 +19,7 @@ import {
 	readBackgroundConfig,
 	systemdArgument,
 } from "../server/launcher/background-config.js";
+import { desktopEntry } from "../server/launcher/desktop-entry.js";
 import { launcherStatus } from "../server/launcher/install.js";
 import { serverOptions } from "../server/options.js";
 import { type controlService, serviceCommand } from "../server/process-policy.js";
@@ -175,4 +176,32 @@ test("persistent mode cannot accidentally become transient and service control a
 	assert.throws(() => serviceCommand("stop", "unrelated.service", "/tmp/unrelated.service"));
 	assert.throws(() => systemdArgument("path\nExecStart=bad"));
 	assert.equal(systemdArgument('a $var %f "quote" \\'), '"a $$var %%f \\"quote\\" \\\\"');
+});
+
+test("installed background configuration launches plain Node and preserves a branded desktop entry", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-web-installed-background-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const entry = join(root, "server.js"),
+		icon = join(root, "icon.png"),
+		directory = join(root, "background");
+	await writeFile(entry, "export {};\n");
+	await writeFile(icon, "test icon");
+	const config = await newBackgroundConfig(4317, { node: process.execPath, entry, icon }, join(root, "desktop"));
+	assert.equal(config.launch.loader, undefined);
+	assert.ok(!backgroundUnit(config, directory).includes("--import"));
+	const control = async () => "";
+	await installBackground(directory, config, control, async () => {});
+	assert.deepEqual(await readBackgroundConfig(backgroundPaths(directory).config), config);
+	const desktop = await launcherStatus(config.desktopPrefix);
+	assert.equal(desktop.status, "installed");
+	const text = await readFile(desktop.entry, "utf8");
+	assert.equal(text, desktopEntry({ ...config.launch, background: directory }));
+	assert.ok(text.includes(`Icon=${icon}`));
+	assert.ok(!text.includes("--import"));
+	await assert.rejects(
+		installBackground(directory, { ...config, packageRoot: root }, control, async () => {}),
+		/another installation/,
+	);
+	assert.equal((await uninstallBackground(directory, control)).status, "absent");
+	assert.equal(serverOptions(["--open", "--no-open"]).open, false);
 });

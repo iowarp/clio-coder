@@ -92,6 +92,7 @@ main:focus {
 	outline: none;
 }
 main {
+	scroll-margin-top: 74px;
 	max-width: 1440px;
 	width: 100%;
 }

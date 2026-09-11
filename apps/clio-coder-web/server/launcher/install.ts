@@ -3,7 +3,6 @@ import { constants } from "node:fs";
 import { access, lstat, mkdir, readFile, realpath, stat, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { desktopEntry, type LaunchPaths, launcherId, launcherUnsupported } from "./desktop-entry.js";
 
@@ -52,7 +51,12 @@ export async function launcherStatus(prefix: string, platform: NodeJS.Platform =
 			desktopEntry(value.launch) === entry;
 		if (owned) {
 			await access(value.launch.node, constants.X_OK);
-			for (const path of [value.launch.node, value.launch.loader, value.launch.entry]) {
+			for (const path of [
+				value.launch.node,
+				value.launch.entry,
+				...(value.launch.loader ? [value.launch.loader] : []),
+				...(value.launch.icon ? [value.launch.icon] : []),
+			]) {
 				await access(path, constants.R_OK);
 				if (!(await stat(path)).isFile()) throw new Error("Launcher target is not a file.");
 			}
@@ -69,7 +73,8 @@ export async function launcherStatus(prefix: string, platform: NodeJS.Platform =
 export async function installLauncher(prefix: string, paths: LaunchPaths) {
 	const launch = {
 		node: await realpath(paths.node),
-		loader: await realpath(paths.loader),
+		...(paths.loader ? { loader: await realpath(paths.loader) } : {}),
+		...(paths.icon ? { icon: await realpath(paths.icon) } : {}),
 		entry: await realpath(paths.entry),
 		...(paths.background ? { background: await realpath(paths.background) } : {}),
 	};
@@ -108,7 +113,7 @@ export async function uninstallLauncher(prefix: string) {
 	return launcherStatus(prefix);
 }
 
-export async function launcher(args: string[]) {
+export async function launcher(args: string[], paths: LaunchPaths) {
 	const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { prefix: { type: "string" } } });
 	const command = positionals[0];
 	if (positionals.length !== 1 || !["install", "status", "uninstall"].includes(command ?? ""))
@@ -120,11 +125,7 @@ export async function launcher(args: string[]) {
 			: join(homedir(), ".local/share"));
 	const result =
 		command === "install"
-			? await installLauncher(prefix, {
-					node: process.execPath,
-					loader: fileURLToPath(import.meta.resolve("tsx")),
-					entry: fileURLToPath(new URL("../main.ts", import.meta.url)),
-				})
+			? await installLauncher(prefix, paths)
 			: command === "uninstall"
 				? await uninstallLauncher(prefix)
 				: await launcherStatus(prefix);

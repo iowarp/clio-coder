@@ -15,9 +15,7 @@
 		"verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build && pnpm run smoke:browser",
 		"test:acp-real": "node --import tsx --test tests/real/acp.test.ts",
 		"smoke:browser": "node --import tsx scripts/browser-smoke.ts",
-		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts",
-		"build:rehearsal": "node --import tsx scripts/rehearsal.ts",
-		"test:rehearsal": "node --import tsx --test tests/real/rehearsal.test.ts"
+		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts"
 	},
 	"dependencies": {
 		"@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",
@@ -43,7 +41,6 @@
 		"@types/react-dom": "19.3.0",
 		"@vitejs/plugin-react": "6.1.1",
 		"playwright-core": "1.62.1",
-		"tsup": "8.5.1",
 		"tsx": "4.22.4",
 		"typescript": "6.0.3",
 		"vite": "8.3.0"

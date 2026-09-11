@@ -151,9 +151,6 @@ importers:
       playwright-core:
         specifier: 1.62.1
         version: 1.62.1
-      tsup:
-        specifier: 8.5.1
-        version: 8.5.1(postcss@8.5.28)(tsx@4.22.4)(typescript@6.0.3)(yaml@2.9.0)
       tsx:
         specifier: 4.22.4
         version: 4.22.4

@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 import { lstat, mkdir, mkdtemp, realpath, rename, rm, rmdir, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { resolveClioDirs } from "../clio/http-shims.js";
 import { localServerReady, waitForLocalServer } from "../local-server.js";
@@ -14,7 +13,7 @@ import {
 	newBackgroundConfig,
 	readBackgroundConfig,
 } from "./background-config.js";
-import { desktopEntry } from "./desktop-entry.js";
+import { desktopEntry, type LaunchPaths } from "./desktop-entry.js";
 import { contents, installLauncher, launcherStatus, uninstallLauncher } from "./install.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -99,6 +98,16 @@ export async function installBackground(
 		throw new Error(
 			"Background setup already has a stable port and desktop location. Uninstall it before changing them.",
 		);
+	if (
+		state.status === "installed" &&
+		(config.packageRoot !== proposed.packageRoot ||
+			config.launch.node !== proposed.launch.node ||
+			config.launch.entry !== proposed.launch.entry ||
+			config.launch.loader !== proposed.launch.loader)
+	)
+		throw new Error(
+			"Background setup belongs to another installation. Run web background uninstall before installing this one.",
+		);
 	const desktop = await launcherStatus(config.desktopPrefix);
 	if (desktop.status !== "absent") await desktopOwned(config, directory);
 	if (state.status === "absent") {
@@ -176,7 +185,7 @@ export async function uninstallBackground(directory: string, control: Control = 
 	return { status: "absent", directory };
 }
 
-export async function background(args: string[]) {
+export async function background(args: string[], launch: LaunchPaths) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");
 	const { values, positionals } = parseArgs({
@@ -221,15 +230,7 @@ export async function background(args: string[]) {
 			(process.env.XDG_DATA_HOME && isAbsolute(process.env.XDG_DATA_HOME)
 				? process.env.XDG_DATA_HOME
 				: join(homedir(), ".local/share"));
-		const config = await newBackgroundConfig(
-			port,
-			{
-				node: process.execPath,
-				loader: fileURLToPath(import.meta.resolve("tsx")),
-				entry: fileURLToPath(new URL("../main.ts", import.meta.url)),
-			},
-			prefix,
-		);
+		const config = await newBackgroundConfig(port, launch, prefix);
 		console.log(JSON.stringify(await installBackground(directory, config), null, 2));
 		if (!values.open) return;
 	}

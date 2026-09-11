@@ -1,10 +1,11 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-	root: "client",
+	root: fileURLToPath(new URL("./client", import.meta.url)),
 	plugins: [react()],
-	build: { outDir: "../dist/client", emptyOutDir: true },
+	build: { outDir: "../dist/client", emptyOutDir: true, license: { fileName: "THIRD_PARTY_LICENSES.md" } },
 	server: {
 		port: 4318,
 		strictPort: true,

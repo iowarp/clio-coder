@@ -27,7 +27,7 @@
   <a href="https://github.com/iowarp/clio-coder/issues">Feedback</a>
 </p>
 
-Clio Coder is an open-source coding agent for your terminal. Ask it to explain a
+Clio Coder is an open-source coding agent with terminal and browser interfaces. Ask it to explain a
 repository, investigate a failing test, or help implement a change. It reads the
 project, works with your tools, and shows you what it did.
 
@@ -51,6 +51,33 @@ cd /path/to/your/project
 clio-coder configure
 clio-coder
 ```
+
+The **terminal interface (TUI)** is the interactive chat opened by `clio-coder`.
+The **CLI** also provides commands for setup, inspection, automation, and headless
+runs. The **web app (GUI)** is another surface over the same Clio runtime, projects,
+configuration, and model targets; it does not replace either terminal path.
+
+**Coming in v0.4.8 (implemented on this development branch):** choose the browser
+app after configuration:
+
+```bash
+clio-coder web --open
+```
+
+It prints a private launch link and opens your default browser when requested.
+For an installed app that remains available after you close its window, Linux
+with a systemd user session supports:
+
+```bash
+clio-coder web background install --open
+```
+
+Connect the browser using that launch link once, then choose **Install Clio Coder**
+in app preferences or your browser's Install app command. The background service
+starts at user login and shares the same local Clio installation. `web background
+status`, `stop`, and `uninstall` inspect, stop, or remove that service. On other
+platforms the foreground web app works while its server is running; managed
+background installation is currently Linux only.
 
 In the configuration launcher, choose **Quick Connect**:
 
@@ -303,6 +330,27 @@ Read the [Safety Model](docs/architecture/safety-model.md) and
 [Scientific Validation](docs/process/scientific-validation.md) for the boundaries.
 
 ## Install
+
+A bootstrap installer is prepared for v0.4.8. Once this branch's script is
+published to `main`, its public entry point will be:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/iowarp/clio-coder/main/scripts/install.sh | bash
+```
+
+Until publication, run `bash scripts/install.sh --dry-run` from this checkout to
+review it locally. The installer uses npm, requires Node.js 22.19+ and npm, and
+installs under `$HOME/.local` without sudo or shell-profile edits. It checks for
+conflicting launchers, prints PATH guidance, and runs Clio's post-install migrations.
+It opens no browser and enables no background service automatically. Its next-step
+instructions follow the commands supported by the version actually installed.
+
+Options include `--version <tag-or-version>`, `--prefix <directory>`,
+`--omit-optional`, and `--dry-run`; pass them to a downloaded script using
+`bash -s -- <options>`. A source-checkout symlink is preserved unless you explicitly
+select `--force`. If you enabled the background service, run `clio-coder web background uninstall`
+before removing the package. Remove an install at the default prefix with
+`npm uninstall -g --prefix "$HOME/.local" @iowarp/clio-coder`.
 
 The npm command in [Get started](#get-started) is the shortest path. Other
 package managers install the same CLI; Node.js is required for all of them.

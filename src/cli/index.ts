@@ -29,6 +29,7 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 
 Usage:
   clio-coder                      start interactive repository chat
+  clio-coder web [--open]         start the browser application
   clio-coder acp                  serve Clio as an ACP v1 agent over stdio
   clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
@@ -260,6 +261,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
+	["web", async (subArgs) => (await import("./web.js")).runWebCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
 	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],

@@ -35,16 +35,20 @@ import { WorkerHost } from "./worker/host.js";
 declare const __CLIO_WEB_BUNDLED__: boolean;
 const bundled = typeof __CLIO_WEB_BUNDLED__ !== "undefined" && __CLIO_WEB_BUNDLED__;
 export async function main(args = process.argv.slice(2)) {
-	if (bundled && (args[0] === "background" || args[0] === "launcher"))
-		throw new Error("Desktop setup is available from the source checkout only in this rehearsal build.");
+	const launch = () => ({
+		node: process.execPath,
+		...(!bundled ? { loader: fileURLToPath(import.meta.resolve("tsx")) } : {}),
+		entry: fileURLToPath(import.meta.url),
+		icon: fileURLToPath(new URL(bundled ? "./client/icon-192.png" : "../dist/client/icon-192.png", import.meta.url)),
+	});
 	if (args[0] === "background") {
 		const { background } = await import("./launcher/background.js");
-		await background(args.slice(1));
+		await background(args.slice(1), launch());
 		return;
 	}
 	if (args[0] === "launcher") {
 		const { launcher } = await import("./launcher/install.js");
-		await launcher(args.slice(1));
+		await launcher(args.slice(1), launch());
 		return;
 	}
 	const values = serverOptions(args);
