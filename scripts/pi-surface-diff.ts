@@ -125,6 +125,11 @@ function typesTarget(value: unknown): string | null {
 
 function declarationTarget(packageName: string, pkg: PackageJson, entryPoint: string): string {
 	if (entryPoint === "." && pkg.exports === undefined && pkg.types) return pkg.types;
+	// Without an exports map Node permits package-relative deep imports. Pi TUI
+	// ships those declarations beside the JS, including dist/keys.js.
+	if (pkg.exports === undefined && entryPoint.startsWith("./") && entryPoint.endsWith(".js")) {
+		return `${entryPoint.slice(0, -3)}.d.ts`;
+	}
 	const exportsMap = pkg.exports;
 	if (!exportsMap) throw new Error(`${packageName} does not declare exports for ${entryPoint}`);
 	const direct = typesTarget(exportsMap[entryPoint]);
