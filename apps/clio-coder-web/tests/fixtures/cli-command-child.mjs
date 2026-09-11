@@ -16,6 +16,7 @@ if (scenario === "slow" || scenario === "ignore-term") {
 } else if (scenario === "stdout-limit") process.stdout.write("x".repeat(8 * 1024 * 1024 + 1));
 else if (scenario === "stderr-limit") process.stderr.write("x".repeat(256 * 1024 + 1));
 else if (scenario === "utf8") process.stdout.write(Buffer.from([0xff]));
+else if (scenario === "jsonl-invalid") process.stdout.write('{"first":true}\nnot-json\n');
 else if (scenario === "json") process.stdout.write("broken JSON");
 else if (scenario === "fail") {
 	process.stderr.write("fixture-private-stderr-content");

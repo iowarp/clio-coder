@@ -15,6 +15,7 @@ import { EventHub } from "./services/event-hub.js";
 import { EvidenceService } from "./services/evidence.js";
 import { FleetService } from "./services/fleet.js";
 import { OperationRegistry } from "./services/operations.js";
+import { ReportsService } from "./services/reports.js";
 import { SessionService } from "./services/sessions.js";
 import { SettingsService } from "./services/settings.js";
 import { TargetsService } from "./services/targets-cli.js";
@@ -74,6 +75,7 @@ export async function main() {
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		reports: new ReportsService(reads, cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,

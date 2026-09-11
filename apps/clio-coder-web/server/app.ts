@@ -9,6 +9,7 @@ import { problemResponse } from "./http/problem.js";
 import { docsPathGuard, docsRoutes } from "./http/routes-docs.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
+import { reportRoutes } from "./http/routes-reports.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { settingsRoutes } from "./http/routes-settings.js";
 import { targetsRoutes } from "./http/routes-targets.js";
@@ -23,6 +24,7 @@ import type { EvidenceService } from "./services/evidence.js";
 import type { FleetService } from "./services/fleet.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
+import type { ReportsService } from "./services/reports.js";
 import type { SessionService } from "./services/sessions.js";
 import type { SettingsService } from "./services/settings.js";
 import type { TargetsService } from "./services/targets-cli.js";
@@ -40,6 +42,7 @@ export function createApp(options: {
 	settings: SettingsService;
 	targets: TargetsService;
 	fleet: FleetService;
+	reports: ReportsService;
 	evidence: EvidenceService;
 	sessions: SessionService;
 	snapshotHold?: () => Promise<void>;
@@ -88,6 +91,7 @@ export function createApp(options: {
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets);
 	fleetRoutes(app, hub, options.fleet);
+	reportRoutes(app, hub, options.reports);
 	evidenceRoutes(app, hub, options.evidence);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {

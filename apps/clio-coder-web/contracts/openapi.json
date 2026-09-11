@@ -6,6 +6,1022 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/evals": {
+			"get": {
+				"operationId": "evals",
+				"summary": "Paginated current-format evaluation reports",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"pattern": "^[A-Za-z0-9_-]+$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["available", "stored", "unreadable", "items", "nextCursor"],
+									"properties": {
+										"available": {
+											"type": "boolean"
+										},
+										"stored": {
+											"type": "integer"
+										},
+										"unreadable": {
+											"type": "integer"
+										},
+										"items": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"evalId",
+													"startedAt",
+													"suiteId",
+													"clioCoder",
+													"environment",
+													"matrix",
+													"servingConfiguration",
+													"summary"
+												],
+												"properties": {
+													"evalId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"startedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"suiteId": {
+														"type": "string"
+													},
+													"clioCoder": {
+														"type": "object",
+														"required": ["version", "commit"],
+														"properties": {
+															"version": {
+																"type": "string"
+															},
+															"commit": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"environment": {
+														"type": "object",
+														"required": ["platform", "node"],
+														"properties": {
+															"platform": {
+																"type": "string"
+															},
+															"node": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"matrix": {
+														"type": "object",
+														"required": ["target", "model", "thinking"],
+														"properties": {
+															"target": {
+																"type": "string"
+															},
+															"model": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"thinking": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"dimensions": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															}
+														},
+														"additionalProperties": false
+													},
+													"servingConfiguration": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"summary": {
+														"type": "object",
+														"required": ["runs", "passed", "failed", "passRate", "wallTimeMs", "tokens"],
+														"properties": {
+															"runs": {
+																"type": "number"
+															},
+															"passed": {
+																"type": "number"
+															},
+															"failed": {
+																"type": "number"
+															},
+															"passRate": {
+																"type": "number"
+															},
+															"wallTimeMs": {
+																"type": "number"
+															},
+															"tokens": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["measured", "runs", "measuredRuns"],
+																		"properties": {
+																			"measured": {
+																				"type": "boolean",
+																				"const": false
+																			},
+																			"runs": {
+																				"type": "number"
+																			},
+																			"measuredRuns": {
+																				"type": "number",
+																				"const": 0
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": [
+																			"measured",
+																			"runs",
+																			"measuredRuns",
+																			"input",
+																			"output",
+																			"total",
+																			"cacheRead",
+																			"cacheWrite"
+																		],
+																		"properties": {
+																			"measured": {
+																				"type": "boolean",
+																				"const": true
+																			},
+																			"runs": {
+																				"type": "number"
+																			},
+																			"measuredRuns": {
+																				"type": "number"
+																			},
+																			"input": {
+																				"type": "number"
+																			},
+																			"output": {
+																				"type": "number"
+																			},
+																			"total": {
+																				"type": "number"
+																			},
+																			"cacheRead": {
+																				"type": "number"
+																			},
+																			"cacheWrite": {
+																				"type": "number"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"nextCursor": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/evals/{id}": {
+			"get": {
+				"operationId": "evalDetail",
+				"summary": "Stored evaluation outcomes and metrics",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["report", "aggregates", "results"],
+									"properties": {
+										"report": {
+											"type": "object",
+											"required": [
+												"evalId",
+												"startedAt",
+												"suiteId",
+												"clioCoder",
+												"environment",
+												"matrix",
+												"servingConfiguration",
+												"summary"
+											],
+											"properties": {
+												"evalId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"startedAt": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"suiteId": {
+													"type": "string"
+												},
+												"clioCoder": {
+													"type": "object",
+													"required": ["version", "commit"],
+													"properties": {
+														"version": {
+															"type": "string"
+														},
+														"commit": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
+												"environment": {
+													"type": "object",
+													"required": ["platform", "node"],
+													"properties": {
+														"platform": {
+															"type": "string"
+														},
+														"node": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												},
+												"matrix": {
+													"type": "object",
+													"required": ["target", "model", "thinking"],
+													"properties": {
+														"target": {
+															"type": "string"
+														},
+														"model": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"thinking": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"dimensions": {
+															"type": "array",
+															"items": {
+																"type": "string"
+															}
+														}
+													},
+													"additionalProperties": false
+												},
+												"servingConfiguration": {
+													"anyOf": [
+														{
+															"type": "object",
+															"patternProperties": {
+																"^.*$": {}
+															}
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"summary": {
+													"type": "object",
+													"required": ["runs", "passed", "failed", "passRate", "wallTimeMs", "tokens"],
+													"properties": {
+														"runs": {
+															"type": "number"
+														},
+														"passed": {
+															"type": "number"
+														},
+														"failed": {
+															"type": "number"
+														},
+														"passRate": {
+															"type": "number"
+														},
+														"wallTimeMs": {
+															"type": "number"
+														},
+														"tokens": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["measured", "runs", "measuredRuns"],
+																	"properties": {
+																		"measured": {
+																			"type": "boolean",
+																			"const": false
+																		},
+																		"runs": {
+																			"type": "number"
+																		},
+																		"measuredRuns": {
+																			"type": "number",
+																			"const": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"required": [
+																		"measured",
+																		"runs",
+																		"measuredRuns",
+																		"input",
+																		"output",
+																		"total",
+																		"cacheRead",
+																		"cacheWrite"
+																	],
+																	"properties": {
+																		"measured": {
+																			"type": "boolean",
+																			"const": true
+																		},
+																		"runs": {
+																			"type": "number"
+																		},
+																		"measuredRuns": {
+																			"type": "number"
+																		},
+																		"input": {
+																			"type": "number"
+																		},
+																		"output": {
+																			"type": "number"
+																		},
+																		"total": {
+																			"type": "number"
+																		},
+																		"cacheRead": {
+																			"type": "number"
+																		},
+																		"cacheWrite": {
+																			"type": "number"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
+										"aggregates": {
+											"anyOf": [
+												{
+													"type": "array",
+													"items": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													}
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"results": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"taskId",
+													"repeatIndex",
+													"target",
+													"pass",
+													"failureClass",
+													"assignmentId",
+													"terminalReceiptRecorded",
+													"metrics",
+													"attachments",
+													"verdict",
+													"behavioral",
+													"behavioralMetrics"
+												],
+												"properties": {
+													"taskId": {
+														"type": "string"
+													},
+													"repeatIndex": {
+														"type": "number"
+													},
+													"target": {
+														"type": "object",
+														"required": ["id", "model", "thinking"],
+														"properties": {
+															"id": {
+																"type": "string"
+															},
+															"model": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"thinking": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"pass": {
+														"type": "boolean"
+													},
+													"failureClass": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"assignmentId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"terminalReceiptRecorded": {
+														"type": "boolean"
+													},
+													"metrics": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {
+																"anyOf": [
+																	{
+																		"type": "number"
+																	},
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "boolean"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														}
+													},
+													"attachments": {
+														"type": "integer"
+													},
+													"verdict": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"behavioral": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"behavioralMetrics": {
+														"anyOf": [
+															{
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/usage": {
+			"get": {
+				"operationId": "usage",
+				"summary": "Canonical usage report for the last 30 days",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["schema", "workspaceId", "windowDays", "from", "to", "facts", "opportunities"],
+									"properties": {
+										"schema": {
+											"type": "string",
+											"const": "experimental"
+										},
+										"workspaceId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"windowDays": {
+											"type": "number",
+											"const": 30
+										},
+										"from": {
+											"type": "string"
+										},
+										"to": {
+											"type": "string"
+										},
+										"facts": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "values"],
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"values": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"opportunities": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["kind", "suggestion", "evidence"],
+												"properties": {
+													"kind": {
+														"type": "string"
+													},
+													"suggestion": {
+														"type": "string"
+													},
+													"evidence": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/evidence": {
 			"get": {
 				"operationId": "evidenceList",

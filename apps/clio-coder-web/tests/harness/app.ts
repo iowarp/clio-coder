@@ -13,6 +13,7 @@ import { EventHub } from "../../server/services/event-hub.js";
 import { EvidenceService } from "../../server/services/evidence.js";
 import { FleetService } from "../../server/services/fleet.js";
 import { OperationRegistry } from "../../server/services/operations.js";
+import { ReportsService } from "../../server/services/reports.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService } from "../../server/services/settings.js";
 import { TargetsService } from "../../server/services/targets-cli.js";
@@ -70,6 +71,7 @@ export async function harness(
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		reports: new ReportsService(reads, cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,

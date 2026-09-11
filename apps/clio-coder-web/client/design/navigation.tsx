@@ -10,7 +10,7 @@ export const navigation = [
 	{ label: "Settings", path: "/settings", available: true },
 	{ label: "Fleet", path: "/fleet", available: true },
 	{ label: "Evidence", path: "/evidence", available: true },
-	{ label: "Evals", path: "/evals", available: false },
+	{ label: "Evals", path: "/evals", available: true },
 	{ label: "Library", path: "/library", available: false },
 	{ label: "System", path: "/system", available: false },
 ] as const;

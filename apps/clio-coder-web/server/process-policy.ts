@@ -83,7 +83,7 @@ export async function childRunning(pid: number) {
 
 /** Fixed-argv CLI children are owned process groups, independently of ACP sessions. */
 export async function runClioCommand(command: CliCommand, cwd: string, env: NodeJS.ProcessEnv = process.env) {
-	const plan = commandPlan(command);
+	const plan = commandPlan(command, cwd);
 	if (!isAbsolute(cwd) || (await realpath(cwd)) !== cwd || !(await stat(cwd)).isDirectory())
 		throw new AppProblem("validation", "CLI workspace must be an existing canonical absolute directory.");
 	const executable = await resolveClioCommand(env);

@@ -10,6 +10,7 @@ import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
 import { seedEvidence } from "../tests/harness/evidence-fixture.js";
 import { seedFleet } from "../tests/harness/fleet-fixture.js";
+import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
@@ -23,6 +24,7 @@ const h = await harness(
 await seedSettings(h.home.path, h.home.env);
 await seedFleet(h.home.path, h.home.env);
 await seedEvidence(h.home.path, h.home.env);
+const reportsSeed = await seedReports(h.home.path, h.home.env);
 const fixture = traceFixture(join(h.home.path, "state"));
 fixture.finish();
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
@@ -161,6 +163,12 @@ try {
 		await check("evidence-detail-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("evidence-detail");
+		await navigate("Evals");
+		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).waitFor();
+		await check("evals");
+		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).click();
+		await page.getByRole("heading", { name: "Trials", exact: true }).waitFor();
+		await check("eval-detail");
 		await navigate("Docs");
 		await page.locator(".docs-page .markdown").waitFor();
 		await check("docs-map");
@@ -229,7 +237,11 @@ try {
 		await check("routing");
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("routing-dark");
+		await page.goto(`${origin}/usage`);
+		await page.getByRole("heading", { name: "Recorded facts", exact: true }).waitFor();
+		await check("usage-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await check("usage");
 		await page.goto(workspaceUrl);
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await page.getByRole("button", { name: "New session", exact: true }).click();

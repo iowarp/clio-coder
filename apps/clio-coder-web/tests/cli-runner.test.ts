@@ -116,3 +116,29 @@ test("CLI runner: cancellation observes SIGTERM, reaps the child, and closes adm
 		await h.close();
 	}
 });
+
+test("usage bridge admits only canonical cwd arguments and rejects a malformed JSON Lines row", async () => {
+	const h = await scratchHome();
+	const runner = new CliRunner({
+		...h.env,
+		CLIO_CODER_WEB_CLI: fixture,
+		CLIO_CODER_WEB_COMMAND_SCENARIO: "jsonl-invalid",
+	});
+	try {
+		assert.throws(() => commandPlan({ kind: "usage.report", repo: "/foreign" }, h.path), AppProblem);
+		assert.deepEqual(commandPlan({ kind: "usage.report" }, h.path).argv, [
+			"usage",
+			"report",
+			"--repo",
+			h.path,
+			"--days",
+			"30",
+			"--json",
+		]);
+		await assert.rejects(runner.run({ kind: "usage.report" }, h.path), /invalid UTF-8 or JSON/);
+		assert.equal(runner.activeCount, 0);
+	} finally {
+		await runner.close();
+		await h.close();
+	}
+});

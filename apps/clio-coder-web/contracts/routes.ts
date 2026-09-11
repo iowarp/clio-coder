@@ -16,6 +16,7 @@ import {
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
+import { EvalDetail, EvalPage, UsageReport } from "./reports.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
@@ -70,6 +71,27 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	evals: defineRoute({
+		...get,
+		path: "/api/evals",
+		query: FleetPageQuery,
+		response: EvalPage,
+		summary: "Paginated current-format evaluation reports",
+	}),
+	evalDetail: defineRoute({
+		...get,
+		path: "/api/evals/:id",
+		params: operationParams,
+		response: EvalDetail,
+		summary: "Stored evaluation outcomes and metrics",
+	}),
+	usage: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/usage",
+		params: operationParams,
+		response: UsageReport,
+		summary: "Canonical usage report for the last 30 days",
+	}),
 	evidenceList: defineRoute({
 		...get,
 		path: "/api/evidence",

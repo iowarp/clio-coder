@@ -17,7 +17,7 @@ export class CliRunner {
 		return this.jobs.size;
 	}
 	run(command: CliCommand, cwd: string, signal?: AbortSignal): Promise<unknown> {
-		const plan = commandPlan(command);
+		const plan = commandPlan(command, cwd);
 		if (this.closed || this.jobs.size >= 4)
 			return Promise.reject(new AppProblem("unavailable", "CLI runner is full or stopping. Retry shortly."));
 		if (signal?.aborted) return Promise.reject(new CliCancelled());
@@ -34,7 +34,7 @@ export class CliRunner {
 	private async execute(
 		command: CliCommand,
 		cwd: string,
-		output: "json" | "exit",
+		output: "json" | "jsonl" | "exit",
 		signal: AbortSignal,
 	): Promise<unknown> {
 		const { child, birthToken } = await runClioCommand(command, cwd, this.env);
@@ -62,7 +62,7 @@ export class CliRunner {
 			child.stdout.on("data", (chunk: Buffer) => {
 				stdoutBytes += chunk.length;
 				if (stdoutBytes > 8 * 1024 * 1024) stop(new AppProblem("operation_failed", "CLI stdout exceeded 8 MiB."));
-				else if (!failure && output === "json") chunks.push(chunk);
+				else if (!failure && output !== "exit") chunks.push(chunk);
 			});
 			child.stderr.on("data", (chunk: Buffer) => {
 				stderrBytes += chunk.length;
@@ -93,7 +93,15 @@ export class CliRunner {
 					return;
 				}
 				try {
-					resolve(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks))));
+					const decoded = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+					resolve(
+						output === "jsonl"
+							? decoded
+									.trim()
+									.split(/\r?\n/)
+									.map((line) => JSON.parse(line))
+							: JSON.parse(decoded),
+					);
 				} catch {
 					reject(new AppProblem("operation_failed", "CLI command returned invalid UTF-8 or JSON."));
 				}

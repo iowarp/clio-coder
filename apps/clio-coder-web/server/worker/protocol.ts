@@ -2,6 +2,7 @@ import type { Problem } from "../../contracts/common.js";
 import type { BlueprintFile, DocsRequest } from "../../contracts/docs.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
+import type { EvalRequest } from "../../contracts/reports.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
 
@@ -18,6 +19,7 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"evals.read": { params: EvalRequest; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };
 	"settings.read": { params: { cwd: string }; result: unknown };

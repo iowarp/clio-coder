@@ -5,6 +5,7 @@ import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
 export const CliCommand = Type.Union([
+	Type.Object({ kind: Type.Literal("usage.report") }, closed),
 	Type.Object({ kind: Type.Literal("evidence.build"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("receipt.verify"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.list") }, closed),
@@ -17,10 +18,13 @@ export const CliCommand = Type.Union([
 ]);
 export type CliCommand = Static<typeof CliCommand>;
 /** The only admitted CLI argv. There is no generic command or extra-arguments escape hatch. */
-export function commandPlan(input: unknown): { argv: string[]; output: "json" | "exit" } {
+export function commandPlan(input: unknown, cwd?: string): { argv: string[]; output: "json" | "jsonl" | "exit" } {
 	if (!Value.Check(CliCommand, input))
 		throw new AppProblem("validation", "CLI command is outside the supported command table.");
 	switch (input.kind) {
+		case "usage.report":
+			if (!cwd) throw new AppProblem("validation", "A canonical workspace is required for usage.");
+			return { argv: ["usage", "report", "--repo", cwd, "--days", "30", "--json"], output: "jsonl" };
 		case "evidence.build":
 			return { argv: ["evidence", "build", "--run", input.id], output: "exit" };
 		case "receipt.verify":
