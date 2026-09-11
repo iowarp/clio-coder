@@ -21,7 +21,7 @@ import { BusChannels, type DispatchCompletedPayload, type DispatchRunIdentity } 
 import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defaults.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
-import { GUARDRAIL_DEFAULTS } from "../../core/guardrails.js";
+import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
@@ -6672,7 +6672,11 @@ export function createDispatchBundle(
 			// No in-memory executor survives a process restart, so every active
 			// side-store lease from an earlier bundle is orphaned and must expire.
 			cleanupDispatchReservations({ startup: true, nowMs: now() });
-			ledger = openLedger();
+			ledger = openLedger({
+				get maxRuns() {
+					return getEffectiveSettings()?.fleet?.history?.maxRuns ?? resolveGuardrail("maxDispatchRuns");
+				},
+			});
 			// Symphony P10: restart recovery from durable artifacts. Adopt
 			// receipts whose ledger rows were lost to a crash between
 			// recordReceipt() and persist(); quarantine tampered ones.

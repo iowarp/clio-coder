@@ -239,7 +239,6 @@ function capRuns(all: RunEnvelope[], maxRuns: number): RunEnvelope[] {
 }
 
 export function openLedger(opts?: LedgerOptions): Ledger {
-	const maxRuns = resolveMaxRuns(opts?.maxRuns);
 	let runs: RunEnvelope[] = readRuns();
 	// Ids this process has written since the last successful persist. See
 	// mergeRunsById: this is what separates our writes from a sibling's rows we
@@ -369,7 +368,7 @@ export function openLedger(opts?: LedgerOptions): Ledger {
 				if (stateRootRemoved()) return;
 				const diskRuns = readRuns();
 				const merged = mergeRunsById(diskRuns, runs, dirty);
-				const capped = capRuns(merged, maxRuns);
+				const capped = capRuns(merged, resolveMaxRuns(opts?.maxRuns));
 				runs = capped;
 				atomicWrite(target, JSON.stringify(capped, null, 2));
 				// A run that left the ring has no ledger row to view any more, so its
