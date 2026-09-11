@@ -30,9 +30,21 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	}
 
 	let unsubscribePluginsReload: (() => void) | null = null;
+	let unsubscribeConfigChange: (() => void) | null = null;
 	const extension: DomainExtension = {
 		async start() {
 			discover();
+			unsubscribeConfigChange =
+				_context.getContract<ConfigContract>("config")?.onChange("nextTurn", ({ diff }) => {
+					if (
+						diff.nextTurn.some(
+							(path) =>
+								path === "integrations.externalAgents.entries" || path.startsWith("integrations.externalAgents.entries."),
+						)
+					) {
+						revision += 1;
+					}
+				}) ?? null;
 			// Recipes are cached at start; plugin agent roots come from the
 			// committed plugin generation, so a changed generation rediscovers.
 			const onResourceReload = (payload: unknown) => {
@@ -74,6 +86,8 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		async stop() {
 			unsubscribePluginsReload?.();
 			unsubscribePluginsReload = null;
+			unsubscribeConfigChange?.();
+			unsubscribeConfigChange = null;
 		},
 	};
 

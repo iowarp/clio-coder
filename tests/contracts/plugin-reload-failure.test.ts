@@ -8,6 +8,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
+import type { ConfigContract } from "../../src/domains/config/index.js";
 import { disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
@@ -22,10 +23,14 @@ it("refreshes agent recipes and prompt inputs only on plugin resource reload", a
 	const env = await isolateClioEnv("clio-coder-reload-ownership-");
 	const originalCwd = process.cwd();
 	const bus = createSafeEventBus();
+	const config: ConfigContract = {
+		get: () => structuredClone(DEFAULT_SETTINGS),
+		onChange: () => () => {},
+	};
 	const context: DomainContext = {
 		bus,
 		getContract(name) {
-			if (name === "config") return { get: () => structuredClone(DEFAULT_SETTINGS) } as never;
+			if (name === "config") return config as never;
 			if (name === "agents") return agents.contract as never;
 			return undefined;
 		},
@@ -79,12 +84,18 @@ for (const mutation of ["disable", "remove"] as const) {
 		const env = await isolateClioEnv(`clio-coder-reload-failure-${mutation}-`);
 		const originalCwd = process.cwd();
 		const bus = createSafeEventBus();
-		let delegates = [{ id: "reload-clash" }];
+		let delegates = [{ id: "reload-clash", command: "fixture", args: [] }];
+		const config: ConfigContract = {
+			get: () => {
+				const settings = structuredClone(DEFAULT_SETTINGS);
+				settings.integrations.externalAgents.entries = delegates;
+				return settings;
+			},
+			onChange: () => () => {},
+		};
 		const context: DomainContext = {
 			bus,
-			getContract: (() => ({
-				get: () => ({ integrations: { externalAgents: { entries: delegates } } }),
-			})) as DomainContext["getContract"],
+			getContract: (() => config) as DomainContext["getContract"],
 		};
 		const agents = createAgentsBundle(context);
 		try {

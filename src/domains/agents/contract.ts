@@ -3,7 +3,7 @@ import type { AgentRecipeDiagnostic } from "./registry.js";
 import type { AgentSpec } from "./spec.js";
 
 export interface AgentsContract {
-	/** Monotonic catalog revision; changes after every successful discovery. */
+	/** Monotonic catalog revision; changes after discovery or external-agent settings updates. */
 	revision(): number;
 	/** Raw recipes as loaded from Markdown files. */
 	list(): ReadonlyArray<AgentRecipe>;
