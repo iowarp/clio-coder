@@ -5,6 +5,7 @@ import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { Home } from "./pages/home.js";
+import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { Toolchain } from "./pages/toolchain.js";
 import { TraceRunPage } from "./pages/traces/run.js";
 import { TraceRuns } from "./pages/traces/runs.js";
@@ -16,6 +17,9 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		children: [
+			{ path: "/sessions", element: <Workspaces client={client} /> },
+			{ path: "/workspaces/:workspaceId/sessions", element: <Sessions client={client} /> },
+			{ path: "/sessions/:id", element: <Session client={client} /> },
 			{ path: "/", element: <Home /> },
 			{ path: "/traces", element: <TraceRuns client={client} /> },
 			{ path: "/traces/:runId", element: <TraceRunPage client={client} /> },

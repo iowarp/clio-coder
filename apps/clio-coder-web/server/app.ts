@@ -6,13 +6,16 @@ import { routes } from "../contracts/routes.js";
 import { getVersionInfo } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
+import { sessionRoutes } from "./http/routes-sessions.js";
 import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
+import { Commands } from "./services/commands.js";
 import type { EventHub } from "./services/event-hub.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
+import type { SessionService } from "./services/sessions.js";
 import type { ToolchainService } from "./services/toolchain.js";
 import type { TraceService } from "./services/traces.js";
 
@@ -23,6 +26,8 @@ export function createApp(options: {
 	operations: OperationRegistry;
 	toolchain: ToolchainService;
 	traces: TraceService;
+	sessions: SessionService;
+	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
 	diagnostics?: boolean;
 }) {
@@ -63,6 +68,7 @@ export function createApp(options: {
 	});
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
+	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (
 			Object.values(routes).some((route) =>

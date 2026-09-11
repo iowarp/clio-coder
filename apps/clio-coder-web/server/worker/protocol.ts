@@ -13,6 +13,7 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"sessions.list": { params: { cwd: string }; result: unknown };
 	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
 	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };

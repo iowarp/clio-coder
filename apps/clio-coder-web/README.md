@@ -1,7 +1,8 @@
 # Clio Coder web
 
 The checkout application serves a local toolchain inventory, pinned installation
-with streamed progress, vendored-tool removal, and a trace explorer. The CLI, TUI, and ACP continue
+with streamed progress, vendored-tool removal, a trace explorer, and workspace
+sessions backed by supervised Clio ACP children. The CLI, TUI, and ACP continue
 to run independently. The packaged `clio-coder web` command belongs to R1.
 
 From the repository root:
@@ -14,7 +15,10 @@ pnpm --filter @iowarp/clio-coder-web start
 ```
 
 Open the full loopback URL printed by the server, then choose **Toolchain** or
-**Traces**. Trace history includes server-side filters and pagination, run details,
+**Traces**, or choose **Sessions** to open a workspace by absolute path, start a
+conversation, or load a saved session. Up to four sessions can be open at once.
+The S3 permission fail-safe rejects tool permission requests; S4 adds the approval
+controls. Trace history includes server-side filters and pagination, run details,
 phase timelines, event payloads, gates, processes, receipts, and live tails. Trace
 reads use your configured Clio state directory; a missing database shows an empty
 state. Receipt summaries omit large payload fields until you request the full receipt.
@@ -80,10 +84,24 @@ SSE retains at most 4,096 envelopes and 8 MiB, supports cursor replay and resync
 and closes a slow connection after its queued bytes exceed a full replay plus a
 512 KiB live burst. The S1 client refetches operation snapshots on progress and
 uses revisions to keep a late response from replacing a newer terminal record.
-Sessions will add their own projection buffer/replay rules in S3.
+Session deltas use a shared revision buffer so a late snapshot cannot duplicate
+or erase newer streamed text. Text items are bounded to 64 KiB, the visible
+timeline to 2 MiB / 2,048 items, and turn summaries to 128.
+
+Recent workspaces and child ownership records live under `<state>/web/`.
+On restart, only a recorded ACP child with a matching birth token and a proven
+dead owner can be terminated. Other live servers sharing the state directory
+retain their children. Reconciliation never edits Clio session ledgers.
+
+`pnpm --filter @iowarp/clio-coder-web test:acp-real` drives the built CLI against
+a local OpenAI-compatible fixture in a scratch home. It includes durable session
+load/replay and records real child RSS/boot measurements. It is separate from the
+network-disabled default test lane.
 
 See [SPRINT.md](SPRINT.md) for canonical status,
 [the S1 implementation handoff](notes/2026-09-11-S1.md) for acceptance evidence,
 and [the S1 closeout](notes/2026-09-11-S1-closeout.md) for the approved CI checker
 update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records trace
-coverage and browser checks. S1 and S2 are complete; S3 adds sessions next.
+coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records session
+and process-lifecycle verification. S1-S3 are complete; S4 adds permission, cancel,
+safe settings, targets, and fleet event controls.

@@ -1,11 +1,21 @@
 import { type Static, Type } from "typebox";
 import { Id } from "./common.js";
 import { Operation, Progress } from "./operations.js";
+import { SessionDeltas } from "./sessions.js";
 
 const base = { v: Type.Literal(1), epoch: Id, seq: Type.Integer({ minimum: 0 }), at: Type.String() };
 const cursor = { epoch: Id, seq: Type.Integer({ minimum: 0 }) };
 const resource = { resource: Id, revision: Type.Integer({ minimum: 1 }) };
 export const Event = Type.Union([
+	Type.Object({ ...base, type: Type.Literal("turn.started"), payload: SessionDeltas["turn.started"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.text"), payload: SessionDeltas["turn.text"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.thought"), payload: SessionDeltas["turn.thought"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.user"), payload: SessionDeltas["turn.user"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.tool"), payload: SessionDeltas["turn.tool"] }),
+	Type.Object({ ...base, type: Type.Literal("turn.finished"), payload: SessionDeltas["turn.finished"] }),
+	Type.Object({ ...base, type: Type.Literal("permission.rejected"), payload: SessionDeltas["permission.rejected"] }),
+	Type.Object({ ...base, type: Type.Literal("session.changed"), payload: SessionDeltas["session.changed"] }),
+
 	Type.Object({ ...base, type: Type.Literal("hello"), payload: Type.Object(cursor) }),
 	Type.Object({
 		...base,

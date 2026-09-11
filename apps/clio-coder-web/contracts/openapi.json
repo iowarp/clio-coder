@@ -6,6 +6,3472 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/workspaces": {
+			"get": {
+				"operationId": "workspaces",
+				"summary": "Recent workspaces",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"required": ["id", "path", "name", "openedAt"],
+										"properties": {
+											"id": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"path": {
+												"type": "string",
+												"maxLength": 4096
+											},
+											"name": {
+												"type": "string"
+											},
+											"openedAt": {
+												"type": "string"
+											}
+										},
+										"additionalProperties": false
+									}
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "openWorkspace",
+				"summary": "Open an existing workspace by absolute path",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["path"],
+								"properties": {
+									"path": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 4096
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "path", "name", "openedAt"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"path": {
+											"type": "string",
+											"maxLength": 4096
+										},
+										"name": {
+											"type": "string"
+										},
+										"openedAt": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}": {
+			"get": {
+				"operationId": "workspace",
+				"summary": "Canonical workspace",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "path", "name", "openedAt"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"path": {
+											"type": "string",
+											"maxLength": 4096
+										},
+										"name": {
+											"type": "string"
+										},
+										"openedAt": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/sessions": {
+			"get": {
+				"operationId": "sessionHistory",
+				"summary": "Durable session history without starting a child",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"required": ["id", "workspaceId", "createdAt", "endedAt", "model", "target"],
+										"properties": {
+											"id": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"workspaceId": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"createdAt": {
+												"type": "string"
+											},
+											"endedAt": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"model": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"target": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"name": {
+												"type": "string"
+											},
+											"firstMessagePreview": {
+												"type": "string"
+											},
+											"messageCount": {
+												"type": "integer"
+											},
+											"lastActivityAt": {
+												"type": "string"
+											}
+										},
+										"additionalProperties": false
+									}
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"operationId": "newSession",
+				"summary": "Start a supervised ACP session",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"workspaceId",
+										"state",
+										"revision",
+										"timeline",
+										"timelineTruncated",
+										"turns",
+										"recoveredOrphan",
+										"label"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"workspaceId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"state": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "starting"
+												},
+												{
+													"type": "string",
+													"const": "open"
+												},
+												{
+													"type": "string",
+													"const": "unknown"
+												},
+												{
+													"type": "string",
+													"const": "closed"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"revision": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"timeline": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"turnId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"sequence": {
+														"type": "integer"
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "text"
+															},
+															{
+																"type": "string",
+																"const": "thought"
+															},
+															{
+																"type": "string",
+																"const": "tool"
+															},
+															{
+																"type": "string",
+																"const": "notice"
+															}
+														]
+													},
+													"text": {
+														"type": "string"
+													},
+													"status": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"title": {
+														"type": "string"
+													},
+													"toolKind": {
+														"type": "string"
+													},
+													"toolCallId": {
+														"type": "string"
+													},
+													"locations": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["path"],
+															"properties": {
+																"path": {
+																	"type": "string"
+																},
+																"line": {
+																	"anyOf": [
+																		{
+																			"type": "integer"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"rawInput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"rawOutput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"provenance": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["version", "role", "agentId"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"role": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "orchestrator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "worker"
+																		}
+																	]
+																},
+																"agentId": {
+																	"type": "string"
+																},
+																"runId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"node": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 16
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"timelineTruncated": {
+											"type": "boolean"
+										},
+										"turns": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"prompt",
+													"origin",
+													"status",
+													"startedAt",
+													"finishedAt",
+													"stopReason",
+													"usage",
+													"problem"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"prompt": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "succeeded"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "cancelled"
+															}
+														]
+													},
+													"startedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"finishedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"stopReason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"usage": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+																"properties": {
+																	"input": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"output": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheRead": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheWrite": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"reasoning": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"problem": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["type", "title", "status", "detail", "code", "instance"],
+																"properties": {
+																	"type": {
+																		"type": "string"
+																	},
+																	"title": {
+																		"type": "string"
+																	},
+																	"status": {
+																		"type": "integer"
+																	},
+																	"detail": {
+																		"type": "string"
+																	},
+																	"code": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "validation"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unauthorized"
+																			},
+																			{
+																				"type": "string",
+																				"const": "not_found"
+																			},
+																			{
+																				"type": "string",
+																				"const": "conflict"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unsupported"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unavailable"
+																			},
+																			{
+																				"type": "string",
+																				"const": "upstream_acp"
+																			},
+																			{
+																				"type": "string",
+																				"const": "operation_failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "internal"
+																			}
+																		]
+																	},
+																	"instance": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"recoveredOrphan": {
+											"type": "boolean"
+										},
+										"label": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/load": {
+			"post": {
+				"operationId": "loadSession",
+				"summary": "Load a durable session and project its replay",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["workspaceId"],
+								"properties": {
+									"workspaceId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"workspaceId",
+										"state",
+										"revision",
+										"timeline",
+										"timelineTruncated",
+										"turns",
+										"recoveredOrphan",
+										"label"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"workspaceId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"state": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "starting"
+												},
+												{
+													"type": "string",
+													"const": "open"
+												},
+												{
+													"type": "string",
+													"const": "unknown"
+												},
+												{
+													"type": "string",
+													"const": "closed"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"revision": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"timeline": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"turnId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"sequence": {
+														"type": "integer"
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "text"
+															},
+															{
+																"type": "string",
+																"const": "thought"
+															},
+															{
+																"type": "string",
+																"const": "tool"
+															},
+															{
+																"type": "string",
+																"const": "notice"
+															}
+														]
+													},
+													"text": {
+														"type": "string"
+													},
+													"status": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"title": {
+														"type": "string"
+													},
+													"toolKind": {
+														"type": "string"
+													},
+													"toolCallId": {
+														"type": "string"
+													},
+													"locations": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["path"],
+															"properties": {
+																"path": {
+																	"type": "string"
+																},
+																"line": {
+																	"anyOf": [
+																		{
+																			"type": "integer"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"rawInput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"rawOutput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"provenance": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["version", "role", "agentId"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"role": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "orchestrator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "worker"
+																		}
+																	]
+																},
+																"agentId": {
+																	"type": "string"
+																},
+																"runId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"node": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 16
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"timelineTruncated": {
+											"type": "boolean"
+										},
+										"turns": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"prompt",
+													"origin",
+													"status",
+													"startedAt",
+													"finishedAt",
+													"stopReason",
+													"usage",
+													"problem"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"prompt": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "succeeded"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "cancelled"
+															}
+														]
+													},
+													"startedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"finishedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"stopReason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"usage": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+																"properties": {
+																	"input": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"output": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheRead": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheWrite": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"reasoning": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"problem": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["type", "title", "status", "detail", "code", "instance"],
+																"properties": {
+																	"type": {
+																		"type": "string"
+																	},
+																	"title": {
+																		"type": "string"
+																	},
+																	"status": {
+																		"type": "integer"
+																	},
+																	"detail": {
+																		"type": "string"
+																	},
+																	"code": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "validation"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unauthorized"
+																			},
+																			{
+																				"type": "string",
+																				"const": "not_found"
+																			},
+																			{
+																				"type": "string",
+																				"const": "conflict"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unsupported"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unavailable"
+																			},
+																			{
+																				"type": "string",
+																				"const": "upstream_acp"
+																			},
+																			{
+																				"type": "string",
+																				"const": "operation_failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "internal"
+																			}
+																		]
+																	},
+																	"instance": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"recoveredOrphan": {
+											"type": "boolean"
+										},
+										"label": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions": {
+			"get": {
+				"operationId": "sessions",
+				"summary": "Sessions supervised or recovered by this server",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"required": [
+											"id",
+											"workspaceId",
+											"state",
+											"revision",
+											"timeline",
+											"timelineTruncated",
+											"turns",
+											"recoveredOrphan",
+											"label"
+										],
+										"properties": {
+											"id": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"workspaceId": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"state": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "starting"
+													},
+													{
+														"type": "string",
+														"const": "open"
+													},
+													{
+														"type": "string",
+														"const": "unknown"
+													},
+													{
+														"type": "string",
+														"const": "closed"
+													},
+													{
+														"type": "string",
+														"const": "failed"
+													}
+												]
+											},
+											"revision": {
+												"type": "integer",
+												"minimum": 0
+											},
+											"timeline": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+													"properties": {
+														"id": {
+															"type": "string"
+														},
+														"turnId": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+														},
+														"sequence": {
+															"type": "integer"
+														},
+														"kind": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "user"
+																},
+																{
+																	"type": "string",
+																	"const": "text"
+																},
+																{
+																	"type": "string",
+																	"const": "thought"
+																},
+																{
+																	"type": "string",
+																	"const": "tool"
+																},
+																{
+																	"type": "string",
+																	"const": "notice"
+																}
+															]
+														},
+														"text": {
+															"type": "string"
+														},
+														"status": {
+															"type": "string"
+														},
+														"origin": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "live"
+																},
+																{
+																	"type": "string",
+																	"const": "replay"
+																}
+															]
+														},
+														"title": {
+															"type": "string"
+														},
+														"toolKind": {
+															"type": "string"
+														},
+														"toolCallId": {
+															"type": "string"
+														},
+														"locations": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"required": ["path"],
+																"properties": {
+																	"path": {
+																		"type": "string"
+																	},
+																	"line": {
+																		"anyOf": [
+																			{
+																				"type": "integer"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"rawInput": {
+															"type": "object",
+															"patternProperties": {
+																"^.*$": {}
+															}
+														},
+														"rawOutput": {
+															"type": "object",
+															"patternProperties": {
+																"^.*$": {}
+															}
+														},
+														"provenance": {
+															"type": "array",
+															"items": {
+																"type": "object",
+																"required": ["version", "role", "agentId"],
+																"properties": {
+																	"version": {
+																		"type": "number",
+																		"const": 1
+																	},
+																	"role": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "orchestrator"
+																			},
+																			{
+																				"type": "string",
+																				"const": "worker"
+																			}
+																		]
+																	},
+																	"agentId": {
+																		"type": "string"
+																	},
+																	"runId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"node": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															},
+															"maxItems": 16
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"timelineTruncated": {
+												"type": "boolean"
+											},
+											"turns": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": [
+														"id",
+														"prompt",
+														"origin",
+														"status",
+														"startedAt",
+														"finishedAt",
+														"stopReason",
+														"usage",
+														"problem"
+													],
+													"properties": {
+														"id": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+														},
+														"prompt": {
+															"type": "string"
+														},
+														"origin": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "live"
+																},
+																{
+																	"type": "string",
+																	"const": "replay"
+																}
+															]
+														},
+														"status": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "running"
+																},
+																{
+																	"type": "string",
+																	"const": "succeeded"
+																},
+																{
+																	"type": "string",
+																	"const": "failed"
+																},
+																{
+																	"type": "string",
+																	"const": "cancelled"
+																}
+															]
+														},
+														"startedAt": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"finishedAt": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"stopReason": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"usage": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+																	"properties": {
+																		"input": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"output": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"cacheRead": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"cacheWrite": {
+																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"reasoning": {
+																			"type": "integer",
+																			"minimum": 0
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"problem": {
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["type", "title", "status", "detail", "code", "instance"],
+																	"properties": {
+																		"type": {
+																			"type": "string"
+																		},
+																		"title": {
+																			"type": "string"
+																		},
+																		"status": {
+																			"type": "integer"
+																		},
+																		"detail": {
+																			"type": "string"
+																		},
+																		"code": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "validation"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unauthorized"
+																				},
+																				{
+																					"type": "string",
+																					"const": "not_found"
+																				},
+																				{
+																					"type": "string",
+																					"const": "conflict"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unsupported"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unavailable"
+																				},
+																				{
+																					"type": "string",
+																					"const": "upstream_acp"
+																				},
+																				{
+																					"type": "string",
+																					"const": "operation_failed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "internal"
+																				}
+																			]
+																		},
+																		"instance": {
+																			"type": "string"
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"recoveredOrphan": {
+												"type": "boolean"
+											},
+											"label": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											}
+										},
+										"additionalProperties": false
+									}
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}": {
+			"get": {
+				"operationId": "session",
+				"summary": "Session projection snapshot",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"workspaceId",
+										"state",
+										"revision",
+										"timeline",
+										"timelineTruncated",
+										"turns",
+										"recoveredOrphan",
+										"label"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"workspaceId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"state": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "starting"
+												},
+												{
+													"type": "string",
+													"const": "open"
+												},
+												{
+													"type": "string",
+													"const": "unknown"
+												},
+												{
+													"type": "string",
+													"const": "closed"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"revision": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"timeline": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"turnId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"sequence": {
+														"type": "integer"
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "text"
+															},
+															{
+																"type": "string",
+																"const": "thought"
+															},
+															{
+																"type": "string",
+																"const": "tool"
+															},
+															{
+																"type": "string",
+																"const": "notice"
+															}
+														]
+													},
+													"text": {
+														"type": "string"
+													},
+													"status": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"title": {
+														"type": "string"
+													},
+													"toolKind": {
+														"type": "string"
+													},
+													"toolCallId": {
+														"type": "string"
+													},
+													"locations": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["path"],
+															"properties": {
+																"path": {
+																	"type": "string"
+																},
+																"line": {
+																	"anyOf": [
+																		{
+																			"type": "integer"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"rawInput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"rawOutput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"provenance": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["version", "role", "agentId"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"role": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "orchestrator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "worker"
+																		}
+																	]
+																},
+																"agentId": {
+																	"type": "string"
+																},
+																"runId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"node": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 16
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"timelineTruncated": {
+											"type": "boolean"
+										},
+										"turns": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"prompt",
+													"origin",
+													"status",
+													"startedAt",
+													"finishedAt",
+													"stopReason",
+													"usage",
+													"problem"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"prompt": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "succeeded"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "cancelled"
+															}
+														]
+													},
+													"startedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"finishedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"stopReason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"usage": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+																"properties": {
+																	"input": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"output": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheRead": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheWrite": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"reasoning": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"problem": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["type", "title", "status", "detail", "code", "instance"],
+																"properties": {
+																	"type": {
+																		"type": "string"
+																	},
+																	"title": {
+																		"type": "string"
+																	},
+																	"status": {
+																		"type": "integer"
+																	},
+																	"detail": {
+																		"type": "string"
+																	},
+																	"code": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "validation"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unauthorized"
+																			},
+																			{
+																				"type": "string",
+																				"const": "not_found"
+																			},
+																			{
+																				"type": "string",
+																				"const": "conflict"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unsupported"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unavailable"
+																			},
+																			{
+																				"type": "string",
+																				"const": "upstream_acp"
+																			},
+																			{
+																				"type": "string",
+																				"const": "operation_failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "internal"
+																			}
+																		]
+																	},
+																	"instance": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"recoveredOrphan": {
+											"type": "boolean"
+										},
+										"label": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/turns": {
+			"post": {
+				"operationId": "turn",
+				"summary": "Start a streamed turn",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["text"],
+								"properties": {
+									"text": {
+										"type": "string",
+										"minLength": 1,
+										"maxLength": 32000,
+										"pattern": "\\S"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["turnId"],
+									"properties": {
+										"turnId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/sessions/{id}/close": {
+			"post": {
+				"operationId": "closeSession",
+				"summary": "Close the supervised session and its child",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"workspaceId",
+										"state",
+										"revision",
+										"timeline",
+										"timelineTruncated",
+										"turns",
+										"recoveredOrphan",
+										"label"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"workspaceId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"state": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "starting"
+												},
+												{
+													"type": "string",
+													"const": "open"
+												},
+												{
+													"type": "string",
+													"const": "unknown"
+												},
+												{
+													"type": "string",
+													"const": "closed"
+												},
+												{
+													"type": "string",
+													"const": "failed"
+												}
+											]
+										},
+										"revision": {
+											"type": "integer",
+											"minimum": 0
+										},
+										"timeline": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"turnId": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"sequence": {
+														"type": "integer"
+													},
+													"kind": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "text"
+															},
+															{
+																"type": "string",
+																"const": "thought"
+															},
+															{
+																"type": "string",
+																"const": "tool"
+															},
+															{
+																"type": "string",
+																"const": "notice"
+															}
+														]
+													},
+													"text": {
+														"type": "string"
+													},
+													"status": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"title": {
+														"type": "string"
+													},
+													"toolKind": {
+														"type": "string"
+													},
+													"toolCallId": {
+														"type": "string"
+													},
+													"locations": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["path"],
+															"properties": {
+																"path": {
+																	"type": "string"
+																},
+																"line": {
+																	"anyOf": [
+																		{
+																			"type": "integer"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"rawInput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"rawOutput": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"provenance": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["version", "role", "agentId"],
+															"properties": {
+																"version": {
+																	"type": "number",
+																	"const": 1
+																},
+																"role": {
+																	"anyOf": [
+																		{
+																			"type": "string",
+																			"const": "orchestrator"
+																		},
+																		{
+																			"type": "string",
+																			"const": "worker"
+																		}
+																	]
+																},
+																"agentId": {
+																	"type": "string"
+																},
+																"runId": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																},
+																"node": {
+																	"anyOf": [
+																		{
+																			"type": "string"
+																		},
+																		{
+																			"type": "null"
+																		}
+																	]
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 16
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"timelineTruncated": {
+											"type": "boolean"
+										},
+										"turns": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"prompt",
+													"origin",
+													"status",
+													"startedAt",
+													"finishedAt",
+													"stopReason",
+													"usage",
+													"problem"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"prompt": {
+														"type": "string"
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "live"
+															},
+															{
+																"type": "string",
+																"const": "replay"
+															}
+														]
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "running"
+															},
+															{
+																"type": "string",
+																"const": "succeeded"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "cancelled"
+															}
+														]
+													},
+													"startedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"finishedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"stopReason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"usage": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+																"properties": {
+																	"input": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"output": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheRead": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"cacheWrite": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"reasoning": {
+																		"type": "integer",
+																		"minimum": 0
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"problem": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["type", "title", "status", "detail", "code", "instance"],
+																"properties": {
+																	"type": {
+																		"type": "string"
+																	},
+																	"title": {
+																		"type": "string"
+																	},
+																	"status": {
+																		"type": "integer"
+																	},
+																	"detail": {
+																		"type": "string"
+																	},
+																	"code": {
+																		"anyOf": [
+																			{
+																				"type": "string",
+																				"const": "validation"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unauthorized"
+																			},
+																			{
+																				"type": "string",
+																				"const": "not_found"
+																			},
+																			{
+																				"type": "string",
+																				"const": "conflict"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unsupported"
+																			},
+																			{
+																				"type": "string",
+																				"const": "unavailable"
+																			},
+																			{
+																				"type": "string",
+																				"const": "upstream_acp"
+																			},
+																			{
+																				"type": "string",
+																				"const": "operation_failed"
+																			},
+																			{
+																				"type": "string",
+																				"const": "internal"
+																			}
+																		]
+																	},
+																	"instance": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"recoveredOrphan": {
+											"type": "boolean"
+										},
+										"label": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/traces/status": {
 			"get": {
 				"operationId": "traceStatus",
@@ -3918,6 +7384,1020 @@
 			},
 			"Event": {
 				"anyOf": [
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.started"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turn"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turn": {
+										"type": "object",
+										"required": ["id", "prompt", "origin", "status", "startedAt", "finishedAt", "stopReason", "usage", "problem"],
+										"properties": {
+											"id": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"prompt": {
+												"type": "string"
+											},
+											"origin": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "live"
+													},
+													{
+														"type": "string",
+														"const": "replay"
+													}
+												]
+											},
+											"status": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "running"
+													},
+													{
+														"type": "string",
+														"const": "succeeded"
+													},
+													{
+														"type": "string",
+														"const": "failed"
+													},
+													{
+														"type": "string",
+														"const": "cancelled"
+													}
+												]
+											},
+											"startedAt": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"finishedAt": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"stopReason": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"usage": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+														"properties": {
+															"input": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"output": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"cacheRead": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"cacheWrite": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"reasoning": {
+																"type": "integer",
+																"minimum": 0
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"problem": {
+												"anyOf": [
+													{
+														"type": "object",
+														"required": ["type", "title", "status", "detail", "code", "instance"],
+														"properties": {
+															"type": {
+																"type": "string"
+															},
+															"title": {
+																"type": "string"
+															},
+															"status": {
+																"type": "integer"
+															},
+															"detail": {
+																"type": "string"
+															},
+															"code": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "validation"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unauthorized"
+																	},
+																	{
+																		"type": "string",
+																		"const": "not_found"
+																	},
+																	{
+																		"type": "string",
+																		"const": "conflict"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unsupported"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unavailable"
+																	},
+																	{
+																		"type": "string",
+																		"const": "upstream_acp"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operation_failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "internal"
+																	}
+																]
+															},
+															"instance": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													{
+														"type": "null"
+													}
+												]
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.text"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "text", "origin"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"text": {
+										"type": "string"
+									},
+									"origin": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "live"
+											},
+											{
+												"type": "string",
+												"const": "replay"
+											}
+										]
+									},
+									"provenance": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["version", "role", "agentId"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"role": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "orchestrator"
+														},
+														{
+															"type": "string",
+															"const": "worker"
+														}
+													]
+												},
+												"agentId": {
+													"type": "string"
+												},
+												"runId": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"node": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										"maxItems": 16
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.thought"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "text", "origin"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"text": {
+										"type": "string"
+									},
+									"origin": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "live"
+											},
+											{
+												"type": "string",
+												"const": "replay"
+											}
+										]
+									},
+									"provenance": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["version", "role", "agentId"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"role": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "orchestrator"
+														},
+														{
+															"type": "string",
+															"const": "worker"
+														}
+													]
+												},
+												"agentId": {
+													"type": "string"
+												},
+												"runId": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"node": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										"maxItems": 16
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.user"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "text", "origin"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"text": {
+										"type": "string"
+									},
+									"origin": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "live"
+											},
+											{
+												"type": "string",
+												"const": "replay"
+											}
+										]
+									},
+									"provenance": {
+										"type": "array",
+										"items": {
+											"type": "object",
+											"required": ["version", "role", "agentId"],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"role": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "orchestrator"
+														},
+														{
+															"type": "string",
+															"const": "worker"
+														}
+													]
+												},
+												"agentId": {
+													"type": "string"
+												},
+												"runId": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"node": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										"maxItems": 16
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.tool"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "item"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"item": {
+										"type": "object",
+										"required": ["id", "turnId", "sequence", "kind", "text", "status", "origin"],
+										"properties": {
+											"id": {
+												"type": "string"
+											},
+											"turnId": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"sequence": {
+												"type": "integer"
+											},
+											"kind": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "user"
+													},
+													{
+														"type": "string",
+														"const": "text"
+													},
+													{
+														"type": "string",
+														"const": "thought"
+													},
+													{
+														"type": "string",
+														"const": "tool"
+													},
+													{
+														"type": "string",
+														"const": "notice"
+													}
+												]
+											},
+											"text": {
+												"type": "string"
+											},
+											"status": {
+												"type": "string"
+											},
+											"origin": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "live"
+													},
+													{
+														"type": "string",
+														"const": "replay"
+													}
+												]
+											},
+											"title": {
+												"type": "string"
+											},
+											"toolKind": {
+												"type": "string"
+											},
+											"toolCallId": {
+												"type": "string"
+											},
+											"locations": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": ["path"],
+													"properties": {
+														"path": {
+															"type": "string"
+														},
+														"line": {
+															"anyOf": [
+																{
+																	"type": "integer"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"rawInput": {
+												"type": "object",
+												"patternProperties": {
+													"^.*$": {}
+												}
+											},
+											"rawOutput": {
+												"type": "object",
+												"patternProperties": {
+													"^.*$": {}
+												}
+											},
+											"provenance": {
+												"type": "array",
+												"items": {
+													"type": "object",
+													"required": ["version", "role", "agentId"],
+													"properties": {
+														"version": {
+															"type": "number",
+															"const": 1
+														},
+														"role": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "orchestrator"
+																},
+																{
+																	"type": "string",
+																	"const": "worker"
+																}
+															]
+														},
+														"agentId": {
+															"type": "string"
+														},
+														"runId": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														},
+														"node": {
+															"anyOf": [
+																{
+																	"type": "string"
+																},
+																{
+																	"type": "null"
+																}
+															]
+														}
+													},
+													"additionalProperties": false
+												},
+												"maxItems": 16
+											}
+										},
+										"additionalProperties": false
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "turn.finished"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "stopReason", "usage", "problem", "finishedAt"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"stopReason": {
+										"type": "string"
+									},
+									"usage": {
+										"anyOf": [
+											{
+												"type": "object",
+												"required": ["input", "output", "cacheRead", "cacheWrite", "reasoning"],
+												"properties": {
+													"input": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"output": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"cacheRead": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"cacheWrite": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"reasoning": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"problem": {
+										"anyOf": [
+											{
+												"type": "object",
+												"required": ["type", "title", "status", "detail", "code", "instance"],
+												"properties": {
+													"type": {
+														"type": "string"
+													},
+													"title": {
+														"type": "string"
+													},
+													"status": {
+														"type": "integer"
+													},
+													"detail": {
+														"type": "string"
+													},
+													"code": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "validation"
+															},
+															{
+																"type": "string",
+																"const": "unauthorized"
+															},
+															{
+																"type": "string",
+																"const": "not_found"
+															},
+															{
+																"type": "string",
+																"const": "conflict"
+															},
+															{
+																"type": "string",
+																"const": "unsupported"
+															},
+															{
+																"type": "string",
+																"const": "unavailable"
+															},
+															{
+																"type": "string",
+																"const": "upstream_acp"
+															},
+															{
+																"type": "string",
+																"const": "operation_failed"
+															},
+															{
+																"type": "string",
+																"const": "internal"
+															}
+														]
+													},
+													"instance": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "null"
+											}
+										]
+									},
+									"finishedAt": {
+										"anyOf": [
+											{
+												"type": "string"
+											},
+											{
+												"type": "null"
+											}
+										]
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "permission.rejected"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "turnId", "reason"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"turnId": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"reason": {
+										"type": "string",
+										"const": "no-ui"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "session.changed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "state", "recoveredOrphan"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"state": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "starting"
+											},
+											{
+												"type": "string",
+												"const": "open"
+											},
+											{
+												"type": "string",
+												"const": "unknown"
+											},
+											{
+												"type": "string",
+												"const": "closed"
+											},
+											{
+												"type": "string",
+												"const": "failed"
+											}
+										]
+									},
+									"recoveredOrphan": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					},
 					{
 						"type": "object",
 						"required": ["v", "epoch", "seq", "at", "type", "payload"],

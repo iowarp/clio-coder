@@ -21,9 +21,14 @@ const adapters = new Set([
 	"src/core/xdg.ts",
 	"src/domains/observability/trace-store.ts",
 	"src/domains/observability/evidence-index.ts",
+	"src/domains/session/history.ts",
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
-const testModules = new Set(["src/domains/toolchain/index.ts", "src/domains/observability/trace-store.ts"]);
+const testModules = new Set([
+	"src/domains/toolchain/index.ts",
+	"src/domains/observability/trace-store.ts",
+	"tests/harness/openai-compat-fixture.ts",
+]);
 function files(directory: string): string[] {
 	return readdirSync(directory, { withFileTypes: true }).flatMap((entry) =>
 		entry.name === "node_modules" || entry.name === "dist"
@@ -56,6 +61,14 @@ function violations(file: string, source: string): string[] {
 		const target = resolve(dirname(file), specifier).replace(/\.js$/, ".ts");
 		const localTarget = relative(app, target),
 			rootTarget = relative(root, target);
+		if (
+			production &&
+			localTarget === "server/clio/http-shims.ts" &&
+			name !== "server/process-policy.ts" &&
+			!typeOnly &&
+			names.some((symbol) => symbol === "createStdioTransport" || symbol === "*")
+		)
+			errors.push("ACP process creation outside chokepoint");
 		if (rootTarget.startsWith("src/") || rootTarget.startsWith("tests/")) {
 			if (!existsSync(target)) errors.push(`root target does not exist: ${rootTarget}`);
 			if (name === "server/clio/http-shims.ts") {
@@ -130,6 +143,7 @@ test("boundary checker rejects representative bypasses", () => {
 		'export * from "../clio/adapters/toolchain.js";',
 		"const module = await import(path);",
 		'import cp from "child_process";',
+		'import { createStdioTransport as spawnAcp } from "../clio/http-shims.js";',
 	])
 		assert.ok(violations(resolve(app, "server/http/escape.ts"), source).length > 0, source);
 });

@@ -381,7 +381,11 @@ footer {
 	}
 	nav {
 		display: flex;
+		flex-wrap: wrap;
 		margin: 0;
+	}
+	nav a span {
+		display: none;
 	}
 	nav a {
 		gap: 25px;
@@ -686,4 +690,119 @@ select:focus-visible {
 	.trace-facts {
 		gap: 6px 12px;
 	}
+}
+
+/* Workspace and conversation */
+.workspace-open {
+	display: flex;
+	gap: 15px;
+	margin: 32px 0 48px;
+	align-items: end;
+	flex-wrap: wrap;
+}
+.workspace-open label {
+	display: grid;
+	flex: 1;
+	gap: 9px;
+	min-width: 180px;
+	font-size: 13px;
+}
+.workspace-path {
+	overflow-wrap: anywhere;
+	color: var(--muted);
+}
+.conversation .page-heading {
+	gap: 15px;
+	flex-wrap: wrap;
+}
+.conversation h1 {
+	font-size: 42px;
+}
+.session-status {
+	font-size: 13px;
+	color: var(--muted);
+	border-bottom: 1px solid var(--line);
+	padding-bottom: 20px;
+}
+.chat-timeline {
+	display: grid;
+	gap: 22px;
+	margin: 30px 0;
+}
+.chat-message {
+	border-left: 2px solid #b4c39a;
+	padding: 8px 20px;
+	min-width: 0;
+}
+.chat-message.user {
+	background: #e9ecdf;
+	border: 0;
+	border-radius: 8px;
+	padding: 20px;
+}
+.chat-message.tool {
+	background: #eeeee5;
+	border-color: #b89b6c;
+}
+.chat-message.notice {
+	border-color: #b89b6c;
+	font-size: 13px;
+}
+.chat-message-label {
+	display: flex;
+	gap: 12px;
+	align-items: baseline;
+	flex-wrap: wrap;
+	font-size: 13px;
+}
+.chat-message-label span,
+.chat-usage {
+	color: var(--muted);
+	font-size: 11px;
+	overflow-wrap: anywhere;
+}
+.chat-message p,
+.chat-thought p {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: 1.75;
+}
+.chat-thought {
+	color: var(--muted);
+	font-size: 13px;
+	padding: 10px 20px;
+}
+.chat-thought summary {
+	cursor: pointer;
+}
+.chat-empty {
+	font-family: Georgia, serif;
+	font-size: 27px;
+	color: var(--muted);
+	padding: 50px 0;
+}
+.session-composer {
+	margin-top: 30px;
+	display: grid;
+	gap: 12px;
+}
+.session-composer label {
+	font-size: 13px;
+}
+.session-composer textarea {
+	width: 100%;
+	resize: vertical;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	padding: 16px;
+	font: inherit;
+	color: inherit;
+	background: #fffef9;
+}
+.session-composer button {
+	justify-self: end;
+}
+textarea:focus-visible {
+	outline: 3px solid #b28029;
+	outline-offset: 2px;
 }

@@ -12,7 +12,8 @@
 		"lint": "biome check .",
 		"test": "node --import tsx --import ./tests/harness/no-network.ts --test tests/*.test.ts",
 		"openapi": "node --import tsx scripts/openapi.ts && biome format --write contracts/openapi.json",
-		"verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build"
+		"verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build",
+		"test:acp-real": "node --import tsx --test tests/real/acp.test.ts"
 	},
 	"dependencies": {
 		"@hono/node-server": "2.1.1",

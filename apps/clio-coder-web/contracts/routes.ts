@@ -3,6 +3,7 @@ import { Empty, Id } from "./common.js";
 import { EventCursor } from "./events.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
+import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
@@ -52,6 +53,84 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	workspaces: defineRoute({
+		...get,
+		path: "/api/workspaces",
+		response: Type.Array(Workspace),
+		summary: "Recent workspaces",
+	}),
+	openWorkspace: defineRoute({
+		...post,
+		status: 200,
+		params: Empty,
+		path: "/api/workspaces",
+		body: Type.Object({ path: Type.String({ minLength: 1, maxLength: 4096 }) }, { additionalProperties: false }),
+		response: Workspace,
+		summary: "Open an existing workspace by absolute path",
+	}),
+	workspace: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/workspaces/:id",
+		response: Workspace,
+		summary: "Canonical workspace",
+	}),
+	sessionHistory: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/workspaces/:id/sessions",
+		response: Type.Array(SessionSummary),
+		summary: "Durable session history without starting a child",
+	}),
+	newSession: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		path: "/api/workspaces/:id/sessions",
+		response: SessionSnapshot,
+		summary: "Start a supervised ACP session",
+	}),
+	loadSession: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		path: "/api/sessions/:id/load",
+		body: Type.Object({ workspaceId: Id }, { additionalProperties: false }),
+		response: SessionSnapshot,
+		summary: "Load a durable session and project its replay",
+	}),
+	sessions: defineRoute({
+		...get,
+		path: "/api/sessions",
+		response: Type.Array(SessionSnapshot),
+		summary: "Sessions supervised or recovered by this server",
+	}),
+	session: defineRoute({
+		...get,
+		params: operationParams,
+		path: "/api/sessions/:id",
+		response: SessionSnapshot,
+		summary: "Session projection snapshot",
+	}),
+	turn: defineRoute({
+		...post,
+		params: operationParams,
+		path: "/api/sessions/:id/turns",
+		body: Type.Object(
+			{ text: Type.String({ minLength: 1, maxLength: 32000, pattern: "\\S" }) },
+			{ additionalProperties: false },
+		),
+		response: Type.Object({ turnId: Id }, { additionalProperties: false }),
+		summary: "Start a streamed turn",
+	}),
+	closeSession: defineRoute({
+		...post,
+		status: 200,
+		params: operationParams,
+		path: "/api/sessions/:id/close",
+		response: SessionSnapshot,
+		summary: "Close the supervised session and its child",
+	}),
 	traceStatus: defineRoute({
 		...get,
 		path: "/api/traces/status",

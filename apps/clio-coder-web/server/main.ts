@@ -6,11 +6,16 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { serve } from "@hono/node-server";
+import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
+import { resolveClioDirs } from "./clio/http-shims.js";
 import { EventHub } from "./services/event-hub.js";
 import { OperationRegistry } from "./services/operations.js";
+import { SessionService } from "./services/sessions.js";
 import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
+import { WorkspaceService } from "./services/workspaces.js";
+import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
 export async function main() {
@@ -38,6 +43,17 @@ export async function main() {
 		ops = new WorkerHost("ops", settings, env);
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
+	const files = new AppFiles(scratch ? join(scratch, "state") : resolveClioDirs().state);
+	const workspaces = new WorkspaceService(files),
+		supervisor = new Supervisor(workspaces, files, hub, env);
+	try {
+		await supervisor.reconcile();
+	} catch (error) {
+		await supervisor.shutdown();
+		await Promise.all([reads.close(), ops.close()]);
+		throw error;
+	}
+	const sessions = new SessionService(supervisor, workspaces, reads);
 	const token = randomBytes(32).toString("base64url");
 	let origin = `http://127.0.0.1:${port}`;
 	const app = createApp({
@@ -47,6 +63,7 @@ export async function main() {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
+		sessions,
 		clientDir,
 	});
 	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
@@ -60,6 +77,7 @@ export async function main() {
 		closing = true;
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
+		await supervisor.shutdown();
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 	};
