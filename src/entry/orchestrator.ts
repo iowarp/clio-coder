@@ -1838,8 +1838,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// The config bundle publishes saved values on reload; session-scoped
 	// overrides must win, so re-derive every process-local projection from the
 	// effective session view after it.
-	const unsubscribeSettingsProjectionSync = bus.on(BusChannels.ConfigHotReload, () => bumpSessionState());
-	termination.onDrain(() => unsubscribeSettingsProjectionSync());
+	const unsubscribeSettingsProjectionSync = [BusChannels.ConfigHotReload, BusChannels.ConfigNextTurn].map((channel) =>
+		bus.on(channel, () => bumpSessionState()),
+	);
+	termination.onDrain(() => {
+		for (const unsubscribe of unsubscribeSettingsProjectionSync) unsubscribe();
+	});
 	const getTaskMemorySeedOffer = (): { source: string; count: number } | null => {
 		return taskMemoryHandoffSeedOffer(process.cwd(), getCurrentSettings().context.memory.enabled);
 	};
