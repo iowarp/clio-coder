@@ -381,9 +381,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		);
 	};
 
+	// A target id/model names the selection, not its current URL, auth, pricing
+	// or cache policy. Keep the constructed descriptor identity across calls.
+	let runtimeTargetSettings: string | null = null;
 	const ensureRuntime = (): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
+		const targetSettings = JSON.stringify(target.target);
+		const sameTargetSettings = runtimeTargetSettings === targetSettings;
 		// Preflight and the wire budget share the session's effective settings,
 		// including overrides that never reach the saved providers snapshot.
 		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
@@ -398,6 +403,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.runtime &&
 			state.runtime.targetId === target.target.id &&
 			state.runtime.runtimeId === target.runtime.id &&
+			sameTargetSettings &&
 			state.runtime.wireModelId === target.wireModelId
 		) {
 			// Same target+runtime+model. Settings may still have moved
@@ -431,6 +437,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			state.runtime &&
 			state.runtime.targetId === target.target.id &&
 			state.runtime.runtimeId === target.runtime.id &&
+			sameTargetSettings &&
 			state.runtime.wireModelId !== target.wireModelId
 		) {
 			const nextModel = synthesizeModel(target);
@@ -917,6 +924,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		});
 
 		state.runtime = localRuntime;
+		runtimeTargetSettings = targetSettings;
 		// Append a modelChange marker only when this rebuild replaces a prior
 		// runtime, which is the cross-target swap case (mid-session change of
 		// target or runtime id). On the initial build, the session header's
