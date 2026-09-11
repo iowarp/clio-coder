@@ -1,3 +1,4 @@
+import { lstatSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { resolvePackageRoot } from "../core/package-root.js";
@@ -39,4 +40,38 @@ export async function runWebCommand(args: string[]): Promise<number> {
 		printError(error instanceof Error ? error.message : "Could not start the web application.");
 		return 1;
 	}
+}
+
+/** Separate packaged entry; inspection never starts a listener or opens a browser. */
+export async function prepareWebUninstall(options: { stateDir: string; desktopPrefix: string }): Promise<{
+	items: Array<{ label: string; path: string }>;
+	remove(): Promise<void>;
+}> {
+	// Most CLI-only installs have no web lifecycle files. Keep that path lazy,
+	// including checkouts whose optional web bundle has not been built yet.
+	const paths = [
+		join(options.stateDir, "web/background"),
+		join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop"),
+		join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop.owner.json"),
+	];
+	const present = paths.some((path) => {
+		try {
+			lstatSync(path);
+			return true;
+		} catch (error) {
+			if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return false;
+			throw error;
+		}
+	});
+	if (!present)
+		return {
+			items: [],
+			remove: async () => {
+				if ((await prepareWebUninstall(options)).items.length)
+					throw new Error("A web installation appeared during confirmation; run uninstall again.");
+			},
+		};
+	const packageRoot = resolvePackageRoot();
+	const server = await import(pathToFileURL(join(packageRoot, "dist/web/server.js")).href);
+	return server.prepareWebUninstall({ ...options, packageRoot });
 }

@@ -343,7 +343,14 @@ leaves it enabled for the next login. `uninstall` disables and stops it, removes
 only its verified configuration/unit/desktop files, and preserves Clio projects,
 conversations and unrelated files. Remove the browser’s installed icon using its
 own uninstall command. Modified or unowned installation files are preserved with
-an explicit error. The on-demand and background launchers use the same native
+an explicit error. The root `clio-coder uninstall` command previews the same owned
+service and desktop entry and removes them before deleting Clio state; a failed
+stop or ownership check aborts the state purge. The default state directory and
+default desktop entry are discovery points, including a custom service directory
+referenced by that desktop entry. Fully custom installations outside both locations
+must use `web background uninstall --directory <path>` or `web launcher uninstall
+--prefix <path>` before root removal. Browser-installed PWAs remain managed by the
+browser. The on-demand and background launchers use the same native
 entry; uninstall the owned old launch mode before installing the other one.
 The source setup must be reinstalled if its checkout or Node installation moves.
 Packaged installation uses the emitted Node entry with no TypeScript loader.

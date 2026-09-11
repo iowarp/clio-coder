@@ -432,7 +432,10 @@ For source installs, update your checkout and rerun `pnpm run install:local`.
 To remove the npm package, use `npm uninstall -g @iowarp/clio-coder`.
 Removing the package preserves Clio's user data. For a deliberate data purge,
 preview `clio-coder uninstall --dry-run`; `uninstall --remove-binary` also
-removes a local source launcher. Per-project files are preserved.
+removes a local source launcher. It stops and disables the owned web background service
+before deleting its state and removes its desktop entry. Ownership conflicts or a
+failed service stop preserve Clio state and report the problem. Per-project files
+are preserved.
 
 `clio-coder reset --help` lists selective reset options. Use `--dry-run` before
 a reset. The [lifecycle guide](docs/guide/installation-and-lifecycle.md) explains

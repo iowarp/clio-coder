@@ -185,6 +185,17 @@ export async function uninstallBackground(directory: string, control: Control = 
 	return { status: "absent", directory };
 }
 
+/** Verify before root uninstall removes the state needed to stop this service. */
+export async function backgroundRemoval(directory: string, packageRoot: string, control: Control = controlService) {
+	const state = await owned(directory);
+	if (state.status === "absent") return null;
+	if ((await realpath(state.config.packageRoot)) !== (await realpath(packageRoot)))
+		throw new Error("Background service belongs to another installation; uninstall stopped before removing Clio state.");
+	await serviceState(state.files, control);
+	await desktopOwned(state.config, directory);
+	return { path: directory, remove: () => uninstallBackground(directory, control) };
+}
+
 export async function background(args: string[], launch: LaunchPaths) {
 	if (process.platform !== "linux")
 		throw new Error("Background setup currently requires Linux with a systemd user session.");

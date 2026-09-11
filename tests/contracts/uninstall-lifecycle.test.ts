@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
+import { runWebCommand } from "../../src/cli/web.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
@@ -12,6 +13,30 @@ const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");
 
 describe("contracts/uninstall-lifecycle", () => {
+	it("previews and removes the packaged web desktop entry before deleting state", {
+		skip: process.platform !== "linux",
+	}, async () => {
+		const temp = home();
+		try {
+			const prefix = join(temp.root, ".local/share");
+			const entry = join(prefix, "applications/io.iowarp.ClioCoder.desktop");
+			strictEqual((await runInHome(temp, () => runWebCommand(["launcher", "install", "--prefix", prefix]))).code, 0);
+			const preview = await runInHome(temp, () => runUninstallCommand(["--dry-run"]));
+			strictEqual(preview.code, 0);
+			match(preview.stdout, /Desktop launcher/);
+			ok(existsSync(entry));
+			const real = await runInHome(temp, () => runUninstallCommand(["--force", "--keep-config", "--keep-data"]));
+			strictEqual(real.code, 0);
+			ok(!existsSync(entry));
+			ok(!existsSync(`${entry}.owner.json`));
+			ok(!existsSync(temp.stateDir));
+			ok(existsSync(temp.configDir));
+			ok(existsSync(temp.dataDir));
+		} finally {
+			temp.cleanup();
+		}
+	});
+
 	it("inventories the four roots with sizes, and lists no child of a root it deletes whole", async () => {
 		const temp = home();
 		try {
