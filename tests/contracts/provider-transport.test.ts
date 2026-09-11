@@ -3,15 +3,18 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
 
-import type { ClioSettings } from "../../src/core/config.js";
+import { type ClioSettings, readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
+import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
 import { listProviderSupportEntries, type ProvidersContract } from "../../src/domains/providers/index.js";
-import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
+import { loadPluginRuntimes } from "../../src/domains/providers/plugins.js";
+import { createRuntimeRegistry, getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import antigravityCodeRuntime, {
 	parseAntigravityModelCatalogDetails,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
@@ -40,6 +43,8 @@ import type { OverlayState } from "../../src/interactive/overlay-key-routing.js"
 import { createOverlayModelSelectors } from "../../src/interactive/overlay-model-selectors.js";
 import type { OpenModelScopeOverlayDeps } from "../../src/interactive/overlays/model-scope.js";
 import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import { resolveWorkerRuntime } from "../../src/worker/runtime-registry.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -489,6 +494,37 @@ describe("provider transport boundary", () => {
 		const ctx = { credentialsPresent: new Set<string>(), httpTimeoutMs: 100, authToken: "target-test-key" };
 		strictEqual((await anthropicCompatRuntime.probe?.(target, ctx))?.ok, true);
 		deepStrictEqual(await anthropicCompatRuntime.probeModels?.(target, ctx), ["claude-model"]);
+	});
+
+	it("loads configured runtime packages for providers and worker rehydration", async () => {
+		const env = await isolateClioEnv("clio-coder-runtime-packages-");
+		const workerRegistry = getRuntimeRegistry();
+		const previous = workerRegistry.list();
+		try {
+			const packageFile = join(env.dir, "runtime-package.mjs");
+			writeFileSync(
+				packageFile,
+				`export const clioRuntimes = [{
+				id: "contract-package", displayName: "Contract Package", kind: "http",
+				apiFamily: "openai-completions", auth: "none", defaultCapabilities: { chat: true },
+				synthesizeModel: (_target, wireModelId) => ({ id: wireModelId, provider: "contract-package" })
+			}];\n`,
+			);
+			ensureClioState();
+			updateSettings((settings) => {
+				settings.integrations.runtimePlugins = [pathToFileURL(packageFile).href];
+			});
+			const registry = createRuntimeRegistry();
+			deepStrictEqual(await loadPluginRuntimes(registry, readSettings()), ["contract-package"]);
+			ok(registry.get("contract-package"));
+			const workerRuntime = await resolveWorkerRuntime("contract-package");
+			ok(workerRuntime);
+			strictEqual(workerRuntime.synthesizeModel({ id: "target", runtime: workerRuntime.id }, "model", null).id, "model");
+		} finally {
+			workerRegistry.clear();
+			for (const descriptor of previous) workerRegistry.register(descriptor);
+			env.restore();
+		}
 	});
 
 	it("loads a valid runtime plugin from a directory", async () => {

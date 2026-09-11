@@ -14,29 +14,19 @@
 
 import { join } from "node:path";
 
+import type { ClioSettings } from "../../core/config.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { activateExternalPluginApiBridge } from "../../engine/api-registry.js";
 import type { RuntimeRegistry } from "./registry.js";
 
-interface PluginSettings {
-	runtimePlugins?: unknown;
-}
-
-function extractPluginPackages(settings: unknown): string[] {
-	if (!settings || typeof settings !== "object") return [];
-	const raw = (settings as PluginSettings).runtimePlugins;
-	if (!Array.isArray(raw)) return [];
-	return raw.filter((entry): entry is string => typeof entry === "string" && entry.length > 0);
-}
-
 export async function loadPluginRuntimes(
 	registry: RuntimeRegistry,
-	settings?: unknown,
+	settings?: Pick<ClioSettings, "integrations">,
 ): Promise<ReadonlyArray<string>> {
 	const loaded: string[] = [];
 
 	const pluginDir = join(clioConfigDir(), "runtimes");
-	const packages = extractPluginPackages(settings);
+	const packages = settings?.integrations.runtimePlugins ?? [];
 	try {
 		const ids = await registry.loadFromDir(pluginDir, activateExternalPluginApiBridge);
 		loaded.push(...ids);
