@@ -257,6 +257,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	const statuses = new Map<string, TargetStatus>();
 	const reasoningCache = new Map<string, boolean>();
 	const unsubscribeConfigListeners: Array<() => void> = [];
+	let stopped = false;
 
 	function reasoningCacheKey(targetId: string, modelId: string): string {
 		return `${targetId}:${modelId}`;
@@ -266,6 +267,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const config = context.getContract<ConfigContract>("config");
 		if (config) return config.get();
 		return readSettings();
+	}
+
+	function currentProbeTarget(probed: TargetDescriptor): TargetDescriptor | undefined {
+		if (stopped) return undefined;
+		return readConfig().targets.find((target) => sameProbeIdentity(probed, target));
 	}
 
 	async function buildProbeContextForTarget(
@@ -323,6 +329,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		probe: ProbeResult | null,
 		previous?: TargetStatus,
 	): TargetStatus {
+		if (previous && !sameProbeIdentity(previous.target, target)) previous = undefined;
 		if (!desc) {
 			const out: TargetStatus = {
 				target,
@@ -385,8 +392,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		target: TargetDescriptor,
 		live: boolean,
 		options?: { reasoning?: boolean; signal?: AbortSignal },
-	): Promise<TargetStatus> {
+	): Promise<TargetStatus | null> {
 		options?.signal?.throwIfAborted();
+		if (stopped) return null;
+		// A probe owns the descriptor it started with across asynchronous I/O.
+		target = structuredClone(target);
 		const previous = statuses.get(target.id);
 		const desc = registry.get(target.runtime);
 		if (!desc) {
@@ -402,6 +412,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		const probeCtx = await buildProbeContextForTarget(target, desc, options?.signal);
 		options?.signal?.throwIfAborted();
+		if (!currentProbeTarget(target)) return null;
 		let probeResult: ProbeResult;
 		try {
 			probeResult = await desc.probe(target, probeCtx);
@@ -409,6 +420,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			probeResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
 		}
 		options?.signal?.throwIfAborted();
+		if (!currentProbeTarget(target)) return null;
 		if (probeResult.ok && typeof desc.probeModels === "function" && !probeResult.models) {
 			try {
 				const ids = await desc.probeModels(target, probeCtx);
@@ -418,6 +430,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			}
 		}
 		options?.signal?.throwIfAborted();
+		if (!currentProbeTarget(target)) return null;
 		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
 			const settings = readConfig();
 			const orchestratorTarget = settings.chat.target === target.id ? settings.chat.model : null;
@@ -426,6 +439,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				try {
 					const result = await desc.probeReasoning(target, candidateModelId, probeCtx);
 					options?.signal?.throwIfAborted();
+					if (!currentProbeTarget(target)) return null;
 					reasoningCache.set(reasoningCacheKey(target.id, candidateModelId), result.reasoning);
 					const capabilityModelId = probeResult.capabilityModelId ?? null;
 					if (capabilityModelId === null || capabilityModelId === candidateModelId) {
@@ -447,9 +461,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 			}
 		}
-		// A cancelled role preparation must not publish failed/stale target state.
+		// Cancellation, target edits/removal, and shutdown revoke publication.
 		options?.signal?.throwIfAborted();
-		const status = buildStatus(target, desc, probeResult, previous);
+		const current = currentProbeTarget(target);
+		if (!current) return null;
+		const status = buildStatus(current, desc, probeResult, previous);
 		statuses.set(target.id, status);
 		if (probeResult.ok && probeResult.models !== undefined) {
 			recordTargetModelSnapshot(
@@ -467,14 +483,18 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	}
 
 	async function probeReasoningForModelInternal(targetId: string, modelId: string): Promise<boolean | null> {
+		if (stopped) return null;
 		const settings = readConfig();
-		const target = settings.targets.find((ep) => ep.id === targetId);
-		if (!target) return null;
+		const configuredTarget = settings.targets.find((ep) => ep.id === targetId);
+		if (!configuredTarget) return null;
+		const target = structuredClone(configuredTarget);
 		const desc = registry.get(target.runtime);
 		if (!desc || typeof desc.probeReasoning !== "function") return null;
 		const probeCtx = await buildProbeContextForTarget(target, desc);
+		if (!currentProbeTarget(target)) return null;
 		try {
 			const result = await desc.probeReasoning(target, modelId, probeCtx);
+			if (!currentProbeTarget(target)) return null;
 			reasoningCache.set(reasoningCacheKey(targetId, modelId), result.reasoning);
 			return result.reasoning;
 		} catch {
@@ -508,6 +528,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	const extension: DomainExtension = {
 		async start() {
+			stopped = false;
 			ensurePiAiRegistered();
 			registerClioApiProviders();
 			registerClioOAuthProviders();
@@ -528,6 +549,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			}
 		},
 		async stop() {
+			stopped = true;
 			for (const unsubscribe of unsubscribeConfigListeners.splice(0)) unsubscribe();
 		},
 	};
