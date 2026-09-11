@@ -331,12 +331,26 @@ code {
 }
 footer {
 	display: flex;
+	flex-wrap: wrap;
+	gap: 16px;
 	justify-content: space-between;
 	border-top: 1px solid var(--line);
 	padding: 18px 42px;
 	font: 9px monospace;
 	color: #74816a;
 	letter-spacing: 1px;
+}
+.pwa-controls {
+	max-width: 38rem;
+	font: 14px / 1.6 var(--font-ui, sans-serif);
+	letter-spacing: normal;
+	color: var(--ink);
+}
+.pwa-controls summary {
+	cursor: pointer;
+}
+.pwa-controls p {
+	margin: 12px 0;
 }
 @media (max-width: 1050px) {
 	.workspace {

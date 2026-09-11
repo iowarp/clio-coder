@@ -1,9 +1,12 @@
 # Clio Coder web
 
-The checkout application serves a local toolchain inventory, pinned installation
-with streamed progress, vendored-tool removal, a trace explorer, documentation search, and workspace
-sessions backed by supervised Clio ACP children. The CLI, TUI, and ACP continue
-to run independently. The packaged `clio-coder web` command belongs to R1.
+The checkout application exposes Clio through a browser or installed local PWA.
+It includes toolchain management, sessions, traces, documentation, settings and
+routing inspection, target operations, fleet history, evidence, evals and usage,
+library discovery, interop and system health. These views use typed REST APIs
+and event streams backed by Clio's existing runtime seams and fixed CLI commands.
+The CLI, TUI, and ACP continue to run independently. The packaged `clio-coder web`
+command belongs to R1.
 
 From the repository root:
 
@@ -249,7 +252,8 @@ The HTTP process and reads worker deny ambient `fetch`. The ops worker captures
 one downloader before installing that guard and passes it only to the pinned
 toolchain adapter. The test lane replaces ambient fetch before startup, so even
 that capability cannot use a real network during tests. Boundary tests reject
-direct socket imports and process creation outside the declared module. These
+direct socket imports except the fixed, authenticated loopback readiness request,
+and process creation outside the declared module. These
 controls govern the app; canonical CLI/ACP children retain the runtime's target,
 provider, and tool networking. Node's permission model does not supply a network
 allowlist or a complete sandbox for these children and native modules.
@@ -278,12 +282,77 @@ exercises native application activation; a physical GNOME/KDE menu click was not
 performed on this Weston environment. Repeat the desktop check after R1 changes
 the launcher target to the installed command.
 
-**PWA deferred (E5).** After the desktop check passed, an isolated prototype used
-a fixed port, a token rewritten into the served page, a temporary manifest and
-icons, and Chrome's native PWA install/launch commands. Installation and the live
-launch succeeded. After closing the server, relaunch still created a browser
-target but the API connection was refused: the installed app cannot start Node.
-The prototype was confined to `/var/tmp/clio-web-verification/E5-pwa-*` and its
-private browser/XDG profile; it was uninstalled afterward. No manifest, service
-worker, token injection, or PWA installation prompt ships in the application.
-The desktop entry is the verified way to start the app without a terminal.
+The installable PWA uses an explicitly enabled **background service** on Linux
+with a running systemd user session. Set it up after building the checkout:
+
+```sh
+pnpm --filter @iowarp/clio-coder-web start background install --open
+pnpm --filter @iowarp/clio-coder-web start background status
+```
+
+The first command starts Clio, enables it for subsequent logins, installs its
+native application entry, and opens the authenticated browser. Choose **Install
+Clio Coder** in the page footer or your browser’s install command. The installed
+app uses the same interface and REST APIs as browser tabs. Closing a window leaves
+the background server available. Systemd restarts it after an unexpected failure.
+It runs during your user session; it does not enable lingering or a machine-wide
+service, and normal CLI, TUI and headless invocations remain independent.
+
+The default address is `http://127.0.0.1:4317`. Installation accepts `--port`,
+`--directory <absolute private directory>` and `--prefix <absolute XDG data directory>`.
+The default private directory is `<Clio state>/web/background`. Repeated installation
+preserves the existing origin and credential. A busy port fails explicitly;
+it never silently moves an installed app to another address. The configuration
+pins the four Clio folders, package root, Node/loader/entry paths and PATH.
+It does not copy provider credentials or other environment secrets. Configure
+provider credentials through Clio’s normal credential store; shell-only environment
+variables are not imported into the user service manager by this installer.
+
+The private configuration contains a random 256-bit token and requires owner-only
+permissions. Neither the systemd unit, journal startup message, status output,
+manifest nor public assets contains the token. Successful authentication to a
+background endpoint remembers the token in this browser profile’s origin-scoped
+storage, so new installed windows and a restarted browser can reconnect.
+**Forget this browser** clears that access in its open windows without stopping
+Clio or deleting work. Reopen the native Clio desktop entry to connect again.
+Use a trusted browser profile; clearing site data also forgets the connection.
+
+The service worker caches only a public recovery page, its stylesheet and script,
+and an icon. It never caches API responses, conversations or authentication,
+and never queues commands. When Clio is temporarily unavailable, reopening the
+installed app shows a calm reconnect screen that retries automatically. An app
+window cannot launch a stopped Node process; this was the limitation measured
+by the original E5 experiment and is why persistent availability is now supplied
+by the explicitly installed user service.
+
+```sh
+pnpm --filter @iowarp/clio-coder-web start background open
+pnpm --filter @iowarp/clio-coder-web start background stop
+pnpm --filter @iowarp/clio-coder-web start background start
+pnpm --filter @iowarp/clio-coder-web start background uninstall
+```
+
+`open` starts the owned service if needed and opens its authenticated URL. `stop`
+leaves it enabled for the next login. `uninstall` disables and stops it, removes
+only its verified configuration/unit/desktop files, and preserves Clio projects,
+conversations and unrelated files. Remove the browser’s installed icon using its
+own uninstall command. Modified or unowned installation files are preserved with
+an explicit error. The on-demand and background launchers use the same native
+entry; uninstall the owned old launch mode before installing the other one.
+The source setup must be reinstalled if its checkout or Node installation moves.
+Packaged installation and lifecycle checks belong to R1.
+
+PWA assets are exposed only in background mode; foreground launch retains its
+per-launch token and optional idle shutdown. Native background setup is currently
+Linux/systemd only. Chrome on Linux is the verified installation target; this
+slice does not claim macOS/Windows service installation or a remotely hosted,
+shared-user deployment.
+
+`pnpm --filter @iowarp/clio-coder-web test:pwa` is an explicit native acceptance
+lane, separate from deterministic `verify`. It requires a graphical Chrome and
+systemd user session, uses private temporary Clio/browser/XDG directories and a
+uniquely named service, then uninstalls both the service and PWA. `CHROME_PATH`
+selects the browser executable and `TMPDIR` selects the artifact directory.
+It checks manifest installability, standalone windows, persistent authentication,
+server crash/restart, offline recovery and its cache contents, browser restart,
+forgetting access across windows, and ownership-safe removal.

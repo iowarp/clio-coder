@@ -54,6 +54,7 @@ export function createApp(options: {
 	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
 	diagnostics?: boolean;
+	pwa?: boolean;
 }) {
 	const app = new Hono();
 	const { hub, operations, toolchain } = options;
@@ -72,6 +73,7 @@ export function createApp(options: {
 		app: APP_VERSION,
 		apiVersion: API_VERSION as 1,
 		epoch: hub.epoch,
+		pwa: options.pwa ?? false,
 	}));
 	register(app, hub, routes.openapi, () => openapi());
 	register(app, hub, routes.events, ({ query }, context) => events(context, hub, query.after));
@@ -112,6 +114,6 @@ export function createApp(options: {
 		throw new AppProblem("not_found", "API route was not found.");
 	});
 	app.notFound((context) => problemResponse(new AppProblem("not_found", "Route was not found."), context));
-	if (options.clientDir) staticClient(app, options.clientDir);
+	if (options.clientDir) staticClient(app, options.clientDir, options.pwa);
 	return app;
 }

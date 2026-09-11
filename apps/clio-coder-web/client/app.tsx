@@ -7,6 +7,7 @@ import { type Client, emptyInput } from "./api/client.js";
 import { subscribe } from "./api/events.js";
 import { MobileNavigation, Navigation, RouteFocus, ThemeToggle } from "./design/navigation.js";
 import { ProblemToasts } from "./design/problems.js";
+import { PwaControls } from "./design/pwa.js";
 
 export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
@@ -54,12 +55,18 @@ export function App({ client }: { client: Client }) {
 					{!client.token ? (
 						<div role="alert">
 							<h1>Open your launch link</h1>
-							<p>Use the full URL printed by the Clio Coder server to connect this tab.</p>
+							<p>
+								Open Clio Coder from your applications to connect this browser, or use the full launch URL printed by the
+								server.
+							</p>
 						</div>
 					) : meta.error ? (
 						<div role="alert">
 							<h1>Connection unavailable</h1>
 							<p>{meta.error.message}</p>
+							<button type="button" disabled={meta.isFetching} onClick={() => void meta.refetch()}>
+								Try again
+							</button>
 						</div>
 					) : meta.isPending ? (
 						<p>Connecting to your installation…</p>
@@ -72,6 +79,7 @@ export function App({ client }: { client: Client }) {
 			</div>
 			<footer>
 				<span>CLIO CODER / LOCAL WORKSPACE</span>
+				<PwaControls enabled={meta.data?.pwa ?? false} token={client.token} />
 				<span>{meta.data ? `v${meta.data.clio}` : "Starting"}</span>
 			</footer>
 			<ProblemToasts />

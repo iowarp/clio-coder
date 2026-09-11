@@ -141,3 +141,60 @@ export async function openBrowser(url: string, env: NodeJS.ProcessEnv = process.
 		});
 	});
 }
+
+export function serviceCommand(
+	action: "show" | "enable" | "start" | "stop" | "disable" | "reload",
+	unit: string,
+	unitFile: string,
+) {
+	if (!/^clio-coder-web-[a-f0-9]{12}\.service$/.test(unit) || !isAbsolute(unitFile) || !unitFile.endsWith(`/${unit}`))
+		throw new Error("Invalid Clio background service identity.");
+	if (action === "reload") return ["--user", "daemon-reload"];
+	if (action === "show")
+		return ["--user", "show", unit, "--property=FragmentPath,ActiveState,UnitFileState,MainPID,Result"];
+	if (action === "enable") return ["--user", "enable", "--now", "--", unitFile];
+	if (action === "disable") return ["--user", "disable", "--now", "--", unit];
+	return ["--user", action, "--", unit];
+}
+export async function controlService(
+	action: Parameters<typeof serviceCommand>[0],
+	unit: string,
+	unitFile: string,
+	env: NodeJS.ProcessEnv = process.env,
+) {
+	if (process.platform !== "linux")
+		throw new Error("Background setup currently requires Linux with a systemd user session.");
+	const child = spawn("systemctl", serviceCommand(action, unit, unitFile), {
+		env,
+		shell: false,
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	return new Promise<string>((resolve, reject) => {
+		const output: Buffer[] = [];
+		let bytes = 0,
+			exceeded = false;
+		const timer = setTimeout(() => {
+			exceeded = true;
+			child.kill("SIGKILL");
+		}, 20_000);
+		const collect = (chunk: Buffer, stdout: boolean) => {
+			bytes += chunk.length;
+			if (bytes > 65_536) {
+				exceeded = true;
+				child.kill("SIGKILL");
+			} else if (stdout) output.push(chunk);
+		};
+		child.stdout.on("data", (chunk: Buffer) => collect(chunk, true));
+		child.stderr.on("data", (chunk: Buffer) => collect(chunk, false));
+		child.once("error", () => {
+			clearTimeout(timer);
+			reject(new Error("systemctl is unavailable. Background setup requires a running Linux systemd user session."));
+		});
+		child.once("close", (code) => {
+			clearTimeout(timer);
+			if (code === 0 && !exceeded) resolve(Buffer.concat(output).toString("utf8"));
+			else
+				reject(new Error(`Background service ${action} failed. Check the user service manager and journal for ${unit}.`));
+		});
+	});
+}

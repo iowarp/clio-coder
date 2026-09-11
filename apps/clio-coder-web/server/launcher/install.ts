@@ -5,13 +5,13 @@ import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { desktopEntry, launcherId, launcherUnsupported } from "./desktop-entry.js";
+import { desktopEntry, type LaunchPaths, launcherId, launcherUnsupported } from "./desktop-entry.js";
 
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 const names = { entry: `${launcherId}.desktop`, manifest: `${launcherId}.desktop.owner.json` };
 const missing = (error: unknown) => (error as NodeJS.ErrnoException).code === "ENOENT";
 
-async function contents(path: string) {
+export async function contents(path: string) {
 	try {
 		const info = await lstat(path);
 		if (!info.isFile() || info.nlink !== 1 || info.size > 16_384 || (process.getuid && info.uid !== process.getuid()))
@@ -66,11 +66,12 @@ export async function launcherStatus(prefix: string, platform: NodeJS.Platform =
 		...files,
 	};
 }
-export async function installLauncher(prefix: string, paths: { node: string; loader: string; entry: string }) {
+export async function installLauncher(prefix: string, paths: LaunchPaths) {
 	const launch = {
 		node: await realpath(paths.node),
 		loader: await realpath(paths.loader),
 		entry: await realpath(paths.entry),
+		...(paths.background ? { background: await realpath(paths.background) } : {}),
 	};
 	const entry = desktopEntry(launch);
 	const state = await launcherStatus(prefix);

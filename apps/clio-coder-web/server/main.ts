@@ -8,6 +8,7 @@ import { serve } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
 import { resolveClioDirs } from "./clio/http-shims.js";
+import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
 import { openBrowser } from "./process-policy.js";
@@ -32,13 +33,20 @@ import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
 export async function main(args = process.argv.slice(2)) {
+	if (args[0] === "background") {
+		const { background } = await import("./launcher/background.js");
+		await background(args.slice(1));
+		return;
+	}
 	if (args[0] === "launcher") {
 		const { launcher } = await import("./launcher/install.js");
 		await launcher(args.slice(1));
 		return;
 	}
-	const values = serverOptions(args),
-		{ port } = values;
+	const values = serverOptions(args);
+	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
+	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
+	const port = persistent?.port ?? values.port;
 	restrictNetwork();
 	const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
 	if (!existsSync(join(clientDir, "index.html")))
@@ -72,7 +80,7 @@ export async function main(args = process.argv.slice(2)) {
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
 	const settingsService = new SettingsService(reads, workspaces);
-	const token = values.token ?? randomBytes(32).toString("base64url");
+	const token = persistent?.token ?? values.token ?? randomBytes(32).toString("base64url");
 	let log: Awaited<ReturnType<typeof lifecycleLog>>;
 	try {
 		log = await lifecycleLog(values.logFile);
@@ -99,11 +107,14 @@ export async function main(args = process.argv.slice(2)) {
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		clientDir,
+		pwa: !!persistent,
 	});
 	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
 		origin = `http://127.0.0.1:${info.port}`;
 		if (scratch) console.log(`[clio-coder:web] Fabricated tool fixture; isolated state: ${scratch}`);
-		console.log(`[clio-coder:web] ${origin}/#token=${token}`);
+		console.log(
+			persistent ? `[clio-coder:web] Background app ready at ${origin}.` : `[clio-coder:web] ${origin}/#token=${token}`,
+		);
 		void log.write(`Listening at ${origin}; idle exit ${values.idleMs ?? "disabled"}.`).catch(fail);
 		if (values.open)
 			void openBrowser(`${origin}/#token=${token}`).catch(() => {

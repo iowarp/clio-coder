@@ -14,7 +14,8 @@
 		"openapi": "node --import tsx scripts/openapi.ts && biome format --write contracts/openapi.json",
 		"verify": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build && pnpm run smoke:browser",
 		"test:acp-real": "node --import tsx --test tests/real/acp.test.ts",
-		"smoke:browser": "node --import tsx scripts/browser-smoke.ts"
+		"smoke:browser": "node --import tsx scripts/browser-smoke.ts",
+		"test:pwa": "node --import tsx --test tests/real/background-pwa.test.ts"
 	},
 	"dependencies": {
 		"@fontsource-variable/atkinson-hyperlegible-next": "5.3.0",

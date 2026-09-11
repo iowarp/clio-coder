@@ -81,7 +81,12 @@ function violations(file: string, source: string): string[] {
 	const production = !name.startsWith("tests/") && !name.startsWith("scripts/");
 	const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
 	const check = (specifier: string, names: string[], typeOnly = false) => {
-		if (production && /^(node:)?(http|https|http2|net|tls|dgram)$/.test(specifier) && !typeOnly)
+		if (
+			production &&
+			/^(node:)?(http|https|http2|net|tls|dgram)$/.test(specifier) &&
+			!typeOnly &&
+			!(name === "server/local-server.ts" && specifier === "node:http" && names.every((name) => name === "request"))
+		)
 			errors.push("direct socket access outside the pinned downloader and HTTP server dependency");
 		if (production && /^(node:)?child_process$/.test(specifier) && name !== "server/process-policy.ts")
 			errors.push("process creation outside chokepoint");

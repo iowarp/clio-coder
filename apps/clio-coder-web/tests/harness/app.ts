@@ -36,6 +36,7 @@ export async function harness(
 		permissionTimers?: PermissionTimers;
 		origin?: () => string;
 		clientDir?: string;
+		pwa?: boolean;
 	} = {},
 ) {
 	const home = await scratchHome();
@@ -81,6 +82,7 @@ export async function harness(
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,
+		pwa: options.pwa ?? false,
 		...(options.clientDir ? { clientDir: options.clientDir } : {}),
 	});
 	const request = (path: string, init: RequestInit = {}) =>

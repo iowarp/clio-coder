@@ -10,9 +10,18 @@ export function desktopArgument(value: string) {
 		throw new Error("Desktop entry paths cannot contain control characters.");
 	return `"${value.replace(/\\/g, "\\\\\\\\").replace(/["`$]/g, "\\\\$&").replace(/%/g, "%%")}"`;
 }
-export function desktopEntry(paths: { node: string; loader: string; entry: string }) {
+export type LaunchPaths = { node: string; loader: string; entry: string; background?: string };
+export function desktopEntry(paths: LaunchPaths) {
 	if (![paths.node, paths.loader, paths.entry].every(isAbsolute)) throw new Error("Launcher paths must be absolute.");
-	const argv = [paths.node, "--import", paths.loader, paths.entry, "--open", "--idle-exit", "60000"];
+	if (paths.background !== undefined && !isAbsolute(paths.background))
+		throw new Error("Background directory must be absolute.");
+	const argv = [
+		paths.node,
+		"--import",
+		paths.loader,
+		paths.entry,
+		...(paths.background ? ["background", "open", "--directory", paths.background] : ["--open", "--idle-exit", "60000"]),
+	];
 	return [
 		"[Desktop Entry]",
 		"Type=Application",

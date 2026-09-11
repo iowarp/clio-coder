@@ -1,0 +1,55 @@
+:root {
+	color-scheme: light dark;
+	font-family: system-ui, sans-serif;
+	color: #203e32;
+	background: #f4f2e9;
+}
+body {
+	margin: 0;
+	padding: 48px 24px;
+}
+main {
+	max-width: 560px;
+	margin: 8vh auto;
+}
+h1 {
+	font:
+		normal clamp(2.6rem, 8vw, 4rem) / 1.12 Georgia,
+		serif;
+	letter-spacing: -0.035em;
+}
+p {
+	font-size: 1rem;
+	line-height: 1.7;
+}
+.eyebrow {
+	text-transform: uppercase;
+	letter-spacing: 0.15em;
+	font-size: 0.8rem;
+}
+.note {
+	font-size: 0.85rem;
+}
+button {
+	font: inherit;
+	padding: 12px 20px;
+	border: 1px solid currentColor;
+	border-radius: 6px;
+	background: #203e32;
+	color: #f4f2e9;
+	cursor: pointer;
+}
+button:focus-visible {
+	outline: 3px solid #667d42;
+	outline-offset: 4px;
+}
+@media (prefers-color-scheme: dark) {
+	:root {
+		color: #e3e8d7;
+		background: #15221b;
+	}
+	button {
+		background: #d9e7aa;
+		color: #15221b;
+	}
+}

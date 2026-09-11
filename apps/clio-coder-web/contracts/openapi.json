@@ -18314,7 +18314,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["clio", "node", "platform", "piAgentCore", "piAi", "piTui", "app", "apiVersion", "epoch"],
+									"required": ["clio", "node", "platform", "piAgentCore", "piAi", "piTui", "app", "apiVersion", "epoch", "pwa"],
 									"properties": {
 										"clio": {
 											"type": "string"
@@ -18364,6 +18364,9 @@
 										},
 										"epoch": {
 											"type": "string"
+										},
+										"pwa": {
+											"type": "boolean"
 										}
 									},
 									"additionalProperties": false
