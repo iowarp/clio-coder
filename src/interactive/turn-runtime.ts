@@ -782,6 +782,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 							output: summary.output,
 							cacheRead: summary.cacheRead,
 							cacheWrite: summary.cacheWrite,
+							...(summary.cacheWrite1h === undefined ? {} : { cacheWrite1h: summary.cacheWrite1h }),
 							reasoningTokens: summary.reasoning,
 							totalTokens: summary.tokens,
 							apiCalls: summary.apiCalls,

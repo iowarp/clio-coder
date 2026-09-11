@@ -35,6 +35,7 @@ export interface SessionUsageSink {
 			output: number;
 			cacheRead: number;
 			cacheWrite: number;
+			cacheWrite1h?: number;
 			reasoningTokens: number;
 			totalTokens: number;
 			apiCalls?: number;
@@ -86,6 +87,7 @@ export function reseedSessionUsageFromLedger(
 				output: call.output,
 				cacheRead: call.cacheRead,
 				cacheWrite: call.cacheWrite,
+				...(call.cacheWrite1h === undefined ? {} : { cacheWrite1h: call.cacheWrite1h }),
 				reasoningTokens: call.reasoningTokens,
 				totalTokens: call.totalTokens,
 				apiCalls: call.apiCalls ?? 1,

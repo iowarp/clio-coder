@@ -202,6 +202,7 @@ export interface TraceSpendInput {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
+	cacheWrite1hTokens?: number;
 	reasoningTokens: number;
 	totalTokens: number;
 	inputCostUsd?: number | null;
@@ -234,6 +235,7 @@ export interface SessionTurnUsage {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
+	cacheWrite1hTokens?: number;
 	reasoningTokens: number;
 	totalTokens: number;
 	costUsd?: number | null;
@@ -363,6 +365,7 @@ export interface TracePhaseRow {
 	output_tokens: number | null;
 	cache_read_tokens: number | null;
 	cache_write_tokens: number | null;
+	cache_write_1h_tokens?: number | null;
 	reasoning_tokens: number | null;
 	total_tokens: number | null;
 	input_cost_usd: number | null;
@@ -443,7 +446,7 @@ CREATE TABLE phases (
   error TEXT,
   started_at TEXT,
   ended_at TEXT,
-  input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER,
+  input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, cache_write_1h_tokens INTEGER,
   reasoning_tokens INTEGER, total_tokens INTEGER,
   input_cost_usd REAL, output_cost_usd REAL, cache_read_cost_usd REAL, cache_write_cost_usd REAL,
   total_cost_usd REAL,
@@ -544,6 +547,13 @@ function ensureRunSourceColumn(db: DatabaseSync): void {
 	db.prepare("UPDATE runs SET source = 'session' WHERE assignment_id = ?").run(SESSION_TRACE_ASSIGNMENT_ID);
 }
 
+/** Missing lifetime detail stays NULL in older traces; it cannot be reconstructed. */
+function ensureCacheWriteLifetimeColumn(db: DatabaseSync): void {
+	const columns = db.prepare("PRAGMA table_info(phases)").all() as { name: string }[];
+	if (!columns.some((column) => column.name === "cache_write_1h_tokens"))
+		db.exec("ALTER TABLE phases ADD COLUMN cache_write_1h_tokens INTEGER;");
+}
+
 /**
  * Finalize `running` rows whose recorded owner is on this host and provably
  * dead (pid gone, or alive under a different birth token, i.e. reused). Rows
@@ -591,6 +601,7 @@ export class TraceStore {
 		this.transaction(() => {
 			ensureProcessOwnerColumns(this.db);
 			ensureRunSourceColumn(this.db);
+			ensureCacheWriteLifetimeColumn(this.db);
 			reconcileAbandonedRuns(this.db);
 		});
 	}
@@ -799,7 +810,7 @@ export class TraceStore {
 	recordSpend(input: TraceSpendInput): void {
 		this.transaction(() => {
 			this.db
-				.prepare(`UPDATE phases SET input_tokens=?, output_tokens=?, cache_read_tokens=?, cache_write_tokens=?,
+				.prepare(`UPDATE phases SET input_tokens=?, output_tokens=?, cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?,
           reasoning_tokens=?, total_tokens=?, input_cost_usd=?, output_cost_usd=?, cache_read_cost_usd=?,
           cache_write_cost_usd=?, total_cost_usd=?, context_tokens=?, context_window=? WHERE phase_id=? AND run_id=?`)
 				.run(
@@ -807,6 +818,7 @@ export class TraceStore {
 					input.outputTokens,
 					input.cacheReadTokens,
 					input.cacheWriteTokens,
+					input.cacheWrite1hTokens ?? null,
 					input.reasoningTokens,
 					input.totalTokens,
 					input.inputCostUsd ?? null,
@@ -982,7 +994,7 @@ export class TraceStore {
 				);
 			this.db
 				.prepare(`UPDATE phases SET status=?, attempt=?, retries=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
-          cache_read_tokens=?, cache_write_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
+          cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
           WHERE phase_id=?`)
 				.run(
 					success ? "success" : "fail",
@@ -994,6 +1006,7 @@ export class TraceStore {
 					input.outputTokenCount ?? null,
 					input.cacheReadTokenCount ?? null,
 					input.cacheWriteTokenCount ?? null,
+					input.cacheWrite1hTokenCount ?? null,
 					input.reasoningTokenCount ?? null,
 					input.tokenCount ?? null,
 					input.costUsd ?? null,
@@ -1113,7 +1126,7 @@ export class TraceStore {
 				.run(input.status, input.at, usage?.totalTokens ?? null, usage?.costUsd ?? null, input.runId);
 			this.db
 				.prepare(`UPDATE phases SET status=?, ended_at=?, error=?, input_tokens=?, output_tokens=?,
-          cache_read_tokens=?, cache_write_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
+          cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?, reasoning_tokens=?, total_tokens=?, total_cost_usd=?
           WHERE phase_id=?`)
 				.run(
 					input.status,
@@ -1123,6 +1136,7 @@ export class TraceStore {
 					usage?.outputTokens ?? null,
 					usage?.cacheReadTokens ?? null,
 					usage?.cacheWriteTokens ?? null,
+					usage?.cacheWrite1hTokens ?? null,
 					usage?.reasoningTokens ?? null,
 					usage?.totalTokens ?? null,
 					usage?.costUsd ?? null,
@@ -1567,6 +1581,7 @@ function terminalUsage(input: DispatchCompletedPayload | DispatchFailedPayload):
 		output: input.outputTokenCount ?? 0,
 		cache_read: input.cacheReadTokenCount ?? 0,
 		cache_write: input.cacheWriteTokenCount ?? 0,
+		...(input.cacheWrite1hTokenCount === undefined ? {} : { cache_write_1h: input.cacheWrite1hTokenCount }),
 		reasoning_tokens: input.reasoningTokenCount ?? 0,
 		total_tokens: input.tokenCount,
 	};

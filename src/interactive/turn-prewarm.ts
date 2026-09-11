@@ -249,9 +249,10 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 					detached: wasDetached,
 					timing: result.timing,
 					promptCache: {
-						input: result.usage?.input ?? 0,
-						cacheRead: result.usage?.cacheRead ?? 0,
-						cacheWrite: result.usage?.cacheWrite ?? 0,
+						input: result.usage?.input ?? null,
+						cacheRead: result.usage?.cacheRead ?? null,
+						cacheWrite: result.usage?.cacheWrite ?? null,
+						...(result.usage?.cacheWrite1h === undefined ? {} : { cacheWrite1h: result.usage.cacheWrite1h }),
 						...(result.backend ? { backend: { ...result.backend } } : {}),
 					},
 					...(result.errorMessage ? { error: result.errorMessage } : {}),

@@ -362,6 +362,7 @@ export interface RunUsageSummary {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning: number;
 	apiCalls: number;
 	hadReasoning: boolean;
@@ -407,6 +408,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 						output?: unknown;
 						cacheRead?: unknown;
 						cacheWrite?: unknown;
+						cacheWrite1h?: unknown;
 						totalTokens?: unknown;
 						cost?: { total?: unknown };
 					};
@@ -432,6 +434,7 @@ export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSumm
 		summary.output += output;
 		summary.cacheRead += cacheRead;
 		summary.cacheWrite += cacheWrite;
+		if (typeof usage.cacheWrite1h === "number") summary.cacheWrite1h = (summary.cacheWrite1h ?? 0) + usage.cacheWrite1h;
 		const reasoning = extractReasoningTokens(usage);
 		if (reasoning !== null) {
 			summary.reasoning += reasoning;

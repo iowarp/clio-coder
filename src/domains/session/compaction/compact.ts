@@ -593,6 +593,9 @@ function addCompactionUsage(total: CompactionUsage | undefined, raw: unknown): C
 		output: base.output + output,
 		cacheRead: base.cacheRead + cacheRead,
 		cacheWrite: base.cacheWrite + cacheWrite,
+		...(base.cacheWrite1h === undefined && usage.cacheWrite1h === undefined
+			? {}
+			: { cacheWrite1h: (base.cacheWrite1h ?? 0) + numberOrZero(usage.cacheWrite1h) }),
 		reasoning: base.reasoning + numberOrZero(usage.reasoning),
 		totalTokens: base.totalTokens + totalTokens,
 		cost: { total: base.cost.total + numberOrZero(usage.cost?.total) },
@@ -605,7 +608,7 @@ function retainReportedUsage(previous: Record<string, unknown>, raw: unknown): R
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return previous;
 	const usage = raw as Record<string, unknown>;
 	const known = { ...previous };
-	for (const field of ["input", "output", "cacheRead", "cacheWrite", "totalTokens"]) {
+	for (const field of ["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "totalTokens"]) {
 		const value = numberOrZero(usage[field]);
 		if (value > 0) known[field] = value;
 	}

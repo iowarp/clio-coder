@@ -82,11 +82,13 @@ for (const priced of [true, false]) {
 			release();
 			const receipt = await run.finalPromise;
 			strictEqual(receipt.costUsd, expected);
+			strictEqual(receipt.cacheWrite1hTokenCount, 500);
 			strictEqual(receipt.tokenCount, 11100, "do not count the one-hour subset twice");
 			const envelope = bundle.contract.getRun(run.runId);
 			ok(envelope);
 			strictEqual(envelope.costUsd, expected);
 			ok(verifyReceiptIntegrity(receipt, envelope).ok);
+			ok(!verifyReceiptIntegrity({ ...receipt, cacheWrite1hTokenCount: 0 }, envelope).ok);
 		} finally {
 			release();
 			await bundle.extension.stop?.();

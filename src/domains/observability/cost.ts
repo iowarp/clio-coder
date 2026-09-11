@@ -127,6 +127,7 @@ export interface UsageBreakdown {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoningTokens: number;
 	totalTokens: number;
 	apiCalls?: number;
@@ -151,6 +152,7 @@ export interface CostEntry {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoningTokens: number;
 	apiCalls?: number;
 	/** Absent on an ordinary turn's call. */
@@ -215,6 +217,7 @@ export function createCostTracker(): CostTracker {
 				output,
 				cacheRead,
 				cacheWrite,
+				...(breakdown?.cacheWrite1h === undefined ? {} : { cacheWrite1h: breakdown.cacheWrite1h }),
 				reasoningTokens,
 				...(apiCalls !== undefined ? { apiCalls } : {}),
 				...(label !== undefined ? { label } : {}),
@@ -224,6 +227,7 @@ export function createCostTracker(): CostTracker {
 			totals.output += output;
 			totals.cacheRead += cacheRead;
 			totals.cacheWrite += cacheWrite;
+			if (breakdown?.cacheWrite1h !== undefined) totals.cacheWrite1h = (totals.cacheWrite1h ?? 0) + breakdown.cacheWrite1h;
 			totals.reasoningTokens += reasoningTokens;
 			totals.totalTokens += tokens;
 			return resolvedUsd;
@@ -247,6 +251,7 @@ export function createCostTracker(): CostTracker {
 			totals.output = 0;
 			totals.cacheRead = 0;
 			totals.cacheWrite = 0;
+			delete totals.cacheWrite1h;
 			totals.reasoningTokens = 0;
 			totals.totalTokens = 0;
 		},

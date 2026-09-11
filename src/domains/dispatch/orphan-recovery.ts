@@ -78,6 +78,7 @@ function envelopeFromReceipt(receipt: RunReceipt, status: RunStatus, receiptPath
 	};
 	if (receipt.cacheReadTokenCount !== undefined) envelope.cacheReadTokenCount = receipt.cacheReadTokenCount;
 	if (receipt.cacheWriteTokenCount !== undefined) envelope.cacheWriteTokenCount = receipt.cacheWriteTokenCount;
+	if (receipt.cacheWrite1hTokenCount !== undefined) envelope.cacheWrite1hTokenCount = receipt.cacheWrite1hTokenCount;
 	if (receipt.reasoningTokenCount !== undefined) envelope.reasoningTokenCount = receipt.reasoningTokenCount;
 	if (receipt.inputTokenCount !== undefined) envelope.inputTokenCount = receipt.inputTokenCount;
 	if (receipt.outputTokenCount !== undefined) envelope.outputTokenCount = receipt.outputTokenCount;

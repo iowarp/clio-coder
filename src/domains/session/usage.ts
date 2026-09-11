@@ -13,10 +13,8 @@
  * every surface's accounting, which is the same thing the tools/interactive
  * boundary rule exists to prevent.
  *
- * Assistant turns marked aborted or error are skipped for the same reason the
- * context estimator skips them: their usage is not a completed call. A
- * cancelled partial persists a fully populated all-zero usage object, so
- * counting it would add an API call worth nothing.
+ * Failed/aborted calls with reported usage still consumed resources. Skip
+ * only all-zero SDK placeholders, whose accounting was never observed.
  */
 
 import {
@@ -39,6 +37,7 @@ export interface LedgerUsageCall {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoningTokens: number;
 	totalTokens: number;
 	costUsd: number;
@@ -58,7 +57,7 @@ function numberAt(source: Record<string, unknown>, key: string): number {
 }
 
 function reasoningTokensOf(usage: Record<string, unknown>): number {
-	const direct = numberAt(usage, "reasoningTokens");
+	const direct = numberAt(usage, "reasoning") || numberAt(usage, "reasoningTokens");
 	if (direct > 0) return direct;
 	const details = usage.outputTokensDetails ?? usage.completionTokensDetails;
 	if (details && typeof details === "object") return numberAt(details as Record<string, unknown>, "reasoningTokens");
@@ -109,6 +108,7 @@ export function ledgerUsageCalls(
 				output: usage.output,
 				cacheRead: usage.cacheRead,
 				cacheWrite: usage.cacheWrite,
+				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
 				reasoningTokens: usage.reasoning,
 				totalTokens: usage.totalTokens,
 				costUsd: usage.cost.total,
@@ -129,8 +129,6 @@ export function ledgerUsageCalls(
 		const payload = entry.payload;
 		if (!payload || typeof payload !== "object" || Array.isArray(payload)) continue;
 		const record = payload as Record<string, unknown>;
-		const stopReason = record.stopReason;
-		if (stopReason === "aborted" || stopReason === "error") continue;
 		const rawUsage = record.usage;
 		if (!rawUsage || typeof rawUsage !== "object" || Array.isArray(rawUsage)) continue;
 		const usage = rawUsage as Record<string, unknown>;
@@ -156,6 +154,7 @@ export function ledgerUsageCalls(
 			output,
 			cacheRead,
 			cacheWrite,
+			...(typeof usage.cacheWrite1h === "number" ? { cacheWrite1h: numberAt(usage, "cacheWrite1h") } : {}),
 			reasoningTokens: reasoningTokensOf(usage),
 			totalTokens,
 			costUsd,

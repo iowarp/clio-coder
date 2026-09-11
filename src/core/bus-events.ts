@@ -630,6 +630,7 @@ export interface DispatchTerminalStats {
 	outputTokenCount: number;
 	cacheReadTokenCount: number;
 	cacheWriteTokenCount: number;
+	cacheWrite1hTokenCount?: number;
 	reasoningTokenCount: number;
 	staticShellHash: string | null;
 	sessionShellHash: string | null;

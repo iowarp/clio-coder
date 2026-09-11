@@ -705,6 +705,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				output: usage.output,
 				cacheRead: usage.cacheRead,
 				cacheWrite: usage.cacheWrite,
+				...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
 				reasoningTokens: usage.reasoning,
 				totalTokens: usage.totalTokens,
 				apiCalls: Math.max(1, Math.round(usage.apiCalls)),

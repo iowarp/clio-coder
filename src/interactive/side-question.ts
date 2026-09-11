@@ -41,6 +41,7 @@ export interface SideQuestionUsage {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning: number;
 	totalTokens: number;
 	costUsd: number;
@@ -117,6 +118,7 @@ export function sideQuestionUsage(raw: unknown): SideQuestionUsage | null {
 		output,
 		cacheRead,
 		cacheWrite,
+		...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: positive(usage.cacheWrite1h) }),
 		reasoning: positive(usage.reasoning),
 		totalTokens,
 		costUsd: positive(usage.cost?.total),

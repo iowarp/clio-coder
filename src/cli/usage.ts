@@ -85,6 +85,7 @@ interface UsageTotals {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoningTokens: number;
 	totalTokens: number;
 	costUsd: number;
@@ -169,6 +170,7 @@ function outOfTurnUsageCall(row: OutOfTurnUsageRow): LedgerUsageCall {
 		output: row.usage.output ?? 0,
 		cacheRead: row.usage.cacheRead ?? 0,
 		cacheWrite: row.usage.cacheWrite ?? 0,
+		...(typeof row.usage.cacheWrite1h === "number" ? { cacheWrite1h: row.usage.cacheWrite1h } : {}),
 		reasoningTokens: row.usage.reasoning ?? 0,
 		totalTokens: row.usage.totalTokens ?? 0,
 		costUsd: row.usage.costUsd ?? 0,
@@ -197,6 +199,7 @@ function addUsageCall(totals: UsageTotals, call: LedgerUsageCall): void {
 	totals.output += call.output;
 	totals.cacheRead += call.cacheRead;
 	totals.cacheWrite += call.cacheWrite;
+	if (call.cacheWrite1h !== undefined) totals.cacheWrite1h = (totals.cacheWrite1h ?? 0) + call.cacheWrite1h;
 	totals.reasoningTokens += call.reasoningTokens;
 	totals.totalTokens += call.totalTokens;
 	totals.costUsd += call.costUsd;

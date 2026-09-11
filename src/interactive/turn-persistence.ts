@@ -213,6 +213,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			outputTokens: total.outputTokens + summary.output,
 			cacheReadTokens: total.cacheReadTokens + summary.cacheRead,
 			cacheWriteTokens: total.cacheWriteTokens + summary.cacheWrite,
+			...(total.cacheWrite1hTokens === undefined && summary.cacheWrite1h === undefined
+				? {}
+				: { cacheWrite1hTokens: (total.cacheWrite1hTokens ?? 0) + (summary.cacheWrite1h ?? 0) }),
 			reasoningTokens: total.reasoningTokens + summary.reasoning,
 			totalTokens: total.totalTokens + summary.tokens,
 			costUsd: (total.costUsd ?? 0) + summary.costUsd,

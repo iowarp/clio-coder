@@ -27,6 +27,7 @@ export interface BackgroundMemoryStepUsage {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning: number;
 	totalTokens: number;
 	costUsd: number;
@@ -83,6 +84,7 @@ export function backgroundMemoryUsageRow(
 			output: usage.output,
 			cacheRead: usage.cacheRead,
 			cacheWrite: usage.cacheWrite,
+			...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: usage.cacheWrite1h }),
 			reasoning: usage.reasoning,
 			totalTokens: usage.totalTokens,
 			costUsd: usage.costUsd,
@@ -122,6 +124,7 @@ export function recordBackgroundMemoryStep(input: RecordBackgroundMemoryStepInpu
 			output: input.usage.output,
 			cacheRead: input.usage.cacheRead,
 			cacheWrite: input.usage.cacheWrite,
+			...(input.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: input.usage.cacheWrite1h }),
 			reasoningTokens: input.usage.reasoning,
 			totalTokens: input.usage.totalTokens,
 			apiCalls: 1,

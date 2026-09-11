@@ -76,6 +76,7 @@ export interface EngineTextCompletionResult {
 		output: number;
 		cacheRead: number;
 		cacheWrite: number;
+		cacheWrite1h?: number;
 		reasoning: number;
 		totalTokens: number;
 		costUsd: number;
@@ -110,6 +111,7 @@ export async function completeEngineText(input: EngineTextCompletionInput): Prom
 			output: response.usage.output,
 			cacheRead: response.usage.cacheRead,
 			cacheWrite: response.usage.cacheWrite,
+			...(response.usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: response.usage.cacheWrite1h }),
 			reasoning: response.usage.reasoning ?? 0,
 			totalTokens: response.usage.totalTokens,
 			costUsd: response.usage.cost.total,

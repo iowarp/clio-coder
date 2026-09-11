@@ -78,6 +78,7 @@ export interface OutOfTurnUsage {
 	output: number | null;
 	cacheRead: number | null;
 	cacheWrite: number | null;
+	cacheWrite1h?: number | null;
 	reasoning: number | null;
 	totalTokens: number | null;
 	costUsd: number | null;
@@ -253,6 +254,7 @@ function asOutOfTurnUsageRow(value: unknown): OutOfTurnUsageRow | null {
 			output: reading(usage.output),
 			cacheRead: reading(usage.cacheRead),
 			cacheWrite: reading(usage.cacheWrite),
+			...(usage.cacheWrite1h === undefined ? {} : { cacheWrite1h: nullableNumber(usage.cacheWrite1h) }),
 			reasoning: reading(usage.reasoning),
 			totalTokens: reading(usage.totalTokens),
 			costUsd: reading(usage.costUsd),

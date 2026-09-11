@@ -166,7 +166,7 @@ describe("contracts/metering integrity", () => {
 		strictEqual(resolveReservedOutputTokens(null), 32_768);
 	});
 
-	it("resets process totals and reseeds only completed calls from the resumed ledger", () => {
+	it("reseeds reported spend including aborted calls, while ignoring unobserved placeholders", () => {
 		let resets = 0;
 		const recorded: Array<{ provider: string; model: string; tokens: number }> = [];
 		const completed = {
@@ -185,6 +185,14 @@ describe("contracts/metering integrity", () => {
 				recordTokens: (provider, model, tokens) => recorded.push({ provider, model, tokens }),
 			},
 			[
+				assistant("unobserved", "aborted", {
+					input: 0,
+					output: 0,
+					cacheRead: 0,
+					cacheWrite: 0,
+					totalTokens: 0,
+					cost: { total: 0 },
+				}),
 				assistant("aborted", "aborted", completed, { provider: "llamacpp", responseModel: "model-a" }),
 				assistant("complete", "stop", completed, { provider: "llamacpp", responseModel: "model-a" }),
 			],
@@ -192,6 +200,9 @@ describe("contracts/metering integrity", () => {
 		);
 
 		strictEqual(resets, 1);
-		deepStrictEqual(recorded, [{ provider: "local-cluster", model: "model-a", tokens: 150 }]);
+		deepStrictEqual(recorded, [
+			{ provider: "local-cluster", model: "model-a", tokens: 150 },
+			{ provider: "local-cluster", model: "model-a", tokens: 150 },
+		]);
 	});
 });

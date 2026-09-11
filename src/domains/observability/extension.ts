@@ -64,6 +64,7 @@ function recordDispatchCost(
 			output: payload.outputTokenCount ?? 0,
 			cacheRead: payload.cacheReadTokenCount ?? 0,
 			cacheWrite: payload.cacheWriteTokenCount ?? 0,
+			...(payload.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1h: payload.cacheWrite1hTokenCount }),
 			reasoningTokens: payload.reasoningTokenCount ?? 0,
 			totalTokens: payload.tokenCount,
 		},

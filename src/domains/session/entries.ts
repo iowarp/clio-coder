@@ -114,6 +114,7 @@ export interface CompactionUsage {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	cacheWrite1h?: number;
 	reasoning: number;
 	totalTokens: number;
 	cost: { total: number };

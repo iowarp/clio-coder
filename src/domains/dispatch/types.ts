@@ -504,6 +504,7 @@ export interface RunEnvelope {
 	reasoningTokenCount?: number;
 	cacheReadTokenCount?: number;
 	cacheWriteTokenCount?: number;
+	cacheWrite1hTokenCount?: number;
 	staticShellHash?: string | null;
 	sessionShellHash?: string | null;
 	dynamicHash?: string | null;
@@ -872,6 +873,7 @@ export interface RunReceipt {
 	outputTokenCount?: number;
 	cacheReadTokenCount?: number;
 	cacheWriteTokenCount?: number;
+	cacheWrite1hTokenCount?: number;
 	reasoningTokenCount?: number;
 	upstreamResponses?: RunReceiptUpstreamResponse[];
 	/** Bounded final/partial assistant output; absent when none was captured. */

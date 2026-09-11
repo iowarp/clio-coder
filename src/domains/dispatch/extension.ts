@@ -325,6 +325,7 @@ interface RunTokenMeter {
 	outputTokens: number;
 	cacheReadTokens: number;
 	cacheWriteTokens: number;
+	cacheWrite1hTokens?: number;
 	reasoningTokens: number;
 	/** Native calls are priced individually by the SDK, including cache TTLs and context tiers. */
 	costUsd?: number;
@@ -499,6 +500,8 @@ function accumulateNativeUsage(
 	meter.outputTokens += call.outputTokens;
 	meter.cacheReadTokens += call.cacheReadTokens;
 	meter.cacheWriteTokens += call.cacheWriteTokens;
+	if (typeof usage.cacheWrite1h === "number" && usage.cacheWrite1h >= 0 && usage.cacheWrite1h <= call.cacheWriteTokens)
+		meter.cacheWrite1hTokens = (meter.cacheWrite1hTokens ?? 0) + usage.cacheWrite1h;
 	meter.reasoningTokens += call.reasoningTokens;
 }
 
@@ -3986,7 +3989,13 @@ export function createDispatchBundle(
 		}
 		timing.workerSpawnedAt = new Date(now()).toISOString();
 
-		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+		const tokenMeter: RunTokenMeter = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			reasoningTokens: 0,
+		};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
 		const toolStats = new Map<string, ToolCallStat>();
@@ -4375,6 +4384,7 @@ export function createDispatchBundle(
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
+				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
@@ -4461,6 +4471,7 @@ export function createDispatchBundle(
 				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
+				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 				staticShellHash: receipt.staticShellHash ?? null,
 				sessionShellHash: receipt.sessionShellHash ?? null,
@@ -4586,6 +4597,9 @@ export function createDispatchBundle(
 					dynamicHash: receiptDraft.dynamicHash ?? null,
 					cacheReadTokenCount: receiptDraft.cacheReadTokenCount ?? 0,
 					cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount ?? 0,
+					...(receiptDraft.cacheWrite1hTokenCount === undefined
+						? {}
+						: { cacheWrite1hTokenCount: receiptDraft.cacheWrite1hTokenCount }),
 					reasoningTokenCount: receiptDraft.reasoningTokenCount ?? 0,
 					heartbeatAt: heartbeatIso(acp.heartbeatAt),
 				};
@@ -4872,7 +4886,13 @@ export function createDispatchBundle(
 				throw error;
 			}
 		})();
-		const tokenMeter = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0 };
+		const tokenMeter: RunTokenMeter = {
+			inputTokens: 0,
+			outputTokens: 0,
+			cacheReadTokens: 0,
+			cacheWriteTokens: 0,
+			reasoningTokens: 0,
+		};
 		const safetyDecisionCounts = { allowed: 0, blocked: 0, permissionRequested: 0 };
 		const escalationCounts = { requested: 0, approved: 0, denied: 0, timedOut: 0 };
 		const blockedAttempts: SafetyBlockedAttempt[] = [];
@@ -5582,6 +5602,7 @@ export function createDispatchBundle(
 				outputTokenCount: tokenMeter.outputTokens,
 				cacheReadTokenCount: tokenMeter.cacheReadTokens,
 				cacheWriteTokenCount: tokenMeter.cacheWriteTokens,
+				...(tokenMeter.cacheWrite1hTokens === undefined ? {} : { cacheWrite1hTokenCount: tokenMeter.cacheWrite1hTokens }),
 				reasoningTokenCount: tokenMeter.reasoningTokens,
 				...(upstreamResponses.length > 0 ? { upstreamResponses: [...upstreamResponses] } : {}),
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
@@ -5679,6 +5700,7 @@ export function createDispatchBundle(
 				outputTokenCount: receipt.outputTokenCount ?? 0,
 				cacheReadTokenCount: receipt.cacheReadTokenCount ?? 0,
 				cacheWriteTokenCount: receipt.cacheWriteTokenCount ?? 0,
+				...(receipt.cacheWrite1hTokenCount === undefined ? {} : { cacheWrite1hTokenCount: receipt.cacheWrite1hTokenCount }),
 				reasoningTokenCount: receipt.reasoningTokenCount ?? 0,
 				staticShellHash: receipt.staticShellHash ?? null,
 				sessionShellHash: receipt.sessionShellHash ?? null,
@@ -5924,6 +5946,9 @@ export function createDispatchBundle(
 					...(receiptDraft.cacheReadTokenCount !== undefined
 						? { cacheReadTokenCount: receiptDraft.cacheReadTokenCount }
 						: {}),
+					...(receiptDraft.cacheWrite1hTokenCount === undefined
+						? {}
+						: { cacheWrite1hTokenCount: receiptDraft.cacheWrite1hTokenCount }),
 					...(receiptDraft.cacheWriteTokenCount !== undefined
 						? { cacheWriteTokenCount: receiptDraft.cacheWriteTokenCount }
 						: {}),
