@@ -18,7 +18,9 @@ export type WorkerSettings = {
 	crashRead?: boolean;
 };
 export type RawTool = Tool;
+export type RuntimeInfo = { entry: string; packageRoot: string; execArgv: string[]; threadId: number };
 export interface Methods {
+	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };
 	"system.read": { params: Record<string, never>; result: unknown };
 	"interop.read": { params: { cwd: string }; result: unknown };
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };

@@ -34,6 +34,7 @@ import type { SystemService } from "./services/system.js";
 import type { TargetsService } from "./services/targets-cli.js";
 import type { ToolchainService } from "./services/toolchain.js";
 import type { TraceService } from "./services/traces.js";
+import type { RuntimeInfo } from "./worker/protocol.js";
 
 export function createApp(options: {
 	token: string;
@@ -55,12 +56,17 @@ export function createApp(options: {
 	clientDir?: string;
 	diagnostics?: boolean;
 	pwa?: boolean;
+	runtime?: () => Promise<{ server: Omit<RuntimeInfo, "threadId">; reads: RuntimeInfo; ops: RuntimeInfo }>;
 }) {
 	const app = new Hono();
 	const { hub, operations, toolchain } = options;
 	app.onError(problemResponse);
 	app.use("*", auth(options.token, options.origin));
 	app.use("*", docsPathGuard);
+	if (process.env.NODE_ENV === "test" && options.runtime) {
+		const inspect = options.runtime;
+		app.get("/api/_diagnostics/runtime", async (context) => context.json(await inspect()));
+	}
 	app.use(
 		"/api/*",
 		bodyLimit({

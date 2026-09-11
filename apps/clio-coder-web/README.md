@@ -356,3 +356,98 @@ selects the browser executable and `TMPDIR` selects the artifact directory.
 It checks manifest installability, standalone windows, persistent authentication,
 server crash/restart, offline recovery and its cache contents, browser restart,
 forgetting access across windows, and ownership-safe removal.
+
+The app-local packaging rehearsal is available with:
+
+```sh
+pnpm --filter @iowarp/clio-coder-web build
+pnpm --filter @iowarp/clio-coder-web build:rehearsal
+pnpm --filter @iowarp/clio-coder-web test:rehearsal
+```
+
+It uses tsup **8.5.1**, matching the root build, with three ESM entries targeting
+Node 22, shared chunks, source maps, no minification, the same require/filename
+shims, and external `node:sqlite`. Hono and its Node server are bundled; the root's
+existing runtime packages remain external. The source launcher and fabricated
+tool fixtures are refused in the rehearsal build. The server locates its client
+and worker JavaScript beside `web/server.js`; importing that module exports
+`main()` without starting a listener. Source mode retains its explicit tsx worker
+bootstrap.
+
+The runtime check first launches the emitted server from a scratch working
+directory without `CLIO_CODER_PACKAGE_ROOT`. It reports the app's version `0.0.0`
+and app directory in all three processes, reproducing the root-resolution hazard.
+It then copies the emitted tree into a scratch package, links only the existing
+root runtime dependencies, proves `tsx` cannot resolve there, and launches plain
+Node with the root pinned. Clio reports `0.4.7`; the reads and ops workers identify
+their emitted JavaScript, list the actual tool registry, and complete canonical
+removal of an absent vendored tool in private state. The test-only authenticated
+`/api/_diagnostics/runtime` route exists only with `NODE_ENV=test`; production
+returns 404. This is a packaging rehearsal with runtime dependency links and
+access to root package assets, not a substitute for R1's installed-tarball test.
+
+The runtime check passes on Node **24.20.0** and the exact **22.19.0** baseline,
+including baseline permission mode with explicit grants for the checkout, scratch
+state and `/proc`, plus worker/child permission. These measured grants remain
+an experiment, not a default for arbitrary user workspaces.
+
+The measured footprint excludes source maps, as the root package does:
+
+| Emitted material | Bytes |
+| --- | ---: |
+| `web/server.js` | 295,601 |
+| `web/reads-worker.js` | 91,124 |
+| `web/ops-worker.js` | 1,256 |
+| 62 shared and dynamically loaded chunks | 2,158,576 |
+| 142 client files, including PWA assets and fonts | 4,336,030 |
+| Complete separate web output | 6,882,587 |
+
+The current root tarball has 1,752 files, **8,540,880 bytes compressed** and
+**45,929,974 bytes unpacked**. Combining it with the separately split web output
+repacked with npm produces **10,519,027 bytes compressed** and **52,812,561 bytes unpacked**: an
+estimated compressed increase of **1,978,147 bytes**. This exceeds the current
+10,000,000/50,000,000-byte release limits. The size check records that result;
+it does not assert that the release budget passes. A single integrated R1 build
+can share code across the CLI and web entries, so its exact size must be measured.
+No root budget has been changed.
+
+The concrete R1 integration checklist is:
+
+1. Add the literal lazy `web` command import in `src/cli/index.ts`. Its handler
+   pins `CLIO_CODER_PACKAGE_ROOT` to the installed package before importing the
+   web entry and calls its exported `main(args)` exactly once. Normal CLI/TUI/ACP
+   startup must not import or start the web application.
+2. Add these exact root tsup entries alongside the existing entries:
+   `"web/server": "apps/clio-coder-web/server/main.ts"`,
+   `"web/reads-worker": "apps/clio-coder-web/server/worker/reads-main.ts"`, and
+   `"web/ops-worker": "apps/clio-coder-web/server/worker/ops-main.ts"`.
+   Set `define: { __CLIO_WEB_BUNDLED__: "true" }`; retain splitting, ESM/Node 22,
+   no minification, shims and `removeNodeProtocol: false`.
+3. Add `"hono"` and `"@hono/node-server"` to the existing `noExternal` list,
+   bundling the app's pinned **4.13.5** and **2.1.1** versions. No new root runtime
+   dependency is needed for them. Preserve the root externals and patched Pi TUI
+   bundling policy. Keep all shared `dist/*.js` chunks, not just the three entries.
+4. Build the client and copy `apps/clio-coder-web/dist/client/` into
+   `dist/web/client/` during the root build. Retain the root `files` glob `dist`
+   and its `!dist/**/*.map` exclusion; the planned explicit `dist/web/**` may sit
+   beside `dist` before the exclusion, although `dist` already covers it. Do not
+   publish the source app, fixture code, tsx, Workbench, or the retired trace viewer.
+   Carry the notices for new bundled frontend/font/Hono dependencies as package
+   assets alongside the existing vendored notices.
+5. Add exact release-manifest requirements `dist/web/server.js`,
+   `dist/web/reads-worker.js`, `dist/web/ops-worker.js`, and
+   `dist/web/client/index.html`. Also require `dist/web/client/manifest.webmanifest`,
+   `dist/web/client/sw.js`, `dist/web/client/offline.html`, `dist/web/client/offline.js`,
+   `dist/web/client/offline.css`, `dist/web/client/icon-192.png`, and
+   `dist/web/client/icon-512.png` so the required PWA cannot disappear from a package.
+6. Replace the rehearsal's desktop-setup refusal with installed-command launch
+   paths. The on-demand entry must use `clio-coder web --open --idle-exit 60000`;
+   background setup must use the installed Node/web entry without a tsx loader,
+   preserve its stable origin and credential, and retain ownership-safe removal.
+   Repeat native launcher, PWA, login-registration and process lifecycle checks.
+7. Extend the actual installed-package test to run with checkout source and
+   devDependencies unavailable. Verify root assets, both workers, REST/SSE and
+   CLI bridges, PWA assets, and clean termination from arbitrary working directories.
+   Measure the single integrated tarball and resolve any remaining size excess
+   before running the release gate. Budget changes require the separately
+   authorized root integration scope; this S10 rehearsal has changed none.

@@ -2,12 +2,12 @@ import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { serve } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
-import { resolveClioDirs } from "./clio/http-shims.js";
+import { resolveClioDirs, resolvePackageRoot } from "./clio/http-shims.js";
 import { backgroundEnvironment, readBackgroundConfig } from "./launcher/background-config.js";
 import { restrictNetwork } from "./network-policy.js";
 import { serverOptions } from "./options.js";
@@ -32,7 +32,11 @@ import { WorkspaceService } from "./services/workspaces.js";
 import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
+declare const __CLIO_WEB_BUNDLED__: boolean;
+const bundled = typeof __CLIO_WEB_BUNDLED__ !== "undefined" && __CLIO_WEB_BUNDLED__;
 export async function main(args = process.argv.slice(2)) {
+	if (bundled && (args[0] === "background" || args[0] === "launcher"))
+		throw new Error("Desktop setup is available from the source checkout only in this rehearsal build.");
 	if (args[0] === "background") {
 		const { background } = await import("./launcher/background.js");
 		await background(args.slice(1));
@@ -44,11 +48,12 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	const values = serverOptions(args);
+	if (bundled && values.fixture) throw new Error("Fabricated tool fixtures are available in source mode only.");
 	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
 	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
 	const port = persistent?.port ?? values.port;
 	restrictNetwork();
-	const clientDir = fileURLToPath(new URL("../dist/client/", import.meta.url));
+	const clientDir = fileURLToPath(new URL(bundled ? "./client/" : "../dist/client/", import.meta.url));
 	if (!existsSync(join(clientDir, "index.html")))
 		throw new Error("Client build is missing. Run pnpm --filter @iowarp/clio-coder-web build before start.");
 	const scratch = values.fixture ? await mkdtemp(join(tmpdir(), "clio-coder-web-fixture-")) : undefined;
@@ -63,8 +68,9 @@ export async function main(args = process.argv.slice(2)) {
 			}
 		: process.env;
 	const settings = { fixture: values.fixture, installDelayMs: 900 };
-	const reads = new WorkerHost("reads", settings, env),
-		ops = new WorkerHost("ops", settings, env);
+	const compiledDirectory = bundled ? new URL("./", import.meta.url) : undefined;
+	const reads = new WorkerHost("reads", settings, env, compiledDirectory),
+		ops = new WorkerHost("ops", settings, env, compiledDirectory);
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(scratch ? join(scratch, "state") : resolveClioDirs().state);
@@ -108,6 +114,15 @@ export async function main(args = process.argv.slice(2)) {
 		sessions,
 		clientDir,
 		pwa: !!persistent,
+		...(process.env.NODE_ENV === "test"
+			? {
+					runtime: async () => ({
+						server: { entry: import.meta.url, packageRoot: resolvePackageRoot(), execArgv: process.execArgv },
+						reads: await reads.call("runtime.info", {}),
+						ops: await ops.call("runtime.info", {}),
+					}),
+				}
+			: {}),
 	});
 	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
 		origin = `http://127.0.0.1:${info.port}`;
@@ -171,7 +186,9 @@ export async function main(args = process.argv.slice(2)) {
 	process.once("SIGINT", stop);
 	process.once("SIGTERM", stop);
 }
-void main().catch((error: unknown) => {
-	console.error(`[clio-coder:web] ${error instanceof Error ? error.message : "Startup failed."}`);
-	process.exitCode = 1;
-});
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+	void main().catch((error: unknown) => {
+		console.error(`[clio-coder:web] ${error instanceof Error ? error.message : "Startup failed."}`);
+		process.exitCode = 1;
+	});
+}

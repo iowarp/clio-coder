@@ -13,8 +13,12 @@ export function startDomainWorker(
 	kind: WorkerKind,
 	settings: WorkerSettings = {},
 	env: NodeJS.ProcessEnv = process.env,
+	compiledDirectory?: URL,
 ): Worker {
-	return new Worker(new URL("./worker/source-entry.mjs", import.meta.url), { workerData: { ...settings, kind }, env });
+	const entry = compiledDirectory
+		? new URL(kind === "reads" ? "reads-worker.js" : "ops-worker.js", compiledDirectory)
+		: new URL("./worker/source-entry.mjs", import.meta.url);
+	return new Worker(entry, { workerData: { ...settings, kind }, env });
 }
 
 /** Fixed ACP command: the workspace path is already canonicalized by WorkspaceService. */

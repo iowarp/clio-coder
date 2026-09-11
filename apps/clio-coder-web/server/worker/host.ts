@@ -21,6 +21,7 @@ export class WorkerHost {
 		private kind: WorkerKind,
 		private settings: WorkerSettings = {},
 		private env: NodeJS.ProcessEnv = process.env,
+		private compiledDirectory?: URL,
 	) {
 		this.start();
 	}
@@ -67,7 +68,7 @@ export class WorkerHost {
 		});
 	}
 	private start() {
-		const worker = startDomainWorker(this.kind, this.settings, this.env);
+		const worker = startDomainWorker(this.kind, this.settings, this.env, this.compiledDirectory);
 		this.worker = worker;
 		worker.on("message", (reply: Reply) => {
 			const pending = this.pending.get(reply.id);
