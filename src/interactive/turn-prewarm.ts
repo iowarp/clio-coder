@@ -127,6 +127,9 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	let pendingTrigger: PrewarmTrigger | null = null;
 	let timer: ReturnType<typeof setTimeout> | null = null;
 	let active: AbortController | null = null;
+	// Ownership outlives detachment: one request and at most one newer trigger.
+	let running: AbortController | null = null;
+	let disposed = false;
 	// Rounds a submit or a session switch let go of. Their result is still
 	// recorded, but it no longer describes the prefix the next turn will send, so
 	// it never reaches the `/context` line.
@@ -281,28 +284,30 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 
 	const fire = (): void => {
 		timer = null;
+		if (disposed || running !== null) return;
 		const trigger = pendingTrigger;
 		pendingTrigger = null;
 		if (trigger === null) return;
 		const controller = new AbortController();
 		active = controller;
-		const previous = inFlight;
-		inFlight = previous
-			.catch(() => null)
-			.then(() => runOnce(trigger, controller))
+		running = controller;
+		inFlight = runOnce(trigger, controller)
 			.catch(() => null)
 			.finally(() => {
 				if (active === controller) active = null;
+				running = null;
+				if (!disposed && pendingTrigger !== null && timer === null) timer = setTimeout(fire, 0);
 			});
 	};
 
 	return {
 		schedule(trigger: PrewarmTrigger): void {
+			if (disposed) return;
 			// A newer trigger describes a newer prefix; the older round is no longer
 			// warming history this session has.
 			releaseActiveRound();
 			pendingTrigger = trigger;
-			if (timer !== null) return;
+			if (timer !== null || running !== null) return;
 			// Ref'd on purpose, same reasoning as `settled()` below: the timer is due
 			// in 0 ms, so it holds the event loop for one tick at most, and a Node 22
 			// loop that drains past a due unref'd timer would otherwise never start
@@ -319,7 +324,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			releaseActiveRound();
 		},
 
-		settled(): Promise<PrewarmOutcome | null> {
+		async settled(): Promise<PrewarmOutcome | null> {
 			// One hop past the scheduling tick so a caller that just scheduled a
 			// round waits for that round rather than for the previous one. The timer
 			// is deliberately ref'd, unlike the scheduling timer above: the caller is
@@ -329,14 +334,16 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			// pending forever and cancelled every later test in the lane; Node 24
 			// happens to fire the due timer first, which is why the hang never
 			// reproduced on a 24.x development machine.
-			return new Promise((resolve) => {
-				setTimeout(() => {
-					resolve(inFlight.catch(() => null));
-				}, 0);
-			});
+			let outcome: PrewarmOutcome | null;
+			do {
+				await new Promise<void>((resolve) => setTimeout(resolve, 0));
+				outcome = await inFlight;
+			} while (timer !== null || running !== null || pendingTrigger !== null);
+			return outcome;
 		},
 
 		dispose(): void {
+			disposed = true;
 			for (const unsubscribe of unsubscribeDispatch) unsubscribe?.();
 			pendingTrigger = null;
 			if (timer !== null) {
@@ -345,7 +352,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			}
 			// Shutdown always aborts: the process is going away, and a socket held
 			// open for a round nobody will read is not a latency question.
-			active?.abort();
+			running?.abort();
 			active = null;
 		},
 	};
