@@ -116,13 +116,14 @@ export function createConfigBundle(
 		update(mutate) {
 			if (!snapshot) throw new Error("config domain not started");
 			const previous = snapshot;
-			const candidate = structuredClone(previous);
-			mutate(candidate);
-			assertAgentNamespace(candidate);
 			// Apply the effective-view delta to the user document under one lock,
 			// then validate it with the project layers before writing. In particular,
 			// a route may name a target supplied only by this workspace.
-			const normalized = updateLayeredSettings(process.cwd(), mutate);
+			const normalized = updateLayeredSettings(process.cwd(), (candidate) => {
+				const next = mutate(candidate) ?? candidate;
+				assertAgentNamespace(next);
+				return next;
+			});
 			snapshot = normalized;
 			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
 			const diff = diffSettings(previous, normalized);
