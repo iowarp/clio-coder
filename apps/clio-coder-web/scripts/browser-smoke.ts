@@ -254,6 +254,15 @@ try {
 		}
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("library-dark");
+		await navigate("System");
+		await page.getByRole("heading", { name: "Clio folders", exact: true }).waitFor();
+		await check("system-dark");
+		await page.getByRole("link", { name: "Other coding agents", exact: true }).click();
+		await page.getByRole("heading", { name: "Codex", exact: true }).waitFor();
+		await check("interop-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await check("interop");
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();

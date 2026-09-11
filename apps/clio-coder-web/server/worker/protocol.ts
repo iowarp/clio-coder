@@ -19,6 +19,8 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"system.read": { params: Record<string, never>; result: unknown };
+	"interop.read": { params: { cwd: string }; result: unknown };
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };
 	"evals.read": { params: EvalRequest; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };

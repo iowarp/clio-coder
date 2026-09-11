@@ -19,6 +19,7 @@ import { OperationRegistry } from "./services/operations.js";
 import { ReportsService } from "./services/reports.js";
 import { SessionService } from "./services/sessions.js";
 import { SettingsService } from "./services/settings.js";
+import { SystemService } from "./services/system.js";
 import { TargetsService } from "./services/targets-cli.js";
 import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
@@ -76,6 +77,7 @@ export async function main() {
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		system: new SystemService(reads, workspaces),
 		library: new LibraryService(reads, cli, workspaces),
 		reports: new ReportsService(reads, cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),

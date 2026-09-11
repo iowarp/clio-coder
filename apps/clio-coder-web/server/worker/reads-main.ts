@@ -13,6 +13,10 @@ const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
 const docs = new DocsAdapter(settings.fixture ? settings.fixtureDocsPackageRoot : undefined);
 serveWorker(async (call) => {
+	if (call.method === "system.read" || call.method === "interop.read") {
+		const { inspectSystem, inspectInterop } = await import("../clio/adapters/system.js");
+		return call.method === "system.read" ? inspectSystem() : inspectInterop(call.params.cwd, settings.fixture);
+	}
 	if (call.method === "library.read") {
 		const { readLibrary } = await import("../clio/adapters/library.js");
 		return readLibrary(call.params);

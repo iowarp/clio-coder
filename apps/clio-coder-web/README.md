@@ -193,3 +193,17 @@ extension reader; `/agents` bridges `agents --json` to preserve resolved specs;
 protected tool code. Viewing these collections runs no checks, extension commands,
 installs or removals. The library retains canonical truncation flags (512 packages,
 256 copies, 1,024 resources); verifier inspection retains its 64-check window.
+
+System inspection is available at `/system` and `GET /api/system`: canonical
+`runDoctor({fix: false})` findings and the four resolved Clio folders. Failed
+settings/credential parser text is withheld because it may quote secret values;
+the finding and its status remain visible. The endpoint offers no repair method.
+`GET /api/meta` also reports Node, platform and the three Pi package versions.
+
+`/system/interop` reads `GET /api/workspaces/:id/interop`. Every registered kind
+is represented, including absent or unknown executables and resource-only
+conventions. Canonical discovery reads declared resource/configuration metadata,
+never foreign sessions or history. Version probes run only `--version`, bounded
+by the runtime to two seconds and 4 KiB per executable; resource walks retain the
+runtime's 4,096-file, depth-12 and 2 MiB/file limits and diagnostics. The API does
+not accept/decline agents or launch their work commands.

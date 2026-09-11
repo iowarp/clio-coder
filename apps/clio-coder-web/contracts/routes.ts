@@ -21,6 +21,7 @@ import { EvalDetail, EvalPage, UsageReport } from "./reports.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
+import { Interop, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
 import { CliTargets, Routing } from "./targets-cli.js";
 import { Install, Tools } from "./toolchain.js";
@@ -72,6 +73,19 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	system: defineRoute({
+		...get,
+		path: "/api/system",
+		response: SystemReport,
+		summary: "Read-only doctor findings and the four resolved Clio paths",
+	}),
+	interop: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/interop",
+		params: operationParams,
+		response: Interop,
+		summary: "All registered external agents and bounded resource discovery",
+	}),
 	library: defineRoute({
 		...get,
 		path: "/api/workspaces/:id/library",

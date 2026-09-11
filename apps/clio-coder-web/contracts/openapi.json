@@ -6,6 +6,521 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/system": {
+			"get": {
+				"operationId": "system",
+				"summary": "Read-only doctor findings and the four resolved Clio paths",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["checkedAt", "paths", "findings"],
+									"properties": {
+										"checkedAt": {
+											"type": "string"
+										},
+										"paths": {
+											"type": "object",
+											"required": ["config", "data", "state", "cache"],
+											"properties": {
+												"config": {
+													"type": "string"
+												},
+												"data": {
+													"type": "string"
+												},
+												"state": {
+													"type": "string"
+												},
+												"cache": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										},
+										"findings": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "ok", "level", "detail", "detailRedacted"],
+												"properties": {
+													"name": {
+														"type": "string"
+													},
+													"ok": {
+														"type": "boolean"
+													},
+													"level": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "ok"
+															},
+															{
+																"type": "string",
+																"const": "warn"
+															},
+															{
+																"type": "string",
+																"const": "error"
+															}
+														]
+													},
+													"detail": {
+														"type": "string"
+													},
+													"detailRedacted": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/interop": {
+			"get": {
+				"operationId": "interop",
+				"summary": "All registered external agents and bounded resource discovery",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["detectedAt", "agents"],
+									"properties": {
+										"detectedAt": {
+											"type": "string"
+										},
+										"agents": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"kind",
+													"label",
+													"hasExecutable",
+													"presence",
+													"binary",
+													"version",
+													"installDir",
+													"adapter",
+													"decision",
+													"skillCount",
+													"projectArtifacts",
+													"inventory"
+												],
+												"properties": {
+													"kind": {
+														"type": "string"
+													},
+													"label": {
+														"type": "string"
+													},
+													"hasExecutable": {
+														"type": "boolean"
+													},
+													"presence": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "present"
+															},
+															{
+																"type": "string",
+																"const": "absent"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
+															}
+														]
+													},
+													"binary": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"version": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"installDir": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"adapter": {
+														"anyOf": [
+															{
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "present"
+																	},
+																	{
+																		"type": "string",
+																		"const": "absent"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"decision": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "accepted"
+															},
+															{
+																"type": "string",
+																"const": "declined"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"skillCount": {
+														"anyOf": [
+															{
+																"type": "integer"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"projectArtifacts": {
+														"anyOf": [
+															{
+																"type": "integer"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"inventory": {
+														"type": "object",
+														"required": ["status", "listing", "diagnostics", "items"],
+														"properties": {
+															"status": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "known"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	}
+																]
+															},
+															"listing": {
+																"type": "string",
+																"const": "unknown"
+															},
+															"diagnostics": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"items": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["kind", "name", "path", "scope"],
+																	"properties": {
+																		"kind": {
+																			"type": "string"
+																		},
+																		"name": {
+																			"type": "string"
+																		},
+																		"path": {
+																			"type": "string"
+																		},
+																		"scope": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "user"
+																				},
+																				{
+																					"type": "string",
+																					"const": "project"
+																				}
+																			]
+																		},
+																		"plugin": {
+																			"type": "string"
+																		},
+																		"version": {
+																			"type": "string"
+																		},
+																		"marketplace": {
+																			"type": "string"
+																		},
+																		"installation": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "installed"
+																				},
+																				{
+																					"type": "string",
+																					"const": "unknown"
+																				}
+																			]
+																		},
+																		"enabled": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/library": {
 			"get": {
 				"operationId": "library",
@@ -17799,10 +18314,46 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["clio", "app", "apiVersion", "epoch"],
+									"required": ["clio", "node", "platform", "piAgentCore", "piAi", "piTui", "app", "apiVersion", "epoch"],
 									"properties": {
 										"clio": {
 											"type": "string"
+										},
+										"node": {
+											"type": "string"
+										},
+										"platform": {
+											"type": "string"
+										},
+										"piAgentCore": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"piAi": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"piTui": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
 										},
 										"app": {
 											"type": "string"

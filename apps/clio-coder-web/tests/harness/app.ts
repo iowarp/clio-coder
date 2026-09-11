@@ -17,6 +17,7 @@ import { OperationRegistry } from "../../server/services/operations.js";
 import { ReportsService } from "../../server/services/reports.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService } from "../../server/services/settings.js";
+import { SystemService } from "../../server/services/system.js";
 import { TargetsService } from "../../server/services/targets-cli.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
 import { TraceService } from "../../server/services/traces.js";
@@ -72,6 +73,7 @@ export async function harness(
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		system: new SystemService(reads, workspaces),
 		library: new LibraryService(reads, cli, workspaces),
 		reports: new ReportsService(reads, cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),

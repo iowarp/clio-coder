@@ -13,6 +13,7 @@ import { LibraryPage } from "./pages/library.js";
 import { EvalDetail, EvalsPage, UsagePage } from "./pages/reports.js";
 import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { SettingsPage } from "./pages/settings.js";
+import { InteropPage, SystemPage } from "./pages/system.js";
 import { TargetsPage } from "./pages/targets.js";
 import { Toolchain } from "./pages/toolchain.js";
 import { TraceRunPage } from "./pages/traces/run.js";
@@ -40,6 +41,8 @@ const router = createBrowserRouter([
 			{ path: "/evals/:id", element: <EvalDetail client={client} /> },
 			{ path: "/usage", element: <UsagePage client={client} /> },
 			{ path: "/library", element: <LibraryPage client={client} /> },
+			{ path: "/system", element: <SystemPage client={client} /> },
+			{ path: "/system/interop", element: <InteropPage client={client} /> },
 			{ path: "/fleet", element: <FleetPage client={client} /> },
 			{ path: "/fleet/:id", element: <FleetDetail client={client} /> },
 			{ path: "/fleet/dispatches/:id", element: <FleetDetail client={client} dispatch /> },

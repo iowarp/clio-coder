@@ -12,7 +12,7 @@ export const navigation = [
 	{ label: "Evidence", path: "/evidence", available: true },
 	{ label: "Evals", path: "/evals", available: true },
 	{ label: "Library", path: "/library", available: true },
-	{ label: "System", path: "/system", available: false },
+	{ label: "System", path: "/system", available: true },
 ] as const;
 export function Navigation({ close }: { close?: () => void }) {
 	const location = useLocation();

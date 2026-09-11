@@ -13,6 +13,7 @@ import { libraryRoutes } from "./http/routes-library.js";
 import { reportRoutes } from "./http/routes-reports.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { settingsRoutes } from "./http/routes-settings.js";
+import { systemRoutes } from "./http/routes-system.js";
 import { targetsRoutes } from "./http/routes-targets.js";
 import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
@@ -29,6 +30,7 @@ import { AppProblem } from "./services/problem.js";
 import type { ReportsService } from "./services/reports.js";
 import type { SessionService } from "./services/sessions.js";
 import type { SettingsService } from "./services/settings.js";
+import type { SystemService } from "./services/system.js";
 import type { TargetsService } from "./services/targets-cli.js";
 import type { ToolchainService } from "./services/toolchain.js";
 import type { TraceService } from "./services/traces.js";
@@ -44,6 +46,7 @@ export function createApp(options: {
 	settings: SettingsService;
 	targets: TargetsService;
 	fleet: FleetService;
+	system: SystemService;
 	library: LibraryService;
 	reports: ReportsService;
 	evidence: EvidenceService;
@@ -65,7 +68,7 @@ export function createApp(options: {
 		}),
 	);
 	register(app, hub, routes.meta, () => ({
-		clio: getVersionInfo().clio,
+		...getVersionInfo(),
 		app: APP_VERSION,
 		apiVersion: API_VERSION as 1,
 		epoch: hub.epoch,
@@ -94,6 +97,7 @@ export function createApp(options: {
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets);
 	fleetRoutes(app, hub, options.fleet);
+	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library);
 	reportRoutes(app, hub, options.reports);
 	evidenceRoutes(app, hub, options.evidence);
