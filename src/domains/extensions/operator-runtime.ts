@@ -297,7 +297,9 @@ export class OperatorExtensionRuntime {
 				message: `operator generation ${next}: ${ready} ready, ${degraded} degraded; tool schemas remain frozen${hooks ? `; hooks/snapshot generation ${hooks.generation}` : ""}`,
 			};
 		} catch (error) {
-			for (const process of staged.values()) this.retire(process, "reload-rejected");
+			for (const process of new Set([...this.processes.values(), ...staged.values()])) {
+				this.retire(process, "reload-rejected");
+			}
 			this.processes.clear();
 			result = {
 				status: this.generation === next ? "committed" : "rejected",

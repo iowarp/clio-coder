@@ -574,6 +574,44 @@ test("no-runtime and queued busy maintenance do no repeated disk verification", 
 	equal(runtime.maintenanceDelayMs, 250);
 });
 
+for (const failure of ["context", "inventory"] as const) {
+	test(`reload retains cleanup ownership when ${failure} lookup fails before staging`, async (t) => {
+		const f = await fixture(t, 'export default api=>{api.handle("inspect",()=>({text:String(process.pid)}));};');
+		let broken = false;
+		const runtime = new OperatorExtensionRuntime({
+			context: () => {
+				if (broken && failure === "context") throw new Error("context unavailable");
+				return { workspace: f.cwd, sessionId: null, mode: "interactive" };
+			},
+			list: () => {
+				if (broken && failure === "inventory") throw new Error("inventory unavailable");
+				return [f.extension];
+			},
+			isIdle: () => true,
+		});
+		let pid: number | undefined;
+		try {
+			equal((await runtime.reload()).status, "committed");
+			const childPid = Number((await runtime.invoke("ext:lab_status.v1:inspect", "")).text);
+			pid = childPid;
+			ok(Number.isSafeInteger(pid) && pid > 0);
+			broken = true;
+			equal((await runtime.reload()).status, "rejected");
+			await runtime.dispose();
+			throws(() => process.kill(childPid, 0), { code: "ESRCH" });
+		} finally {
+			await runtime.dispose();
+			if (pid) {
+				try {
+					process.kill(pid, "SIGKILL");
+				} catch {
+					/* Already reaped by disposal. */
+				}
+			}
+		}
+	});
+}
+
 test("missing workspace and throwing context adapters quarantine real observations without unhandled rejection", async (t) => {
 	const f = await fixture(
 		t,
