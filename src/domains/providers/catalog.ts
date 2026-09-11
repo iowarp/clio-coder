@@ -160,12 +160,16 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 			input.defaultBaseUrl,
 		reasoning: caps.reasoning,
 		input: caps.vision ? (builtin?.input.includes("image") ? builtin.input : ["text", "image"]) : ["text"],
-		cost: {
-			input: pricing?.input ?? builtin?.cost.input ?? 0,
-			output: pricing?.output ?? builtin?.cost.output ?? 0,
-			cacheRead: pricing?.cacheRead ?? builtin?.cost.cacheRead ?? 0,
-			cacheWrite: pricing?.cacheWrite ?? builtin?.cost.cacheWrite ?? 0,
-		},
+		// Catalog tiers belong to the catalog rates. An explicit target price
+		// replaces that schedule, using the same defaults as resolveEffectivePricing.
+		cost: pricing
+			? {
+					input: pricing.input,
+					output: pricing.output,
+					cacheRead: pricing.cacheRead ?? 0,
+					cacheWrite: pricing.cacheWrite ?? 0,
+				}
+			: structuredClone(builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
 	};
