@@ -65,8 +65,10 @@ workspace edits with command approval, one worker at a time, a $5 tracked sessio
 budget, and a regular terminal interface. Other settings can wait. Escape goes
 back during setup; `clio-coder configure --settings` opens the full menu.
 
-**New in 0.4.6:** Quick Connect and simpler output styles. See
-[Install](#install) for source builds and other package managers.
+**New in 0.4.7:** A unified Library for reusable workflows, operator extensions,
+safer keyboard controls, and a compact welcome header. See the
+[changelog](CHANGELOG.md) for release details and [Install](#install) for source
+builds and other package managers.
 
 ## Built for scientific software
 
