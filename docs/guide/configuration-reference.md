@@ -171,6 +171,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].litellm.request.tags` | `[clio-coder]` | Additional LiteLLM request tags (list of non-empty strings without commas); Clio always adds `clio-coder`. |  |
 | `targets[].litellm.request.timeoutSeconds` |  | Optional LiteLLM request/upstream timeout override sent as `x-litellm-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
 | `targets[].maxConcurrentRequests` |  | Explicit request-slot limit for this inference endpoint (integer >= 1); overrides live slot discovery and is shared by every target on the same normalized URL; applies next turn. |  |
+| `targets[].cache.retention` | SDK default | Native Pi request cache policy: `none`, `short`, or `long`. Meaning depends on the selected API/model; this grants no management or paid-warming authority. | explicit call > target > Anthropic environment fallback > SDK default |
 | `targets[].pricing.cacheRead` | `0` | USD rate for cache-read tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.cacheWrite` | `0` | USD rate for cache-write tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.input` |  | USD rate per input token unit used for cost accounting when set, taking precedence over catalog pricing (number >= 0); required together with `output`. |  |

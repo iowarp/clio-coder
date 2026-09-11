@@ -148,7 +148,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 	}
 	const pricing = input.target.pricing;
 	const targetHeaders = input.target.auth?.headers;
-	const model: Model<Api> = {
+	const model: Model<Api> & { clioCoder?: { cache: NonNullable<TargetDescriptor["cache"]> } } = {
 		...catalogFields,
 		id: input.wireModelId,
 		name: `${input.wireModelId} (${input.target.id})`,
@@ -172,6 +172,7 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 			: structuredClone(builtin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }),
 		contextWindow: caps.contextWindow,
 		maxTokens: caps.maxTokens,
+		...(input.target.cache === undefined ? {} : { clioCoder: { cache: structuredClone(input.target.cache) } }),
 	};
 	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(targetHeaders ?? {}) };
 	if (Object.keys(headers).length > 0) {

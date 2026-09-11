@@ -14,6 +14,11 @@ export interface TargetPricing {
 	cacheWrite?: number;
 }
 
+/** Request policy interpreted by the selected Pi API; it does not authorize cache administration or paid warming. */
+export interface TargetCacheSettings {
+	retention?: "none" | "short" | "long";
+}
+
 // Canonical persisted lifecycle name. Readers temporarily normalize the
 // released `clio-managed` spelling at the settings boundary.
 export type TargetLifecycle = "user-managed" | "clio-coder-managed";
@@ -74,6 +79,7 @@ export interface TargetDescriptor {
 	lifecycle?: TargetLifecycle;
 	gateway?: boolean;
 	pricing?: TargetPricing;
+	cache?: TargetCacheSettings;
 	lmstudio?: LmStudioTargetSettings;
 	litellm?: LiteLLMTargetSettings;
 	/** Explicit request-slot limit for this inference endpoint. It overrides live discovery. */

@@ -593,6 +593,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"lifecycle",
 		"gateway",
 		"pricing",
+		"cache",
 		"lmstudio",
 		"litellm",
 		"maxConcurrentRequests",
@@ -641,6 +642,21 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("pricing" in value) {
 		const v = validatePricing(issues, `${path}.pricing`, value.pricing);
 		if (v !== undefined) target.pricing = v;
+	}
+	if ("cache" in value) {
+		if (!isPlainObject(value.cache)) issues.add(`${path}.cache`, "expected a map");
+		else {
+			issues.unknownKeys(`${path}.cache`, value.cache, ["retention"]);
+			target.cache = {};
+			if ("retention" in value.cache) {
+				const retention = expectEnum(issues, `${path}.cache.retention`, value.cache.retention, [
+					"none",
+					"short",
+					"long",
+				] as const);
+				if (retention !== undefined) target.cache.retention = retention;
+			}
+		}
 	}
 	if ("lmstudio" in value) {
 		const v = validateLmStudioSettings(issues, `${path}.lmstudio`, value.lmstudio);

@@ -25,6 +25,7 @@ export interface ClioLocalModelMetadata {
 		chatTemplateKwargsUnsupported?: boolean;
 		lmstudio?: TargetDescriptor["lmstudio"];
 		litellm?: TargetDescriptor["litellm"];
+		cache?: TargetDescriptor["cache"];
 	};
 }
 
@@ -65,6 +66,8 @@ function localOpenAICompat(caps: CapabilityFlags, runtimeId: string): OpenAIComp
 		maxTokensField: "max_tokens",
 		supportsThinkingTokenBudget: runtimeId === "vllm",
 		supportsStrictMode: false,
+		// Native and generic gateway schemas do not establish hosted 24h retention.
+		supportsLongCacheRetention: false,
 	};
 	const thinkingFormat = openAIThinkingFormat(caps);
 	if (thinkingFormat) (compat as unknown as { thinkingFormat?: string }).thinkingFormat = thinkingFormat;
@@ -111,6 +114,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			...(quirks ? { quirks } : {}),
 			...(target.lmstudio ? { lmstudio: target.lmstudio } : {}),
 			...(target.litellm ? { litellm: target.litellm } : {}),
+			...(target.cache ? { cache: structuredClone(target.cache) } : {}),
 		},
 	};
 	if (headers) model.headers = headers;

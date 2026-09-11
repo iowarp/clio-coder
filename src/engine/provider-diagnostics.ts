@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, writeFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { Api, AssistantMessageEventStream, Model, StreamOptions } from "@earendil-works/pi-ai";
+import type { TargetCacheSettings } from "../domains/providers/types/target-descriptor.js";
 import { findEngineEnvKeys } from "./env-api-keys.js";
 
 /** Process-owned opt-in reaches every native engine call, including prewarm and workers. */
@@ -11,7 +12,11 @@ export function instrumentProviderCall<T extends StreamOptions>(
 	invoke: (options: T | undefined) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	let effective = options;
-	if (model.api === "anthropic-messages" && options?.cacheRetention === undefined) {
+	const configured = (model as Model<Api> & { clioCoder?: { cache?: TargetCacheSettings } }).clioCoder?.cache?.retention;
+	if (options?.cacheRetention === undefined && configured !== undefined) {
+		effective = { ...options, cacheRetention: configured } as T;
+	}
+	if (model.api === "anthropic-messages" && effective?.cacheRetention === undefined) {
 		const retention = process.env.CLIO_CODER_ANTHROPIC_CACHE_RETENTION;
 		if (retention !== undefined && retention !== "") {
 			if (retention !== "none" && retention !== "short" && retention !== "long") {

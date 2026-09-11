@@ -546,11 +546,15 @@ function applyLmStudioPayload(
 	return next;
 }
 
-function applyLlamaCppPromptCachePayload(payload: Record<string, unknown>, model: Model<Api>): Record<string, unknown> {
+function applyLlamaCppPromptCachePayload(
+	payload: Record<string, unknown>,
+	model: Model<Api>,
+	retention: StreamOptions["cacheRetention"],
+): Record<string, unknown> {
 	const metadata = runtimeMetadata(model);
 	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return payload;
 	if (payload.cache_prompt !== undefined) return payload;
-	return { ...payload, cache_prompt: true };
+	return { ...payload, cache_prompt: retention !== "none" };
 }
 
 function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boolean {
@@ -562,13 +566,14 @@ function shouldApplyLlamaCppPromptCache(model: Model<"openai-completions">): boo
 function composeThinkingOnPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	base: AnyOnPayload | undefined,
+	retention: StreamOptions["cacheRetention"],
 ): AnyOnPayload {
 	return async (payload, model) => {
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
 		const next = applyLmStudioPayload(
-			applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model), resolved.thinking, resolved, model),
+			applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model, retention), resolved.thinking, resolved, model),
 			model,
 			resolved,
 		);
@@ -625,7 +630,7 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 		applied.mechanism === "on-off" ||
 		applied.mechanism === "none"
 	) {
-		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload);
+		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload, options?.cacheRetention);
 	}
 	return merged as TOptions;
 }

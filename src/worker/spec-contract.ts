@@ -381,6 +381,10 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 	readOptionalEnum(target, "lifecycle", "WorkerSpec.target", TARGET_LIFECYCLES);
 	if (target.auth !== undefined) validateTargetAuth(target.auth);
 	if (target.pricing !== undefined) validateTargetPricing(target.pricing);
+	if (target.cache !== undefined) {
+		const cache = readRecord(target.cache, "WorkerSpec.target.cache");
+		readOptionalEnum(cache, "retention", "WorkerSpec.target.cache", ["none", "short", "long"] as const);
+	}
 	if (target.capabilities !== undefined) validateCapabilityPatch(target.capabilities, "WorkerSpec.target.capabilities");
 }
 
