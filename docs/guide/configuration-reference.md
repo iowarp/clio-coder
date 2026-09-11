@@ -172,6 +172,14 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].litellm.request.timeoutSeconds` |  | Optional LiteLLM request/upstream timeout override sent as `x-litellm-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
 | `targets[].maxConcurrentRequests` |  | Explicit request-slot limit for this inference endpoint (integer >= 1); overrides live slot discovery and is shared by every target on the same normalized URL; applies next turn. |  |
 | `targets[].cache.retention` | SDK default | Native Pi request cache policy: `none`, `short`, or `long`. Meaning depends on the selected API/model; this grants no management or paid-warming authority. | explicit call > target > Anthropic environment fallback > SDK default |
+| `targets[].cache.deployment.backend` | unset | Read-only binding to `llamacpp` or `vllm`; absence leaves warming ineligible. | target |
+| `targets[].cache.deployment.controlUrl` | unset | Explicit HTTP(S) discovery endpoint, without embedded credentials/query/fragment. No gateway credentials or administrative requests are sent here. | target |
+| `targets[].cache.deployment.model` | unset | Exact native model id, distinct from a gateway route alias. | target |
+| `targets[].cache.deployment.build` | unset | Expected worker build/version; a mismatch invalidates warm admission. Current llama warm protocol is verified against commit `c841aee`; other versions remain passive. | target |
+| `targets[].cache.deployment.gatewayDeploymentId` | unset | LiteLLM deployment id to compare against a single current `/v1/model/info` route. A match alone does not establish cache-control transport support. | target |
+| `targets[].cache.warm.maxInputTokens` | `8192` | Positive maximum estimated input tokens after engine context transforms; oversized warms are refused. This is an estimate, not a tokenizer or billing cap. | target |
+| `targets[].cache.warm.maxDurationMs` | `30000` | Positive client warm deadline, capped at 120000 ms. Client cancellation is not proof that backend computation stopped. | target |
+| `targets[].cache.warm.cooldownMs` | `60000` | Positive delay between completed warm requests; effective minimum 1000 ms. An identical prefix is suppressed for at least 60000 ms. | target |
 | `targets[].pricing.cacheRead` | `0` | USD rate for cache-read tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.cacheWrite` | `0` | USD rate for cache-write tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.input` |  | USD rate per input token unit used for cost accounting when set, taking precedence over catalog pricing (number >= 0); required together with `output`. |  |

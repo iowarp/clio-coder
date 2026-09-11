@@ -998,6 +998,60 @@
 <td></td>
 </tr>
 <tr>
+<td><code>targets[].cache.retention</code></td>
+<td>SDK default</td>
+<td>Native Pi request cache policy: <code>none</code>, <code>short</code>, or <code>long</code>. Meaning depends on the selected API/model; this grants no management or paid-warming authority.</td>
+<td>explicit call &gt; target &gt; Anthropic environment fallback &gt; SDK default</td>
+</tr>
+<tr>
+<td><code>targets[].cache.deployment.backend</code></td>
+<td>unset</td>
+<td>Read-only binding to <code>llamacpp</code> or <code>vllm</code>; absence leaves warming ineligible.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.deployment.controlUrl</code></td>
+<td>unset</td>
+<td>Explicit HTTP(S) discovery endpoint, without embedded credentials/query/fragment. No gateway credentials or administrative requests are sent here.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.deployment.model</code></td>
+<td>unset</td>
+<td>Exact native model id, distinct from a gateway route alias.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.deployment.build</code></td>
+<td>unset</td>
+<td>Expected worker build/version; a mismatch invalidates warm admission. Current llama warm protocol is verified against commit <code>c841aee</code>; other versions remain passive.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.deployment.gatewayDeploymentId</code></td>
+<td>unset</td>
+<td>LiteLLM deployment id to compare against a single current <code>/v1/model/info</code> route. A match alone does not establish cache-control transport support.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.warm.maxInputTokens</code></td>
+<td><code>8192</code></td>
+<td>Positive maximum estimated input tokens after engine context transforms; oversized warms are refused. This is an estimate, not a tokenizer or billing cap.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.warm.maxDurationMs</code></td>
+<td><code>30000</code></td>
+<td>Positive client warm deadline, capped at 120000 ms. Client cancellation is not proof that backend computation stopped.</td>
+<td>target</td>
+</tr>
+<tr>
+<td><code>targets[].cache.warm.cooldownMs</code></td>
+<td><code>60000</code></td>
+<td>Positive delay between completed warm requests; effective minimum 1000 ms. An identical prefix is suppressed for at least 60000 ms.</td>
+<td>target</td>
+</tr>
+<tr>
 <td><code>targets[].pricing.cacheRead</code></td>
 <td><code>0</code></td>
 <td>USD rate for cache-read tokens (number &gt;= 0); 0 when absent.</td>

@@ -399,7 +399,7 @@ Three behaviors in this release are gated on a runtime's tier being `local-nativ
 
 The tier means "an inference server the operator runs, whose prefix cache and resident model Clio's own behavior can displace." That is what the three gates are actually asking:
 
-- **Pre-warm** runs only here, whatever `chat.prewarm` says, because a cloud provider bills the request and caches on its own schedule. The check is made twice, once from configuration before any runtime is resolved and once against the resolved runtime, so an unreachable target does not pay for a capability probe at boot just to be told no.
+- **Pre-warm** requires `chat.prewarm: true` and a verified, loaded and idle native deployment binding. The first supported path is the pinned llama.cpp deployment described below. Other native runtimes, unknown gateway routes and paid routes remain passive. Checks run before preparation and again before the request; a runtime tier alone grants no load or eviction authority.
 - **Endpoint capacity** defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.
 - **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](../architecture/context-engine.md#cache-divergence-honesty).
 
@@ -1241,3 +1241,199 @@ When opening issues, include the Clio version, Node version, target id/runtime, 
 ## Explicit Antigravity continuity
 
 Antigravity resumes a conversation only when a caller explicitly supplies its conversation ID through the worker runtime. The dispatch tool exposes no resume argument. A nonempty ID must be at most 4096 UTF-8 bytes and contain no Unicode control characters; it is passed as a literal `--conversation` argument. Clio requires the first init conversation ID to match the requested ID and fails the run if agy starts a different conversation. An absent or empty ID starts fresh. Antigravity runs are never retried automatically.
+
+## Exact prompt reuse and bounded warming
+
+Normal provider caching does not require Clio to manage inference state. Pi
+serializes native requests and normalizes provider usage; Clio preserves those
+values through the session ledger, worker receipts and trace records. A matching
+serialized prefix is a reuse candidate. Only backend usage/timing evidence can
+establish an actual hit. A compiler memoization hit or a forked transcript cannot.
+
+| Responsibility | Existing owner | Clio correction or limit |
+| --- | --- | --- |
+| Native request conversion, thinking history and cache controls | Pi 0.85.1 | Target retention reaches all instrumented native Pi APIs; explicit call options still win. |
+| Exclusive input/read/write buckets, cost tiers and one-hour write cost | Pi | Preserve the full catalog cost and per-call calculated total instead of flattening tiers or repricing an aggregate. |
+| Main, worker, failed/aborted and out-of-turn usage | Clio | Preserve optional `cacheWrite1h` as a subset of writes; retain billed failed calls. Missing provider usage remains unknown. |
+| Main and warm preparation | Pi public transforms and Clio payload hooks | Warm calls use the caller's transforms, ordered tools, thinking and payload replacement without executing tools or adding messages to history. |
+| Session transport identity | Pi/Clio session ownership | `sessionId` remains the real session id. No fleet-wide cache key replaces it. |
+| Distinct cross-session cache affinity, separately configured one-hour rate | SDK contract gap | No duplicate serializer or price calculator is introduced. Pi's supported provider pricing remains authoritative. |
+
+A native Pi target can request retention without enabling warming:
+
+```yaml
+targets:
+  - id: direct-openai
+    runtime: openai
+    cache:
+      retention: long
+```
+
+Precedence is explicit request option, then target, then
+`CLIO_CODER_ANTHROPIC_CACHE_RETENTION` for native Anthropic Messages, then Pi's
+own environment/default. Targets reload on the next turn, including when the
+id and model stay the same. The active conversation survives the runtime refresh.
+There are no duplicate model, recipe or fleet retention knobs.
+
+| API/deployment | Effective policy and current verification |
+| --- | --- |
+| Native OpenAI Responses, older supported models | Pi's model compatibility flags select `24h` for `long`. `none` omits controls; it does not universally disable automatic caching. Payload fixtures cover this path. |
+| Native OpenAI Responses, explicit-mode models | Pi selects `prompt_cache_options`; `none` requests explicit mode without breakpoints, and `long` selects `30m` TTL. Clio adds no extra breakpoints or weaker instruction roles. Payload fixtures cover this path. |
+| Native Anthropic Messages | Pi selects eligible short or one-hour cache-control blocks. `none` removes these controls. Real serializer/HTTP usage fixtures cover normalization and the one-hour subset. |
+| Direct llama.cpp | Normal calls retain `cache_prompt: true`; `retention: none` selects false. Optional warming requires the binding and evidence below. |
+| LiteLLM/generic OpenAI compatibility | Passive provider usage is retained. Generic synthesis does not advertise OpenAI `24h` retention. A declared route alone does not prove native controls or timings survive translation. Gateway warming stays disabled. |
+| vLLM | Normal inference and passive provider usage continue. A declared build can be checked, but version alone proves neither APC enablement nor idle scheduler/memory capacity. Warming stays disabled; no fixed-slot model is imposed. |
+| Claude Agent SDK, subscription/OAuth and other harnesses | Harness-specific transport and usage remain intact. Native Pi controls and direct API prices are not promises about another harness. |
+| Gemini explicit cache objects, Bedrock/platform cache administration | No new object lifecycle or administration is added. Existing Pi/provider support remains responsible for supported passive observations and requests. |
+
+For a direct llama.cpp **already loaded** worker at the audited commit, an
+operator can opt into a bounded pilot. Use the worker's actual `build_info`,
+exact model alias and endpoint; the values below are examples, not deployment
+measurements:
+
+```yaml
+chat:
+  prewarm: true
+targets:
+  - id: local-llama
+    runtime: llamacpp
+    url: http://127.0.0.1:8080
+    lifecycle: user-managed
+    cache:
+      retention: short
+      deployment:
+        backend: llamacpp
+        controlUrl: http://127.0.0.1:8080
+        model: your-exact-model-id
+        build: b1-c841aee
+      warm:
+        maxInputTokens: 8192
+        maxDurationMs: 30000
+        cooldownMs: 60000
+```
+
+Discovery uses GET requests with a two-second total deadline and refuses
+redirects. The control endpoint receives no inferred credentials. An authenticated
+control endpoint therefore remains unavailable to this initial reader. For a
+router, Clio inspects `/models` before any model-qualified request. Sleeping,
+loading or unloaded models are ineligible; a build change, unknown model or busy
+slot also refuses warming. The verified llama protocol is commit `c841aee`.
+Other builds stay passive until their no-autoload and inspection behavior is
+verified. A missing process epoch stays unknown; discovery is repeated rather
+than persisting a warm handle across restarts.
+
+A gateway declaration uses the same `deployment` map plus
+`gatewayDeploymentId`, with `model` set to the native model and `controlUrl` to
+its native endpoint. The reader compares a single matching LiteLLM route's id,
+model and API base before contacting that control endpoint. Failover or multiple
+replicas invalidate that binding. Even a matching route remains passive:
+end-to-end native control transport and reliable request affinity have not been
+validated on the configured gateway. No gateway credentials are forwarded to
+native discovery.
+
+The warm owns one request and at most one newer pending trigger. Pending work
+expires after 30 seconds. The default bound is 8192 estimated input tokens and
+a 30-second client deadline, with a 60-second cooldown; configured deadlines
+cannot exceed two minutes. Context transforms run before the input estimate.
+The one-token output and dummy suffix do not enter the conversation. The warm
+uses observe-only residency and `autoload=false` on native llama requests, so
+it cannot use the ordinary turn's implicit administrative authority.
+
+Admission retains the blanket active-dispatch refusal, checks shared Clio
+worker leases/reservations, and reads live native slots for foreign traffic.
+These are conservative admission observations, **not a global endpoint
+reservation**. Another process can begin work after the check. A foreground
+submit detaches a non-preemptible warm; its usage and local endpoint occupancy
+remain owned until the client round actually settles. Shutdown aborts detached
+rounds as well. Client cancellation never proves the server has stopped;
+subsequent admission must observe the backend again.
+
+`prewarm` custom ledger entries contain the actual usage, backend timings and
+deployment observation. `prewarmSkipped` records changed refusal reasons such
+as `deployment-unbound`, `model-not-loaded`, `deployment-build-mismatch`,
+`gateway-route-mismatch`, `gateway-cache-transport-unverified`,
+`vllm-scheduler-unverified`, `cooldown` and `expired`. These records contain no
+prompt payloads. Diagnostic payload capture remains a separate explicit opt-in.
+
+Turn off speculative work with `chat.prewarm: false`. Remove `cache.deployment`
+to return an individual target to passive operation. `cache.retention: none`
+selects the API's supported cache-off request policy and also refuses Clio
+warming; its exact effect on provider automatic caches is API-specific.
+Existing `chat.prewarm: true` configurations without deployment evidence now
+skip the speculative request. Ordinary inference remains available.
+
+No paid warming or automatic sibling-worker warming is enabled. Native workers
+retain isolated/fork/splice context selection and share Pi serialization and
+accounting, but the worker's context guard and payload hooks must be included
+in any future headless warm composition. There is no main-to-worker cache
+transfer based on ancestry.
+
+### Validation status for this change
+
+Live validation on 2026-09-11 exercised mini's `ornith1.5-35b-moe` on
+llama.cpp (`b1-c841aee`) and dynamo's `qwen3.8-27b` on LM Studio, first directly
+and then through blade's LiteLLM 1.98.0. The selected models were allowed to
+wake/load for inference; no serving configuration or administrative API was
+changed. The same native models and thinking-off intent were retained.
+
+Ten repetitions per route used about 2,850 tokens of public synthetic context
+and a bounded output. All useful requests in the corrected engine run returned
+exactly `OK`. Median client TTFT was:
+
+| Route | New prefix | Repeated prefix | After a separate warm |
+| --- | ---: | ---: | ---: |
+| Mini native | 1,691 ms | 183 ms | 163 ms |
+| Dynamo native | 1,255 ms | 156 ms | 155 ms |
+| Mini through LiteLLM | 1,706 ms | 196 ms | 173 ms |
+| Dynamo through LiteLLM | 1,259 ms | 163 ms | 162 ms |
+
+Mini reported roughly 2,834 cached tokens directly and 2,837 through the
+gateway after warming. Dynamo's OpenAI-compatible responses did not expose a
+cache-read breakdown; their normalized zero must not be presented as measured
+cache misses. Its timing improvement is an observation, not a per-request
+cache-token measurement. Gateway response metadata identified the expected
+models/deployments with no reported fallback or retry.
+
+Including the warm itself, warm plus useful request took **10.6–12.4% more
+median elapsed time** than one first request. That fails the preregistered 5%
+maximum total-time regression. Automatic warming therefore remains off by
+default. This workload favors reuse from useful requests; the after-warm TTFT
+reduction alone is not a total-work improvement. An idle-time or foreground
+contention benefit requires its own controlled measurement before rollout.
+
+Four full Clio main-agent CLI runs also completed with no tool calls and
+matching native/gateway outputs per model: mini returned `OK.`, dynamo `OK`.
+The punctuation means mini did not meet a literal exact-`OK` instruction in
+those full-prompt smoke runs; it is not hidden by the transport success. The
+engine workload above enforced the exact output separately.
+
+Four custom-worker CLI runs then returned exactly `OK`, with zero tool calls
+and succeeded outcomes. Each emitted receipt matched its persisted receipt and
+passed Clio's integrity verifier against its persisted run envelope. The mini
+worker through LiteLLM reported 719 cache-read tokens in that verified receipt.
+These checks establish transport and accounting continuity; the synthetic
+worker's task quality was not independently graded.
+
+The first exploratory driver omitted the public capability update that
+production applies after model synthesis. That made dynamo through LiteLLM
+spend its output budget on thinking. Those samples were preserved and marked
+invalid for semantic comparisons; the reported rerun includes the existing
+public update and checks visible output. This was a driver error, not a newly
+found production thinking regression.
+
+Fixtures additionally cover OpenAI/Anthropic serializers, normalized usage,
+SDK pricing tiers, failed calls, selected-target refresh, warm hooks and
+lifecycle, and deployment invalidation. Isolated/fork/splice worker context
+contracts pass. vLLM live verification is explicitly outside this local pass;
+its scheduler and APC controls remain unverified and passive.
+
+Raw local results are in `.clio-coder/artifacts/cache-live-2026-09-11T14-17-51.153Z/`,
+with full CLI events under `.clio-coder/artifacts/cache-cli-2026-09-11T14-20-44.264Z/`.
+Worker events and receipt verification are under
+`.clio-coder/artifacts/cache-worker-2026-09-11T14-26-13.738Z/`.
+The original preregistration is preserved separately from the schema-correct
+`.clio-coder/validation.yaml`. These artifacts are not distributed with a release.
+The run does not establish replica affinity guarantees, eviction/TTL behavior,
+foreign-traffic fairness, paid-provider savings, or a complete deployment pin
+for every model binary/tokenizer. Those limits prevent a general performance
+claim or enabling automatic gateway/worker warming.
