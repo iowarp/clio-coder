@@ -8,6 +8,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 	const bus = getSharedBus();
 	const before = bus.listeners(BusChannels.SessionStart).length;
 	const stopped: string[] = [];
+	let dependencyDuringStop: string | undefined;
 	const failure = new Error("startup failed after subscribing");
 	const modules = ["dependency", "consumer"].map(
 		(name): DomainModule => ({
@@ -24,7 +25,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 						stop() {
 							unsubscribe?.();
 							stopped.push(name);
-							if (name === "consumer") strictEqual(context.getContract<{ name: string }>("dependency")?.name, "dependency");
+							if (name === "consumer") dependencyDuringStop = context.getContract<{ name: string }>("dependency")?.name;
 						},
 					},
 				};
@@ -33,6 +34,7 @@ test("failed domain startup releases its listeners and earlier dependencies in r
 	);
 	await rejects(loadDomains(modules, { diagnostic() {} }), { cause: failure });
 	deepStrictEqual(stopped, ["consumer", "dependency"]);
+	strictEqual(dependencyDuringStop, "dependency");
 	strictEqual(bus.listeners(BusChannels.SessionStart).length, before);
 });
 

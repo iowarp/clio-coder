@@ -29,6 +29,16 @@ interface RegisteredHook {
 	timeoutMs?: number;
 }
 
+function registeredHook(hook: Hook, options?: { timeoutMs: number }): RegisteredHook {
+	if (
+		options &&
+		(!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0 || options.timeoutMs > 2 ** 31 - 1)
+	) {
+		throw new RangeError("shutdown hook timeout must be a positive 32-bit timer delay");
+	}
+	return { run: hook, ...options };
+}
+
 /** Wall-clock budget per hook and per domain.stop() call. */
 export const DEFAULT_SHUTDOWN_HOOK_MS = 500;
 
@@ -141,19 +151,13 @@ class TerminationCoordinator {
 	}
 
 	onDrain(hook: Hook, options?: { timeoutMs: number }): void {
-		if (
-			options &&
-			(!Number.isSafeInteger(options.timeoutMs) || options.timeoutMs <= 0 || options.timeoutMs > 2 ** 31 - 1)
-		) {
-			throw new RangeError("shutdown hook timeout must be a positive 32-bit timer delay");
-		}
-		this.drainHooks.push({ run: hook, ...options });
+		this.drainHooks.push(registeredHook(hook, options));
 	}
 	onTerminate(hook: Hook): void {
 		this.terminateHooks.push({ run: hook });
 	}
-	onPersist(hook: Hook): void {
-		this.persistHooks.push({ run: hook });
+	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
+		this.persistHooks.push(registeredHook(hook, options));
 	}
 
 	async shutdown(code = 0): Promise<void> {

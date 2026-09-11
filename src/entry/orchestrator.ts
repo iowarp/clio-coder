@@ -36,7 +36,7 @@ import {
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
-import { getTerminationCoordinator } from "../core/termination.js";
+import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -1203,8 +1203,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await dispatch.drain();
 		});
 	}
-	termination.onPersist(async () => {
-		await result.stop();
+	// The loader caps each domain separately. The outer hook must allow the
+	// whole sequence to finish, including cleanup after a timed-out domain.
+	termination.onPersist(() => result.stop(), {
+		timeoutMs: Math.min(2 ** 31 - 1, (result.loaded.length + 1) * resolveShutdownHookBudgetMs()),
 	});
 
 	bus.emit(BusChannels.SessionStart, { at: Date.now() });

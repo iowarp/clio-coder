@@ -159,25 +159,32 @@ describe("operator shell and wiki shutdown", { concurrency: false, skip: process
 			});
 		}
 	}
-	it("keeps the default hook budget while allowing one internal override", { timeout: 10_000 }, async () => {
-		const home = makeScratchHome("clio-coder-shutdown-budget-");
-		const child = spawn(process.execPath, ["--import", "tsx", fixture, "budget", home.dir, "unused"], {
-			env: { ...process.env, ...home.env, CLIO_CODER_SHUTDOWN_HOOK_MS: "50" },
-			stdio: ["ignore", "ignore", "pipe"],
+	for (const mode of ["budget", "domains"]) {
+		it(`keeps per-hook limits within the ${mode} shutdown allowance`, { timeout: 10_000 }, async () => {
+			const home = makeScratchHome("clio-coder-shutdown-budget-");
+			const child = spawn(process.execPath, ["--import", "tsx", fixture, mode, home.dir, "unused"], {
+				env: { ...process.env, ...home.env, CLIO_CODER_SHUTDOWN_HOOK_MS: "50" },
+				stdio: ["ignore", "ignore", "pipe"],
+			});
+			let stderr = "";
+			child.stderr.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+			try {
+				assert.ok(await waitFor(() => child.exitCode !== null, 5000));
+				assert.equal(child.exitCode, 0);
+				if (mode === "budget") {
+					assert.match(stderr, /drain\[1\] exceeded 50ms budget/);
+					assert.doesNotMatch(stderr, /drain\[0\] exceeded/);
+				} else {
+					assert.match(stderr, /slow.stop\(\) exceeded 50ms budget/);
+					assert.doesNotMatch(stderr, /persist\[0\] exceeded/);
+				}
+				assert.ok(existsSync(join(home.dir, "persisted")));
+			} finally {
+				if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+				home.cleanup();
+			}
 		});
-		let stderr = "";
-		child.stderr.on("data", (chunk: Buffer) => {
-			stderr += chunk.toString();
-		});
-		try {
-			assert.ok(await waitFor(() => child.exitCode !== null, 5000));
-			assert.equal(child.exitCode, 0);
-			assert.match(stderr, /drain\[1\] exceeded 50ms budget/);
-			assert.doesNotMatch(stderr, /drain\[0\] exceeded/);
-			assert.ok(existsSync(join(home.dir, "persisted")));
-		} finally {
-			if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-			home.cleanup();
-		}
-	});
+	}
 });

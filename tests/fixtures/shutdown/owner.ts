@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { withWikiDispatchLifecycle } from "../../../src/cli/wiki-generate.js";
 import { runBashCommand } from "../../../src/core/bash-exec.js";
+import { loadDomains } from "../../../src/core/domain-loader.js";
 import { getTerminationCoordinator } from "../../../src/core/termination.js";
 import { spawnWorkerProcess, type WorkerSpec } from "../../../src/domains/dispatch/worker-spawn.js";
 import {
@@ -89,6 +90,25 @@ if (mode === "editor") {
 			await worker.promise;
 		},
 	);
+} else if (mode === "domains") {
+	const loaded = await loadDomains(
+		["persist", "slow"].map((name) => ({
+			manifest: { name, dependsOn: name === "slow" ? ["persist"] : [] },
+			createExtension: () => ({
+				contract: {},
+				extension: {
+					start() {},
+					stop() {
+						if (name === "slow") return new Promise<void>(() => {});
+						writeFileSync(join(root, "persisted"), "yes");
+					},
+				},
+			}),
+		})),
+	);
+	const termination = getTerminationCoordinator();
+	termination.onPersist(() => loaded.stop(), { timeoutMs: 300 });
+	await termination.shutdown(0);
 } else if (mode === "budget") {
 	const termination = getTerminationCoordinator();
 	termination.onDrain(() => new Promise((resolve) => setTimeout(resolve, 200)), { timeoutMs: 300 });
