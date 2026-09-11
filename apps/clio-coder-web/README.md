@@ -130,16 +130,10 @@ a local OpenAI-compatible fixture in a scratch home. It includes durable session
 load/replay and records real child RSS/boot measurements. It is separate from the
 network-disabled default test lane.
 
-See [SPRINT.md](SPRINT.md) for canonical status,
-[the S1 implementation handoff](notes/2026-09-11-S1.md) for acceptance evidence,
-and [the S1 closeout](notes/2026-09-11-S1-closeout.md) for the approved CI checker
-update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records trace
-coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records session
-and process-lifecycle verification. [S4 evidence](notes/2026-09-11-S4.md) records
-permission/control verification and measured reconnect behavior. [S5 evidence](notes/2026-09-11-S5.md)
-records renderer, design, and browser accessibility verification. [S6 evidence](notes/2026-09-11-S6.md)
-records documentation, link and blueprint checks. [S7a evidence](notes/2026-09-11-S7a.md)
-records layered settings, customization, redaction and worker-deadline checks.
+See [SPRINT.md](SPRINT.md) for canonical status, acceptance results, measurements
+and the next slice. Validation notes and screenshots live outside the checkout;
+the ledger records their locations, and earlier commits retain historical evidence.
+
 S1-S7b provide sessions, trace and documentation browsing, settings inspection,
 and target operations. Target listing and offline models/profiles/bindings are
 workspace REST reads. Target probe, use, and removal return operation IDs;
