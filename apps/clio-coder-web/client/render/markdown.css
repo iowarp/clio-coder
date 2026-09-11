@@ -1,0 +1,252 @@
+/* React token renderer; code and diagrams are contained instruments in either theme. */
+.markdown {
+	min-width: 0;
+	color: var(--ink);
+	font-size: 16px;
+	line-height: 1.7;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+.markdown > * + * {
+	margin-top: 0.85em;
+}
+.markdown p {
+	margin: 0 0 0.8em;
+	white-space: normal;
+	font-size: inherit;
+	line-height: inherit;
+}
+.markdown .md-heading {
+	font-family: var(--font-editorial);
+	line-height: 1.25;
+	font-weight: 550;
+	margin: 1.2em 0 0.45em;
+}
+.markdown .md-heading--1 {
+	font-size: 30px;
+}
+.markdown .md-heading--2 {
+	font-size: 25px;
+}
+.markdown .md-heading--3 {
+	font-size: 21px;
+}
+.markdown .md-heading--4,
+.markdown .md-heading--5,
+.markdown .md-heading--6 {
+	font-size: 18px;
+}
+.markdown .md-list {
+	margin: 0.6em 0;
+	padding-left: 1.6em;
+}
+.markdown li {
+	margin: 0.3em 0;
+}
+.markdown .md-list--tasks {
+	list-style: none;
+	padding-left: 0;
+}
+.markdown .md-task {
+	display: inline-block;
+	width: auto;
+	margin: 0 8px 0 0;
+}
+.markdown blockquote {
+	border-left: 3px solid var(--accent);
+	padding-left: 18px;
+	margin-left: 0;
+	color: var(--muted);
+}
+.markdown hr {
+	border: 0;
+	border-top: 1px solid var(--line);
+	margin-block: 24px;
+}
+.markdown .md-link {
+	color: var(--accent);
+	text-underline-offset: 3px;
+}
+.markdown .md-link--blocked {
+	border-bottom: 1px dotted var(--muted);
+	color: var(--muted);
+}
+.markdown .md-image,
+.markdown .md-html {
+	color: var(--muted);
+	font: 12px / 1.7 var(--font-mono);
+}
+.markdown p.md-html {
+	white-space: pre-wrap;
+}
+.markdown code {
+	display: inline;
+	padding: 2px 5px;
+	border-radius: 3px;
+	background: var(--inset);
+	color: var(--ink);
+	font: 0.84em var(--font-mono);
+}
+.markdown pre code {
+	display: inline;
+	padding: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	overflow-wrap: normal;
+}
+.md-table {
+	overflow: auto;
+	max-width: 100%;
+	border: 1px solid var(--line);
+	border-radius: 4px;
+}
+.markdown table {
+	min-width: 100%;
+	border-collapse: collapse;
+	font-size: 14px;
+}
+.markdown td,
+.markdown th {
+	padding: 9px 13px;
+	border-bottom: 1px solid var(--line);
+	text-align: left;
+}
+.markdown th {
+	background: var(--inset);
+}
+.code-block,
+.diagram {
+	min-width: 0;
+	margin: 16px 0;
+	border: 1px solid #3b5146;
+	border-radius: 5px;
+	overflow: hidden;
+	background: #15201c;
+	color: #e2eee5;
+}
+.code-block__bar {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 12px;
+	padding: 7px 12px;
+	border-bottom: 1px solid #3b5146;
+	background: #1d2b24;
+	color: #b9cabd;
+	font: 11px var(--font-mono);
+}
+.code-block__lang {
+	color: #b7dbbe;
+	font-weight: 700;
+}
+.code-block__lines {
+	margin-right: auto;
+}
+.code-block__copy {
+	min-height: 32px;
+	padding: 5px 9px;
+	border-color: #53745f;
+	background: transparent;
+	color: #e2eee5;
+	font: 11px var(--font-mono);
+}
+.code-block__copy.is-copied {
+	color: #c4edbe;
+}
+.code-block__copy.is-failed {
+	color: #ffc0a8;
+}
+.code-block pre,
+.diagram pre {
+	max-height: 520px;
+	margin: 0;
+	padding: 16px;
+	overflow: auto;
+	color: #e2eee5;
+	white-space: pre;
+	font: 12px / 1.7 var(--font-mono);
+	tab-size: 4;
+}
+.code-block__cursor {
+	display: inline-block;
+	width: 6px;
+	height: 13px;
+	background: #c3dcbf;
+	margin-left: 3px;
+}
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+	color: #bac4be;
+	font-style: italic;
+}
+.token.punctuation,
+.token.operator,
+.token.entity,
+.token.url {
+	color: #c6d6cd;
+}
+.token.keyword,
+.token.atrule,
+.token.important {
+	color: #9bddcd;
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.template-string {
+	color: #f2d39d;
+}
+.token.number,
+.token.boolean,
+.token.constant,
+.token.symbol {
+	color: #d8c2ed;
+}
+.token.function,
+.token.function-name,
+.token.class-name,
+.token.builtin {
+	color: #b2d4f1;
+}
+.token.property,
+.token.attr-name,
+.token.variable,
+.token.tag,
+.token.selector {
+	color: #b6dcbd;
+}
+.token.deleted {
+	color: #ffc0a8;
+}
+.token.inserted {
+	color: #c4edbe;
+}
+.token.bold {
+	font-weight: 700;
+}
+.token.italic {
+	font-style: italic;
+}
+.diagram__canvas {
+	overflow: auto;
+	padding: 18px;
+}
+.diagram__canvas svg {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	margin-inline: auto;
+}
+.diagram__status {
+	padding: 12px;
+	font: 12px / 1.6 var(--font-mono);
+	color: #c6d6cd;
+	white-space: pre-wrap;
+}
+.code-block pre:focus-visible,
+.diagram pre:focus-visible {
+	outline-offset: -3px;
+}

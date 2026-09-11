@@ -191,7 +191,7 @@ function SettingsPanel({ client, session }: { client: Client; session: SessionSn
 					<small>Source: {autonomy.data.source}</small>
 				</label>
 			) : null}
-			<h3>Configured targets</h3>
+			<h2>Configured targets</h2>
 			{targets.data?.truncated ? <p className="trace-warning">Clio truncated this target list.</p> : null}
 			{targets.data?.targets.map((target) => (
 				<div className="target-card" key={target.id}>

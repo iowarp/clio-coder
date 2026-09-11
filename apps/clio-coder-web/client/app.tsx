@@ -5,6 +5,8 @@ import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { subscribe } from "./api/events.js";
+import { MobileNavigation, Navigation, RouteFocus, ThemeToggle } from "./design/navigation.js";
+import { ProblemToasts } from "./design/problems.js";
 
 export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
@@ -19,6 +21,10 @@ export function App({ client }: { client: Client }) {
 	}, [client, queries]);
 	return (
 		<div className="shell">
+			<RouteFocus />
+			<a className="skip-link" href="#main">
+				Skip to content
+			</a>
 			<header className="masthead">
 				<NavLink to="/" className="brand">
 					<span className="mark" aria-hidden="true">
@@ -26,34 +32,25 @@ export function App({ client }: { client: Client }) {
 					</span>
 					Clio Coder
 				</NavLink>
-				<span className="connection">
-					<span aria-hidden="true">●</span> {connection}
-				</span>
+				<div className="header-controls">
+					<span className="connection" role="status" data-connected={connection === "Connected"}>
+						<span aria-hidden="true">●</span> {connection}
+					</span>
+					<ThemeToggle />
+					<MobileNavigation />
+				</div>
 			</header>
 			<div className="workspace">
-				<aside>
+				<aside className="desktop-navigation">
 					<p className="eyebrow">Your installation</p>
-					<nav aria-label="Main navigation">
-						<NavLink to="/" end>
-							Overview <span>01</span>
-						</NavLink>
-						<NavLink to="/sessions">
-							Sessions <span>02</span>
-						</NavLink>
-						<NavLink to="/traces">
-							Traces <span>03</span>
-						</NavLink>
-						<NavLink to="/toolchain">
-							Toolchain <span>04</span>
-						</NavLink>
-					</nav>
+					<Navigation />
 					<p className="local-note">
 						Runs on your machine.
 						<br />
 						Ready when you are.
 					</p>
 				</aside>
-				<main>
+				<main id="main" tabIndex={-1}>
 					{!client.token ? (
 						<div role="alert">
 							<h1>Open your launch link</h1>
@@ -77,6 +74,7 @@ export function App({ client }: { client: Client }) {
 				<span>CLIO CODER / LOCAL WORKSPACE</span>
 				<span>{meta.data ? `v${meta.data.clio}` : "Starting"}</span>
 			</footer>
+			<ProblemToasts />
 		</div>
 	);
 }

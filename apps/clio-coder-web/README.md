@@ -58,15 +58,29 @@ pnpm run test:web
 ```
 
 `verify` checks server and browser TypeScript, root Biome rules, the app's Node
-tests, and the Vite build. Tests prohibit uninjected fetches and use isolated
+tests, the Vite build, and the Chrome/Axe browser smoke. Tests prohibit uninjected fetches and use isolated
 homes. OpenAPI generation uses the same route table as the handlers and typed
 client; tests reject semantic drift in the checked-in JSON.
+
+`pnpm --filter @iowarp/clio-coder-web smoke:browser` uses Chrome at
+`/usr/bin/google-chrome`; pass `--chrome=/absolute/path` to override it. The smoke
+runs against isolated app/ACP fixtures at 1600, 1050, and 390 px, blocks external
+requests, checks accessibility and page overflow, and writes its report and
+screenshots to `dist/smoke/`. It requires a current client build. The application
+has light/dark themes, a keyboard-accessible mobile navigation dialog, and a
+shared safe Markdown, code, and diagram renderer; [DESIGN.md](DESIGN.md) records
+the retained rules. Fonts are served locally.
 
 The server binds only `127.0.0.1`. A random 256-bit token is printed in the URL
 fragment, moved into the tab's session storage, and removed from the address bar.
 API requests require bearer authentication; EventSource uses the same token in
 its query because it cannot set an Authorization header. Host and Origin are
 checked; static files have realpath containment and a content security policy.
+Markdown is rendered as React elements: raw HTML stays text, images are not
+fetched, and only HTTP, HTTPS, and mailto links are active. Prism produces token
+trees; strict Mermaid output is sanitized before SVG mounting. The CSP permits
+inline styles for those diagrams while scripts, connections, and fonts remain
+same-origin.
 The toolchain adapter admits only registry download/document URLs before calling
 its fetcher; upstream redirects follow the root installer's download behavior,
 and the domain verifies all asset and document checksums. Process creation enters
@@ -108,5 +122,6 @@ and [the S1 closeout](notes/2026-09-11-S1-closeout.md) for the approved CI check
 update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records trace
 coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records session
 and process-lifecycle verification. [S4 evidence](notes/2026-09-11-S4.md) records
-permission/control verification and measured reconnect behavior. S1-S4 are complete;
-S5 adds the shared renderers, design system, and browser accessibility smoke.
+permission/control verification and measured reconnect behavior. [S5 evidence](notes/2026-09-11-S5.md)
+records renderer, design, and browser accessibility verification. S1-S5 are complete;
+S6 adds the documentation tree, page rendering, search, and blueprints.

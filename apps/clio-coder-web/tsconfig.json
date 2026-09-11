@@ -1,5 +1,10 @@
 {
 	"extends": "../../tsconfig.json",
-	"compilerOptions": { "rootDir": "../..", "noEmit": true },
+	"compilerOptions": {
+		"rootDir": "../..",
+		"noEmit": true,
+		"jsx": "react-jsx",
+		"lib": ["ES2022", "DOM", "DOM.Iterable"]
+	},
 	"include": ["server", "contracts", "tests", "scripts", "vite.config.ts"]
 }

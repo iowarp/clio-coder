@@ -6,6 +6,7 @@ import type { TimelineItem } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime, formatTokens } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { MarkdownContent } from "../render/Markdown.js";
 import { CancelTurn, DeleteSession, FleetStrip, PermissionCards, SessionControls } from "./session-controls.js";
 export function Workspaces({ client }: { client: Client }) {
 	const navigate = useNavigate(),
@@ -168,14 +169,18 @@ function Timeline({ item }: { item: TimelineItem }) {
 							? (item.title ?? "Tool")
 							: item.kind === "notice"
 								? "Session notice"
-								: "Clio"}
+								: "Clio Coder"}
 				</strong>
 				<span>
 					{attribution ?? (item.kind === "user" ? "" : "Attribution not recorded")}
 					{item.origin === "replay" ? " · replay" : ""}
 				</span>
 			</div>
-			<p>{item.text}</p>
+			{item.kind === "text" ? (
+				<MarkdownContent source={item.text} complete={item.status !== "in_progress" && item.status !== "pending"} />
+			) : (
+				<p>{item.text}</p>
+			)}
 			{item.kind === "tool" ? (
 				<>
 					<span className="trace-badge">
@@ -250,7 +255,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			<p className="session-status" role="status">
 				{snapshot.recoveredOrphan ? "Recovered after server interruption · " : ""}
 				{snapshot.state}
-				{busy ? " · Clio is working…" : ""}
+				{busy ? " · Clio Coder is working…" : ""}
 			</p>
 			<SessionControls client={client} session={snapshot} />
 			<CancelTurn client={client} session={snapshot} />
@@ -284,7 +289,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					prompt.mutate();
 				}}
 			>
-				<label htmlFor="prompt">Message Clio</label>
+				<label htmlFor="prompt">Message Clio Coder</label>
 				<textarea
 					id="prompt"
 					value={text}

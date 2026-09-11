@@ -20,7 +20,13 @@ import { scratchHome } from "./scratch-home.js";
 
 export async function harness(
 	settings: WorkerSettings = {},
-	options: { scenario?: string; snapshotHold?: () => Promise<void>; permissionTimers?: PermissionTimers } = {},
+	options: {
+		scenario?: string;
+		snapshotHold?: () => Promise<void>;
+		permissionTimers?: PermissionTimers;
+		origin?: () => string;
+		clientDir?: string;
+	} = {},
 ) {
 	const home = await scratchHome();
 	const reads = new WorkerHost("reads", { fixture: true, ...settings }, home.env),
@@ -46,7 +52,7 @@ export async function harness(
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const app = createApp({
 		token: "test-token",
-		origin: () => "http://127.0.0.1:4317",
+		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
 		hub,
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
@@ -54,6 +60,7 @@ export async function harness(
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,
+		...(options.clientDir ? { clientDir: options.clientDir } : {}),
 	});
 	const request = (path: string, init: RequestInit = {}) =>
 		app.request(`http://127.0.0.1:4317${path}`, {

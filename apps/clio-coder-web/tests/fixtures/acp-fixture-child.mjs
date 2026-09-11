@@ -149,18 +149,37 @@ async function handle(frame) {
 				);
 				break;
 			case "session/prompt": {
+				const promptText = frame.params.prompt?.map((block) => block.text).join(" ") ?? "";
+				const turnScenario =
+					scenario === "markdown" && promptText.includes("[approval]")
+						? "permission"
+						: scenario === "markdown" && promptText.includes("[stream]")
+							? "loop"
+							: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
-				if (scenario.startsWith("permission")) await permission();
-				else if (scenario === "slow") {
+				if (turnScenario.startsWith("permission")) await permission();
+				else if (turnScenario === "slow") {
 					while (!cancelled) await delay(100);
-				} else if (scenario === "loop") {
+				} else if (turnScenario === "loop") {
 					for (let i = 0; i < 1400 && !cancelled; i++) {
 						text(`${i} `);
 						await delay(1);
 					}
 				} else {
 					if (scenario === "fleet") fleet();
+					if (scenario === "markdown") {
+						for (const chunk of [
+							"# Fixture findings\n\nThe change is **verified** against a local fixture.\n\n",
+							"```ts\nconst answer: number = 42;\nconsole.log('A deliberately long code line verifies keyboard scrolling without widening the page', answer);\n```\n\n",
+							"```mermaid\nflowchart LR\n  Request --> Review\n  Review --> Result\n```\n\n",
+							"<script>window.modelMarkupExecuted = true</script>\n\n[Unsafe](javascript:alert(1)) and [Reference](https://example.org).\n\n| Check | Result |\n| --- | --- |\n| Fixture | Passed |\n\n",
+						]) {
+							if (cancelled) break;
+							text(chunk);
+							await delay(100);
+						}
+					}
 					update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Check the fixture." } });
 					if (scenario === "tool") {
 						update({

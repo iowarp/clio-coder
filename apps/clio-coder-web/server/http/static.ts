@@ -30,11 +30,12 @@ export function staticClient(app: Hono, directory: string) {
 			".js": "text/javascript; charset=utf-8",
 			".css": "text/css; charset=utf-8",
 			".svg": "image/svg+xml",
+			".woff2": "font/woff2",
 		};
 		context.header("Content-Type", types[extname(file)] ?? "application/octet-stream");
 		context.header(
 			"Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'",
 		);
 		return context.req.method === "HEAD" ? context.body(null) : context.body(Uint8Array.from(await readFile(file)));
 	});
