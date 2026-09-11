@@ -78,35 +78,11 @@ export async function loadDomains(
 		},
 	};
 
-	for (const name of order) {
-		const mod = modules.find((m) => m.manifest.name === name);
-		if (!mod) continue;
-		try {
-			const bundle = await mod.createExtension(context);
-			await bundle.extension.start();
-			extensions.set(name, bundle.extension);
-			contracts.set(name, bundle.contract);
-			loaded.push(name);
-			bus.emit(BusChannels.DomainLoaded, { name });
-		} catch (error) {
-			failed.push({ name, error });
-			bus.emit(BusChannels.DomainFailed, { name, error });
-			// The throw below aborts boot; nothing downstream gets a chance to
-			// render the failure, so the structured line must land first.
-			const message = error instanceof Error ? error.message : String(error);
-			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(
-				`[clio-coder:domain] load failed: ${name}: ${message}\n`,
-			);
-			throw new DomainLoadError(name, error);
-		}
-	}
-
-	const stop = async (): Promise<void> => {
+	const stopAll = async (): Promise<void> => {
 		const debug = process.env.CLIO_CODER_DEBUG_SHUTDOWN === "1";
 		const budgetMs = resolveShutdownHookBudgetMs();
-		for (const name of [...loaded].reverse()) {
-			const ext = extensions.get(name);
-			if (!ext?.stop) continue;
+		for (const [name, ext] of [...extensions].reverse()) {
+			if (!ext.stop) continue;
 			const stopFn = ext.stop.bind(ext);
 			const t0 = debug ? process.hrtime.bigint() : 0n;
 			const completed = await runWithBudget(stopFn, budgetMs, (err) => {
@@ -124,7 +100,34 @@ export async function loadDomains(
 				);
 			}
 		}
+		extensions.clear();
+		contracts.clear();
 	};
+	let stopping: Promise<void> | undefined;
+	const stop = (): Promise<void> => (stopping ??= stopAll());
+
+	for (const name of order) {
+		const mod = modules.find((m) => m.manifest.name === name);
+		if (!mod) continue;
+		try {
+			const bundle = await mod.createExtension(context);
+			// A rejected start may already own listeners or other resources.
+			extensions.set(name, bundle.extension);
+			await bundle.extension.start();
+			contracts.set(name, bundle.contract);
+			loaded.push(name);
+			bus.emit(BusChannels.DomainLoaded, { name });
+		} catch (error) {
+			failed.push({ name, error });
+			bus.emit(BusChannels.DomainFailed, { name, error });
+			await stop();
+			const message = error instanceof Error ? error.message : String(error);
+			(options.diagnostic ?? ((text: string) => process.stderr.write(text)))(
+				`[clio-coder:domain] load failed: ${name}: ${message}\n`,
+			);
+			throw new DomainLoadError(name, error);
+		}
+	}
 
 	const getContract = <T extends DomainContract = DomainContract>(name: string): T | undefined => {
 		return contracts.get(name) as T | undefined;
@@ -134,7 +137,13 @@ export async function loadDomains(
 }
 
 function topoSort(modules: ReadonlyArray<DomainModule>): string[] {
-	const names = new Set(modules.map((m) => m.manifest.name));
+	const names = new Set<string>();
+	for (const { manifest } of modules) {
+		if (names.has(manifest.name)) {
+			throw new DomainLoadError("topo", new Error(`Duplicate domain: ${manifest.name}`));
+		}
+		names.add(manifest.name);
+	}
 	const unresolved: string[] = [];
 	for (const m of modules) {
 		for (const dep of m.manifest.dependsOn) {
