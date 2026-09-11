@@ -10,6 +10,7 @@ import { parse } from "../../server/http/validate.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
 import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
+import { EvidenceService } from "../../server/services/evidence.js";
 import { FleetService } from "../../server/services/fleet.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { SessionService } from "../../server/services/sessions.js";
@@ -69,6 +70,7 @@ export async function harness(
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
@@ -110,11 +112,11 @@ export async function harness(
 export async function json<S extends TSchema>(response: Response, schema: S): Promise<Static<S>> {
 	return parse(schema, await response.json());
 }
-export async function terminal(operations: OperationRegistry, id: string): Promise<Operation> {
-	for (let i = 0; i < 200; i++) {
+export async function terminal(operations: OperationRegistry, id: string, timeoutMs = 4000): Promise<Operation> {
+	for (let i = 0; i < Math.ceil(timeoutMs / 20); i++) {
 		const record = operations.get(id);
 		if (record.status !== "queued" && record.status !== "running") return record;
 		await setTimeout(20);
 	}
-	throw new Error("Operation did not finish within four seconds.");
+	throw new Error(`Operation did not finish within ${timeoutMs} ms.`);
 }

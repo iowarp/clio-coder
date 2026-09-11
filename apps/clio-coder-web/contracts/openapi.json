@@ -6,6 +6,1358 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/evidence": {
+			"get": {
+				"operationId": "evidenceList",
+				"summary": "Paginated evidence artifacts and trust verdicts",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"pattern": "^[A-Za-z0-9_-]+$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["items", "nextCursor"],
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["overview", "verdict"],
+												"properties": {
+													"overview": {
+														"type": "object",
+														"required": [
+															"version",
+															"evidenceId",
+															"source",
+															"generatedAt",
+															"runIds",
+															"sessionId",
+															"statuses",
+															"startedAt",
+															"endedAt",
+															"tasks",
+															"cwds",
+															"agentIds",
+															"targetIds",
+															"runtimeIds",
+															"modelIds",
+															"tags",
+															"files",
+															"totals"
+														],
+														"properties": {
+															"version": {
+																"type": "number",
+																"const": 1
+															},
+															"evidenceId": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+															},
+															"source": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["kind", "runId"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "run"
+																			},
+																			"runId": {
+																				"type": "string",
+																				"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "sessionId"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "session"
+																			},
+																			"sessionId": {
+																				"type": "string",
+																				"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "evalId"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "eval"
+																			},
+																			"evalId": {
+																				"type": "string",
+																				"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																]
+															},
+															"generatedAt": {
+																"type": "string"
+															},
+															"runIds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"sessionId": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"statuses": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"startedAt": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"endedAt": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"tasks": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"cwds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"agentIds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"targetIds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"runtimeIds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"modelIds": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"tags": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"files": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"totals": {
+																"type": "object",
+																"required": [
+																	"runs",
+																	"receipts",
+																	"toolCalls",
+																	"toolErrors",
+																	"blockedToolCalls",
+																	"sessionEntries",
+																	"auditRows",
+																	"toolEvents",
+																	"linkedToolEvents",
+																	"protectedArtifacts",
+																	"tokens",
+																	"costUsd",
+																	"wallTimeMs"
+																],
+																"properties": {
+																	"runs": {
+																		"type": "number"
+																	},
+																	"receipts": {
+																		"type": "number"
+																	},
+																	"toolCalls": {
+																		"type": "number"
+																	},
+																	"toolErrors": {
+																		"type": "number"
+																	},
+																	"blockedToolCalls": {
+																		"type": "number"
+																	},
+																	"sessionEntries": {
+																		"type": "number"
+																	},
+																	"auditRows": {
+																		"type": "number"
+																	},
+																	"toolEvents": {
+																		"type": "number"
+																	},
+																	"linkedToolEvents": {
+																		"type": "number"
+																	},
+																	"protectedArtifacts": {
+																		"type": "number"
+																	},
+																	"tokens": {
+																		"type": "number"
+																	},
+																	"costUsd": {
+																		"type": "number"
+																	},
+																	"wallTimeMs": {
+																		"type": "number"
+																	}
+																},
+																"additionalProperties": false
+															},
+															"redactionCount": {
+																"type": "number"
+															},
+															"decisions": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["runId", "sessionId", "ref", "record"],
+																	"properties": {
+																		"runId": {
+																			"type": "string"
+																		},
+																		"sessionId": {
+																			"type": "string"
+																		},
+																		"ref": {
+																			"type": "string"
+																		},
+																		"record": {
+																			"type": "object",
+																			"patternProperties": {
+																				"^.*$": {}
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															}
+														},
+														"additionalProperties": false
+													},
+													"verdict": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "compromised"
+															},
+															{
+																"type": "string",
+																"const": "unverified"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
+															},
+															{
+																"type": "string",
+																"const": "grounded"
+															},
+															{
+																"type": "string",
+																"const": "reviewed"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"nextCursor": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/evidence/{id}": {
+			"get": {
+				"operationId": "evidenceDetail",
+				"summary": "Evidence findings, canonical trust, admitted provenance and gate decisions",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["overview", "verdict", "projection", "findings", "runs", "provenance", "gateDecisions"],
+									"properties": {
+										"overview": {
+											"type": "object",
+											"required": [
+												"version",
+												"evidenceId",
+												"source",
+												"generatedAt",
+												"runIds",
+												"sessionId",
+												"statuses",
+												"startedAt",
+												"endedAt",
+												"tasks",
+												"cwds",
+												"agentIds",
+												"targetIds",
+												"runtimeIds",
+												"modelIds",
+												"tags",
+												"files",
+												"totals"
+											],
+											"properties": {
+												"version": {
+													"type": "number",
+													"const": 1
+												},
+												"evidenceId": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"source": {
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["kind", "runId"],
+															"properties": {
+																"kind": {
+																	"type": "string",
+																	"const": "run"
+																},
+																"runId": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["kind", "sessionId"],
+															"properties": {
+																"kind": {
+																	"type": "string",
+																	"const": "session"
+																},
+																"sessionId": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																}
+															},
+															"additionalProperties": false
+														},
+														{
+															"type": "object",
+															"required": ["kind", "evalId"],
+															"properties": {
+																"kind": {
+																	"type": "string",
+																	"const": "eval"
+																},
+																"evalId": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																}
+															},
+															"additionalProperties": false
+														}
+													]
+												},
+												"generatedAt": {
+													"type": "string"
+												},
+												"runIds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"sessionId": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"statuses": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"startedAt": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"endedAt": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"tasks": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"cwds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"agentIds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"targetIds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"runtimeIds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"modelIds": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"tags": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"files": {
+													"type": "array",
+													"items": {
+														"type": "string"
+													}
+												},
+												"totals": {
+													"type": "object",
+													"required": [
+														"runs",
+														"receipts",
+														"toolCalls",
+														"toolErrors",
+														"blockedToolCalls",
+														"sessionEntries",
+														"auditRows",
+														"toolEvents",
+														"linkedToolEvents",
+														"protectedArtifacts",
+														"tokens",
+														"costUsd",
+														"wallTimeMs"
+													],
+													"properties": {
+														"runs": {
+															"type": "number"
+														},
+														"receipts": {
+															"type": "number"
+														},
+														"toolCalls": {
+															"type": "number"
+														},
+														"toolErrors": {
+															"type": "number"
+														},
+														"blockedToolCalls": {
+															"type": "number"
+														},
+														"sessionEntries": {
+															"type": "number"
+														},
+														"auditRows": {
+															"type": "number"
+														},
+														"toolEvents": {
+															"type": "number"
+														},
+														"linkedToolEvents": {
+															"type": "number"
+														},
+														"protectedArtifacts": {
+															"type": "number"
+														},
+														"tokens": {
+															"type": "number"
+														},
+														"costUsd": {
+															"type": "number"
+														},
+														"wallTimeMs": {
+															"type": "number"
+														}
+													},
+													"additionalProperties": false
+												},
+												"redactionCount": {
+													"type": "number"
+												},
+												"decisions": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["runId", "sessionId", "ref", "record"],
+														"properties": {
+															"runId": {
+																"type": "string"
+															},
+															"sessionId": {
+																"type": "string"
+															},
+															"ref": {
+																"type": "string"
+															},
+															"record": {
+																"type": "object",
+																"patternProperties": {
+																	"^.*$": {}
+																}
+															}
+														},
+														"additionalProperties": false
+													}
+												}
+											},
+											"additionalProperties": false
+										},
+										"verdict": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "compromised"
+												},
+												{
+													"type": "string",
+													"const": "unverified"
+												},
+												{
+													"type": "string",
+													"const": "unknown"
+												},
+												{
+													"type": "string",
+													"const": "grounded"
+												},
+												{
+													"type": "string",
+													"const": "reviewed"
+												}
+											]
+										},
+										"projection": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "canonical"
+												},
+												{
+													"type": "string",
+													"const": "historical_format"
+												}
+											]
+										},
+										"findings": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "severity", "tag", "runId", "message"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"severity": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "info"
+															},
+															{
+																"type": "string",
+																"const": "warn"
+															}
+														]
+													},
+													"tag": {
+														"type": "string"
+													},
+													"runId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"message": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"runs": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["runId", "status", "summary"],
+												"properties": {
+													"runId": {
+														"type": "string"
+													},
+													"status": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"summary": {
+														"type": "object",
+														"required": ["version", "verdict", "text", "axes", "claimant", "unknown", "refs"],
+														"properties": {
+															"version": {
+																"type": "number",
+																"const": 1
+															},
+															"verdict": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "compromised"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unverified"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unknown"
+																	},
+																	{
+																		"type": "string",
+																		"const": "grounded"
+																	},
+																	{
+																		"type": "string",
+																		"const": "reviewed"
+																	}
+																]
+															},
+															"text": {
+																"type": "string"
+															},
+															"axes": {
+																"type": "object",
+																"required": [
+																	"artifactIntegrity",
+																	"validationGrounding",
+																	"independentReview",
+																	"contextProvenance",
+																	"autonomyEnforcement",
+																	"completionEvidence"
+																],
+																"properties": {
+																	"artifactIntegrity": {
+																		"type": "string"
+																	},
+																	"validationGrounding": {
+																		"type": "string"
+																	},
+																	"independentReview": {
+																		"type": "string"
+																	},
+																	"contextProvenance": {
+																		"type": "string"
+																	},
+																	"autonomyEnforcement": {
+																		"type": "string"
+																	},
+																	"completionEvidence": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															"claimant": {
+																"type": "string"
+															},
+															"unknown": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"refs": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"provenance": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["runId", "view", "lines"],
+												"properties": {
+													"runId": {
+														"type": "string"
+													},
+													"view": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {}
+														}
+													},
+													"lines": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"gateDecisions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"patternProperties": {
+													"^.*$": {}
+												}
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/evidence/{runId}/build": {
+			"post": {
+				"operationId": "evidenceBuild",
+				"summary": "Collect evidence for a run through Clio",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "runId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/receipts/{runId}/verify": {
+			"post": {
+				"operationId": "receiptVerify",
+				"summary": "Recheck receipt integrity against its run through Clio",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "runId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/fleet/runs": {
 			"get": {
 				"operationId": "fleetRoots",
@@ -15726,6 +17078,462 @@
 																}
 															},
 															"additionalProperties": false
+														},
+														{
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["kind", "id", "exitCode", "message", "artifact"],
+																	"properties": {
+																		"kind": {
+																			"type": "string",
+																			"const": "evidence"
+																		},
+																		"id": {
+																			"type": "string",
+																			"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																		},
+																		"exitCode": {
+																			"type": "number",
+																			"const": 0
+																		},
+																		"message": {
+																			"type": "string"
+																		},
+																		"artifact": {
+																			"type": "object",
+																			"required": ["overview", "verdict"],
+																			"properties": {
+																				"overview": {
+																					"type": "object",
+																					"required": [
+																						"version",
+																						"evidenceId",
+																						"source",
+																						"generatedAt",
+																						"runIds",
+																						"sessionId",
+																						"statuses",
+																						"startedAt",
+																						"endedAt",
+																						"tasks",
+																						"cwds",
+																						"agentIds",
+																						"targetIds",
+																						"runtimeIds",
+																						"modelIds",
+																						"tags",
+																						"files",
+																						"totals"
+																					],
+																					"properties": {
+																						"version": {
+																							"type": "number",
+																							"const": 1
+																						},
+																						"evidenceId": {
+																							"type": "string",
+																							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																						},
+																						"source": {
+																							"anyOf": [
+																								{
+																									"type": "object",
+																									"required": ["kind", "runId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "run"
+																										},
+																										"runId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								},
+																								{
+																									"type": "object",
+																									"required": ["kind", "sessionId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "session"
+																										},
+																										"sessionId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								},
+																								{
+																									"type": "object",
+																									"required": ["kind", "evalId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "eval"
+																										},
+																										"evalId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								}
+																							]
+																						},
+																						"generatedAt": {
+																							"type": "string"
+																						},
+																						"runIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"sessionId": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"statuses": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"startedAt": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"endedAt": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"tasks": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"cwds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"agentIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"targetIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"runtimeIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"modelIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"tags": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"files": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"totals": {
+																							"type": "object",
+																							"required": [
+																								"runs",
+																								"receipts",
+																								"toolCalls",
+																								"toolErrors",
+																								"blockedToolCalls",
+																								"sessionEntries",
+																								"auditRows",
+																								"toolEvents",
+																								"linkedToolEvents",
+																								"protectedArtifacts",
+																								"tokens",
+																								"costUsd",
+																								"wallTimeMs"
+																							],
+																							"properties": {
+																								"runs": {
+																									"type": "number"
+																								},
+																								"receipts": {
+																									"type": "number"
+																								},
+																								"toolCalls": {
+																									"type": "number"
+																								},
+																								"toolErrors": {
+																									"type": "number"
+																								},
+																								"blockedToolCalls": {
+																									"type": "number"
+																								},
+																								"sessionEntries": {
+																									"type": "number"
+																								},
+																								"auditRows": {
+																									"type": "number"
+																								},
+																								"toolEvents": {
+																									"type": "number"
+																								},
+																								"linkedToolEvents": {
+																									"type": "number"
+																								},
+																								"protectedArtifacts": {
+																									"type": "number"
+																								},
+																								"tokens": {
+																									"type": "number"
+																								},
+																								"costUsd": {
+																									"type": "number"
+																								},
+																								"wallTimeMs": {
+																									"type": "number"
+																								}
+																							},
+																							"additionalProperties": false
+																						},
+																						"redactionCount": {
+																							"type": "number"
+																						},
+																						"decisions": {
+																							"type": "array",
+																							"items": {
+																								"type": "object",
+																								"required": ["runId", "sessionId", "ref", "record"],
+																								"properties": {
+																									"runId": {
+																										"type": "string"
+																									},
+																									"sessionId": {
+																										"type": "string"
+																									},
+																									"ref": {
+																										"type": "string"
+																									},
+																									"record": {
+																										"type": "object",
+																										"patternProperties": {
+																											"^.*$": {}
+																										}
+																									}
+																								},
+																								"additionalProperties": false
+																							}
+																						}
+																					},
+																					"additionalProperties": false
+																				},
+																				"verdict": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "compromised"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unverified"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unknown"
+																						},
+																						{
+																							"type": "string",
+																							"const": "grounded"
+																						},
+																						{
+																							"type": "string",
+																							"const": "reviewed"
+																						}
+																					]
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"required": ["kind", "id", "exitCode", "message", "verification"],
+																	"properties": {
+																		"kind": {
+																			"type": "string",
+																			"const": "receipt-verification"
+																		},
+																		"id": {
+																			"type": "string",
+																			"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																		},
+																		"exitCode": {
+																			"type": "number",
+																			"const": 0
+																		},
+																		"message": {
+																			"type": "string"
+																		},
+																		"verification": {
+																			"type": "object",
+																			"required": ["version", "verifiedAt", "runId", "state", "reason", "axes"],
+																			"properties": {
+																				"version": {
+																					"type": "number",
+																					"const": 1
+																				},
+																				"verifiedAt": {
+																					"type": "string"
+																				},
+																				"runId": {
+																					"type": "string",
+																					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																				},
+																				"state": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "pending"
+																						},
+																						{
+																							"type": "string",
+																							"const": "verified"
+																						},
+																						{
+																							"type": "string",
+																							"const": "failed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unavailable"
+																						}
+																					]
+																				},
+																				"reason": {
+																					"anyOf": [
+																						{
+																							"type": "null"
+																						},
+																						{
+																							"type": "string",
+																							"const": "integrity-mismatch"
+																						},
+																						{
+																							"type": "string",
+																							"const": "ledger-mismatch"
+																						},
+																						{
+																							"type": "string",
+																							"const": "integrity-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "execution-role-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "routing-intent-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "route-decision-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "receipt-unreadable"
+																						},
+																						{
+																							"type": "string",
+																							"const": "envelope-unavailable"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unclassified"
+																						}
+																					]
+																				},
+																				"axes": {
+																					"type": "object",
+																					"required": [
+																						"artifactIntegrity",
+																						"validationGrounding",
+																						"independentReview",
+																						"contextProvenance",
+																						"autonomyEnforcement",
+																						"completionEvidence"
+																					],
+																					"properties": {
+																						"artifactIntegrity": {
+																							"type": "string"
+																						},
+																						"validationGrounding": {
+																							"type": "string"
+																						},
+																						"independentReview": {
+																							"type": "string"
+																						},
+																						"contextProvenance": {
+																							"type": "string"
+																						},
+																						"autonomyEnforcement": {
+																							"type": "string"
+																						},
+																						"completionEvidence": {
+																							"type": "string"
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															]
 														}
 													]
 												}
@@ -16441,6 +18249,462 @@
 																}
 															},
 															"additionalProperties": false
+														},
+														{
+															"anyOf": [
+																{
+																	"type": "object",
+																	"required": ["kind", "id", "exitCode", "message", "artifact"],
+																	"properties": {
+																		"kind": {
+																			"type": "string",
+																			"const": "evidence"
+																		},
+																		"id": {
+																			"type": "string",
+																			"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																		},
+																		"exitCode": {
+																			"type": "number",
+																			"const": 0
+																		},
+																		"message": {
+																			"type": "string"
+																		},
+																		"artifact": {
+																			"type": "object",
+																			"required": ["overview", "verdict"],
+																			"properties": {
+																				"overview": {
+																					"type": "object",
+																					"required": [
+																						"version",
+																						"evidenceId",
+																						"source",
+																						"generatedAt",
+																						"runIds",
+																						"sessionId",
+																						"statuses",
+																						"startedAt",
+																						"endedAt",
+																						"tasks",
+																						"cwds",
+																						"agentIds",
+																						"targetIds",
+																						"runtimeIds",
+																						"modelIds",
+																						"tags",
+																						"files",
+																						"totals"
+																					],
+																					"properties": {
+																						"version": {
+																							"type": "number",
+																							"const": 1
+																						},
+																						"evidenceId": {
+																							"type": "string",
+																							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																						},
+																						"source": {
+																							"anyOf": [
+																								{
+																									"type": "object",
+																									"required": ["kind", "runId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "run"
+																										},
+																										"runId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								},
+																								{
+																									"type": "object",
+																									"required": ["kind", "sessionId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "session"
+																										},
+																										"sessionId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								},
+																								{
+																									"type": "object",
+																									"required": ["kind", "evalId"],
+																									"properties": {
+																										"kind": {
+																											"type": "string",
+																											"const": "eval"
+																										},
+																										"evalId": {
+																											"type": "string",
+																											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																										}
+																									},
+																									"additionalProperties": false
+																								}
+																							]
+																						},
+																						"generatedAt": {
+																							"type": "string"
+																						},
+																						"runIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"sessionId": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"statuses": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"startedAt": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"endedAt": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"tasks": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"cwds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"agentIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"targetIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"runtimeIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"modelIds": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"tags": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"files": {
+																							"type": "array",
+																							"items": {
+																								"type": "string"
+																							}
+																						},
+																						"totals": {
+																							"type": "object",
+																							"required": [
+																								"runs",
+																								"receipts",
+																								"toolCalls",
+																								"toolErrors",
+																								"blockedToolCalls",
+																								"sessionEntries",
+																								"auditRows",
+																								"toolEvents",
+																								"linkedToolEvents",
+																								"protectedArtifacts",
+																								"tokens",
+																								"costUsd",
+																								"wallTimeMs"
+																							],
+																							"properties": {
+																								"runs": {
+																									"type": "number"
+																								},
+																								"receipts": {
+																									"type": "number"
+																								},
+																								"toolCalls": {
+																									"type": "number"
+																								},
+																								"toolErrors": {
+																									"type": "number"
+																								},
+																								"blockedToolCalls": {
+																									"type": "number"
+																								},
+																								"sessionEntries": {
+																									"type": "number"
+																								},
+																								"auditRows": {
+																									"type": "number"
+																								},
+																								"toolEvents": {
+																									"type": "number"
+																								},
+																								"linkedToolEvents": {
+																									"type": "number"
+																								},
+																								"protectedArtifacts": {
+																									"type": "number"
+																								},
+																								"tokens": {
+																									"type": "number"
+																								},
+																								"costUsd": {
+																									"type": "number"
+																								},
+																								"wallTimeMs": {
+																									"type": "number"
+																								}
+																							},
+																							"additionalProperties": false
+																						},
+																						"redactionCount": {
+																							"type": "number"
+																						},
+																						"decisions": {
+																							"type": "array",
+																							"items": {
+																								"type": "object",
+																								"required": ["runId", "sessionId", "ref", "record"],
+																								"properties": {
+																									"runId": {
+																										"type": "string"
+																									},
+																									"sessionId": {
+																										"type": "string"
+																									},
+																									"ref": {
+																										"type": "string"
+																									},
+																									"record": {
+																										"type": "object",
+																										"patternProperties": {
+																											"^.*$": {}
+																										}
+																									}
+																								},
+																								"additionalProperties": false
+																							}
+																						}
+																					},
+																					"additionalProperties": false
+																				},
+																				"verdict": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "compromised"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unverified"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unknown"
+																						},
+																						{
+																							"type": "string",
+																							"const": "grounded"
+																						},
+																						{
+																							"type": "string",
+																							"const": "reviewed"
+																						}
+																					]
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																{
+																	"type": "object",
+																	"required": ["kind", "id", "exitCode", "message", "verification"],
+																	"properties": {
+																		"kind": {
+																			"type": "string",
+																			"const": "receipt-verification"
+																		},
+																		"id": {
+																			"type": "string",
+																			"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																		},
+																		"exitCode": {
+																			"type": "number",
+																			"const": 0
+																		},
+																		"message": {
+																			"type": "string"
+																		},
+																		"verification": {
+																			"type": "object",
+																			"required": ["version", "verifiedAt", "runId", "state", "reason", "axes"],
+																			"properties": {
+																				"version": {
+																					"type": "number",
+																					"const": 1
+																				},
+																				"verifiedAt": {
+																					"type": "string"
+																				},
+																				"runId": {
+																					"type": "string",
+																					"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																				},
+																				"state": {
+																					"anyOf": [
+																						{
+																							"type": "string",
+																							"const": "pending"
+																						},
+																						{
+																							"type": "string",
+																							"const": "verified"
+																						},
+																						{
+																							"type": "string",
+																							"const": "failed"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unavailable"
+																						}
+																					]
+																				},
+																				"reason": {
+																					"anyOf": [
+																						{
+																							"type": "null"
+																						},
+																						{
+																							"type": "string",
+																							"const": "integrity-mismatch"
+																						},
+																						{
+																							"type": "string",
+																							"const": "ledger-mismatch"
+																						},
+																						{
+																							"type": "string",
+																							"const": "integrity-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "execution-role-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "routing-intent-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "route-decision-invalid"
+																						},
+																						{
+																							"type": "string",
+																							"const": "receipt-unreadable"
+																						},
+																						{
+																							"type": "string",
+																							"const": "envelope-unavailable"
+																						},
+																						{
+																							"type": "string",
+																							"const": "unclassified"
+																						}
+																					]
+																				},
+																				"axes": {
+																					"type": "object",
+																					"required": [
+																						"artifactIntegrity",
+																						"validationGrounding",
+																						"independentReview",
+																						"contextProvenance",
+																						"autonomyEnforcement",
+																						"completionEvidence"
+																					],
+																					"properties": {
+																						"artifactIntegrity": {
+																							"type": "string"
+																						},
+																						"validationGrounding": {
+																							"type": "string"
+																						},
+																						"independentReview": {
+																							"type": "string"
+																						},
+																						"contextProvenance": {
+																							"type": "string"
+																						},
+																						"autonomyEnforcement": {
+																							"type": "string"
+																						},
+																						"completionEvidence": {
+																							"type": "string"
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"additionalProperties": false
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															]
 														}
 													]
 												}
@@ -22389,6 +24653,462 @@
 																	}
 																},
 																"additionalProperties": false
+															},
+															{
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["kind", "id", "exitCode", "message", "artifact"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "evidence"
+																			},
+																			"id": {
+																				"type": "string",
+																				"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																			},
+																			"exitCode": {
+																				"type": "number",
+																				"const": 0
+																			},
+																			"message": {
+																				"type": "string"
+																			},
+																			"artifact": {
+																				"type": "object",
+																				"required": ["overview", "verdict"],
+																				"properties": {
+																					"overview": {
+																						"type": "object",
+																						"required": [
+																							"version",
+																							"evidenceId",
+																							"source",
+																							"generatedAt",
+																							"runIds",
+																							"sessionId",
+																							"statuses",
+																							"startedAt",
+																							"endedAt",
+																							"tasks",
+																							"cwds",
+																							"agentIds",
+																							"targetIds",
+																							"runtimeIds",
+																							"modelIds",
+																							"tags",
+																							"files",
+																							"totals"
+																						],
+																						"properties": {
+																							"version": {
+																								"type": "number",
+																								"const": 1
+																							},
+																							"evidenceId": {
+																								"type": "string",
+																								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																							},
+																							"source": {
+																								"anyOf": [
+																									{
+																										"type": "object",
+																										"required": ["kind", "runId"],
+																										"properties": {
+																											"kind": {
+																												"type": "string",
+																												"const": "run"
+																											},
+																											"runId": {
+																												"type": "string",
+																												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																											}
+																										},
+																										"additionalProperties": false
+																									},
+																									{
+																										"type": "object",
+																										"required": ["kind", "sessionId"],
+																										"properties": {
+																											"kind": {
+																												"type": "string",
+																												"const": "session"
+																											},
+																											"sessionId": {
+																												"type": "string",
+																												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																											}
+																										},
+																										"additionalProperties": false
+																									},
+																									{
+																										"type": "object",
+																										"required": ["kind", "evalId"],
+																										"properties": {
+																											"kind": {
+																												"type": "string",
+																												"const": "eval"
+																											},
+																											"evalId": {
+																												"type": "string",
+																												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																											}
+																										},
+																										"additionalProperties": false
+																									}
+																								]
+																							},
+																							"generatedAt": {
+																								"type": "string"
+																							},
+																							"runIds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"sessionId": {
+																								"anyOf": [
+																									{
+																										"type": "string"
+																									},
+																									{
+																										"type": "null"
+																									}
+																								]
+																							},
+																							"statuses": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"startedAt": {
+																								"anyOf": [
+																									{
+																										"type": "string"
+																									},
+																									{
+																										"type": "null"
+																									}
+																								]
+																							},
+																							"endedAt": {
+																								"anyOf": [
+																									{
+																										"type": "string"
+																									},
+																									{
+																										"type": "null"
+																									}
+																								]
+																							},
+																							"tasks": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"cwds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"agentIds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"targetIds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"runtimeIds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"modelIds": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"tags": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"files": {
+																								"type": "array",
+																								"items": {
+																									"type": "string"
+																								}
+																							},
+																							"totals": {
+																								"type": "object",
+																								"required": [
+																									"runs",
+																									"receipts",
+																									"toolCalls",
+																									"toolErrors",
+																									"blockedToolCalls",
+																									"sessionEntries",
+																									"auditRows",
+																									"toolEvents",
+																									"linkedToolEvents",
+																									"protectedArtifacts",
+																									"tokens",
+																									"costUsd",
+																									"wallTimeMs"
+																								],
+																								"properties": {
+																									"runs": {
+																										"type": "number"
+																									},
+																									"receipts": {
+																										"type": "number"
+																									},
+																									"toolCalls": {
+																										"type": "number"
+																									},
+																									"toolErrors": {
+																										"type": "number"
+																									},
+																									"blockedToolCalls": {
+																										"type": "number"
+																									},
+																									"sessionEntries": {
+																										"type": "number"
+																									},
+																									"auditRows": {
+																										"type": "number"
+																									},
+																									"toolEvents": {
+																										"type": "number"
+																									},
+																									"linkedToolEvents": {
+																										"type": "number"
+																									},
+																									"protectedArtifacts": {
+																										"type": "number"
+																									},
+																									"tokens": {
+																										"type": "number"
+																									},
+																									"costUsd": {
+																										"type": "number"
+																									},
+																									"wallTimeMs": {
+																										"type": "number"
+																									}
+																								},
+																								"additionalProperties": false
+																							},
+																							"redactionCount": {
+																								"type": "number"
+																							},
+																							"decisions": {
+																								"type": "array",
+																								"items": {
+																									"type": "object",
+																									"required": ["runId", "sessionId", "ref", "record"],
+																									"properties": {
+																										"runId": {
+																											"type": "string"
+																										},
+																										"sessionId": {
+																											"type": "string"
+																										},
+																										"ref": {
+																											"type": "string"
+																										},
+																										"record": {
+																											"type": "object",
+																											"patternProperties": {
+																												"^.*$": {}
+																											}
+																										}
+																									},
+																									"additionalProperties": false
+																								}
+																							}
+																						},
+																						"additionalProperties": false
+																					},
+																					"verdict": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "compromised"
+																							},
+																							{
+																								"type": "string",
+																								"const": "unverified"
+																							},
+																							{
+																								"type": "string",
+																								"const": "unknown"
+																							},
+																							{
+																								"type": "string",
+																								"const": "grounded"
+																							},
+																							{
+																								"type": "string",
+																								"const": "reviewed"
+																							}
+																						]
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "object",
+																		"required": ["kind", "id", "exitCode", "message", "verification"],
+																		"properties": {
+																			"kind": {
+																				"type": "string",
+																				"const": "receipt-verification"
+																			},
+																			"id": {
+																				"type": "string",
+																				"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																			},
+																			"exitCode": {
+																				"type": "number",
+																				"const": 0
+																			},
+																			"message": {
+																				"type": "string"
+																			},
+																			"verification": {
+																				"type": "object",
+																				"required": ["version", "verifiedAt", "runId", "state", "reason", "axes"],
+																				"properties": {
+																					"version": {
+																						"type": "number",
+																						"const": 1
+																					},
+																					"verifiedAt": {
+																						"type": "string"
+																					},
+																					"runId": {
+																						"type": "string",
+																						"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																					},
+																					"state": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "pending"
+																							},
+																							{
+																								"type": "string",
+																								"const": "verified"
+																							},
+																							{
+																								"type": "string",
+																								"const": "failed"
+																							},
+																							{
+																								"type": "string",
+																								"const": "unavailable"
+																							}
+																						]
+																					},
+																					"reason": {
+																						"anyOf": [
+																							{
+																								"type": "null"
+																							},
+																							{
+																								"type": "string",
+																								"const": "integrity-mismatch"
+																							},
+																							{
+																								"type": "string",
+																								"const": "ledger-mismatch"
+																							},
+																							{
+																								"type": "string",
+																								"const": "integrity-invalid"
+																							},
+																							{
+																								"type": "string",
+																								"const": "execution-role-invalid"
+																							},
+																							{
+																								"type": "string",
+																								"const": "routing-intent-invalid"
+																							},
+																							{
+																								"type": "string",
+																								"const": "route-decision-invalid"
+																							},
+																							{
+																								"type": "string",
+																								"const": "receipt-unreadable"
+																							},
+																							{
+																								"type": "string",
+																								"const": "envelope-unavailable"
+																							},
+																							{
+																								"type": "string",
+																								"const": "unclassified"
+																							}
+																						]
+																					},
+																					"axes": {
+																						"type": "object",
+																						"required": [
+																							"artifactIntegrity",
+																							"validationGrounding",
+																							"independentReview",
+																							"contextProvenance",
+																							"autonomyEnforcement",
+																							"completionEvidence"
+																						],
+																						"properties": {
+																							"artifactIntegrity": {
+																								"type": "string"
+																							},
+																							"validationGrounding": {
+																								"type": "string"
+																							},
+																							"independentReview": {
+																								"type": "string"
+																							},
+																							"contextProvenance": {
+																								"type": "string"
+																							},
+																							"autonomyEnforcement": {
+																								"type": "string"
+																							},
+																							"completionEvidence": {
+																								"type": "string"
+																							}
+																						},
+																						"additionalProperties": false
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																]
 															}
 														]
 													}

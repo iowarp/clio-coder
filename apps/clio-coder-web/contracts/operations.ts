@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
+import { EvidenceOperationResult } from "./evidence.js";
 import { TargetOperationResult } from "./targets-cli.js";
 import { ToolResult } from "./toolchain.js";
 
@@ -12,7 +13,7 @@ const base = {
 	startedAt: Type.String(),
 	progress: Type.Array(Progress, { maxItems: 256 }),
 };
-export const OperationResult = Type.Union([ToolResult, TargetOperationResult]);
+export const OperationResult = Type.Union([ToolResult, TargetOperationResult, EvidenceOperationResult]);
 export type OperationResult = Static<typeof OperationResult>;
 export const Operation = Type.Union([
 	Type.Object(

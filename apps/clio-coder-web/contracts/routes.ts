@@ -2,6 +2,7 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Empty, Id } from "./common.js";
 import { Blueprints, DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
+import { EvidenceDetail, EvidencePage } from "./evidence.js";
 import {
 	Councils,
 	DispatchRun,
@@ -69,6 +70,34 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	evidenceList: defineRoute({
+		...get,
+		path: "/api/evidence",
+		query: FleetPageQuery,
+		response: EvidencePage,
+		summary: "Paginated evidence artifacts and trust verdicts",
+	}),
+	evidenceDetail: defineRoute({
+		...get,
+		path: "/api/evidence/:id",
+		params: operationParams,
+		response: EvidenceDetail,
+		summary: "Evidence findings, canonical trust, admitted provenance and gate decisions",
+	}),
+	evidenceBuild: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/evidence/:runId/build",
+		params: Type.Object({ id: Id, runId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Collect evidence for a run through Clio",
+	}),
+	receiptVerify: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/receipts/:runId/verify",
+		params: Type.Object({ id: Id, runId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Recheck receipt integrity against its run through Clio",
+	}),
 	fleetRoots: defineRoute({
 		...get,
 		path: "/api/fleet/runs",

@@ -12,6 +12,7 @@ import { resolveClioDirs } from "./clio/http-shims.js";
 import { CliRunner } from "./services/cli-runner.js";
 import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
+import { EvidenceService } from "./services/evidence.js";
 import { FleetService } from "./services/fleet.js";
 import { OperationRegistry } from "./services/operations.js";
 import { SessionService } from "./services/sessions.js";
@@ -73,6 +74,7 @@ export async function main() {
 		docs: new DocsService(reads),
 		settings: settingsService,
 		fleet: new FleetService(reads),
+		evidence: new EvidenceService(reads, cli, workspaces, operations),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		clientDir,

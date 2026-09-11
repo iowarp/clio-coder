@@ -14,6 +14,7 @@ export function staticClient(app: Hono, directory: string) {
 			[
 				"/toolchain",
 				"/fleet",
+				"/evidence",
 				"/traces",
 				"/sessions",
 				"/docs",
@@ -22,7 +23,7 @@ export function staticClient(app: Hono, directory: string) {
 				"/settings/targets",
 				"/settings/routing",
 			].includes(context.req.path) ||
-			/^\/(traces|sessions|fleet)\/[^/]+$/.test(context.req.path) ||
+			/^\/(traces|sessions|fleet|evidence)\/[^/]+$/.test(context.req.path) ||
 			/^\/fleet\/dispatches\/[^/]+$/.test(context.req.path) ||
 			/^\/workspaces\/[^/]+\/sessions$/.test(context.req.path)
 				? "index.html"

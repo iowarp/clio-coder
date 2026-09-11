@@ -9,7 +9,7 @@ export const navigation = [
 	{ label: "Docs", path: "/docs", available: true },
 	{ label: "Settings", path: "/settings", available: true },
 	{ label: "Fleet", path: "/fleet", available: true },
-	{ label: "Evidence", path: "/evidence", available: false },
+	{ label: "Evidence", path: "/evidence", available: true },
 	{ label: "Evals", path: "/evals", available: false },
 	{ label: "Library", path: "/library", available: false },
 	{ label: "System", path: "/system", available: false },

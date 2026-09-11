@@ -13,6 +13,10 @@ const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
 const docs = new DocsAdapter(settings.fixture ? settings.fixtureDocsPackageRoot : undefined);
 serveWorker(async (call) => {
+	if (call.method === "evidence.read") {
+		const { readEvidence } = await import("../clio/adapters/evidence.js");
+		return readEvidence(call.params);
+	}
 	if (call.method === "fleet.read") {
 		const { readFleet } = await import("../clio/adapters/fleet.js");
 		return readFleet(call.params);

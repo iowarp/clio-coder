@@ -5,6 +5,8 @@ import { AppProblem } from "./services/problem.js";
 
 const closed = { additionalProperties: false };
 export const CliCommand = Type.Union([
+	Type.Object({ kind: Type.Literal("evidence.build"), id: Id }, closed),
+	Type.Object({ kind: Type.Literal("receipt.verify"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.list") }, closed),
 	Type.Object({ kind: Type.Literal("targets.probe"), id: Id }, closed),
 	Type.Object({ kind: Type.Literal("targets.use"), id: Id }, closed),
@@ -19,6 +21,10 @@ export function commandPlan(input: unknown): { argv: string[]; output: "json" | 
 	if (!Value.Check(CliCommand, input))
 		throw new AppProblem("validation", "CLI command is outside the supported command table.");
 	switch (input.kind) {
+		case "evidence.build":
+			return { argv: ["evidence", "build", "--run", input.id], output: "exit" };
+		case "receipt.verify":
+			return { argv: ["fleet", "verify", input.id, "--json"], output: "json" };
 		case "targets.list":
 			return { argv: ["targets", "--json"], output: "json" };
 		case "targets.probe":

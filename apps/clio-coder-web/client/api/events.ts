@@ -36,6 +36,10 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 				);
 			else void queries.invalidateQueries({ queryKey: ["operation", event.payload.resource] });
 			void queries.invalidateQueries({ queryKey: ["tools"] });
+			if (event.payload.kind.startsWith("evidence.")) {
+				for (const key of ["evidence", "evidence-detail", "fleet-receipt"])
+					void queries.invalidateQueries({ queryKey: [key] });
+			}
 			if (event.payload.kind.startsWith("targets.")) {
 				for (const key of ["targets", "routing", "workspace-settings", "config-graph"])
 					void queries.invalidateQueries({ queryKey: [key] });

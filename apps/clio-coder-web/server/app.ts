@@ -7,6 +7,7 @@ import { getVersionInfo } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
 import { docsPathGuard, docsRoutes } from "./http/routes-docs.js";
+import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { settingsRoutes } from "./http/routes-settings.js";
@@ -18,6 +19,7 @@ import { idempotencyKey, register } from "./http/validate.js";
 import { Commands } from "./services/commands.js";
 import type { DocsService } from "./services/docs.js";
 import type { EventHub } from "./services/event-hub.js";
+import type { EvidenceService } from "./services/evidence.js";
 import type { FleetService } from "./services/fleet.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
@@ -38,6 +40,7 @@ export function createApp(options: {
 	settings: SettingsService;
 	targets: TargetsService;
 	fleet: FleetService;
+	evidence: EvidenceService;
 	sessions: SessionService;
 	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
@@ -85,6 +88,7 @@ export function createApp(options: {
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets);
 	fleetRoutes(app, hub, options.fleet);
+	evidenceRoutes(app, hub, options.evidence);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (

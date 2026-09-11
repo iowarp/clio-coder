@@ -154,3 +154,17 @@ runs use cursor pagination; individual runs and full receipts have direct read
 endpoints. Council and gate views retain Clio's canonical bounded windows and
 report truncation. Reads run in the domain worker, enforce artifact containment,
 and reject an oversized dispatch ledger rather than reporting empty history.
+
+Evidence reports are available at `/evidence` and `/api/evidence`, with cursor
+pagination and a detail endpoint for findings, canonical trust axes, admitted
+provenance and authenticated gate decisions. Historical reports without a trust
+file report `unknown`; an intact receipt alone never means the work was validated.
+`POST /api/workspaces/:id/evidence/:runId/build` collects a run's evidence through
+Clio, then reads the artifact from the store. `POST
+/api/workspaces/:id/receipts/:runId/verify` rechecks the original receipt and
+returns its canonical `pending`, `verified`, `failed` or `unavailable` result in
+an operation. Both require an idempotency key and an empty JSON object. A completed
+verification command can report failed integrity. A failed evidence build may
+still have written a report containing integrity findings; refresh before retrying.
+Evidence reads enforce containment and 8 MiB per file, with a 10,000-directory /
+64 MiB overview inventory ceiling. They never parse the build command's prose.
