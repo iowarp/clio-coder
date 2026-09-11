@@ -1375,12 +1375,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// this boot projection below.
 	configureRunEventJournal(resolvedSettings.fleet.history.journal);
 
-	// Guard registrations on the middleware contract, in order: loop guard,
-	// protected artifacts (last among guards so it absorbs protect_path effects
-	// from everything before it), dispatch dedup. Workers register their own
-	// loop guard and protected-artifacts instances inside their subprocess in
-	// worker-runtime.ts; the orchestrator instances carry the bus and the
-	// session persistence sink.
+	// Register the loop and dispatch guards first. The protected-artifact guard
+	// is constructed here but registered after user hooks below, so it can
+	// absorb their protect_path effects. Workers register their own guards in
+	// worker-runtime.ts; these instances carry the bus and session persistence.
 	middleware.registerHook(
 		createLoopGuardRegistration({
 			safety,
@@ -1429,7 +1427,6 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 		return protectedArtifactsGuard.state();
 	};
-	middleware.registerHook(protectedArtifactsGuard);
 	middleware.registerHook(createDispatchDedupRegistration());
 	// Observers run after the guards; they emit no effects and their sinks are
 	// best-effort (session ledger, codewiki refresh).
@@ -1527,9 +1524,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 	// User-defined hooks: extensions and the project (.clio-coder/hooks.yaml,
 	// .clio-coder/hooks.local.yaml) declare a conservative, receipted hook set on the
-	// same effect machinery. They register after the guards, so safety stays
-	// authoritative: a hook may add effects (including request block_tool) but
-	// cannot grant a permission safety would deny. Loading is best-effort.
+	// same effect machinery. A hook may add effects (including request block_tool)
+	// but cannot grant a permission safety would deny. The protected-artifact
+	// guard follows them to consume protect_path before tool execution.
 	// The coordinator is the only writer of the "user-hooks" owner and the only
 	// caller of the extensions reload; it publishes the extension generation
 	// and the hook registrations with two adjacent assignments on one stack
@@ -1537,7 +1534,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// published here too (the extensions bundle publishes nothing at start),
 	// so no consumer ever sees extension resources paired with hooks from a
 	// different generation. The owner slot is anchored here, so user hooks
-	// keep evaluating after the guards and before the assessors below.
+	// keep evaluating before the protection consumer and assessors below.
 	const hookReceiptLog = createHookReceiptLog({ persistPath: join(clioStateDir(), "hook-receipts.json") });
 	let bootHookNotices = true;
 	const reloadPlugins = () =>
@@ -1558,6 +1555,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	extensionReload.applyBoot();
+	middleware.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP

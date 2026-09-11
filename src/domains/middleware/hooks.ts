@@ -10,8 +10,8 @@
  *
  * There is no arbitrary script execution: `command` takes an argv array and is
  * run without a shell, so there is no string to inject into. Hooks never
- * replace the safety policy. They register after the guard hooks and can only
- * add effects (including requesting `block_tool`); the durable safety contract
+ * replace the safety policy. They can only add effects (including requesting
+ * `block_tool`); the durable safety contract
  * still classifies every tool call independently and a hook cannot grant a
  * permission safety would deny.
  *
