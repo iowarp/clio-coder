@@ -1,7 +1,7 @@
 # Clio Coder web
 
 The checkout application serves a local toolchain inventory, pinned installation
-with streamed progress, vendored-tool removal, a trace explorer, and workspace
+with streamed progress, vendored-tool removal, a trace explorer, documentation search, and workspace
 sessions backed by supervised Clio ACP children. The CLI, TUI, and ACP continue
 to run independently. The packaged `clio-coder web` command belongs to R1.
 
@@ -76,7 +76,13 @@ fragment, moved into the tab's session storage, and removed from the address bar
 API requests require bearer authentication; EventSource uses the same token in
 its query because it cannot set an Authorization header. Host and Origin are
 checked; static files have realpath containment and a content security policy.
-Markdown is rendered as React elements: raw HTML stays text, images are not
+Choose **Docs** for the shipped reference tree and local search. Markdown page
+links stay inside the app; blueprints are available when `docs/html/` exists in
+the package (normally a source checkout). Blueprint pages run in a sandboxed
+origin and cannot read the app token. The documentation index refreshes on server
+restart. Unavailable source references are shown as text with an explanation.
+
+Chat Markdown is rendered as React elements: raw HTML stays text, images are not
 fetched, and only HTTP, HTTPS, and mailto links are active. Prism produces token
 trees; strict Mermaid output is sanitized before SVG mounting. The CSP permits
 inline styles for those diagrams while scripts, connections, and fonts remain
@@ -123,5 +129,6 @@ update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records tra
 coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records session
 and process-lifecycle verification. [S4 evidence](notes/2026-09-11-S4.md) records
 permission/control verification and measured reconnect behavior. [S5 evidence](notes/2026-09-11-S5.md)
-records renderer, design, and browser accessibility verification. S1-S5 are complete;
-S6 adds the documentation tree, page rendering, search, and blueprints.
+records renderer, design, and browser accessibility verification. [S6 evidence](notes/2026-09-11-S6.md)
+records documentation, link and blueprint checks. S1-S6 are complete; S7a adds
+read-only layered settings and customization inspection.

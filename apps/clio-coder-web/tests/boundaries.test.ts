@@ -17,6 +17,7 @@ const httpModules = new Map([
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
 const adapters = new Set([
+	"src/core/package-root.ts",
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
 	"src/domains/observability/trace-store.ts",

@@ -1,4 +1,5 @@
 import { workerData } from "node:worker_threads";
+import { DocsAdapter } from "../clio/adapters/docs.js";
 import { sessionHistory } from "../clio/adapters/sessions.js";
 import { toolchainAdapter } from "../clio/adapters/toolchain.js";
 import { TraceAdapter } from "../clio/adapters/traces.js";
@@ -10,7 +11,10 @@ const settings = workerData as WorkerSettings;
 const fixture = settings.fixture ? await import("../../tests/fixtures/toolchain.js") : undefined;
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
+const docs = new DocsAdapter(settings.fixture ? settings.fixtureDocsPackageRoot : undefined);
 serveWorker((call) => {
+	if (call.method === "docs.read") return docs.read(call.params);
+	if (call.method === "docs.blueprint") return docs.blueprint(call.params.path);
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
 	if (call.method === "traces.read") return traces.read(call.params);
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");

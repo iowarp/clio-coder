@@ -5,6 +5,7 @@ import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/problems.js";
+import { Docs } from "./pages/docs.js";
 import { Home } from "./pages/home.js";
 import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { Toolchain } from "./pages/toolchain.js";
@@ -27,6 +28,7 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		children: [
+			{ path: "/docs/*", element: <Docs client={client} /> },
 			{ path: "/sessions", element: <Workspaces client={client} /> },
 			{ path: "/workspaces/:workspaceId/sessions", element: <Sessions client={client} /> },
 			{ path: "/sessions/:id", element: <Session client={client} /> },

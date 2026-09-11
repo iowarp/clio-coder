@@ -1,5 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Empty, Id } from "./common.js";
+import { Blueprints, DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
@@ -56,6 +57,32 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	docsTree: defineRoute({
+		...get,
+		path: "/api/docs/tree",
+		response: DocsTree,
+		summary: "Documentation navigation and Markdown inventory",
+	}),
+	docsPage: defineRoute({
+		...get,
+		path: "/api/docs/page",
+		query: Type.Object({ path: Type.String({ minLength: 1, maxLength: 1024 }) }, { additionalProperties: false }),
+		response: DocPage,
+		summary: "Read a contained Markdown page and resolve its links",
+	}),
+	docsSearch: defineRoute({
+		...get,
+		path: "/api/docs/search",
+		query: Type.Object({ q: Type.String({ maxLength: 200 }) }, { additionalProperties: false }),
+		response: DocsSearch,
+		summary: "Search the package documentation",
+	}),
+	docsBlueprints: defineRoute({
+		...get,
+		path: "/api/docs/blueprints",
+		response: Blueprints,
+		summary: "Available source-checkout blueprints",
+	}),
 	permission: defineRoute({
 		...post,
 		status: 200,

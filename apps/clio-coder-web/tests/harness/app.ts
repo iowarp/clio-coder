@@ -7,6 +7,7 @@ import type { PermissionTimers } from "../../server/acp/permissions.js";
 import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { parse } from "../../server/http/validate.js";
+import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { SessionService } from "../../server/services/sessions.js";
@@ -57,6 +58,7 @@ export async function harness(
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
+		docs: new DocsService(reads),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,

@@ -6,12 +6,14 @@ import { routes } from "../contracts/routes.js";
 import { getVersionInfo } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
+import { docsPathGuard, docsRoutes } from "./http/routes-docs.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
 import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
 import { Commands } from "./services/commands.js";
+import type { DocsService } from "./services/docs.js";
 import type { EventHub } from "./services/event-hub.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
@@ -26,6 +28,7 @@ export function createApp(options: {
 	operations: OperationRegistry;
 	toolchain: ToolchainService;
 	traces: TraceService;
+	docs: DocsService;
 	sessions: SessionService;
 	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
@@ -35,6 +38,7 @@ export function createApp(options: {
 	const { hub, operations, toolchain } = options;
 	app.onError(problemResponse);
 	app.use("*", auth(options.token, options.origin));
+	app.use("*", docsPathGuard);
 	app.use(
 		"/api/*",
 		bodyLimit({
@@ -68,6 +72,7 @@ export function createApp(options: {
 	});
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
+	docsRoutes(app, hub, options.docs);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (

@@ -10,6 +10,7 @@
 import type { Tokens } from "marked";
 import type { ReactNode, RefObject } from "react";
 import * as React from "react";
+import { documentHeadings } from "../../contracts/docs-headings.js";
 
 const { createContext, memo, useContext, useEffect, useMemo, useRef, useState } = React;
 
@@ -216,6 +217,10 @@ interface MermaidBlockProps {
  * to settle rather than landing between text frames.
  */
 const StreamingContext = createContext(false);
+const DocumentContext = createContext<{
+	links: Readonly<Record<string, string | null>>;
+	headings: Map<MarkdownToken, string>;
+} | null>(null);
 
 export const MermaidBlock = memo(function MermaidBlock({ source, settled }: MermaidBlockProps) {
 	const container = useRef<HTMLElement>(null);
@@ -307,6 +312,7 @@ function Inline({ tokens }: { tokens: readonly MarkdownToken[] }) {
 }
 
 function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
+	const document = useContext(DocumentContext);
 	switch (token.type) {
 		case "text": {
 			const text = token as Tokens.Text;
@@ -339,7 +345,12 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 			return <br />;
 		case "link": {
 			const link = token as Tokens.Link;
-			const href = safeHref(link.href);
+			const mapped = document?.links[link.href];
+			const href = document
+				? mapped && (/^\/docs(?:-html)?\//.test(mapped) || safeHref(mapped))
+					? mapped
+					: null
+				: safeHref(link.href);
 			if (href === null) {
 				return (
 					<span className="md-link md-link--blocked" title="This link was not activated: unsupported destination">
@@ -348,7 +359,13 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 				);
 			}
 			return (
-				<a className="md-link" href={href} target="_blank" rel="noopener noreferrer" title={link.title ?? undefined}>
+				<a
+					className="md-link"
+					href={href}
+					target={href.startsWith("/docs/") ? undefined : "_blank"}
+					rel="noopener noreferrer"
+					title={link.title ?? undefined}
+				>
 					<Inline tokens={link.tokens} />
 				</a>
 			);
@@ -397,6 +414,7 @@ function ListItems({ items, settled }: { items: readonly Tokens.ListItem[]; sett
 }
 
 function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): ReactNode {
+	const document = useContext(DocumentContext);
 	switch (token.type) {
 		case "space":
 		case "def":
@@ -405,7 +423,7 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 			const heading = token as Tokens.Heading;
 			const Tag = headingTag(heading.depth);
 			return (
-				<Tag className={`md-heading md-heading--${heading.depth}`}>
+				<Tag id={document?.headings.get(token)} className={`md-heading md-heading--${heading.depth}`}>
 					<Inline tokens={heading.tokens} />
 				</Tag>
 			);
@@ -518,6 +536,7 @@ export const Blocks = memo(function Blocks({
 });
 
 interface MarkdownContentProps {
+	readonly documentLinks?: Readonly<Record<string, string | null>>;
 	readonly source: string;
 	/** True once the narrative can no longer grow; the whole source is then lexed once, canonically. */
 	readonly complete: boolean;
@@ -537,6 +556,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 	source,
 	complete,
 	deferDiagrams = false,
+	documentLinks,
 }: MarkdownContentProps) {
 	const incremental = useRef<IncrementalMarkdown | null>(null);
 	const split = useMemo(() => {
@@ -546,15 +566,21 @@ export const MarkdownContent = memo(function MarkdownContent({
 	}, [source, complete]);
 	const finalTokens = useMemo(() => (complete ? lexMarkdown(source) : null), [source, complete]);
 	// Complete messages are lexed once; streaming messages retain their settled prefix.
+	const document = useMemo(
+		() => (documentLinks ? { links: documentLinks, headings: documentHeadings(finalTokens ?? []) } : null),
+		[documentLinks, finalTokens],
+	);
 	const settledTokens = finalTokens ?? split?.settled ?? NO_TOKENS;
 	const tailTokens = finalTokens === null ? (split?.tail ?? NO_TOKENS) : NO_TOKENS;
 	return (
-		<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
-			<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
-				<Blocks tokens={settledTokens} settled />
-				<Blocks tokens={tailTokens} settled={false} />
-			</div>
-		</StreamingContext.Provider>
+		<DocumentContext.Provider value={document}>
+			<StreamingContext.Provider value={finalTokens === null || deferDiagrams}>
+				<div className={`markdown ${finalTokens === null ? "is-streaming" : "is-complete"}`}>
+					<Blocks tokens={settledTokens} settled />
+					<Blocks tokens={tailTokens} settled={false} />
+				</div>
+			</StreamingContext.Provider>
+		</DocumentContext.Provider>
 	);
 });
 

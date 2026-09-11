@@ -138,6 +138,40 @@ try {
 		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
 		await check("trace-run");
+		await navigate("Docs");
+		await page.locator(".docs-page .markdown").waitFor();
+		await check("docs-map");
+		await page.getByLabel("Search the documentation", { exact: true }).fill("trace");
+		await page.getByRole("button", { name: "Search docs", exact: true }).click();
+		const docResults = page.getByRole("region", { name: "Search results" });
+		await docResults.getByRole("link", { name: /Trace Store/i }).click();
+		await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
+		await check("docs-page");
+		if (width === 1600) {
+			const opened = context.waitForEvent("page");
+			await page.locator('.docs-page a[href="/docs-html/trace_blueprint.html"]').click();
+			const blueprint = await opened;
+			blueprint.on("pageerror", (error) => errors.push(`Blueprint: ${error.message}`));
+			await blueprint.getByRole("button", { name: "Copy code snippet" }).first().waitFor();
+			assert.equal(
+				await blueprint.evaluate(() => {
+					try {
+						sessionStorage.getItem("clio-coder-web-token");
+						return false;
+					} catch {
+						return true;
+					}
+				}),
+				true,
+				"Blueprint must not inherit application storage",
+			);
+			await blueprint.close();
+		}
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `docs-${width}.png`), fullPage: false });
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("docs-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await navigate("Sessions");
 		await page.getByLabel("Workspace path", { exact: true }).fill(h.home.path);
 		await page.getByRole("button", { name: "Open workspace", exact: true }).click();

@@ -9,6 +9,7 @@ import { serve } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
 import { resolveClioDirs } from "./clio/http-shims.js";
+import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
 import { OperationRegistry } from "./services/operations.js";
 import { SessionService } from "./services/sessions.js";
@@ -63,6 +64,7 @@ export async function main() {
 		operations,
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
+		docs: new DocsService(reads),
 		sessions,
 		clientDir,
 	});
