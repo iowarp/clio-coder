@@ -99,7 +99,6 @@ clio-coder trace procs <runId> [--db PATH]
 clio-coder trace code-steps <rootId> [--json]
 clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
 clio-coder trace sql <SELECT query> [--db PATH]
-clio-coder trace ui [--db PATH] [--port N]
 ```
 
 `clio-coder trace --help` and every subcommand `--help` print usage and exit with code 0.
@@ -122,24 +121,34 @@ When resolving the SQLite database path:
 5. **`procs`**: Lists orchestrator and worker process executions associated with a `runId`. Displays state (`live` or `ended`), PID, process kind, name, and command string.
 6. **`prune`**: Applies the resolved age and byte retention policy while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether `VACUUM` ran.
 7. **`sql`**: Executes a single read-only `SELECT` or `WITH` SQL statement against the SQLite trace database. The subcommand enforces read-only access before opening storage: queries containing semicolons or data mutation keywords (`INSERT`, `UPDATE`, `DELETE`, `CREATE`, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.
-8. **`ui`**: Launches the web-based interactive trace viewer server on the specified `--port` (default 0). This subcommand requires a source checkout containing `apps/trace-viewer/server.mjs`.
 
-### Trace Viewer Surface
+### Unified Web Trace API
 
-The viewer binds to `127.0.0.1` only and serves a read-only JSON API beside the static page:
+The source application in `apps/clio-coder-web/` replaces the separate trace
+viewer. It binds to `127.0.0.1` and requires the per-launch bearer token. The CLI
+trace commands above continue to work independently of the web process.
 
 | Endpoint | Source |
 | --- | --- |
-| `GET /api/health` | Schema version handshake. |
-| `GET /api/runs[?limit=N]` | `runs`, newest first. |
-| `GET /api/runs/:runId` | One `runs` row. |
-| `GET /api/runs/:runId/phases` | `phases`, ordered by `seq`. |
-| `GET /api/runs/:runId/events[?after=cursor&limit=N]` | `events` by rowid cursor, capped at 500 per page. |
-| `GET /api/runs/:runId/gates` | `gate_results`. |
-| `GET /api/runs/:runId/envelopes` | `envelopes`. |
-| `GET /api/runs/:runId/processes` | `processes`. |
-| `GET /api/runs/:runId/receipt` | Sidecars beside the database: `<stateDir>/receipts/<runId>.json` and the matching `<stateDir>/evidence-index.json` row. |
+| `GET /api/traces/status` | Schema and availability status. |
+| `GET /api/traces/runs` | Keyset-paginated runs, with source and text filters. |
+| `GET /api/traces/runs/:runId` | One run. |
+| `GET /api/traces/runs/:runId/phases` | Phases ordered by sequence. |
+| `GET /api/traces/runs/:runId/events` | Rowid-cursor event history. |
+| `GET /api/traces/runs/:runId/live` | SSE event tail. |
+| `GET /api/traces/runs/:runId/gates` | Gate results. |
+| `GET /api/traces/runs/:runId/envelopes` | Trace envelopes. |
+| `GET /api/traces/runs/:runId/processes` | Process records. |
+| `GET /api/traces/runs/:runId/receipt` | Receipt and evidence-index sidecars. |
 
-The receipt endpoint derives `<stateDir>` from the directory holding the trace database, since `clio-coder trace ui` reads `<stateDir>/trace.sqlite`. A mirror copied away from its state directory has no sidecars, so a missing, unreadable, or malformed file yields a `null` half with HTTP 200 rather than an error. The response drops `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`: the panel renders provenance, not transcripts.
+The receipt endpoint reads sidecars beside the database. Missing or malformed
+sidecars yield a null half without failing the run page. The default projection
+omits `output`, `upstreamResponses`, `routeDecision`, `briefing`, and `steering`;
+`?include=full` explicitly requests the full receipt. The authenticated operator can
+inspect trace payloads. The browser renders all model content through its safe
+rich-content renderer.
 
-The run page renders the task request, wall-clock duration, phase description, failure reason and retry count, a chronological log of every event type with its payload, gate verdicts and violations, the run's processes, and a receipt panel covering outcome, verification state and basis, spend, per-tool call statistics, safety counters, findings, and build provenance. Fields the harness never sealed read as absent rather than as zero.
+The run page shows the request, phase waterfall, duration, costs, events with
+payloads, gate decisions, processes, and receipt provenance. Unrecorded fields
+remain absent rather than becoming zero. The typed route table and OpenAPI in
+`apps/clio-coder-web/contracts/` define query parameters and response schemas.

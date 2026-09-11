@@ -292,10 +292,6 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 <td>Run one read-only query against the mirror. Only a single <code>SELECT</code> or read-only <code>WITH</code> statement is accepted; anything else exits 2.</td>
 </tr>
 <tr>
-<td><code>clio-coder trace ui [--db PATH] [--port N]</code></td>
-<td>Serve the localhost-only waterfall viewer. The viewer is not part of the published package.</td>
-</tr>
-<tr>
 <td><code>clio-coder dev evolve manifest init|validate|summarize</code></td>
 <td>Create and check typed harness change manifests.</td>
 </tr>
@@ -1271,7 +1267,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 </thead>
 <tbody><tr>
 <td><code>pnpm run ci</code></td>
-<td>Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the trace-viewer suite.</td>
+<td>Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the web application suite.</td>
 </tr>
 <tr>
 <td><code>pnpm run ci:release</code></td>

@@ -730,7 +730,6 @@ Grouped by command. Global flags appear under `global`.
 | `--limit` | For `trace runs`, integer 1 to 500 number of runs to list (also `--limit=N`). |
 | `--max-age-days` | For `trace prune`, integer 1 to 36500 retention age in days for this prune only (also `--max-age-days=N`). |
 | `--max-bytes` | For `trace prune`, integer size ceiling in bytes, at least 1048576, for this prune only (also `--max-bytes=N`). |
-| `--port` | For `trace ui`, TCP port for the localhost viewer, 0 to 65535 (also `--port=N`); 0 picks an ephemeral port. |
 | `-h` | Short form of --help. |
 
 ### `uninstall`

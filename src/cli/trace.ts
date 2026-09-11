@@ -1,7 +1,5 @@
 import { existsSync } from "node:fs";
-import { access } from "node:fs/promises";
 import { resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
 import { clioStatePath } from "../core/xdg.js";
 import type { CodeStepRecord } from "../domains/dispatch/code-step.js";
 import { codeStepDir, readCodeStepRecords } from "../domains/dispatch/code-step-store.js";
@@ -29,10 +27,8 @@ const HELP = `Usage:
   clio-coder trace code-steps <rootId> [--json]   deterministic code steps of one fleet root
   clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
   clio-coder trace sql <SELECT query> [--db PATH]
-  clio-coder trace ui [--db PATH] [--port N]        source checkout only
 
-The viewer ships with the repository, not the npm package, so from an installed
-Clio the subcommands above are the way in. They read the same database, except
+The subcommands above read the same database, except
 code-steps, which reads the per-root record files under the state directory's
 code-steps/ tree (a code step is a subprocess, not a model run, so it never
 enters the SQLite mirror).
@@ -51,7 +47,6 @@ interface ParsedTraceArgs {
 	dbExplicit: boolean;
 	follow: boolean;
 	limit: number;
-	port: number;
 	json: boolean;
 	maxAgeDays: number | undefined;
 	maxBytes: number | undefined;
@@ -63,7 +58,6 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 	let dbExplicit = false;
 	let follow = false;
 	let limit = DEFAULT_TRACE_LIMIT;
-	let port = 0;
 	let json = false;
 	let maxAgeDays: number | undefined;
 	let maxBytes: number | undefined;
@@ -71,13 +65,7 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 		const arg = args[index];
 		if (arg === "--follow") follow = true;
 		else if (arg === "--json") json = true;
-		else if (
-			arg === "--db" ||
-			arg === "--limit" ||
-			arg === "--port" ||
-			arg === "--max-age-days" ||
-			arg === "--max-bytes"
-		) {
+		else if (arg === "--db" || arg === "--limit" || arg === "--max-age-days" || arg === "--max-bytes") {
 			const value = args[index + 1];
 			if (value === undefined) throw new Error(`${arg} requires a value`);
 			index += 1;
@@ -85,25 +73,23 @@ function parseTraceArgs(args: string[]): ParsedTraceArgs {
 				db = resolve(value);
 				dbExplicit = true;
 			} else if (arg === "--limit") limit = parseInteger(value, "--limit", 1, 500);
-			else if (arg === "--port") port = parseInteger(value, "--port", 0, 65_535);
 			else if (arg === "--max-age-days") maxAgeDays = parseInteger(value, arg, 1, 36_500);
 			else maxBytes = parseInteger(value, arg, 1024 * 1024, Number.MAX_SAFE_INTEGER);
 		} else if (arg?.startsWith("--db=")) {
 			db = resolve(arg.slice(5));
 			dbExplicit = true;
 		} else if (arg?.startsWith("--limit=")) limit = parseInteger(arg.slice(8), "--limit", 1, 500);
-		else if (arg?.startsWith("--port=")) port = parseInteger(arg.slice(7), "--port", 0, 65_535);
 		else if (arg?.startsWith("--max-age-days=")) maxAgeDays = parseInteger(arg.slice(15), "--max-age-days", 1, 36_500);
 		else if (arg?.startsWith("--max-bytes="))
 			maxBytes = parseInteger(arg.slice(12), "--max-bytes", 1024 * 1024, Number.MAX_SAFE_INTEGER);
 		else if (arg?.startsWith("-")) throw new Error(`unknown trace flag: ${arg}`);
 		else if (arg !== undefined) positional.push(arg);
 	}
-	return { positional, db, dbExplicit, follow, limit, port, json, maxAgeDays, maxBytes };
+	return { positional, db, dbExplicit, follow, limit, json, maxAgeDays, maxBytes };
 }
 
 /** Every subcommand `trace` answers to. Anything else is a usage error. */
-const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "code-steps", "prune", "sql", "ui"]);
+const TRACE_COMMANDS = new Set(["runs", "inspect", "phases", "tail", "procs", "code-steps", "prune", "sql"]);
 
 /** The subcommands whose first positional is a run id. */
 const TRACE_COMMANDS_NEEDING_RUN_ID = new Set(["phases", "tail", "procs"]);
@@ -169,8 +155,6 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 		}
 	}
 
-	if (command === "ui") return runTraceUi(parsed.db, parsed.port);
-
 	// Code-step records live in flat per-root JSON files beside the ledger, not
 	// in the SQLite mirror, so this answers before the database is consulted and
 	// ignores --db. An absent root directory is the empty state: the root either
@@ -187,7 +171,6 @@ export async function runTraceCommand(args: string[]): Promise<number> {
 				!parsed.dbExplicit &&
 				!parsed.follow &&
 				parsed.limit === DEFAULT_TRACE_LIMIT &&
-				parsed.port === 0 &&
 				parsed.maxAgeDays === undefined &&
 				parsed.maxBytes === undefined,
 		);
@@ -377,50 +360,6 @@ function printProcesses(rows: TraceProcessRow[]): void {
 			`${(row.ended_at === null ? "live" : "ended").padEnd(6)} ${String(row.pid).padEnd(8)} ${row.kind.padEnd(12)} ${row.name.slice(0, 20).padEnd(20)} ${row.command}\n`,
 		);
 	}
-}
-
-async function runTraceUi(db: string, port: number): Promise<number> {
-	const candidates = [
-		fileURLToPath(new URL("../apps/trace-viewer/server.mjs", import.meta.url)),
-		fileURLToPath(new URL("../../apps/trace-viewer/server.mjs", import.meta.url)),
-	];
-	const entry = await firstExisting(candidates);
-	if (entry === null) {
-		process.stderr.write(
-			"trace viewer is available only from a source checkout; apps/trace-viewer/server.mjs was not found\n" +
-				"  the npm package does not carry the viewer, so an installed clio cannot start it\n" +
-				`  the same run is readable here: clio-coder trace runs --db ${db}\n` +
-				"  from a checkout of the repository: npm run trace:ui\n",
-		);
-		return 1;
-	}
-	const module = (await import(pathToFileURL(entry).href)) as {
-		startTraceViewer(options: { db: string; port: number }): Promise<{ url: string; close(): Promise<void> }>;
-	};
-	const server = await module.startTraceViewer({ db, port });
-	process.stdout.write(`Trace viewer: ${server.url}\n`);
-	await new Promise<void>((resolveStop) => {
-		const stop = (): void => {
-			process.off("SIGINT", stop);
-			process.off("SIGTERM", stop);
-			void server.close().finally(resolveStop);
-		};
-		process.on("SIGINT", stop);
-		process.on("SIGTERM", stop);
-	});
-	return 0;
-}
-
-async function firstExisting(paths: string[]): Promise<string | null> {
-	for (const path of paths) {
-		try {
-			await access(path);
-			return path;
-		} catch {
-			// Try the next source-checkout location.
-		}
-	}
-	return null;
 }
 
 function parseInteger(value: string, flag: string, min: number, max: number): number {

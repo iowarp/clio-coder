@@ -75,6 +75,23 @@ describe("contracts/trace code-steps reads the deterministic code-step records b
 		match(result.stderr, /trace code-steps requires a fleet root id/);
 	});
 
+	it("retires the viewer command and port flag before opening storage", async () => {
+		const removed = await capture(["ui"]);
+		strictEqual(removed.code, 2);
+		match(removed.stderr, /unknown trace command: ui/);
+		const help = await capture(["--help"]);
+		strictEqual(help.code, 0);
+		strictEqual(help.stdout.includes("trace ui"), false);
+		for (const args of [
+			["runs", "--port", "4600"],
+			["runs", "--port=4600"],
+		]) {
+			const result = await capture(args);
+			strictEqual(result.code, 2);
+			match(result.stderr, /unknown trace flag: --port/);
+		}
+	});
+
 	it("treats a root that never ran a code step as the empty state, not a failure", async () => {
 		const result = await capture(["code-steps", "root-empty"]);
 		strictEqual(result.code, 0);

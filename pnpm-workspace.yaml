@@ -1,6 +1,8 @@
 packages:
   - "."
   - "apps/*"
+  # Retained reference source; excluded from recursive build/test/publish operations.
+  - "!apps/workbench"
 
 # Preserve the existing build fallback before `pnpm test`.
 enablePrePostScripts: true

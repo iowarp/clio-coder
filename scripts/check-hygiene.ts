@@ -93,6 +93,8 @@ function checkProductNamespace(): void {
 	}).split("\0");
 	const legacyProjectPath = /(?:^|[\s"'`/\\])\.clio(?:-(?!coder\b)|(?=$|[\s/\\"'`.,;:)\]}]))/iu;
 	for (const file of new Set(files)) {
+		// Workbench is retained reference source, outside the active product gates.
+		if (file.startsWith("apps/workbench/")) continue;
 		if (!/\.(?:[cm]?[jt]sx?|md|json|ya?ml|toml|sh|html|txt)$/u.test(file)) continue;
 		if (file === "CHANGELOG.md" || file.startsWith("docs/history/") || file.startsWith(".github/releases/")) continue;
 		if (!existsSync(join(root, file))) continue;
@@ -436,10 +438,7 @@ function checkCiScripts(): void {
 			fail("ci-scripts", `package.json scripts.${name} must be "${expected}", got "${scripts[name]}"`);
 		}
 	};
-	expectScript(
-		"ci",
-		"pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer && pnpm run test:web",
-	);
+	expectScript("ci", "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:web");
 	expectScript("library:check", "node --import tsx scripts/pin-library.ts --check");
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
 	expectScript("ci:release", "pnpm run ci && node scripts/check-release.mjs");

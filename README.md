@@ -394,44 +394,23 @@ exactly which settings, credentials, and session directories each option affects
 
 ## Optional interfaces
 
-The terminal is the main starting point. Source checkouts also include a
-desktop/browser interface and a local viewer for recorded runs.
-
-<details>
-<summary><strong>Desktop and browser GUI</strong></summary>
-
-The GUI in `apps/workbench/` uses your existing Clio configuration. It requires
-Deno `>=2.9.5`, workspace dependencies, and `clio-coder` on `PATH`.
+The terminal is the main starting point. The unified application in
+[`apps/clio-coder-web/`](apps/clio-coder-web/README.md) provides the authenticated
+local REST API and browser interface for sessions, traces, documentation, and
+configuration. It currently runs from a source checkout:
 
 ```bash
-cd apps/workbench
-deno task browser       # build and serve on localhost:4173
-deno task gui:install   # optional standalone local application
+pnpm --filter @iowarp/clio-coder-web build
+pnpm --filter @iowarp/clio-coder-web start
 ```
 
-The installed launcher is `clio-coder-gui`. Linux, including WSL2, is tested;
-native Windows launch is unavailable. Prebuilt GUI downloads are not distributed.
-The GUI keeps its own recent-project list; Clio owns sessions and authentication.
+Open the authenticated URL printed by the server. The app binds to `127.0.0.1`;
+its Traces page reads the trace database without modifying it. The separate
+trace viewer has been retired. This web application is not yet included in the
+published CLI package.
 
-See the [GUI guide](apps/workbench/README.md) for installation, state locations,
-updates, and removal. There is no `clio-coder workbench` subcommand.
-
-</details>
-
-<details>
-<summary><strong>Read-only trace viewer</strong></summary>
-
-From a source checkout:
-
-```bash
-clio-coder trace ui --port 4600
-```
-
-The viewer binds to `127.0.0.1` and reads the local trace database without
-modifying it. The npm package does not include this app. See the
-[trace viewer guide](apps/trace-viewer/README.md).
-
-</details>
+`apps/workbench/` remains as reference source for future GUI work. It is excluded
+from workspace installation, recursive builds, publication, and product gates.
 
 ## Help and documentation
 

@@ -17,8 +17,9 @@ Requirements:
 - Linux or macOS for full parity. Windows is best effort until a stable release.
 
 Enable pnpm through Corepack (`corepack enable pnpm`), or install the pinned version locally.
-The root workspace includes both applications. pnpm owns dependency installation;
-Workbench still uses Deno for its host and tests.
+The root workspace includes the unified web application. pnpm owns dependency
+installation. `apps/workbench/` is retained reference source and excluded from
+workspace builds, publication, and product gates.
 
 Bootstrap:
 
@@ -38,7 +39,7 @@ pnpm run ci
 
 This runs type checking, lint (including boundaries, documentation drift and
 skill audit records and full-tree library pins), one build, the contract/smoke
-suite, and the trace-viewer suite. Use `pnpm run library:check` for package pins
+suite, and the unified web application tests. Use `pnpm run library:check` for package pins
 and `pnpm run skills:check` for skill authoring records; both run in `lint` and `ci`.
 
 The GitHub `ci` job runs the release gate on Ubuntu. The separate

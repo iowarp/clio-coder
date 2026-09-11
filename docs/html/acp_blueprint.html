@@ -53,11 +53,7 @@
 <h2>1. Overview &amp; Protocol Specification</h2>
 <p>Clio Coder provides a native ACP server via the <code>clio-coder acp</code> command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (<code>src/engine/acp/transport.ts</code>).</p>
 <p>The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
-The source tree includes the <code>apps/workbench</code> localhost desktop client. Its ACP
-adapter supports session browsing and deletion, safe settings, target probes,
-usage, recovery, evaluation inventory, routing and dispatch inspection, toolchain
-status, agent attribution, and the live fleet event strip. The workbench is a
-source application and is not included in the published CLI package.</p>
+The source tree includes the <code>apps/clio-coder-web</code> application, which supervises ACP children and exposes session operations through authenticated local REST and SSE. The earlier <code>apps/workbench</code> client is retained as reference source and is excluded from workspace builds, publication, and product gates.</p>
 <pre><code class="language-mermaid">graph LR
     client[External ACP Client] &lt;--&gt;|JSON-RPC 2.0 / stdio| server[Clio ACP Server]
     server --&gt; mediator[Tool Mediator &amp; Safety Net]

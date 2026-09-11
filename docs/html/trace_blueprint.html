@@ -123,7 +123,6 @@ clio-coder trace procs &lt;runId&gt; [--db PATH]
 clio-coder trace code-steps &lt;rootId&gt; [--json]
 clio-coder trace prune [--max-age-days N] [--max-bytes N] [--db PATH] [--json]
 clio-coder trace sql &lt;SELECT query&gt; [--db PATH]
-clio-coder trace ui [--db PATH] [--port N]
 </code></pre>
 <p><code>clio-coder trace --help</code> and every subcommand <code>--help</code> print usage and exit with code 0.</p>
 <p><code>trace code-steps</code> is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so <code>src/domains/dispatch/code-step-store.ts</code> writes its <code>CodeStepRecord</code> to <code>&lt;stateDir&gt;/code-steps/&lt;rootId&gt;/&lt;runId&gt;.json</code> instead of fabricating route rows in the ledger. The command reads those files back oldest first, prints the record verbatim under <code>--json</code>, and treats an absent root directory as the empty state with exit 0. <code>--db</code> is ignored.</p>
@@ -143,10 +142,11 @@ clio-coder trace ui [--db PATH] [--port N]
 <li><strong><code>procs</code></strong>: Lists orchestrator and worker process executions associated with a <code>runId</code>. Displays state (<code>live</code> or <code>ended</code>), PID, process kind, name, and command string.</li>
 <li><strong><code>prune</code></strong>: Applies the resolved age and byte retention policy while protecting queued and running runs. Text and JSON results report the policy, removed runs and rows, physical bytes reclaimed, protected runs, and whether <code>VACUUM</code> ran.</li>
 <li><strong><code>sql</code></strong>: Executes a single read-only <code>SELECT</code> or <code>WITH</code> SQL statement against the SQLite trace database. The subcommand enforces read-only access before opening storage: queries containing semicolons or data mutation keywords (<code>INSERT</code>, <code>UPDATE</code>, <code>DELETE</code>, <code>CREATE</code>, etc.) are rejected with exit code 2. BigInt numbers in result objects format as JSON strings.</li>
-<li><strong><code>ui</code></strong>: Launches the web-based interactive trace viewer server on the specified <code>--port</code> (default 0). This subcommand requires a source checkout containing <code>apps/trace-viewer/server.mjs</code>.</li>
 </ol>
-<h3>Trace Viewer Surface</h3>
-<p>The viewer binds to <code>127.0.0.1</code> only and serves a read-only JSON API beside the static page:</p>
+<h3>Unified Web Trace API</h3>
+<p>The source application in <code>apps/clio-coder-web/</code> replaces the separate trace
+viewer. It binds to <code>127.0.0.1</code> and requires the per-launch bearer token. The CLI
+trace commands above continue to work independently of the web process.</p>
 <table>
 <thead>
 <tr>
@@ -155,45 +155,57 @@ clio-coder trace ui [--db PATH] [--port N]
 </tr>
 </thead>
 <tbody><tr>
-<td><code>GET /api/health</code></td>
-<td>Schema version handshake.</td>
+<td><code>GET /api/traces/status</code></td>
+<td>Schema and availability status.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs[?limit=N]</code></td>
-<td><code>runs</code>, newest first.</td>
+<td><code>GET /api/traces/runs</code></td>
+<td>Keyset-paginated runs, with source and text filters.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId</code></td>
-<td>One <code>runs</code> row.</td>
+<td><code>GET /api/traces/runs/:runId</code></td>
+<td>One run.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/phases</code></td>
-<td><code>phases</code>, ordered by <code>seq</code>.</td>
+<td><code>GET /api/traces/runs/:runId/phases</code></td>
+<td>Phases ordered by sequence.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/events[?after=cursor&amp;limit=N]</code></td>
-<td><code>events</code> by rowid cursor, capped at 500 per page.</td>
+<td><code>GET /api/traces/runs/:runId/events</code></td>
+<td>Rowid-cursor event history.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/gates</code></td>
-<td><code>gate_results</code>.</td>
+<td><code>GET /api/traces/runs/:runId/live</code></td>
+<td>SSE event tail.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/envelopes</code></td>
-<td><code>envelopes</code>.</td>
+<td><code>GET /api/traces/runs/:runId/gates</code></td>
+<td>Gate results.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/processes</code></td>
-<td><code>processes</code>.</td>
+<td><code>GET /api/traces/runs/:runId/envelopes</code></td>
+<td>Trace envelopes.</td>
 </tr>
 <tr>
-<td><code>GET /api/runs/:runId/receipt</code></td>
-<td>Sidecars beside the database: <code>&lt;stateDir&gt;/receipts/&lt;runId&gt;.json</code> and the matching <code>&lt;stateDir&gt;/evidence-index.json</code> row.</td>
+<td><code>GET /api/traces/runs/:runId/processes</code></td>
+<td>Process records.</td>
+</tr>
+<tr>
+<td><code>GET /api/traces/runs/:runId/receipt</code></td>
+<td>Receipt and evidence-index sidecars.</td>
 </tr>
 </tbody></table>
-<p>The receipt endpoint derives <code>&lt;stateDir&gt;</code> from the directory holding the trace database, since <code>clio-coder trace ui</code> reads <code>&lt;stateDir&gt;/trace.sqlite</code>. A mirror copied away from its state directory has no sidecars, so a missing, unreadable, or malformed file yields a <code>null</code> half with HTTP 200 rather than an error. The response drops <code>output</code>, <code>upstreamResponses</code>, <code>routeDecision</code>, <code>briefing</code>, and <code>steering</code>: the panel renders provenance, not transcripts.</p>
-<p>The run page renders the task request, wall-clock duration, phase description, failure reason and retry count, a chronological log of every event type with its payload, gate verdicts and violations, the run&#39;s processes, and a receipt panel covering outcome, verification state and basis, spend, per-tool call statistics, safety counters, findings, and build provenance. Fields the harness never sealed read as absent rather than as zero.</p>
-        </article>
+<p>The receipt endpoint reads sidecars beside the database. Missing or malformed
+sidecars yield a null half without failing the run page. The default projection
+omits <code>output</code>, <code>upstreamResponses</code>, <code>routeDecision</code>, <code>briefing</code>, and <code>steering</code>;
+<code>?include=full</code> explicitly requests the full receipt. The authenticated operator can
+inspect trace payloads. The browser renders all model content through its safe
+rich-content renderer.</p>
+<p>The run page shows the request, phase waterfall, duration, costs, events with
+payloads, gate decisions, processes, and receipt provenance. Unrecorded fields
+remain absent rather than becoming zero. The typed route table and OpenAPI in
+<code>apps/clio-coder-web/contracts/</code> define query parameters and response schemas.</p>
+</article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="time_conventions_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Time and Clock Conventions</span></a>
           <a class="nav-link-card next" href="tui_design_blueprint.html"><span class="nav-label">Next</span><span class="nav-title">Clio TUI Design System</span></a>

@@ -2,6 +2,11 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Changed
+- Retire the separate trace viewer and `trace ui`; the unified source web app owns trace browsing. Preserve Workbench as reference source while excluding it from workspace builds, publication, and product gates.
+
 ## 0.4.7 - 2026-09-10
 
 This release brings a unified Library for reusable workflows, operator extensions, safer keyboard and draft handling, and a compact welcome header. Native workers retain configured output limits and interrupted reasoning, and the guides describe the shipped behavior and its verification limits.
