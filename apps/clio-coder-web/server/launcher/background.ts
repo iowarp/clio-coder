@@ -164,6 +164,21 @@ export async function startBackground(
 	await ready(state.config.port, state.config.token);
 	return `http://127.0.0.1:${state.config.port}/#token=${state.config.token}`;
 }
+/** Navigation may reuse a verified installation, but never silently takes over another package. */
+export async function tryStartBackground(
+	directory: string,
+	packageRoot: string,
+	control: Control = controlService,
+	ready = waitForLocalServer,
+) {
+	const state = await owned(directory);
+	if (state.status === "absent") return undefined;
+	if ((await realpath(state.config.packageRoot)) !== (await realpath(packageRoot)))
+		throw new Error(
+			"Background setup belongs to another installation. Use that installation or run web without --reuse-background.",
+		);
+	return startBackground(directory, control, ready);
+}
 export async function stopBackground(directory: string, control: Control = controlService) {
 	const state = await owned(directory);
 	if (state.status === "absent") return;

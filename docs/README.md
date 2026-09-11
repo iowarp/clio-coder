@@ -24,7 +24,7 @@ docs/
 ├── architecture/   Runtime contracts and design
 ├── process/        Development, validation, and release practice
 ├── history/        Dated records that are not current guidance
-└── html/           Source-checkout visual blueprints
+└── html/           Handmade visual blueprints for the web app
 ```
 
 ## Start here
@@ -187,9 +187,9 @@ resolves from the installed package root (`resolvePackageRoot()`,
 **What is indexed.** Every `.md` file under `<package-root>/docs/`, excluding
 `docs/html/`, plus root `README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each
 of those exists. The npm package ships `docs/**/*.md`, `README.md` and
-`CHANGELOG.md`; it does not ship `docs/html/` or a root `CLIO-CODER.md`, so in an
-npm install the blueprints are absent and the handbook is indexed only when you
-are running from a source checkout. The index is deterministic and needs no
+`CHANGELOG.md`, plus the handmade visual blueprints used by the web app.
+HTML is not part of the agent's Markdown index. A root `CLIO-CODER.md` is indexed
+only when present, such as in a source checkout. The index is deterministic and needs no
 network or embedding service (`src/tools/context/docs-engine.ts`).
 
 **Searching and then reading.** `context(scope="docs", query="…")` returns
@@ -208,27 +208,29 @@ root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
 Do not duplicate the `docs/` segment, and do not resolve a citation against the
 workspace. Omitting `query` lists the corpus instead of searching it.
 
-**The blueprint viewer.** `clio-coder docs` serves `docs/html/` from the package
-root on `127.0.0.1:<port>`. It does not look at your current directory and does
-not check whether you are in a Git checkout: the only question is whether the
-installed package has those files. When it does not, the command prints the
-packaged Markdown path and a link to the blueprints on GitHub instead of starting
-a server.
+**The web documentation.** `clio-coder docs` opens the documentation map in the
+Clio Coder web app. `clio-coder docs safety` opens the safety guide. It resolves
+content from the installed package, independent of your current project, and
+reuses this installation's background app when configured. Otherwise it starts
+a foreground loopback server; press Ctrl+C to stop. `--no-open` prints the private
+launch link without opening a browser. The command never installs a service.
 
 ## Interactive blueprints
 
-Every Markdown page has a dedicated visual blueprint under `docs/html/`, and
-the separate `docs/html/index.html` landing page mirrors this documentation
-tree. Blueprint links use the public repository so they still work when a guide
-is read from the npm package. From a source checkout, serve the same files
-locally with:
+The handmade blueprints under `docs/html/` are preserved as a visual view of the
+reference. Guides and blueprints share the web app's navigation, search, and
+light or dark theme. Use the guide/blueprint switch on a paired document; links
+stay in the app. Both views ship with the npm package. The HTML sources remain
+available for editing, while the old standalone documentation server is retired.
 
 ```bash
 clio-coder docs
+clio-coder docs safety
+clio-coder docs guide/configuration-reference.md --no-open
 ```
 
-The Markdown pages are the portable reference and ship with the npm package.
-The HTML blueprints are development aids and are not required for the runtime.
+The Markdown files remain the portable reference for the CLI, agents, editors,
+and repository readers. Opening documentation does not require a model connection.
 
 ## Writing documentation
 

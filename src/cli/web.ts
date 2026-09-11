@@ -15,6 +15,8 @@ Usage:
 The foreground server prints a private launch link. --open opens your default
 browser. Press Ctrl+C to stop. --no-open explicitly disables browser opening.
 Optional --idle-exit <milliseconds> stops an idle foreground server.
+Use --path </app/path> to open a particular page. --reuse-background uses this
+installation's background app when configured, or starts a foreground server.
 
 On Linux with a systemd user session, background install keeps the app available
 at login. Open its launch link once, then install it from your browser. Background

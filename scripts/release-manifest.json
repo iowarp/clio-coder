@@ -26,6 +26,9 @@
 		"src/domains/prompts/fragments/identity/clio-worker.md",
 		"assets/clio-coder-logo-128.webp",
 		"docs/README.md",
+		"docs/html/safety_blueprint.html",
+		"docs/html/shared.css",
+		"docs/html/shared.js",
 		"damage-control-rules.yaml",
 		"library/skills/skill-marketplace.json",
 		"library/skills/registry.yaml",
@@ -42,6 +45,7 @@
 		"examples/extensions/measurements/clio-coder-extension.json"
 	],
 	"requiredPrefixes": [
+		"docs/html/",
 		"dist/assets/grammars/",
 		"src/domains/prompts/fragments/",
 		"src/domains/agents/builtins/",

@@ -54,6 +54,20 @@ export async function main(args = process.argv.slice(2)) {
 		return;
 	}
 	const values = serverOptions(args);
+	if (values.reuseBackground) {
+		const { tryStartBackground } = await import("./launcher/background.js");
+		const existing = await tryStartBackground(join(resolveClioDirs().state, "web/background"), resolvePackageRoot());
+		if (existing) {
+			const url = new URL(existing);
+			url.pathname = values.path;
+			console.log(`[clio-coder:web] ${url.href}`);
+			if (values.open)
+				await openBrowser(url.href).catch(() => {
+					console.error("[clio-coder:web] Could not open the browser. Open the printed URL manually.");
+				});
+			return;
+		}
+	}
 	if (bundled && values.fixture) throw new Error("Fabricated tool fixtures are available in source mode only.");
 	const persistent = values.persistent ? await readBackgroundConfig(values.persistent) : undefined;
 	if (persistent) Object.assign(process.env, backgroundEnvironment(persistent));
@@ -132,13 +146,12 @@ export async function main(args = process.argv.slice(2)) {
 	});
 	const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, (info) => {
 		origin = `http://127.0.0.1:${info.port}`;
+		const launchUrl = `${origin}${values.path}#token=${token}`;
 		if (scratch) console.log(`[clio-coder:web] Fabricated tool fixture; isolated state: ${scratch}`);
-		console.log(
-			persistent ? `[clio-coder:web] Background app ready at ${origin}.` : `[clio-coder:web] ${origin}/#token=${token}`,
-		);
+		console.log(persistent ? `[clio-coder:web] Background app ready at ${origin}.` : `[clio-coder:web] ${launchUrl}`);
 		void log.write(`Listening at ${origin}; idle exit ${values.idleMs ?? "disabled"}.`).catch(fail);
 		if (values.open)
-			void openBrowser(`${origin}/#token=${token}`).catch(() => {
+			void openBrowser(launchUrl).catch(() => {
 				console.error("[clio-coder:web] Could not open the browser. Open the printed URL manually.");
 				void log.write("Could not open the browser; server remains available.").catch(fail);
 			});

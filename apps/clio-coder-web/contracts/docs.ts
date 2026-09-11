@@ -31,6 +31,7 @@ export const Blueprints = Type.Object(
 					topic: Type.String(),
 					title: Type.String(),
 					file: Type.String(),
+					documentPath: Type.Optional(Type.String()),
 				},
 				closed,
 			),
@@ -46,4 +47,4 @@ export type DocsRequest =
 	| { kind: "blueprints" }
 	| { kind: "page"; path: string }
 	| { kind: "search"; q: string };
-export type BlueprintFile = { body: Uint8Array; type: string; size: number };
+export type BlueprintFile = { body: Uint8Array; type: string; size: number; path: string };

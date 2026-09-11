@@ -41,6 +41,20 @@ test("--open uses the actual bound URL with its explicit token; invalid flags an
 		["--token", "short"],
 		["--token", "a".repeat(300)],
 		["--log-file", ""],
+		...[
+			"https://example.com",
+			"//example.com",
+			"/%2fexample.com",
+			"/docs/../api",
+			"/docs/%2e%2e/api",
+			"/docs?token=x",
+			"/docs#token=x",
+			"/docs%0ax",
+			"/docs\\x",
+			"/docs/%zz",
+		].map((path) => ["--path", path]),
+		["--reuse-background", "--port", "4317"],
+		["--reuse-background", "--fixture"],
 	])
 		assert.throws(() => serverOptions(args));
 	const dir = await mkdtemp(join(tmpdir(), "clio-web-open-"));
@@ -50,9 +64,13 @@ test("--open uses the actual bound URL with its explicit token; invalid flags an
 		log = join(dir, "url");
 	await writeFile(opener, '#!/bin/sh\nprintf "%s" "$1" > "$OPENER_LOG"\n');
 	await chmod(opener, 0o700);
-	const s = await serverProcess(t, ["--open", "--idle-exit", "1500"], { PATH: join(dir, "bin"), OPENER_LOG: log });
+	const s = await serverProcess(t, ["--open", "--path", "/docs/architecture/safety-model.md", "--idle-exit", "1500"], {
+		PATH: join(dir, "bin"),
+		OPENER_LOG: log,
+	});
 	assert.equal(await s.exited, 0);
 	assert.equal(await readFile(log, "utf8"), s.launch.href);
+	assert.equal(s.launch.pathname, "/docs/architecture/safety-model.md");
 	const target = join(dir, "unrelated");
 	await writeFile(target, "keep");
 	await symlink(target, join(dir, "symlink"));

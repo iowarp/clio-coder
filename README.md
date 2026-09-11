@@ -465,6 +465,12 @@ from workspace installation, recursive builds, publication, and product gates.
 
 ## Help and documentation
 
+In v0.4.8, `clio-coder docs` opens the documentation inside the web app;
+`clio-coder docs safety` goes directly to the safety guide. Guides and handmade
+blueprints share navigation and the active theme, including in npm installs.
+Add `--no-open` to print the private launch link. A configured background app is
+reused; otherwise the command starts a foreground server until Ctrl+C.
+
 If setup fails, start with `clio-coder doctor` and
 `clio-coder configure --section diagnostics`. To discover commands, use
 `clio-coder --help`; `--help --all` includes developer tools.

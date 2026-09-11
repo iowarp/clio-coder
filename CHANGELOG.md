@@ -6,13 +6,18 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Added
 - Unified web application through the lazy `clio-coder web` command, packaged with its REST/SSE server, two domain workers, and local client assets. Sessions, traces, docs, toolchain, settings/targets, fleet, evidence, evals/usage, Library, and system inspection use the existing Clio runtime.
-- Explicit Linux background service and installable PWA with a stable local connection, public offline recovery, and ownership-checked service/launcher removal. Foreground web use remains available on other platforms.
+- Explicit Linux background service and installable PWA with a stable local connection, public offline recovery, and ownership-checked service/launcher removal. Foreground web use remains available on other platforms. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint.
 - npm-backed bootstrap installer for Linux/macOS with prerequisite checks, a user-owned prefix, version selection, dry runs, conflict protection, and capability-aware next steps. The GitHub raw-content URL becomes live when the script is published.
 
 ### Changed
+- Consolidate documentation in the web app: `clio-coder docs [topic]` opens a guide and reuses a configured background app, while handmade blueprints stay inside the same navigation and theme. Include the visual sources in npm, retire the separate CLI docs server, and route old HTML entry links into the app.
 - Restore the Clio logo throughout the web app; use soft cream and pastel forest themes, compact icon controls, and application preferences without a page footer.
 - Build the web surface together with the CLI, share server chunks, ship frontend/font/Hono notices, and validate installed workers without a TypeScript loader. Adjust release size tripwires to 12 MB compressed / 55 MB unpacked for the complete browser surface (initial integrated artifact approximately 10.15 / 50.89 MB).
-- Retire the separate trace viewer and `trace ui`; the unified source web app owns trace browsing. Preserve Workbench as reference source while excluding it from workspace builds, publication, and product gates.
+- Retire the separate trace viewer and `trace ui`; the unified web app uses the shared runtime trace reader for browsing and pagination. Preserve Workbench as reference source while excluding it from workspace builds, publication, and product gates.
+
+### Fixed
+- Report unavailable target credentials before an ACP turn starts, with recovery instructions for background sessions whose keys were configured only in a terminal environment. Keep provider error bodies and credentials out of web errors.
+- Stop and disable owned web background services and remove their desktop entries before root uninstall deletes Clio state. Preview these resources and preserve state when ownership checks or service removal fail.
 
 ## 0.4.7 - 2026-09-10
 

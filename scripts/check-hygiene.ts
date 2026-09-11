@@ -1099,13 +1099,6 @@ const ROOT_ONLY_RESOLVERS = new Set([
 	"src/cli/components.ts",
 ]);
 const PATH_JOINERS = new Set(["join", "resolve"]);
-// Paths the code resolves from the package root and handles being absent. The
-// tarball deliberately does not ship them; the source checkout has them.
-const OPTIONAL_PACKAGE_ROOT_PATHS = new Set([
-	// `clio-coder docs` serves the interactive blueprints from a source checkout
-	// and, from an npm install, names where they are and exits 1.
-	"docs/html",
-]);
 
 interface PackageRootUse {
 	file: string;
@@ -1272,7 +1265,6 @@ function checkPackaging(): void {
 		for (const use of joined) {
 			if (use.path === null) continue;
 			if (NPM_IMPLICIT_FILES.has(use.path)) continue;
-			if (OPTIONAL_PACKAGE_ROOT_PATHS.has(use.path)) continue;
 			const looksLikeFile = /\.[A-Za-z0-9]+$/.test(use.path);
 			const shipped = looksLikeFile ? shippedBy(packageFiles, use.path) : shipsUnder(packageFiles, use.path);
 			if (!shipped) {
@@ -1482,8 +1474,8 @@ function checkPromptsDocLinks(): void {
 	if (!pkg.files.includes("docs/**/*.md")) {
 		fail("prompts", "package.json files must include docs/**/*.md");
 	}
-	if (!pkg.files.includes("!docs/html/**")) {
-		fail("prompts", "package.json files must exclude docs/html/**");
+	if (!pkg.files.includes("docs/html/**")) {
+		fail("prompts", "package.json files must include docs/html/** for the web documentation");
 	}
 
 	// Corpus coverage: the directive promises every bundled doc is one call away.

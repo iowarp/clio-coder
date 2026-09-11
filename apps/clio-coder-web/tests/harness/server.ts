@@ -32,7 +32,7 @@ export async function serverProcess(t: TestContext, args: string[] = [], env: No
 		let output = "";
 		child.stdout.on("data", (chunk) => {
 			output += String(chunk);
-			const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/);
+			const match = output.match(/http:\/\/127\.0\.0\.1:\d+\/[^\s#]*#token=[\w-]+/);
 			if (match) resolve(new URL(match[0]));
 		});
 		child.once("error", reject);

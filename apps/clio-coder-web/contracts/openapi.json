@@ -7986,7 +7986,7 @@
 		"/api/docs/blueprints": {
 			"get": {
 				"operationId": "docsBlueprints",
-				"summary": "Available source-checkout blueprints",
+				"summary": "Available visual blueprints and their paired guides",
 				"security": [
 					{
 						"bearer": []
@@ -8018,6 +8018,9 @@
 														"type": "string"
 													},
 													"file": {
+														"type": "string"
+													},
+													"documentPath": {
 														"type": "string"
 													}
 												},

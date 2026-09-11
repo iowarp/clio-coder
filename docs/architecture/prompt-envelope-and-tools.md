@@ -217,7 +217,7 @@ For aggregate cost and token facts across sessions, use `clio-coder usage report
 
 ## Self-documentation retrieval
 
-`context(scope="docs")` is the model-facing companion to the human `clio-coder docs` server. From a source checkout, the server serves `docs/html/**` blueprints for people; in every installation, the docs scope indexes the bundled Markdown corpus for agents. It is deterministic and offline: no embeddings service, network call, or filesystem write is needed.
+`context(scope="docs")` is the model-facing companion to `clio-coder docs`, which opens the human documentation in the unified web app. Guides and handmade visual blueprints ship in npm and share the app navigation and theme. The docs scope indexes the bundled Markdown corpus for agents; it does not index blueprint HTML. It is deterministic and offline: no embeddings service, network call, or filesystem write is needed.
 
 The search index splits markdown into heading-delimited sections, records heading breadcrumbs and line ranges, and ranks results with light stemming, controlled Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The tool returns compact JSON containing corpus metadata, normalized and expanded query terms, and ranked hits with `file`, `heading`, `breadcrumb`, `anchor`, section `lines`, `snippetLines`, a bounded `snippet`, `matchedTerms`, `signals`, `coverage`, and `score`. `limit` defaults to 5 sections and caps at 12. The per-file filter the pre-consolidation docs tool accepted was dropped; narrow with more specific query terms instead. Even an empty result is valid JSON with empty arrays and a populated `next` continuation.
 

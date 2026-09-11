@@ -132,10 +132,17 @@ export class DocsAdapter {
 			.filter((entry) => entry.isFile() && /\.html$/i.test(entry.name) && entry.name.toLowerCase() !== "index.html")
 			.map((entry) => {
 				const topic = entry.name.replace(/(?:_blueprint)?\.html$/i, "");
+				const html = boundedRead(contained(root, entry.name), 8 * 1024 * 1024).toString("utf8");
+				const source =
+					/<meta\b(?=[^>]*\sname\s*=\s*["']clio-markdown-source["'])[^>]*\scontent\s*=\s*["']docs\/([^"']+)["']/i.exec(
+						html,
+					)?.[1];
+				const page = source ? this.index().pages.get(source) : undefined;
 				return {
 					topic,
 					file: entry.name,
-					title: topic.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+					title: page?.title ?? topic.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
+					...(page ? { documentPath: page.path } : {}),
 				};
 			})
 			.sort((a, b) => a.topic.localeCompare(b.topic));
@@ -163,7 +170,12 @@ export class DocsAdapter {
 			target = contained(root, match.file);
 		}
 		const body = boundedRead(target, 8 * 1024 * 1024);
-		return { body, type: types[extname(target).toLowerCase()] ?? "application/octet-stream", size: body.length };
+		return {
+			body,
+			type: types[extname(target).toLowerCase()] ?? "application/octet-stream",
+			size: body.length,
+			path: relative(root, target).split("\\").join("/"),
+		};
 	}
 	private link(from: string, href: string): string | null {
 		const publicDocs = /^https:\/\/github\.com\/iowarp\/clio-coder\/(?:blob|tree)\/(?:main|v048)\/docs\/(.+)$/i.exec(
@@ -191,7 +203,8 @@ export class DocsAdapter {
 			} catch {
 				return null;
 			}
-			return `/docs-html/${normalized.slice(5).split("/").map(encodeURIComponent).join("/")}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
+			if (normalized === "html/index.html") return "/docs";
+			return `/docs/blueprints/${normalized.slice(5).split("/").map(encodeURIComponent).join("/")}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 		}
 		const pagePath = this.index().pages.has(normalized) ? normalized : `${normalized.replace(/\/$/, "")}/README.md`;
 		const page = this.index().pages.get(pagePath);

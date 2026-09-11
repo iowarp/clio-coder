@@ -39,10 +39,10 @@
 	font-size: 1rem;
 }
 .docs-page .md-heading {
-	scroll-margin-top: 2rem;
+	scroll-margin-top: 80px;
 }
 .docs-path {
-	font-family: var(--mono);
+	font-family: var(--font-mono);
 	font-size: 0.75rem;
 	overflow-wrap: anywhere;
 }
@@ -73,4 +73,134 @@
 }
 .docs-navigation > details > summary {
 	font-weight: 700;
+}
+
+/* One reading surface: Markdown and visual views share the toolbar and title. */
+.docs-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 10px 18px;
+	margin-bottom: 14px;
+}
+.docs-toolbar .docs-path {
+	margin: 0;
+	color: var(--muted);
+}
+nav.docs-view {
+	display: inline-flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0;
+	margin: 0;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	background: var(--surface);
+	font-size: 13px;
+}
+.docs-view > a,
+.docs-view > span {
+	display: inline-block;
+	padding: 7px 14px;
+	text-decoration: none;
+	color: var(--muted);
+	border-radius: 5px;
+	font-size: 13px;
+}
+.docs-view > a[aria-current="page"] {
+	background: var(--inset);
+	color: var(--ink);
+	font-weight: 600;
+}
+.docs-view > a:hover {
+	background: transparent;
+	color: var(--ink);
+}
+.docs-view > a[aria-current="page"]:hover {
+	background: var(--inset);
+}
+.docs-view > span[aria-disabled="true"] {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+.docs-view__note {
+	flex-basis: 100%;
+	margin: 0;
+	padding: 0 14px 8px;
+	font-size: 12px;
+	color: var(--muted);
+}
+.docs-title {
+	font-family: var(--font-editorial);
+	font-weight: 550;
+	font-size: 30px;
+	line-height: 1.25;
+	margin: 0 0 14px;
+}
+.docs-note,
+.blueprint-status {
+	font-size: 14px;
+	color: var(--muted);
+	margin: 0 0 12px;
+}
+.blueprint-frame {
+	position: relative;
+	min-width: 0;
+	scroll-margin-top: 74px;
+}
+.blueprint-frame__document {
+	display: block;
+	width: 100%;
+	min-height: 320px;
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	background: var(--paper);
+	color-scheme: light dark;
+}
+.blueprint-frame.is-loading .blueprint-frame__document {
+	opacity: 0;
+	position: absolute;
+	inset: 0;
+	height: 320px;
+}
+.blueprint-frame.is-loading {
+	min-height: 320px;
+}
+.blueprint-problem,
+.blueprint-external {
+	margin: 0 0 14px;
+	padding: 16px 18px;
+	border: 1px solid var(--line);
+	border-left: 4px solid var(--danger);
+	border-radius: 6px;
+	background: var(--surface);
+	font-size: 14px;
+	line-height: 1.6;
+}
+.blueprint-external {
+	border-left-color: var(--accent);
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+}
+.blueprint-external p,
+.blueprint-problem p {
+	margin: 0 0 8px;
+	overflow-wrap: anywhere;
+}
+.blueprint-external p {
+	margin: 0;
+}
+.blueprint-external a {
+	color: var(--accent);
+}
+.blueprint-problem h3 {
+	margin: 0 0 6px;
+	font-size: 17px;
+}
+.docs-page--blueprint {
+	max-width: none;
 }

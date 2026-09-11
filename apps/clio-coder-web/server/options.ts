@@ -12,6 +12,8 @@ export function serverOptions(args: string[]) {
 			token: { type: "string" },
 			"log-file": { type: "string" },
 			persistent: { type: "string" },
+			path: { type: "string" },
+			"reuse-background": { type: "boolean", default: false },
 		},
 	});
 	const integer = (name: string, value: string, min: number, max: number) => {
@@ -23,6 +25,32 @@ export function serverOptions(args: string[]) {
 	if (values.token !== undefined && !/^[\w-]{32,256}$/.test(values.token))
 		throw new Error("--token must contain 32–256 URL-safe letters, digits, underscores or hyphens.");
 	if (values["log-file"] === "") throw new Error("--log-file must name a file.");
+	const path = values.path ?? "/";
+	let decoded: string;
+	try {
+		decoded = decodeURIComponent(path);
+	} catch {
+		throw new Error("--path must be an absolute path within the app.");
+	}
+	if (
+		!path.startsWith("/") ||
+		decoded.startsWith("//") ||
+		/[\\?#]/.test(decoded) ||
+		[...decoded].some((char) => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127) ||
+		decoded.split("/").some((part) => part === "." || part === "..") ||
+		new URL(path, "http://clio.invalid").pathname !== path
+	)
+		throw new Error("--path must be an absolute path within the app.");
+	if (
+		values["reuse-background"] &&
+		(values.port !== undefined ||
+			values.token !== undefined ||
+			values.fixture ||
+			values.persistent !== undefined ||
+			values["idle-exit"] !== undefined ||
+			values["log-file"] !== undefined)
+	)
+		throw new Error("--reuse-background cannot be combined with foreground server configuration flags.");
 	if (
 		values.persistent !== undefined &&
 		(!values.persistent ||
@@ -43,5 +71,7 @@ export function serverOptions(args: string[]) {
 		token: values.token,
 		logFile: values["log-file"],
 		persistent: values.persistent,
+		path,
+		reuseBackground: values["reuse-background"],
 	};
 }

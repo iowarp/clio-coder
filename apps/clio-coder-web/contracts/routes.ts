@@ -284,7 +284,7 @@ export const routes = {
 		...get,
 		path: "/api/docs/blueprints",
 		response: Blueprints,
-		summary: "Available source-checkout blueprints",
+		summary: "Available visual blueprints and their paired guides",
 	}),
 	permission: defineRoute({
 		...post,

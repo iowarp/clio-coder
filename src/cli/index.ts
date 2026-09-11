@@ -76,7 +76,7 @@ Usage:
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
-  clio-coder docs [topic]         serve the HTML docs of a source checkout on 127.0.0.1 (--no-open to skip browser)
+  clio-coder docs [topic]         open documentation in the web app (--no-open to print the launch link)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
   clio-coder --help, -h           this message
   clio-coder --help --all         this message plus every command under 'clio-coder dev'

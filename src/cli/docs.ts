@@ -1,354 +1,110 @@
-import { spawn } from "node:child_process";
-import { createReadStream, readdirSync, realpathSync, statSync } from "node:fs";
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
-import { relative, resolve } from "node:path";
-import chalk from "chalk";
+import { readdirSync, readFileSync } from "node:fs";
+import { basename, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
-import { printError, printHeader } from "./argv.js";
-
-// Human-facing viewer over the source-checkout HTML blueprints. It binds an ephemeral
-// static file server to 127.0.0.1 only, serves docs/html/index.html as the
-// menu plus the blueprint pages, prints the URL, and runs until SIGINT. It
-// uses only Node's built-in http and fs: zero new dependencies, no daemon, no
-// persisted state, no telemetry, and no external network. The static-path
-// resolution and the menu synthesis are pure functions so they unit-test
-// without binding a port.
-
-const HOST = "127.0.0.1";
+import { printError } from "./argv.js";
+import { runWebCommand } from "./web.js";
 
 const HELP = `clio-coder docs [topic] [--no-open]
 
-Serve Clio Coder's interactive HTML documentation locally and open it in a
-browser. The blueprints live in docs/html of a source checkout; the npm package
-ships the categorized Markdown reference tree under docs/ and excludes HTML.
-The server binds an ephemeral port on
-127.0.0.1, keeps no state, runs no daemon, and reaches no external network.
-Press Ctrl+C to stop it.
+Open the documentation in the Clio Coder web app. Guides and handmade visual
+blueprints share the app's navigation and theme, in both npm installs and checkouts.
 
 Arguments:
-  [topic]      deep-link a specific blueprint (for example: safety, configuration,
-               tools). Omit to open the documentation menu.
+  [topic]      a topic such as safety, configuration, or fleet_dispatch, or a
+               document path such as architecture/safety-model.md.
+               Omit to open the documentation map.
 
 Flags:
-  --no-open    do not launch a browser; just print the URL.
+  --no-open    print the private launch link without opening a browser.
   --help, -h   this message.
+
+Reuses your installed background app when available. Otherwise starts a local
+foreground web server on 127.0.0.1; press Ctrl+C to stop it. No background service
+is installed by this command. Your current directory does not affect the docs.
 `;
 
-const CONTENT_TYPES: Readonly<Record<string, string>> = {
-	".html": "text/html; charset=utf-8",
-	".htm": "text/html; charset=utf-8",
-	".css": "text/css; charset=utf-8",
-	".js": "text/javascript; charset=utf-8",
-	".mjs": "text/javascript; charset=utf-8",
-	".json": "application/json; charset=utf-8",
-	".svg": "image/svg+xml",
-	".png": "image/png",
-	".webp": "image/webp",
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif": "image/gif",
-	".ico": "image/x-icon",
-	".woff": "font/woff",
-	".woff2": "font/woff2",
-	".ttf": "font/ttf",
-	".map": "application/json; charset=utf-8",
-	".txt": "text/plain; charset=utf-8",
-};
+type Blueprint = { topic: string; file: string; documentPath?: string };
+const key = (value: string) => value.toLowerCase().replace(/_/g, "-");
+const route = (path: string) => `/docs/${path.split("/").map(encodeURIComponent).join("/")}`;
 
-export interface DocsMenuEntry {
-	/** Short deep-link key, for example `safety`. */
-	topic: string;
-	/** Real on-disk file name, for example `safety_blueprint.html`. */
-	file: string;
-	/** Human label, for example `Safety`. */
-	label: string;
-}
-
-/** Resolve the source-checkout HTML root. The npm package deliberately excludes it. */
-function resolveDocsHtmlDir(): string {
-	return resolve(resolvePackageRoot(), "docs", "html");
-}
-
-/** Content-type for a file path by extension. Pure. Defaults to octet-stream. */
-function contentTypeFor(filePath: string): string {
-	const dot = filePath.lastIndexOf(".");
-	if (dot === -1) return "application/octet-stream";
-	return CONTENT_TYPES[filePath.slice(dot).toLowerCase()] ?? "application/octet-stream";
-}
-
-/**
- * Map a request URL to a safe relative path under the html root. Pure: no disk
- * access. Strips the query and fragment, decodes percent-escapes, defaults `/`
- * to `index.html`, and rejects any traversal segment so a request can never
- * escape the served directory.
- */
-function resolveRequestPath(rawUrl: string): { ok: true; relative: string } | { ok: false; reason: string } {
-	const pathPart = (rawUrl.split(/[?#]/, 1)[0] ?? "").trim();
-	let decoded: string;
-	try {
-		decoded = decodeURIComponent(pathPart);
-	} catch {
-		return { ok: false, reason: "bad-request" };
+/** Resolve only catalogued destinations; ambiguous basenames require a full path. */
+export function docsTopicRoute(
+	topic: string | undefined,
+	pages: readonly string[],
+	blueprints: readonly Blueprint[],
+): string | undefined {
+	if (topic === undefined) return "/docs";
+	if (!topic || /[\\\0?#]/.test(topic) || topic.startsWith("/") || topic.split("/").includes("..")) return;
+	const wanted = key(topic.replace(/^docs\//, ""));
+	const exact = pages.find((path) => key(path) === wanted || key(path.replace(/\.md$/i, "")) === wanted);
+	if (exact) return route(exact);
+	const blueprint = blueprints.find(
+		(row) => key(row.topic) === wanted || key(row.file) === wanted || key(row.file.replace(/\.html$/i, "")) === wanted,
+	);
+	if (blueprint) {
+		if (blueprint.documentPath && pages.includes(blueprint.documentPath)) return route(blueprint.documentPath);
+		return route(`blueprints/${blueprint.file}`);
 	}
-	if (decoded.includes("\0")) return { ok: false, reason: "forbidden" };
-	const segments = decoded.split(/[/\\]/).filter((segment) => segment.length > 0 && segment !== ".");
-	if (segments.length === 0) return { ok: true, relative: "index.html" };
-	for (const segment of segments) {
-		if (segment === "..") return { ok: false, reason: "forbidden" };
-	}
-	return { ok: true, relative: segments.join("/") };
+	const matches = pages.filter((path) => key(basename(path).replace(/\.md$/i, "")) === wanted.replace(/\.md$/, ""));
+	const match = matches[0];
+	return matches.length === 1 && match ? route(match) : undefined;
 }
 
-function titleize(topic: string): string {
-	return topic
-		.split(/[-_]+/)
-		.filter((word) => word.length > 0)
-		.map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-		.join(" ");
-}
-
-/**
- * Synthesize the deep-linkable topic menu from a directory listing. Pure: takes
- * the file-name list, not the directory. `index.html` is the menu itself and is
- * excluded; a trailing `_blueprint` is stripped from the topic key.
- */
-function synthesizeMenu(fileNames: ReadonlyArray<string>): DocsMenuEntry[] {
-	const entries: DocsMenuEntry[] = [];
-	for (const name of fileNames) {
-		if (!name.toLowerCase().endsWith(".html")) continue;
-		if (name.toLowerCase() === "index.html") continue;
-		const topic = name.replace(/\.html$/i, "").replace(/_blueprint$/i, "");
-		entries.push({ topic, file: name, label: titleize(topic) });
-	}
-	entries.sort((a, b) => a.topic.localeCompare(b.topic));
-	return entries;
-}
-
-/**
- * Resolve a user-supplied `[topic]` to a real file name. Pure. Accepts the bare
- * topic (`safety`), the blueprint file stem (`safety_blueprint`), or a full
- * `.html` name, case-insensitively. Returns null when nothing matches.
- */
-function topicToFile(topic: string, fileNames: ReadonlyArray<string>): string | null {
-	const wanted = topic
-		.trim()
-		.toLowerCase()
-		.replace(/\.html$/i, "");
-	if (wanted.length === 0) return null;
-	for (const candidate of [`${wanted}.html`, `${wanted}_blueprint.html`]) {
-		const match = fileNames.find((name) => name.toLowerCase() === candidate);
-		if (match) return match;
-	}
-	const hit = synthesizeMenu(fileNames).find((entry) => entry.topic.toLowerCase() === wanted);
-	return hit ? hit.file : null;
-}
-
-function isWithin(child: string, parent: string): boolean {
-	const rel = relative(parent, child);
-	return rel === "" || (!rel.startsWith("..") && !rel.startsWith(`..${"/"}`) && !/^([A-Za-z]:)?[/\\]/.test(rel));
-}
-
-function listHtmlFiles(htmlDir: string): string[] {
-	try {
-		return readdirSync(htmlDir)
-			.filter((name) => name.toLowerCase().endsWith(".html"))
-			.sort((a, b) => a.localeCompare(b));
-	} catch {
-		return [];
-	}
-}
-
-/** Build the static request handler for one html root. */
-export function createDocsRequestHandler(htmlDir: string): (req: IncomingMessage, res: ServerResponse) => void {
-	const root = realpathSync(resolve(htmlDir));
-	return (req, res) => {
-		if (req.method !== "GET" && req.method !== "HEAD") {
-			res.writeHead(405, { "content-type": "text/plain; charset=utf-8", allow: "GET, HEAD" });
-			res.end("method not allowed");
-			return;
+function catalog(root: string) {
+	const pages: string[] = [];
+	const scan = (path: string) => {
+		for (const entry of readdirSync(join(root, path), { withFileTypes: true })) {
+			const name = path ? `${path}/${entry.name}` : entry.name;
+			if (name === "html") continue;
+			if (entry.isDirectory()) scan(name);
+			else if (entry.isFile() && /\.md$/i.test(name)) pages.push(name);
 		}
-		const resolved = resolveRequestPath(req.url ?? "/");
-		if (!resolved.ok) {
-			const status = resolved.reason === "forbidden" ? 403 : 400;
-			res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
-			res.end(resolved.reason);
-			return;
-		}
-		const requestedTarget = resolve(root, resolved.relative);
-		if (!isWithin(requestedTarget, root)) {
-			res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
-			res.end("forbidden");
-			return;
-		}
-		let size: number | null = null;
-		let target: string | null = null;
-		try {
-			target = realpathSync(requestedTarget);
-			if (!isWithin(target, root)) {
-				res.writeHead(403, { "content-type": "text/plain; charset=utf-8" });
-				res.end("forbidden");
-				return;
-			}
-			const stat = statSync(target);
-			if (stat.isFile()) size = stat.size;
-		} catch {
-			size = null;
-		}
-		if (size === null || target === null) {
-			res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
-			res.end("not found");
-			return;
-		}
-		const headers = {
-			"content-type": contentTypeFor(target),
-			"content-length": String(size),
-			"cache-control": "no-store",
-		};
-		if (req.method === "HEAD") {
-			res.writeHead(200, headers);
-			res.end();
-			return;
-		}
-		res.writeHead(200, headers);
-		const stream = createReadStream(target);
-		stream.on("error", () => {
-			if (!res.writableEnded) res.end();
-		});
-		stream.pipe(res);
 	};
-}
-
-export interface DocsServerHandle {
-	server: Server;
-	url: string;
-	port: number;
-	close(): Promise<void>;
-}
-
-export interface StartDocsServerOptions {
-	htmlDir: string;
-	/** Bind host. Defaults to 127.0.0.1 and is never widened. */
-	host?: string;
-	/** Bind port. Defaults to 0 (ephemeral). */
-	port?: number;
-}
-
-/** Start the viewer bound to 127.0.0.1 on an ephemeral port. */
-async function startDocsServer(options: StartDocsServerOptions): Promise<DocsServerHandle> {
-	const host = options.host ?? HOST;
-	const server = createServer(createDocsRequestHandler(options.htmlDir));
-	await new Promise<void>((resolveListen, rejectListen) => {
-		const onError = (err: Error): void => rejectListen(err);
-		server.once("error", onError);
-		server.listen(options.port ?? 0, host, () => {
-			server.removeListener("error", onError);
-			resolveListen();
-		});
-	});
-	const address = server.address() as AddressInfo;
-	const port = address.port;
-	return {
-		server,
-		port,
-		url: `http://${host}:${port}/`,
-		close: () => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-	};
-}
-
-function openBrowser(url: string): void {
-	const platform = process.platform;
-	const command = platform === "darwin" ? "open" : platform === "win32" ? "cmd" : "xdg-open";
-	const args = platform === "win32" ? ["/c", "start", "", url] : [url];
+	scan("");
+	const blueprints: Blueprint[] = [];
 	try {
-		const child = spawn(command, args, { stdio: "ignore", detached: true });
-		child.on("error", () => {
-			// Best-effort: the printed URL is the fallback when no opener exists.
-		});
-		child.unref();
-	} catch {
-		// Best-effort: never fail the command because a browser could not launch.
+		for (const entry of readdirSync(join(root, "html"), { withFileTypes: true })) {
+			if (!entry.isFile() || !/\.html$/i.test(entry.name) || entry.name === "index.html") continue;
+			const html = readFileSync(join(root, "html", entry.name), "utf8");
+			const documentPath =
+				/<meta\b(?=[^>]*\sname\s*=\s*["']clio-markdown-source["'])[^>]*\scontent\s*=\s*["']docs\/([^"']+)["']/i.exec(
+					html,
+				)?.[1];
+			blueprints.push({
+				topic: entry.name.replace(/(?:_blueprint)?\.html$/i, ""),
+				file: entry.name,
+				...(documentPath && pages.includes(documentPath) ? { documentPath } : {}),
+			});
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 	}
+	return { pages, blueprints };
 }
 
-export function waitForShutdown(): Promise<void> {
-	return new Promise((resolveShutdown) => {
-		const onSignal = (): void => {
-			process.removeListener("SIGINT", onSignal);
-			process.removeListener("SIGTERM", onSignal);
-			resolveShutdown();
-		};
-		process.once("SIGINT", onSignal);
-		process.once("SIGTERM", onSignal);
-	});
-}
-
-export async function runDocsCommand(args: ReadonlyArray<string> = []): Promise<number> {
+export async function runDocsCommand(args: readonly string[] = []): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	let noOpen = false;
-	const positionals: string[] = [];
-	for (const arg of args) {
-		if (arg === "--no-open") {
-			noOpen = true;
-			continue;
-		}
-		if (arg.startsWith("-")) {
-			printError(`unknown flag: ${arg}`);
-			process.stdout.write(HELP);
-			return 2;
-		}
-		positionals.push(arg);
-	}
-	if (positionals.length > 1) {
-		printError("docs accepts at most one [topic]");
-		process.stdout.write(HELP);
+	const positionals = args.filter((arg) => arg !== "--no-open");
+	const unknownFlag = positionals.find((arg) => arg.startsWith("-"));
+	if (unknownFlag || positionals.length > 1) {
+		printError(unknownFlag ? `unknown flag: ${unknownFlag}` : "docs accepts at most one [topic]");
 		return 2;
 	}
-
-	let htmlDir: string;
 	try {
-		htmlDir = resolveDocsHtmlDir();
-	} catch (err) {
-		printError(`could not resolve the docs HTML root: ${err instanceof Error ? err.message : String(err)}`);
-		return 1;
-	}
-	const files = listHtmlFiles(htmlDir);
-	if (files.length === 0) {
-		printError(`no HTML docs at ${htmlDir}`);
-		process.stdout.write(
-			`  the npm package ships only the categorized Markdown reference tree: ${resolve(resolvePackageRoot(), "docs")}\n` +
-				"  the interactive blueprints are in a source checkout and at https://github.com/iowarp/clio-coder/tree/main/docs/html\n",
-		);
-		return 1;
-	}
-
-	let landing = "index.html";
-	const topic = positionals[0];
-	if (topic !== undefined) {
-		const file = topicToFile(topic, files);
-		if (!file) {
-			printError(`unknown docs topic: ${topic}`);
-			const topics = synthesizeMenu(files).map((entry) => entry.topic);
-			if (topics.length > 0) process.stdout.write(`  available topics: ${topics.join(", ")}\n`);
+		const { pages, blueprints } = catalog(join(resolvePackageRoot(), "docs"));
+		const path = docsTopicRoute(positionals[0], pages, blueprints);
+		if (!path) {
+			printError(
+				`Unknown or ambiguous docs topic: ${positionals[0]}. Run clio-coder docs to browse the documentation map.`,
+			);
 			return 2;
 		}
-		landing = file;
+		return runWebCommand(["--path", path, "--reuse-background", args.includes("--no-open") ? "--no-open" : "--open"]);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : "Could not open the documentation.");
+		return 1;
 	}
-
-	const handle = await startDocsServer({ htmlDir });
-	const landingUrl = landing === "index.html" ? handle.url : `${handle.url}${landing}`;
-	printHeader("Clio docs viewer");
-	process.stdout.write(`  serving HTML root ${htmlDir}\n`);
-	process.stdout.write(`  open ${chalk.cyan(landingUrl)}\n`);
-	process.stdout.write("  bound to 127.0.0.1 only: no external network, no daemon, no state.\n");
-	process.stdout.write("  press Ctrl+C to stop.\n");
-	if (!noOpen) openBrowser(landingUrl);
-
-	await waitForShutdown();
-	await handle.close();
-	process.stdout.write("docs viewer stopped.\n");
-	return 0;
 }

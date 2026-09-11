@@ -220,7 +220,10 @@ const StreamingContext = createContext(false);
 const DocumentContext = createContext<{
 	links: Readonly<Record<string, string | null>>;
 	headings: Map<MarkdownToken, string>;
+	onNavigate: ((href: string) => void) | undefined;
 } | null>(null);
+
+const DOCS_ROUTE = /^\/docs(?:\/|$)/;
 
 export const MermaidBlock = memo(function MermaidBlock({ source, settled }: MermaidBlockProps) {
 	const container = useRef<HTMLElement>(null);
@@ -347,7 +350,7 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 			const link = token as Tokens.Link;
 			const mapped = document?.links[link.href];
 			const href = document
-				? mapped && (/^\/docs(?:-html)?\//.test(mapped) || safeHref(mapped))
+				? mapped && (DOCS_ROUTE.test(mapped) || safeHref(mapped))
 					? mapped
 					: null
 				: safeHref(link.href);
@@ -358,13 +361,26 @@ function InlineToken({ token }: { token: MarkdownToken }): ReactNode {
 					</span>
 				);
 			}
+			const internal = DOCS_ROUTE.test(href);
+			const onNavigate = document?.onNavigate;
 			return (
 				<a
 					className="md-link"
 					href={href}
-					target={href.startsWith("/docs/") ? undefined : "_blank"}
+					target={internal ? undefined : "_blank"}
 					rel="noopener noreferrer"
 					title={link.title ?? undefined}
+					onClick={
+						internal && onNavigate
+							? (event) => {
+									// Plain activation stays inside the router; modified clicks keep their native meaning.
+									if (event.defaultPrevented || event.button !== 0) return;
+									if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+									event.preventDefault();
+									onNavigate(href);
+								}
+							: undefined
+					}
 				>
 					<Inline tokens={link.tokens} />
 				</a>
@@ -537,6 +553,8 @@ export const Blocks = memo(function Blocks({
 
 interface MarkdownContentProps {
 	readonly documentLinks?: Readonly<Record<string, string | null>>;
+	/** Receives application routes (`/docs…`) that a document link resolves to, so they stay inside the router. */
+	readonly onDocumentNavigate?: (href: string) => void;
 	readonly source: string;
 	/** True once the narrative can no longer grow; the whole source is then lexed once, canonically. */
 	readonly complete: boolean;
@@ -557,6 +575,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 	complete,
 	deferDiagrams = false,
 	documentLinks,
+	onDocumentNavigate,
 }: MarkdownContentProps) {
 	const incremental = useRef<IncrementalMarkdown | null>(null);
 	const split = useMemo(() => {
@@ -567,8 +586,11 @@ export const MarkdownContent = memo(function MarkdownContent({
 	const finalTokens = useMemo(() => (complete ? lexMarkdown(source) : null), [source, complete]);
 	// Complete messages are lexed once; streaming messages retain their settled prefix.
 	const document = useMemo(
-		() => (documentLinks ? { links: documentLinks, headings: documentHeadings(finalTokens ?? []) } : null),
-		[documentLinks, finalTokens],
+		() =>
+			documentLinks
+				? { links: documentLinks, headings: documentHeadings(finalTokens ?? []), onNavigate: onDocumentNavigate }
+				: null,
+		[documentLinks, finalTokens, onDocumentNavigate],
 	);
 	const settledTokens = finalTokens ?? split?.settled ?? NO_TOKENS;
 	const tailTokens = finalTokens === null ? (split?.tail ?? NO_TOKENS) : NO_TOKENS;

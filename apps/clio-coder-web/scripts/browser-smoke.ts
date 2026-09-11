@@ -80,14 +80,27 @@ try {
 				(path === "/api/events" || /^\/api\/traces\/runs\/[^/]+\/live$/.test(path))
 			)
 				return;
+			// The blueprint isolation probe asks the sandbox for the API and expects the content policy to refuse.
+			if (request.failure()?.errorText === "net::ERR_BLOCKED_BY_CSP" && path === "/api/meta") return;
 			failures.push(`${path}: ${request.failure()?.errorText}`);
 		});
 		page.on("response", (response) => {
 			if (response.status() >= 400) statuses.push({ path: new URL(response.url()).pathname, status: response.status() });
 		});
-		async function check(name: string) {
+		async function check(name: string, options: { blueprint?: boolean } = {}) {
 			await page.evaluate(() => document.fonts.ready);
-			const axe = await new AxeBuilder({ page }).analyze();
+			// A theme change lands as an attribute first; let the cascade and a paint settle before axe reads colours.
+			await page.waitForFunction(
+				() =>
+					getComputedStyle(document.body).color ===
+					(document.documentElement.dataset.theme === "dark" ? "rgb(226, 230, 216)" : "rgb(46, 62, 52)"),
+			);
+			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+			// Axe preloads stylesheets with its own XHR; the blueprint sandbox's connect-src refuses that fetch, so
+			// blueprint checks skip preloading. Every rule still runs, inside the frame as well.
+			const builder = new AxeBuilder({ page });
+			if (options.blueprint) builder.options({ preload: false });
+			const axe = await builder.analyze();
 			const serious = axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
 			const overflow = await page.evaluate(
 				() => document.documentElement.scrollWidth > document.documentElement.clientWidth,
@@ -208,25 +221,195 @@ try {
 		await docResults.getByRole("link", { name: /Trace Store/i }).click();
 		await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
 		await check("docs-page");
-		if (width === 1600) {
-			const opened = context.waitForEvent("page");
-			await page.locator('.docs-page a[href="/docs-html/trace_blueprint.html"]').click();
-			const blueprint = await opened;
-			blueprint.on("pageerror", (error) => errors.push(`Blueprint: ${error.message}`));
+		if (width === 1600 || width === 390) {
+			// A blueprint is an in-app reading view: same page, sandboxed frame, no popup.
+			await page.locator('.docs-page .markdown a[href="/docs/blueprints/trace_blueprint.html"]').click();
+			await page.waitForURL(`${origin}/docs/blueprints/trace_blueprint.html`);
+			const frameElement = page.locator("iframe.blueprint-frame__document");
+			await frameElement.waitFor({ state: "attached" });
+			assert.equal(await frameElement.getAttribute("sandbox"), "allow-scripts");
+			assert.equal(await frameElement.getAttribute("src"), "/docs-html/trace_blueprint.html?embed=1&theme=light");
+			const blueprint = page.frameLocator("iframe.blueprint-frame__document");
+			await page.locator(".blueprint-frame.is-ready").waitFor();
 			await blueprint.getByRole("button", { name: "Copy code snippet" }).first().waitFor();
-			assert.equal(
-				await blueprint.evaluate(() => {
-					try {
-						sessionStorage.getItem("clio-coder-web-token");
-						return false;
-					} catch {
-						return true;
-					}
-				}),
-				true,
-				"Blueprint must not inherit application storage",
+			assert.equal(context.pages().length, 1, "Blueprints open in the same page");
+			assert.equal(new URL(page.url()).pathname, "/docs/blueprints/trace_blueprint.html");
+			await page.getByRole("heading", { name: "Trace store contract", exact: true }).waitFor();
+			// Handmade copy, code and drawings survive presentation; only the document's own chrome is hidden.
+			await blueprint.locator(".reference-prose h2", { hasText: "Tables" }).waitFor();
+			assert.ok(
+				(await blueprint.locator("pre code.language-sql").first().innerText()).includes("PRAGMA journal_mode=WAL"),
 			);
-			await blueprint.close();
+			assert.equal(await blueprint.locator(".document-header svg").count(), 1);
+			assert.equal(await blueprint.locator(".document-header").isVisible(), false);
+			assert.equal(await blueprint.locator("a.sidebar-source").isVisible(), false);
+			assert.equal(await blueprint.locator('.reference-prose > blockquote[data-clio-self-reference="true"]').count(), 1);
+			assert.equal(await blueprint.locator(".reference-prose > blockquote").first().isVisible(), false);
+			assert.equal(await blueprint.locator("html").getAttribute("data-theme"), "light");
+			assert.equal(
+				await blueprint.locator("body").evaluate((body) => getComputedStyle(body).backgroundColor),
+				"rgb(238, 232, 216)",
+				"Blueprint body follows the application's light palette",
+			);
+			// The sandbox denies storage and API access, and its origin is opaque.
+			const isolation = await blueprint.locator("html").evaluate(async () => {
+				let storage = false;
+				try {
+					sessionStorage.getItem("clio-coder-token");
+				} catch {
+					storage = true;
+				}
+				let api = false;
+				try {
+					await fetch("/api/meta");
+				} catch {
+					api = true;
+				}
+				return { storage, api, origin: window.origin };
+			});
+			assert.deepEqual(isolation, { storage: true, api: true, origin: "null" });
+			// Theme changes travel by message: no reload, and the reading position survives.
+			await blueprint.locator("html").evaluate(() => {
+				(window as unknown as { clioSmokeMarker: number }).clioSmokeMarker = 1;
+				window.scrollTo(0, 400);
+			});
+			assert.equal(
+				await blueprint.locator("html").evaluate((html) => getComputedStyle(html).scrollBehavior),
+				"auto",
+				"Blueprints honor reduced motion",
+			);
+			assert.equal(await blueprint.locator("html").evaluate(() => Math.round(window.scrollY)), 400);
+			await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+			await blueprint.locator('html[data-theme="dark"]').waitFor();
+			assert.deepEqual(
+				await blueprint.locator("html").evaluate(() => ({
+					marker: (window as unknown as { clioSmokeMarker?: number }).clioSmokeMarker,
+					scrollY: Math.round(window.scrollY),
+					background: getComputedStyle(document.body).backgroundColor,
+				})),
+				{ marker: 1, scrollY: 400, background: "rgb(32, 42, 37)" },
+			);
+			await check("docs-blueprint-dark", { blueprint: true });
+			await page.getByRole("button", { name: "Light theme", exact: true }).click();
+			await blueprint.locator('html[data-theme="light"]').waitFor();
+			await check("docs-blueprint", { blueprint: true });
+			// Messages from a foreign source or with an unsafe destination never move the application.
+			await page.evaluate(() => window.postMessage({ type: "clio:blueprint", event: "navigate", href: "/sessions" }, "*"));
+			await blueprint.locator("html").evaluate(() => {
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "https://example.com/" }, "*");
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "/docs/../api/meta" }, "*");
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "/docs/%2e%2e/api/meta.md" }, "*");
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "/docs/%5c..%5cguide/x.md" }, "*");
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "/docs/%zz/guide.md" }, "*");
+				parent.postMessage(
+					{ type: "clio:blueprint", event: "navigate", href: "/docs/blueprints/%2e%2e%2fescape.html" },
+					"*",
+				);
+				parent.postMessage({ type: "clio:blueprint", event: "navigate", href: "javascript:alert(1)" }, "*");
+			});
+			await page.waitForTimeout(300);
+			assert.equal(new URL(page.url()).pathname, "/docs/blueprints/trace_blueprint.html");
+			// External links are refused by the child and surfaced as a plain link; nothing navigates on its own.
+			await blueprint.locator("html").evaluate(() => {
+				const anchor = document.createElement("a");
+				anchor.href = "https://example.com/spec";
+				anchor.textContent = "smoke external link";
+				document.querySelector(".reference-prose")?.prepend(anchor);
+			});
+			await blueprint.getByRole("link", { name: "smoke external link" }).click();
+			const externalNotice = page.locator(".blueprint-external");
+			await externalNotice.waitFor();
+			const externalLink = externalNotice.getByRole("link", { name: "https://example.com/spec" });
+			assert.equal(await externalLink.getAttribute("target"), "_blank");
+			assert.equal(new URL(page.url()).pathname, "/docs/blueprints/trace_blueprint.html");
+			assert.equal(context.pages().length, 1);
+			assert.equal(
+				await blueprint.locator("html").evaluate(() => (window as unknown as { clioSmokeMarker?: number }).clioSmokeMarker),
+				1,
+				"The child frame did not navigate",
+			);
+			await externalNotice.getByRole("button", { name: "Dismiss", exact: true }).click();
+			// Links inside the blueprint stay in the application, modified clicks included.
+			await blueprint.locator(".related-nav a.next").click();
+			await page.waitForURL(`${origin}/docs/blueprints/tui_design_blueprint.html`);
+			await page.locator(".blueprint-frame.is-ready").waitFor();
+			await blueprint.locator(".reference-prose h2", { hasText: "Output styles" }).waitFor();
+			await blueprint.locator('.related-nav a[href="trace_blueprint.html"]').click({ modifiers: ["Control"] });
+			await page.waitForURL(`${origin}/docs/blueprints/trace_blueprint.html`);
+			await page.locator(".blueprint-frame.is-ready").waitFor();
+			assert.equal(context.pages().length, 1);
+			// A blueprint's relative Markdown link opens the guide in the application.
+			await blueprint.locator("html").evaluate(() => {
+				const anchor = document.createElement("a");
+				anchor.href = "../architecture/trace-store.md";
+				anchor.textContent = "smoke guide link";
+				document.querySelector(".reference-prose")?.prepend(anchor);
+			});
+			await blueprint.getByRole("link", { name: "smoke guide link" }).click();
+			await page.waitForURL(`${origin}/docs/architecture/trace-store.md`);
+			await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
+			// The reading view switch pairs the guide with its blueprint.
+			const readingView = page.getByRole("navigation", { name: "Reading view" });
+			await readingView.getByRole("link", { name: "Blueprint", exact: true }).click();
+			await page.waitForURL(`${origin}/docs/blueprints/trace_blueprint.html`);
+			await page.locator(".blueprint-frame.is-ready").waitFor();
+			await readingView.getByRole("link", { name: "Guide", exact: true }).click();
+			await page.waitForURL(`${origin}/docs/architecture/trace-store.md`);
+			await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
+			if (width === 1600) {
+				// A fragment on the blueprint route scrolls the document to that heading.
+				await page.goto(`${origin}/docs/blueprints/trace_blueprint.html#tables`);
+				await page.locator(".blueprint-frame.is-ready").waitFor();
+				const documentFrame = page
+					.frames()
+					.find((frame) => frame.url().startsWith(`${origin}/docs-html/trace_blueprint.html?`));
+				assert.ok(documentFrame, "The blueprint document frame is attached");
+				await documentFrame.waitForFunction(() => {
+					const heading = document.getElementById("tables");
+					if (!heading) return false;
+					const top = heading.getBoundingClientRect().top;
+					return window.scrollY > 0 && top >= 0 && top < 40;
+				});
+				// Keyboard: the frame is the next stop after the reading view, and focus continues into the document.
+				await page.getByRole("navigation", { name: "Reading view" }).getByRole("link", { name: "Blueprint" }).focus();
+				await page.keyboard.press("Tab");
+				assert.equal(await page.evaluate(() => document.activeElement?.tagName), "IFRAME");
+				await page.keyboard.press("Tab");
+				assert.equal(await blueprint.locator("html").evaluate(() => document.activeElement?.tagName), "A");
+				assert.equal(
+					await page.locator("iframe.blueprint-frame__document").getAttribute("title"),
+					"Trace store contract · blueprint",
+				);
+				// A missing file is an explicit, retryable state rather than a blank frame.
+				await page.goto(`${origin}/docs/blueprints/missing_blueprint.html`);
+				const missing = page.getByRole("alert").filter({ hasText: "No blueprint file named missing_blueprint.html" });
+				await missing.waitFor();
+				await missing.getByRole("button", { name: "Try again", exact: true }).click();
+				await missing.waitFor();
+				assert.equal(await page.locator("iframe").count(), 0);
+				await check("docs-blueprint-missing");
+				// A document that never announces itself reports a timeout, and still appears once it arrives.
+				const held: (() => Promise<void>)[] = [];
+				await page.route("**/docs-html/tui_design_blueprint.html?*", async (route) => {
+					if (route.request().resourceType() === "document") held.push(() => route.continue());
+					else await route.continue();
+				});
+				await page.goto(`${origin}/docs/blueprints/tui_design_blueprint.html`);
+				await page.getByRole("button", { name: "Reload blueprint", exact: true }).waitFor({ timeout: 20000 });
+				assert.equal(held.length, 1);
+				await held[0]?.();
+				await page.locator(".blueprint-frame.is-ready").waitFor();
+				await page.unroute("**/docs-html/tui_design_blueprint.html?*");
+				assert.equal(await page.getByRole("button", { name: "Reload blueprint", exact: true }).count(), 0);
+				await page.goto(`${origin}/docs/blueprints/index.html`);
+				await page.waitForURL(`${origin}/docs`);
+				await page.locator(".docs-page .markdown").waitFor();
+				await navigate("Docs");
+				await page.getByLabel("Search the documentation", { exact: true }).fill("trace");
+				await page.getByRole("button", { name: "Search docs", exact: true }).click();
+				await docResults.getByRole("link", { name: /Trace Store/i }).click();
+				await page.locator(".docs-path").filter({ hasText: "architecture/trace-store.md" }).waitFor();
+			}
 		}
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `docs-${width}.png`), fullPage: false });
@@ -384,7 +567,11 @@ try {
 	assert.deepEqual(errors, []);
 	assert.deepEqual(failures, []);
 	assert.deepEqual(
-		statuses.filter((item) => !(item.path === "/api/workspaces" && item.status === 422)),
+		statuses.filter(
+			(item) =>
+				!(item.path === "/api/workspaces" && item.status === 422) &&
+				!(item.path === "/docs-html/missing_blueprint.html" && item.status === 404),
+		),
 		[],
 	);
 	success = true;

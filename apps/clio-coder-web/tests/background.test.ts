@@ -9,6 +9,7 @@ import {
 	installBackground,
 	startBackground,
 	stopBackground,
+	tryStartBackground,
 	uninstallBackground,
 } from "../server/launcher/background.js";
 import {
@@ -47,6 +48,7 @@ test("background setup preserves its stable identity, starts explicitly, and rem
 		assert.equal(token, config.token);
 	};
 	assert.equal((await backgroundStatus(directory, control)).status, "absent");
+	assert.equal(await tryStartBackground(directory, config.packageRoot, control, ready), undefined);
 	const installed = await installBackground(directory, config, control, ready);
 	assert.equal(installed.status, "installed");
 	assert.ok(!JSON.stringify(installed).includes(config.token));
@@ -73,11 +75,19 @@ test("background setup preserves its stable identity, starts explicitly, and rem
 	assert.equal(state.desktop, "installed");
 	assert.ok(!JSON.stringify(state).includes(config.token));
 	assert.equal(await startBackground(directory, control, ready), `http://127.0.0.1:4317/#token=${config.token}`);
+	assert.equal(
+		await tryStartBackground(directory, config.packageRoot, control, ready),
+		`http://127.0.0.1:4317/#token=${config.token}`,
+	);
+	const beforeForeign = calls.length;
+	await assert.rejects(tryStartBackground(directory, root, control, ready), /another installation/);
+	assert.equal(calls.length, beforeForeign);
 	await stopBackground(directory, control);
 	await writeFile(join(directory, "keep.txt"), "keep");
 	await writeFile(files.unitFile, `${unit}# user edit\n`);
 	const before = calls.length;
 	await assert.rejects(uninstallBackground(directory, control), /ownership/);
+	await assert.rejects(tryStartBackground(directory, config.packageRoot, control, ready), /ownership/);
 	assert.equal(calls.length, before);
 	await writeFile(files.unitFile, unit);
 	assert.equal((await uninstallBackground(directory, control)).status, "absent");
