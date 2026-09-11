@@ -1,0 +1,2367 @@
+{
+	"openapi": "3.1.0",
+	"jsonSchemaDialect": "https://json-schema.org/draft/2020-12/schema",
+	"info": {
+		"title": "Clio Coder",
+		"version": "0.0.0"
+	},
+	"paths": {
+		"/api/meta": {
+			"get": {
+				"operationId": "meta",
+				"summary": "Application and Clio versions",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["clio", "app", "apiVersion", "epoch"],
+									"properties": {
+										"clio": {
+											"type": "string"
+										},
+										"app": {
+											"type": "string"
+										},
+										"apiVersion": {
+											"type": "number",
+											"const": 1
+										},
+										"epoch": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/openapi.json": {
+			"get": {
+				"operationId": "openapi",
+				"summary": "OpenAPI contract",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"patternProperties": {
+										"^.*$": {}
+									}
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/events": {
+			"get": {
+				"operationId": "events",
+				"summary": "Global event stream",
+				"security": [
+					{
+						"bearer": []
+					},
+					{
+						"eventToken": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "after",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[0-9]{1,16}$",
+							"maxLength": 145
+						}
+					},
+					{
+						"name": "token",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 256
+						}
+					},
+					{
+						"name": "Last-Event-ID",
+						"in": "header",
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}:[0-9]{1,16}$",
+							"maxLength": 145
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"text/event-stream": {
+								"schema": {
+									"type": "string"
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/toolchain/tools": {
+			"get": {
+				"operationId": "tools",
+				"summary": "Pinned tools in registry order",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "array",
+									"items": {
+										"type": "object",
+										"required": [
+											"id",
+											"version",
+											"summary",
+											"license",
+											"platform",
+											"supported",
+											"installed",
+											"installDir",
+											"resolution"
+										],
+										"properties": {
+											"id": {
+												"type": "string",
+												"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+											},
+											"version": {
+												"type": "string"
+											},
+											"summary": {
+												"type": "string"
+											},
+											"license": {
+												"type": "string"
+											},
+											"platform": {
+												"anyOf": [
+													{
+														"type": "string"
+													},
+													{
+														"type": "null"
+													}
+												]
+											},
+											"supported": {
+												"type": "boolean"
+											},
+											"installed": {
+												"type": "boolean"
+											},
+											"installDir": {
+												"type": "string"
+											},
+											"resolution": {
+												"type": "object",
+												"required": ["source", "binaryPath", "version", "description", "vendoredPath", "pathCandidate"],
+												"properties": {
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "path"
+															},
+															{
+																"type": "string",
+																"const": "vendored"
+															},
+															{
+																"type": "string",
+																"const": "none"
+															}
+														]
+													},
+													"binaryPath": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"version": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"description": {
+														"type": "string"
+													},
+													"vendoredPath": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"pathCandidate": {
+														"anyOf": [
+															{
+																"type": "null"
+															},
+															{
+																"type": "object",
+																"required": ["path", "version", "satisfiesMinimum"],
+																"properties": {
+																	"path": {
+																		"type": "string"
+																	},
+																	"version": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"satisfiesMinimum": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"additionalProperties": false
+									}
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/toolchain/tools/{toolId}/install": {
+			"post": {
+				"operationId": "install",
+				"summary": "Install the pinned tool",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "toolId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {
+									"force": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/toolchain/tools/{toolId}/remove": {
+			"post": {
+				"operationId": "remove",
+				"summary": "Remove vendored versions",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "toolId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/operations/{id}": {
+			"get": {
+				"operationId": "operation",
+				"summary": "Operation snapshot",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "queued"
+														},
+														{
+															"type": "string",
+															"const": "running"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": [
+												"id",
+												"kind",
+												"revision",
+												"cancellable",
+												"startedAt",
+												"progress",
+												"status",
+												"finishedAt",
+												"result"
+											],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "succeeded"
+												},
+												"finishedAt": {
+													"type": "string"
+												},
+												"result": {
+													"type": "object",
+													"required": ["id", "message"],
+													"properties": {
+														"id": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+														},
+														"message": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": [
+												"id",
+												"kind",
+												"revision",
+												"cancellable",
+												"startedAt",
+												"progress",
+												"status",
+												"finishedAt",
+												"problem"
+											],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "failed"
+												},
+												"finishedAt": {
+													"type": "string"
+												},
+												"problem": {
+													"type": "object",
+													"required": ["type", "title", "status", "detail", "code", "instance"],
+													"properties": {
+														"type": {
+															"type": "string"
+														},
+														"title": {
+															"type": "string"
+														},
+														"status": {
+															"type": "integer"
+														},
+														"detail": {
+															"type": "string"
+														},
+														"code": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "validation"
+																},
+																{
+																	"type": "string",
+																	"const": "unauthorized"
+																},
+																{
+																	"type": "string",
+																	"const": "not_found"
+																},
+																{
+																	"type": "string",
+																	"const": "conflict"
+																},
+																{
+																	"type": "string",
+																	"const": "unsupported"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																},
+																{
+																	"type": "string",
+																	"const": "upstream_acp"
+																},
+																{
+																	"type": "string",
+																	"const": "operation_failed"
+																},
+																{
+																	"type": "string",
+																	"const": "internal"
+																}
+															]
+														},
+														"instance": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "cancelled"
+												},
+												"finishedAt": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							},
+							"X-Clio-Revision": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Snapshot revision"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/operations/{id}/cancel": {
+			"post": {
+				"operationId": "cancel",
+				"summary": "Cancel a cancellable operation",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"anyOf": [
+										{
+											"type": "object",
+											"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"anyOf": [
+														{
+															"type": "string",
+															"const": "queued"
+														},
+														{
+															"type": "string",
+															"const": "running"
+														}
+													]
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": [
+												"id",
+												"kind",
+												"revision",
+												"cancellable",
+												"startedAt",
+												"progress",
+												"status",
+												"finishedAt",
+												"result"
+											],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "succeeded"
+												},
+												"finishedAt": {
+													"type": "string"
+												},
+												"result": {
+													"type": "object",
+													"required": ["id", "message"],
+													"properties": {
+														"id": {
+															"type": "string",
+															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+														},
+														"message": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": [
+												"id",
+												"kind",
+												"revision",
+												"cancellable",
+												"startedAt",
+												"progress",
+												"status",
+												"finishedAt",
+												"problem"
+											],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "failed"
+												},
+												"finishedAt": {
+													"type": "string"
+												},
+												"problem": {
+													"type": "object",
+													"required": ["type", "title", "status", "detail", "code", "instance"],
+													"properties": {
+														"type": {
+															"type": "string"
+														},
+														"title": {
+															"type": "string"
+														},
+														"status": {
+															"type": "integer"
+														},
+														"detail": {
+															"type": "string"
+														},
+														"code": {
+															"anyOf": [
+																{
+																	"type": "string",
+																	"const": "validation"
+																},
+																{
+																	"type": "string",
+																	"const": "unauthorized"
+																},
+																{
+																	"type": "string",
+																	"const": "not_found"
+																},
+																{
+																	"type": "string",
+																	"const": "conflict"
+																},
+																{
+																	"type": "string",
+																	"const": "unsupported"
+																},
+																{
+																	"type": "string",
+																	"const": "unavailable"
+																},
+																{
+																	"type": "string",
+																	"const": "upstream_acp"
+																},
+																{
+																	"type": "string",
+																	"const": "operation_failed"
+																},
+																{
+																	"type": "string",
+																	"const": "internal"
+																}
+															]
+														},
+														"instance": {
+															"type": "string"
+														}
+													},
+													"additionalProperties": false
+												}
+											},
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt"],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"kind": {
+													"type": "string"
+												},
+												"revision": {
+													"type": "integer",
+													"minimum": 1
+												},
+												"cancellable": {
+													"type": "boolean"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"progress": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": ["at", "message"],
+														"properties": {
+															"at": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"maxItems": 256
+												},
+												"status": {
+													"type": "string",
+													"const": "cancelled"
+												},
+												"finishedAt": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										}
+									]
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	},
+	"components": {
+		"securitySchemes": {
+			"bearer": {
+				"type": "http",
+				"scheme": "bearer"
+			},
+			"eventToken": {
+				"type": "apiKey",
+				"in": "query",
+				"name": "token"
+			}
+		},
+		"schemas": {
+			"Problem": {
+				"type": "object",
+				"required": ["type", "title", "status", "detail", "code", "instance"],
+				"properties": {
+					"type": {
+						"type": "string"
+					},
+					"title": {
+						"type": "string"
+					},
+					"status": {
+						"type": "integer"
+					},
+					"detail": {
+						"type": "string"
+					},
+					"code": {
+						"anyOf": [
+							{
+								"type": "string",
+								"const": "validation"
+							},
+							{
+								"type": "string",
+								"const": "unauthorized"
+							},
+							{
+								"type": "string",
+								"const": "not_found"
+							},
+							{
+								"type": "string",
+								"const": "conflict"
+							},
+							{
+								"type": "string",
+								"const": "unsupported"
+							},
+							{
+								"type": "string",
+								"const": "unavailable"
+							},
+							{
+								"type": "string",
+								"const": "upstream_acp"
+							},
+							{
+								"type": "string",
+								"const": "operation_failed"
+							},
+							{
+								"type": "string",
+								"const": "internal"
+							}
+						]
+					},
+					"instance": {
+						"type": "string"
+					}
+				},
+				"additionalProperties": false
+			},
+			"Event": {
+				"anyOf": [
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "hello"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["epoch", "seq"],
+								"properties": {
+									"epoch": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"seq": {
+										"type": "integer",
+										"minimum": 0
+									}
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "resync"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["epoch", "seq", "reason"],
+								"properties": {
+									"epoch": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"seq": {
+										"type": "integer",
+										"minimum": 0
+									},
+									"reason": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "epoch"
+											},
+											{
+												"type": "string",
+												"const": "evicted"
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "operation.progress"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "progress"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"progress": {
+										"type": "object",
+										"required": ["at", "message"],
+										"properties": {
+											"at": {
+												"type": "string"
+											},
+											"message": {
+												"type": "string"
+											}
+										},
+										"additionalProperties": false
+									}
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "operation.finished"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["resource", "revision", "operation"],
+								"properties": {
+									"resource": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"revision": {
+										"type": "integer",
+										"minimum": 1
+									},
+									"operation": {
+										"anyOf": [
+											{
+												"type": "object",
+												"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"cancellable": {
+														"type": "boolean"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"progress": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["at", "message"],
+															"properties": {
+																"at": {
+																	"type": "string"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 256
+													},
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "queued"
+															},
+															{
+																"type": "string",
+																"const": "running"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"required": [
+													"id",
+													"kind",
+													"revision",
+													"cancellable",
+													"startedAt",
+													"progress",
+													"status",
+													"finishedAt",
+													"result"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"cancellable": {
+														"type": "boolean"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"progress": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["at", "message"],
+															"properties": {
+																"at": {
+																	"type": "string"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 256
+													},
+													"status": {
+														"type": "string",
+														"const": "succeeded"
+													},
+													"finishedAt": {
+														"type": "string"
+													},
+													"result": {
+														"type": "object",
+														"required": ["id", "message"],
+														"properties": {
+															"id": {
+																"type": "string",
+																"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+															},
+															"message": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"required": [
+													"id",
+													"kind",
+													"revision",
+													"cancellable",
+													"startedAt",
+													"progress",
+													"status",
+													"finishedAt",
+													"problem"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"cancellable": {
+														"type": "boolean"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"progress": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["at", "message"],
+															"properties": {
+																"at": {
+																	"type": "string"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 256
+													},
+													"status": {
+														"type": "string",
+														"const": "failed"
+													},
+													"finishedAt": {
+														"type": "string"
+													},
+													"problem": {
+														"type": "object",
+														"required": ["type", "title", "status", "detail", "code", "instance"],
+														"properties": {
+															"type": {
+																"type": "string"
+															},
+															"title": {
+																"type": "string"
+															},
+															"status": {
+																"type": "integer"
+															},
+															"detail": {
+																"type": "string"
+															},
+															"code": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "validation"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unauthorized"
+																	},
+																	{
+																		"type": "string",
+																		"const": "not_found"
+																	},
+																	{
+																		"type": "string",
+																		"const": "conflict"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unsupported"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unavailable"
+																	},
+																	{
+																		"type": "string",
+																		"const": "upstream_acp"
+																	},
+																	{
+																		"type": "string",
+																		"const": "operation_failed"
+																	},
+																	{
+																		"type": "string",
+																		"const": "internal"
+																	}
+																]
+															},
+															"instance": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"required": ["id", "kind", "revision", "cancellable", "startedAt", "progress", "status", "finishedAt"],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"revision": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"cancellable": {
+														"type": "boolean"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"progress": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["at", "message"],
+															"properties": {
+																"at": {
+																	"type": "string"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
+														},
+														"maxItems": 256
+													},
+													"status": {
+														"type": "string",
+														"const": "cancelled"
+													},
+													"finishedAt": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										]
+									}
+								}
+							}
+						}
+					},
+					{
+						"type": "object",
+						"required": ["v", "epoch", "seq", "at", "type", "payload"],
+						"properties": {
+							"v": {
+								"type": "number",
+								"const": 1
+							},
+							"epoch": {
+								"type": "string",
+								"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+							},
+							"seq": {
+								"type": "integer",
+								"minimum": 0
+							},
+							"at": {
+								"type": "string"
+							},
+							"type": {
+								"type": "string",
+								"const": "toolchain.changed"
+							},
+							"payload": {
+								"type": "object",
+								"required": ["id"],
+								"properties": {
+									"id": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									}
+								}
+							}
+						}
+					}
+				]
+			}
+		}
+	}
+}

@@ -438,7 +438,7 @@ function checkCiScripts(): void {
 	};
 	expectScript(
 		"ci",
-		"pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer",
+		"pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:trace-viewer && pnpm run test:web",
 	);
 	expectScript("library:check", "node --import tsx scripts/pin-library.ts --check");
 	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");

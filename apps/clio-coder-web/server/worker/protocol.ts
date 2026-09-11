@@ -1,0 +1,26 @@
+import type { Problem } from "../../contracts/common.js";
+import type { Tool } from "../../contracts/toolchain.js";
+
+export type WorkerKind = "reads" | "ops";
+export type WorkerSettings = {
+	fixture?: boolean;
+	readDelayMs?: number;
+	readDeadlineMs?: number;
+	installDelayMs?: number;
+	failInstall?: boolean;
+	crashRead?: boolean;
+};
+export type RawTool = Tool;
+export interface Methods {
+	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
+	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };
+	"tools.remove": { params: { id: string }; result: { id: string; message: string } };
+}
+export type Method = keyof Methods;
+export type Call = {
+	[M in Method]: { id: string; method: M; params: Methods[M]["params"]; deadlineMs: number };
+}[Method];
+export type Reply =
+	| { id: string; ok: true; result: Methods[Method]["result"] }
+	| { id: string; ok: false; problem: Problem }
+	| { id: string; progress: string };
