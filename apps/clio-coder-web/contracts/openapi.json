@@ -6,6 +6,624 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/workspaces/{id}/settings": {
+			"get": {
+				"operationId": "workspaceSettings",
+				"summary": "Effective settings and each leaf's origin layer",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["rows", "layers", "issues"],
+									"properties": {
+										"rows": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["key", "source", "value", "redacted"],
+												"properties": {
+													"key": {
+														"type": "string"
+													},
+													"source": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "built-in"
+															},
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "project"
+															},
+															{
+																"type": "string",
+																"const": "project.local"
+															},
+															{
+																"type": "string",
+																"const": "cli"
+															}
+														]
+													},
+													"value": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "number"
+															},
+															{
+																"type": "boolean"
+															},
+															{
+																"type": "null"
+															},
+															{
+																"type": "array",
+																"items": {},
+																"maxItems": 0
+															},
+															{
+																"type": "object",
+																"properties": {},
+																"additionalProperties": false
+															}
+														]
+													},
+													"redacted": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"layers": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["origin", "path", "present"],
+												"properties": {
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "built-in"
+															},
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "project"
+															},
+															{
+																"type": "string",
+																"const": "project.local"
+															},
+															{
+																"type": "string",
+																"const": "cli"
+															}
+														]
+													},
+													"path": {
+														"type": "string"
+													},
+													"present": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"issues": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["origin", "path", "kind", "message"],
+												"properties": {
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "built-in"
+															},
+															{
+																"type": "string",
+																"const": "user"
+															},
+															{
+																"type": "string",
+																"const": "project"
+															},
+															{
+																"type": "string",
+																"const": "project.local"
+															},
+															{
+																"type": "string",
+																"const": "cli"
+															}
+														]
+													},
+													"path": {
+														"type": "string"
+													},
+													"kind": {
+														"type": "string"
+													},
+													"message": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/config-graph": {
+			"get": {
+				"operationId": "configGraph",
+				"summary": "Read-only customization graph without secrets or hook argv",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["categories", "entries", "issues"],
+									"properties": {
+										"categories": {
+											"type": "array",
+											"items": {
+												"anyOf": [
+													{
+														"type": "string",
+														"const": "settings"
+													},
+													{
+														"type": "string",
+														"const": "clio-md"
+													},
+													{
+														"type": "string",
+														"const": "rule"
+													},
+													{
+														"type": "string",
+														"const": "operator-profile"
+													},
+													{
+														"type": "string",
+														"const": "hook"
+													},
+													{
+														"type": "string",
+														"const": "extension"
+													},
+													{
+														"type": "string",
+														"const": "skill-root"
+													},
+													{
+														"type": "string",
+														"const": "prompt-root"
+													},
+													{
+														"type": "string",
+														"const": "agent-root"
+													},
+													{
+														"type": "string",
+														"const": "fleet-root"
+													},
+													{
+														"type": "string",
+														"const": "safety"
+													},
+													{
+														"type": "string",
+														"const": "memory"
+													}
+												]
+											}
+										},
+										"entries": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["category", "id", "scope", "reloadClass", "facts"],
+												"properties": {
+													"category": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "settings"
+															},
+															{
+																"type": "string",
+																"const": "clio-md"
+															},
+															{
+																"type": "string",
+																"const": "rule"
+															},
+															{
+																"type": "string",
+																"const": "operator-profile"
+															},
+															{
+																"type": "string",
+																"const": "hook"
+															},
+															{
+																"type": "string",
+																"const": "extension"
+															},
+															{
+																"type": "string",
+																"const": "skill-root"
+															},
+															{
+																"type": "string",
+																"const": "prompt-root"
+															},
+															{
+																"type": "string",
+																"const": "agent-root"
+															},
+															{
+																"type": "string",
+																"const": "fleet-root"
+															},
+															{
+																"type": "string",
+																"const": "safety"
+															},
+															{
+																"type": "string",
+																"const": "memory"
+															}
+														]
+													},
+													"id": {
+														"type": "string"
+													},
+													"scope": {
+														"type": "string"
+													},
+													"sourcePath": {
+														"type": "string"
+													},
+													"hash": {
+														"type": "string"
+													},
+													"trust": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "trusted"
+															},
+															{
+																"type": "string",
+																"const": "untrusted"
+															},
+															{
+																"type": "string",
+																"const": "n/a"
+															}
+														]
+													},
+													"precedence": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "winner"
+															},
+															{
+																"type": "string",
+																"const": "loser"
+															},
+															{
+																"type": "string",
+																"const": "single"
+															},
+															{
+																"type": "string",
+																"const": "layer"
+															}
+														]
+													},
+													"reloadClass": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "hot"
+															},
+															{
+																"type": "string",
+																"const": "next-turn"
+															},
+															{
+																"type": "string",
+																"const": "reload"
+															},
+															{
+																"type": "string",
+																"const": "restart"
+															},
+															{
+																"type": "string",
+																"const": "n/a"
+															}
+														]
+													},
+													"contextCostTokens": {
+														"type": "number"
+													},
+													"facts": {
+														"type": "object",
+														"patternProperties": {
+															"^.*$": {
+																"anyOf": [
+																	{
+																		"type": "number"
+																	},
+																	{
+																		"type": "boolean"
+																	}
+																]
+															}
+														}
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"issues": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["category", "count", "message"],
+												"properties": {
+													"category": {
+														"type": "string"
+													},
+													"count": {
+														"type": "integer",
+														"minimum": 1
+													},
+													"message": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/docs/tree": {
 			"get": {
 				"operationId": "docsTree",

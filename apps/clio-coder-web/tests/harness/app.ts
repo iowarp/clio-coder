@@ -11,6 +11,7 @@ import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { SessionService } from "../../server/services/sessions.js";
+import { SettingsService } from "../../server/services/settings.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
 import { TraceService } from "../../server/services/traces.js";
 import { WorkspaceService } from "../../server/services/workspaces.js";
@@ -23,6 +24,7 @@ export async function harness(
 	settings: WorkerSettings = {},
 	options: {
 		scenario?: string;
+		env?: NodeJS.ProcessEnv;
 		snapshotHold?: () => Promise<void>;
 		permissionTimers?: PermissionTimers;
 		origin?: () => string;
@@ -30,8 +32,9 @@ export async function harness(
 	} = {},
 ) {
 	const home = await scratchHome();
-	const reads = new WorkerHost("reads", { fixture: true, ...settings }, home.env),
-		ops = new WorkerHost("ops", { fixture: true, ...settings }, home.env);
+	const env = { ...home.env, ...options.env };
+	const reads = new WorkerHost("reads", { fixture: true, ...settings }, env),
+		ops = new WorkerHost("ops", { fixture: true, ...settings }, env);
 	const hub = new EventHub(),
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(join(home.path, "state")),
@@ -41,7 +44,7 @@ export async function harness(
 		files,
 		hub,
 		{
-			...home.env,
+			...env,
 			CLIO_CODER_WEB_CLI: fileURLToPath(new URL("../fixtures/acp-fixture-child.mjs", import.meta.url)),
 			CLIO_CODER_WEB_FIXTURE_SCENARIO: options.scenario ?? "text",
 			CLIO_CODER_WEB_FIXTURE_LOG: join(home.path, "acp.jsonl"),
@@ -59,6 +62,7 @@ export async function harness(
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		docs: new DocsService(reads),
+		settings: new SettingsService(reads, workspaces),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,

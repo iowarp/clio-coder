@@ -17,6 +17,8 @@ const httpModules = new Map([
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
 const adapters = new Set([
+	"src/core/settings-layers.ts",
+	"src/cli/config-inspect.ts",
 	"src/core/package-root.ts",
 	"src/domains/toolchain/index.ts",
 	"src/core/xdg.ts",
@@ -26,6 +28,11 @@ const adapters = new Set([
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([
+	"src/core/settings-layers.ts",
+	"src/core/init.ts",
+	"src/core/workspace-trust.ts",
+	"src/cli/config-inspect.ts",
+	"src/domains/providers/auth/index.ts",
 	"src/domains/toolchain/index.ts",
 	"src/domains/observability/trace-store.ts",
 	"tests/harness/openai-compat-fixture.ts",

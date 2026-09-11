@@ -13,6 +13,7 @@ import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
 import { OperationRegistry } from "./services/operations.js";
 import { SessionService } from "./services/sessions.js";
+import { SettingsService } from "./services/settings.js";
 import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
 import { WorkspaceService } from "./services/workspaces.js";
@@ -65,6 +66,7 @@ export async function main() {
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		docs: new DocsService(reads),
+		settings: new SettingsService(reads, workspaces),
 		sessions,
 		clientDir,
 	});

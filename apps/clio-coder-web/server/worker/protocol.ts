@@ -7,6 +7,7 @@ export type WorkerKind = "reads" | "ops";
 export type WorkerSettings = {
 	fixture?: boolean;
 	fixtureDocsPackageRoot?: string;
+	fixtureGraphDelayMs?: number;
 	readDelayMs?: number;
 	readDeadlineMs?: number;
 	installDelayMs?: number;
@@ -15,6 +16,8 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"settings.read": { params: { cwd: string }; result: unknown };
+	"config.graph": { params: { cwd: string }; result: unknown };
 	"docs.read": { params: DocsRequest; result: unknown };
 	"docs.blueprint": { params: { path: string }; result: BlueprintFile };
 	"sessions.list": { params: { cwd: string }; result: unknown };

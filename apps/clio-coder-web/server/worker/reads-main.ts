@@ -12,7 +12,17 @@ const fixture = settings.fixture ? await import("../../tests/fixtures/toolchain.
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings));
 const traces = new TraceAdapter();
 const docs = new DocsAdapter(settings.fixture ? settings.fixtureDocsPackageRoot : undefined);
-serveWorker((call) => {
+serveWorker(async (call) => {
+	if (call.method === "settings.read") {
+		const { inspectSettings } = await import("../clio/adapters/settings.js");
+		return inspectSettings(call.params.cwd);
+	}
+	if (call.method === "config.graph") {
+		if (settings.fixture && settings.fixtureGraphDelayMs)
+			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, settings.fixtureGraphDelayMs);
+		const { inspectConfigGraph } = await import("../clio/adapters/config-graph.js");
+		return inspectConfigGraph(call.params.cwd);
+	}
 	if (call.method === "docs.read") return docs.read(call.params);
 	if (call.method === "docs.blueprint") return docs.blueprint(call.params.path);
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);

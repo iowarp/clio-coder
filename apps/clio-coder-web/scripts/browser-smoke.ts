@@ -7,6 +7,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { serve } from "@hono/node-server";
 import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
+import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const { values } = parseArgs({ options: { chrome: { type: "string", default: "/usr/bin/google-chrome" } } });
@@ -17,6 +18,7 @@ const h = await harness(
 	{ installDelayMs: 150 },
 	{ scenario: "markdown", origin: () => origin, clientDir: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
 );
+await seedSettings(h.home.path, h.home.env);
 const fixture = traceFixture(join(h.home.path, "state"));
 fixture.finish();
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
@@ -177,6 +179,24 @@ try {
 		await page.getByRole("button", { name: "Open workspace", exact: true }).click();
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await check("sessions");
+		const workspaceUrl = page.url();
+		await navigate("Settings");
+		await page.getByLabel("Filter settings", { exact: true }).fill("chat.model");
+		await page.getByText("fixture-local-model", { exact: true }).waitFor();
+		await check("settings-inspection");
+		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `settings-${width}.png`) });
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("settings-inspection-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByRole("link", { name: "Why", exact: true }).click();
+		await page.getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
+		await check("config-graph");
+		if (width === 1600) await page.screenshot({ path: join(output, "config-graph.png") });
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("config-graph-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.goto(workspaceUrl);
+		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await page.getByRole("button", { name: "New session", exact: true }).click();
 		await page
 			.getByLabel("Message Clio Coder", { exact: true })

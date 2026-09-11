@@ -8,6 +8,7 @@ import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
 import { docsPathGuard, docsRoutes } from "./http/routes-docs.js";
 import { sessionRoutes } from "./http/routes-sessions.js";
+import { settingsRoutes } from "./http/routes-settings.js";
 import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
@@ -18,6 +19,7 @@ import type { EventHub } from "./services/event-hub.js";
 import type { OperationRegistry } from "./services/operations.js";
 import { AppProblem } from "./services/problem.js";
 import type { SessionService } from "./services/sessions.js";
+import type { SettingsService } from "./services/settings.js";
 import type { ToolchainService } from "./services/toolchain.js";
 import type { TraceService } from "./services/traces.js";
 
@@ -29,6 +31,7 @@ export function createApp(options: {
 	toolchain: ToolchainService;
 	traces: TraceService;
 	docs: DocsService;
+	settings: SettingsService;
 	sessions: SessionService;
 	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
@@ -73,6 +76,7 @@ export function createApp(options: {
 	register(app, hub, routes.cancel, ({ params }) => operations.cancel(params.id));
 	traceRoutes(app, hub, options.traces);
 	docsRoutes(app, hub, options.docs);
+	settingsRoutes(app, hub, options.settings);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (

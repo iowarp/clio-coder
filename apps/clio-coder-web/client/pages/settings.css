@@ -1,0 +1,67 @@
+.workspace-picker,
+.settings-filter {
+	display: block;
+	max-width: 45rem;
+	margin-block: 1.5rem;
+}
+.workspace-picker select,
+.settings-filter input {
+	display: block;
+	width: 100%;
+	margin-top: 0.5rem;
+}
+.settings-tabs {
+	display: flex;
+	gap: 1.5rem;
+	margin-block: 2rem;
+	border-bottom: 1px solid var(--line);
+	padding-bottom: 0.8rem;
+}
+.settings-tabs [aria-current="page"] {
+	font-weight: 700;
+	text-decoration-thickness: 3px;
+}
+.settings-list > div {
+	display: grid;
+	grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) 6rem;
+	gap: 1rem;
+	border-top: 1px solid var(--line);
+	padding-block: 1rem;
+}
+.settings-list dt,
+.settings-list dd,
+.config-path,
+.config-entries h3 {
+	overflow-wrap: anywhere;
+	min-width: 0;
+}
+.settings-list dd {
+	margin: 0;
+}
+.setting-source {
+	font-size: 0.85rem;
+}
+.settings-list small {
+	display: block;
+}
+.config-entries {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
+	gap: 1rem;
+}
+.config-entries .trace-panel {
+	margin: 0;
+}
+.config-fact {
+	display: flex;
+	gap: 1rem;
+}
+.config-category {
+	margin-top: 2.5rem;
+}
+@media (max-width: 750px) {
+	.settings-list > div {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0.5rem;
+	}
+}

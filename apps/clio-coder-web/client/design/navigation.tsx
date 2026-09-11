@@ -7,7 +7,7 @@ export const navigation = [
 	{ label: "Traces", path: "/traces", available: true },
 	{ label: "Toolchain", path: "/toolchain", available: true },
 	{ label: "Docs", path: "/docs", available: true },
-	{ label: "Settings", path: "/settings", available: false },
+	{ label: "Settings", path: "/settings", available: true },
 	{ label: "Fleet", path: "/fleet", available: false },
 	{ label: "Evidence", path: "/evidence", available: false },
 	{ label: "Evals", path: "/evals", available: false },

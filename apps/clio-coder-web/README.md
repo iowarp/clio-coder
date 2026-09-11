@@ -82,6 +82,11 @@ the package (normally a source checkout). Blueprint pages run in a sandboxed
 origin and cannot read the app token. The documentation index refreshes on server
 restart. Unavailable source references are shown as text with an explanation.
 
+Choose **Settings** to inspect a workspace’s effective settings and their origin
+layers, or **Why** to inspect customization sources, trust, precedence, and reload
+behavior. These pages are read-only. Credential/environment values and executable
+argument vectors are hidden; source issues are summarized without raw contents.
+
 Chat Markdown is rendered as React elements: raw HTML stays text, images are not
 fetched, and only HTTP, HTTPS, and mailto links are active. Prism produces token
 trees; strict Mermaid output is sanitized before SVG mounting. The CSP permits
@@ -130,5 +135,6 @@ coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records sessi
 and process-lifecycle verification. [S4 evidence](notes/2026-09-11-S4.md) records
 permission/control verification and measured reconnect behavior. [S5 evidence](notes/2026-09-11-S5.md)
 records renderer, design, and browser accessibility verification. [S6 evidence](notes/2026-09-11-S6.md)
-records documentation, link and blueprint checks. S1-S6 are complete; S7a adds
-read-only layered settings and customization inspection.
+records documentation, link and blueprint checks. [S7a evidence](notes/2026-09-11-S7a.md)
+records layered settings, customization, redaction and worker-deadline checks.
+S1-S7a are complete; S7b adds the CLI runner and target operations.
