@@ -39,6 +39,7 @@ This release brings a unified Library for reusable workflows, operator extension
 - Protect installed plugin and harness-extension trees and lifecycle commands as operator-owned resources. Include complete plugin pins in lint and shipped package verification.
 
 ### Fixed
+- Allow the hosted Ubuntu release gate 15 minutes, matching the tag-release workflow, so the expanded contract, smoke and package checks can finish before the job deadline.
 - Preserve trusted project and local output-token settings in native workers, with safe fallback when workspace settings are untrusted or changed. Retain private reasoning-only length responses for bounded same-model continuation without moving private reasoning into visible message content.
 - Record native Materio verification limits explicitly: synthetic examples, offline contracts and advisory reviews do not establish completion of the full scientific writing pipeline.
 - Keep trusted Library skills visible when an untrusted compatibility copy has the same name, and explain trust or manual-activation restrictions on named skill loads.

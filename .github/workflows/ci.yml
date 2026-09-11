@@ -17,7 +17,9 @@ concurrency:
 jobs:
   ci:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    # The full release suite outgrew the eight-minute hosted runner budget.
+    # Match release.yml so every contract, smoke and package audit can finish.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
         with:
