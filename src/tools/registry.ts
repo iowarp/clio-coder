@@ -486,7 +486,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				});
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
-				const finalResult = shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition);
+				const finalResult = shapeToolResult(
+					spec,
+					applyToolResultEffects(result, [...beforeEffects, ...afterEffects]),
+					options,
+					resultDisposition,
+				);
 				return { kind: "ok", result: finalResult, decision };
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
@@ -495,7 +500,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				return {
 					kind: "ok",
-					result: shapeToolResult(spec, applyToolResultEffects(result, afterEffects), options, resultDisposition),
+					result: shapeToolResult(
+						spec,
+						applyToolResultEffects(result, [...beforeEffects, ...afterEffects]),
+						options,
+						resultDisposition,
+					),
 					decision,
 				};
 			}
