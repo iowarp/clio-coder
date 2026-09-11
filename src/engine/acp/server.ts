@@ -2559,6 +2559,17 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 		const text = promptText(params);
 		if (text.length === 0) throw new AcpRequestError(-32602, "prompt text is required", { code: "invalid_params" });
+		// Check the same credential authority as the runtime, without resolving or
+		// echoing a secret. Desktop services do not inherit a terminal's API keys.
+		const targetId = routingSnapshot().target;
+		const target = targetId ? options.providers?.getTarget(targetId) : undefined;
+		const runtime = target ? options.providers?.getRuntime(target.runtime) : undefined;
+		if (target && runtime && options.providers && !options.providers.auth.statusForTarget(target, runtime).available) {
+			throw new AcpRequestError(-32000, "credentials for the selected target are unavailable", {
+				code: "prompt_not_admitted",
+				reason: "authentication-required",
+			});
+		}
 		if (options.session?.current()?.id !== session.id && options.session) options.session.resume(session.id);
 		const active = createActivePromptState();
 		session.activePrompt = active;

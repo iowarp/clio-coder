@@ -232,6 +232,9 @@ export async function background(args: string[], launch: LaunchPaths) {
 				: join(homedir(), ".local/share"));
 		const config = await newBackgroundConfig(port, launch, prefix);
 		console.log(JSON.stringify(await installBackground(directory, config), null, 2));
+		console.log(
+			"Background sessions use Clio's saved credentials. If a target key exists only in your terminal environment, save it with clio-coder auth login <target> before starting a conversation.",
+		);
 		if (!values.open) return;
 	}
 	const url = await startBackground(directory);

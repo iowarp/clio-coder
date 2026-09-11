@@ -203,6 +203,7 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
 }
 async function provider(options: {
 	reply: string;
+	authorization?: string;
 	tool?: boolean;
 	toolCallId?: string;
 	next?: () => { reply?: string; tool?: { name: string; args: Record<string, unknown> } };
@@ -217,6 +218,11 @@ async function provider(options: {
 		if (request.method !== "POST" || request.url !== "/v1/chat/completions") {
 			response.statusCode = 404;
 			response.end();
+			return;
+		}
+		if (options.authorization && request.headers.authorization !== options.authorization) {
+			response.writeHead(401, { "content-type": "application/json" });
+			response.end(JSON.stringify({ error: { message: "Fixture requires its saved credential" } }));
 			return;
 		}
 		const payload = await readBody(request);
@@ -262,6 +268,67 @@ async function closeServer(server: Server): Promise<void> {
 	await new Promise<void>((resolve) => server.close(() => resolve()));
 }
 describe("smoke/ACP stdio boundary", { concurrency: false }, () => {
+	it("reports missing service credentials before admission and uses saved auth after reopening", async () => {
+		const target = home();
+		const fixture = await provider({
+			reply: "SAVED_CREDENTIAL_REPLY",
+			authorization: "Bearer synthetic-service-test-key",
+		});
+		let client: AcpClient | undefined;
+		try {
+			await initialize(target);
+			seedTarget(target, fixture.url);
+			const settingsPath = join(target.root, "config", "settings.yaml");
+			writeFileSync(
+				settingsPath,
+				readFileSync(settingsPath, "utf8").replace(
+					"    runtime: openai-compat",
+					"    runtime: openai-compat\n    auth:\n      apiKeyEnvVar: CLIO_ACP_TEST_ONLY_KEY",
+				),
+			);
+			delete target.env.CLIO_ACP_TEST_ONLY_KEY;
+			delete target.env.OPENAI_API_KEY;
+			const project = join(target.root, "project");
+			mkdirSync(project);
+			client = launch(target, project);
+			const sessionId = await openSession(client, project);
+			const rejected = await client
+				.request("session/prompt", {
+					sessionId,
+					prompt: [{ type: "text", text: "hi" }],
+				})
+				.then(
+					() => null,
+					(error: unknown) =>
+						error as { error: { message: string; data: { _meta: Record<string, Record<string, unknown>> } } },
+				);
+			ok(rejected);
+			strictEqual(rejected.error.data._meta["clio-coder/error"]?.code, "prompt_not_admitted");
+			strictEqual(rejected.error.data._meta["clio-coder/error"]?.reason, "authentication-required");
+			doesNotMatch(JSON.stringify(rejected), /CLIO_ACP_TEST_ONLY_KEY|settings.yaml|credentials.yaml/);
+			strictEqual(client.updates.length, 0);
+			strictEqual(fixture.requests.length, 0);
+			await client.close(sessionId);
+			strictEqual(await runCli(["auth", "login", "acp-local", "--api-key", "synthetic-service-test-key"], target.env), 0);
+			client = launch(target, project);
+			await client.request("initialize", { protocolVersion: 1 });
+			await client.request("session/load", { sessionId, cwd: project, mcpServers: [] });
+			const turn = await client.request<{ stopReason: string }>("session/prompt", {
+				sessionId,
+				prompt: [{ type: "text", text: "hi" }],
+			});
+			strictEqual(turn.stopReason, "end_turn");
+			match(JSON.stringify(client.updates), /SAVED_CREDENTIAL_REPLY/);
+			doesNotMatch(JSON.stringify(client.updates), /synthetic-service-test-key/);
+			strictEqual(fixture.requests.length, 1);
+			await client.close(sessionId);
+		} finally {
+			await client?.killAndWait();
+			await closeServer(fixture.server);
+			target.cleanup();
+		}
+	});
+
 	it("serves a real text turn and rejects an unadmitted prompt before updates", async () => {
 		const configured = home();
 		const empty = home();

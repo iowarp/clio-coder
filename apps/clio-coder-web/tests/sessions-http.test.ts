@@ -6,7 +6,32 @@ import { setTimeout } from "node:timers/promises";
 import { Problem } from "../contracts/common.js";
 import type { Event } from "../contracts/events.js";
 import { routes } from "../contracts/routes.js";
+import { acpProblem } from "../server/acp/client.js";
+import { AcpProtocolError } from "../server/clio/http-shims.js";
 import { harness, json } from "./harness/app.js";
+
+test("ACP problems explain missing credentials and failed turns without forwarding upstream prose", () => {
+	const failure = (code: unknown, reason?: unknown) =>
+		acpProblem(
+			new AcpProtocolError("private-provider-secret", {
+				message: "private-provider-secret",
+				data: { _meta: { "clio-coder/error": { code, reason } } },
+			}),
+		).problem;
+	const missing = failure("prompt_not_admitted", "authentication-required");
+	assert.equal(missing.code, "upstream_acp");
+	assert.match(missing.detail, /credentials.*selected target/);
+	assert.match(missing.detail, /clio-coder auth login/);
+	assert.match(missing.detail, /close and reopen/);
+	assert.match(failure("turn_failed").detail, /session's trace/);
+	for (const problem of [
+		missing,
+		failure("turn_failed"),
+		failure("prompt_not_admitted", "private-provider-secret"),
+		failure("private-provider-secret"),
+	])
+		assert.doesNotMatch(JSON.stringify(problem), /private-provider-secret/);
+});
 
 async function waitUntil(check: () => boolean) {
 	for (let i = 0; i < 200; i++) {

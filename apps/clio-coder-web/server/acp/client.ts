@@ -25,6 +25,16 @@ export function acpProblem(error: unknown) {
 	if (error instanceof AcpProtocolError) {
 		const detail = record(record(record(error.data).data)._meta)["clio-coder/error"];
 		const code = record(detail).code;
+		if (code === "prompt_not_admitted" && record(detail).reason === "authentication-required")
+			return new AppProblem(
+				"upstream_acp",
+				"Clio cannot access credentials for the selected target. Connect it with clio-coder auth login <target> in a terminal, then close and reopen this session. Background apps use Clio's saved credentials; terminal-only API keys are unavailable after login or restart.",
+			);
+		if (code === "turn_failed")
+			return new AppProblem(
+				"upstream_acp",
+				"Clio could not complete this turn. Probe the selected target and check this session's trace for the cause, then retry. (turn_failed)",
+			);
 		return new AppProblem(
 			"upstream_acp",
 			`Clio ACP refused the request (${typeof code === "string" && /^[a-z_]{1,80}$/.test(code) ? code : "protocol_error"}).`,
