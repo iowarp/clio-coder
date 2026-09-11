@@ -862,13 +862,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		deps.bus?.on(BusChannels.ConfigHotReload, () => {
 			context.invalidateSessionPromptCache();
 		}) ?? null;
-	// A committed extension generation with new content can change the skill
-	// and prompt inputs the session prompt compiles from; same invalidation.
-	const unsubscribeExtensionsReload =
-		deps.bus?.on(BusChannels.ExtensionsReloaded, (payload) => {
-			if (payload.changed) context.invalidateSessionPromptCache();
-		}) ?? null;
-
 	const unsubscribePluginsReload =
 		deps.bus?.on(BusChannels.PluginsReloaded, () => {
 			context.invalidateSessionPromptCache();
@@ -1572,7 +1565,6 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		dispose(): void {
 			unsubscribeConfigReload?.();
-			unsubscribeExtensionsReload?.();
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();
 			unsubscribePrewarmCompaction();

@@ -714,10 +714,8 @@ export interface CompactionPayload {
 /**
  * Published on {@link BusChannels.ExtensionsReloaded} by the composition
  * root after a new extension generation and its user-hook registrations
- * have both been committed. Consumers that cache extension-sourced data
- * (prompt fragments, agent recipes, the session prompt) refresh on
- * `changed`; an unchanged generation carries the previous digest and needs
- * no work. Never published between the two commits.
+ * have both been committed. Never published between the two commits.
+ * Recipe and prompt consumers subscribe to PluginsReloaded instead.
  */
 export interface ExtensionsReloadedPayload {
 	generation: number;

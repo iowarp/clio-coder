@@ -205,7 +205,7 @@ export function createPromptsBundle(
 
 	let unsubscribeContextSources: (() => void) | null = null;
 	let unsubscribeHotReload: (() => void) | null = null;
-	let unsubscribeExtensionsReload: (() => void) | null = null;
+	let unsubscribePluginsReload: (() => void) | null = null;
 	const extension: DomainExtension = {
 		async start() {
 			try {
@@ -226,28 +226,15 @@ export function createPromptsBundle(
 				if (!diffTouchesFragments(paths)) return;
 				reload();
 			});
-			// Extension prompt and skill roots feed fragments through the
-			// resources domain; a committed generation with new content means
-			// the table must be rebuilt from the new roots.
-			const onResourceReload = (payload: unknown) => {
-				if ((payload as { changed?: unknown } | undefined)?.changed !== true) return;
-				reload();
-			};
-			const unsubscribe = [
-				context.bus.on(BusChannels.ExtensionsReloaded, onResourceReload),
-				context.bus.on(BusChannels.PluginsReloaded, () => reload()),
-			];
-			unsubscribeExtensionsReload = () => {
-				for (const stop of unsubscribe) stop();
-			};
+			unsubscribePluginsReload = context.bus.on(BusChannels.PluginsReloaded, () => reload());
 		},
 		async stop() {
 			unsubscribeContextSources?.();
 			unsubscribeContextSources = null;
 			unsubscribeHotReload?.();
 			unsubscribeHotReload = null;
-			unsubscribeExtensionsReload?.();
-			unsubscribeExtensionsReload = null;
+			unsubscribePluginsReload?.();
+			unsubscribePluginsReload = null;
 			sessionSourceSnapshots.clear();
 		},
 	};

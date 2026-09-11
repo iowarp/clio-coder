@@ -4,10 +4,12 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { BusChannels, type PluginsReloadedPayload } from "../../src/core/bus-events.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import { disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
+import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -15,6 +17,48 @@ const recipe = readFileSync(
 	fileURLToPath(new URL("../../src/domains/agents/builtins/researcher.md", import.meta.url)),
 	"utf8",
 ).replace("audience: shadow", "audience: custom");
+
+it("refreshes agent recipes and prompt inputs only on plugin resource reload", async () => {
+	const env = await isolateClioEnv("clio-coder-reload-ownership-");
+	const originalCwd = process.cwd();
+	const bus = createSafeEventBus();
+	const context: DomainContext = {
+		bus,
+		getContract(name) {
+			if (name === "config") return { get: () => structuredClone(DEFAULT_SETTINGS) } as never;
+			if (name === "agents") return agents.contract as never;
+			return undefined;
+		},
+	};
+	const agents = createAgentsBundle(context);
+	const prompts = createPromptsBundle(context, { noContextFiles: true });
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd);
+		process.chdir(cwd);
+		await agents.extension.start();
+		await prompts.extension.start();
+		const revision = agents.contract.revision();
+		const epoch = prompts.contract.inputEpoch();
+		mkdirSync(join(env.dir, "config/agents"), { recursive: true });
+		writeFileSync(join(env.dir, "config/agents/reload-owned-agent.md"), recipe);
+		const generation = { generation: 2, previousGeneration: 1, changed: true, digest: "fixture" };
+		bus.emit(BusChannels.ExtensionsReloaded, generation);
+		strictEqual(agents.contract.get("reload-owned-agent"), null);
+		strictEqual(agents.contract.revision(), revision);
+		strictEqual(prompts.contract.inputEpoch(), epoch);
+		bus.emit(BusChannels.PluginsReloaded, generation);
+		ok(agents.contract.get("reload-owned-agent"));
+		ok(agents.contract.revision() > revision);
+		ok(prompts.contract.inputEpoch() !== epoch);
+	} finally {
+		await prompts.extension.stop?.();
+		await agents.extension.stop?.();
+		process.chdir(originalCwd);
+		env.restore();
+	}
+});
+
 function packageFixture(root: string, name: string, agent: string): void {
 	mkdirSync(join(root, "agents"), { recursive: true });
 	writeFileSync(join(root, "agents", `${agent}.md`), recipe);

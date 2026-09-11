@@ -29,7 +29,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		rediscoveryPending = false;
 	}
 
-	let unsubscribeExtensionsReload: (() => void) | null = null;
+	let unsubscribePluginsReload: (() => void) | null = null;
 	const extension: DomainExtension = {
 		async start() {
 			discover();
@@ -69,17 +69,11 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 					);
 				}
 			};
-			const unsubscribe = [
-				_context.bus.on(BusChannels.ExtensionsReloaded, onResourceReload),
-				_context.bus.on(BusChannels.PluginsReloaded, onResourceReload),
-			];
-			unsubscribeExtensionsReload = () => {
-				for (const stop of unsubscribe) stop();
-			};
+			unsubscribePluginsReload = _context.bus.on(BusChannels.PluginsReloaded, onResourceReload);
 		},
 		async stop() {
-			unsubscribeExtensionsReload?.();
-			unsubscribeExtensionsReload = null;
+			unsubscribePluginsReload?.();
+			unsubscribePluginsReload = null;
 		},
 	};
 
