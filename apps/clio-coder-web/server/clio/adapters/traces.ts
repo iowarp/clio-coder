@@ -1,6 +1,5 @@
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative } from "node:path";
-import type { SQLInputValue } from "node:sqlite";
 import { Type } from "typebox";
 import { Value } from "typebox/value";
 import { clioStateDir } from "../../../../../src/core/xdg.js";
@@ -12,7 +11,7 @@ import {
 	traceDatabasePath,
 } from "../../../../../src/domains/observability/trace-store.js";
 import { Id } from "../../../contracts/common.js";
-import type { TraceRequest, TraceRun } from "../../../contracts/traces.js";
+import type { TraceRequest } from "../../../contracts/traces.js";
 import { AppProblem } from "../../services/problem.js";
 
 const Cursor = Type.Object({ startedAt: Type.String({ maxLength: 64 }), runId: Id }, { additionalProperties: false });
@@ -42,7 +41,6 @@ function contained(state: string, directory: string, filename: string) {
 export class TraceAdapter {
 	private reader: TraceReader | undefined;
 	private identity = "";
-	private source = "source";
 	private close() {
 		this.reader?.close();
 		this.reader = undefined;
@@ -56,10 +54,6 @@ export class TraceAdapter {
 		if (!this.reader) {
 			this.reader = new TraceReader(path);
 			this.identity = identity;
-			const columns = this.reader.db.prepare("PRAGMA table_info(runs)").all();
-			this.source = columns.some((row) => row.name === "source")
-				? "source"
-				: "CASE WHEN assignment_id = 'session' THEN 'session' ELSE 'dispatch' END";
 		}
 		const version = this.reader.db.prepare("SELECT value FROM meta WHERE key='schema_version'").get();
 		if (Number(version?.value) !== TRACE_SCHEMA_VERSION) {
@@ -79,39 +73,15 @@ export class TraceAdapter {
 			if (input.kind === "status")
 				return { available: true, schemaVersion: TRACE_SCHEMA_VERSION, retentionPolicy: resolveTraceRetentionPolicy() };
 			if (input.kind === "runs") {
-				const { query } = input,
-					where: string[] = [],
-					args: SQLInputValue[] = [];
-				if (cursor) {
-					where.push("(started_at < ? OR (started_at = ? AND run_id < ?))");
-					args.push(cursor.startedAt, cursor.startedAt, cursor.runId);
-				}
-				if (query.source) {
-					where.push(`(${this.source}) = ?`);
-					args.push(query.source);
-				}
-				if (query.status) {
-					where.push("status = ?");
-					args.push(query.status);
-				}
-				if (query.q) {
-					where.push("(run_id LIKE ? OR agent LIKE ? OR model LIKE ? OR status LIKE ? OR request LIKE ?)");
-					args.push(...Array<string>(5).fill(`%${query.q}%`));
-				}
-				const limit = query.limit ?? 50;
-				const rows = reader.db
-					.prepare(
-						`SELECT *, ${this.source} AS source FROM runs ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, run_id DESC LIMIT ?`,
-					)
-					.all(...args, limit + 1) as unknown as TraceRun[];
-				const runs = rows.slice(0, limit),
-					last = runs.at(-1);
+				const { source, status, q, limit } = input.query;
+				const page = reader.runsPage({
+					...(cursor ? { before: cursor } : {}),
+					...(limit !== undefined ? { limit } : {}),
+					filter: { ...(source ? { source } : {}), ...(status ? { status } : {}), ...(q ? { q } : {}) },
+				});
 				return {
-					runs,
-					nextCursor:
-						rows.length > limit && last
-							? Buffer.from(JSON.stringify({ startedAt: last.started_at, runId: last.run_id })).toString("base64url")
-							: null,
+					runs: page.runs,
+					nextCursor: page.nextBefore ? Buffer.from(JSON.stringify(page.nextBefore)).toString("base64url") : null,
 				};
 			}
 			const run = reader.run(input.runId);

@@ -1200,13 +1200,24 @@ function traceDatabaseFootprintBytes(path: string): number {
 	return total;
 }
 
+export interface TraceRunCursor {
+	startedAt: string;
+	runId: string;
+}
+
+export interface TraceRunsPageOptions {
+	before?: TraceRunCursor;
+	limit?: number;
+	filter?: { source?: TraceRunRow["source"]; status?: TraceRunRow["status"]; q?: string };
+}
+
 export class TraceReader {
 	readonly db: DatabaseSync;
 	/**
 	 * `runs.source` is an additive column (see ensureRunSourceColumn) a
 	 * TraceStore writer backfills in place. A read-only reader can open a
 	 * database no writer has touched since before the column existed — the
-	 * trace viewer opening a dormant install's trace.sqlite fresh is the
+	 * web application opening a dormant install's trace.sqlite fresh is the
 	 * realistic case — and cannot ALTER TABLE to fix that itself, so it
 	 * derives the same value the migration would have written instead.
 	 */
@@ -1235,6 +1246,40 @@ export class TraceReader {
 		return this.db
 			.prepare(`SELECT ${this.runsSourceExpr} FROM runs ORDER BY started_at DESC LIMIT ?`)
 			.all(clampInt(limit, 1, 500)) as unknown as TraceRunRow[];
+	}
+
+	/** Stable keyset pagination, including read-only databases predating runs.source. */
+	runsPage({ before, limit = 50, filter = {} }: TraceRunsPageOptions = {}): {
+		runs: TraceRunRow[];
+		nextBefore: TraceRunCursor | null;
+	} {
+		const size = clampInt(limit, 1, 500);
+		const where: string[] = [],
+			args: SQLInputValue[] = [];
+		if (before) {
+			where.push("(started_at < ? OR (started_at = ? AND run_id < ?))");
+			args.push(before.startedAt, before.startedAt, before.runId);
+		}
+		if (filter.source) {
+			where.push("source = ?");
+			args.push(filter.source);
+		}
+		if (filter.status) {
+			where.push("status = ?");
+			args.push(filter.status);
+		}
+		if (filter.q) {
+			where.push("(run_id LIKE ? OR agent LIKE ? OR model LIKE ? OR status LIKE ? OR request LIKE ?)");
+			args.push(...Array<string>(5).fill(`%${filter.q}%`));
+		}
+		const rows = this.db
+			.prepare(
+				`SELECT * FROM (SELECT ${this.runsSourceExpr} FROM runs) ${where.length ? `WHERE ${where.join(" AND ")}` : ""} ORDER BY started_at DESC, run_id DESC LIMIT ?`,
+			)
+			.all(...args, size + 1) as unknown as TraceRunRow[];
+		const runs = rows.slice(0, size),
+			last = runs.at(-1);
+		return { runs, nextBefore: rows.length > size && last ? { startedAt: last.started_at, runId: last.run_id } : null };
 	}
 
 	run(runId: string): TraceRunRow | null {

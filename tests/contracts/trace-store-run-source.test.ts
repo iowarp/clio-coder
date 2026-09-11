@@ -8,7 +8,7 @@
  * the same way `processes.host`/`processes.birth_token` were added without a
  * schema-version bump.
  */
-import { strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -180,6 +180,34 @@ describe("trace-store runs.source column and its migration", () => {
 			const bySource = Object.fromEntries(reader.runs(10).map((row) => [row.run_id, row.source]));
 			strictEqual(bySource["run-legacy-dispatch"], "dispatch");
 			strictEqual(bySource["run-legacy-session"], "session");
+			const first = reader.runsPage({ limit: 1 });
+			deepStrictEqual(
+				first.runs.map((row) => row.run_id),
+				["run-legacy-session"],
+			);
+			strictEqual(first.nextBefore?.runId, "run-legacy-session");
+			ok(first.nextBefore);
+			const second = reader.runsPage({ before: first.nextBefore, limit: 1 });
+			deepStrictEqual(
+				second.runs.map((row) => row.run_id),
+				["run-legacy-dispatch"],
+			);
+			strictEqual(second.nextBefore, null);
+			deepStrictEqual(
+				reader
+					.runsPage({ filter: { source: "session", status: "success", q: "test-model" } })
+					.runs.map((row) => row.run_id),
+				["run-legacy-session"],
+			);
+			strictEqual(reader.runsPage({ filter: { source: "dispatch", q: "' OR 1=1 --" } }).runs.length, 0);
+			strictEqual(reader.runsPage({ limit: Number.NaN }).runs.length, 1);
+			strictEqual(
+				reader.db
+					.prepare("PRAGMA table_info(runs)")
+					.all()
+					.some((row) => row.name === "source"),
+				false,
+			);
 		} finally {
 			reader.close();
 		}

@@ -152,3 +152,5 @@ The run page shows the request, phase waterfall, duration, costs, events with
 payloads, gate decisions, processes, and receipt provenance. Unrecorded fields
 remain absent rather than becoming zero. The typed route table and OpenAPI in
 `apps/clio-coder-web/contracts/` define query parameters and response schemas.
+
+The shared `TraceReader.runsPage({before, limit, filter})` seam owns run-list pagination for the web API. It orders by `started_at DESC, run_id DESC`, returns a bounded page and `nextBefore`, and combines source, status, and search filters with bound SQL parameters. A read-only legacy database derives `source` without a migration. The app validates and encodes the cursor; it does not duplicate pagination SQL.
