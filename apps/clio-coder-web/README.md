@@ -66,7 +66,8 @@ client; tests reject semantic drift in the checked-in JSON.
 `/usr/bin/google-chrome`; pass `--chrome=/absolute/path` to override it. The smoke
 runs against isolated app/ACP fixtures at 1600, 1050, and 390 px, blocks external
 requests, checks accessibility and page overflow, and writes its report and
-screenshots to `dist/smoke/`. It requires a current client build. The application
+screenshots to a temporary directory outside the checkout, printed in the report
+(`TMPDIR` controls its parent). It requires a current client build. The application
 has light/dark themes, a keyboard-accessible mobile navigation dialog, and a
 shared safe Markdown, code, and diagram renderer; [DESIGN.md](DESIGN.md) records
 the retained rules. Fonts are served locally.
@@ -99,8 +100,8 @@ and the domain verifies all asset and document checksums. Process creation enter
 worker-only adapters. These are code-level controls; Node permission-mode
 evaluation is S9.
 
-Operations and idempotency keys live for this server epoch. At most 256 completed
-snapshots are retained in completion order, while active operations are retained.
+Operations and idempotency keys live for this server epoch. Completed snapshots
+are retained in completion order up to 256 records and 16 MiB, while active operations are retained.
 An evicted operation's key still maps to its original id, preventing a duplicate
 mutation within the epoch; its snapshot returns 404. Progress is bounded to 256
 entries and 64 KiB. Installs and removals have no cancel control because the
@@ -137,4 +138,13 @@ permission/control verification and measured reconnect behavior. [S5 evidence](n
 records renderer, design, and browser accessibility verification. [S6 evidence](notes/2026-09-11-S6.md)
 records documentation, link and blueprint checks. [S7a evidence](notes/2026-09-11-S7a.md)
 records layered settings, customization, redaction and worker-deadline checks.
-S1-S7a are complete; S7b adds the CLI runner and target operations.
+S1-S7b provide sessions, trace and documentation browsing, settings inspection,
+and target operations. Target listing and offline models/profiles/bindings are
+workspace REST reads. Target probe, use, and removal return operation IDs;
+use/removal run Clio's canonical commands and return typed follow-up reads.
+Probes are cancellable and check all configured endpoints, matching the CLI.
+Adding targets remains a CLI configuration task because the current CLI has no
+non-interactive JSON add contract. CLI children use fixed arguments, a four-child
+limit, 60-second deadlines, and 8 MiB stdout / 256 KiB stderr limits. Stderr never
+crosses the REST boundary. Finished-operation events omit snapshots larger than
+256 KiB; clients retrieve those through the operation REST endpoint.

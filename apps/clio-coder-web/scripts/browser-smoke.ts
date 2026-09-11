@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
@@ -11,8 +12,7 @@ import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
 const { values } = parseArgs({ options: { chrome: { type: "string", default: "/usr/bin/google-chrome" } } });
-const output = fileURLToPath(new URL("../dist/smoke/", import.meta.url));
-await mkdir(output, { recursive: true });
+const output = await mkdtemp(join(tmpdir(), "clio-web-browser-"));
 let origin = "http://127.0.0.1:0";
 const h = await harness(
 	{ installDelayMs: 150 },
@@ -195,6 +195,20 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("config-graph-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByRole("link", { name: "Targets", exact: true }).click();
+		await page.getByRole("article", { name: "fixture-target", exact: true }).waitFor();
+		await check("targets");
+		await page.getByRole("button", { name: "Use for chat & fleet", exact: true }).click();
+		await page.getByRole("heading", { name: "Target operation · succeeded", exact: true }).waitFor();
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("targets-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByRole("link", { name: "Routing", exact: true }).click();
+		await page.getByRole("heading", { name: /^Agent bindings ·/ }).waitFor();
+		await check("routing");
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("routing-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await page.getByRole("button", { name: "New session", exact: true }).click();
@@ -293,6 +307,7 @@ try {
 	success = true;
 } finally {
 	const report = {
+		output,
 		success,
 		chrome: browser.version(),
 		checks,

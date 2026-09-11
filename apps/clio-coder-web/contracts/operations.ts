@@ -1,5 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
+import { TargetOperationResult } from "./targets-cli.js";
 import { ToolResult } from "./toolchain.js";
 
 export const Progress = Type.Object({ at: Type.String(), message: Type.String() }, { additionalProperties: false });
@@ -11,13 +12,15 @@ const base = {
 	startedAt: Type.String(),
 	progress: Type.Array(Progress, { maxItems: 256 }),
 };
+export const OperationResult = Type.Union([ToolResult, TargetOperationResult]);
+export type OperationResult = Static<typeof OperationResult>;
 export const Operation = Type.Union([
 	Type.Object(
 		{ ...base, status: Type.Union([Type.Literal("queued"), Type.Literal("running")]) },
 		{ additionalProperties: false },
 	),
 	Type.Object(
-		{ ...base, status: Type.Literal("succeeded"), finishedAt: Type.String(), result: ToolResult },
+		{ ...base, status: Type.Literal("succeeded"), finishedAt: Type.String(), result: OperationResult },
 		{ additionalProperties: false },
 	),
 	Type.Object(

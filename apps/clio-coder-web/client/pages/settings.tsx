@@ -54,14 +54,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 			<p className="eyebrow">Configuration / {view === "settings" ? "Effective values" : "Sources and precedence"}</p>
 			<h1>{view === "settings" ? "Effective settings" : "Why Clio behaves this way"}</h1>
 			<WorkspacePicker selection={selection} />
-			<nav className="settings-tabs" aria-label="Configuration views">
-				<Link aria-current={view === "settings" ? "page" : undefined} to={`/settings?workspace=${id}`}>
-					Settings
-				</Link>
-				<Link aria-current={view === "why" ? "page" : undefined} to={`/settings/why?workspace=${id}`}>
-					Why
-				</Link>
-			</nav>
+			<ConfigurationTabs id={id} active={view} />
 			{view === "settings" &&
 				id &&
 				(settings.isPending ? (
@@ -184,5 +177,22 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 					</>
 				))}
 		</section>
+	);
+}
+
+export function ConfigurationTabs({ id, active }: { id: string; active: "settings" | "why" | "targets" | "routing" }) {
+	return (
+		<nav className="settings-tabs" aria-label="Configuration views">
+			{[
+				{ key: "settings", label: "Settings", path: "/settings" },
+				{ key: "why", label: "Why", path: "/settings/why" },
+				{ key: "targets", label: "Targets", path: "/settings/targets" },
+				{ key: "routing", label: "Routing", path: "/settings/routing" },
+			].map((tab) => (
+				<Link key={tab.key} aria-current={active === tab.key ? "page" : undefined} to={`${tab.path}?workspace=${id}`}>
+					{tab.label}
+				</Link>
+			))}
+		</nav>
 	);
 }

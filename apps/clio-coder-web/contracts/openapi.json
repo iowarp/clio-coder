@@ -6,6 +6,960 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/workspaces/{id}/targets": {
+			"get": {
+				"operationId": "targetsList",
+				"summary": "Configured targets through the canonical CLI",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["targets", "truncated"],
+									"properties": {
+										"targets": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"runtime",
+													"url",
+													"defaultModel",
+													"available",
+													"health",
+													"tier",
+													"models",
+													"modelsTruncated",
+													"contextWindow"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"runtime": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"url": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 2048
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"defaultModel": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"available": {
+														"type": "boolean"
+													},
+													"health": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"tier": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"models": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"maxItems": 200
+													},
+													"modelsTruncated": {
+														"type": "boolean"
+													},
+													"contextWindow": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 200
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/routing": {
+			"get": {
+				"operationId": "routing",
+				"summary": "Offline models, fleet profiles and agent bindings",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["models", "profiles", "bindings", "truncated"],
+									"properties": {
+										"models": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["target", "runtime", "id", "capabilities", "context", "maxOutputTokens", "state"],
+												"properties": {
+													"target": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"runtime": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"id": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"capabilities": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"context": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"maxOutputTokens": {
+														"anyOf": [
+															{
+																"type": "number"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"state": {
+														"type": "string",
+														"maxLength": 256
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 2000
+										},
+										"profiles": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["name", "target", "runtime", "model", "thinkingLevel"],
+												"properties": {
+													"name": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"target": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"runtime": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"model": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"thinkingLevel": {
+														"type": "string",
+														"maxLength": 256
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 2000
+										},
+										"bindings": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["agentId", "profile", "target", "model", "resolved"],
+												"properties": {
+													"agentId": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"profile": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"target": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"model": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"resolved": {
+														"type": "boolean"
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 2000
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/targets/{targetId}/probe": {
+			"post": {
+				"operationId": "targetsProbe",
+				"summary": "Probe configured targets and return this target's status",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "targetId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/targets/{targetId}/use": {
+			"post": {
+				"operationId": "targetsUse",
+				"summary": "Use a target for chat and fleet through the CLI",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "targetId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/targets/{targetId}/remove": {
+			"post": {
+				"operationId": "targetsRemove",
+				"summary": "Remove a configured target through the CLI",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "targetId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/settings": {
 			"get": {
 				"operationId": "workspaceSettings",
@@ -12428,18 +13382,294 @@
 													"type": "string"
 												},
 												"result": {
-													"type": "object",
-													"required": ["id", "message"],
-													"properties": {
-														"id": {
-															"type": "string",
-															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "message"],
+															"properties": {
+																"id": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
 														},
-														"message": {
-															"type": "string"
+														{
+															"type": "object",
+															"required": ["kind", "id", "message", "exitCode", "targets"],
+															"properties": {
+																"kind": {
+																	"type": "string",
+																	"const": "targets"
+																},
+																"id": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																},
+																"message": {
+																	"type": "string"
+																},
+																"exitCode": {
+																	"type": "number",
+																	"const": 0
+																},
+																"targets": {
+																	"type": "object",
+																	"required": ["targets", "truncated"],
+																	"properties": {
+																		"targets": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": [
+																					"id",
+																					"runtime",
+																					"url",
+																					"defaultModel",
+																					"available",
+																					"health",
+																					"tier",
+																					"models",
+																					"modelsTruncated",
+																					"contextWindow"
+																				],
+																				"properties": {
+																					"id": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"runtime": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"url": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"maxLength": 2048
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					},
+																					"defaultModel": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"maxLength": 256
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					},
+																					"available": {
+																						"type": "boolean"
+																					},
+																					"health": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"tier": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"models": {
+																						"type": "array",
+																						"items": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"maxItems": 200
+																					},
+																					"modelsTruncated": {
+																						"type": "boolean"
+																					},
+																					"contextWindow": {
+																						"anyOf": [
+																							{
+																								"type": "number"
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					}
+																				},
+																				"additionalProperties": false
+																			},
+																			"maxItems": 200
+																		},
+																		"truncated": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"settings": {
+																	"type": "object",
+																	"required": ["rows", "layers", "issues"],
+																	"properties": {
+																		"rows": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["key", "source", "value", "redacted"],
+																				"properties": {
+																					"key": {
+																						"type": "string"
+																					},
+																					"source": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"value": {
+																						"anyOf": [
+																							{
+																								"type": "string"
+																							},
+																							{
+																								"type": "number"
+																							},
+																							{
+																								"type": "boolean"
+																							},
+																							{
+																								"type": "null"
+																							},
+																							{
+																								"type": "array",
+																								"items": {},
+																								"maxItems": 0
+																							},
+																							{
+																								"type": "object",
+																								"properties": {},
+																								"additionalProperties": false
+																							}
+																						]
+																					},
+																					"redacted": {
+																						"type": "boolean"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"layers": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["origin", "path", "present"],
+																				"properties": {
+																					"origin": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"path": {
+																						"type": "string"
+																					},
+																					"present": {
+																						"type": "boolean"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"issues": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["origin", "path", "kind", "message"],
+																				"properties": {
+																					"origin": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"path": {
+																						"type": "string"
+																					},
+																					"kind": {
+																						"type": "string"
+																					},
+																					"message": {
+																						"type": "string"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
 														}
-													},
-													"additionalProperties": false
+													]
 												}
 											},
 											"additionalProperties": false
@@ -12867,18 +14097,294 @@
 													"type": "string"
 												},
 												"result": {
-													"type": "object",
-													"required": ["id", "message"],
-													"properties": {
-														"id": {
-															"type": "string",
-															"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													"anyOf": [
+														{
+															"type": "object",
+															"required": ["id", "message"],
+															"properties": {
+																"id": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																},
+																"message": {
+																	"type": "string"
+																}
+															},
+															"additionalProperties": false
 														},
-														"message": {
-															"type": "string"
+														{
+															"type": "object",
+															"required": ["kind", "id", "message", "exitCode", "targets"],
+															"properties": {
+																"kind": {
+																	"type": "string",
+																	"const": "targets"
+																},
+																"id": {
+																	"type": "string",
+																	"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																},
+																"message": {
+																	"type": "string"
+																},
+																"exitCode": {
+																	"type": "number",
+																	"const": 0
+																},
+																"targets": {
+																	"type": "object",
+																	"required": ["targets", "truncated"],
+																	"properties": {
+																		"targets": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": [
+																					"id",
+																					"runtime",
+																					"url",
+																					"defaultModel",
+																					"available",
+																					"health",
+																					"tier",
+																					"models",
+																					"modelsTruncated",
+																					"contextWindow"
+																				],
+																				"properties": {
+																					"id": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"runtime": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"url": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"maxLength": 2048
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					},
+																					"defaultModel": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"maxLength": 256
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					},
+																					"available": {
+																						"type": "boolean"
+																					},
+																					"health": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"tier": {
+																						"type": "string",
+																						"maxLength": 256
+																					},
+																					"models": {
+																						"type": "array",
+																						"items": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"maxItems": 200
+																					},
+																					"modelsTruncated": {
+																						"type": "boolean"
+																					},
+																					"contextWindow": {
+																						"anyOf": [
+																							{
+																								"type": "number"
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					}
+																				},
+																				"additionalProperties": false
+																			},
+																			"maxItems": 200
+																		},
+																		"truncated": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																},
+																"settings": {
+																	"type": "object",
+																	"required": ["rows", "layers", "issues"],
+																	"properties": {
+																		"rows": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["key", "source", "value", "redacted"],
+																				"properties": {
+																					"key": {
+																						"type": "string"
+																					},
+																					"source": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"value": {
+																						"anyOf": [
+																							{
+																								"type": "string"
+																							},
+																							{
+																								"type": "number"
+																							},
+																							{
+																								"type": "boolean"
+																							},
+																							{
+																								"type": "null"
+																							},
+																							{
+																								"type": "array",
+																								"items": {},
+																								"maxItems": 0
+																							},
+																							{
+																								"type": "object",
+																								"properties": {},
+																								"additionalProperties": false
+																							}
+																						]
+																					},
+																					"redacted": {
+																						"type": "boolean"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"layers": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["origin", "path", "present"],
+																				"properties": {
+																					"origin": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"path": {
+																						"type": "string"
+																					},
+																					"present": {
+																						"type": "boolean"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"issues": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["origin", "path", "kind", "message"],
+																				"properties": {
+																					"origin": {
+																						"anyOf": [
+																							{
+																								"type": "string",
+																								"const": "built-in"
+																							},
+																							{
+																								"type": "string",
+																								"const": "user"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project"
+																							},
+																							{
+																								"type": "string",
+																								"const": "project.local"
+																							},
+																							{
+																								"type": "string",
+																								"const": "cli"
+																							}
+																						]
+																					},
+																					"path": {
+																						"type": "string"
+																					},
+																					"kind": {
+																						"type": "string"
+																					},
+																					"message": {
+																						"type": "string"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"additionalProperties": false
 														}
-													},
-													"additionalProperties": false
+													]
 												}
 											},
 											"additionalProperties": false
@@ -18415,7 +19921,7 @@
 							},
 							"payload": {
 								"type": "object",
-								"required": ["resource", "revision", "operation"],
+								"required": ["resource", "revision", "kind"],
 								"properties": {
 									"resource": {
 										"type": "string",
@@ -18424,6 +19930,9 @@
 									"revision": {
 										"type": "integer",
 										"minimum": 1
+									},
+									"kind": {
+										"type": "string"
 									},
 									"operation": {
 										"anyOf": [
@@ -18536,18 +20045,294 @@
 														"type": "string"
 													},
 													"result": {
-														"type": "object",
-														"required": ["id", "message"],
-														"properties": {
-															"id": {
-																"type": "string",
-																"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["id", "message"],
+																"properties": {
+																	"id": {
+																		"type": "string",
+																		"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																	},
+																	"message": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
 															},
-															"message": {
-																"type": "string"
+															{
+																"type": "object",
+																"required": ["kind", "id", "message", "exitCode", "targets"],
+																"properties": {
+																	"kind": {
+																		"type": "string",
+																		"const": "targets"
+																	},
+																	"id": {
+																		"type": "string",
+																		"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+																	},
+																	"message": {
+																		"type": "string"
+																	},
+																	"exitCode": {
+																		"type": "number",
+																		"const": 0
+																	},
+																	"targets": {
+																		"type": "object",
+																		"required": ["targets", "truncated"],
+																		"properties": {
+																			"targets": {
+																				"type": "array",
+																				"items": {
+																					"type": "object",
+																					"required": [
+																						"id",
+																						"runtime",
+																						"url",
+																						"defaultModel",
+																						"available",
+																						"health",
+																						"tier",
+																						"models",
+																						"modelsTruncated",
+																						"contextWindow"
+																					],
+																					"properties": {
+																						"id": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"runtime": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"url": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"maxLength": 2048
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"defaultModel": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"maxLength": 256
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						},
+																						"available": {
+																							"type": "boolean"
+																						},
+																						"health": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"tier": {
+																							"type": "string",
+																							"maxLength": 256
+																						},
+																						"models": {
+																							"type": "array",
+																							"items": {
+																								"type": "string",
+																								"maxLength": 256
+																							},
+																							"maxItems": 200
+																						},
+																						"modelsTruncated": {
+																							"type": "boolean"
+																						},
+																						"contextWindow": {
+																							"anyOf": [
+																								{
+																									"type": "number"
+																								},
+																								{
+																									"type": "null"
+																								}
+																							]
+																						}
+																					},
+																					"additionalProperties": false
+																				},
+																				"maxItems": 200
+																			},
+																			"truncated": {
+																				"type": "boolean"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	"settings": {
+																		"type": "object",
+																		"required": ["rows", "layers", "issues"],
+																		"properties": {
+																			"rows": {
+																				"type": "array",
+																				"items": {
+																					"type": "object",
+																					"required": ["key", "source", "value", "redacted"],
+																					"properties": {
+																						"key": {
+																							"type": "string"
+																						},
+																						"source": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"const": "built-in"
+																								},
+																								{
+																									"type": "string",
+																									"const": "user"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project.local"
+																								},
+																								{
+																									"type": "string",
+																									"const": "cli"
+																								}
+																							]
+																						},
+																						"value": {
+																							"anyOf": [
+																								{
+																									"type": "string"
+																								},
+																								{
+																									"type": "number"
+																								},
+																								{
+																									"type": "boolean"
+																								},
+																								{
+																									"type": "null"
+																								},
+																								{
+																									"type": "array",
+																									"items": {},
+																									"maxItems": 0
+																								},
+																								{
+																									"type": "object",
+																									"properties": {},
+																									"additionalProperties": false
+																								}
+																							]
+																						},
+																						"redacted": {
+																							"type": "boolean"
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"layers": {
+																				"type": "array",
+																				"items": {
+																					"type": "object",
+																					"required": ["origin", "path", "present"],
+																					"properties": {
+																						"origin": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"const": "built-in"
+																								},
+																								{
+																									"type": "string",
+																									"const": "user"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project.local"
+																								},
+																								{
+																									"type": "string",
+																									"const": "cli"
+																								}
+																							]
+																						},
+																						"path": {
+																							"type": "string"
+																						},
+																						"present": {
+																							"type": "boolean"
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			},
+																			"issues": {
+																				"type": "array",
+																				"items": {
+																					"type": "object",
+																					"required": ["origin", "path", "kind", "message"],
+																					"properties": {
+																						"origin": {
+																							"anyOf": [
+																								{
+																									"type": "string",
+																									"const": "built-in"
+																								},
+																								{
+																									"type": "string",
+																									"const": "user"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project"
+																								},
+																								{
+																									"type": "string",
+																									"const": "project.local"
+																								},
+																								{
+																									"type": "string",
+																									"const": "cli"
+																								}
+																							]
+																						},
+																						"path": {
+																							"type": "string"
+																						},
+																						"kind": {
+																							"type": "string"
+																						},
+																						"message": {
+																							"type": "string"
+																						}
+																					},
+																					"additionalProperties": false
+																				}
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"additionalProperties": false
 															}
-														},
-														"additionalProperties": false
+														]
 													}
 												},
 												"additionalProperties": false

@@ -30,10 +30,16 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 		}
 		if (event.type === "hello") connection("Connected");
 		if (event.type === "operation.finished") {
-			queries.setQueryData<Operation>(["operation", event.payload.resource], (current) =>
-				current && current.revision > event.payload.revision ? current : event.payload.operation,
-			);
+			if (event.payload.operation)
+				queries.setQueryData<Operation>(["operation", event.payload.resource], (current) =>
+					current && current.revision > event.payload.revision ? current : event.payload.operation,
+				);
+			else void queries.invalidateQueries({ queryKey: ["operation", event.payload.resource] });
 			void queries.invalidateQueries({ queryKey: ["tools"] });
+			if (event.payload.kind.startsWith("targets.")) {
+				for (const key of ["targets", "routing", "workspace-settings", "config-graph"])
+					void queries.invalidateQueries({ queryKey: [key] });
+			}
 		}
 		if (event.type === "operation.progress")
 			void queries.invalidateQueries({ queryKey: ["operation", event.payload.resource] });

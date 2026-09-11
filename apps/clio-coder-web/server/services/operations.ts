@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { Operation, Progress } from "../../contracts/operations.js";
+import type { Operation, OperationResult, Progress } from "../../contracts/operations.js";
 import type { EventHub } from "./event-hub.js";
 import { AppProblem, problemOf } from "./problem.js";
 
@@ -21,6 +21,12 @@ export class OperationRegistry {
 	private keys = new Map<string, { fingerprint: string; id: string }>();
 	private omitted = new Map<string, number>();
 	private finished: string[] = [];
+	private retainedBytes = 0;
+	private terminalSizes = new Map<string, number>();
+	private cancellations = new Map<string, AbortController>();
+	get activeCount() {
+		return [...this.records.values()].filter(live).length;
+	}
 	constructor(private hub: EventHub) {}
 	get(id: string): Operation {
 		const record = this.records.get(id);
@@ -33,7 +39,8 @@ export class OperationRegistry {
 		scope: string;
 		key: string;
 		fingerprint: string;
-		run: (progress: (message: string) => void) => Promise<{ id: string; message: string }>;
+		cancellable?: boolean;
+		run: (progress: (message: string) => void, signal: AbortSignal) => Promise<OperationResult>;
 	}): string {
 		const key = JSON.stringify([input.kind, input.scope, input.key]);
 		const existing = this.keys.get(key);
@@ -48,19 +55,24 @@ export class OperationRegistry {
 			id,
 			kind: input.kind,
 			revision: 1,
-			cancellable: false,
+			cancellable: input.cancellable ?? false,
 			status: "queued",
 			startedAt: new Date().toISOString(),
 			progress: [],
 		});
+		this.cancellations.set(id, new AbortController());
 		queueMicrotask(() => {
 			void this.run(id, input.run);
 		});
 		return id;
 	}
 	cancel(id: string): Operation {
-		this.get(id);
-		throw new AppProblem("unsupported", "This operation cannot be interrupted safely.");
+		const record = this.get(id);
+		if (!record.cancellable) throw new AppProblem("unsupported", "This operation cannot be interrupted safely.");
+		if (record.status === "cancelled") return record;
+		if (!live(record)) throw new AppProblem("conflict", "Operation already finished.");
+		this.cancellations.get(id)?.abort();
+		return this.get(id);
 	}
 	private progress(id: string, message: string) {
 		const record = this.records.get(id);
@@ -81,12 +93,18 @@ export class OperationRegistry {
 		this.records.set(id, { ...record, revision: record.revision + 1, progress: omitted ? [marker(), ...lines] : lines });
 		this.hub.publish({ type: "operation.progress", payload: { resource: id, revision: record.revision + 1, progress } });
 	}
-	private async run(id: string, run: (progress: (message: string) => void) => Promise<{ id: string; message: string }>) {
+	private async run(
+		id: string,
+		run: (progress: (message: string) => void, signal: AbortSignal) => Promise<OperationResult>,
+	) {
 		const initial = this.get(id);
+		const controller = this.cancellations.get(id);
+		if (!controller) throw new Error("Missing operation controller");
 		this.records.set(id, { ...initial, status: "running" });
 		let terminal: Operation;
 		try {
-			const result = await run((message) => this.progress(id, message));
+			const result = await run((message) => this.progress(id, message), controller.signal);
+			if (controller.signal.aborted) throw new Error("cancelled");
 			const record = this.get(id);
 			terminal = {
 				...record,
@@ -97,23 +115,38 @@ export class OperationRegistry {
 			};
 		} catch (error) {
 			const record = this.get(id);
-			terminal = {
-				...record,
-				revision: record.revision + 1,
-				status: "failed",
-				finishedAt: new Date().toISOString(),
-				problem: problemOf(error),
-			};
+			terminal = controller.signal.aborted
+				? { ...record, revision: record.revision + 1, status: "cancelled", finishedAt: new Date().toISOString() }
+				: {
+						...record,
+						revision: record.revision + 1,
+						status: "failed",
+						finishedAt: new Date().toISOString(),
+						problem: problemOf(error),
+					};
 		}
+		this.cancellations.delete(id);
 		this.records.set(id, terminal);
+		const bytes = Buffer.byteLength(JSON.stringify(terminal));
 		this.hub.publish({
 			type: "operation.finished",
-			payload: { resource: id, revision: terminal.revision, operation: structuredClone(terminal) },
+			// Large follow-up inventories stay available through REST without overflowing
+			// the SSE subscriber's 512 KiB queue. Clients refetch when the snapshot is absent.
+			payload: {
+				resource: id,
+				revision: terminal.revision,
+				kind: terminal.kind,
+				...(bytes <= 256 * 1024 ? { operation: structuredClone(terminal) } : {}),
+			},
 		});
 		this.finished.push(id);
-		while (this.finished.length > 256) {
+		this.terminalSizes.set(id, bytes);
+		this.retainedBytes += bytes;
+		while (this.finished.length > 256 || this.retainedBytes > 16 * 1024 * 1024) {
 			const oldest = this.finished.shift();
 			if (oldest) {
+				this.retainedBytes -= this.terminalSizes.get(oldest) ?? 0;
+				this.terminalSizes.delete(oldest);
 				this.records.delete(oldest);
 				this.omitted.delete(oldest);
 			}

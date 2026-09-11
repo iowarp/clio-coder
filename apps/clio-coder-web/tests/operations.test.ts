@@ -61,3 +61,29 @@ test("canonical fingerprints, bounded progress, terminal retention and live-oper
 	release({ id: "herdr", message: "done" });
 	await terminal(registry, live);
 });
+
+test("large operation inventories use REST snapshots and byte-bounded terminal retention", async () => {
+	const hub = new EventHub(),
+		registry = new OperationRegistry(hub);
+	const events: import("../contracts/events.js").Event[] = [];
+	const disconnect = hub.connect(undefined, (event) => events.push(event));
+	let first = "",
+		last = "";
+	for (let i = 0; i < 34; i++) {
+		last = registry.create({
+			kind: "inventory",
+			scope: "test",
+			key: String(i),
+			fingerprint: String(i),
+			run: async () => ({ id: "fixture", message: "x".repeat(512 * 1024) }),
+		});
+		first ||= last;
+		await terminal(registry, last);
+	}
+	assert.throws(() => registry.get(first), /no longer retained/);
+	const record = registry.get(last);
+	assert.ok(record.status === "succeeded" && record.result.message.length === 512 * 1024);
+	assert.ok(events.filter((event) => event.type === "operation.finished").every((event) => !event.payload.operation));
+	assert.ok(hub.byteSize < 16_000);
+	disconnect();
+});

@@ -1,7 +1,9 @@
+import { spawn } from "node:child_process";
 import { constants, existsSync } from "node:fs";
 import { access, readFile, realpath, stat } from "node:fs/promises";
 import { delimiter, isAbsolute, join } from "node:path";
 import { Worker } from "node:worker_threads";
+import { type CliCommand, commandPlan } from "./cli-commands.js";
 import { createStdioTransport, processAlive, processBirthToken, resolvePackageRoot } from "./clio/http-shims.js";
 import { AppProblem } from "./services/problem.js";
 import type { WorkerKind, WorkerSettings } from "./worker/protocol.js";
@@ -77,4 +79,33 @@ export async function childRunning(pid: number) {
 	} catch {
 		return processAlive(pid);
 	}
+}
+
+/** Fixed-argv CLI children are owned process groups, independently of ACP sessions. */
+export async function runClioCommand(command: CliCommand, cwd: string, env: NodeJS.ProcessEnv = process.env) {
+	const plan = commandPlan(command);
+	if (!isAbsolute(cwd) || (await realpath(cwd)) !== cwd || !(await stat(cwd)).isDirectory())
+		throw new AppProblem("validation", "CLI workspace must be an existing canonical absolute directory.");
+	const executable = await resolveClioCommand(env);
+	const child = spawn(executable.file, [...executable.prefix, ...plan.argv], {
+		cwd,
+		env,
+		shell: false,
+		detached: process.platform !== "win32",
+		stdio: ["ignore", "pipe", "pipe"],
+	});
+	const birthToken = child.pid ? processBirthToken(child.pid) : "";
+	return { child, birthToken };
+}
+
+export function stopClioCommand(
+	child: Awaited<ReturnType<typeof runClioCommand>>["child"],
+	birthToken: string | null,
+	signal: "SIGTERM" | "SIGKILL",
+) {
+	if (!child.pid || child.exitCode !== null || child.signalCode !== null) return false;
+	if (birthToken && !birthToken.startsWith("pid-") && process.platform !== "win32")
+		return signalRecordedChild(child.pid, birthToken, signal);
+	// A live Node ChildProcess handle still owns the unreaped child; this is not a persisted PID lookup.
+	return child.kill(signal);
 }

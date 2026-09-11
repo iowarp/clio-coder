@@ -41,7 +41,7 @@ export const Event = Type.Union([
 	Type.Object({
 		...base,
 		type: Type.Literal("operation.finished"),
-		payload: Type.Object({ ...resource, operation: Operation }),
+		payload: Type.Object({ ...resource, kind: Type.String(), operation: Type.Optional(Operation) }),
 	}),
 	Type.Object({ ...base, type: Type.Literal("toolchain.changed"), payload: Type.Object({ id: Id }) }),
 ]);

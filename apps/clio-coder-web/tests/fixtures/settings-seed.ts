@@ -20,7 +20,7 @@ writeFileSync(
 		targets: [
 			{
 				id: "fixture-target",
-				runtime: "openai-compatible",
+				runtime: "openai-compat",
 				url: "http://127.0.0.1:9",
 				auth: { headers: { "X-Fixture": "fixture-header-secret" } },
 			},

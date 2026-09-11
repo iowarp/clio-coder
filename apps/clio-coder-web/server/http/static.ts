@@ -11,7 +11,16 @@ export function staticClient(app: Hono, directory: string) {
 		const path =
 			context.req.path === "/" ||
 			context.req.path.startsWith("/docs/") ||
-			["/toolchain", "/traces", "/sessions", "/docs", "/settings", "/settings/why"].includes(context.req.path) ||
+			[
+				"/toolchain",
+				"/traces",
+				"/sessions",
+				"/docs",
+				"/settings",
+				"/settings/why",
+				"/settings/targets",
+				"/settings/routing",
+			].includes(context.req.path) ||
 			/^\/(traces|sessions)\/[^/]+$/.test(context.req.path) ||
 			/^\/workspaces\/[^/]+\/sessions$/.test(context.req.path)
 				? "index.html"

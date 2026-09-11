@@ -9,11 +9,13 @@ import { serve } from "@hono/node-server";
 import { Supervisor } from "./acp/supervisor.js";
 import { createApp } from "./app.js";
 import { resolveClioDirs } from "./clio/http-shims.js";
+import { CliRunner } from "./services/cli-runner.js";
 import { DocsService } from "./services/docs.js";
 import { EventHub } from "./services/event-hub.js";
 import { OperationRegistry } from "./services/operations.js";
 import { SessionService } from "./services/sessions.js";
 import { SettingsService } from "./services/settings.js";
+import { TargetsService } from "./services/targets-cli.js";
 import { ToolchainService } from "./services/toolchain.js";
 import { TraceService } from "./services/traces.js";
 import { WorkspaceService } from "./services/workspaces.js";
@@ -56,6 +58,8 @@ export async function main() {
 		throw error;
 	}
 	const sessions = new SessionService(supervisor, workspaces, reads);
+	const cli = new CliRunner(env);
+	const settingsService = new SettingsService(reads, workspaces);
 	const token = randomBytes(32).toString("base64url");
 	let origin = `http://127.0.0.1:${port}`;
 	const app = createApp({
@@ -66,7 +70,8 @@ export async function main() {
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		docs: new DocsService(reads),
-		settings: new SettingsService(reads, workspaces),
+		settings: settingsService,
+		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		clientDir,
 	});
@@ -81,7 +86,7 @@ export async function main() {
 		closing = true;
 		server.close();
 		if ("closeAllConnections" in server) server.closeAllConnections();
-		await supervisor.shutdown();
+		await Promise.all([supervisor.shutdown(), cli.close()]);
 		await Promise.all([reads.close(), ops.close()]);
 		if (scratch) await rm(scratch, { recursive: true, force: true });
 	};

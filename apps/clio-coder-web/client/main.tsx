@@ -9,6 +9,7 @@ import { Docs } from "./pages/docs.js";
 import { Home } from "./pages/home.js";
 import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { SettingsPage } from "./pages/settings.js";
+import { TargetsPage } from "./pages/targets.js";
 import { Toolchain } from "./pages/toolchain.js";
 import { TraceRunPage } from "./pages/traces/run.js";
 import { TraceRuns } from "./pages/traces/runs.js";
@@ -29,6 +30,8 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		children: [
+			{ path: "/settings/targets", element: <TargetsPage client={client} view="targets" /> },
+			{ path: "/settings/routing", element: <TargetsPage client={client} view="routing" /> },
 			{ path: "/settings", element: <SettingsPage client={client} view="settings" /> },
 			{ path: "/settings/why", element: <SettingsPage client={client} view="why" /> },
 			{ path: "/docs/*", element: <Docs client={client} /> },

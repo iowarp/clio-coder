@@ -7,11 +7,13 @@ import type { PermissionTimers } from "../../server/acp/permissions.js";
 import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { parse } from "../../server/http/validate.js";
+import { CliRunner } from "../../server/services/cli-runner.js";
 import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService } from "../../server/services/settings.js";
+import { TargetsService } from "../../server/services/targets-cli.js";
 import { ToolchainService } from "../../server/services/toolchain.js";
 import { TraceService } from "../../server/services/traces.js";
 import { WorkspaceService } from "../../server/services/workspaces.js";
@@ -54,6 +56,8 @@ export async function harness(
 	);
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces, reads);
+	const cli = new CliRunner(env);
+	const settingsService = new SettingsService(reads, workspaces);
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),
@@ -62,7 +66,8 @@ export async function harness(
 		toolchain: new ToolchainService(reads, ops, operations, hub),
 		traces: new TraceService(reads),
 		docs: new DocsService(reads),
-		settings: new SettingsService(reads, workspaces),
+		settings: settingsService,
+		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,
@@ -87,13 +92,14 @@ export async function harness(
 		supervisor,
 		reads,
 		ops,
+		cli,
 		hub,
 		operations,
 		app,
 		request,
 		post,
 		close: async () => {
-			await supervisor.shutdown();
+			await Promise.all([supervisor.shutdown(), cli.close()]);
 			await Promise.all([reads.close(), ops.close()]);
 			await home.close();
 		},

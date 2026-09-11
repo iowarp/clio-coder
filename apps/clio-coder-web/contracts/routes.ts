@@ -9,6 +9,7 @@ import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
+import { CliTargets, Routing } from "./targets-cli.js";
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
@@ -58,6 +59,41 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	targetsList: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/targets",
+		params: operationParams,
+		response: CliTargets,
+		summary: "Configured targets through the canonical CLI",
+	}),
+	routing: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/routing",
+		params: operationParams,
+		response: Routing,
+		summary: "Offline models, fleet profiles and agent bindings",
+	}),
+	targetsProbe: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/targets/:targetId/probe",
+		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Probe configured targets and return this target's status",
+	}),
+	targetsUse: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/targets/:targetId/use",
+		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Use a target for chat and fleet through the CLI",
+	}),
+	targetsRemove: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/targets/:targetId/remove",
+		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
+		response: Accepted,
+		summary: "Remove a configured target through the CLI",
+	}),
 	workspaceSettings: defineRoute({
 		...get,
 		path: "/api/workspaces/:id/settings",
