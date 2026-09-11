@@ -148,3 +148,9 @@ non-interactive JSON add contract. CLI children use fixed arguments, a four-chil
 limit, 60-second deadlines, and 8 MiB stdout / 256 KiB stderr limits. Stderr never
 crosses the REST boundary. Finished-operation events omit snapshots larger than
 256 KiB; clients retrieve those through the operation REST endpoint.
+
+Fleet history is available at `/fleet` and `/api/fleet/`. Fleet roots and dispatch
+runs use cursor pagination; individual runs and full receipts have direct read
+endpoints. Council and gate views retain Clio's canonical bounded windows and
+report truncation. Reads run in the domain worker, enforce artifact containment,
+and reject an oversized dispatch ledger rather than reporting empty history.

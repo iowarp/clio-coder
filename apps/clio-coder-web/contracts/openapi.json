@@ -6,6 +6,2064 @@
 		"version": "0.0.0"
 	},
 	"paths": {
+		"/api/fleet/runs": {
+			"get": {
+				"operationId": "fleetRoots",
+				"summary": "Paginated durable fleet roots",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"pattern": "^[A-Za-z0-9_-]+$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["items", "nextCursor"],
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"fleet",
+													"planHash",
+													"startedAt",
+													"endedAt",
+													"resumedFrom",
+													"stepCount",
+													"completedCount"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"fleet": {
+														"type": "string"
+													},
+													"planHash": {
+														"type": "string"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"endedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"resumedFrom": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"stepCount": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"completedCount": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"nextCursor": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^[A-Za-z0-9_-]+$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/runs/{id}": {
+			"get": {
+				"operationId": "fleetRoot",
+				"summary": "Fleet plan results, receipt and related topology",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["run", "steps", "receipt", "councils", "gates"],
+									"properties": {
+										"run": {
+											"type": "object",
+											"required": [
+												"id",
+												"fleet",
+												"planHash",
+												"startedAt",
+												"endedAt",
+												"resumedFrom",
+												"stepCount",
+												"completedCount"
+											],
+											"properties": {
+												"id": {
+													"type": "string",
+													"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+												},
+												"fleet": {
+													"type": "string"
+												},
+												"planHash": {
+													"type": "string"
+												},
+												"startedAt": {
+													"type": "string"
+												},
+												"endedAt": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"resumedFrom": {
+													"anyOf": [
+														{
+															"type": "string"
+														},
+														{
+															"type": "null"
+														}
+													]
+												},
+												"stepCount": {
+													"type": "integer",
+													"minimum": 0
+												},
+												"completedCount": {
+													"type": "integer",
+													"minimum": 0
+												}
+											},
+											"additionalProperties": false
+										},
+										"steps": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"stepId",
+													"terminalRunId",
+													"assignmentId",
+													"succeeded",
+													"integrityValid",
+													"failureReason",
+													"output"
+												],
+												"properties": {
+													"stepId": {
+														"type": "string"
+													},
+													"terminalRunId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"assignmentId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"succeeded": {
+														"type": "boolean"
+													},
+													"integrityValid": {
+														"type": "boolean"
+													},
+													"failureReason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"output": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"receipt": {
+											"anyOf": [
+												{
+													"type": "object",
+													"patternProperties": {
+														"^.*$": {}
+													}
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"councils": {
+											"type": "object",
+											"required": ["councils", "truncated"],
+											"properties": {
+												"councils": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": [
+															"group",
+															"startedAt",
+															"endedAt",
+															"running",
+															"roundsPlanned",
+															"roundsObserved",
+															"origin",
+															"approval",
+															"members",
+															"membersTruncated",
+															"membersRejected",
+															"synthesis"
+														],
+														"properties": {
+															"group": {
+																"type": "string"
+															},
+															"startedAt": {
+																"type": "string"
+															},
+															"endedAt": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"running": {
+																"type": "boolean"
+															},
+															"roundsPlanned": {
+																"anyOf": [
+																	{
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"roundsObserved": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"origin": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"approval": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"members": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": [
+																		"label",
+																		"agentId",
+																		"targetId",
+																		"wireModelId",
+																		"executionRole",
+																		"turns",
+																		"turnsTruncated"
+																	],
+																	"properties": {
+																		"label": {
+																			"type": "string"
+																		},
+																		"agentId": {
+																			"type": "string"
+																		},
+																		"targetId": {
+																			"type": "string"
+																		},
+																		"wireModelId": {
+																			"type": "string"
+																		},
+																		"executionRole": {
+																			"type": "string"
+																		},
+																		"turns": {
+																			"type": "array",
+																			"items": {
+																				"type": "object",
+																				"required": ["round", "runId", "status", "outcome", "terminal"],
+																				"properties": {
+																					"round": {
+																						"type": "integer",
+																						"minimum": 0
+																					},
+																					"runId": {
+																						"type": "string"
+																					},
+																					"status": {
+																						"type": "string"
+																					},
+																					"outcome": {
+																						"anyOf": [
+																							{
+																								"type": "string"
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					},
+																					"terminal": {
+																						"type": "boolean"
+																					}
+																				},
+																				"additionalProperties": false
+																			}
+																		},
+																		"turnsTruncated": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"membersTruncated": {
+																"type": "boolean"
+															},
+															"membersRejected": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"synthesis": {
+																"type": "object",
+																"required": ["kind", "sealedRunId", "judge"],
+																"properties": {
+																	"kind": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"sealedRunId": {
+																		"anyOf": [
+																			{
+																				"type": "string"
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	},
+																	"judge": {
+																		"anyOf": [
+																			{
+																				"type": "object",
+																				"required": ["runId", "agentId", "targetId", "wireModelId", "status", "outcome"],
+																				"properties": {
+																					"runId": {
+																						"type": "string"
+																					},
+																					"agentId": {
+																						"type": "string"
+																					},
+																					"targetId": {
+																						"type": "string"
+																					},
+																					"wireModelId": {
+																						"type": "string"
+																					},
+																					"status": {
+																						"type": "string"
+																					},
+																					"outcome": {
+																						"anyOf": [
+																							{
+																								"type": "string"
+																							},
+																							{
+																								"type": "null"
+																							}
+																						]
+																					}
+																				},
+																				"additionalProperties": false
+																			},
+																			{
+																				"type": "null"
+																			}
+																		]
+																	}
+																},
+																"additionalProperties": false
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"truncated": {
+													"type": "boolean"
+												}
+											},
+											"additionalProperties": false
+										},
+										"gates": {
+											"type": "object",
+											"required": ["present", "decisions", "truncated", "unverifiable"],
+											"properties": {
+												"present": {
+													"type": "boolean"
+												},
+												"decisions": {
+													"type": "array",
+													"items": {
+														"type": "object",
+														"required": [
+															"id",
+															"group",
+															"topology",
+															"cycle",
+															"outcome",
+															"decidedAt",
+															"subjects",
+															"subjectsTruncated",
+															"decider",
+															"correlation",
+															"winner",
+															"confirms",
+															"reason"
+														],
+														"properties": {
+															"id": {
+																"type": "string"
+															},
+															"group": {
+																"type": "string"
+															},
+															"topology": {
+																"type": "string"
+															},
+															"cycle": {
+																"type": "integer",
+																"minimum": 0
+															},
+															"outcome": {
+																"type": "string"
+															},
+															"decidedAt": {
+																"type": "string"
+															},
+															"subjects": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"subjectsTruncated": {
+																"type": "boolean"
+															},
+															"decider": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"correlation": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["agent", "target", "modelFamily", "runtime", "node", "independent"],
+																		"properties": {
+																			"agent": {
+																				"type": "boolean"
+																			},
+																			"target": {
+																				"type": "boolean"
+																			},
+																			"modelFamily": {
+																				"type": "boolean"
+																			},
+																			"runtime": {
+																				"type": "boolean"
+																			},
+																			"node": {
+																				"type": "boolean"
+																			},
+																			"independent": {
+																				"type": "boolean"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"winner": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["index", "runId"],
+																		"properties": {
+																			"index": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"runId": {
+																				"type": "string"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"confirms": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"reason": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"truncated": {
+													"type": "boolean"
+												},
+												"unverifiable": {
+													"type": "integer",
+													"minimum": 0
+												}
+											},
+											"additionalProperties": false
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/dispatches": {
+			"get": {
+				"operationId": "dispatchRuns",
+				"summary": "Paginated durable dispatch runs",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "integer",
+							"minimum": 1,
+							"maximum": 100
+						}
+					},
+					{
+						"name": "cursor",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"maxLength": 1024,
+							"pattern": "^[A-Za-z0-9_-]+$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["items", "nextCursor"],
+									"properties": {
+										"items": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"agentId",
+													"executionRole",
+													"task",
+													"targetId",
+													"wireModelId",
+													"runtimeId",
+													"startedAt",
+													"endedAt",
+													"status",
+													"outcome",
+													"outcomeDetail",
+													"cwd",
+													"sessionId",
+													"tokenCount",
+													"costUsd",
+													"parentRunId",
+													"rootRunId"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"agentId": {
+														"type": "string"
+													},
+													"executionRole": {
+														"type": "string"
+													},
+													"task": {
+														"type": "string"
+													},
+													"targetId": {
+														"type": "string"
+													},
+													"wireModelId": {
+														"type": "string"
+													},
+													"runtimeId": {
+														"type": "string"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"endedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"status": {
+														"type": "string"
+													},
+													"outcome": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"outcomeDetail": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"cwd": {
+														"type": "string"
+													},
+													"sessionId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"tokenCount": {
+														"type": "number"
+													},
+													"costUsd": {
+														"type": "number"
+													},
+													"parentRunId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"rootRunId": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"nextCursor": {
+											"anyOf": [
+												{
+													"type": "string",
+													"maxLength": 1024,
+													"pattern": "^[A-Za-z0-9_-]+$"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/dispatches/{id}": {
+			"get": {
+				"operationId": "dispatchRun",
+				"summary": "One durable dispatch run",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": [
+										"id",
+										"agentId",
+										"executionRole",
+										"task",
+										"targetId",
+										"wireModelId",
+										"runtimeId",
+										"startedAt",
+										"endedAt",
+										"status",
+										"outcome",
+										"outcomeDetail",
+										"cwd",
+										"sessionId",
+										"tokenCount",
+										"costUsd",
+										"parentRunId",
+										"rootRunId"
+									],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										},
+										"agentId": {
+											"type": "string"
+										},
+										"executionRole": {
+											"type": "string"
+										},
+										"task": {
+											"type": "string"
+										},
+										"targetId": {
+											"type": "string"
+										},
+										"wireModelId": {
+											"type": "string"
+										},
+										"runtimeId": {
+											"type": "string"
+										},
+										"startedAt": {
+											"type": "string"
+										},
+										"endedAt": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"status": {
+											"type": "string"
+										},
+										"outcome": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"outcomeDetail": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"cwd": {
+											"type": "string"
+										},
+										"sessionId": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"tokenCount": {
+											"type": "number"
+										},
+										"costUsd": {
+											"type": "number"
+										},
+										"parentRunId": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										},
+										"rootRunId": {
+											"anyOf": [
+												{
+													"type": "string"
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/receipts/{id}": {
+			"get": {
+				"operationId": "fleetReceipt",
+				"summary": "Full durable receipt by run identifier",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["receipt"],
+									"properties": {
+										"receipt": {
+											"anyOf": [
+												{
+													"type": "object",
+													"patternProperties": {
+														"^.*$": {}
+													}
+												},
+												{
+													"type": "null"
+												}
+											]
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/councils": {
+			"get": {
+				"operationId": "fleetCouncils",
+				"summary": "Canonical bounded council topology",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["councils", "truncated"],
+									"properties": {
+										"councils": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"group",
+													"startedAt",
+													"endedAt",
+													"running",
+													"roundsPlanned",
+													"roundsObserved",
+													"origin",
+													"approval",
+													"members",
+													"membersTruncated",
+													"membersRejected",
+													"synthesis"
+												],
+												"properties": {
+													"group": {
+														"type": "string"
+													},
+													"startedAt": {
+														"type": "string"
+													},
+													"endedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"running": {
+														"type": "boolean"
+													},
+													"roundsPlanned": {
+														"anyOf": [
+															{
+																"type": "integer",
+																"minimum": 0
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"roundsObserved": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"origin": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"approval": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"members": {
+														"type": "array",
+														"items": {
+															"type": "object",
+															"required": ["label", "agentId", "targetId", "wireModelId", "executionRole", "turns", "turnsTruncated"],
+															"properties": {
+																"label": {
+																	"type": "string"
+																},
+																"agentId": {
+																	"type": "string"
+																},
+																"targetId": {
+																	"type": "string"
+																},
+																"wireModelId": {
+																	"type": "string"
+																},
+																"executionRole": {
+																	"type": "string"
+																},
+																"turns": {
+																	"type": "array",
+																	"items": {
+																		"type": "object",
+																		"required": ["round", "runId", "status", "outcome", "terminal"],
+																		"properties": {
+																			"round": {
+																				"type": "integer",
+																				"minimum": 0
+																			},
+																			"runId": {
+																				"type": "string"
+																			},
+																			"status": {
+																				"type": "string"
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string"
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			},
+																			"terminal": {
+																				"type": "boolean"
+																			}
+																		},
+																		"additionalProperties": false
+																	}
+																},
+																"turnsTruncated": {
+																	"type": "boolean"
+																}
+															},
+															"additionalProperties": false
+														}
+													},
+													"membersTruncated": {
+														"type": "boolean"
+													},
+													"membersRejected": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"synthesis": {
+														"type": "object",
+														"required": ["kind", "sealedRunId", "judge"],
+														"properties": {
+															"kind": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"sealedRunId": {
+																"anyOf": [
+																	{
+																		"type": "string"
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															},
+															"judge": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["runId", "agentId", "targetId", "wireModelId", "status", "outcome"],
+																		"properties": {
+																			"runId": {
+																				"type": "string"
+																			},
+																			"agentId": {
+																				"type": "string"
+																			},
+																			"targetId": {
+																				"type": "string"
+																			},
+																			"wireModelId": {
+																				"type": "string"
+																			},
+																			"status": {
+																				"type": "string"
+																			},
+																			"outcome": {
+																				"anyOf": [
+																					{
+																						"type": "string"
+																					},
+																					{
+																						"type": "null"
+																					}
+																				]
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"truncated": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/fleet/gates": {
+			"get": {
+				"operationId": "fleetGates",
+				"summary": "Canonical verified gate decision topology",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["present", "decisions", "truncated", "unverifiable"],
+									"properties": {
+										"present": {
+											"type": "boolean"
+										},
+										"decisions": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"group",
+													"topology",
+													"cycle",
+													"outcome",
+													"decidedAt",
+													"subjects",
+													"subjectsTruncated",
+													"decider",
+													"correlation",
+													"winner",
+													"confirms",
+													"reason"
+												],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"group": {
+														"type": "string"
+													},
+													"topology": {
+														"type": "string"
+													},
+													"cycle": {
+														"type": "integer",
+														"minimum": 0
+													},
+													"outcome": {
+														"type": "string"
+													},
+													"decidedAt": {
+														"type": "string"
+													},
+													"subjects": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"subjectsTruncated": {
+														"type": "boolean"
+													},
+													"decider": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"correlation": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["agent", "target", "modelFamily", "runtime", "node", "independent"],
+																"properties": {
+																	"agent": {
+																		"type": "boolean"
+																	},
+																	"target": {
+																		"type": "boolean"
+																	},
+																	"modelFamily": {
+																		"type": "boolean"
+																	},
+																	"runtime": {
+																		"type": "boolean"
+																	},
+																	"node": {
+																		"type": "boolean"
+																	},
+																	"independent": {
+																		"type": "boolean"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"winner": {
+														"anyOf": [
+															{
+																"type": "object",
+																"required": ["index", "runId"],
+																"properties": {
+																	"index": {
+																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"runId": {
+																		"type": "string"
+																	}
+																},
+																"additionalProperties": false
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"confirms": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"reason": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"truncated": {
+											"type": "boolean"
+										},
+										"unverifiable": {
+											"type": "integer",
+											"minimum": 0
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/targets": {
 			"get": {
 				"operationId": "targetsList",

@@ -17,6 +17,10 @@ const httpModules = new Map([
 	["src/domains/lifecycle/version.ts", new Set(["getVersionInfo"])],
 ]);
 const adapters = new Set([
+	"src/domains/dispatch/state.ts",
+	"src/domains/dispatch/types.ts",
+	"src/domains/dispatch/council-topology.ts",
+	"src/domains/dispatch/gate-topology.ts",
 	"src/core/settings-layers.ts",
 	"src/cli/config-inspect.ts",
 	"src/core/package-root.ts",
@@ -28,6 +32,9 @@ const adapters = new Set([
 ]);
 // Test-only root seams are intentionally enumerated independently of production.
 const testModules = new Set([
+	"src/domains/dispatch/state.ts",
+	"src/domains/dispatch/types.ts",
+	"src/domains/dispatch/gate-decisions.ts",
 	"src/core/settings-layers.ts",
 	"src/core/init.ts",
 	"src/core/workspace-trust.ts",

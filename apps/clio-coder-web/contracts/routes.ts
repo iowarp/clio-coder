@@ -2,6 +2,16 @@ import { type Static, type TSchema, Type } from "typebox";
 import { Empty, Id } from "./common.js";
 import { Blueprints, DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
+import {
+	Councils,
+	DispatchRun,
+	DispatchRuns,
+	FleetGates,
+	FleetPageQuery,
+	FleetReceipt,
+	FleetRootDetail,
+	FleetRoots,
+} from "./fleet.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
@@ -59,6 +69,54 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	fleetRoots: defineRoute({
+		...get,
+		path: "/api/fleet/runs",
+		response: FleetRoots,
+		summary: "Paginated durable fleet roots",
+		query: FleetPageQuery,
+	}),
+	fleetRoot: defineRoute({
+		...get,
+		path: "/api/fleet/runs/:id",
+		response: FleetRootDetail,
+		summary: "Fleet plan results, receipt and related topology",
+		params: operationParams,
+	}),
+	dispatchRuns: defineRoute({
+		...get,
+		path: "/api/fleet/dispatches",
+		response: DispatchRuns,
+		summary: "Paginated durable dispatch runs",
+		query: FleetPageQuery,
+	}),
+	dispatchRun: defineRoute({
+		...get,
+		path: "/api/fleet/dispatches/:id",
+		response: DispatchRun,
+		summary: "One durable dispatch run",
+		params: operationParams,
+	}),
+	fleetReceipt: defineRoute({
+		...get,
+		path: "/api/fleet/receipts/:id",
+		response: FleetReceipt,
+		summary: "Full durable receipt by run identifier",
+		params: operationParams,
+	}),
+	fleetCouncils: defineRoute({
+		...get,
+		path: "/api/fleet/councils",
+		response: Councils,
+		summary: "Canonical bounded council topology",
+	}),
+	fleetGates: defineRoute({
+		...get,
+		path: "/api/fleet/gates",
+		response: FleetGates,
+		summary: "Canonical verified gate decision topology",
+	}),
+
 	targetsList: defineRoute({
 		...get,
 		path: "/api/workspaces/:id/targets",

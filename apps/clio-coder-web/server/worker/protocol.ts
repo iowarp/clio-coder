@@ -1,5 +1,6 @@
 import type { Problem } from "../../contracts/common.js";
 import type { BlueprintFile, DocsRequest } from "../../contracts/docs.js";
+import type { FleetRequest } from "../../contracts/fleet.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
 
@@ -16,6 +17,7 @@ export type WorkerSettings = {
 };
 export type RawTool = Tool;
 export interface Methods {
+	"fleet.read": { params: FleetRequest; result: unknown };
 	"settings.read": { params: { cwd: string }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"docs.read": { params: DocsRequest; result: unknown };

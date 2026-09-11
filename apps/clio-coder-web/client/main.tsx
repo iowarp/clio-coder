@@ -6,6 +6,7 @@ import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/problems.js";
 import { Docs } from "./pages/docs.js";
+import { FleetDetail, FleetPage } from "./pages/fleet.js";
 import { Home } from "./pages/home.js";
 import { Session, Sessions, Workspaces } from "./pages/sessions.js";
 import { SettingsPage } from "./pages/settings.js";
@@ -30,6 +31,9 @@ const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
 		children: [
+			{ path: "/fleet", element: <FleetPage client={client} /> },
+			{ path: "/fleet/:id", element: <FleetDetail client={client} /> },
+			{ path: "/fleet/dispatches/:id", element: <FleetDetail client={client} dispatch /> },
 			{ path: "/settings/targets", element: <TargetsPage client={client} view="targets" /> },
 			{ path: "/settings/routing", element: <TargetsPage client={client} view="routing" /> },
 			{ path: "/settings", element: <SettingsPage client={client} view="settings" /> },

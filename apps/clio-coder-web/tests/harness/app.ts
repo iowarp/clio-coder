@@ -10,6 +10,7 @@ import { parse } from "../../server/http/validate.js";
 import { CliRunner } from "../../server/services/cli-runner.js";
 import { DocsService } from "../../server/services/docs.js";
 import { EventHub } from "../../server/services/event-hub.js";
+import { FleetService } from "../../server/services/fleet.js";
 import { OperationRegistry } from "../../server/services/operations.js";
 import { SessionService } from "../../server/services/sessions.js";
 import { SettingsService } from "../../server/services/settings.js";
@@ -67,6 +68,7 @@ export async function harness(
 		traces: new TraceService(reads),
 		docs: new DocsService(reads),
 		settings: settingsService,
+		fleet: new FleetService(reads),
 		targets: new TargetsService(cli, workspaces, settingsService, operations),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),

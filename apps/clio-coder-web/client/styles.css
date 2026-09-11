@@ -872,3 +872,8 @@ textarea:focus-visible {
 		align-items: start;
 	}
 }
+
+.fleet-receipt {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}

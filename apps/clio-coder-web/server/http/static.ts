@@ -13,6 +13,7 @@ export function staticClient(app: Hono, directory: string) {
 			context.req.path.startsWith("/docs/") ||
 			[
 				"/toolchain",
+				"/fleet",
 				"/traces",
 				"/sessions",
 				"/docs",
@@ -21,7 +22,8 @@ export function staticClient(app: Hono, directory: string) {
 				"/settings/targets",
 				"/settings/routing",
 			].includes(context.req.path) ||
-			/^\/(traces|sessions)\/[^/]+$/.test(context.req.path) ||
+			/^\/(traces|sessions|fleet)\/[^/]+$/.test(context.req.path) ||
+			/^\/fleet\/dispatches\/[^/]+$/.test(context.req.path) ||
 			/^\/workspaces\/[^/]+\/sessions$/.test(context.req.path)
 				? "index.html"
 				: decodeURIComponent(context.req.path).slice(1);

@@ -8,6 +8,7 @@ import { AxeBuilder } from "@axe-core/playwright";
 import { serve } from "@hono/node-server";
 import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
+import { seedFleet } from "../tests/harness/fleet-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
@@ -19,6 +20,7 @@ const h = await harness(
 	{ scenario: "markdown", origin: () => origin, clientDir: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
 );
 await seedSettings(h.home.path, h.home.env);
+await seedFleet(h.home.path, h.home.env);
 const fixture = traceFixture(join(h.home.path, "state"));
 fixture.finish();
 const server = serve({ fetch: h.app.fetch, hostname: "127.0.0.1", port: 0 });
@@ -140,6 +142,16 @@ try {
 		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
 		await check("trace-run");
+		await navigate("Fleet");
+		await page.getByRole("heading", { name: "fixture-council", exact: true }).waitFor();
+		await check("fleet");
+		await page.locator('a[href="/fleet/fleet-149"]').click();
+		await page.getByText("Fixture step passed.", { exact: true }).waitFor();
+		await page.getByRole("heading", { name: "review · pass", exact: true }).waitFor();
+		await check("fleet-run");
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("fleet-run-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await navigate("Docs");
 		await page.locator(".docs-page .markdown").waitFor();
 		await check("docs-map");
