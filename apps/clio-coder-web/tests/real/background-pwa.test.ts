@@ -166,6 +166,7 @@ test("native user service and installed Chrome PWA retain access through window,
 		assert.equal(await connected(page), epoch);
 		assert.equal(await page.evaluate(() => matchMedia("(display-mode: standalone)").matches), true);
 		checks.push("real Chrome PWA installed, launched as standalone and authenticated without a token URL");
+		await page.getByRole("button", { name: "App preferences", exact: true }).click();
 		await page.getByText("Installed app preferences", { exact: true }).click();
 		for (const width of [390, 1050]) {
 			await page.setViewportSize({ width, height: 900 });
@@ -224,6 +225,7 @@ test("native user service and installed Chrome PWA retain access through window,
 		const other = await context.newPage();
 		await other.goto(origin);
 		await connected(other);
+		await page.getByRole("button", { name: "App preferences", exact: true }).click();
 		await page.getByText("Installed app preferences", { exact: true }).click();
 		await page.getByRole("button", { name: "Forget this browser" }).click();
 		await page.getByText(/Open Clio Coder from your applications/).waitFor();

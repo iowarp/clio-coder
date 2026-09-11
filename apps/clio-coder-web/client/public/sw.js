@@ -1,5 +1,5 @@
 // Cache only the public recovery page. Conversations, API responses, tokens and mutations never enter this cache.
-const cacheName = "clio-coder-recovery-v1";
+const cacheName = "clio-coder-recovery-v2";
 const recoveryAssets = ["/offline.html", "/offline.css", "/offline.js", "/icon-192.png"];
 self.addEventListener("install", (event) => {
 	event.waitUntil(

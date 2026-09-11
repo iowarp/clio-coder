@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { forgetBrowser, rememberBrowser, rememberedTokenKey } from "../api/token.js";
 
+import { Icon } from "./icons.js";
+
 type InstallPrompt = Event & { prompt(): Promise<unknown>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
-export function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
+function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
 	const [prompt, setPrompt] = useState<InstallPrompt | null>(null);
 	const [installed, setInstalled] = useState(false);
 	const [storage, setStorage] = useState(true);
@@ -90,5 +92,54 @@ export function PwaControls({ enabled, token }: { enabled: boolean; token: strin
 			</button>
 			{message && <p role="status">{message}</p>}
 		</details>
+	);
+}
+
+export function AppPreferences({
+	enabled,
+	token,
+	version,
+}: {
+	enabled: boolean;
+	token: string;
+	version: string | undefined;
+}) {
+	const dialog = useRef<HTMLDialogElement>(null);
+	return (
+		<>
+			<button
+				className="icon-button"
+				type="button"
+				aria-label="App preferences"
+				title="App preferences"
+				onClick={() => dialog.current?.showModal()}
+			>
+				<Icon name="more" />
+			</button>
+			<dialog ref={dialog} className="app-dialog" aria-label="App preferences">
+				<div className="toast-heading">
+					<strong className="brand">
+						<img src="/clio-coder-logo.webp" alt="" width="36" height="36" />
+						Clio Coder
+					</strong>
+					<button
+						className="icon-button"
+						type="button"
+						aria-label="Close app preferences"
+						onClick={() => dialog.current?.close()}
+					>
+						<Icon name="close" />
+					</button>
+				</div>
+				<p className="app-version">{version ? `Version ${version}` : "Connecting to Clio…"}</p>
+				<PwaControls enabled={enabled} token={token} />
+				{!enabled && (
+					<p>
+						Clio is running for this session. To keep the installed app available, enable the background server from the
+						terminal.
+					</p>
+				)}
+			</dialog>
+		</>
 	);
 }

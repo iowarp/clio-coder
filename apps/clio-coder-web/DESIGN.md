@@ -12,7 +12,7 @@ The application is a field notebook for working with code: a readable conversati
 
 ## Shell and wayfinding
 
-The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet, Evidence, Evals, Library, and System. A section is visibly unavailable until it has a working surface. The masthead carries the product identity, connection state, and theme control; the footer carries the reported Clio version.
+The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet, Evidence, Evals, Library, and System. The 58 px masthead carries the original Clio logo, a discreet connection indicator, and icon controls with accessible names. App preferences hold the reported version, PWA installation, and browser connection controls. There is no page footer; the application gives that space to the work. Navigation uses consistent line icons rather than decorative numbering.
 
 Below 750 px the rail becomes a native modal navigation dialog. The browser owns focus containment, Escape, and return to the trigger. A skip link reaches the main landmark. Page navigation focuses that landmark and updates the document title. Main content uses flexible minimum-zero grid tracks; tables, code, and diagrams scroll within their own surfaces.
 
@@ -20,7 +20,7 @@ Below 750 px the rail becomes a native modal navigation dialog. The browser owns
 
 Fonts are local package assets. Atkinson Hyperlegible Next is the interface and reading face; Newsreader gives major headings an editorial voice; Commit Mono is reserved for exact keys, code, paths, and compact annotations. The theme tokens live in `client/design/tokens.css`; renderer rules live in `client/render/markdown.css`.
 
-The default is warm paper with green ink and fine rules. Dark mode uses a low-chroma green/graphite frame with the same hierarchy. Action surfaces use a restrained amber treatment; errors use a red rule and text. Color always supplements an explicit label. Reading text is 15–16 px, exact annotations 12 px, and short decorative instrument labels may be 10 px. Code and diagrams use a contained dark surface in both themes.
+The default is soft cream paper and cream surfaces with sage accents, green ink, and fine rules. Dark mode uses muted forest surfaces and pastel sage accents with the same hierarchy. An explicit theme choice persists; otherwise the system preference supplies the initial theme. Action surfaces use a restrained amber treatment; errors use a red rule and text. Color always supplements an explicit label. Reading text is 15–16 px, exact annotations 12 px, and short decorative instrument labels may be 10 px. Code and diagrams use a contained dark surface in both themes.
 
 Use shallow radii, generous space around primary work, and denser bounded details behind disclosures. The conversation has a continuous evidence rule; model prose is not a nested card. Avoid decorative counters or telemetry. Motion is limited to meaningful state changes and respects reduced-motion preferences.
 

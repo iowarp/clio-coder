@@ -1,8 +1,8 @@
 :root {
 	color-scheme: light dark;
 	font-family: system-ui, sans-serif;
-	color: #203e32;
-	background: #f4f2e9;
+	color: #365846;
+	background: #eee8d8;
 }
 body {
 	margin: 0;
@@ -35,8 +35,8 @@ button {
 	padding: 12px 20px;
 	border: 1px solid currentColor;
 	border-radius: 6px;
-	background: #203e32;
-	color: #f4f2e9;
+	background: #365846;
+	color: #eee8d8;
 	cursor: pointer;
 }
 button:focus-visible {
@@ -45,11 +45,11 @@ button:focus-visible {
 }
 @media (prefers-color-scheme: dark) {
 	:root {
-		color: #e3e8d7;
-		background: #15221b;
+		color: #e2e6d8;
+		background: #202a25;
 	}
 	button {
-		background: #d9e7aa;
-		color: #15221b;
+		background: #b7d0b2;
+		color: #202a25;
 	}
 }

@@ -20,7 +20,12 @@ const output = await mkdtemp(join(tmpdir(), "clio-web-browser-"));
 let origin = "http://127.0.0.1:0";
 const h = await harness(
 	{ installDelayMs: 150 },
-	{ scenario: "markdown", origin: () => origin, clientDir: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
+	{
+		pwa: true,
+		scenario: "markdown",
+		origin: () => origin,
+		clientDir: fileURLToPath(new URL("../dist/client/", import.meta.url)),
+	},
 );
 await seedSettings(h.home.path, h.home.env);
 await seedFleet(h.home.path, h.home.env);
@@ -122,10 +127,33 @@ try {
 		assert.equal(await page.locator(".skip-link").evaluate((element) => document.activeElement === element), true);
 		await page.keyboard.press("Enter");
 		assert.equal(await page.locator("#main").evaluate((element) => document.activeElement === element), true);
+		assert.equal(await page.locator("footer").count(), 0);
+		const header = await page.locator(".masthead").boundingBox();
+		assert.ok(header && header.height <= 60);
+		assert.equal(
+			await page
+				.locator(".brand img")
+				.first()
+				.evaluate((image) => (image as HTMLImageElement).naturalWidth > 0),
+			true,
+		);
+		await page.getByRole("button", { name: "App preferences", exact: true }).click();
+		await page.getByText("Install Clio Coder", { exact: true }).click();
+		await page.getByRole("button", { name: "Forget this browser" }).waitFor();
+		await check("app-preferences");
+		await page.keyboard.press("Escape");
+		assert.equal(
+			await page
+				.getByRole("button", { name: "App preferences", exact: true })
+				.evaluate((el) => document.activeElement === el),
+			true,
+		);
 		await check("home");
 		if (width === 1600) await page.screenshot({ path: join(output, "home.png"), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await page.locator(':root[data-theme="dark"]').waitFor();
 		await check("home-dark");
+		await page.screenshot({ path: join(output, `${width}-home-dark.png`), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		if (width === 390) {
 			await page.getByRole("button", { name: "Open navigation", exact: true }).click();

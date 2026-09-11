@@ -56,6 +56,7 @@ export function staticClient(app: Hono, directory: string, pwa = false) {
 			".woff2": "font/woff2",
 			".webmanifest": "application/manifest+json; charset=utf-8",
 			".png": "image/png",
+			".webp": "image/webp",
 		};
 		context.header("Content-Type", types[extname(file)] ?? "application/octet-stream");
 		context.header(

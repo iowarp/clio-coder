@@ -12,14 +12,18 @@
 }
 .settings-tabs {
 	display: flex;
+	flex-wrap: wrap;
 	gap: 1.5rem;
 	margin-block: 2rem;
 	border-bottom: 1px solid var(--line);
 	padding-bottom: 0.8rem;
 }
-.settings-tabs [aria-current="page"] {
+.settings-tabs [aria-current="page"],
+.settings-tabs [aria-pressed="true"] {
 	font-weight: 700;
 	text-decoration-thickness: 3px;
+	background: var(--inset);
+	border-color: var(--accent);
 }
 .settings-list > div {
 	display: grid;
