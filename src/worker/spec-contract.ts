@@ -384,6 +384,29 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 	if (target.cache !== undefined) {
 		const cache = readRecord(target.cache, "WorkerSpec.target.cache");
 		readOptionalEnum(cache, "retention", "WorkerSpec.target.cache", ["none", "short", "long"] as const);
+		if (cache.deployment !== undefined) {
+			const binding = readRecord(cache.deployment, "WorkerSpec.target.cache.deployment");
+			readString(binding.backend, "WorkerSpec.target.cache.deployment.backend");
+			readOptionalEnum(binding, "backend", "WorkerSpec.target.cache.deployment", ["llamacpp", "vllm"] as const);
+			for (const key of ["controlUrl", "model", "build"])
+				readString(binding[key], `WorkerSpec.target.cache.deployment.${key}`);
+			readOptionalString(binding, "gatewayDeploymentId", "WorkerSpec.target.cache.deployment");
+			const url = new URL(readString(binding.controlUrl, "WorkerSpec.target.cache.deployment.controlUrl"));
+			if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+				throw new Error(
+					"WorkerSpec.target.cache.deployment.controlUrl must be HTTP(S) without credentials, query, or fragment",
+				);
+		}
+		if (cache.warm !== undefined) {
+			const warm = readRecord(cache.warm, "WorkerSpec.target.cache.warm");
+			for (const key of ["maxInputTokens", "maxDurationMs", "cooldownMs"]) {
+				if (
+					warm[key] !== undefined &&
+					(typeof warm[key] !== "number" || !Number.isSafeInteger(warm[key]) || (warm[key] as number) < 1)
+				)
+					throw new Error(`WorkerSpec.target.cache.warm.${key} must be a positive safe integer`);
+			}
+		}
 	}
 	if (target.capabilities !== undefined) validateCapabilityPatch(target.capabilities, "WorkerSpec.target.capabilities");
 }

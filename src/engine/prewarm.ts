@@ -9,6 +9,7 @@
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { BackendCompletionTimings } from "../core/cache-telemetry.js";
 import { streamSimple } from "./ai.js";
+import { estimateInputTokensFromContext } from "./apis/output-budget.js";
 import type { AgentMessage, AgentTool, EngineModel, Usage } from "./types.js";
 
 /**
@@ -50,6 +51,8 @@ export interface PrewarmRoundInput {
 	};
 	apiKey?: string;
 	signal?: AbortSignal;
+	/** Admission bound on the engine's input estimate, after context selection. */
+	maxInputTokens?: number;
 	/** Public Pi preparation hooks of the eventual caller. No tools or agent loop are executed. */
 	agent?: Pick<
 		Agent,
@@ -124,6 +127,19 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 	// pre-warm has to make the same mapping or the thinking composition resolves
 	// against a different level and the rendered template moves.
 	const options: Record<string, unknown> = { maxTokens: PREWARM_MAX_TOKENS };
+	// Narrow residency authority without changing prompt rendering. A warm may
+	// not inherit the foreground turn's implicit load/unload authorization.
+	const metadata = (input.model as EngineModel & { clioCoder?: Record<string, unknown> }).clioCoder;
+	const model = metadata ? { ...input.model, clioCoder: { ...metadata, lifecycle: "user-managed" } } : input.model;
+	if (metadata?.runtimeId === "llamacpp") {
+		// A worker that disappeared after admission must not be JIT-loaded by
+		// the pinned llama router. This query is independent of prompt bytes.
+		options.fetch = (request: string | URL | Request, init?: RequestInit) => {
+			const url = new URL(request instanceof Request ? request.url : request);
+			url.searchParams.set("autoload", "false");
+			return fetch(request instanceof Request ? new Request(url, request) : url, init);
+		};
+	}
 	if (input.state.thinkingLevel !== "off") options.reasoning = input.state.thinkingLevel;
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
@@ -157,9 +173,16 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 			? await input.agent.convertToLlm(messages)
 			: messages.filter((message) => LLM_MESSAGE_ROLES.has(message.role));
 		input.signal?.throwIfAborted();
-		const context = { systemPrompt: input.state.systemPrompt, messages: converted, tools: [...input.state.tools] };
+		const context = {
+			systemPrompt: input.state.systemPrompt,
+			messages: converted,
+			tools: [...input.state.tools],
+		} as Parameters<typeof streamSimple>[1];
+		if (input.maxInputTokens !== undefined && estimateInputTokensFromContext(context) > input.maxInputTokens) {
+			throw new Error("pre-warm input estimate exceeds its token budget");
+		}
 		const events = await send(
-			input.model,
+			model,
 			context as unknown as Parameters<typeof streamSimple>[1],
 			options as unknown as Parameters<typeof streamSimple>[2],
 		);

@@ -17,6 +17,17 @@ export interface TargetPricing {
 /** Request policy interpreted by the selected Pi API; it does not authorize cache administration or paid warming. */
 export interface TargetCacheSettings {
 	retention?: "none" | "short" | "long";
+	/** Explicit read-only deployment binding; never grants administrative authority. */
+	deployment?: {
+		backend: "llamacpp" | "vllm";
+		controlUrl: string;
+		model: string;
+		build: string;
+		/** Required for a gateway binding; compared with its current route inventory. */
+		gatewayDeploymentId?: string;
+	};
+	/** Local warm bounds. Paid routes remain ineligible. */
+	warm?: { maxInputTokens?: number; maxDurationMs?: number; cooldownMs?: number };
 }
 
 // Canonical persisted lifecycle name. Readers temporarily normalize the

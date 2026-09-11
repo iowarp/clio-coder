@@ -17,7 +17,6 @@ test("catalog synthesis preserves SDK context price tiers and explicit target pr
 		output: 100,
 		cacheRead: 6000,
 		cacheWrite: 2000,
-		cacheWrite1h: 500,
 		totalTokens: tier.inputTokensAbove + 8101,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};

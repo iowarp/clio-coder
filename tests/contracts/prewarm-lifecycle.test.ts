@@ -1,5 +1,5 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
-import { test } from "node:test";
+import { afterEach, beforeEach, test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
@@ -9,6 +9,13 @@ import type { PrewarmRoundInput, PrewarmRoundResult } from "../../src/engine/pre
 import type { TurnContext } from "../../src/interactive/turn-context.js";
 import { createTurnPrewarm } from "../../src/interactive/turn-prewarm.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
+
+let scratch: IsolatedClioEnv;
+beforeEach(async () => {
+	scratch = await isolateClioEnv("clio-cache-prewarm-");
+});
+afterEach(() => scratch.restore());
 
 function fixture() {
 	const settings = structuredClone(DEFAULT_SETTINGS);
@@ -37,6 +44,18 @@ function fixture() {
 		hasActiveDispatch: () => false,
 		prepareRuntime: async () => ({ ok: true, runtime, apiKey: "fixture" }),
 		applySessionTools: () => {},
+		observeDeployment: async () => ({
+			observedAt: Date.now(),
+			backend: "llamacpp",
+			model: "fixture",
+			build: "fixture",
+			epoch: null,
+			endpoint: target.url,
+			requestControls: ["cache_prompt"],
+			warm: "bounded",
+			administration: "unsupported",
+			reason: "fixture",
+		}),
 		recordUsage: () => {
 			recorded += 1;
 		},
@@ -78,11 +97,9 @@ test("detached warming retains ownership and collapses repeated triggers to one 
 		f.warm.schedule("compaction");
 		f.rounds[0]?.finish(completed);
 		await delay(10);
-		strictEqual(f.rounds.length, 2);
-		deepStrictEqual(f.counts(), { reservations: 1, recorded: 1, visible: 0 });
-		f.rounds[1]?.finish(completed);
-		deepStrictEqual(await f.warm.settled(), { ran: true, trigger: "compaction" });
-		deepStrictEqual(f.counts(), { reservations: 0, recorded: 2, visible: 1 });
+		strictEqual(f.rounds.length, 1, "cooldown also bounds repeated work after the detached round");
+		deepStrictEqual(await f.warm.settled(), { ran: false, reason: "cooldown" });
+		deepStrictEqual(f.counts(), { reservations: 0, recorded: 1, visible: 0 });
 	} finally {
 		f.warm.dispose();
 	}

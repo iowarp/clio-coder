@@ -646,7 +646,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("cache" in value) {
 		if (!isPlainObject(value.cache)) issues.add(`${path}.cache`, "expected a map");
 		else {
-			issues.unknownKeys(`${path}.cache`, value.cache, ["retention"]);
+			issues.unknownKeys(`${path}.cache`, value.cache, ["retention", "deployment", "warm"]);
 			target.cache = {};
 			if ("retention" in value.cache) {
 				const retention = expectEnum(issues, `${path}.cache.retention`, value.cache.retention, [
@@ -655,6 +655,61 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 					"long",
 				] as const);
 				if (retention !== undefined) target.cache.retention = retention;
+			}
+			if ("deployment" in value.cache) {
+				const binding = value.cache.deployment;
+				const bindingPath = `${path}.cache.deployment`;
+				if (!isPlainObject(binding)) issues.add(bindingPath, "expected a map");
+				else {
+					issues.unknownKeys(bindingPath, binding, ["backend", "controlUrl", "model", "build", "gatewayDeploymentId"]);
+					const backend = expectEnum(issues, `${bindingPath}.backend`, binding.backend, ["llamacpp", "vllm"] as const);
+					for (const key of ["controlUrl", "model", "build"] as const) {
+						if (typeof binding[key] !== "string" || !binding[key].trim())
+							issues.add(`${bindingPath}.${key}`, "expected a nonempty string");
+					}
+					if (typeof binding.controlUrl === "string") {
+						try {
+							const url = new URL(binding.controlUrl);
+							if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
+								throw new Error("invalid URL");
+						} catch {
+							issues.add(`${bindingPath}.controlUrl`, "expected an HTTP(S) URL without credentials, query, or fragment");
+						}
+					}
+					if (
+						binding.gatewayDeploymentId !== undefined &&
+						(typeof binding.gatewayDeploymentId !== "string" || !binding.gatewayDeploymentId.trim())
+					)
+						issues.add(`${bindingPath}.gatewayDeploymentId`, "expected a nonempty string");
+					if (
+						backend &&
+						typeof binding.controlUrl === "string" &&
+						typeof binding.model === "string" &&
+						typeof binding.build === "string"
+					) {
+						target.cache.deployment = {
+							backend,
+							controlUrl: binding.controlUrl,
+							model: binding.model,
+							build: binding.build,
+							...(typeof binding.gatewayDeploymentId === "string" ? { gatewayDeploymentId: binding.gatewayDeploymentId } : {}),
+						};
+					}
+				}
+			}
+			if ("warm" in value.cache) {
+				if (!isPlainObject(value.cache.warm)) issues.add(`${path}.cache.warm`, "expected a map");
+				else {
+					issues.unknownKeys(`${path}.cache.warm`, value.cache.warm, ["maxInputTokens", "maxDurationMs", "cooldownMs"]);
+					target.cache.warm = {};
+					for (const key of ["maxInputTokens", "maxDurationMs", "cooldownMs"] as const) {
+						const bound = value.cache.warm[key];
+						if (bound === undefined) continue;
+						if (typeof bound !== "number" || !Number.isSafeInteger(bound) || bound < 1)
+							issues.add(`${path}.cache.warm.${key}`, "expected a positive safe integer");
+						else target.cache.warm[key] = bound;
+					}
+				}
 			}
 		}
 	}

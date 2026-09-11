@@ -10,10 +10,16 @@
  * nobody watching.
  */
 
+import { createHash } from "node:crypto";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
-import type { ProvidersContract } from "../domains/providers/index.js";
+import { endpointCapacityUsage } from "../domains/dispatch/index.js";
+import {
+	type CacheDeploymentObservation,
+	observeCacheDeployment,
+	type ProvidersContract,
+} from "../domains/providers/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { Usage } from "../engine/types.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
@@ -28,9 +34,14 @@ export type PrewarmSkipReason =
 	| "dispatch-active"
 	| "tier"
 	| "unresolved"
+	| "deployment"
+	| "cooldown"
+	| "expired"
 	| "superseded";
 
-export type PrewarmOutcome = { ran: true; trigger: PrewarmTrigger } | { ran: false; reason: PrewarmSkipReason };
+export type PrewarmOutcome =
+	| { ran: true; trigger: PrewarmTrigger }
+	| { ran: false; reason: PrewarmSkipReason; detail?: string };
 
 export interface TurnPrewarmDeps {
 	state: ChatTurnState;
@@ -78,6 +89,7 @@ export interface TurnPrewarmDeps {
 	registerEndpointSlot?: (runtime: AgentRuntime) => (() => void) | null;
 	/** Test seam. Production uses the real provider round. */
 	runPrewarm?: typeof runPrewarmRound;
+	observeDeployment?: typeof observeCacheDeployment;
 	/**
 	 * Whether a submit aborts the round's request. Defaults to the measured
 	 * backend behavior; see {@link ABORT_ROUND_ON_SUBMIT}.
@@ -130,6 +142,10 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 	// Ownership outlives detachment: one request and at most one newer trigger.
 	let running: AbortController | null = null;
 	let disposed = false;
+	let pendingSince = 0;
+	let lastFinished = 0;
+	let lastPrefix: string | null = null;
+	let lastSkip: string | null = null;
 	// Rounds a submit or a session switch let go of. Their result is still
 	// recorded, but it no longer describes the prefix the next turn will send, so
 	// it never reaches the `/context` line.
@@ -170,13 +186,33 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		// notice from either.
 		const targetId = deps.getSettings().chat?.target?.trim();
 		const runtimeId = targetId ? deps.providers.getTarget(targetId)?.runtime : undefined;
-		if (runtimeId === undefined || deps.providers.getRuntime(runtimeId)?.tier !== "local-native") return "tier";
+		if (
+			runtimeId === undefined ||
+			(deps.providers.getRuntime(runtimeId)?.tier !== "local-native" &&
+				!(runtimeId === "litellm" && targetId && deps.providers.getTarget(targetId)?.cache?.deployment))
+		)
+			return "tier";
 		return null;
 	};
 
 	const runOnce = async (trigger: PrewarmTrigger, controller: AbortController): Promise<PrewarmOutcome> => {
 		const refusal = admissionRefusal();
 		if (refusal) return { ran: false, reason: refusal };
+		const targetId = deps.getSettings().chat.target;
+		const target = targetId ? deps.providers.getTarget(targetId) : null;
+		if (!target) return { ran: false, reason: "unresolved" };
+		const targetSettings = JSON.stringify(target);
+		const started = Date.now();
+		if (target.cache?.retention === "none") return { ran: false, reason: "disabled" };
+		if (target.pricing && Object.values(target.pricing).some((rate) => rate > 0))
+			return { ran: false, reason: "deployment", detail: "paid-warming-disabled" };
+		const cooldown = Math.max(1000, target.cache?.warm?.cooldownMs ?? 60000);
+		if (Date.now() - lastFinished < cooldown) return { ran: false, reason: "cooldown" };
+		const observe = deps.observeDeployment ?? observeCacheDeployment;
+		let deployment: CacheDeploymentObservation = await observe(target, deps.getSettings().chat.model ?? "", {
+			signal: controller.signal,
+		});
+		if (deployment.warm !== "bounded") return { ran: false, reason: "deployment", detail: deployment.reason };
 
 		const prepared = await deps.prepareRuntime(controller.signal);
 		if (!prepared.ok) return { ran: false, reason: "unresolved" };
@@ -197,12 +233,44 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const lateRefusal = admissionRefusal();
 		if (lateRefusal) return { ran: false, reason: lateRefusal };
 		if (detached.has(controller) || controller.signal.aborted) return { ran: false, reason: "superseded" };
+		// Binding/residency can change during preparation. Discovery itself never
+		// loads models and missing evidence leaves ordinary inference untouched.
+		deployment = await observe(target, runtime.wireModelId, { signal: controller.signal });
+		if (deployment.warm !== "bounded") return { ran: false, reason: "deployment", detail: deployment.reason };
+		const finalRefusal = admissionRefusal();
+		if (finalRefusal) return { ran: false, reason: finalRefusal };
+		if (
+			detached.has(controller) ||
+			controller.signal.aborted ||
+			JSON.stringify(deps.providers.getTarget(target.id)) !== targetSettings
+		)
+			return { ran: false, reason: "superseded" };
+		if (Date.now() - started > 30000) return { ran: false, reason: "expired" };
+		// This includes shared dispatch leases/reservations and this process's
+		// foreground streams. It is a fresh check, not an atomic global warm lease;
+		// server slot observations above also include unrelated active traffic.
+		if (deployment.endpoint && (endpointCapacityUsage()[deployment.endpoint] ?? 0) > 0)
+			return { ran: false, reason: "dispatch-active" };
+		const prefix = createHash("sha256")
+			.update(
+				JSON.stringify({
+					model: runtime.agent.state.model,
+					system: runtime.agent.state.systemPrompt,
+					messages: runtime.agent.state.messages,
+					tools: runtime.agent.state.tools,
+					thinking: runtime.agent.state.thinkingLevel,
+				}),
+			)
+			.digest("hex");
+		if (prefix === lastPrefix && Date.now() - lastFinished < Math.max(cooldown, 60000))
+			return { ran: false, reason: "cooldown" };
 
 		// The claim is taken before the request goes out and released in the
 		// finally, including on the detach path, because the request the server is
 		// still finishing is the one occupying the slot.
 		const releaseEndpointSlot = deps.registerEndpointSlot?.(runtime) ?? null;
 		let result: Awaited<ReturnType<typeof round>>;
+		const deadline = setTimeout(() => controller.abort(), Math.min(target.cache?.warm?.maxDurationMs ?? 30000, 120000));
 		try {
 			result = await round({
 				model: runtime.agent.state.model,
@@ -215,10 +283,14 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				},
 				...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 				signal: controller.signal,
+				maxInputTokens: target.cache?.warm?.maxInputTokens ?? 8192,
 			});
 		} finally {
+			clearTimeout(deadline);
+			lastFinished = Date.now();
 			releaseEndpointSlot?.();
 		}
+		lastPrefix = result.aborted || result.errorMessage ? null : prefix;
 
 		// The prefill the server did is spend whatever the operator did next, so a
 		// let-go round is recorded exactly like a completed one. Only the
@@ -227,7 +299,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		// prefix.
 		const wasDetached = detached.has(controller) || controller.signal.aborted;
 		const promptTokens = prewarmPromptTokens(result);
-		if (!wasDetached) {
+		if (!wasDetached && !result.errorMessage) {
 			deps.context.notePrewarm({
 				tokens: promptTokens,
 				ms: result.timing.apiMs,
@@ -246,6 +318,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				parentTurnId: deps.state.lastTurnId,
 				data: {
 					trigger,
+					deployment,
 					target: runtime.targetId,
 					model: runtime.wireModelId,
 					promptTokens,
@@ -291,7 +364,31 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		const controller = new AbortController();
 		active = controller;
 		running = controller;
-		inFlight = runOnce(trigger, controller)
+		inFlight = (
+			Date.now() - pendingSince > 30000
+				? Promise.resolve<PrewarmOutcome>({ ran: false, reason: "expired" })
+				: runOnce(trigger, controller)
+		)
+			.then((outcome) => {
+				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
+					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
+					if (lastSkip !== key) {
+						lastSkip = key;
+						try {
+							deps.session?.appendEntry({
+								kind: "custom",
+								customType: "prewarmSkipped",
+								display: false,
+								parentTurnId: deps.state.lastTurnId,
+								data: { trigger, ...outcome },
+							});
+						} catch {
+							/* Optional diagnostics. */
+						}
+					}
+				} else if (outcome.ran) lastSkip = null;
+				return outcome;
+			})
 			.catch(() => null)
 			.finally(() => {
 				if (active === controller) active = null;
@@ -307,6 +404,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			// warming history this session has.
 			releaseActiveRound();
 			pendingTrigger = trigger;
+			pendingSince = Date.now();
 			if (timer !== null || running !== null) return;
 			// Ref'd on purpose, same reasoning as `settled()` below: the timer is due
 			// in 0 ms, so it holds the event loop for one tick at most, and a Node 22

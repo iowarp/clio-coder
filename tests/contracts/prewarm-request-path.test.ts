@@ -1,6 +1,9 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { Type } from "typebox";
+import llamacpp from "../../src/domains/providers/runtimes/local-native/llamacpp.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { streamSimple } from "../../src/engine/ai.js";
@@ -111,5 +114,53 @@ test("terminal-only warm reports no TTFT and absent provider usage remains unkno
 		strictEqual(fixture.requests.length, 1);
 	} finally {
 		await fixture.close();
+	}
+});
+
+test("native warm cannot administer residency or JIT-load a model and applies its input bound after transforms", async () => {
+	const paths: string[] = [];
+	let body: Record<string, unknown> | undefined;
+	const server = createServer(async (req, res) => {
+		paths.push(`${req.method} ${req.url}`);
+		if (req.url !== "/v1/chat/completions?autoload=false") {
+			res.writeHead(404);
+			return res.end("{}");
+		}
+		let raw = "";
+		for await (const chunk of req) raw += chunk;
+		body = JSON.parse(raw);
+		res.setHeader("content-type", "text/event-stream");
+		res.end(
+			'data: {"id":"fixture","model":"fixture","choices":[{"index":0,"delta":{"content":"."}}]}\n\ndata: {"id":"fixture","model":"fixture","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":1,"total_tokens":11}}\n\ndata: [DONE]\n\n',
+		);
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		const model = llamacpp.synthesizeModel(
+			{
+				id: "local",
+				runtime: "llamacpp",
+				url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
+				lifecycle: "clio-coder-managed",
+			},
+			"fixture",
+			null,
+		);
+		const { agent } = createEngineAgent({ initialState: { model, thinkingLevel: "off", systemPrompt: "instructions" } });
+		const result = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
+		strictEqual(result.errorMessage, null);
+		deepStrictEqual(paths, ["GET /v1/models", "POST /v1/chat/completions?autoload=false"]);
+		strictEqual(body?.cache_prompt, true);
+		strictEqual(
+			(model as { clioCoder?: { lifecycle?: string } }).clioCoder?.lifecycle,
+			"clio-coder-managed",
+			"foreground authority is unchanged",
+		);
+		agent.transformContext = async (messages) => [{ role: "user", content: "x".repeat(1000), timestamp: 0 }, ...messages];
+		const refused = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
+		ok(refused.errorMessage?.includes("token budget"));
+		strictEqual(paths.length, 2, "oversized transformed warm never reaches the server");
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}
 });
