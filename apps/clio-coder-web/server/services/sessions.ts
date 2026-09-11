@@ -25,4 +25,12 @@ export class SessionService {
 			throw new AppProblem("not_found", "Session was not found in this workspace's ledger.");
 		return this.supervisor.open(workspaceId, id);
 	}
+	async ledgerCommand(id: string, action: "label" | "delete", workspaceId?: string, label?: string) {
+		const workspace = workspaceId ?? this.supervisor.get(id).workspaceId;
+		const row = (await this.history(workspace)).find((row) => row.id === id);
+		if (!row) throw new AppProblem("not_found", "Session was not found in this workspace's ledger.");
+		if (action === "delete" && row.endedAt === null)
+			throw new AppProblem("conflict", "Close the session before deleting it.");
+		return this.supervisor.ledgerCommand(workspace, id, action, label);
+	}
 }

@@ -38,7 +38,7 @@ export function register<R extends Route>(app: Hono, hub: EventHub, route: R, ha
 				throw new AppProblem("validation", `Expected an integer query parameter: ${key}`);
 		}
 		let body: unknown = {};
-		if (route.method === "POST") {
+		if (route.method !== "GET") {
 			idempotencyKey(context);
 			if (context.req.header("content-type")?.split(";")[0] !== "application/json")
 				throw new AppProblem("validation", "Expected an application/json body.");

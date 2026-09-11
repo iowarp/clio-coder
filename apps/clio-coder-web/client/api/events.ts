@@ -23,7 +23,10 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 				state = buffer.event(delta);
 			if (state) queries.setQueryData<SessionSnapshot>(["session", state.id], state);
 			if (buffer.hasGap) void queries.invalidateQueries({ queryKey: ["session", delta.payload.resource] });
-			if (delta.type === "session.changed") void queries.invalidateQueries({ queryKey: ["sessions"] });
+			if (delta.type === "session.changed" || delta.type === "session.labelled") {
+				void queries.invalidateQueries({ queryKey: ["sessions"] });
+				void queries.invalidateQueries({ queryKey: ["session-history"] });
+			}
 		}
 		if (event.type === "hello") connection("Connected");
 		if (event.type === "operation.finished") {

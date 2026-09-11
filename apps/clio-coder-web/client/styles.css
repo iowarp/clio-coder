@@ -806,3 +806,69 @@ textarea:focus-visible {
 	outline: 3px solid #b28029;
 	outline-offset: 2px;
 }
+
+/* Session controls keep approval and cancellation reachable on narrow screens. */
+.control-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 12px;
+	align-items: end;
+	margin-block: 16px;
+}
+.session-controls,
+.permission-card,
+.fleet-strip {
+	padding: 20px;
+	border: 1px solid var(--line);
+	border-radius: 10px;
+	margin-block: 16px;
+}
+.permission-card {
+	border-color: var(--green);
+}
+.session-settings {
+	display: grid;
+	gap: 16px;
+}
+.session-settings fieldset {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 16px;
+	padding: 16px;
+}
+.session-settings label,
+.session-controls label {
+	display: grid;
+	gap: 6px;
+	min-width: 0;
+}
+.session-settings select,
+.session-settings input,
+.session-controls input {
+	width: 100%;
+	min-width: 0;
+	padding: 10px;
+}
+.target-card {
+	display: flex;
+	justify-content: space-between;
+	gap: 16px;
+	align-items: center;
+	overflow-wrap: anywhere;
+}
+.fleet-strip ol {
+	padding-left: 20px;
+}
+.fleet-strip li > span {
+	margin-left: 12px;
+	font-size: 12px;
+}
+@media (max-width: 650px) {
+	.session-settings fieldset {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.target-card {
+		flex-direction: column;
+		align-items: start;
+	}
+}

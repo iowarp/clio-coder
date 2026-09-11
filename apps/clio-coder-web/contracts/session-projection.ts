@@ -26,6 +26,8 @@ export function emptySession(id: string, workspaceId: string): SessionSnapshot {
 		turns: [],
 		recoveredOrphan: false,
 		label: null,
+		permissions: [],
+		fleet: [],
 	};
 }
 export function applySessionDelta(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
@@ -55,6 +57,16 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(MARKER) };
 	};
 	switch (event.type) {
+		case "session.labelled":
+			return { ...state, label: event.payload.label };
+		case "fleet.loopBlocked":
+		case "fleet.enqueued":
+		case "fleet.started":
+		case "fleet.progress":
+		case "fleet.completed":
+		case "fleet.failed":
+		case "evidence.ready":
+			return { ...state, fleet: [...state.fleet, event.payload.item].slice(-128) };
 		case "session.changed":
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
 		case "turn.started": {
@@ -103,16 +115,25 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "turn.tool":
 			upsert(event.payload.item);
 			break;
-		case "permission.rejected":
+		case "permission.requested":
+		case "permission.escalated":
+		case "permission.resolved":
+		case "permission.expired": {
+			const permission = event.payload.permission;
+			state = {
+				...state,
+				permissions: [...state.permissions.filter((item) => item.id !== permission.id), permission].slice(-32),
+			};
 			upsert({
-				id: `${event.payload.turnId}:permission:${event.payload.revision}`,
-				turnId: event.payload.turnId,
+				id: permission.id,
+				turnId: permission.turnId,
 				kind: "notice",
-				text: "Permission rejected: approval UI is not available in this slice.",
-				status: "rejected",
+				text: `Permission ${permission.status}: ${permission.title}`,
+				status: permission.status,
 				origin: "live",
 			});
 			break;
+		}
 		case "turn.finished": {
 			const { turnId, stopReason, usage, problem, finishedAt } = event.payload;
 			const status = stopReason === "cancelled" ? "cancelled" : problem ? "failed" : "succeeded";
@@ -137,6 +158,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 export class SessionBuffer {
 	private snapshotValue: SessionSnapshot | undefined;
 	private pending = new Map<number, SessionDelta>();
+	private pendingBytes = 0;
 	private overflow = false;
 	get value() {
 		return this.snapshotValue;
@@ -146,9 +168,12 @@ export class SessionBuffer {
 	}
 	event(event: SessionDelta) {
 		if (event.payload.revision <= (this.snapshotValue?.revision ?? -1)) return this.snapshotValue;
+		if (this.pending.has(event.payload.revision)) return this.drain();
 		this.pending.set(event.payload.revision, event);
-		if (this.pending.size > 4096) {
+		this.pendingBytes += encoder.encode(JSON.stringify(event)).byteLength;
+		if (this.pending.size > 4096 || this.pendingBytes > 8 * 1024 * 1024) {
 			this.pending.clear();
+			this.pendingBytes = 0;
 			this.overflow = true;
 		}
 		return this.drain();
@@ -157,15 +182,20 @@ export class SessionBuffer {
 		this.overflow = false;
 		if (!this.snapshotValue || value.revision >= this.snapshotValue.revision) this.snapshotValue = value;
 		for (const revision of this.pending.keys())
-			if (revision <= (this.snapshotValue?.revision ?? -1)) this.pending.delete(revision);
+			if (revision <= (this.snapshotValue?.revision ?? -1)) this.remove(revision);
 		return this.drain();
+	}
+	private remove(revision: number) {
+		const value = this.pending.get(revision);
+		if (value) this.pendingBytes -= encoder.encode(JSON.stringify(value)).byteLength;
+		this.pending.delete(revision);
 	}
 	private drain() {
 		if (!this.snapshotValue) return undefined;
 		while (true) {
 			const next = this.pending.get(this.snapshotValue.revision + 1);
 			if (!next) return this.snapshotValue;
-			this.pending.delete(next.payload.revision);
+			this.remove(next.payload.revision);
 			this.snapshotValue = applySessionDelta(this.snapshotValue, next);
 		}
 	}

@@ -17,8 +17,10 @@ pnpm --filter @iowarp/clio-coder-web start
 Open the full loopback URL printed by the server, then choose **Toolchain** or
 **Traces**, or choose **Sessions** to open a workspace by absolute path, start a
 conversation, or load a saved session. Up to four sessions can be open at once.
-The S3 permission fail-safe rejects tool permission requests; S4 adds the approval
-controls. Trace history includes server-side filters and pagination, run details,
+Permission cards offer one-time allow or reject. Unanswered cards escalate after
+45 seconds and cancel the turn after 10 minutes. Session controls include cancel,
+labels, safe settings, autonomy, target probes, and confirmed deletion of closed
+sessions; fleet activity and evidence-ready facts stream alongside the conversation. Trace history includes server-side filters and pagination, run details,
 phase timelines, event payloads, gates, processes, receipts, and live tails. Trace
 reads use your configured Clio state directory; a missing database shows an empty
 state. Receipt summaries omit large payload fields until you request the full receipt.
@@ -86,7 +88,9 @@ and closes a slow connection after its queued bytes exceed a full replay plus a
 uses revisions to keep a late response from replacing a newer terminal record.
 Session deltas use a shared revision buffer so a late snapshot cannot duplicate
 or erase newer streamed text. Text items are bounded to 64 KiB, the visible
-timeline to 2 MiB / 2,048 items, and turn summaries to 128.
+timeline to 2 MiB / 2,048 items, and turn summaries to 128. Permissions retain 32
+cards and fleet activity 128 facts; pending client deltas share the 8 MiB / 4,096
+entry bound. The server retains 16 closed session snapshots plus active sessions.
 
 Recent workspaces and child ownership records live under `<state>/web/`.
 On restart, only a recorded ACP child with a matching birth token and a proven
@@ -103,5 +107,6 @@ See [SPRINT.md](SPRINT.md) for canonical status,
 and [the S1 closeout](notes/2026-09-11-S1-closeout.md) for the approved CI checker
 update and final verification. [S2 evidence](notes/2026-09-11-S2.md) records trace
 coverage and browser checks. [S3 evidence](notes/2026-09-11-S3.md) records session
-and process-lifecycle verification. S1-S3 are complete; S4 adds permission, cancel,
-safe settings, targets, and fleet event controls.
+and process-lifecycle verification. [S4 evidence](notes/2026-09-11-S4.md) records
+permission/control verification and measured reconnect behavior. S1-S4 are complete;
+S5 adds the shared renderers, design system, and browser accessibility smoke.

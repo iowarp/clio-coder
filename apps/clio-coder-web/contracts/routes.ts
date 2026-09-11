@@ -3,7 +3,10 @@ import { Empty, Id } from "./common.js";
 import { EventCursor } from "./events.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
+import { PermissionDecision } from "./permissions.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
+import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
+import { SessionTargets, TargetProbe } from "./targets.js";
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
@@ -27,7 +30,7 @@ export interface Route<
 	B extends TSchema = TSchema,
 	R extends TSchema = TSchema,
 > {
-	method: "GET" | "POST";
+	method: "GET" | "POST" | "PATCH" | "DELETE";
 	path: string;
 	params: P;
 	query: Q;
@@ -53,6 +56,94 @@ const operationParams = Type.Object({ id: Id }, { additionalProperties: false })
 const get = { method: "GET", params: Empty, query: Empty, body: Empty, status: 200 } as const;
 const post = { method: "POST", query: Empty, body: Empty, status: 202 } as const;
 export const routes = {
+	permission: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/permissions/:permissionId",
+		params: Type.Object({ id: Id, permissionId: Id }, { additionalProperties: false }),
+		body: Type.Object({ decision: PermissionDecision }, { additionalProperties: false }),
+		response: Empty,
+		summary: "Answer a pending permission once",
+	}),
+	cancelTurn: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/turns/:turnId/cancel",
+		params: Type.Object({ id: Id, turnId: Id }, { additionalProperties: false }),
+		response: Empty,
+		summary: "Cancel the specified active turn",
+	}),
+	sessionSettings: defineRoute({
+		...get,
+		path: "/api/sessions/:id/settings",
+		params: operationParams,
+		response: SafeSettings,
+		summary: "The four ACP safe settings",
+	}),
+	patchSessionSettings: defineRoute({
+		...post,
+		method: "PATCH",
+		status: 200,
+		path: "/api/sessions/:id/settings",
+		params: operationParams,
+		body: SafeSettingsPatch,
+		response: SafeSettings,
+		summary: "Patch only the four ACP safe settings",
+	}),
+	sessionTargets: defineRoute({
+		...get,
+		path: "/api/sessions/:id/targets",
+		params: operationParams,
+		response: SessionTargets,
+		summary: "Targets available to this ACP session",
+	}),
+	probeSessionTarget: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/targets/:targetId/probe",
+		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
+		response: TargetProbe,
+		summary: "Probe a configured target through ACP",
+	}),
+	labelSession: defineRoute({
+		...post,
+		method: "PATCH",
+		status: 200,
+		path: "/api/sessions/:id",
+		params: operationParams,
+		body: Type.Object(
+			{ label: Type.String({ maxLength: 256, pattern: "^[^\\u0000-\\u001f\\u007f]*$" }), workspaceId: Type.Optional(Id) },
+			{ additionalProperties: false },
+		),
+		response: Empty,
+		summary: "Save the session label through ACP",
+	}),
+	deleteSession: defineRoute({
+		...post,
+		method: "DELETE",
+		status: 200,
+		path: "/api/sessions/:id",
+		params: operationParams,
+		body: Type.Object({ workspaceId: Type.Optional(Id) }, { additionalProperties: false }),
+		response: Empty,
+		summary: "Delete a closed session through ACP",
+	}),
+	sessionAutonomy: defineRoute({
+		...get,
+		path: "/api/sessions/:id/autonomy",
+		params: operationParams,
+		response: Autonomy,
+		summary: "Current session autonomy and source",
+	}),
+	setSessionAutonomy: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/autonomy",
+		params: operationParams,
+		body: Type.Object({ level: AutonomyLevel }, { additionalProperties: false }),
+		response: Autonomy,
+		summary: "Set autonomy for this session",
+	}),
 	workspaces: defineRoute({
 		...get,
 		path: "/api/workspaces",

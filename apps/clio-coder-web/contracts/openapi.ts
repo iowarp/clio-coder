@@ -28,7 +28,7 @@ export function openapi() {
 			parameters: [
 				...parameters(route.params, "path"),
 				...parameters(route.query, "query"),
-				...(route.method === "POST"
+				...(route.method !== "GET"
 					? [
 							{
 								name: "Idempotency-Key",
@@ -40,7 +40,7 @@ export function openapi() {
 					: []),
 				...(route.stream ? [{ name: "Last-Event-ID", in: "header", schema: routes.events.query.properties.after }] : []),
 			],
-			...(route.method === "POST"
+			...(route.method !== "GET"
 				? { requestBody: { required: true, content: { "application/json": { schema: route.body } } } }
 				: {}),
 			responses: {
@@ -50,7 +50,7 @@ export function openapi() {
 					headers: {
 						"X-Clio-Epoch": { schema: { type: "string" }, description: "Server epoch" },
 						"X-Clio-Seq": { schema: { type: "integer" }, description: "Sequence before assembling the snapshot" },
-						...(id === "operation"
+						...(id === "operation" || id === "session"
 							? { "X-Clio-Revision": { schema: { type: "integer" }, description: "Snapshot revision" } }
 							: {}),
 					},

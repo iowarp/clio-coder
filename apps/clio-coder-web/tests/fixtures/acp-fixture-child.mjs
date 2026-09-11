@@ -7,6 +7,13 @@ import { setTimeout as delay } from "node:timers/promises";
 const scenario = process.env.CLIO_CODER_WEB_FIXTURE_SCENARIO ?? "text";
 let sessionId = randomUUID(),
 	cancelled = false;
+let eventSequence = 0,
+	autonomy = "suggest";
+const settings = {
+	chat: { target: "fixture", model: "fixture-model", thinkingLevel: "off" },
+	safety: { autonomy: "suggest" },
+};
+const editable = ["chat.target", "chat.model", "chat.thinkingLevel", "safety.autonomy"];
 const pending = new Map();
 const log = (event) => {
 	if (process.env.CLIO_CODER_WEB_FIXTURE_LOG)
@@ -23,6 +30,16 @@ const update = (
 const text = (value) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
 const usage = { input: 11, output: 12, cacheRead: 13, cacheWrite: 14, reasoning: 15, totalTokens: 50, costUsd: 0.001 };
 const permission = async () => {
+	const toolCall = {
+		sessionUpdate: "tool_call",
+		toolCallId: "write-1",
+		title: "Write fixture",
+		kind: "edit",
+		status: "pending",
+		rawInput: { path: "fixture.txt", content: "approved" },
+		locations: [{ path: "fixture.txt" }],
+	};
+	update(toolCall);
 	const id = `permission-${randomUUID()}`;
 	const promise = new Promise((resolve) => pending.set(id, resolve));
 	send({
@@ -30,7 +47,7 @@ const permission = async () => {
 		method: "session/request_permission",
 		params: {
 			sessionId,
-			toolCall: { toolCallId: "write-1", title: "Write fixture", kind: "edit", status: "pending" },
+			toolCall: scenario === "permission-mismatch" ? { ...toolCall, rawInput: { path: "different.txt" } } : toolCall,
 			options: [
 				{ optionId: "allow", kind: "allow_once", name: "Allow once" },
 				{ optionId: "reject", kind: "reject_once", name: "Reject" },
@@ -40,7 +57,58 @@ const permission = async () => {
 	const result = await promise;
 	const executed = result?.outcome?.optionId === "allow";
 	log({ permission: result, toolExecuted: executed });
-	text(executed ? "Tool executed." : "Permission rejected.");
+	update({ sessionUpdate: "tool_call_update", toolCallId: "write-1", status: executed ? "completed" : "failed" });
+	if (!cancelled) text(executed ? "Tool executed." : "Permission rejected.");
+};
+const fleet = () => {
+	const identity = {
+		runId: "run-1",
+		agentId: "worker-1",
+		taskPreview: "Bounded task",
+		node: null,
+		origin: "tool",
+		attempt: 1,
+	};
+	for (const [kind, payload] of [
+		[
+			"safety.loopBlocked",
+			{
+				toolCallId: null,
+				tool: "read",
+				repeatCount: 2,
+				blocksThisTurn: 1,
+				budget: 3,
+				disposition: "block",
+				interrupted: false,
+				shape: null,
+			},
+		],
+		["dispatch.enqueued", identity],
+		["dispatch.started", identity],
+		["dispatch.progress", { runId: "run-1", agentId: "worker-1", progressCount: 1, truncated: false }],
+		[
+			"dispatch.completed",
+			{ runId: "run-1", agentId: "worker-1", outcome: "success", outcomeCode: "done", durationMs: 10, tokenCount: 23 },
+		],
+		["dispatch.failed", { runId: "run-2", agentId: "worker-2", outcome: "error", reason: "tool_failed", durationMs: 12 }],
+		[
+			"accountability.evidenceReady",
+			{ runId: "run-1", evidenceId: "evidence-1", firstPassSuccess: true, findingCount: 2, tags: ["fixture"] },
+		],
+	])
+		send({
+			method: "clio-coder/event",
+			params: {
+				version: 1,
+				workspaceInstanceId: "fixture",
+				sessionId,
+				turnId: null,
+				sequence: ++eventSequence,
+				kind,
+				terminal: ["dispatch.completed", "dispatch.failed", "accountability.evidenceReady"].includes(kind),
+				payload: { ...payload, excludedProviderBody: "private" },
+			},
+		});
 };
 async function handle(frame) {
 	if (!frame.method) {
@@ -83,7 +151,7 @@ async function handle(frame) {
 			case "session/prompt": {
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
-				if (scenario === "permission") await permission();
+				if (scenario.startsWith("permission")) await permission();
 				else if (scenario === "slow") {
 					while (!cancelled) await delay(100);
 				} else if (scenario === "loop") {
@@ -92,6 +160,7 @@ async function handle(frame) {
 						await delay(1);
 					}
 				} else {
+					if (scenario === "fleet") fleet();
 					update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Check the fixture." } });
 					if (scenario === "tool") {
 						update({
@@ -123,9 +192,46 @@ async function handle(frame) {
 			}
 			case "session/cancel":
 				cancelled = true;
+				for (const resolve of pending.values()) resolve({ outcome: { outcome: "cancelled" } });
+				pending.clear();
 				break;
 			case "session/close":
 				cancelled = true;
+				break;
+			case "clio-coder/settings/patch_safe":
+				for (const [key, value] of Object.entries(frame.params.patch)) {
+					if (!editable.includes(key)) throw Error("invalid_params");
+					const [group, name] = key.split(".");
+					settings[group][name] = value;
+				}
+				result = { settings, editable };
+				break;
+			case "clio-coder/settings/get_safe":
+				result = { settings, editable, privateCredential: "must-be-stripped" };
+				break;
+			case "clio-coder/targets/list":
+				result = {
+					targets: [
+						{
+							id: "fixture",
+							runtime: "openai-compatible",
+							models: ["fixture-model"],
+							isOrchestrator: true,
+							apiKey: "must-be-stripped",
+						},
+					],
+					_meta: { "clio-coder/truncated": true },
+				};
+				break;
+			case "clio-coder/targets/probe":
+				result = { targetId: frame.params.targetId, healthy: true, latencyMs: 5, reason: null };
+				break;
+			case "clio-coder/session/autonomy":
+				autonomy = frame.params.level ?? autonomy;
+				result = { level: autonomy, source: "session" };
+				break;
+			case "clio-coder/session/label":
+			case "clio-coder/session/delete":
 				break;
 			default:
 				throw Error("method_not_found");

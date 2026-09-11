@@ -75,7 +75,7 @@ test("workspace and session routes stream one complete turn with five usage fiel
 	assert.deepEqual(await h.files.read("children"), []);
 });
 
-test("permission is rejected without execution and remote session admission codes remain upstream_acp problems", {
+test("permission rejection never executes and remote session admission codes remain upstream_acp problems", {
 	timeout: 20000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "permission" });
@@ -83,6 +83,13 @@ test("permission is rejected without execution and remote session admission code
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
 	h.supervisor.startTurn(session.id, "Write a file");
+	await waitUntil(() => h.supervisor.get(session.id).permissions.length > 0);
+	const permission = h.supervisor.get(session.id).permissions[0];
+	assert.ok(permission);
+	assert.equal(
+		(await h.post(`/api/sessions/${session.id}/permissions/${permission.id}`, { decision: "reject" })).status,
+		200,
+	);
 	await waitUntil(() => h.supervisor.get(session.id).turns.at(-1)?.status === "succeeded");
 	const state = h.supervisor.get(session.id);
 	assert.ok(state.timeline.some((item) => item.kind === "notice" && item.text.includes("Permission rejected")));

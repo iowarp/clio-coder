@@ -24,11 +24,11 @@ export function createClient(token: string, fetcher: typeof fetch = fetch) {
 					method: route.method,
 					headers: {
 						Authorization: `Bearer ${token}`,
-						...(route.method === "POST"
+						...(route.method !== "GET"
 							? { "Content-Type": "application/json", "Idempotency-Key": key ?? crypto.randomUUID() }
 							: {}),
 					},
-					...(route.method === "POST" ? { body: JSON.stringify(input.body) } : {}),
+					...(route.method !== "GET" ? { body: JSON.stringify(input.body) } : {}),
 				});
 			} catch {
 				throw new ApiProblem({

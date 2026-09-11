@@ -89,4 +89,38 @@ test("real built CLI streams through HTTP; E3 records one, two, three ACP child 
 			(item) => item.origin === "replay" && item.kind === "text" && item.text.includes("Hello from the real Clio CLI."),
 		),
 	);
+	const settings = await json(await server.request(`/api/sessions/${id}/settings`), routes.sessionSettings.response);
+	assert.equal(settings.editable.length, 4);
+	const updated = await server.request(`/api/sessions/${id}/settings`, "PATCH", { "chat.thinkingLevel": "off" });
+	assert.equal(updated.status, 200, await updated.clone().text());
+	const targets = await json(await server.request(`/api/sessions/${id}/targets`), routes.sessionTargets.response);
+	assert.ok(targets.targets.length > 0);
+	const target = targets.targets[0];
+	assert.ok(target);
+	const probe = await json(
+		await server.post(`/api/sessions/${id}/targets/${target.id}/probe`),
+		routes.probeSessionTarget.response,
+	);
+	assert.equal(probe.healthy, true);
+	const autonomy = await json(
+		await server.post(`/api/sessions/${id}/autonomy`, { level: "suggest" }),
+		routes.setSessionAutonomy.response,
+	);
+	assert.equal(autonomy.level, "suggest");
+	const renamed = await server.request(`/api/sessions/${id}`, "PATCH", { label: "S4 verified conversation" });
+	assert.equal(renamed.status, 200, await renamed.clone().text());
+	assert.equal(
+		(await json(await server.request(`/api/sessions/${id}`), routes.session.response)).label,
+		"S4 verified conversation",
+	);
+	assert.equal((await server.request(`/api/sessions/${id}`, "DELETE", {})).status, 409);
+	await server.post(`/api/sessions/${id}/close`);
+	const deleted = await server.request(`/api/sessions/${id}`, "DELETE", { workspaceId: workspace.id });
+	assert.equal(deleted.status, 200, await deleted.clone().text());
+	const remaining = await json(
+		await server.request(`/api/workspaces/${workspace.id}/sessions`),
+		routes.sessionHistory.response,
+	);
+	assert.ok(!remaining.some((row) => row.id === id));
+	assert.equal(((await files.read("children")) as unknown[]).length, 2, "temporary control child is fully reaped");
 });

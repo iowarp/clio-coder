@@ -3,6 +3,7 @@ import { setTimeout } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { Static, TSchema } from "typebox";
 import type { Operation } from "../../contracts/operations.js";
+import type { PermissionTimers } from "../../server/acp/permissions.js";
 import { Supervisor } from "../../server/acp/supervisor.js";
 import { createApp } from "../../server/app.js";
 import { parse } from "../../server/http/validate.js";
@@ -19,7 +20,7 @@ import { scratchHome } from "./scratch-home.js";
 
 export async function harness(
 	settings: WorkerSettings = {},
-	options: { scenario?: string; snapshotHold?: () => Promise<void> } = {},
+	options: { scenario?: string; snapshotHold?: () => Promise<void>; permissionTimers?: PermissionTimers } = {},
 ) {
 	const home = await scratchHome();
 	const reads = new WorkerHost("reads", { fixture: true, ...settings }, home.env),
@@ -28,12 +29,19 @@ export async function harness(
 		operations = new OperationRegistry(hub);
 	const files = new AppFiles(join(home.path, "state")),
 		workspaces = new WorkspaceService(files);
-	const supervisor = new Supervisor(workspaces, files, hub, {
-		...home.env,
-		CLIO_CODER_WEB_CLI: fileURLToPath(new URL("../fixtures/acp-fixture-child.mjs", import.meta.url)),
-		CLIO_CODER_WEB_FIXTURE_SCENARIO: options.scenario ?? "text",
-		CLIO_CODER_WEB_FIXTURE_LOG: join(home.path, "acp.jsonl"),
-	});
+	const supervisor = new Supervisor(
+		workspaces,
+		files,
+		hub,
+		{
+			...home.env,
+			CLIO_CODER_WEB_CLI: fileURLToPath(new URL("../fixtures/acp-fixture-child.mjs", import.meta.url)),
+			CLIO_CODER_WEB_FIXTURE_SCENARIO: options.scenario ?? "text",
+			CLIO_CODER_WEB_FIXTURE_LOG: join(home.path, "acp.jsonl"),
+		},
+		4,
+		options.permissionTimers,
+	);
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const app = createApp({

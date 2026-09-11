@@ -52,7 +52,13 @@ export async function processServer(env: NodeJS.ProcessEnv) {
 					method,
 					headers: {
 						Authorization: `Bearer ${token}`,
-						...(body === undefined ? {} : { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() }),
+						...(body === undefined
+							? {}
+							: {
+									"Content-Type": "application/json",
+									"Content-Length": String(Buffer.byteLength(JSON.stringify(body))),
+									"Idempotency-Key": crypto.randomUUID(),
+								}),
 					},
 				},
 				(response) => {

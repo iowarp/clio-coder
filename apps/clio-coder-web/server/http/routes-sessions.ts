@@ -12,6 +12,42 @@ export function sessionRoutes(
 	snapshotHold?: () => Promise<void>,
 ) {
 	const { supervisor, workspaces } = sessions;
+	register(app, hub, routes.permission, ({ params, body }, context) =>
+		commands.run(`permission:${params.id}:${params.permissionId}`, idempotencyKey(context), body, async () =>
+			supervisor.decide(params.id, params.permissionId, body.decision),
+		),
+	);
+	register(app, hub, routes.cancelTurn, ({ params }, context) =>
+		commands.run(`cancel:${params.id}:${params.turnId}`, idempotencyKey(context), {}, () =>
+			supervisor.cancel(params.id, params.turnId),
+		),
+	);
+	register(app, hub, routes.sessionSettings, ({ params }) => supervisor.settings(params.id));
+	register(app, hub, routes.patchSessionSettings, ({ params, body }, context) =>
+		commands.run(`settings:${params.id}`, idempotencyKey(context), body, () => supervisor.settings(params.id, body)),
+	);
+	register(app, hub, routes.sessionTargets, ({ params }) => supervisor.targets(params.id));
+	register(app, hub, routes.probeSessionTarget, ({ params }, context) =>
+		commands.run(`probe:${params.id}:${params.targetId}`, idempotencyKey(context), {}, () =>
+			supervisor.probe(params.id, params.targetId),
+		),
+	);
+	register(app, hub, routes.sessionAutonomy, ({ params }) => supervisor.autonomy(params.id));
+	register(app, hub, routes.setSessionAutonomy, ({ params, body }, context) =>
+		commands.run(`autonomy:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.autonomy(params.id, body.level),
+		),
+	);
+	register(app, hub, routes.labelSession, ({ params, body }, context) =>
+		commands.run(`label:${params.id}`, idempotencyKey(context), body, () =>
+			sessions.ledgerCommand(params.id, "label", body.workspaceId, body.label),
+		),
+	);
+	register(app, hub, routes.deleteSession, ({ params, body }, context) =>
+		commands.run(`delete:${params.id}`, idempotencyKey(context), body, () =>
+			sessions.ledgerCommand(params.id, "delete", body.workspaceId),
+		),
+	);
 	register(app, hub, routes.workspaces, () => workspaces.list());
 	register(app, hub, routes.workspace, ({ params }) => workspaces.get(params.id));
 	register(app, hub, routes.openWorkspace, ({ body }, context) =>

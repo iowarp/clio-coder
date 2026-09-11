@@ -6,6 +6,7 @@ import type { TimelineItem } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime, formatTokens } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
+import { CancelTurn, DeleteSession, FleetStrip, PermissionCards, SessionControls } from "./session-controls.js";
 export function Workspaces({ client }: { client: Client }) {
 	const navigate = useNavigate(),
 		queries = useQueryClient(),
@@ -135,6 +136,7 @@ export function Sessions({ client }: { client: Client }) {
 							<button type="button" disabled={open.isPending} onClick={() => open.mutate(session.id)}>
 								Load session
 							</button>
+							{session.endedAt ? <DeleteSession client={client} id={session.id} workspaceId={workspaceId} /> : null}
 						</article>
 					))}
 				{history.data?.length === 0 ? <p>No saved sessions in this workspace.</p> : null}
@@ -250,6 +252,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 				{snapshot.state}
 				{busy ? " · Clio is working…" : ""}
 			</p>
+			<SessionControls client={client} session={snapshot} />
+			<CancelTurn client={client} session={snapshot} />
+			<PermissionCards client={client} session={snapshot} />
+			<FleetStrip session={snapshot} />
 			{snapshot.timelineTruncated ? (
 				<p className="trace-warning">
 					Earlier conversation content was omitted from this view to keep it bounded. Clio retains its own session history.

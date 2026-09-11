@@ -22,7 +22,7 @@ export function startDomainWorker(
 /** Fixed ACP command: the workspace path is already canonicalized by WorkspaceService. */
 export async function startAcpChild(cwd: string, env: NodeJS.ProcessEnv = process.env) {
 	const command = await resolveClioCommand(env);
-	return createStdioTransport(command.file, [...command.prefix, "acp", "--cwd", cwd], {
+	return createStdioTransport(command.file, [...command.prefix, "acp", "--cwd", cwd, "--permission-timeout", "605000"], {
 		cwd,
 		env: Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined)),
 	});

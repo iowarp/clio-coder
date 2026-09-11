@@ -1,5 +1,7 @@
 import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
+import { FleetItem } from "./fleet-events.js";
+import { Permission } from "./permissions.js";
 
 const closed = { additionalProperties: false };
 const string = Type.String();
@@ -116,6 +118,8 @@ export const SessionSnapshot = Type.Object(
 		turns: Type.Array(Turn),
 		recoveredOrphan: Type.Boolean(),
 		label: nullableString,
+		permissions: Type.Array(Permission, { maxItems: 32 }),
+		fleet: Type.Array(FleetItem, { maxItems: 128 }),
 	},
 	closed,
 );
@@ -125,6 +129,8 @@ const textPayload = Type.Object(
 	{ ...base, turnId: Id, text: string, origin: Origin, provenance: Type.Optional(Provenance) },
 	closed,
 );
+const permissionPayload = Type.Object({ ...base, permission: Permission }, closed);
+const fleetPayload = Type.Object({ ...base, item: FleetItem }, closed);
 export const SessionDeltas = {
 	"turn.started": Type.Object({ ...base, turn: Turn }, closed),
 	"turn.text": textPayload,
@@ -142,7 +148,18 @@ export const SessionDeltas = {
 		},
 		closed,
 	),
-	"permission.rejected": Type.Object({ ...base, turnId: Id, reason: Type.Literal("no-ui") }, closed),
+	"permission.requested": permissionPayload,
+	"permission.escalated": permissionPayload,
+	"permission.resolved": permissionPayload,
+	"permission.expired": permissionPayload,
+	"fleet.loopBlocked": fleetPayload,
+	"fleet.enqueued": fleetPayload,
+	"fleet.started": fleetPayload,
+	"fleet.progress": fleetPayload,
+	"fleet.completed": fleetPayload,
+	"fleet.failed": fleetPayload,
+	"evidence.ready": fleetPayload,
+	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
 };
 export type SessionDelta = {
