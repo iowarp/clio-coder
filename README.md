@@ -73,8 +73,9 @@ setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
 it. An optional local **browser app** over the same runtime is described under
 [Optional browser app](#optional-browser-app). The first session does not need it.
 
-**New in 0.4.7:** A unified Library for reusable workflows, operator extensions,
-safer keyboard controls, and a compact welcome header. See the
+**New in 0.4.8:** More reliable live settings, provider accounting and runtime
+cleanup, an npm-backed installer, and an optional web app with documentation
+generated from the Markdown guides. See the
 [changelog](CHANGELOG.md) for release details and [Install](#install) for source
 builds and other package managers.
 
@@ -312,16 +313,16 @@ Read the [Safety Model](docs/architecture/safety-model.md) and
 
 ## Install
 
-A bootstrap installer is prepared for v0.4.8. Once this branch's script is
-published to `main`, its public entry point will be:
+The npm-backed bootstrap installer checks prerequisites and guides you through
+terminal setup:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/iowarp/clio-coder/main/scripts/install.sh | bash
 ```
 
-Until publication, run `bash scripts/install.sh --dry-run` from this checkout to
-review it locally. The installer targets Linux and macOS (on Windows, use the npm
-command above), requires Node.js 22.19+ and npm, and installs under
+To preview it from a source checkout, run `bash scripts/install.sh --dry-run`.
+The installer targets Linux and macOS (on Windows, use the npm command above),
+requires Node.js 22.19+ and npm, and installs under
 `$HOME/.local` without sudo or shell-profile edits. It checks for
 conflicting launchers, prints PATH guidance, and runs Clio's post-install migrations.
 It opens no browser and enables no background service automatically. Its next-step
@@ -371,7 +372,7 @@ can also be installed with your package manager. See
 From source, the latest stable release uses the pinned pnpm workflow:
 
 ```bash
-git clone --branch v0.4.7 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.8 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
@@ -427,9 +428,8 @@ exactly which settings, credentials, and session directories each option affects
 
 ## Optional browser app
 
-The terminal is the primary interface. This development branch also packages a
-local browser app over the same runtime, projects, configuration, and model
-targets, planned for v0.4.8 (see the [changelog](CHANGELOG.md)):
+The terminal is the primary interface. Clio Coder also packages a local browser
+app over the same runtime, projects, configuration, and model targets:
 
 ```bash
 clio-coder web --open
@@ -452,7 +452,7 @@ from workspace installation, recursive builds, publication, and product gates.
 
 The guides under [`docs/`](docs/README.md) are Markdown, ship with the package,
 and need no browser. To discover commands, use `clio-coder --help` (`--help
---all` includes developer tools) and `/help` inside a session. On this branch,
+--all` includes developer tools) and `/help` inside a session.
 `clio-coder docs [topic]` opens the same guides in the browser app; for example,
 `clio-coder docs safety` opens the safety guide, and `--no-open` prints the
 private launch link instead of opening a browser.

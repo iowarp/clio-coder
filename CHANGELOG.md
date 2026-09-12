@@ -2,12 +2,12 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.4.8 - 2026-09-11
 
-The v0.4.8 development branch strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.
+Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.
 
 ### Added
-- An npm-backed bootstrap installer for Linux/macOS with prerequisite checks, a user-owned prefix, version selection, dry runs, conflict protection, and terminal-first next steps. The GitHub raw-content URL becomes live when the script is published.
+- An npm-backed bootstrap installer for Linux/macOS with prerequisite checks, a user-owned prefix, version selection, dry runs, conflict protection, and terminal-first next steps.
 - An optional web application through the lazy `clio-coder web` command, packaged with its REST/SSE server, two domain workers, and local client assets. Sessions, traces, docs, toolchain, settings/targets, fleet, evidence, evals/usage, Library, and system inspection use the existing Clio runtime.
 - Explicit background service setup for Linux with a systemd user session and an installable PWA with a stable local connection and offline recovery. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint. Foreground web use remains available on other platforms.
 

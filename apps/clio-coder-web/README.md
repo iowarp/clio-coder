@@ -1,9 +1,8 @@
 # Clio Coder web
 
-The v0.4.8 development package now exposes `clio-coder web --open`. Root `pnpm run build`
+Clio Coder 0.4.8 exposes `clio-coder web --open`. Root `pnpm run build`
 builds the client and all three server entries together. Run `clio-coder web --help`
-for foreground, Linux background/PWA, and desktop-launcher commands. Publication
-is a separate release step; the published npm version has not changed in this work.
+for foreground, Linux background/PWA, and desktop-launcher commands.
 The source commands below remain useful for development.
 
 The UI uses the original Clio logo, cream and pastel forest themes, a compact
@@ -12,13 +11,12 @@ installation, and remembered-browser controls. Theme and connection icons retain
 accessible names and keyboard focus feedback.
 
 
-The checkout application exposes Clio through a browser or installed local PWA.
+The application exposes Clio through a browser or installed local PWA.
 It includes toolchain management, sessions, traces, documentation, settings and
 routing inspection, target operations, fleet history, evidence, evals and usage,
 library discovery, interop and system health. These views use typed REST APIs
 and event streams backed by Clio's existing runtime seams and fixed CLI commands.
-The CLI, TUI, and ACP continue to run independently. The packaged `clio-coder web`
-command belongs to R1.
+The CLI, TUI, and ACP continue to run independently.
 
 From the repository root:
 
