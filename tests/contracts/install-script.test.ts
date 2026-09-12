@@ -301,7 +301,7 @@ describe("contracts/install-script", () => {
 			match(r.stdout, /ok: Clio Coder 0\.4\.7/u);
 			match(r.stdout, new RegExp(`^Installed: ${launcher}$`, "mu"));
 			match(r.stdout, new RegExp(`^  ${launcher} --version$`, "mu"));
-			match(r.stdout, /Terminal \(interactive TUI\):\n {2}clio-coder$/mu);
+			ok(r.stdout.includes(`Terminal (interactive TUI):\n  ${launcher}\n`));
 			match(r.stdout, /clio-coder configure$/mu);
 			doesNotMatch(r.stdout, /clio-coder web --open/u, "0.4.7 has no web command");
 			doesNotMatch(r.stdout, /web background install/u);
@@ -321,6 +321,32 @@ describe("contracts/install-script", () => {
 		}
 	});
 
+	it("printed next steps work before PATH is updated, including a prefix with spaces", () => {
+		const s = scratch();
+		try {
+			writeFileSync(s.helpFile, HELP_WITH_WEB);
+			writeFileSync(s.webHelpFile, WEB_HELP_WITH_BACKGROUND);
+			const result = run(s, ["--prefix", join(s.home, "my tools")]);
+			strictEqual(result.code, 0, result.all);
+			const steps = result.stdout
+				.split("\n")
+				.filter((line) => /^ {2}.*clio-coder(?: configure| web --open| web background install --open)?$/u.test(line));
+			ok(steps.length >= 3, result.stdout);
+			for (const step of steps) {
+				const executed = spawnSync("bash", ["-c", step], {
+					encoding: "utf8",
+					timeout: 5000,
+					env: { PATH: `${s.fakeBin}:${SYSTEM_PATH}`, FAKE_CLI_LOG: s.cliLog },
+				});
+				strictEqual(executed.status, 0, `${step}: ${executed.stderr}`);
+			}
+			ok(cliCalls(s).includes("configure"));
+			ok(cliCalls(s).includes("web --open"));
+		} finally {
+			s.cleanup();
+		}
+	});
+
 	it("offers web --open when the installed help lists it, and the Linux background step only when listed", () => {
 		const s = scratch();
 		try {
@@ -328,7 +354,7 @@ describe("contracts/install-script", () => {
 			writeFileSync(s.webHelpFile, WEB_HELP_WITH_BACKGROUND, "utf8");
 			const r = run(s, ["--prefix", join(s.home, "clio")]);
 			strictEqual(r.code, 0, r.all);
-			match(r.stdout, /^ {2}clio-coder web --open$/mu);
+			ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} web --open\n`));
 			strictEqual(
 				cliCalls(s)
 					.filter((call) => call.startsWith("web"))
@@ -336,7 +362,8 @@ describe("contracts/install-script", () => {
 				"web --help",
 				"the installer reads web --help and never starts the app",
 			);
-			if (process.platform === "linux") match(r.stdout, /^ {2}clio-coder web background install --open$/mu);
+			if (process.platform === "linux")
+				ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} web background install --open\n`));
 			else doesNotMatch(r.stdout, /background install/u);
 			doesNotMatch(r.stdout, /this version has no 'clio-coder web' command/iu);
 

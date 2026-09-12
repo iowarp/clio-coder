@@ -22,12 +22,19 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cli="$root/dist/cli/index.js"
-config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/clio-coder"
-settings="$config_dir/settings.yaml"
+settings=""
 target=""
 model=""
 strict=0
 while [ $# -gt 0 ]; do
+	case "$1" in
+		--settings|--target|--model)
+			if [ $# -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
+				echo "smoke-real-home: $1 requires a value" >&2
+				exit 2
+			fi
+			;;
+	esac
 	case "$1" in
 		--settings) settings="$2"; shift 2 ;;
 		--target) target="$2"; shift 2 ;;
@@ -41,6 +48,11 @@ if [ ! -f "$cli" ]; then
 	echo "smoke-real-home: $cli is missing; run pnpm run build first" >&2
 	exit 2
 fi
+if [ -z "$settings" ]; then
+	# The built read-only command owns platform and environment precedence.
+	config_dir="$(node "$cli" paths --json | node -e 'const p=JSON.parse(require("node:fs").readFileSync(0,"utf8")); if(typeof p.config!=="string") process.exit(2); process.stdout.write(p.config)')"
+	settings="$config_dir/settings.yaml"
+fi
 if [ ! -f "$settings" ]; then
 	echo "smoke-real-home: no settings file at $settings; pass --settings <path>" >&2
 	exit 2
@@ -52,10 +64,18 @@ cleanup() { rm -rf "$scratch"; }
 trap cleanup EXIT
 mkdir -p "$scratch/home/config" "$scratch/project"
 cp "$settings" "$scratch/home/config/settings.yaml"
+chmod 600 "$scratch/home/config/settings.yaml"
 if [ -f "$(dirname "$settings")/credentials.yaml" ]; then
 	cp "$(dirname "$settings")/credentials.yaml" "$scratch/home/config/credentials.yaml"
+	chmod 600 "$scratch/home/config/credentials.yaml"
 fi
 export CLIO_CODER_HOME="$scratch/home"
+# Per-role overrides outrank CLIO_CODER_HOME. Pin every role before doctor --fix
+# or a turn can inherit and mutate the operator's real state.
+export CLIO_CODER_CONFIG_DIR="$scratch/home/config"
+export CLIO_CODER_DATA_DIR="$scratch/home/data"
+export CLIO_CODER_STATE_DIR="$scratch/home/state"
+export CLIO_CODER_CACHE_DIR="$scratch/home/cache"
 cd "$scratch/project"
 git init -q
 

@@ -27,7 +27,7 @@ Install Clio Coder from npm into a user-writable prefix without sudo.
 
 Options:
   --version <spec>   Package version: latest (default), an npm dist-tag such as
-                     next, or an exact version such as 0.4.7 or v0.4.7.
+                     next, or an exact version such as X.Y.Z or vX.Y.Z.
                      Also read from CLIO_CODER_VERSION.
   --prefix <dir>     npm prefix; the launcher lands in <dir>/bin/clio-coder.
                      Default: $HOME/.local. Also read from CLIO_CODER_NPM_PREFIX.
@@ -263,29 +263,29 @@ print_next_steps() {
 Verify this exact install, then configure a model target:
   $launcher_command --version
   $launcher_command doctor
-  clio-coder configure
+  $launcher_command configure
 
 Terminal (interactive TUI):
-  clio-coder
+  $launcher_command
 NEXT
 	if [[ $web_listed -eq 1 ]]; then
 		cat <<NEXT
 
 Browser app (local, opens once you ask):
-  clio-coder web --open
+  $launcher_command web --open
 NEXT
 		if [[ $background_listed -eq 1 && "$(uname -s 2>/dev/null || true)" == "Linux" ]]; then
 			cat <<NEXT
 
 Optional on Linux: keep it available in the background and install it as a PWA:
-  clio-coder web background install --open
+  $launcher_command web background install --open
 NEXT
 		fi
 	else
 		cat <<NEXT
 
 The browser app ships with a newer Clio Coder release.
-This version has no 'clio-coder web' command; check later with: clio-coder --help
+This version has no 'clio-coder web' command; check later with: $launcher_command --help
 NEXT
 	fi
 	cat <<NEXT
