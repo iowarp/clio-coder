@@ -1,26 +1,28 @@
 # Where Clio's tests live
 
-The root repository has contract and smoke tests under `tests/`; import
-boundaries run through the lint hygiene checker. Add a test beside the closest
-current behavior, and create a new file only for a genuinely new cluster.
+Routine contracts and three process smoke files protect core product boundaries.
+The installed-package and real native timing checks belong to qualification.
+Extended regressions are explicit development investigations.
 
 ## Layout
 
-| Lane | Path | Runner | Build needed |
+| Lane | Path | Command | Build needed |
 |---|---|---|---|
-| Contracts | `tests/contracts/*.test.ts` | `npm run test:file -- <file-or-files>` through tsx and the temp-root preload | No; imports `src/` |
-| Smoke | `tests/smoke/*.test.ts` | `npm run test:file -- <file-or-files>` | Yes; spawns `dist/cli/index.js` |
-| Boundaries | `tests/boundaries/check-boundaries.ts` | `npm run lint` through `scripts/check-hygiene.ts` | No |
-| Root full suite | Contract and smoke files | `npm run test` | Yes for current smoke behavior |
-| Unified web | `apps/clio-coder-web/tests/` | `pnpm --filter @iowarp/clio-coder-web verify` | Root build for CLI/ACP fixtures; verify builds the client and runs headless Chrome |
+| Required contracts | `tests/contracts/*.test.ts` | `npm run test:file -- <file>` | CLI tests require current dist |
+| Required process smoke | ACP, binary boot, process lifecycle under `tests/smoke/` | `npm run test` includes them | Yes |
+| Package qualification | Installed package and native call timing under `tests/smoke/` | `npm run ci:release` | Built once by qualification |
+| Extended regressions | `tests/extended/`, `tests/extended-smoke/` | `npm run test:full` or a focused `test:file` | Yes for CLI scenarios |
+| Static boundaries and pins | `scripts/check-hygiene.ts` | `npm run lint` | No |
+| Required web boundaries | Selected files in `apps/clio-coder-web/tests/` | `npm run test:web` | Root build |
+| Full web investigation | All web tests and browser matrix | `pnpm --filter @iowarp/clio-coder-web verify` | Yes |
 
-`npm run ci` orders typecheck, lint, skill-pin verification, build, the root
-suite, and unified web tests. `npm run ci:release` adds the release audit.
-The trace viewer is retired; Workbench is reference source outside product gates.
+`npm run ci` runs the routine lane. `npm run ci:release` qualifies a clean,
+committed candidate and its exact tarball; `npm run release:preflight` checks
+that qualification without repeating development tests. See CONTRIBUTING.md.
 
 ## Contract files
 
-| Area | Current files under `tests/contracts/` |
+| Area | Required or extended focused files |
 |---|---|
 | Authentication | `auth-login-write-failure`, `auth-storage-durability` |
 | Context, session, and state | `context-lifecycle`, `memory-scope`, `project-bootstrap`, `session-durability`, `state-file-lock`, `task-board-done`, `working-set-core` |
@@ -69,12 +71,12 @@ Child fixtures in `tests/fixtures/` are
 
 ```bash
 # all contracts (the shell expands the file pattern)
-npm run test:file -- tests/contracts/*.test.ts
+npm run test:full
 
 # one contract or smoke file
 npm run test:file -- tests/contracts/skill-install.test.ts
 npm run build
-npm run test:file -- tests/smoke/cli-core.test.ts
+npm run test:file -- tests/extended-smoke/cli-core.test.ts
 
 # only it.only or describe.only within one file
 npm run test:file -- --test-only tests/contracts/skill-install.test.ts

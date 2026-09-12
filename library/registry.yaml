@@ -187,7 +187,7 @@ entries:
       - Clio mock provider harness
     version: 0.3.1
     sourceUrl: skills/meta/clio-coder-test
-    sha256: a02b34e3d028368057c72db85140120701a01a898a7dee21e0e3deea65101d68
+    sha256: fc8b0f3f7748070456bcf5366a0cf0bb41bf1737549592d3064b7b81cc9b0512
     provides:
       - kind: skill
         name: clio-coder-test

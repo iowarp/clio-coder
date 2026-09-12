@@ -12,6 +12,9 @@ Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take ef
 - Explicit background service setup for Linux with a systemd user session and an installable PWA with a stable local connection and offline recovery. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint. Foreground web use remains available on other platforms.
 
 ### Changed
+- Separate fast routine CI, exact-package qualification and explicitly invoked full development investigations. Publication now checks a fresh, source- and artifact-bound qualification instead of rerunning the entire suite. Keep the withdrawn v0.4.8 release withdrawn during pipeline repair.
+- Remove duplicated catalog/prose snapshots and repeated synthetic eval executions, reuse the installed package for browser verification, and replace configuration-reference repository copies with one typed schema check.
+- Preserve causal first-call timing when session wall clocks regress, and stop cancellation tests from swallowing Node test reporter output.
 - Generate the web documentation directly from the canonical Markdown, with shared navigation, search, heading outlines and the application theme. `clio-coder docs [topic]` opens the same reading surface and reuses a configured background app. Retire the separate docs server and HTML blueprints, including their iframe bridge and package assets. Markdown remains available to agents and repository readers.
 - Build the web surface together with the CLI, share server chunks, and ship frontend/font/Hono notices. Installed-package tests exercise both workers without a TypeScript loader. Release size tripwires are 12 MB compressed / 55 MB unpacked for the complete package.
 - Restore the Clio logo in the web app with cream and pastel forest themes and compact application controls.

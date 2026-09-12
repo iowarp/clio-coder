@@ -1,32 +1,20 @@
 name: release
 
-# Release flow: push a tag `vX.Y.Z` that matches package.json's version. This
-# job is self-sufficient. It runs the full `ci:release` gate itself (about
-# four minutes), verifies the tag against package.json, and creates the GitHub
-# release with the tarball attached and the version's CHANGELOG.md section as
-# the release body. It does not wait on, or query, the `ci` workflow: making a
-# tag block on a separate 18-minute run bought nothing that rerunning a
-# four-minute gate does not.
-#
-# There is no npm publish path here. Publishing is a manual maintainer step
-# (`npm login && npm publish`), and `prepublishOnly` runs the full `ci:release`
-# gate on the maintainer's machine at that point.
-
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write # create the GitHub release
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  release:
+  qualify:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
         with:
@@ -37,43 +25,44 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Verify tag matches package.json version
+      - name: Verify release version
         run: |
           pkg="$(node -p "require('./package.json').version")"
-          tag="${GITHUB_REF_NAME#v}"
-          if [ "$pkg" != "$tag" ]; then
-            echo "package.json version $pkg does not match tag $GITHUB_REF_NAME" >&2
-            exit 1
-          fi
-      # The gate the maintainer ran locally, run again on the tagged tree:
-      # typecheck, Biome, hygiene (including skill pins), build, the contract/smoke suite, the
-      # web application suite, and the packaging audit. This also leaves dist/ in
-      # place for npm pack below.
-      - name: Release gate
+          test "${GITHUB_REF_NAME#v}" = "$pkg"
+      - name: Qualify exact package
+        id: candidate
         run: pnpm run ci:release
-      - name: Pack tarball for the GitHub release
-        run: npm pack
-      # The release body is the CHANGELOG.md section for this version, not
-      # GitHub's generated commit list: the changelog is the user-facing record
-      # the release audit already checks against package.json. An empty
-      # section fails here rather than publishing a release with no notes.
-      - name: Extract release notes from CHANGELOG.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qualified-package
+          path: ${{ steps.candidate.outputs.artifact }}*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    needs: qualify
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: qualified-package
+          path: ${{ runner.temp }}/qualified-package
+      - name: Create GitHub release from qualified package
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          (cd "$RUNNER_TEMP/qualified-package" && sha256sum --check candidate.tgz.sha256)
           version="${GITHUB_REF_NAME#v}"
           awk -v version="$version" '
             /^## / { if (found) exit; if ($2 == version) { found = 1; next } }
             found { print }
-          ' CHANGELOG.md | sed '/./,$!d' | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > release-notes.md
-          if [ ! -s release-notes.md ]; then
-            echo "CHANGELOG.md has no \"## $version\" section to use as the release body" >&2
-            exit 1
-          fi
-          echo "release notes: $(wc -l < release-notes.md) lines"
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create "$GITHUB_REF_NAME" ./iowarp-clio-coder-*.tgz \
-            --title "Clio Coder ${GITHUB_REF_NAME#v}" \
-            --notes-file release-notes.md \
-            --verify-tag
+          ' CHANGELOG.md > "$RUNNER_TEMP/release-notes.md"
+          test -n "$(tr -d '[:space:]' < "$RUNNER_TEMP/release-notes.md")"
+          gh release create "$GITHUB_REF_NAME" "$RUNNER_TEMP/qualified-package/candidate.tgz" \
+            --title "Clio Coder $version" --notes-file "$RUNNER_TEMP/release-notes.md" --verify-tag

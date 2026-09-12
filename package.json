@@ -81,17 +81,21 @@
 		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
 		"pretest": "test -f dist/cli/index.js || pnpm run build",
-		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test tests/contracts/*.test.ts tests/smoke/*.test.ts",
+		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/contracts/*.test.ts tests/smoke/acp-boundary.test.ts tests/smoke/real-binary-boot.test.ts tests/smoke/process-lifecycle.test.ts",
 		"test:web": "pnpm --filter @iowarp/clio-coder-web test",
 		"ci": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:web",
-		"ci:release": "pnpm run ci && node scripts/check-release.mjs",
+		"ci:release": "node scripts/release-candidate.mjs qualify",
 		"install:local": "bash scripts/install-local.sh",
 		"smoke:real-home": "bash scripts/smoke-real-home.sh",
-		"prepublishOnly": "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release",
+		"prepublishOnly": "node scripts/release-candidate.mjs preflight",
 		"skills:pin": "node --import tsx scripts/pin-skills.ts",
 		"skills:check": "node --import tsx scripts/pin-skills.ts --check",
 		"library:pin": "node --import tsx scripts/pin-library.ts",
-		"library:check": "node --import tsx scripts/pin-library.ts --check"
+		"library:check": "node --import tsx scripts/pin-library.ts --check",
+		"test:full": "node --import tsx --import ./tests/harness/tmp-root.ts --test tests/contracts/*.test.ts tests/extended/*.test.ts tests/smoke/*.test.ts tests/extended-smoke/*.test.ts",
+		"test:package": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/smoke/installed-package.test.ts tests/smoke/native-call-timing.test.ts",
+		"release:preflight": "node scripts/release-candidate.mjs preflight",
+		"test:web:full": "pnpm --filter @iowarp/clio-coder-web test:full"
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186"

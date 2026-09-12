@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { FileAuthStorageBackend } from "../../src/domains/providers/auth/backend-file.js";
 import { openAuthStorage } from "../../src/domains/providers/auth/index.js";
 
-const SOURCE_CLI = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+const SOURCE_CLI = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 const FAKE_KEY = "dogfood-contract-key-not-a-real-credential";
 const MODEL = "fixture/model";
 
@@ -45,7 +45,7 @@ function doctor(root: string, args: string[]): Promise<{ code: number; stdout: s
 	return new Promise((resolve, reject) => {
 		execFile(
 			process.execPath,
-			["--import", import.meta.resolve("tsx"), SOURCE_CLI, "doctor", ...args],
+			[SOURCE_CLI, "doctor", ...args],
 			{
 				cwd: root,
 				timeout: 30_000,

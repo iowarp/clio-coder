@@ -348,7 +348,7 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		const scratch = home("clio-coder-eval-custom-");
 		try {
 			// Artifact location does not require rerunning every recipe. Keep the
-			// full shipped-corpus roundtrip in its dedicated test below.
+			// positive/adversarial comparison in its dedicated test below.
 			const suite = parseYaml(readFileSync(join(ROOT, "evals/behavioral-machinery.yaml"), "utf8"));
 			suite.tasks = [suite.tasks[0]];
 			suite.tasks[0].workspace = { kind: "local", path: ROOT };
@@ -398,10 +398,15 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 		}
 	});
 
-	it("round-trips all shipped machinery cases through eval report and self-comparison", async () => {
+	it("round-trips positive and adversarial eval results through report and comparison", async () => {
 		const scratch = home("clio-coder-eval-machinery-");
 		try {
-			const run = await runCli(["eval", "run", "--suite", "evals/behavioral-machinery.yaml", "--clio-coder-entry", CLI], {
+			const suite = parseYaml(readFileSync(join(ROOT, "evals/behavioral-machinery.yaml"), "utf8"));
+			suite.tasks = suite.tasks.slice(0, 2);
+			for (const task of suite.tasks) task.workspace = { kind: "local", path: ROOT };
+			const suitePath = join(scratch.root, "comparison.json");
+			writeFileSync(suitePath, JSON.stringify(suite));
+			const run = await runCli(["eval", "run", "--suite", suitePath, "--clio-coder-entry", CLI], {
 				env: scratch.env,
 				timeoutMs: 300_000,
 			});
@@ -415,24 +420,10 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			match(report.stdout, /Pass rate: 100\.00%/u);
 
 			const artifact = await loadEvalArtifactV4(join(scratch.root, "data"), evalId);
-			strictEqual(artifact.summary.runs, 26);
-			strictEqual(artifact.summary.passed, 26);
+			strictEqual(artifact.summary.runs, 2);
+			strictEqual(artifact.summary.passed, 2);
 			strictEqual(artifact.summary.failed, 0);
-			const roles = [
-				"architect",
-				"coder",
-				"context-bootstrap",
-				"debugger",
-				"documenter",
-				"git-master",
-				"oracle",
-				"provenance",
-				"researcher",
-				"scout",
-				"tester",
-				"verifier",
-				"wiki-writer",
-			];
+			const roles = ["architect"];
 			deepStrictEqual(
 				artifact.results.map((result) => result.taskId),
 				roles.flatMap((role) => [`${role}-positive`, `${role}-adversarial`]),

@@ -21,6 +21,7 @@ async function captureAuth(args: ReadonlyArray<string>): Promise<{ code: number;
 	let stdout = "";
 	let stderr = "";
 	process.stdout.write = ((chunk: string | Uint8Array) => {
+		if (typeof chunk !== "string") return outWrite.call(process.stdout, chunk);
 		stdout += typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
 		return true;
 	}) as typeof process.stdout.write;

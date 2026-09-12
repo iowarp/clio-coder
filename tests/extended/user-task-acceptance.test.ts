@@ -153,9 +153,9 @@ describe("operator task acceptance", () => {
 
 	it("the actual CLI refuses unknown ids without writing and accepts repeated flags", () =>
 		project((cwd) => {
-			const cli = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+			const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 			const run = (...args: string[]) =>
-				spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), cli, "tasks", ...args], {
+				spawnSync(process.execPath, [cli, "tasks", ...args], {
 					cwd,
 					encoding: "utf8",
 					timeout: 30000,

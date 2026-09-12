@@ -161,7 +161,7 @@ level onto `thinking.type: "adaptive"` plus `output_config.effort` (read from th
 `thinkingLevelMap` and `compat.forceAdaptiveThinking`) or onto a bounded `budget_tokens` for
 budget-based models. Clio's `onPayload` hook no longer rewrites those fields; it only sets the
 OpenAI Responses `reasoning.summary` verbosity, which the agent loop cannot express as an option.
-`tests/contracts/thinking-off-wire.test.ts` locks the local LM Studio and
+`tests/extended/thinking-off-wire.test.ts` locks the local LM Studio and
 llama.cpp controls used when thinking is off. Anthropic request assembly is
 inherited from the pinned Pi dependency; Clio no longer carries a separate
 contract test that reconstructs Pi's whole adaptive or budget payload.

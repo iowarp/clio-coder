@@ -228,7 +228,7 @@ The current reduced contract suite divides dispatch coverage by ownership:
 | --- | --- |
 | `tests/contracts/dispatch-lifecycle.test.ts` | Attached and detached lifecycle deduplication, durable transitions, terminal finalization, and orphan recovery from durable attempts. |
 | `tests/contracts/dispatch-admission.test.ts` | Typed-scope authority, capability pairing, deterministic capacity admission, conservative slot defaults, and ACP authority boundaries. |
-| `tests/contracts/dispatch-schema.test.ts` | Capability-shaped model schema, referenced `$defs`, and hidden-field compatibility. |
+| `tests/extended/dispatch-schema.test.ts` | Capability-shaped model schema, referenced `$defs`, and hidden-field compatibility. |
 
 Earlier releases carried separate envelope, assignment, detached-assignment,
 and failure-class test files for the detailed retry scenarios. Those files are

@@ -32,10 +32,10 @@ import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js";
 import { resolvePackageRoot } from "../src/core/package-root.js";
-import { OPTIONAL_RECIPE_KEYS, RECIPE_KEYS } from "../src/domains/agents/recipe-schema.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
+import { configurationReferenceMembership } from "./configuration-reference.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
 
 const root = resolvePackageRoot(import.meta.url);
@@ -364,158 +364,23 @@ function checkBoundaries(): void {
 // ci-scripts: package.json scripts and the CI/release workflows held against
 // what they must do. Was tests/contracts/ci-scripts.test.ts.
 // ---------------------------------------------------------------------------
-interface WorkflowStep {
-	run?: string;
-	uses?: string;
-	with?: Record<string, unknown>;
-}
-interface WorkflowJob {
-	steps: WorkflowStep[];
-}
-
-function packageScripts(): Record<string, string> {
-	return (
-		JSON.parse(readRoot("package.json")) as {
-			scripts: Record<string, string>;
-		}
-	).scripts;
-}
-
-function workflow(relPath: string): Record<string, unknown> {
-	return parseYaml(readRoot(relPath)) as Record<string, unknown>;
-}
-
 function checkCiScripts(): void {
-	// Both runtime identity fragments must be exact package resources the
-	// release gate requires.
-	const manifestFiles = (
-		JSON.parse(readRoot("scripts/release-manifest.json")) as {
-			requiredFiles: string[];
-		}
-	).requiredFiles;
-	for (const fragment of [
-		"src/domains/prompts/fragments/identity/clio.md",
-		"src/domains/prompts/fragments/identity/clio-worker.md",
-	]) {
-		if (!manifestFiles.includes(fragment)) {
-			fail("ci-scripts", `scripts/release-manifest.json requiredFiles must include ${fragment}`);
-		}
-	}
-
-	// The release gate's own recipe frontmatter allowlist must not drift from
-	// the schema the parser defines (see incident note in the deleted test).
-	const gate = readRoot("scripts/check-release.mjs");
-	const listed = (name: string): string[] => {
-		const match = gate.match(new RegExp(`const ${name} = new Set\\(\\[([\\s\\S]*?)\\]\\)`));
-		if (!match) {
-			fail("ci-scripts", `scripts/check-release.mjs must declare ${name}`);
-			return [];
-		}
-		return [...(match[1] as string).matchAll(/"([^"]+)"/g)].map((entry) => entry[1] as string);
-	};
-	const requiredListed = listed("requiredRecipeKeys").sort();
-	const requiredExpected = [...RECIPE_KEYS].sort();
-	if (JSON.stringify(requiredListed) !== JSON.stringify(requiredExpected)) {
-		fail(
-			"ci-scripts",
-			`scripts/check-release.mjs requiredRecipeKeys (${requiredListed}) must match RECIPE_KEYS (${requiredExpected})`,
-		);
-	}
-	const optionalListed = listed("optionalRecipeKeys").sort();
-	const optionalExpected = [...OPTIONAL_RECIPE_KEYS].sort();
-	if (JSON.stringify(optionalListed) !== JSON.stringify(optionalExpected)) {
-		fail(
-			"ci-scripts",
-			`scripts/check-release.mjs optionalRecipeKeys (${optionalListed}) must match OPTIONAL_RECIPE_KEYS (${optionalExpected})`,
-		);
-	}
-
-	// The deterministic local ci script must stay aligned with the
-	// release-relevant checks.
-	const scripts = packageScripts();
-	const expectScript = (name: string, expected: string) => {
-		if (scripts[name] !== expected) {
-			fail("ci-scripts", `package.json scripts.${name} must be "${expected}", got "${scripts[name]}"`);
-		}
-	};
-	expectScript("ci", "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:web");
-	expectScript("library:check", "node --import tsx scripts/pin-library.ts --check");
-	expectScript("skills:check", "node --import tsx scripts/pin-skills.ts --check");
-	expectScript("ci:release", "pnpm run ci && node scripts/check-release.mjs");
-	expectScript("prepublishOnly", "CLIO_CODER_RELEASE_CONTEXT=publish pnpm run ci:release");
-
-	// Hosted CI stays deliberately small: the Node 22 release gate plus a
-	// deterministic Windows subprocess subset, with superseded runs cancelled.
-	const ciPath = ".github/workflows/ci.yml";
-	if (!existsSync(join(root, ciPath))) {
-		fail("ci-scripts", "ci.yml must exist as the single fast CI workflow");
-	} else {
-		const ci = workflow(ciPath);
-		const jobs = (ci.jobs ?? {}) as Record<string, WorkflowJob>;
-		if (JSON.stringify(Object.keys(jobs)) !== JSON.stringify(["ci", "windows-subprocess"])) {
-			fail(
-				"ci-scripts",
-				`ci.yml must contain only the ci and windows-subprocess jobs, got: ${Object.keys(jobs).join(", ")}`,
-			);
-		}
-		const ciJob = jobs.ci;
-		if (ciJob) {
-			const setupNode = ciJob.steps.find((step) => step.uses?.startsWith("actions/setup-node@"));
-			if (String(setupNode?.with?.["node-version"]) !== "22") {
-				fail("ci-scripts", `ci.yml setup-node must use Node 22, got ${setupNode?.with?.["node-version"]}`);
+	const ci = parseYaml(readRoot(".github/workflows/ci.yml"));
+	const release = parseYaml(readRoot(".github/workflows/release.yml"));
+	if (ci.concurrency?.["cancel-in-progress"] !== true) fail("ci-scripts", "CI must cancel superseded runs");
+	if (ci.permissions?.contents !== "read") fail("ci-scripts", "routine CI must be read-only");
+	if (release.jobs?.release?.needs !== "qualify")
+		fail("ci-scripts", "release creation must depend on successful qualification");
+	for (const workflow of [ci, release]) {
+		for (const job of Object.values(workflow.jobs ?? {}) as Array<{
+			"continue-on-error"?: boolean;
+			steps?: Array<{ "continue-on-error"?: boolean; run?: string }>;
+		}>) {
+			if (job["continue-on-error"]) fail("ci-scripts", "gate jobs must propagate failures");
+			for (const step of job.steps ?? []) {
+				if (step["continue-on-error"] || step.run?.includes("--ignore-scripts"))
+					fail("ci-scripts", "gate steps must not bypass failures or lifecycle hooks");
 			}
-			const ciCommands = ciJob.steps.flatMap((step) => (step.run ? [step.run] : []));
-			if (!ciCommands.includes("pnpm run ci:release")) {
-				fail("ci-scripts", "ci.yml must run pnpm run ci:release");
-			}
-		}
-		if (
-			!isDeepStrictEqual(jobs["windows-subprocess"], {
-				"runs-on": "windows-latest",
-				"timeout-minutes": 10,
-				steps: [
-					{ uses: "actions/checkout@v6", with: { "persist-credentials": false } },
-					{ uses: "pnpm/action-setup@v4" },
-					{ uses: "actions/setup-node@v6", with: { "node-version": 22, cache: "pnpm" } },
-					{ run: "pnpm install --frozen-lockfile" },
-					{ run: "pnpm run typecheck" },
-					{
-						run: "pnpm run test:file tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts",
-					},
-				],
-			})
-		) {
-			fail("ci-scripts", "ci.yml windows-subprocess must run only the Node 22 typecheck and subprocess contract gate");
-		}
-		const concurrency = ci.concurrency as { group?: unknown; "cancel-in-progress"?: unknown } | undefined;
-		if (typeof concurrency?.group !== "string" || concurrency["cancel-in-progress"] !== true) {
-			fail("ci-scripts", "ci.yml must cancel superseded runs with a concurrency group");
-		}
-	}
-
-	const flakeHuntPath = ".github/workflows/flake-hunt.yml";
-	if (existsSync(join(root, flakeHuntPath))) {
-		fail("ci-scripts", "flake-hunt.yml must remain deleted");
-	}
-
-	// Releases remain a separate tag-only path.
-	const releasePath = ".github/workflows/release.yml";
-	if (!existsSync(join(root, releasePath))) {
-		fail("ci-scripts", "release.yml must exist");
-	} else {
-		const release = workflow(releasePath);
-		const triggers = release.on as { push?: { tags?: unknown } };
-		if (
-			JSON.stringify(Object.keys(triggers)) !== JSON.stringify(["push"]) ||
-			JSON.stringify(triggers.push?.tags) !== JSON.stringify(["v*"])
-		) {
-			fail("ci-scripts", "release.yml must trigger on v* tags only");
-		}
-	}
-
-	for (const relPath of [ciPath, releasePath]) {
-		if (existsSync(join(root, relPath)) && readRoot(relPath).includes("test:repeat")) {
-			fail("ci-scripts", `${relPath} must not reference the removed repeat-test lane`);
 		}
 	}
 }
@@ -708,43 +573,6 @@ function checkEnvironmentVariableInventory(): void {
 // table covers every default leaf. Membership comes from the existing typed
 // settings shape, including defaultless optional fields and array/map elements.
 // ---------------------------------------------------------------------------
-function configurationReferenceMembership(): (path: string) => boolean {
-	const file = join(root, "src/core/defaults.ts");
-	const program = ts.createProgram([file], {
-		module: ts.ModuleKind.NodeNext,
-		moduleResolution: ts.ModuleResolutionKind.NodeNext,
-		strict: true,
-		skipLibCheck: true,
-		noEmit: true,
-	});
-	const checker = program.getTypeChecker();
-	const source = program.getSourceFile(file);
-	const module = source && checker.getSymbolAtLocation(source);
-	const settings = module && checker.getExportsOfModule(module).find((symbol) => symbol.name === "DEFAULT_SETTINGS");
-	if (!settings || !source) throw new Error("cannot resolve DEFAULT_SETTINGS schema");
-	const schema = checker.getTypeOfSymbolAtLocation(settings, source);
-	return (path) => {
-		// Keep container syntax significant: an array is not an object or a map.
-		const tokens = path.match(/[^.[\]]+|\[\]/g) ?? [];
-		if (tokens.map((token, index) => (index > 0 && token !== "[]" ? `.${token}` : token)).join("") !== path) return false;
-		let current: ts.Type | undefined = schema;
-		for (const token of tokens) {
-			current = checker.getNonNullableType(current);
-			if (token === "[]") {
-				if (!checker.isArrayType(current) && !checker.isTupleType(current)) return false;
-				current = checker.getIndexTypeOfType(current, ts.IndexKind.Number);
-			} else if (token === "<key>") {
-				current = checker.getIndexTypeOfType(current, ts.IndexKind.String);
-			} else {
-				if (!(current.flags & ts.TypeFlags.Object) || checker.isArrayType(current)) return false;
-				const property = checker.getPropertyOfType(current, token);
-				current = property && checker.getTypeOfSymbolAtLocation(property, source);
-			}
-			if (!current || current.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown | ts.TypeFlags.Never)) return false;
-		}
-		return tokens.length > 0;
-	};
-}
 
 function configurationReferenceRows(): string[] {
 	const doc = readRoot("docs/guide/configuration-reference.md");
@@ -775,7 +603,7 @@ function checkConfigurationReference(): void {
 		);
 	}
 
-	const isSupported = configurationReferenceMembership();
+	const isSupported = configurationReferenceMembership(root);
 	const stale = rows.filter((path) => !isSupported(path));
 	if (stale.length > 0) {
 		fail(

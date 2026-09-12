@@ -130,14 +130,7 @@ function stubHost(): { host: LibraryRefreshHost; calls: number } {
 function cli(args: string[]): { code: number; json: Record<string, unknown> } {
 	const result = spawnSync(
 		process.execPath,
-		[
-			"--import",
-			import.meta.resolve("tsx"),
-			new URL("../../src/cli/index.ts", import.meta.url).pathname,
-			"library",
-			...args,
-			"--json",
-		],
+		[new URL("../../dist/cli/index.js", import.meta.url).pathname, "library", ...args, "--json"],
 		{ cwd: root, env: process.env, encoding: "utf8" },
 	);
 	const text = result.stdout || result.stderr;

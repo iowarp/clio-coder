@@ -17,7 +17,7 @@ import {
 import { isolateClioEnv, scratchClioEnvVars } from "../harness/scratch-env.js";
 
 const materioSource = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
-const cliEntry = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
+const cliEntry = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 
 function write(root: string, name: string, text: string): void {
 	const file = join(root, name);
@@ -73,7 +73,7 @@ function counts(resources: ReadonlyArray<LibraryResource>): Record<string, numbe
 }
 
 function cli(env: { dir: string }, cwd: string, args: string[]): { code: number; json: unknown; stderr: string } {
-	const result = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), cliEntry, "library", ...args], {
+	const result = spawnSync(process.execPath, [cliEntry, "library", ...args], {
 		cwd,
 		env: { ...process.env, ...scratchClioEnvVars(env.dir), HOME: env.dir },
 		encoding: "utf8",

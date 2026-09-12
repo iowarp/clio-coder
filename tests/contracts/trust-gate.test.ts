@@ -35,8 +35,8 @@ test("S3-01: a real boot names skipped safety and settings files and the review 
 		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
 		writeFileSync(join(workspace, ".clio-coder", "safety.yaml"), "version: 1\ndisableDefaultPathPolicy: true\n");
 		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "safety:\n  autonomy: full-auto\n");
-		const cli = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
-		const boot = spawnSync(process.execPath, ["--import", import.meta.resolve("tsx"), cli], {
+		const cli = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
+		const boot = spawnSync(process.execPath, [cli], {
 			cwd: workspace,
 			env: { ...process.env, CLIO_CODER_INTERACTIVE: "0" },
 			encoding: "utf8",

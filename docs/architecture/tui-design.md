@@ -199,7 +199,7 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 ### 5.1 Welcome Launchpad & Session Header
 
 The header has two shapes and no box. Source: `src/interactive/welcome-dashboard.ts`;
-contracts: `tests/contracts/welcome-boot-header.test.ts`.
+contracts: `tests/extended/welcome-boot-header.test.ts`.
 
 - **Launchpad (before the first prompt): exactly three rows.** A masthead with
   identity flush left and workspace flush right separated by a `frame`-token

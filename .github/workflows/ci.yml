@@ -16,10 +16,9 @@ concurrency:
 
 jobs:
   ci:
+    name: ci (22)
     runs-on: ubuntu-latest
-    # The full release suite outgrew the eight-minute hosted runner budget.
-    # Match release.yml so every contract, smoke and package audit can finish.
-    timeout-minutes: 15
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v6
         with:
@@ -30,8 +29,29 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Release gate
+      - name: Routine gate
+        if: ${{ !startsWith(github.ref, 'refs/heads/ci-scratch-') }}
+        run: pnpm run ci
+      - name: Candidate qualification
+        if: startsWith(github.ref, 'refs/heads/ci-scratch-')
         run: pnpm run ci:release
+
+  runtime-compatibility:
+    name: ci (24)
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Supported Node runtime boundaries
+        run: pnpm run test:file -- tests/contracts/engine-lifecycle.test.ts tests/contracts/provider-transport.test.ts tests/contracts/session-durability.test.ts
 
   windows-subprocess:
     runs-on: windows-latest
@@ -46,5 +66,4 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run typecheck
       - run: pnpm run test:file tests/contracts/antigravity-subprocess.test.ts tests/contracts/bash-exec-settlement.test.ts tests/contracts/windows-process-tree.test.ts

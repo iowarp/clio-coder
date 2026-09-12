@@ -164,11 +164,12 @@ describe("interop discovery and adoption", () => {
 			COPILOT_HOME: path.join(home, ".copilot"),
 		};
 		const cli = (...args: string[]) =>
-			spawnSync(
-				process.execPath,
-				["--import", import.meta.resolve("tsx"), path.resolve("src/cli/index.ts"), "interop", ...args],
-				{ cwd, env: childEnv, encoding: "utf8", timeout: 30000 },
-			);
+			spawnSync(process.execPath, [path.resolve("dist/cli/index.js"), "interop", ...args], {
+				cwd,
+				env: childEnv,
+				encoding: "utf8",
+				timeout: 30000,
+			});
 		// Resolve the tsx loader from the repository even when the child cwd is a fixture.
 		const inspected = cli("inspect", "--json");
 		strictEqual(inspected.status, 0, inspected.stderr);

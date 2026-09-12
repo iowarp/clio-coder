@@ -83,14 +83,7 @@ function catalog(items: LibraryEntry[]): string {
 async function captureCli(args: string[]): Promise<{ code: number; output: string }> {
 	const result = spawnSync(
 		process.execPath,
-		[
-			"--import",
-			import.meta.resolve("tsx"),
-			new URL("../../src/cli/index.ts", import.meta.url).pathname,
-			"library",
-			...args,
-			"--json",
-		],
+		[new URL("../../dist/cli/index.js", import.meta.url).pathname, "library", ...args, "--json"],
 		{ cwd: root, env: process.env, encoding: "utf8" },
 	);
 	return { code: result.status ?? 1, output: result.stdout || result.stderr };

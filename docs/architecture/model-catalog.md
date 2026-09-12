@@ -222,7 +222,7 @@ When an LLM response is interrupted because it hits an output token limit during
    - Replay repair does not mutate saved session transcripts, original stop reasons, usage metrics, or thinking signatures.
    - If target model, provider, or API switches, or reasoning is turned off, this narrow request repair is skipped and existing conversion policy applies; opaque signatures and cross-model conversions retain their original provider semantics.
    - A per-response output-token cap does not cap total task tokens or guarantee completed task execution; existing repair and deadline limits continue to apply.
-   - Verified by contract suite `tests/contracts/reasoning-length-replay.test.ts`.
+   - Verified by contract suite `tests/extended/reasoning-length-replay.test.ts`.
 
 ---
 

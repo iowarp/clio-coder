@@ -4,7 +4,6 @@ import { describe, it } from "node:test";
 import {
 	type CompileInputs,
 	compile,
-	LEGACY_SESSION_PROMPT_SECTION_ORDER,
 	SESSION_PROMPT_SECTION_ORDER,
 	type SessionPromptInputs,
 } from "../../src/domains/prompts/compiler.js";
@@ -120,10 +119,6 @@ describe("compiled main prompt: section layout", () => {
 		ok(at("project-context") < at("memory"));
 		ok(at("memory") < at("runtime"));
 		strictEqual(order[order.length - 1], "runtime", "runtime is the last compiled section");
-	});
-
-	it("is a pure permutation of the 0.3.8 order: no section added, none dropped", () => {
-		deepStrictEqual([...SESSION_PROMPT_SECTION_ORDER].sort(), [...LEGACY_SESSION_PROMPT_SECTION_ORDER].sort());
 	});
 
 	it("renders section text in the same order as the section list", () => {

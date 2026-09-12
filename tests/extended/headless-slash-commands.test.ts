@@ -6,8 +6,7 @@ import { join } from "node:path";
 import { it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-const CLI = fileURLToPath(new URL("../../src/cli/index.ts", import.meta.url));
-const TSX = import.meta.resolve("tsx");
+const CLI = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 
 it("headless commands refuse interactive actions before boot while preserving skills, templates, and prose", () => {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-headless-slash-"));
@@ -24,16 +23,12 @@ it("headless commands refuse interactive actions before boot while preserving sk
 		NO_COLOR: "1",
 	};
 	const run = (task: string) =>
-		spawnSync(
-			process.execPath,
-			["--import", TSX, CLI, "run", "--target", "headless-slash-missing-target", "--json", task],
-			{
-				cwd: root,
-				env,
-				encoding: "utf8",
-				timeout: 15_000,
-			},
-		);
+		spawnSync(process.execPath, [CLI, "run", "--target", "headless-slash-missing-target", "--json", task], {
+			cwd: root,
+			env,
+			encoding: "utf8",
+			timeout: 15_000,
+		});
 	try {
 		for (const task of [
 			"/context compact retain constraints",
@@ -95,11 +90,12 @@ it("headless run prints a display-only template to stdout and exits without boot
 	};
 	try {
 		for (const task of ["/pkg:help", "/pkg:help with arguments"]) {
-			const result = spawnSync(
-				process.execPath,
-				["--import", TSX, CLI, "run", "--target", "headless-slash-missing-target", task],
-				{ cwd: root, env, encoding: "utf8", timeout: 15_000 },
-			);
+			const result = spawnSync(process.execPath, [CLI, "run", "--target", "headless-slash-missing-target", task], {
+				cwd: root,
+				env,
+				encoding: "utf8",
+				timeout: 15_000,
+			});
 			strictEqual(result.error, undefined, task);
 			strictEqual(result.status, 0, `${task}: ${result.stderr}`);
 			strictEqual(result.stdout, "━━━ pkg ━━━\n /pkg:help   This help\n", task);

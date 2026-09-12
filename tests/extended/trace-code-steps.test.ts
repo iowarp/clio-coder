@@ -14,6 +14,7 @@ async function capture(args: string[]): Promise<{ code: number; stdout: string; 
 	let stdout = "";
 	let stderr = "";
 	process.stdout.write = ((chunk: string | Uint8Array) => {
+		if (typeof chunk !== "string") return outWrite.call(process.stdout, chunk);
 		stdout += String(chunk);
 		return true;
 	}) as typeof process.stdout.write;

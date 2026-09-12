@@ -20,10 +20,11 @@ clio-coder:
 
 # Clio Test
 
-The root Node suite has two test lanes. Contract tests import `src/` directly
-through tsx; smoke tests spawn the built `dist/cli/index.js`. The import-boundary
-checker runs under lint rather than `npm test`. The unified web application
-has its own full verification lane and shares the root release gate.
+The root Node suite has a small required contract/process lane, an installed-package
+qualification lane, and explicit extended development regressions. Contract tests
+import source through tsx; CLI tests use the current built binary. Lint owns static
+import boundaries and library pins. Publication performs only an exact-candidate
+preflight after successful qualification.
 
 For the question of whether a change may leave your machine (commit, push, or
 PR), use `clio-coder-dev`. **REQUIRED SUB-SKILL:** `clio-coder-dev` for the
@@ -38,15 +39,24 @@ npm run skills:check                      # catalog pins and marketplace index
 npm run test:file -- tests/contracts/<file>.test.ts
 npm run build                             # tsup plus the codewiki asset
 npm run test:file -- tests/smoke/<file>.test.ts  # requires a current build
-npm run test                              # every contract and smoke file
+npm run test                              # required contracts and three process smoke files
+npm run test:full                         # explicit extended root investigation
+npm run test:web:full                     # explicit extended web investigation
 pnpm --filter @iowarp/clio-coder-web verify # app types, lint, tests, build, browser
 npm run ci                                # deterministic root gate
-npm run ci:release                        # root gate plus package/release audit
+npm run ci:release                        # qualify clean committed source and exact installed tarball
+npm run release:preflight                 # fast check of the unchanged qualified package
 ```
+
+The required web tests cover authentication, permissions, cancellation, worker RPC,
+egress and process ownership. The installed-package lane includes one real browser
+boot/reconnect against the installed server. The full web `verify` command is an
+explicit development investigation, including its viewport/accessibility matrix.
+Do not run full development tests repeatedly during release or publication.
 
 The separate trace viewer is retired. `apps/workbench/` is retained reference
 source, excluded from builds, publication and product gates. Use `test:web` for
-the app tests alone; app `verify` also requires headless Chrome.
+the required app tests alone; app `verify` requires headless Chrome.
 
 No deterministic gate contacts a real model. When a task explicitly requires
 live validation, build first and run `node dist/cli/index.js run` against a
@@ -63,7 +73,7 @@ settings with the result.
 | Any import edit under `src/` | `npm run lint` | Hygiene invokes all six boundary rules. |
 | CLI, entry, process lifecycle, or ACP stdio flow | Build, then the closest file under `tests/smoke/` | Smoke executes the built binary. |
 | Published package contents | Build, then `tests/smoke/installed-package.test.ts` | The test packs and installs the actual artifact. |
-| Unified web application | `pnpm --filter @iowarp/clio-coder-web verify` | Includes worker/API boundaries and headless browser checks; root `ci` includes its test lane. |
+| Unified web application | `npm run test:web` | Required authentication/runtime boundaries; full `verify` is optional development work. |
 
 Read `references/test-map.md` for the current file map and exact subset
 commands.
@@ -114,7 +124,8 @@ three buckets:
 3. Run the narrowest related contract or application test.
 4. If the built boundary changed, build and run the closest smoke file.
 5. Run `npm run ci` before handing back a broad root change. Use
-   `npm run ci:release` when release packaging is in scope.
+   `npm run ci:release` on the clean committed candidate when packaging is in scope.
+   It records the exact source/artifact; use only `release:preflight` afterward.
 6. Report exactly what ran and what remains unverified.
 
 For one test file or an `it.only` while debugging:

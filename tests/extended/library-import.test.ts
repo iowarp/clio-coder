@@ -883,11 +883,12 @@ describe("library import of foreign plugin packages", () => {
 	it("exposes the CLI route with JSON that omits reviewed bytes and requires --yes to publish", () => {
 		const root = claudeBundle("cli-pack");
 		const cli = (...args: string[]) =>
-			spawnSync(
-				process.execPath,
-				["--import", import.meta.resolve("tsx"), path.resolve("src/cli/index.ts"), "library", "import", ...args],
-				{ cwd, env: { ...process.env, HOME: path.join(env.dir, "home") }, encoding: "utf8", timeout: 60000 },
-			);
+			spawnSync(process.execPath, [path.resolve("dist/cli/index.js"), "library", "import", ...args], {
+				cwd,
+				env: { ...process.env, HOME: path.join(env.dir, "home") },
+				encoding: "utf8",
+				timeout: 60000,
+			});
 		const dry = cli(root, "--dry-run", "--json");
 		strictEqual(dry.status, 0, dry.stderr);
 		const parsed = JSON.parse(dry.stdout) as { ok: boolean; confirmed: boolean; plan: Record<string, unknown> };

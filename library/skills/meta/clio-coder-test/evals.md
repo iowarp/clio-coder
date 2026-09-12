@@ -18,7 +18,7 @@ Expected:
 Prompt: "I edited `src/cli/run.ts`. How do I verify end-to-end?"
 Expected:
 - Builds (or relies on `npm run dev` watch), then starts with
-  `npm run test:file -- tests/smoke/cli-core.test.ts`.
+  `npm run test:file -- tests/extended-smoke/cli-core.test.ts`.
 - Explains smoke spawns `dist/cli/index.js`, so it only sees built code.
 
 ## T3 — hot reload

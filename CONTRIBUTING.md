@@ -39,30 +39,38 @@ Local and GitHub PR gate:
 pnpm run ci
 ```
 
-This runs type checking, lint (including boundaries, documentation drift and
-skill audit records and full-tree library pins), one build, the contract/smoke
-suite, and the unified web application tests. Use `pnpm run library:check` for package pins
-and `pnpm run skills:check` for skill authoring records; both run in `lint` and `ci`.
+This runs types, lint (including architecture boundaries and library pins), one
+build, 27 core contract files, three real CLI/ACP/process smoke files, and the
+web application's authentication and runtime boundary tests. It deliberately
+excludes broad development regressions, catalog inventories and model eval
+corpora. Superseded GitHub runs are cancelled. Branch protection requires `ci (22)` (the routine gate) and `ci (24)` (engine,
+provider transport and durable-session compatibility only). The separate Windows job runs
+only the three subprocess contracts whose process-tree behavior is platform-specific.
 
-The GitHub `ci` job runs the release gate on Ubuntu. The separate
-`windows-subprocess` job uses Node 22 on `windows-latest` and runs typecheck
-plus the Antigravity subprocess, Bash settlement, and Windows process-tree
-contracts. It is a focused Windows lane, not the full suite. Native Windows
-local checks provide local evidence; they do not establish a hosted CI pass.
-
-Release gate (for maintainers before tags or release artifacts):
+Choose the lane for the risk:
 
 ```bash
-pnpm run ci:release
+pnpm run test:file -- tests/contracts/safety-gates.test.ts # focused development
+pnpm run ci                                              # routine Linux CI
+pnpm run ci:release                                      # clean committed candidate
+pnpm run test:full                                       # explicit full root investigation
+pnpm run test:web:full                                   # explicit full web investigation
+pnpm --filter @iowarp/clio-coder-web verify                # full web development, including browser matrix
 ```
 
-The release gate includes `ci` and adds the package audit. Running `ci` again
-on the same unchanged tree is unnecessary. Run a focused regression while
-developing a repair, then the full gate for the candidate being reviewed.
-Model tests use local fixtures. The installed-package smoke in `ci` installs
-runtime dependencies through npm and needs registry access or a populated npm
-cache. `ci:release` additionally runs `pnpm audit` against the registry; an
-unavailable advisory service is a failed audit, not a clean result.
+Candidate qualification runs the routine gate, web types, the dependency/package
+audit, and two package smoke files. Those install the exact tarball with normal npm
+lifecycle scripts, exercise native delayed-header timing, and boot the installed web
+app in Chrome. They reuse that installed server for the browser check. No live model
+or operator credentials are required. Registry access is needed for the installed
+runtime dependencies and advisory audit; a failed audit is a failed qualification.
+Cold dependency installation is separate from gate timing.
+
+`tests/extended/` and `tests/extended-smoke/` retain focused development regressions.
+Run the relevant ones when editing their surfaces, or the explicit full suite for an
+extended investigation. They are not repeated during CI or npm publication. A newly
+found correctness regression must be fixed before qualification; moving a failing
+test to an extended lane is not a repair.
 
 Live provider validation (manual/opt-in, after `pnpm run build`):
 
@@ -83,56 +91,39 @@ built `dist/cli/index.js`; their files own the process drivers needed for each
 boundary. Rebuild `dist/` after changing CLI or entry-point source before
 running a focused smoke test.
 
-Do not assert a CLI subcommand's output by capturing `process.stdout.write`
-in-process. In-process stdout capture fights the node:test spec reporter:
-async flushes land in the capture buffer and the reporter's pass/fail counters
-get eaten, so a passing test can report as no output. Spawn the CLI through the
-harness instead. Patching `process.stdout`/`stderr` to assert a small library
-function's own output is fine; the trap is capturing a whole subcommand's
-output in-process while the reporter runs.
+Never replace `process.stdout.write` across asynchronous test work. Node's test
+child sends reporter records through that stream: a later test's mock can swallow
+an earlier failure's name and details. Spawn CLI commands using the current built
+binary. Small library captures must forward non-string reporter frames unchanged.
+
 
 ## Releasing
 
-Releases are cut from a tag. The GitHub release is created by CI; the npm
-publish is a manual maintainer step. The current procedure is the sequence
-below together with `.github/workflows/release.yml` and
-`scripts/check-release.mjs`. The
-[v0.4.1 release-cut checklist](docs/history/release-cut-checklist.md) is a
-historical record, not a reusable current checklist.
+The current [release checklist](docs/process/release-cut-checklist.md) is authoritative.
+The withdrawn v0.4.8 candidate is not authorization to restore its tag or publish it.
 
-1. During development, keep the top changelog section at `## Unreleased`. A
-   maintainer collects release work on a **local-only** compact candidate
-   branch (`v046` for `v0.4.6`) and bumps `version` there. Never push this
-   candidate branch to the canonical repository. Before the cut, retitle the
-   changelog section `## <version> - YYYY-MM-DD`, align the ACP registry manifest
-   version, and update the README's install tag and release notices.
-2. Run `pnpm run ci:release` on the exact candidate. It runs the full `ci` gate,
-   then `scripts/check-release.mjs`, which verifies the built `dist/` and
-   audits the exact npm package contents.
-3. Fetch `origin`, require the fetched `origin/main` to be the candidate's
-   ancestor, then fast-forward local `main` with `git merge --ff-only v046`.
-   Re-run the release gate if the candidate changed and verify local `main`
-   equals the reviewed candidate SHA.
-4. Fetch once more and stop on unexpected movement. With explicit maintainer
-   authorization, push only `refs/heads/main:refs/heads/main`; no topic or
-   release-candidate branch is pushed to canonical `origin`.
-5. Require CI for that exact `main` SHA to pass. Create the annotated tag on
-   that commit and push only it: `git tag -a v0.4.6` followed by
-   `git push origin refs/tags/v0.4.6`. The tag must match `package.json`; the
-   release workflow refuses mismatches.
-6. `.github/workflows/release.yml` verifies the tag against `package.json`,
-   runs `pnpm run ci:release` on the tagged tree, and creates the GitHub release
-   with the tarball attached and the version's `CHANGELOG.md` section as the
-   body. It does not publish to npm.
-7. A maintainer publishes from the tagged commit with `npm publish`;
-   `prepublishOnly` runs the same `ci:release` gate in release mode first.
-8. Verify the release and tag. Reconcile milestone tickets against tagged
-   implementation and acceptance evidence; plain issue references and release
-   tags do not close tickets. Verify automatic closures, explicitly close
-   completed tickets that remain open, and carry incomplete work forward before
-   closing the milestone. Then delete the local compact candidate branch.
-   The canonical remote returns to its steady state: `main` plus immutable
-   release tags and GitHub releases, with no release branch.
+1. Prepare and commit the exact candidate on a local branch. Install the pinned
+   workspace dependencies, then run `pnpm run ci:release` once. It qualifies one
+   artifact and stores it with a receipt under `~/.cache/clio-coder/qualification/`.
+   A new qualification invalidates old evidence before doing any work.
+2. Review the candidate SHA and qualified package. With explicit authorization,
+   fast-forward main and push the matching annotated version tag. The tag workflow
+   qualifies its own exact package before a dependent job can create the GitHub release.
+   It uploads that package, never a newly packed replacement.
+3. From the unchanged locally qualified checkout, run `pnpm run release:preflight`,
+   then, only with publication authorization, `npm publish`. `prepublishOnly` repeats
+   only the fast preflight. It requires the same clean commit, Node version, a
+   qualification less than 24 hours old, the original artifact digest, matching
+   current package bytes (including ignored build output), and dated release notes.
+   Missing, stale or changed evidence fails closed: qualify again. There are no
+   bypass flags or ignored lifecycle hooks in this procedure.
+4. Verify the published artifact and reconcile the release milestone before branch
+   closeout. Remote writes, tags and publishing always require explicit authorization.
+
+Do not run `ci`, the full suite, another build, or another installed-package check
+between successful qualification and publication. A rebuild may change package bytes
+and require qualification again. Live-model checks and the real-home smoke are
+optional investigations, not deterministic publish prerequisites.
 
 What `scripts/check-release.mjs` enforces, and how to respond when it fails:
 

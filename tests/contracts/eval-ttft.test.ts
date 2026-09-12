@@ -62,6 +62,20 @@ test("TTFT chooses the chronological first call and never borrows a later timing
 	});
 });
 
+test("TTFT follows durable parent order when the wall clock steps backwards", () => {
+	const first = call("first", LATE, { ttftMs: 1200 });
+	const second = { ...call("second", EARLY, { ttftMs: 214 }), parentTurnId: "tool" };
+	const tool: SessionEntry = {
+		kind: "message",
+		role: "tool_result",
+		turnId: "tool",
+		parentTurnId: "first",
+		timestamp: EARLY,
+		payload: {},
+	};
+	assert.deepEqual(metrics([first, tool, second]).ttftMsFirstCall, { value: 1200, source: "ledger" });
+});
+
 test("TTFT chronology crosses session-directory order", async () => {
 	const env = await isolateClioEnv("clio-coder-eval-ttft-");
 	try {

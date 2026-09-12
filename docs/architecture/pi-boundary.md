@@ -108,7 +108,7 @@ else, `src/interactive/**` included, reaches Pi through engine re-exports such a
 graph, alongside five other isolation rules including the Stage 0 instant-shell
 closure (`STAGE_0_OWNER`, `STAGE0_SEAMS`). `tests/contracts/engine-lifecycle.test.ts`
 covers agent-loop ordering, reset, tool-argument normalization, the keybinding
-table and alt-screen render seams; `tests/contracts/tool-boundaries.test.ts`
+table and alt-screen render seams; `tests/extended/tool-boundaries.test.ts`
 covers tool schema admission and execution isolation across runtimes.
 
 ## Pi regression net
@@ -118,11 +118,11 @@ Run these contracts first on a Pi bump, before the full gate:
 - `tests/boundaries/check-boundaries.ts` (static architecture boundaries and Stage 0 seams)
 - `tests/contracts/engine-lifecycle.test.ts` (agent-loop ordering, reset, tool-argument normalization, keybinding table, alt-screen render seams)
 - `tests/contracts/provider-transport.test.ts`
-- `tests/contracts/openrouter-transport.test.ts`
-- `tests/contracts/provider-context-boundary.test.ts`
-- `tests/contracts/rendering-invariants.test.ts`
-- `tests/contracts/gemma-channel-filter.test.ts`
-- `tests/contracts/tool-boundaries.test.ts`
+- `tests/extended/openrouter-transport.test.ts`
+- `tests/extended/provider-context-boundary.test.ts`
+- `tests/extended/rendering-invariants.test.ts`
+- `tests/extended/gemma-channel-filter.test.ts`
+- `tests/extended/tool-boundaries.test.ts`
 - `tests/contracts/session-durability.test.ts`
 - `tests/smoke/process-lifecycle.test.ts`
 

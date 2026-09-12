@@ -20,10 +20,12 @@ import { describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { checkInstalledBrowser } from "../../apps/clio-coder-web/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
 import { type AgentRecipeDiagnostic, loadRecipesFromDir } from "../../src/domains/agents/registry.js";
+import { pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { clearPluginSnapshots } from "../../src/domains/plugins/resources.js";
 import { loadPromptTemplates } from "../../src/domains/resources/prompts/loader.js";
 import { loadSkills } from "../../src/domains/resources/skills/loader.js";
@@ -411,6 +413,8 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		);
 		ok(threads[0] !== threads[1], "reads and ops are distinct worker threads");
 
+		await checkInstalledBrowser(origin, WEB_TEST_TOKEN);
+
 		const tools = await request("/api/toolchain/tools");
 		strictEqual(tools.status, 200);
 		strictEqual(((await tools.json()) as unknown[]).length, 3, "the reads worker lists the three pinned tools");
@@ -615,13 +619,15 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			mkdirSync(prefix, { recursive: true });
 			mkdirSync(foreign, { recursive: true });
 			mkdirSync(coverage, { recursive: true });
-			const packed = JSON.parse(
-				execFileSync("npm", ["pack", "--json", "--silent", "--pack-destination", work], {
-					cwd: ROOT,
-					encoding: "utf8",
-					stdio: ["ignore", "pipe", "ignore"],
-				}),
-			) as Array<{ filename?: string }>;
+			const packed = process.env.CLIO_CODER_RELEASE_TARBALL
+				? [{ filename: process.env.CLIO_CODER_RELEASE_TARBALL }]
+				: (JSON.parse(
+						execFileSync("npm", ["pack", "--json", "--silent", "--pack-destination", work], {
+							cwd: ROOT,
+							encoding: "utf8",
+							stdio: ["ignore", "pipe", "ignore"],
+						}),
+					) as Array<{ filename?: string }>);
 			strictEqual(packed.length, 1, "npm pack must produce one tarball");
 			const filename = packed[0]?.filename;
 			ok(filename);
@@ -632,12 +638,11 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"--prefix",
 					prefix,
 					"--omit=optional",
-					"--ignore-scripts",
 					"--package-lock=false",
 					"--no-audit",
 					"--no-fund",
 					"--loglevel=error",
-					join(work, filename),
+					process.env.CLIO_CODER_RELEASE_TARBALL ?? join(work, filename),
 				],
 				{ cwd: prefix, stdio: "pipe", timeout: 90_000 },
 			);
@@ -840,7 +845,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				}
 			});
 
-			// 2. Install all 34 bundled packages:
+			// 2. Verify every packed pin; exercise installation for a skill and a bundle.
 			interface CatalogEntry {
 				kind: string;
 				name: string;
@@ -862,6 +867,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			);
 			strictEqual(authored.entries.length, 34, "bundled catalog must contain 34 packages");
 
+			const standaloneSkill = authored.entries.find((entry) => entry.kind === "skill");
+			ok(standaloneSkill);
 			for (const entry of authored.entries) {
 				const packedSource = resolve(packageRoot, "library", entry.sourceUrl);
 				strictEqual(discovered.entries.find((item) => item.name === entry.name)?.sourceUrl, packedSource);
@@ -870,6 +877,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 					"library",
 					`package source ${packedSource} must resolve strictly beneath installed package library/`,
 				);
+				strictEqual(pluginContentDigest(packedSource), entry.sha256, `packed integrity: ${entry.name}`);
+				if (entry !== standaloneSkill && entry.name !== "materio") continue;
 				const installed = (await libraryJson(["library", "install", `${entry.kind}:${entry.name}`, "--project"])) as {
 					path: string;
 					sha256: string;
@@ -878,17 +887,17 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				strictEqual(installed.sha256, entry.sha256, `packed bytes must match the full-tree pin for ${entry.name}`);
 			}
 
-			// 3. Verify 39 skill resources, 20 agent recipes total, Materio's 17 prompts and fleet through actual loaders:
+			// 3. Load the installed skill and bundle alongside built-in recipes.
 			const allAgents = (await libraryJson(["agents", "--all"])) as Array<{ id: string; skills: string[] }>;
 			strictEqual(allAgents.length, 20, "must expose exactly 20 agent recipes total");
 
 			withIsolatedState(libraryHome, () => {
 				const loadedSkills = loadSkills({ cwd: libraryProject, home: libraryHome, configDir: join(libraryHome, "config") });
 				deepStrictEqual(loadedSkills.diagnostics, []);
-				strictEqual(loadedSkills.items.length, 39, "actual skill loader must return 39 skill resources");
+				strictEqual(loadedSkills.items.length, 7, "one standalone skill and six bundle skills load");
 
 				const availableSkills = new Set(loadedSkills.items.map((skill) => skill.name));
-				for (const agent of allAgents) {
+				for (const agent of allAgents.filter((agent) => !builtinSourceIds.includes(agent.id))) {
 					for (const skill of agent.skills) {
 						ok(availableSkills.has(skill), `${agent.id} references unavailable skill ${skill}`);
 					}

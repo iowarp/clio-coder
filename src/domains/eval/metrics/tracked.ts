@@ -42,6 +42,7 @@ export interface BuildEvalTrackedMetricsInput {
 }
 
 interface AssistantCall {
+	turnId: string;
 	timestamp: string | null;
 	payload: Record<string, unknown>;
 	promptCache: Record<string, unknown> | null;
@@ -175,7 +176,7 @@ export function buildEvalTrackedMetrics(input: BuildEvalTrackedMetricsInput): Ev
 			receiptToolErrors === undefined
 				? { value: ledgerToolErrors, source: "ledger" }
 				: { value: receiptToolErrors, source: "receipt" },
-		ttftMsFirstCall: firstCallTtft(calls),
+		ttftMsFirstCall: firstCallTtft(calls, input.ledgerEntries),
 		wallClockMs: wallClockMetric(input.receipt, input.fallbackWallClockMs),
 		contextTokensAtEnd: contextTokensAtEnd(calls, compactionEntries),
 		compactions: { value: compactionEntries.length, source: "ledger" },
@@ -210,6 +211,7 @@ function assistantCalls(entries: ReadonlyArray<SessionEntry>): AssistantCall[] {
 		if (promptCache === null && timing === null && usage === null) return [];
 		return [
 			{
+				turnId: entry.turnId,
 				timestamp: entry.payload.timestampEstimated === true ? null : entry.timestamp,
 				payload: entry.payload,
 				promptCache,
@@ -279,7 +281,24 @@ function reasoningMetric(
 	return measured ? { value: total, source: "ledger" } : { value: null, source: "estimated" };
 }
 
-function firstCallTtft(calls: ReadonlyArray<AssistantCall>): EvalSourcedNullableNumber {
+function firstCallTtft(
+	calls: ReadonlyArray<AssistantCall>,
+	entries: ReadonlyArray<SessionEntry>,
+): EvalSourcedNullableNumber {
+	// Parent links are causal evidence; wall-clock corrections must not promote
+	// a later call in the same session. Compare timestamps only across roots.
+	const parents = new Map(entries.map((entry) => [entry.turnId, entry.parentTurnId]));
+	const callIds = new Set(calls.map((call) => call.turnId));
+	const hasEarlierCall = (call: AssistantCall): boolean => {
+		const visited = new Set<string>([call.turnId]);
+		let parent = parents.get(call.turnId);
+		while (parent != null && !visited.has(parent)) {
+			if (callIds.has(parent)) return true;
+			visited.add(parent);
+			parent = parents.get(parent);
+		}
+		return false;
+	};
 	// Session directories are read by name, not by call time. Select without
 	// reordering the evidence or borrowing a later call's available timing.
 	let first: AssistantCall | undefined;
@@ -288,6 +307,7 @@ function firstCallTtft(calls: ReadonlyArray<AssistantCall>): EvalSourcedNullable
 		if (call.timestamp === null) return { value: null, source: "estimated" };
 		const at = Date.parse(call.timestamp);
 		if (!Number.isFinite(at)) return { value: null, source: "estimated" };
+		if (hasEarlierCall(call)) continue;
 		if (at < firstAt) {
 			first = call;
 			firstAt = at;

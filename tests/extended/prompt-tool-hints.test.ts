@@ -97,39 +97,6 @@ describe("role-aware prompt hints", () => {
 		strictEqual(compiled.systemPrompt.includes("workers behind dispatch"), false);
 	});
 
-	it("sorts, normalizes, and exact-deduplicates equivalent hint inputs", () => {
-		const table = loadFragments();
-		const forward = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			sessionInputs: {
-				providerSupportsTools: true,
-				toolNames: [ToolNames.Read, ToolNames.Grep],
-				toolPromptHints: [
-					{ tool: ToolNames.Read, hint: "  Shared\n guidance  " },
-					{ tool: ToolNames.Grep, hint: "Shared guidance" },
-				],
-			},
-		});
-		const reversed = compile(table, {
-			identity: "identity.clio",
-			operatingContract: "operating.contract",
-			safety: "safety.auto-edit",
-			sessionInputs: {
-				providerSupportsTools: true,
-				toolNames: [ToolNames.Grep, ToolNames.Read],
-				toolPromptHints: [
-					{ tool: ToolNames.Grep, hint: "Shared guidance" },
-					{ tool: ToolNames.Read, hint: "  Shared\n guidance  " },
-				],
-			},
-		});
-
-		strictEqual(forward.systemPrompt, reversed.systemPrompt);
-		strictEqual(forward.systemPrompt.split("Shared guidance").length - 1, 1);
-	});
-
 	it("keeps reversed and duplicate inputs equivalent for every prompt role", () => {
 		const toolNames = [ToolNames.Context, ToolNames.Read, ToolNames.CodeNav, ToolNames.Context] as never[];
 		const hints = [

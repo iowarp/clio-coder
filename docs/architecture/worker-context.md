@@ -94,7 +94,7 @@ compatibility allowance and not a universal provider contract. A per-response ca
 also caps one response, not a task: it does not bound total task tokens or
 guarantee the task finishes.
 
-`tests/contracts/worker-output-settings.test.ts` covers the eight combinations of
+`tests/extended/worker-output-settings.test.ts` covers the eight combinations of
 trust state and layer (trusted project at low/medium/xhigh effort, trusted local
 override, untrusted, changed-after-trust, malformed, and user settings only).
 

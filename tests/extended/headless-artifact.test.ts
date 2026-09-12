@@ -192,7 +192,9 @@ for (const scenario of [
 		test(`headless settlement: ${scenario.name} (${mode})`, async (t) => {
 			let stdout = "";
 			let stderr = "";
+			const reportWrite = process.stdout.write.bind(process.stdout);
 			t.mock.method(process.stdout, "write", (chunk: string, callback?: (error?: Error | null) => void) => {
+				if (typeof chunk !== "string") return reportWrite(chunk);
 				stdout += String(chunk);
 				if (typeof callback === "function") callback();
 				return true;

@@ -19,7 +19,7 @@
  * the environment, so the run has exactly one root and only the process that
  * created it removes it.
  */
-import { lstatSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { installTmpGitGuard } from "./tmp-git-guard.js";
@@ -65,19 +65,7 @@ export function isRemovableRoot(dir: string): boolean {
 /** How long a root must have gone untouched before a later run may collect it. */
 const STALE_ROOT_MS = 4 * 60 * 60 * 1000;
 
-/**
- * Remove roots that an earlier run never got to.
- *
- * The exit hook below only collects the root of a run that exits. A run killed
- * by SIGKILL, an out-of-memory abort, or an operator's Ctrl-C leaves its root
- * behind forever, and nothing else ever looks at it. On a machine where /tmp is
- * a tmpfs (4GB here) a day of interrupted runs fills it and every later run
- * fails for lack of space, which reads as an unrelated test failure.
- *
- * Age is the only signal available: a root carries no owner pid, and stat'ing
- * for holders would cost more than the sweep saves. Four hours is far longer
- * than any run this suite has, so a root that old belongs to nobody.
- */
+/** Collect only old roots whose recorded owner has exited. Never infer death from age alone. */
 function sweepStaleRoots(): void {
 	const cutoff = Date.now() - STALE_ROOT_MS;
 	let entries: string[];
@@ -92,6 +80,14 @@ function sweepStaleRoots(): void {
 		if (!isRemovableRoot(path)) continue;
 		try {
 			if (lstatSync(path).mtimeMs > cutoff) continue;
+			const owner = JSON.parse(readFileSync(join(path, ".owner.json"), "utf8")) as { pid?: unknown };
+			if (typeof owner.pid !== "number" || !Number.isInteger(owner.pid) || owner.pid <= 0) continue;
+			try {
+				process.kill(owner.pid, 0);
+				continue;
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ESRCH") continue;
+			}
 			rmSync(path, { recursive: true, force: true });
 		} catch {
 			// A root another run is actively removing, or one this user cannot
@@ -104,7 +100,13 @@ const inherited = process.env[ROOT_ENV];
 // The same predicate the delete is gated on: a root that would not be safe to
 // remove is not one to write into either, so a stale or hostile value from the
 // environment is replaced by a fresh root rather than trusted.
-if (inherited !== undefined && isRemovableRoot(inherited)) {
+if (
+	inherited !== undefined &&
+	(isRemovableRoot(inherited) ||
+		(resolve(inherited) === systemTmp &&
+			basename(systemTmp).startsWith(TEST_TMP_ROOT_PREFIX) &&
+			lstatSync(systemTmp, { throwIfNoEntry: false })?.isDirectory()))
+) {
 	// A test child inside a run that already has a root. Use it; the process that
 	// created it is the one that removes it.
 	process.env.TMPDIR = inherited;
@@ -113,6 +115,7 @@ if (inherited !== undefined && isRemovableRoot(inherited)) {
 	// nothing to collect.
 	sweepStaleRoots();
 	const root = mkdtempSync(join(systemTmp, TEST_TMP_ROOT_PREFIX));
+	writeFileSync(join(root, ".owner.json"), JSON.stringify({ pid: process.pid }));
 	process.env[ROOT_ENV] = root;
 	process.env.TMPDIR = root;
 	process.on("exit", () => {

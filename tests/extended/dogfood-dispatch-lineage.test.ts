@@ -142,7 +142,9 @@ async function fixture(transientFailure = false, spawn?: (spec: WorkerSpec) => S
 it("a worker admitted during main submit points to its eventual receipt; independent turns do not retain the host", {
 	timeout: 30_000,
 }, async (t) => {
-	t.mock.method(process.stdout, "write", (_chunk: string, callback?: () => void) => {
+	const reportWrite = process.stdout.write.bind(process.stdout);
+	t.mock.method(process.stdout, "write", (chunk: string, callback?: () => void) => {
+		if (typeof chunk !== "string") return reportWrite(chunk);
 		callback?.();
 		return true;
 	});
