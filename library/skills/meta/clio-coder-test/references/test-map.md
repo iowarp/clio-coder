@@ -12,12 +12,11 @@ current behavior, and create a new file only for a genuinely new cluster.
 | Smoke | `tests/smoke/*.test.ts` | `npm run test:file -- <file-or-files>` | Yes; spawns `dist/cli/index.js` |
 | Boundaries | `tests/boundaries/check-boundaries.ts` | `npm run lint` through `scripts/check-hygiene.ts` | No |
 | Root full suite | Contract and smoke files | `npm run test` | Yes for current smoke behavior |
-| Trace viewer | `apps/trace-viewer/tests/*.test.mjs` | `npm run test:trace-viewer` | No |
-| Workbench | `apps/workbench/tests/` | `deno task verify` from `apps/workbench` | The command builds the app |
+| Unified web | `apps/clio-coder-web/tests/` | `pnpm --filter @iowarp/clio-coder-web verify` | Root build for CLI/ACP fixtures; verify builds the client and runs headless Chrome |
 
 `npm run ci` orders typecheck, lint, skill-pin verification, build, the root
-suite, and trace-viewer tests. `npm run ci:release` adds the release audit. The
-Workbench gate is separate.
+suite, and unified web tests. `npm run ci:release` adds the release audit.
+The trace viewer is retired; Workbench is reference source outside product gates.
 
 ## Contract files
 
@@ -32,7 +31,7 @@ Workbench gate is separate.
 | Safety and tools | `bash-exec-settlement`, `rejection-feedback`, `safe-resource-write`, `safety-gates`, `tool-boundaries` |
 | Evidence, eval, and release | `eval-boundary`, `evidence-integrity`, `metering-integrity`, `release-boundary` |
 | Extensions, interop, and skills | `extension-compatibility`, `extension-reload-coordinator`, `extension-reload-slash`, `extension-resources`, `extension-snapshot`, `interop-boundary`, `marketplace-offer`, `skill-install` |
-| Documentation server | `docs-server` |
+| Documentation navigation | `docs-server` |
 
 Append `.test.ts` to every stem in the table. Use `rg` over the files before
 choosing a lane; related behavior can span more than one focused contract.

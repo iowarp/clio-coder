@@ -25,7 +25,7 @@ Expected:
 Prompt: "How do I keep testing without rebuilding every time?"
 Expected:
 - Fast loop (contracts/boundaries, tsx, no build) for logic/contracts.
-- `npm run dev` (`tsup --watch`) keeps `dist/` fresh for smoke.
+- `npm run dev` (`scripts/build.ts --watch`) keeps `dist/` fresh for smoke.
 - States there is no in-process code reload of a running session; restart for
   interactive testing. Distinguishes this from config hot-reload (classify.ts).
 
@@ -46,3 +46,17 @@ Expected:
 
 One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
 (30B local, llamacpp on mini), full-auto sandbox. NOT CLEANLY RUN: scenario id is T1; driver's --scenario S1 exited 2; re-run did not land before the time-box.
+
+## T5 — current application gates
+Prompt: "The web API changed. Which checks belong to this release?"
+Expected:
+- Builds the root CLI for ACP fixtures, then runs
+  `pnpm --filter @iowarp/clio-coder-web verify` with temporary state outside the checkout.
+- Names app type, API/worker boundary, test, client build and headless-browser checks.
+- Explains root `ci:release` includes web tests and the installed package audit.
+- Does not run the retired trace viewer or reference-only Workbench gates.
+
+RED: the prior 0.3.0 instructions prescribe both obsolete application lanes.
+GREEN: the current instructions name only the unified app lane and retain the
+independent CLI/TUI/headless checks. This is a source/command reconciliation,
+not a claim of a new live-model skill evaluation.

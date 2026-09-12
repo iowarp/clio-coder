@@ -7,7 +7,7 @@ triggers:
   - run Clio contract tests
   - test ACP over stdio
   - Clio mock provider harness
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 clio-coder:
   registry-id: iowarp/clio-coder
@@ -22,8 +22,8 @@ clio-coder:
 
 The root Node suite has two test lanes. Contract tests import `src/` directly
 through tsx; smoke tests spawn the built `dist/cli/index.js`. The import-boundary
-checker runs under lint rather than `npm test`. The trace viewer and Workbench
-have separate application gates.
+checker runs under lint rather than `npm test`. The unified web application
+has its own full verification lane and shares the root release gate.
 
 For the question of whether a change may leave your machine (commit, push, or
 PR), use `clio-coder-dev`. **REQUIRED SUB-SKILL:** `clio-coder-dev` for the
@@ -39,14 +39,14 @@ npm run test:file -- tests/contracts/<file>.test.ts
 npm run build                             # tsup plus the codewiki asset
 npm run test:file -- tests/smoke/<file>.test.ts  # requires a current build
 npm run test                              # every contract and smoke file
-npm run test:trace-viewer                 # apps/trace-viewer
+pnpm --filter @iowarp/clio-coder-web verify # app types, lint, tests, build, browser
 npm run ci                                # deterministic root gate
 npm run ci:release                        # root gate plus package/release audit
 ```
 
-The Workbench is not part of the root `npm run ci` command. From
-`apps/workbench`, run `deno task verify` for its format, lint, type check, test,
-and build gate.
+The separate trace viewer is retired. `apps/workbench/` is retained reference
+source, excluded from builds, publication and product gates. Use `test:web` for
+the app tests alone; app `verify` also requires headless Chrome.
 
 No deterministic gate contacts a real model. When a task explicitly requires
 live validation, build first and run `node dist/cli/index.js run` against a
@@ -63,8 +63,7 @@ settings with the result.
 | Any import edit under `src/` | `npm run lint` | Hygiene invokes all six boundary rules. |
 | CLI, entry, process lifecycle, or ACP stdio flow | Build, then the closest file under `tests/smoke/` | Smoke executes the built binary. |
 | Published package contents | Build, then `tests/smoke/installed-package.test.ts` | The test packs and installs the actual artifact. |
-| Trace viewer | `npm run test:trace-viewer` | It has a separate Node package and test command. |
-| Workbench | `deno task verify` in `apps/workbench` | Its Deno/Vite gate is independent of the root npm gate. |
+| Unified web application | `pnpm --filter @iowarp/clio-coder-web verify` | Includes worker/API boundaries and headless browser checks; root `ci` includes its test lane. |
 
 Read `references/test-map.md` for the current file map and exact subset
 commands.
@@ -93,7 +92,7 @@ The authoritative definitions and exceptions are in
 ## Source and configuration reload
 
 Contract tests and hygiene read current source, so they need no build. Smoke
-tests run `dist/`, so rebuild first or keep `npm run dev` (`tsup --watch`)
+tests run `dist/`, so rebuild first or keep `npm run dev` (`scripts/build.ts --watch`)
 running. A running Clio process does not reload changed ESM modules; restart it
 after a fresh build.
 

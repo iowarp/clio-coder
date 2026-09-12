@@ -220,7 +220,7 @@
 				"Clio mock provider harness"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"audit": "pass",
 			"category": "meta"
 		},

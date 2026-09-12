@@ -185,9 +185,9 @@ entries:
       - run Clio contract tests
       - test ACP over stdio
       - Clio mock provider harness
-    version: 0.3.0
+    version: 0.3.1
     sourceUrl: skills/meta/clio-coder-test
-    sha256: 8832464dfd5e5d827c770f1dddc860a1cb397748435ae61e8e68a0032add249e
+    sha256: a02b34e3d028368057c72db85140120701a01a898a7dee21e0e3deea65101d68
     provides:
       - kind: skill
         name: clio-coder-test

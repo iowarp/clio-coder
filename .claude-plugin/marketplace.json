@@ -66,7 +66,7 @@
 			"name": "clio-coder-test",
 			"source": "./library/skills/meta/clio-coder-test",
 			"description": "Verifies a Clio Coder source change against the current contract, smoke, boundary, and application test lanes, including temporary-state and local-provider harnesses. Not for deciding what may change; use clio-coder-dev.",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},
