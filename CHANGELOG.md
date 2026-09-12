@@ -4,20 +4,29 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+The v0.4.8 development branch strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.
+
 ### Added
-- Unified web application through the lazy `clio-coder web` command, packaged with its REST/SSE server, two domain workers, and local client assets. Sessions, traces, docs, toolchain, settings/targets, fleet, evidence, evals/usage, Library, and system inspection use the existing Clio runtime.
-- Explicit Linux background service and installable PWA with a stable local connection, public offline recovery, and ownership-checked service/launcher removal. Foreground web use remains available on other platforms. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint.
-- npm-backed bootstrap installer for Linux/macOS with prerequisite checks, a user-owned prefix, version selection, dry runs, conflict protection, and capability-aware next steps. The GitHub raw-content URL becomes live when the script is published.
+- An npm-backed bootstrap installer for Linux/macOS with prerequisite checks, a user-owned prefix, version selection, dry runs, conflict protection, and terminal-first next steps. The GitHub raw-content URL becomes live when the script is published.
+- An optional web application through the lazy `clio-coder web` command, packaged with its REST/SSE server, two domain workers, and local client assets. Sessions, traces, docs, toolchain, settings/targets, fleet, evidence, evals/usage, Library, and system inspection use the existing Clio runtime.
+- Explicit background service setup for Linux with a systemd user session and an installable PWA with a stable local connection and offline recovery. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint. Foreground web use remains available on other platforms.
 
 ### Changed
-- Consolidate documentation in the web app: `clio-coder docs [topic]` opens a guide and reuses a configured background app, while handmade blueprints stay inside the same navigation and theme. Include the visual sources in npm, retire the separate CLI docs server, and route old HTML entry links into the app.
-- Restore the Clio logo throughout the web app; use soft cream and pastel forest themes, compact icon controls, and application preferences without a page footer.
-- Build the web surface together with the CLI, share server chunks, ship frontend/font/Hono notices, and validate installed workers without a TypeScript loader. Adjust release size tripwires to 12 MB compressed / 55 MB unpacked for the complete browser surface (initial integrated artifact approximately 10.15 / 50.89 MB).
-- Retire the separate trace viewer and `trace ui`; the unified web app uses the shared runtime trace reader for browsing and pagination. Preserve Workbench as reference source while excluding it from workspace builds, publication, and product gates.
+- Consolidate documentation in the web app: `clio-coder docs [topic]` opens a guide and reuses a configured background app, while handmade blueprints stay inside the same navigation and theme. Include the visual sources in npm, retire the separate CLI docs server, and route old HTML entry links into the app. Markdown references remain directly available in the package and repository.
+- Build the web surface together with the CLI, share server chunks, and ship frontend/font/Hono notices. Installed-package tests exercise both workers without a TypeScript loader. Release size tripwires are 12 MB compressed / 55 MB unpacked for the complete package.
+- Restore the Clio logo in the web app with cream and pastel forest themes and compact application controls.
+- Retire the separate trace viewer and `trace ui`; the unified web app uses the shared runtime trace reader. Preserve Workbench as reference source outside workspace builds, publication, and product gates. Update the shipped testing skill to use the current application lane.
 
 ### Fixed
+- Apply effective output limits, thinking settings, tool read limits and history retention at their declared reload boundaries. Changing the selected target refreshes its runtime; configuration mutations are validated once against the value that will actually be committed.
+- Load provider runtime packages from canonical settings and bind cached probe state to the current target identity. External agent edits invalidate prompt inputs; recipe reloads stay independent from executable extension reloads.
+- Preserve SDK pricing tiers and per-call costs through native worker accounting. Retain cache-write lifetimes and usage from billed failed calls across session history, traces, compaction and receipts instead of repricing aggregate tokens.
+- Carry target cache policy through native provider requests. Prewarm uses the normal request hooks, requires fresh matching deployment evidence, and enforces input, duration and cooldown bounds. Detached work retains ownership until it settles; paid routes remain ineligible for speculative warming.
+- Unwind started domains after a startup failure, stop each domain once, and preserve per-domain shutdown budgets. Failed extension reloads retain the cleanup needed to stop their processes.
+- Apply user-hook path protections before tool execution and preserve annotations emitted before a tool starts.
 - Report unavailable target credentials before an ACP turn starts, with recovery instructions for background sessions whose keys were configured only in a terminal environment. Keep provider error bodies and credentials out of web errors.
 - Stop and disable owned web background services and remove their desktop entries before root uninstall deletes Clio state. Preview these resources and preserve state when ownership checks or service removal fail.
+- Resolve the real-home release smoke's input configuration through Clio's canonical paths command and pin all four temporary roots before running diagnosis or a turn, so inherited directory overrides cannot redirect smoke writes into the operator's state.
 
 ## 0.4.7 - 2026-09-10
 

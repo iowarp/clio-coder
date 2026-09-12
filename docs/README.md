@@ -36,7 +36,10 @@ docs/
 | Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 
-A minimal first run is:
+A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
+local inference server such as Ollama or LM Studio, a lab gateway, or a cloud
+API. Quick Connect asks for the endpoint, a key when the server needs one, and
+a model.
 
 ```bash
 npm install -g @iowarp/clio-coder

@@ -976,7 +976,7 @@ async function checkReadmeInstallBlock(): Promise<void> {
 	// version output, which passes even when a stale clio-coder shadows the one
 	// just installed.
 	const readme = readRoot("README.md");
-	const section = readme.slice(readme.indexOf("## Install"), readme.indexOf("To remove it"));
+	const section = readme.split(/^## /m).find((part) => part.startsWith("Install\n")) ?? "";
 	if (!section.includes("command -v clio-coder")) {
 		fail("readme-install-block", "the README no longer asks which file the bare name reaches");
 	}

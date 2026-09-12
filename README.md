@@ -27,9 +27,9 @@
   <a href="https://github.com/iowarp/clio-coder/issues">Feedback</a>
 </p>
 
-Clio Coder is an open-source coding agent with terminal and browser interfaces. Ask it to explain a
-repository, investigate a failing test, or help implement a change. It reads the
-project, works with your tools, and shows you what it did.
+Clio Coder is an open-source coding agent that runs in your terminal. Ask it to
+explain a repository, investigate a failing test, or help implement a change. It
+reads the project, works with your tools, and shows you what it did.
 
 Built for scientific software and high-performance computing (HPC), Clio works
 with the code researchers maintain every day: simulation kernels, numerical
@@ -42,8 +42,10 @@ still needs your expertise. See [release notes](CHANGELOG.md) for current change
 
 ## Get started
 
-You need **Node.js 22.19 or newer**, Linux or macOS, and a running model server
-or API endpoint. Windows support is currently best effort.
+You need **Node.js 22.19 or newer** on Linux or macOS, and a model to talk to:
+a local inference server such as Ollama or LM Studio, your lab's gateway, or a
+cloud API. A local server usually needs no key. A gateway or cloud API gives you
+one, and Quick Connect asks for it. Windows support is currently best effort.
 
 ```bash
 npm install -g @iowarp/clio-coder
@@ -51,33 +53,6 @@ cd /path/to/your/project
 clio-coder configure
 clio-coder
 ```
-
-The **terminal interface (TUI)** is the interactive chat opened by `clio-coder`.
-The **CLI** also provides commands for setup, inspection, automation, and headless
-runs. The **web app (GUI)** is another surface over the same Clio runtime, projects,
-configuration, and model targets; it does not replace either terminal path.
-
-**Coming in v0.4.8 (implemented on this development branch):** choose the browser
-app after configuration:
-
-```bash
-clio-coder web --open
-```
-
-It prints a private launch link and opens your default browser when requested.
-For an installed app that remains available after you close its window, Linux
-with a systemd user session supports:
-
-```bash
-clio-coder web background install --open
-```
-
-Connect the browser using that launch link once, then choose **Install Clio Coder**
-in app preferences or your browser's Install app command. The background service
-starts at user login and shares the same local Clio installation. `web background
-status`, `stop`, and `uninstall` inspect, stop, or remove that service. On other
-platforms the foreground web app works while its server is running; managed
-background installation is currently Linux only.
 
 In the configuration launcher, choose **Quick Connect**:
 
@@ -91,6 +66,12 @@ Clio uses [recommended defaults](docs/guide/configuration-and-targets.md#recomme
 workspace edits with command approval, one worker at a time, a $5 tracked session
 budget, and a regular terminal interface. Other settings can wait. Escape goes
 back during setup; `clio-coder configure --settings` opens the full menu.
+
+`clio-coder` opens the **terminal interface (TUI)**: an interactive chat that
+shows tool calls and diffs as they happen. The same command is the **CLI** for
+setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
+it. An optional local **browser app** over the same runtime is described under
+[Optional browser app](#optional-browser-app). The first session does not need it.
 
 **New in 0.4.7:** A unified Library for reusable workflows, operator extensions,
 safer keyboard controls, and a compact welcome header. See the
@@ -339,8 +320,9 @@ curl -fsSL https://raw.githubusercontent.com/iowarp/clio-coder/main/scripts/inst
 ```
 
 Until publication, run `bash scripts/install.sh --dry-run` from this checkout to
-review it locally. The installer uses npm, requires Node.js 22.19+ and npm, and
-installs under `$HOME/.local` without sudo or shell-profile edits. It checks for
+review it locally. The installer targets Linux and macOS (on Windows, use the npm
+command above), requires Node.js 22.19+ and npm, and installs under
+`$HOME/.local` without sudo or shell-profile edits. It checks for
 conflicting launchers, prints PATH guidance, and runs Clio's post-install migrations.
 It opens no browser and enables no background service automatically. Its next-step
 instructions follow the commands supported by the version actually installed.
@@ -443,37 +425,40 @@ exactly which settings, credentials, and session directories each option affects
 
 </details>
 
-## Optional interfaces
+## Optional browser app
 
-The terminal is the main starting point. The unified application in
-[`apps/clio-coder-web/`](apps/clio-coder-web/README.md) provides the authenticated
-local REST API and browser interface for sessions, traces, documentation, and
-configuration. It currently runs from a source checkout:
+The terminal is the primary interface. This development branch also packages a
+local browser app over the same runtime, projects, configuration, and model
+targets, planned for v0.4.8 (see the [changelog](CHANGELOG.md)):
 
 ```bash
-pnpm --filter @iowarp/clio-coder-web build
-pnpm --filter @iowarp/clio-coder-web start
+clio-coder web --open
 ```
 
-Open the authenticated URL printed by the server. The app binds to `127.0.0.1`;
-its Traces page reads the trace database without modifying it. The separate
-trace viewer has been retired. This web application is not yet included in the
-published CLI package.
+It prints a private launch link and opens your default browser only when asked.
+The server binds to `127.0.0.1`, and its Traces page reads the trace database
+without modifying it. On Linux with a systemd user session,
+`clio-coder web background install --open` keeps the app available after login
+and lets you install it from the browser as a PWA; `web background status`,
+`stop`, and `uninstall` manage that service. Other platforms can run the
+foreground app while its server is running. The background service has been
+verified on Linux only; macOS and Windows have not been exercised. Development
+details are in [`apps/clio-coder-web/README.md`](apps/clio-coder-web/README.md).
 
 `apps/workbench/` remains as reference source for future GUI work. It is excluded
 from workspace installation, recursive builds, publication, and product gates.
 
 ## Help and documentation
 
-In v0.4.8, `clio-coder docs` opens the documentation inside the web app;
-`clio-coder docs safety` goes directly to the safety guide. Guides and handmade
-blueprints share navigation and the active theme, including in npm installs.
-Add `--no-open` to print the private launch link. A configured background app is
-reused; otherwise the command starts a foreground server until Ctrl+C.
+The guides under [`docs/`](docs/README.md) are Markdown, ship with the package,
+and need no browser. To discover commands, use `clio-coder --help` (`--help
+--all` includes developer tools) and `/help` inside a session. On this branch,
+`clio-coder docs [topic]` opens the same guides in the browser app; for example,
+`clio-coder docs safety` opens the safety guide, and `--no-open` prints the
+private launch link instead of opening a browser.
 
 If setup fails, start with `clio-coder doctor` and
-`clio-coder configure --section diagnostics`. To discover commands, use
-`clio-coder --help`; `--help --all` includes developer tools.
+`clio-coder configure --section diagnostics`.
 
 | Looking for… | Start here |
 | --- | --- |

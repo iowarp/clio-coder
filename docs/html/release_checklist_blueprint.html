@@ -55,14 +55,15 @@ repeatable, and reversible. Every step following the authorization boundary affe
 canonical remote state or publishes immutable packages.</p>
 <h2>Part 1: Candidate Preparation on a Local Compact Branch</h2>
 <p>Maintainers prepare release candidates on a local-only compact branch named after
-the version without punctuation, such as <code>v046</code> for version <code>0.4.6</code>. Dotted branch
+the version without punctuation, such as <code>v048</code> for version <code>0.4.8</code>. Dotted branch
 names like <code>v0.4.6</code> are forbidden because dotted names belong exclusively to immutable
 tags. The canonical repository hosts only <code>main</code>, and no release candidate branch is
 ever pushed to canonical origin.</p>
 <ol>
-<li><p>Ensure the working tree is clean and updated from canonical origin:</p>
-<pre><code class="language-bash">git checkout -b v046 origin/main
+<li><p>Inspect <code>git status --short</code> and the current branch. Reuse an existing candidate branch; create one only when starting a new release from canonical origin:</p>
+<pre><code class="language-bash">git checkout -b v048 origin/main
 </code></pre>
+<p>Review all changes since the previous release with an explicit tag ref such as <code>git log refs/tags/v0.4.7..HEAD</code>. Cover runtime and terminal changes as well as optional application surfaces. Preserve user work and do not create another candidate branch during resumed closeout.</p>
 </li>
 <li><p>Update <code>version</code> in <code>package.json</code> and <code>assets/acp-registry/agent.json</code> to the
 release version. Update the README's source-install tag and remove any
@@ -71,7 +72,7 @@ versions, dependency versions, and migration fixtures unchanged.</p>
 </li>
 <li><p>Retitle the active changelog section in <code>CHANGELOG.md</code> from <code>## Unreleased</code> to
 <code>## &lt;version&gt; - YYYY-MM-DD</code>. The release gate in <code>scripts/check-release.mjs</code> requires
-the first version header to match the version in <code>package.json</code>.</p>
+a dated matching heading for a publish or tag context. Development branches may keep <code>## Unreleased</code>; a passing development gate alone does not establish that a versioned release is ready.</p>
 </li>
 <li><p>Commit the release candidate preparation locally:</p>
 <pre><code class="language-bash">git commit -am &quot;chore(release): prepare &lt;version&gt;&quot;
@@ -81,15 +82,19 @@ the first version header to match the version in <code>package.json</code>.</p>
 <h2>Part 2: Local Candidate Verification Gate</h2>
 <p>Run deterministic local checks on the candidate commit before requesting authorization.</p>
 <ol>
-<li><p>Execute the release gate:</p>
-<pre><code class="language-bash">pnpm run ci:release
+<li><p>Keep verification artifacts outside the checkout, then execute the release gate:</p>
+<pre><code class="language-bash">clio_verify_dir="$(mktemp -d "${TMPDIR:-/tmp}/clio-coder-release.XXXXXX")"
+export TMPDIR="$clio_verify_dir"
+pnpm install --frozen-lockfile
+pnpm run ci:release
 </code></pre>
 <p>This gate runs <code>pnpm run ci</code> followed by <code>node scripts/check-release.mjs</code>. It verifies
 type checking, Biome formatting, hygiene rules, architecture boundary invariants,
 the build, the contract and smoke test suites, web application tests, and dist integrity.
 The packaging audit checks executable entry shebangs, ensures forbidden files like
 source maps and caches are omitted, verifies runtime resources from <code>scripts/release-manifest.json</code>,
-and enforces size limits (10 MB packed, 50 MB unpacked).</p>
+and enforces size limits (12 MB packed, 55 MB unpacked). It includes the actual installed-tarball smoke with isolated state and no source-checkout dependency.</p>
+<p>For web changes, also run <code>pnpm --filter @iowarp/clio-coder-web verify</code> for both TypeScript programs and headless Chrome checks. Record the operating system, Node version, skipped checks and live-model evidence separately. Verify the minimum supported Node version for package/lifecycle changes; a Linux pass does not establish macOS or Windows coverage.</p>
 </li>
 <li><p>Optionally validate a live model turn against a configured target:</p>
 <pre><code class="language-bash">node dist/cli/index.js run --target &lt;id&gt; --autonomy read-only &quot;Reply with exactly: CLIO_LIVE_OK&quot;
@@ -110,14 +115,16 @@ accompany <code>dist/</code>, <code>src/</code>, and the documented runtime reso
 <code>.agents/skills/</code> symlinks are clone conveniences and are not tarball contents.</p>
 </li>
 <li><p>Validate an installed tarball in a clean temporary directory:</p>
-<p>Create a temporary directory, pack the tarball, install it via npm, and verify
+<p>Use the installed-package smoke from the gate as automated proof. For an additional manual check, pack outside the checkout with <code>npm pack --pack-destination "$clio_verify_dir"</code>, install it via npm, and verify
 installed binary lifecycle commands in an isolated environment with an empty <code>CLIO_CODER_HOME</code>:</p>
 <pre><code class="language-bash">clio-coder --version
 clio-coder --help
 clio-coder doctor
 clio-coder uninstall --dry-run
 </code></pre>
+<p>Check the primary user path: configure a target, open the TUI, and complete a headless turn. The web app ships with the package; opening it and installing desktop entries or background services are explicit user actions, never npm installation side effects. CLI/TUI/ACP startup does not require the web server.</p>
 </li>
+<li><p>After naming and dating the release, run <code>CLIO_CODER_RELEASE_CONTEXT=publish node scripts/check-release.mjs</code>. This validates publication prerequisites without publishing anything.</p></li>
 </ol>
 <h2>Part 3: Candidate Review and Authorization Boundary</h2>
 <p>Before touching any remote ref, summarize the candidate for maintainer review:</p>
@@ -139,7 +146,7 @@ an immutable package. Do not execute any of them without explicit maintainer aut
 </li>
 <li><p>Fast-forward local <code>main</code> to the candidate commit:</p>
 <pre><code class="language-bash">git checkout main
-git merge --ff-only v046
+git merge --ff-only v048
 </code></pre>
 </li>
 <li><p>Verify that local <code>main</code> matches the reviewed candidate SHA exactly.</p>
@@ -214,7 +221,7 @@ clio-coder doctor
 </code></pre>
 </li>
 <li><p>Remove the local compact candidate branch:</p>
-<pre><code class="language-bash">git branch -d v046
+<pre><code class="language-bash">git branch -d v048
 </code></pre>
 <p>The canonical repository remains in its steady state containing only <code>main</code> and immutable tags.</p>
 </li>
@@ -222,7 +229,7 @@ clio-coder doctor
 <h2>Part 8: Rollback and Error Recovery</h2>
 <p>npm package publication is irreversible. A published version cannot be removed or overwritten.
 Any issue discovered after publication must be resolved through a subsequent release. Prior
-to pushing git tags or publishing to npm, local candidate commits can be amended or reset freely.</p>
+to pushing git tags or publishing to npm, correct the local candidate and rerun the affected gates. Preserve unrelated work; do not reset or rewrite another workstream during release preparation.</p>
         </article>
         <nav class="related-nav" aria-label="Adjacent references">
           <a class="nav-link-card" href="development_pipeline_blueprint.html"><span class="nav-label">Previous</span><span class="nav-title">Development Pipeline</span></a>

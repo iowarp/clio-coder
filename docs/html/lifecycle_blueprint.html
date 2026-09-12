@@ -113,7 +113,7 @@ credentials; reinstalling the package alone does not reset them.</p>
 # Or: pnpm add -g @iowarp/clio-coder --no-optional
 # Or: bun add -g @iowarp/clio-coder --omit=optional
 </code></pre>
-<p>Measured on Linux x64 with a production install (<code>--omit=dev</code>): 387MB across 118 packages with the SDK, 143MB across 109 packages without it. That is 244MB and nine packages saved, a 63% smaller tree, and what remains is fully open-licensed.</p>
+<p>Historical Linux x64 measurement before the web package integration (<code>--omit=dev</code>): 387 MB across 118 packages with the SDK, 143 MB across 109 packages without it. Treat those numbers as a comparison, not the current install size: the platform, dependency versions and optional packages change the total. The release tarball size excludes separately installed npm dependencies.</p>
 <p>Everything except the <code>claude-sdk</code> runtime works on the smaller install: boot, <code>clio-coder doctor</code>, every other target and worker runtime. Dispatching a <code>claude-sdk</code> target on an install that omitted the package fails that run with a diagnostic naming the package and the command that fixes it (<code>npm install @anthropic-ai/claude-agent-sdk@0.3.186</code>); nothing else degrades, and nothing fails at startup.</p>
 <hr>
 <h2>1. Directory Layout &amp; Platform Defaults</h2>

@@ -63,7 +63,7 @@ authoritative—and please fix or report the documentation drift.</p>
 ├── architecture/   Runtime contracts and design
 ├── process/        Development, validation, and release practice
 ├── history/        Dated records that are not current guidance
-└── html/           Source-checkout visual blueprints
+└── html/           Handmade visual blueprints for the web app
 </code></pre>
 <h2>Start here</h2>
 <table>
@@ -92,7 +92,10 @@ authoritative—and please fix or report the documentation drift.</p>
 </tr>
 </tbody>
 </table>
-<p>A minimal first run is:</p>
+<p>A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
+local inference server such as Ollama or LM Studio, a lab gateway, or a cloud
+API. Quick Connect asks for the endpoint, a key when the server needs one, and
+a model.</p>
 <pre><code class="language-bash">npm install -g @iowarp/clio-coder
 clio-coder configure
 cd /path/to/your/project

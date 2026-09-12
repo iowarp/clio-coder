@@ -21,17 +21,19 @@ The root workspace includes the unified web application. pnpm owns dependency
 installation. `apps/workbench/` is retained reference source and excluded from
 workspace builds, publication, and product gates.
 
-Bootstrap:
+Bootstrap, in the order the checks depend on each other (the smoke tests run
+the built `dist/`, so build before testing):
 
 ```bash
 pnpm install --frozen-lockfile
+pnpm run build
 pnpm run typecheck
 pnpm run lint
 pnpm run test
-pnpm run build
+pnpm run test:web
 ```
 
-Local and GitHub PR gate (fast, deterministic):
+Local and GitHub PR gate:
 
 ```bash
 pnpm run ci
@@ -57,6 +59,10 @@ pnpm run ci:release
 The release gate includes `ci` and adds the package audit. Running `ci` again
 on the same unchanged tree is unnecessary. Run a focused regression while
 developing a repair, then the full gate for the candidate being reviewed.
+Model tests use local fixtures. The installed-package smoke in `ci` installs
+runtime dependencies through npm and needs registry access or a populated npm
+cache. `ci:release` additionally runs `pnpm audit` against the registry; an
+unavailable advisory service is a failed audit, not a clean result.
 
 Live provider validation (manual/opt-in, after `pnpm run build`):
 
@@ -134,8 +140,9 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
   `npm publish` require `## <version> - YYYY-MM-DD`, so unfinished notes cannot
   enter an immutable artifact.
 - Only `dist/cli/index.js` and `dist/worker/entry.js` carry a shebang. The
-  shebang comes from the hashbang line in each entry source file. Never add
-  a tsup `banner`; it would stamp every chunk in `dist/`.
+  shebang comes from the hashbang line in each entry source file. Never put a
+  shebang in the tsup `banner`; a banner is stamped on every chunk in `dist/`
+  (the existing banner only defines `require` for bundled CommonJS code).
 - The package ships no source maps, benchmarks, caches, or repo scripts. If
   a forbidden file appears, fix the `files` allowlist in `package.json`
   rather than deleting the file from the repo.
@@ -145,7 +152,7 @@ What `scripts/check-release.mjs` enforces, and how to respond when it fails:
   both package.json `files` and `scripts/release-manifest.json`.
   The double bookkeeping is deliberate: neither edit can silently drop a
   resource the CLI needs at runtime.
-- Size budgets: 10 MB tarball, 50 MB unpacked, set in `check-release.mjs`.
+- Size budgets: 12 MB tarball, 55 MB unpacked, set in `check-release.mjs`.
   They are a tripwire for packaging defects such as a leaked `node_modules`
   or a doubled `dist/`, not a diet. If a legitimate change exceeds them,
   raise the budget in the same PR with a justification, never as a drive-by.
@@ -156,6 +163,18 @@ command pays only for its own chunk and `clio-coder --version` stays fast. Keep 
 subcommands behind dynamic imports, and keep heavyweight runtime dependencies
 in the `external` list so they load from `node_modules` only when a chunk
 that needs them runs.
+
+## Getting help and reporting problems
+
+- Questions, bug reports, and feature requests go to
+  [GitHub issues](https://github.com/iowarp/clio-coder/issues). Include the
+  Clio and Node versions, the relevant `clio-coder doctor` output, and steps
+  to reproduce, with credentials and sensitive project data removed.
+- Security issues follow [SECURITY.md](SECURITY.md), not a public issue.
+- Participation is governed by the [Code of Conduct](CODE_OF_CONDUCT.md).
+- Field reports from real research projects are the most useful input: a
+  difficult build, an unreliable model connection, or a workflow that needs
+  better support.
 
 ## Hard Rules
 
