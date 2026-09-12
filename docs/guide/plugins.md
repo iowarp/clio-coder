@@ -1,8 +1,5 @@
 # Portable plugins and the library
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Plugins visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/plugins_blueprint.html).
-
 A plugin is a complete, versioned bundle of skills and supporting files. The portable root `plugin.json` follows [Agent Plugins 1.0.0](https://agent-plugins.org/). Clio reads native prompts, agent recipes, and fleets from its namespaced manifest extension. Installing a bundle keeps those resources and their references together.
 
 Browse the bundled catalog, preview a complete installation, then install it:

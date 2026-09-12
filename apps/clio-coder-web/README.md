@@ -93,7 +93,7 @@ API requests require bearer authentication; EventSource uses the same token in
 its query because it cannot set an Authorization header. Host and Origin are
 checked; static files have realpath containment and a content security policy.
 Choose **Docs** for the shipped reference tree and local search. Markdown page
-links and paired visual blueprints stay inside the app. Both ship in npm.
+links stay inside the app. Pages and outlines are generated from the packaged Markdown.
 Blueprint pages run in a sandboxed origin with the active app theme and cannot
 read the app token. The documentation index refreshes on server
 restart. Unavailable source references are shown as text with an explanation.
@@ -405,9 +405,7 @@ release tripwires. See the final ledger row for the precise closeout measurement
 ## Unified documentation
 
 `clio-coder docs [topic] [--no-open]` enters this app, reusing a verified background
-installation or starting a foreground server. Guides and preserved handmade
-blueprints are paired by their source metadata and use one navigation/search
-surface. `/docs/blueprints/<file>` displays the visual view in an opaque sandbox
-with the active app theme; ordinary `/docs-html/<file>` visits redirect into the
-app. Blueprint scripts keep their document interactions without access to browser
-authentication or the API. Both Markdown and blueprint assets ship in npm.
+installation or starting a foreground server. The application renders the canonical Markdown directly. Navigation groups are
+built from the documentation map and page outlines from Markdown headings.
+Search, links, code-copy controls and diagrams share one themed reading surface.
+The legacy HTML tree, iframe bridge and blueprint routes are retired.

@@ -1,5 +1,5 @@
 import type { Problem } from "../../contracts/common.js";
-import type { BlueprintFile, DocsRequest } from "../../contracts/docs.js";
+import type { DocsRequest } from "../../contracts/docs.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { EvalRequest } from "../../contracts/reports.js";
@@ -30,7 +30,6 @@ export interface Methods {
 	"settings.read": { params: { cwd: string }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"docs.read": { params: DocsRequest; result: unknown };
-	"docs.blueprint": { params: { path: string }; result: BlueprintFile };
 	"sessions.list": { params: { cwd: string }; result: unknown };
 	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };

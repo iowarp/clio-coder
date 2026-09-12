@@ -1,8 +1,5 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Model Catalog, Runtime Refresh, and Field Notes visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/models_blueprint.html).
-
 Clio Coder treats a selectable model as the intersection of three sources:
 
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).

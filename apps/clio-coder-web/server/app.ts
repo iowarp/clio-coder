@@ -6,7 +6,7 @@ import { routes } from "../contracts/routes.js";
 import { getVersionInfo } from "./clio/http-shims.js";
 import { auth } from "./http/auth.js";
 import { problemResponse } from "./http/problem.js";
-import { docsPathGuard, docsRoutes } from "./http/routes-docs.js";
+import { docsRoutes } from "./http/routes-docs.js";
 import { evidenceRoutes } from "./http/routes-evidence.js";
 import { fleetRoutes } from "./http/routes-fleet.js";
 import { libraryRoutes } from "./http/routes-library.js";
@@ -62,7 +62,6 @@ export function createApp(options: {
 	const { hub, operations, toolchain } = options;
 	app.onError(problemResponse);
 	app.use("*", auth(options.token, options.origin));
-	app.use("*", docsPathGuard);
 	if (process.env.NODE_ENV === "test" && options.runtime) {
 		const inspect = options.runtime;
 		app.get("/api/_diagnostics/runtime", async (context) => context.json(await inspect()));

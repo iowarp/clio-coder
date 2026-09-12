@@ -1,8 +1,5 @@
 # ALCF Inference Provider
 
-> **Visual blueprint:** The source checkout includes the complete
-> [ALCF Inference Provider visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/alcf_blueprint.html).
-
 Clio can use Argonne's ALCF inference gateway as an OpenAI-compatible target
 backed by Globus OAuth. The runtime id is `alcf`; each configured target points
 at one gateway cluster URL, such as Sophia or Metis.

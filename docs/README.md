@@ -4,9 +4,6 @@
 
 # Clio Coder documentation
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Clio Coder documentation visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/readme_blueprint.html).
-
 This is the documentation map for Clio Coder. Start with the path closest to
 what you are trying to do; the deeper references are here when you need exact
 schemas, wire contracts, or architectural invariants.
@@ -23,8 +20,7 @@ docs/
 ├── guide/          Operator and user workflows
 ├── architecture/   Runtime contracts and design
 ├── process/        Development, validation, and release practice
-├── history/        Dated records that are not current guidance
-└── html/           Handmade visual blueprints for the web app
+└── history/        Dated records that are not current guidance
 ```
 
 ## Start here
@@ -187,11 +183,9 @@ Clio's documentation ships with Clio, not with your workspace. Everything below
 resolves from the installed package root (`resolvePackageRoot()`,
 `src/core/package-root.ts`), never from the directory you launched in.
 
-**What is indexed.** Every `.md` file under `<package-root>/docs/`, excluding
-`docs/html/`, plus root `README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each
-of those exists. The npm package ships `docs/**/*.md`, `README.md` and
-`CHANGELOG.md`, plus the handmade visual blueprints used by the web app.
-HTML is not part of the agent's Markdown index. A root `CLIO-CODER.md` is indexed
+**What is indexed.** Every `.md` file under `<package-root>/docs/`, plus root
+`README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each exists. The npm package
+ships the Markdown reference used by both the application and agents. A root `CLIO-CODER.md` is indexed
 only when present, such as in a source checkout. The index is deterministic and needs no
 network or embedding service (`src/tools/context/docs-engine.ts`).
 
@@ -218,13 +212,15 @@ reuses this installation's background app when configured. Otherwise it starts
 a foreground loopback server; press Ctrl+C to stop. `--no-open` prints the private
 launch link without opening a browser. The command never installs a service.
 
-## Interactive blueprints
+## Reading in the application
 
-The handmade blueprints under `docs/html/` are preserved as a visual view of the
-reference. Guides and blueprints share the web app's navigation, search, and
-light or dark theme. Use the guide/blueprint switch on a paired document; links
-stay in the app. Both views ship with the npm package. The HTML sources remain
-available for editing, while the old standalone documentation server is retired.
+The GUI renders these Markdown sources directly with the application's theme,
+syntax highlighting, copy controls, tables and diagrams. Navigation groups come
+from this map, search indexes the same pages, and each page's outline is generated
+from its headings. Internal references stay in the application.
+
+Edit the Markdown once to update both human and agent documentation. There is
+no separate HTML source tree, document server, or alternate reading view.
 
 ```bash
 clio-coder docs

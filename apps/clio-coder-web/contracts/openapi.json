@@ -7726,7 +7726,7 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["path", "title", "markdown", "links", "unavailableLinks"],
+									"required": ["path", "title", "markdown", "headings", "links", "unavailableLinks"],
 									"properties": {
 										"path": {
 											"type": "string"
@@ -7736,6 +7736,27 @@
 										},
 										"markdown": {
 											"type": "string"
+										},
+										"headings": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["id", "title", "depth"],
+												"properties": {
+													"id": {
+														"type": "string"
+													},
+													"title": {
+														"type": "string"
+													},
+													"depth": {
+														"type": "integer",
+														"minimum": 1,
+														"maximum": 6
+													}
+												},
+												"additionalProperties": false
+											}
 										},
 										"links": {
 											"type": "object",
@@ -7893,142 +7914,6 @@
 										},
 										"additionalProperties": false
 									}
-								}
-							}
-						},
-						"headers": {
-							"X-Clio-Epoch": {
-								"schema": {
-									"type": "string"
-								},
-								"description": "Server epoch"
-							},
-							"X-Clio-Seq": {
-								"schema": {
-									"type": "integer"
-								},
-								"description": "Sequence before assembling the snapshot"
-							}
-						}
-					},
-					"default": {
-						"description": "Problem",
-						"content": {
-							"application/problem+json": {
-								"schema": {
-									"type": "object",
-									"required": ["type", "title", "status", "detail", "code", "instance"],
-									"properties": {
-										"type": {
-											"type": "string"
-										},
-										"title": {
-											"type": "string"
-										},
-										"status": {
-											"type": "integer"
-										},
-										"detail": {
-											"type": "string"
-										},
-										"code": {
-											"anyOf": [
-												{
-													"type": "string",
-													"const": "validation"
-												},
-												{
-													"type": "string",
-													"const": "unauthorized"
-												},
-												{
-													"type": "string",
-													"const": "not_found"
-												},
-												{
-													"type": "string",
-													"const": "conflict"
-												},
-												{
-													"type": "string",
-													"const": "unsupported"
-												},
-												{
-													"type": "string",
-													"const": "unavailable"
-												},
-												{
-													"type": "string",
-													"const": "upstream_acp"
-												},
-												{
-													"type": "string",
-													"const": "operation_failed"
-												},
-												{
-													"type": "string",
-													"const": "internal"
-												}
-											]
-										},
-										"instance": {
-											"type": "string"
-										}
-									},
-									"additionalProperties": false
-								}
-							}
-						}
-					}
-				}
-			}
-		},
-		"/api/docs/blueprints": {
-			"get": {
-				"operationId": "docsBlueprints",
-				"summary": "Available visual blueprints and their paired guides",
-				"security": [
-					{
-						"bearer": []
-					}
-				],
-				"parameters": [],
-				"responses": {
-					"200": {
-						"description": "Success",
-						"content": {
-							"application/json": {
-								"schema": {
-									"type": "object",
-									"required": ["available", "items"],
-									"properties": {
-										"available": {
-											"type": "boolean"
-										},
-										"items": {
-											"type": "array",
-											"items": {
-												"type": "object",
-												"required": ["topic", "title", "file"],
-												"properties": {
-													"topic": {
-														"type": "string"
-													},
-													"title": {
-														"type": "string"
-													},
-													"file": {
-														"type": "string"
-													},
-													"documentPath": {
-														"type": "string"
-													}
-												},
-												"additionalProperties": false
-											}
-										}
-									},
-									"additionalProperties": false
 								}
 							}
 						},

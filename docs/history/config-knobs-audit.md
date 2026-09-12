@@ -1,8 +1,5 @@
 # Config Knobs Audit (Historical Appendix)
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Config Knobs Audit (Historical Appendix) visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/config_knobs_audit_blueprint.html).
-
 > [!IMPORTANT]
 > This document is a historical record of the point-in-time configuration knob audit conducted on 2026-07-03.
 > It details the pre-consolidation state of the codebase before the `v0.2.9` release.

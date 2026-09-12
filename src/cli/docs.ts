@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { printError } from "./argv.js";
@@ -6,8 +6,8 @@ import { runWebCommand } from "./web.js";
 
 const HELP = `clio-coder docs [topic] [--no-open]
 
-Open the documentation in the Clio Coder web app. Guides and handmade visual
-blueprints share the app's navigation and theme, in both npm installs and checkouts.
+Open the documentation in the Clio Coder web app. Pages, navigation and outlines
+are rendered from the same Markdown reference shipped with Clio.
 
 Arguments:
   [topic]      a topic such as safety, configuration, or fleet_dispatch, or a
@@ -23,29 +23,28 @@ foreground web server on 127.0.0.1; press Ctrl+C to stop it. No background servi
 is installed by this command. Your current directory does not affect the docs.
 `;
 
-type Blueprint = { topic: string; file: string; documentPath?: string };
 const key = (value: string) => value.toLowerCase().replace(/_/g, "-");
 const route = (path: string) => `/docs/${path.split("/").map(encodeURIComponent).join("/")}`;
 
 /** Resolve only catalogued destinations; ambiguous basenames require a full path. */
-export function docsTopicRoute(
-	topic: string | undefined,
-	pages: readonly string[],
-	blueprints: readonly Blueprint[],
-): string | undefined {
+export function docsTopicRoute(topic: string | undefined, pages: readonly string[]): string | undefined {
 	if (topic === undefined) return "/docs";
 	if (!topic || /[\\\0?#]/.test(topic) || topic.startsWith("/") || topic.split("/").includes("..")) return;
 	const wanted = key(topic.replace(/^docs\//, ""));
+	const topics: Record<string, string> = {
+		safety: "architecture/safety-model.md",
+		configuration: "guide/configuration-and-targets.md",
+		trace: "architecture/trace-store.md",
+	};
+	const preferred = topics[wanted];
+	if (preferred && pages.includes(preferred)) return route(preferred);
 	const exact = pages.find((path) => key(path) === wanted || key(path.replace(/\.md$/i, "")) === wanted);
 	if (exact) return route(exact);
-	const blueprint = blueprints.find(
-		(row) => key(row.topic) === wanted || key(row.file) === wanted || key(row.file.replace(/\.html$/i, "")) === wanted,
-	);
-	if (blueprint) {
-		if (blueprint.documentPath && pages.includes(blueprint.documentPath)) return route(blueprint.documentPath);
-		return route(`blueprints/${blueprint.file}`);
-	}
-	const matches = pages.filter((path) => key(basename(path).replace(/\.md$/i, "")) === wanted.replace(/\.md$/, ""));
+	const name = wanted.replace(/\.md$/, "");
+	const exactNames = pages.filter((path) => key(basename(path).replace(/\.md$/i, "")) === name);
+	const matches = exactNames.length
+		? exactNames
+		: pages.filter((path) => key(basename(path).replace(/\.md$/i, "")).startsWith(`${name}-`));
 	const match = matches[0];
 	return matches.length === 1 && match ? route(match) : undefined;
 }
@@ -61,25 +60,7 @@ function catalog(root: string) {
 		}
 	};
 	scan("");
-	const blueprints: Blueprint[] = [];
-	try {
-		for (const entry of readdirSync(join(root, "html"), { withFileTypes: true })) {
-			if (!entry.isFile() || !/\.html$/i.test(entry.name) || entry.name === "index.html") continue;
-			const html = readFileSync(join(root, "html", entry.name), "utf8");
-			const documentPath =
-				/<meta\b(?=[^>]*\sname\s*=\s*["']clio-markdown-source["'])[^>]*\scontent\s*=\s*["']docs\/([^"']+)["']/i.exec(
-					html,
-				)?.[1];
-			blueprints.push({
-				topic: entry.name.replace(/(?:_blueprint)?\.html$/i, ""),
-				file: entry.name,
-				...(documentPath && pages.includes(documentPath) ? { documentPath } : {}),
-			});
-		}
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-	}
-	return { pages, blueprints };
+	return pages;
 }
 
 export async function runDocsCommand(args: readonly string[] = []): Promise<number> {
@@ -94,8 +75,8 @@ export async function runDocsCommand(args: readonly string[] = []): Promise<numb
 		return 2;
 	}
 	try {
-		const { pages, blueprints } = catalog(join(resolvePackageRoot(), "docs"));
-		const path = docsTopicRoute(positionals[0], pages, blueprints);
+		const pages = catalog(join(resolvePackageRoot(), "docs"));
+		const path = docsTopicRoute(positionals[0], pages);
 		if (!path) {
 			printError(
 				`Unknown or ambiguous docs topic: ${positionals[0]}. Run clio-coder docs to browse the documentation map.`,

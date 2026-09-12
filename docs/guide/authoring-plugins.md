@@ -1,7 +1,5 @@
 # Authoring a portable agent plugin
 
-> **Visual blueprint:** See the [visual reference](../html/authoring_plugins_blueprint.html) in the source checkout.
-
 An agent plugin packages a workflow and its supporting resources as one versioned installation. Its canonical identity is the [Agent Plugins 1.0.0 manifest](https://agent-plugins.org/schemas/1.0.0/plugin.schema.json). Clio keeps the complete package together, verifies its full-tree digest, and discovers the resources supported by the current runtime.
 
 The minimal package has a root `plugin.json` and an immediate child skill directory:

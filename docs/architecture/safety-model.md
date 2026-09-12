@@ -1,8 +1,5 @@
 # Clio Coder Safety Model
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Clio Coder Safety Model visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/safety_blueprint.html).
-
 Clio Coder's safety posture is code-enforced, not prompt-only. As the orchestrator coding agent in the [IOWarp](https://iowarp.ai) ecosystem developed by the [Gnosis Research Center](https://grc.iit.edu) at Illinois Tech under NSF Award [#2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318), Clio gates execution by target capabilities, the tool registry, the safety policy engine, project policies, protected-artifact checks, and audit receipts.
 
 Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/entry/orchestrator.ts`, `src/domains/dispatch/write-boundary.ts`, `src/interactive/view/artifacts.ts`, and `damage-control-rules.yaml`.

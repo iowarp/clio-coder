@@ -1,8 +1,5 @@
 # Installation and Lifecycle Operations
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Installation and Lifecycle Operations visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/lifecycle_blueprint.html).
-
 Clio Coder installs from the npm registry as `@iowarp/clio-coder` using npm,
 pnpm, or Bun, or from a source checkout using the pinned pnpm workflow. The
 [README installation guide](../../README.md#install) covers global installs,

@@ -1,8 +1,5 @@
 # Panes and the Files Pane
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Panes and the Files Pane visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/panes_files_blueprint.html).
-
 This page is the operator's path from a clean machine to a working files pane
 beside a Clio Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`

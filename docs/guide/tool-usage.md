@@ -1,8 +1,5 @@
 # Tool Usage Reference
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Tool Usage Reference visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/tool_usage_blueprint.html).
-
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
 In the current source tree, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.

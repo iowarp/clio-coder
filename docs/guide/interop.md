@@ -1,7 +1,5 @@
 # Coding agent interoperability
 
-> **Visual blueprint:** See the [visual reference](../html/interop_blueprint.html) in the source checkout.
-
 Interoperability runs both ways. Inbound, Clio can discover resources held by
 Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, then adopt
 safe text resources into the library after approval. Outbound, the same canonical

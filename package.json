@@ -57,7 +57,6 @@
 		".claude-plugin/marketplace.json",
 		"evals/**",
 		"docs/**/*.md",
-		"docs/html/**",
 		"README.md",
 		"CHANGELOG.md",
 		"CONTRIBUTING.md",

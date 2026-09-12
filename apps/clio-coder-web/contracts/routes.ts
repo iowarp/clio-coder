@@ -1,6 +1,6 @@
 import { type Static, type TSchema, Type } from "typebox";
 import { Empty, Id } from "./common.js";
-import { Blueprints, DocPage, DocsSearch, DocsTree } from "./docs.js";
+import { DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
 import { EvidenceDetail, EvidencePage } from "./evidence.js";
 import {
@@ -279,12 +279,6 @@ export const routes = {
 		query: Type.Object({ q: Type.String({ maxLength: 200 }) }, { additionalProperties: false }),
 		response: DocsSearch,
 		summary: "Search the package documentation",
-	}),
-	docsBlueprints: defineRoute({
-		...get,
-		path: "/api/docs/blueprints",
-		response: Blueprints,
-		summary: "Available visual blueprints and their paired guides",
 	}),
 	permission: defineRoute({
 		...post,

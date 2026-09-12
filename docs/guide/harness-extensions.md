@@ -1,7 +1,5 @@
 # Harness extensions
 
-> **Visual blueprint:** See the [visual reference](../html/harness_extensions_blueprint.html) in the source checkout.
-
 Harness extensions add executable capabilities to Clio. Library recipes may also carry explicitly invoked workflow or evaluation scripts. Installing or browsing a recipe never registers harness tools, hooks, operator commands, or UI. A domain workflow that combines prompts, agents, skills, fleets, and reference files is a plugin, installed with `clio-coder library install <path>`.
 
 An extension declares command tools in `clio-coder-extension.yaml`, `.yml`, or `.json`. Clio discovers and validates declarations without importing or executing package code. Tools become available in a new session after installation. Native workers can use a tool when their admitted recipe includes its qualified name; narrower profiles such as `minimal-local` exclude extension commands.

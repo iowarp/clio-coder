@@ -1,31 +1,11 @@
 import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { dirname, extname, isAbsolute, posix, relative, resolve } from "node:path";
+import { dirname, isAbsolute, posix, relative, resolve } from "node:path";
 import { marked, type Token, type Tokens } from "marked";
 import { resolvePackageRoot } from "../../../../../src/core/package-root.js";
-import type { BlueprintFile, Blueprints, DocPage, DocsRequest, DocsTree } from "../../../contracts/docs.js";
+import type { DocPage, DocsRequest, DocsTree } from "../../../contracts/docs.js";
 import { documentHeadings } from "../../../contracts/docs-headings.js";
 import { AppProblem } from "../../services/problem.js";
 
-const types: Record<string, string> = {
-	".html": "text/html; charset=utf-8",
-	".htm": "text/html; charset=utf-8",
-	".css": "text/css; charset=utf-8",
-	".js": "text/javascript; charset=utf-8",
-	".mjs": "text/javascript; charset=utf-8",
-	".json": "application/json; charset=utf-8",
-	".svg": "image/svg+xml",
-	".png": "image/png",
-	".webp": "image/webp",
-	".jpg": "image/jpeg",
-	".jpeg": "image/jpeg",
-	".gif": "image/gif",
-	".ico": "image/x-icon",
-	".woff": "font/woff",
-	".woff2": "font/woff2",
-	".ttf": "font/ttf",
-	".map": "application/json; charset=utf-8",
-	".txt": "text/plain; charset=utf-8",
-};
 function within(root: string, target: string) {
 	const rel = relative(root, target);
 	return !isAbsolute(rel) && rel !== ".." && !rel.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`);
@@ -61,9 +41,6 @@ export class DocsAdapter {
 	private docsRoot() {
 		this.root ??= contained(realpathSync(this.packageRoot), "docs");
 		return this.root;
-	}
-	private htmlRoot() {
-		return contained(this.docsRoot(), "html");
 	}
 	private index() {
 		if (this.catalog) return this.catalog;
@@ -121,62 +98,6 @@ export class DocsAdapter {
 		};
 		return this.catalog;
 	}
-	blueprints(): Blueprints {
-		let root: string;
-		try {
-			root = this.htmlRoot();
-		} catch {
-			return { available: false, items: [] };
-		}
-		const items = readdirSync(root, { withFileTypes: true })
-			.filter((entry) => entry.isFile() && /\.html$/i.test(entry.name) && entry.name.toLowerCase() !== "index.html")
-			.map((entry) => {
-				const topic = entry.name.replace(/(?:_blueprint)?\.html$/i, "");
-				const html = boundedRead(contained(root, entry.name), 8 * 1024 * 1024).toString("utf8");
-				const source =
-					/<meta\b(?=[^>]*\sname\s*=\s*["']clio-markdown-source["'])[^>]*\scontent\s*=\s*["']docs\/([^"']+)["']/i.exec(
-						html,
-					)?.[1];
-				const page = source ? this.index().pages.get(source) : undefined;
-				return {
-					topic,
-					file: entry.name,
-					title: page?.title ?? topic.replace(/[-_]/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase()),
-					...(page ? { documentPath: page.path } : {}),
-				};
-			})
-			.sort((a, b) => a.topic.localeCompare(b.topic));
-		return { available: true, items };
-	}
-	blueprint(rawPath: string): BlueprintFile {
-		let path: string;
-		try {
-			path = decodeURIComponent(rawPath.split(/[?#]/)[0] ?? "");
-		} catch {
-			throw new AppProblem("validation", "Malformed documentation URL.", 400);
-		}
-		const root = this.htmlRoot();
-		path = path.replace(/^\/+/, "") || "index.html";
-		let target: string;
-		try {
-			target = contained(root, path);
-		} catch (error) {
-			if (!(error instanceof AppProblem) || error.problem.code !== "not_found" || path.includes("/")) throw error;
-			const wanted = path.toLowerCase().replace(/\.html$/, "");
-			const match = this.blueprints().items.find(
-				(item) => item.topic.toLowerCase() === wanted || item.file.toLowerCase().replace(/\.html$/, "") === wanted,
-			);
-			if (!match) throw error;
-			target = contained(root, match.file);
-		}
-		const body = boundedRead(target, 8 * 1024 * 1024);
-		return {
-			body,
-			type: types[extname(target).toLowerCase()] ?? "application/octet-stream",
-			size: body.length,
-			path: relative(root, target).split("\\").join("/"),
-		};
-	}
 	private link(from: string, href: string): string | null {
 		const publicDocs = /^https:\/\/github\.com\/iowarp\/clio-coder\/(?:blob|tree)\/(?:main|v048)\/docs\/(.+)$/i.exec(
 			href,
@@ -196,16 +117,6 @@ export class DocsAdapter {
 		const normalized = posix.normalize(
 			location ? (path.startsWith("/") ? path.slice(1) : posix.join(dirname(from), path)) : from,
 		);
-		if (normalized.startsWith("html/")) {
-			try {
-				const file = contained(this.htmlRoot(), normalized.slice(5));
-				if (!statSync(file).isFile()) return null;
-			} catch {
-				return null;
-			}
-			if (normalized === "html/index.html") return "/docs";
-			return `/docs/blueprints/${normalized.slice(5).split("/").map(encodeURIComponent).join("/")}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
-		}
 		const pagePath = this.index().pages.has(normalized) ? normalized : `${normalized.replace(/\/$/, "")}/README.md`;
 		const page = this.index().pages.get(pagePath);
 		if (page) {
@@ -221,8 +132,7 @@ export class DocsAdapter {
 		}
 		return `https://github.com/iowarp/clio-coder/blob/main/${packagePath.split("/").map(encodeURIComponent).join("/")}${hash ? `#${encodeURIComponent(hash)}` : ""}`;
 	}
-	read(input: DocsRequest): DocsTree | DocPage | Blueprints | { path: string; title: string; excerpt: string }[] {
-		if (input.kind === "blueprints") return this.blueprints();
+	read(input: DocsRequest): DocsTree | DocPage | { path: string; title: string; excerpt: string }[] {
 		if (input.kind === "tree") return this.index().tree;
 		if (input.kind === "search") {
 			const terms = input.q.toLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -254,13 +164,19 @@ export class DocsAdapter {
 		if (!/\.md$/i.test(input.path)) throw new AppProblem("validation", "Only Markdown document paths are accepted.");
 		const markdown = boundedRead(contained(this.docsRoot(), input.path), 1024 * 1024).toString("utf8");
 		const links: Record<string, string | null> = Object.create(null);
-		marked.walkTokens(marked.lexer(markdown), (token: Token) => {
+		const tokens = marked.lexer(markdown);
+		marked.walkTokens(tokens, (token: Token) => {
 			if (token.type === "link") links[(token as Tokens.Link).href] = this.link(input.path, (token as Tokens.Link).href);
 		});
 		return {
 			path: input.path,
 			title: titleOf(input.path, markdown),
 			markdown,
+			headings: [...documentHeadings(tokens)].map(([token, id]) => ({
+				id,
+				title: (token as Tokens.Heading).text.replace(/<[^>]*>/g, "").replace(/[`*_~]/g, ""),
+				depth: (token as Tokens.Heading).depth,
+			})),
 			links,
 			unavailableLinks: Object.entries(links)
 				.filter(([, destination]) => destination === null)

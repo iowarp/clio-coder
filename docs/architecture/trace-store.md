@@ -1,8 +1,5 @@
 # Trace store contract
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Trace store contract visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/trace_blueprint.html).
-
 Clio's trace database is a rebuildable, queryable mirror. Receipts, session
 ledgers, gate artifacts, and evidence remain the source of truth. Removing
 `<state-dir>/trace.sqlite` loses no authoritative run data.

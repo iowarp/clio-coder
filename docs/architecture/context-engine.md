@@ -1,8 +1,5 @@
 # Context Engine
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Context Engine visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/context_blueprint.html).
-
 Clio Coder tracks context pressure, records per-turn snapshots, and protects the provider context with bounded tool results plus single-threshold compaction.
 
 Source of truth lives in `src/domains/session/context-accounting.ts`, `src/domains/session/context-ledger.ts`, `src/domains/session/compaction/`, `src/domains/context/working-set/`, `src/domains/session/migrations/index.ts`, and the chat-loop integration in `src/interactive/chat-loop.ts`.

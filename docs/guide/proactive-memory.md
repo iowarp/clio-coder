@@ -1,8 +1,5 @@
 # Proactive task memory
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Proactive task memory visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/proactive_memory_blueprint.html).
-
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
 exist in the transcript while no longer influencing the next action. The design

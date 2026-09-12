@@ -1,8 +1,5 @@
 # Worker Dispatch Mechanics
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Worker Dispatch Mechanics visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/worker_dispatch_blueprint.html).
-
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
 Source of truth:

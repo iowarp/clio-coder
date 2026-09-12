@@ -11,7 +11,4 @@ export class DocsService {
 		if (!Value.Check(schema, raw)) throw new AppProblem("unavailable", "Documentation returned an invalid record.");
 		return raw;
 	}
-	blueprint(path: string) {
-		return this.reads.call("docs.blueprint", { path });
-	}
 }

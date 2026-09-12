@@ -1,7 +1,5 @@
 # Library packages
 
-> **Visual blueprint:** See the [Library visual reference](../html/resource_library_blueprint.html) in the source checkout.
-
 The **library** is Clio's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and the same installation state. A plugin bundles several resources; each other kind exposes one public resource and may include supporting files.
 
 ## Browse and install

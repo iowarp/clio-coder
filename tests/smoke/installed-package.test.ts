@@ -341,16 +341,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	mkdirSync(foreign, { recursive: true });
 	const env: NodeJS.ProcessEnv = { ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" };
 
-	// Every authored blueprint and its shared assets survive packaging byte for byte.
-	const docsAssets = readdirSync(join(ROOT, "docs/html")).filter(
-		(file) => /\.html$/i.test(file) || file === "shared.css" || file === "shared.js",
-	);
-	for (const file of docsAssets)
-		deepStrictEqual(
-			readFileSync(join(packageRoot, "docs/html", file)),
-			readFileSync(join(ROOT, "docs/html", file)),
-			`packaged blueprint asset ${file}`,
-		);
+	ok(!existsSync(join(packageRoot, "docs/html")), "retired HTML documentation must not ship");
 
 	// The checkout's tsx loader must be unreachable from inside the install: a
 	// probe file under the prefix walks up through prefix/node_modules only.
@@ -484,27 +475,18 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const token = /#token=([\w-]+)/u.exec(docs.stdout())?.[1];
 		ok(token, "docs prints an authenticated app launch link");
-		const menu = await webRequest(docs.origin, token, "/api/docs/blueprints");
-		strictEqual(menu.status, 200);
-		const blueprints = (await menu.json()) as { available: boolean; items: { file: string; documentPath?: string }[] };
-		strictEqual(blueprints.available, true);
-		strictEqual(
-			blueprints.items.length,
-			docsAssets.filter((file) => /\.html$/i.test(file) && file !== "index.html").length,
-		);
-		ok(blueprints.items.every((item) => item.documentPath && existsSync(join(packageRoot, "docs", item.documentPath))));
+		strictEqual((await webRequest(docs.origin, token, "/api/docs/blueprints")).status, 404);
 		const page = await webRequest(docs.origin, token, "/api/docs/page?path=architecture/safety-model.md");
 		strictEqual(page.status, 200);
-		const document = (await page.json()) as { markdown: string; links: Record<string, string> };
+		const document = (await page.json()) as {
+			markdown: string;
+			links: Record<string, string>;
+			headings: { id: string; title: string }[];
+		};
 		strictEqual(document.markdown, readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8"));
-		ok(Object.values(document.links).includes("/docs/blueprints/safety_blueprint.html"));
-		const blueprint = await webRequest(docs.origin, token, "/docs-html/safety_blueprint.html?embed=1&theme=light");
-		strictEqual(blueprint.status, 200);
-		match(await blueprint.text(), /clio:blueprint/u);
-		match(blueprint.headers.get("content-security-policy") ?? "", /sandbox allow-scripts/u);
+		ok(document.headings.length > 0, "the installed Markdown generates its page outline");
+		ok(Object.values(document.links).every((link) => !link?.includes("blueprint")));
 		strictEqual((await webRequest(docs.origin, token, "/docs/architecture/safety-model.md")).status, 200);
-		for (const asset of ["shared.css", "shared.js"])
-			strictEqual((await webRequest(docs.origin, token, `/docs-html/${asset}`)).status, 200);
 	} finally {
 		deepStrictEqual(await docs.close(), { code: 0, signal: null }, `docs server shuts down cleanly: ${docs.stderr()}`);
 	}

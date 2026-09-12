@@ -52,7 +52,6 @@ serveWorker(async (call) => {
 		return inspectConfigGraph(call.params.cwd);
 	}
 	if (call.method === "docs.read") return docs.read(call.params);
-	if (call.method === "docs.blueprint") return docs.blueprint(call.params.path);
 	if (call.method === "sessions.list") return sessionHistory(call.params.cwd);
 	if (call.method === "traces.read") return traces.read(call.params);
 	if (call.method !== "tools.list") throw new AppProblem("unsupported", "Method is not available in the reads worker.");

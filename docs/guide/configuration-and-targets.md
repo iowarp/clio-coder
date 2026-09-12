@@ -1,8 +1,5 @@
 # Configuration, Targets, Runtimes, and Auth
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Configuration, Targets, Runtimes, and Auth visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/configuration_blueprint.html).
-
 Clio Coder is target-first: chat and fleet dispatch resolve through configured targets in `settings.yaml`, not through provider-specific ad hoc flags. Chat and print targets are HTTP and native engine-backed runtimes. Fleet dispatch can also target sanctioned subscription and external-worker runtimes described below.
 
 Clio's engine is built on the pi SDK (see [docs/architecture/pi-boundary.md](../architecture/pi-boundary.md)). Broad provider/model support comes from engine-backed descriptors and from the generic `openai-compat` and `anthropic-compat` targets. Clio adds orchestration, local/native runtime ergonomics, target configuration, dispatch, safety, and receipts rather than creating a first-class descriptor for every provider.

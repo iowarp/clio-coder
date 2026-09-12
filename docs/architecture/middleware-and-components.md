@@ -1,8 +1,5 @@
 # Middleware and Component Registry
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Middleware and Component Registry visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/middleware_blueprint.html).
-
 Clio Coder has two related but separate surfaces:
 
 1. **Components**: deterministic inventory of files that can affect harness behavior.

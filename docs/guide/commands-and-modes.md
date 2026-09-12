@@ -1,8 +1,5 @@
 # Commands and Modes
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Commands and Modes visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/commands_blueprint.html).
-
 Clio Coder is a terminal-first coding agent. This page is the detailed command
 reference for interactive sessions, headless runs, dispatch, verification, and
 common operator workflows; the README remains an approachable product and
@@ -76,7 +73,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
-| `clio-coder docs [topic] [--no-open]` | Open the documentation in the web app, with guides and visual blueprints in one view. Reuse the configured background app or start a foreground loopback server; `--no-open` prints its launch link. |
+| `clio-coder docs [topic] [--no-open]` | Open the documentation in the web app, rendered directly from the canonical Markdown. Reuse the configured background app or start a foreground loopback server; `--no-open` prints its launch link. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |

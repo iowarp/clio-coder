@@ -1,8 +1,5 @@
 # Extensions, Resources, and Share Archives
 
-> **Visual blueprint:** The source checkout includes the complete
-> [Extensions, Resources, and Share Archives visual reference](https://github.com/iowarp/clio-coder/blob/main/docs/html/extensions_blueprint.html).
-
 Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, agent recipes, fleet contracts, scripts, and reference files, installed with `clio-coder library install <path>`. A harness extension is executable runtime capability: command tools and hook declarations, installed with `clio-coder extensions install <path>`. Only plugins contribute resources; see [plugins.md](plugins.md) and [harness-extensions.md](harness-extensions.md) for each contract.
 
 Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.
