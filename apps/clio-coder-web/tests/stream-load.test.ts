@@ -35,10 +35,13 @@ async function stream(response: Response) {
 test("E2/E4: 1400-event turn reconnects over HTTP without lost/reordered text and keeps memory bounded", {
 	timeout: 30000,
 }, async (t) => {
-	const h = await harness({}, { scenario: "loop" });
+	const h = await harness({}, { scenario: "loop", env: { NODE_ENV: "test" } });
 	t.after(h.close);
 	const workspace = await h.workspaces.open(h.home.path),
 		session = await h.supervisor.open(workspace.id);
+	// Worker construction starts asynchronous module loading. Establish readiness
+	// before measuring turn growth so CPU speed cannot move startup into the sample.
+	await Promise.all([h.reads.call("runtime.info", {}), h.ops.call("runtime.info", {})]);
 	const buffer = new SessionBuffer();
 	buffer.snapshot(session);
 	const before = process.memoryUsage();
@@ -87,11 +90,17 @@ test("E2/E4: 1400-event turn reconnects over HTTP without lost/reordered text an
 	assert.equal(buffer.hasGap, false);
 	assert.equal(h.hub.size, 1403);
 	assert.ok(h.hub.byteSize < 8 * 1024 * 1024);
+	const final = process.memoryUsage();
+	peakRss = Math.max(peakRss, final.rss);
+	peakHeap = Math.max(peakHeap, final.heapUsed);
 	// Budgets are fixed before measurement: 128 MiB RSS growth / 64 MiB heap growth,
-	// including this HTTP test's workers, reader, and client projection.
-	assert.ok(peakRss - before.rss < 128 * 1024 * 1024);
-	assert.ok(peakHeap - before.heapUsed < 64 * 1024 * 1024);
+	// including resident workers, reader, and client projection after startup.
 	t.diagnostic(
 		`E2/E4 ${JSON.stringify({ eventCount: sequences.length, turnTextReplayable: true, ringEntries: h.hub.size, ringBytes: h.hub.byteSize, beforeRss: before.rss, peakRss, beforeHeap: before.heapUsed, peakHeap, snapshotBytes: Buffer.byteLength(JSON.stringify(buffer.value)) })}`,
+	);
+	assert.ok(peakRss - before.rss < 128 * 1024 * 1024, `Streaming RSS grew by ${peakRss - before.rss} bytes.`);
+	assert.ok(
+		peakHeap - before.heapUsed < 64 * 1024 * 1024,
+		`Streaming heap grew by ${peakHeap - before.heapUsed} bytes.`,
 	);
 });
