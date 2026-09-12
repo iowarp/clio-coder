@@ -1,21 +1,46 @@
 import { strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import {
+	copyFileSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	readlinkSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { it } from "node:test";
 
 it("checks configuration rows through real hygiene in a disposable package fixture", () => {
 	const root = resolve(import.meta.dirname, "../..");
 	const fixture = mkdtempSync(join(tmpdir(), "clio-coder-configuration-reference-"));
 	try {
-		for (const entry of readdirSync(root)) {
-			// Agent scratch and nested worktrees are not package inputs.
-			if (entry === ".superpowers") continue;
-			if (!["node_modules", ".git", "dist"].includes(entry))
-				cpSync(join(root, entry), join(fixture, entry), { recursive: true });
-			else symlinkSync(join(root, entry), join(fixture, entry));
+		// Use the same source inventory as hygiene. Copying whole directories also
+		// copies ignored nested dependencies, build output and operator scratch.
+		const sources = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+			cwd: root,
+			encoding: "utf8",
+			maxBuffer: 10 * 1024 * 1024,
+		});
+		for (const file of new Set(sources.split("\0").filter(Boolean))) {
+			const source = join(root, file);
+			const info = lstatSync(source, { throwIfNoEntry: false });
+			if (!info || info.isDirectory()) continue;
+			const destination = join(fixture, file);
+			mkdirSync(dirname(destination), { recursive: true });
+			if (info.isSymbolicLink()) symlinkSync(readlinkSync(source), destination);
+			else copyFileSync(source, destination);
 		}
+		for (const entry of ["node_modules", ".git", "dist"]) {
+			symlinkSync(join(root, entry), join(fixture, entry));
+		}
+		strictEqual(existsSync(join(fixture, "apps/clio-coder-web/node_modules")), false);
+		strictEqual(existsSync(join(fixture, "apps/clio-coder-web/dist")), false);
 		const docPath = join(fixture, "docs/guide/configuration-reference.md");
 		const original = readFileSync(docPath, "utf8");
 		const cases = [
@@ -63,6 +88,7 @@ it("checks configuration rows through real hygiene in a disposable package fixtu
 				strictEqual(output.includes(`\n  ${path}\n`), scenario.stale, output);
 			}
 		}
+		strictEqual(readFileSync(join(root, "docs/guide/configuration-reference.md"), "utf8"), original);
 	} finally {
 		rmSync(fixture, { recursive: true, force: true });
 	}
