@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## 0.4.8 - 2026-09-11
+## 0.4.8 - 2026-09-12
 
 Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.
 
@@ -12,7 +12,7 @@ Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take ef
 - Explicit background service setup for Linux with a systemd user session and an installable PWA with a stable local connection and offline recovery. Native lifecycle verification covers Linux/WSL2; macOS and Windows were not exercised in this sprint. Foreground web use remains available on other platforms.
 
 ### Changed
-- Separate fast routine CI, exact-package qualification and explicitly invoked full development investigations. Publication now checks a fresh, source- and artifact-bound qualification instead of rerunning the entire suite. Keep the withdrawn v0.4.8 release withdrawn during pipeline repair.
+- Separate fast routine CI, exact-package qualification and explicitly invoked full development investigations. Publication now checks a fresh, source- and artifact-bound qualification instead of rerunning the entire suite. An earlier v0.4.8 candidate was withdrawn before npm publication; this release is the re-qualified cut.
 - Remove duplicated catalog/prose snapshots and repeated synthetic eval executions, reuse the installed package for browser verification, and replace configuration-reference repository copies with one typed schema check.
 - Preserve causal first-call timing when session wall clocks regress, and stop cancellation tests from swallowing Node test reporter output.
 - Generate the web documentation directly from the canonical Markdown, with shared navigation, search, heading outlines and the application theme. `clio-coder docs [topic]` opens the same reading surface and reuses a configured background app. Retire the separate docs server and HTML blueprints, including their iframe bridge and package assets. Markdown remains available to agents and repository readers.
