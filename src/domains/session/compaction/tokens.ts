@@ -1,16 +1,11 @@
 /**
- * Token estimation for session entries (Phase 12 slice 12c).
+ * Token estimation for session entries.
  *
- * Ports pi-coding-agent's chars/4 heuristic verbatim (reference:
- * pi-mono/packages/coding-agent/src/core/compaction/compaction.ts:232
- * `estimateTokens`). Pure functions, no I/O.
+ * Uses shared context-accounting estimates for messages and character-based
+ * estimates for other context-bearing entries. Provider usage anchors measured
+ * prefixes when available. These estimates are approximate, not token ceilings.
+ * Pure functions, no I/O.
  *
- * Rationale for the heuristic (plan §3):
- *   - Conservative by design: over-estimating trips compaction earlier,
- *     never later. Missing a trigger and hitting provider overflow is
- *     expensive; running a compaction on 80k when actual was 95k is cheap.
- *   - pi-coding-agent ships it at scale, so we adopt the
- *     known ceiling rather than introduce a new numeric contract.
  *   - Exact per-provider counts (Anthropic /count_tokens, tiktoken) are
  *     parked. The `TokenEstimator` interface below keeps them a drop-in
  *     swap for a later phase.

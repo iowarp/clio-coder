@@ -3,9 +3,8 @@ import { asDirectoryPathBoundary, pathBoundaryEntryCovers, resolvePathBoundary }
 import type { ActionClass } from "./action-classifier.js";
 
 /**
- * Scope rules for worker-vs-orchestrator privilege checks. Phase 2 ships the
- * shapes and the subset predicate. Phase 6 consumes isSubset at dispatch
- * admission so a worker scope never escalates past the orchestrator.
+ * Scope rules for worker-vs-orchestrator privilege checks. Dispatch admission
+ * consumes isSubset so a worker scope never escalates past the orchestrator.
  */
 
 export interface ScopeSpec {

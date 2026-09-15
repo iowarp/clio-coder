@@ -6,7 +6,7 @@ import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
- * state. Slice 3 wires it into dispatch admission and audit. This module only
+ * state. Dispatch admission and tool audit consume it. This module only
  * owns the mapping from (tool, args) to an ActionClass.
  */
 

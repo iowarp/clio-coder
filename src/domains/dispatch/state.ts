@@ -1,5 +1,5 @@
 /**
- * Dispatch run ledger with atomic writes (Phase 6 slice 2).
+ * Dispatch run ledger with atomic writes.
  *
  * On-disk layout under `clioStateDir()`:
  *   runs.json                    JSON array of RunEnvelope, newest first
@@ -9,8 +9,8 @@
  * mutate memory only; `persist()` writes the settings-bounded ring (default
  * 1000) atomically via engine.atomicWrite.
  *
- * No worker spawning, no domain wire-up, no SafeEventBus emission yet. Those
- * land in P6S3 and P6S5. This slice is a pure persistence primitive.
+ * This module owns persistence. The dispatch extension wires worker spawning,
+ * cross-domain coordination, and event emission around this ledger.
  *
  * A crash between recordReceipt and persist leaves the receipt JSON on disk
  * without a ledger entry. The dispatch extension closes that gap at startup by

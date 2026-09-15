@@ -1,5 +1,5 @@
 /**
- * cwd-fallback overlay (Phase 12 slice 12d).
+ * cwd-fallback overlay.
  *
  * Two-choice overlay shown after `session.resume(...)` when the recorded
  * cwd no longer exists on disk (see src/domains/session/cwd-fallback.ts).

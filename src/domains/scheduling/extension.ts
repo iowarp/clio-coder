@@ -1,9 +1,9 @@
 /**
  * Scheduling domain wire-up. Seeds budget + concurrency state from settings and
  * listens to dispatch.enqueued so it can fire budget.alert events when session
- * spend meets or crosses the ceiling. Dispatch admission preflights this state
- * and denies new dispatches at or over the ceiling; the alert is the TUI's
- * explanation of those denials.
+ * spend meets or crosses the ceiling. Dispatch preflight reads this state for
+ * accounting. Session-cost alerts are advisory; explicit per-request intent
+ * cost ceilings are enforced separately by dispatch route admission.
  */
 
 import { type BudgetAlertPayload, BusChannels } from "../../core/bus-events.js";

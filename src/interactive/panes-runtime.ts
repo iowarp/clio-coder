@@ -6,7 +6,7 @@
  * ladder *before* the pane is split: `openUtilityPane` delivers its command by
  * sending `exec <argv>` into the pane's shell, so a binary that is not there
  * kills the pane the instant it appears, and the operator sees a flicker
- * instead of an install hint (phase 1 report, open question 3). And every
+ * instead of an install hint. Every
  * mutation is scoped to panes Clio created, because the contract's registry
  * refuses anything else.
  *

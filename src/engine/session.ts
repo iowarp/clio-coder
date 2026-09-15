@@ -1,5 +1,5 @@
 /**
- * Clio session JSONL writer + reader (Phase 3 slice 1).
+ * Clio session JSONL writer + reader.
  *
  * On-disk layout under `clioStateDir()`:
  *   sessions/<cwdHash>/<sessionId>/

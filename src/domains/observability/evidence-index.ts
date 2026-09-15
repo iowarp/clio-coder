@@ -1,8 +1,8 @@
 /**
  * Sidecar evidence index. A compact, append/merge-by-runId ledger written
  * under `<stateDir>/evidence-index.json` whenever a dispatch run completes and
- * the forensic evidence bundle is built (see extension.ts). Slice 6 reads this
- * to surface a rolling first-pass-success rate and a failure-cause histogram in
+ * the forensic evidence bundle is built (see extension.ts). The accountability
+ * read model uses this to surface a rolling first-pass-success rate and a failure-cause histogram in
  * observability without re-running the heavy `buildEvidence` aggregator.
  *
  * The file is a JSON array kept as a bounded ring (newest rows win, capped at

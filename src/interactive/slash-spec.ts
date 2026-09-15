@@ -27,8 +27,8 @@ export interface CommandPositionalSpec {
 }
 
 /**
- * Stable grammar/provider seam. Slice 10 names every dynamic noun; slice 11
- * supplies read-only implementations for these slots.
+ * Stable names for dynamic completion sources. The presentation layer supplies
+ * read-only catalogs for available slots; unsupplied slots return no values.
  */
 export const COMPLETION_SLOT_NAMES = [
 	"agents",

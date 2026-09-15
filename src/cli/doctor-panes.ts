@@ -11,7 +11,7 @@ import { describeResolution, findPinnedTool, toolStatus } from "../domains/toolc
  *
  * Six rows, in the order an operator debugs them: what mode the pane layer
  * resolved to, whether the socket answered, whether the server is new enough
- * for the methods phase 3 uses, where the pane host binary resolves, what the
+ * for the notification and pane-control methods, where the pane host binary resolves, what the
  * boot layout composes, and whether the journal directory the viewer reads is
  * writable.
  *

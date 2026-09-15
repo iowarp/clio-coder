@@ -11,16 +11,12 @@
  * created, tracked in `pane-registry.ts` and tagged with the `clio_coder_owner`
  * metadata token so `clio-coder doctor` can find orphans. The one documented
  * exception is Clio's own hosting pane in guest mode, which `reportSelf`
- * writes to under SA-3 of the v0.4.0 cycle plan.
+ * writes to without requiring Clio ownership.
  *
- * What is deliberately absent: per-run viewer panes. The v0.4.0 phase 3/4
- * integration opened a pane per dispatched run in a hidden Fleet tab, with a
- * focus ladder, run-state reporting, and resume adoption keyed on run ids. All
- * of that projected fleet state the native surfaces already show onto panes
- * nobody had asked for. The one run-viewing surface is now the workers-view
- * watch pane (src/interactive/watch-pane.ts): a single utility pane following
- * a selection file, opened on operator demand and retargeted by file writes
- * that never touch this socket.
+ * Runs are viewed through the workers-view watch pane
+ * (src/interactive/watch-pane.ts). This single utility pane follows a selection
+ * file, opens on operator demand, and is retargeted by file writes that never
+ * touch this socket. Dispatch does not create per-run viewer panes.
  */
 
 import type { DomainContract } from "../../core/domain-loader.js";

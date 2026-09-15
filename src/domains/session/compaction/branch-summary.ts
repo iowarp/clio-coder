@@ -1,5 +1,5 @@
 /**
- * Branch summary builders (Phase 12 slice 12c).
+ * Branch summary builders.
  *
  * Deterministic text assembly for the compaction prompt. The summarization
  * model is asked to read a serialized conversation and emit a structured

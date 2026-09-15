@@ -1,7 +1,7 @@
 /**
  * Shutdown coordinator implementing the four-phase sequence from spec §17:
  *   DRAIN     stop accepting new input / dispatch
- *   TERMINATE kill active workers (wired in Phase 7)
+ *   TERMINATE kill active workers
  *   PERSIST   atomic writes of domain state
  *   EXIT      tear down TUI and process.exit
  *

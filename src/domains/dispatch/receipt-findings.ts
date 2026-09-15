@@ -1,8 +1,7 @@
 /**
- * Cheap, pure findings classifier for the durable receipt summary (v0.2.7
- * Slice 3). It maps the signals already present on a receipt draft and its
- * ledger envelope -- outcome, outcomeDetail, exitCode, toolStats, toolActivity
- * -- to a conservative subset of the canonical EvidenceTag taxonomy.
+ * Cheap, pure findings classifier for the durable receipt summary. It maps
+ * outcome, outcomeDetail, exitCode, toolStats, and toolActivity from the receipt
+ * draft and ledger envelope to a conservative subset of the EvidenceTag taxonomy.
  *
  * This is deliberately NOT buildEvidence. The forensic aggregator reads the
  * persisted receipt, so calling it at record time would create a cycle. This

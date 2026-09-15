@@ -345,8 +345,8 @@ export interface ChatLoop {
 	 * in-memory `state.messages` for a single bridge message carrying the
 	 * summary, and emit the standard summary notice. Used by `/context compact`
 	 * slash command so the next user turn ships only the bridge plus the new
-	 * text to the provider (slice 12.5b bug 4). Silent no-op when no session
-	 * or no compaction deps are wired; in both cases emits a user-visible
+	 * text to the provider. When no session or compaction dependencies are
+	 * wired, it skips compaction and emits a user-visible
 	 * notice so the `/context compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;

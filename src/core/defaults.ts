@@ -391,7 +391,7 @@ export interface FleetSettings extends FleetRouteSettings {
 	history: FleetHistorySettings;
 }
 
-/** Roles whose authority is narrow enough for Slice 9 active joint routing. */
+/** Roles whose authority is narrow enough for active joint routing. */
 export const ACTIVE_ROUTING_ROLES = ["researcher", "verifier", "reviewer", "judge"] as const;
 export type ActiveRoutingRole = (typeof ACTIVE_ROUTING_ROLES)[number];
 

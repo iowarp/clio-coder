@@ -1,6 +1,6 @@
 /**
  * Human-readable rejection messages for blocked tool calls. The registry
- * (slice 6) renders `short` in the UI footer, attaches `detail` to the audit
+ * renders `short` in the UI footer, attaches `detail` to the audit
  * record, and surfaces `hints` to the worker so the next turn can recover
  * without another round-trip.
  */

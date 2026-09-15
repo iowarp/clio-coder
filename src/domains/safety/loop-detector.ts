@@ -1,6 +1,6 @@
 /**
  * Simple sliding-window loop detector. Pure logic; the caller owns state
- * storage. Slice 3 hands this an identity key composed of tool name + canonical
+ * storage. Callers provide an identity key composed of tool name + canonical
  * arg hash and a `Date.now()` reading so runaway workers can be caught before
  * their audit trail floods disk. `hashToolCall` builds that identity key and
  * lives here, beside the detector, so every observer (the registry's hook

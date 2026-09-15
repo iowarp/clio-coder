@@ -14,13 +14,9 @@
  *   operator turn passes through several phases inside one window, of which
  *   only the last is worth a wire call.
  *
- * What this bridge deliberately no longer does is open panes. The phase 3/4
- * integration projected every dispatch onto a viewer pane in a hidden Fleet
- * tab (an `agents` policy knob, a keep-failed close policy, resume adoption,
- * role-vocabulary sidebar labels). All of it duplicated the native fleet
- * surfaces into panes the operator had not asked for; the one pane that
- * renders runs is now the operator-pulled watch pane (`watch-pane.ts`), and
- * the policy line lives in `pane-policy.ts`.
+ * The bridge does not open panes. The operator opens the shared watch pane
+ * (`watch-pane.ts`) to inspect runs already shown by the native fleet
+ * surfaces. Pane ownership policy lives in `pane-policy.ts`.
  */
 
 import { type AgentStatusChangedPayload, BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";

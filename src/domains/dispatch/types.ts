@@ -1,6 +1,6 @@
 import type { WorkerContextProvenance } from "../context/worker/contract.js";
 /**
- * Shared run + receipt types for the dispatch domain (Phase 6 slice 2).
+ * Shared run + receipt types for the dispatch domain.
  *
  * RunEnvelope is the live record kept in the ledger (runs.json). RunReceipt is
  * the per-run artifact written under receipts/<runId>.json on completion. Both

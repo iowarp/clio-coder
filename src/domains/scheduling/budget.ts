@@ -1,7 +1,9 @@
 /**
- * Session budget state. checkCeiling reports whether the current spend is at
- * or above the ceiling; dispatch admission stays informational for v0.1 per
- * the Phase 10 scope, so the caller decides whether to enforce.
+ * Session budget state. checkCeiling reports whether current spend is under,
+ * at, or over the ceiling. Scheduling preflight exposes that spend and ceiling
+ * to dispatch reservations for accounting; the allocator does not enforce this
+ * session ceiling. Dispatch separately enforces an explicit per-request intent
+ * cost ceiling against the route estimate.
  */
 
 export type BudgetVerdict = "under" | "at" | "over";

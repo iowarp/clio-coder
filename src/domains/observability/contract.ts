@@ -160,8 +160,8 @@ export interface ObservabilityContract extends ObservabilityRunProjection {
 	/**
 	 * Rolling first-pass-success rate, unverified successes, ungrounded claims,
 	 * and failure-cause histogram, aggregated
-	 * from the sidecar evidence index on call. Read-only: it folds rows Slice 2
-	 * already wrote and recomputes no evidence.
+	 * from the sidecar evidence index on call. It folds rows written at dispatch
+	 * completion and recomputes no evidence.
 	 */
 	accountability(): AccountabilitySummary;
 	/** Latest completed assistant stream throughput for compact footer display. */

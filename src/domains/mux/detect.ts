@@ -8,7 +8,7 @@
  * contract test pins that by making `net.connect` throw for the duration of the
  * call.
  *
- * Embedded mode resolves to `none` until Phase 5 lands the session bootstrap.
+ * Embedded pane hosting is not implemented, so it resolves to `none`.
  * Asking for it is not an error, but it is a refusal rather than a quiet
  * degrade: the detection carries `refused: true`, the boot prints the reason on
  * stderr, and doctor's mode row warns. A session that asked for panes and got

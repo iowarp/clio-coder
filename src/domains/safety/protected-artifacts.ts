@@ -62,10 +62,9 @@ export type ValidationCommandDetection = { kind: "validation"; matched: string }
  * `npx vitest`, `tsc --noEmit`). Its consumer, dispatch validation grounding,
  * spends a match on nothing. An unmatched claim there is reported and never
  * downgrades a quality label, so the cost of a miss is noise in the receipt
- * rather than a gate opening. Observed live this session: S3 workers claimed
- * "git diff verification" and grounded 0/1, and a slice-2 coder verified its
- * own fix with `node -e "import(...)"`. Both are real work the strict set
- * cannot name.
+ * rather than a gate opening. Commands such as `git diff` and
+ * `node -e "import(...)"` can ground inspection claims even when they do not
+ * satisfy the strict validation vocabulary.
  */
 export type ValidationCommandScope = "finish-contract" | "grounding";
 

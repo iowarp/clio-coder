@@ -1,5 +1,5 @@
 /**
- * Coalescing wrapper around chat events (slice 12.5d).
+ * Coalescing wrapper around chat events.
  *
  * Streaming responses fire text, thinking, and cumulative tool-result updates
  * at very high frequency. The TUI's per-event `requestRender()` call rebuilt the
@@ -1211,8 +1211,7 @@ export function buildReplayAgentMessagesFromTurns(
  * Rehydrate a chat panel from a persisted session's turn list. The
  * interactive layer calls this after /resume or /fork so the user sees the
  * prior transcript instead of a blank pane; without it, swapping the
- * session contract updated meta but left the visible chat untouched
- * (Row 51 and Row 52 on the Phase 12 ledger).
+ * session contract updated meta but left the visible chat untouched.
  *
  * Replays a structured SessionEntry stream. Compaction summaries, branch
  * summaries, bash executions, custom entries, and metadata entries are

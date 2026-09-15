@@ -1,5 +1,5 @@
 /**
- * Renderers for CompactionSummary session entries (Phase 12 slice 12c).
+ * Renderers for CompactionSummary session entries.
  *
  * Two output shapes live here:
  *   1. `renderCompactionSummaryLine` is the inline one-liner chat-loop

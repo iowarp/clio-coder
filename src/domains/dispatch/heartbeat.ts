@@ -1,5 +1,5 @@
 /**
- * Pure heartbeat watchdog classifier (Phase 6 slice 3).
+ * Pure heartbeat watchdog classifier.
  *
  * Maps a last-seen monotonic stamp to one of three states. The dispatch domain
  * drives this on each scheduler tick; the orchestrator uses `stale` to surface

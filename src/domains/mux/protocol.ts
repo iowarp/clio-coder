@@ -1,12 +1,10 @@
 /**
  * Protocol floors for the wire methods that are not universal.
  *
- * Phase 1 recorded `protocol` and `version` from the `ping` handshake and gated
- * nothing on them, because every method phase 1 used exists across the whole
- * protocol range Clio cares about. Phase 3 adds two that do not, and Phase 4
- * adds the worktree family: a herdr old
- * enough to predate them answers `invalid_request`, and the honest response is
- * to take the documented fallback rather than to log a failure per call.
+ * The `ping` handshake records the server protocol and version. Notification,
+ * pane-control, layout, and worktree methods require the protocol floors below.
+ * Older servers answer `invalid_request`, so callers check support and take
+ * the documented fallback before making those calls.
  *
  * The floors are protocol introductions checked against herdr's changelog and
  * then re-verified with `herdr api schema --json` on the released artifacts
@@ -24,7 +22,7 @@
 
 import type { MuxServerInfo } from "./types.js";
 
-/** Wire methods this file gates. Phase 1 methods are unconditional and absent here. */
+/** Wire methods with explicit protocol floors. Basic discovery methods are unconditional. */
 export type MuxGatedMethod =
 	| "notification.show"
 	| "pane.rename"

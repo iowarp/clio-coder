@@ -51,7 +51,7 @@ export type GateTopologyRole = "builder" | "reviewer" | "candidate" | "judge" | 
 
 /**
  * Facts the role is derived from. `capabilityClass` and `resultContractKind`
- * both come from the strict Slice 2 recipe schema, so a role can never be read
+ * both come from the strict recipe schema, so a role can never be read
  * off free-form prose or a display-only field.
  */
 export interface ExecutionRoleInput {
@@ -79,7 +79,7 @@ export interface ExecutionRoleInput {
  *   3. Outside a gate, the recipe's own typed contract decides. A declared
  *      `verifier-report` is the only contract that makes a direct run a
  *      verifier; a Debugger's `debugger-report` deliberately does not, because
- *      Slice 2 forbids it from masquerading as a gate verdict.
+ *      the result schema distinguishes diagnosis from a gate verdict.
  *   4. A read-only recipe with no verifier contract is reconnaissance.
  */
 export function deriveExecutionRole(input: ExecutionRoleInput): ExecutionRole {
@@ -151,7 +151,7 @@ export function withAttemptRole(requestRole: ExecutionRole, attempt: number): Ex
  * Defaulting a reviewer or judge to the builder agent makes the gate a
  * self-review: the same recipe, the same prompt surface, and usually the same
  * model family grading its own output. That verdict is correlated by
- * construction and Slice 1 already refuses to treat it as a quality label, so
+ * construction and cannot count as an independent quality label, so
  * the default has to be an agent whose entire contract is independent typed
  * validation.
  */

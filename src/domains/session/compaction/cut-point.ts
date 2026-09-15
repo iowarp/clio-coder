@@ -1,5 +1,5 @@
 /**
- * Cut-point detection for compaction (Phase 12 slice 12c).
+ * Cut-point detection for compaction.
  *
  * Walks an entry list newest-to-oldest, accumulating estimated tokens, and
  * reports where to slice so the suffix carries at least `keepRecentTokens`

@@ -45,7 +45,7 @@ export interface SafetyContract {
 		readonly confirmed: ScopeSpec;
 	};
 
-	/** Subset check used by dispatch admission (Phase 6). */
+	/** Subset check used by dispatch admission. */
 	isSubset(worker: ScopeSpec, orchestrator: ScopeSpec): boolean;
 
 	/** Immutable safety policy metadata for receipts, audit, and replay. */

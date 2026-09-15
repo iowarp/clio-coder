@@ -1,5 +1,5 @@
 /**
- * Retry settings and countdown helper (Phase 12 / Phase 22 seam).
+ * Retry settings and countdown helper.
  *
  * pi-agent-core surfaces provider failures as a terminal assistant message
  * with `stopReason: "error"` + `errorMessage: <provider text>`. It does not

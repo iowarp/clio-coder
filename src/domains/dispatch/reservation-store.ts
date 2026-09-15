@@ -36,9 +36,9 @@ export type ReservationMemberStatus = "held" | "consumed" | "released";
 export type ReservationStatus = "active" | "released" | "rolled_back" | "expired";
 
 /**
- * A reservation holds four scarce things and nothing else: a global
- * concurrency slot, a per-node slot, an inference-endpoint slot, and a budget
- * upper bound. Node and endpoint identity matter only because slots bind on
+ * A reservation holds global, per-node, and inference-endpoint concurrency
+ * slots and records an advisory cost upper bound. Node and endpoint identity
+ * matter only because slots bind on
  * those dimensions. Agent, target, model, and runtime
  * identity are route identity, which the failover envelope owns
  * (`assertRouteWithinApprovedEnvelope`); pinning them here made a
@@ -330,12 +330,10 @@ export function transferDispatchReservationToLease(input: {
 }
 
 /**
- * Move a member's held capacity to the node a retry actually resolved, and
- * re-check the aggregate budget against the retry's own estimate. The durable
- * lease moves the capacity slot on a retry, but nothing else re-checks money, so
- * a retry that resolves a costlier route would otherwise run outside what the
- * plan reserved. Atomic under
- * the state-file lock: the old node's slot is released and the new one acquired
+ * Move a member's held capacity to the node a retry actually resolved and
+ * record the retry's own cost estimate. Allocation rechecks capacity while
+ * retaining cost as advisory accounting. Atomic under the state-file lock:
+ * the old node's slot is released and the new one acquired
  * in a single write, so a concurrent plan can never observe both held. Fails
  * closed with a named reason, which the caller surfaces as an admission denial
  * rather than letting the attempt escape its reservation.

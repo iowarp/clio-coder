@@ -9,9 +9,8 @@ import {
 /**
  * The session task board: the live state behind the `tasks` tool, the footer
  * tasks row, and the /tasks overlay. Every mutation persists a full-snapshot
- * `taskLedger` entry (the dormant Phase 12 entry kind gains its producer
- * here), so the board is replayable from the JSONL alone and survives
- * resume/fork without any side-car state.
+ * `taskLedger` entry, so the board is replayable from the JSONL alone and
+ * survives resume/fork without any side-car state.
  *
  * Shape mapping onto TaskLedgerEntry:
  *   - the board title is the single top-level goal

@@ -92,7 +92,7 @@ export interface SessionContract {
 	append(turn: TurnInput): ClioTurnRecord;
 	/**
 	 * Append a rich SessionEntry to the current session. Complements
-	 * `append(turn)` for Phase 12+ entry kinds (compactionSummary,
+	 * `append(turn)` for structured entry kinds (compactionSummary,
 	 * branchSummary, modelChange, etc.). Old callers keep using `append`.
 	 */
 	appendEntry(entry: SessionEntryInput): SessionEntry;

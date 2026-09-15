@@ -75,7 +75,7 @@ export interface GateDecisionArtifact {
  * prose line. Two schemas exist because the two topologies ask different
  * questions:
  *
- *   - Review asks "does this work pass?", which is exactly the Slice 2
+ *   - Review asks "does this work pass?", which is exactly the
  *     `verifier-report` contract. There is deliberately no `revise` verdict:
  *     whether a failure is worth another cycle is the coordinator's bounded
  *     continuation policy, not a decision the reviewed model gets to author.
@@ -96,7 +96,7 @@ export interface CompeteGateResult {
 
 export type GateResultParse<T> = { ok: true; result: T } | { ok: false; reason: string };
 
-/** Parse a reviewer answer under the Slice 2 Verifier contract. */
+/** Parse a reviewer answer under the verifier-report contract. */
 function parseReviewGateResult(output: string): GateResultParse<ReviewGateResult> {
 	const result = parseVerifierResult(output);
 	return result === null
@@ -128,7 +128,7 @@ export interface ReviewGateDecision {
 /**
  * Apply the coordinator's review policy to one reviewer answer.
  *
- * The reviewer answers pass or fail under its Slice 2 contract and nothing
+ * The reviewer answers pass or fail under its verifier-report contract and nothing
  * else. `revise` is this function's bounded continuation decision: a failure
  * with cycles left earns another builder attempt, the same failure at the bound
  * is simply the terminal fail, and an answer that does not satisfy the contract

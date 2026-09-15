@@ -14,7 +14,7 @@ import type { BusChannel, BusPayloadMap } from "./bus-events.js";
  * settling, so side effects that must happen before the next emit() must be
  * completed synchronously.
  *
- * Phase 2+ registers domain listeners here; violate the invariant and
+ * Domain listeners register here; violate the invariant and
  * shutdown.* ordering or banner timing will drift.
  */
 export type SafeEventListener<C extends BusChannel = BusChannel> = (payload: BusPayloadMap[C]) => void | Promise<void>;

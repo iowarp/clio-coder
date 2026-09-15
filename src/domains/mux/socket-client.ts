@@ -175,9 +175,9 @@ export interface MuxWorktreeRemovedResult {
 }
 
 /**
- * The domain-facing surface. Phase 1 covers exactly the wire methods spec 4.3
- * lists for this phase, plus `pane.send_text`, `pane.report_agent`,
- * `pane.report_metadata` (see the notes on those methods below).
+ * The domain-facing wire surface covers discovery, workspace and pane control,
+ * notifications, layouts, worktrees, and agent metadata. Individual methods
+ * document their protocol requirements and behavior below.
  */
 export interface MuxClient {
 	readonly socketPath: string;

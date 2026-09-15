@@ -1,5 +1,5 @@
 /**
- * Session cwd fallback resolver (Phase 12 slice 12d).
+ * Session cwd fallback resolver.
  *
  * Pure guard used by the interactive layer when a session is resumed.
  * `meta.cwd` is captured at session creation time; by the time the user
@@ -37,7 +37,7 @@ export const defaultFsProbe: FsProbe = {
 /**
  * Discriminated result the overlay layer branches on.
  *   - `no-cwd`: the meta record has no cwd field or it is blank after
- *     trimming. Pre-Phase-12 sessions occasionally land here.
+ *     trimming. Incomplete legacy metadata can produce this result.
  *   - `missing`: cwd string is set but the directory does not exist on
  *     disk (fsProbe.exists returned false).
  *   - `not-a-directory`: the path exists but resolves to a file or a

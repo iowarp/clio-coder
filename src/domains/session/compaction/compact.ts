@@ -1,5 +1,5 @@
 /**
- * Compaction orchestration (Phase 12 slice 12c).
+ * Compaction orchestration.
  *
  * Given a list of session entries, finds the cut point, summarizes the
  * history portion via the supplied model, and returns the trimmed entry
