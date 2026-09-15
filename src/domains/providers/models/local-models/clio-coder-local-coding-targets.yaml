@@ -829,23 +829,23 @@
     leakageNote: |
       LM Studio's gemma4 chat template emits chain-of-thought as plain text
       bracketed by literal '<|channel>thought\n' and '<channel|>' markers
-      rather than structured reasoning fragments. The OpenAI-compatible path
-      currently exposes those markers as the server streams them; filtering
-      this family remains a follow-up.
+      rather than structured reasoning fragments. Clio splits those regions into
+      thinking content on the OpenAI-compatible stream, including LM Studio,
+      and removes the channel markers from the visible answer.
     gpuTiers:
       "48gb": "Fits at f16 KV when parallel=1 and ctx=122880; drop to q8_0 KV at parallel=4."
       "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
     runtimePreference:
       lmstudio: "Pin parallel=1 in the LM Studio per-model preset to give a single agent the full 122880 context."
-      openaiCompat: "LM Studio chat uses this surface; visible text may contain the raw channel markers."
+      openaiCompat: "LM Studio chat uses this surface; Clio separates inline thought regions and removes their channel markers."
     thinking:
       mechanism: on-off
       guidance: |
         Gemma 4 chat template exposes thinking only as on or off; intermediate
         levels coerce to on. NVFP4 quantization can corrupt JSON tool-call
         output under aggressive sampling, so the instruct profile pins
-        temperature at 0.7. LM Studio's OpenAI-compatible stream currently
-        exposes channel markers when the server does not classify them.
+        temperature at 0.7. Clio classifies inline channel markers on LM Studio's
+        OpenAI-compatible stream when the server leaves them in content.
     serving: "LilaRest publishes no per-model sampler; values inherit the gemma family default per the official Google Gemma 4 31B card. KV cache budget at f16, ctx=122880 is roughly 57 GB on top of ~21 GB of NVFP4 weights."
 
 # The qat/UD-Q4_K_XL/MTP build is the long-context llama.cpp gemma profile and is a
@@ -928,7 +928,7 @@
       "32gb": "32 GB Vulkan llama.cpp profile with UD-Q4_K_XL weights, ctx=262144, q8 KV, flash attention, parallel=1, F16 gemma4v mmproj (vision), and MTP draft (spec-type draft-mtp, n_max 4) both active."
     runtimePreference:
       llamaCpp: "OpenAI-compatible chat completions with --jinja and --reasoning off. Recommended local profile serves at ctx=262144, q8 KV, flash attention, parallel=1, batch=1024, ubatch=256, with F16 mmproj vision and draft-mtp speculative decoding; sampler temperature 0.8, top_p 0.95, top_k 64, repeat_penalty 1.05."
-      openaiCompat: "Fallback when a gateway fronts the same llama.cpp chat-completions surface; the openai-compat surface does not expose the channel-marker classifier, so visible text may show raw thought markers."
+      openaiCompat: "Fallback when a gateway fronts the same llama.cpp chat-completions surface; Clio separates inline thought regions with the shared channel-marker filter."
     llamaCpp:
       ctxSize: 262144
       cacheTypeK: q8_0
@@ -1008,15 +1008,16 @@
       "48gb": "Fits at f16 KV with parallel=1; q8_0 KV recommended at parallel=4."
       "80gb": "Comfortable at f16 KV with parallel=1 and ctx=122880."
     runtimePreference:
-      lmstudio: "LM Studio's OpenAI-compatible stream may expose this family's channel markers as visible text."
+      lmstudio: "LM Studio may stream inline channel markers; Clio separates the thought region and removes the markers from the answer."
       openaiCompat: "Fallback; reasoning_content is absent from the openai-compat reasoning probe for this family."
     thinking:
       mechanism: always-on
       guidance: |
         Distilled traces emit unconditionally. The thinking level setting is
         ignored at the API surface; chain-of-thought arrives whether or not
-        Clio asks for it. Channel-marker filtering remains a follow-up for the
-        OpenAI-compatible LM Studio path.
+        Clio asks for it. The shared channel-marker filter splits inline thought
+        regions into thinking content on the OpenAI-compatible LM Studio path
+        and removes the markers from the visible answer.
     serving: "Distilled from Claude 4.6 Opus reasoning traces onto Google Gemma 4 31B; sampler matches the gemopus card values."
 
 - family: qwopus3.6-27b-v1-preview

@@ -1,7 +1,11 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import type { Model } from "@earendil-works/pi-ai";
 
+import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
+import { synthLocalModel } from "../../src/domains/providers/runtimes/common/local-synth.js";
+import { FileKnowledgeBase } from "../../src/domains/providers/types/knowledge-base.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import { createGemmaChannelFilter, type GemmaChannelSegment } from "../../src/engine/gemma-channel-filter.js";
 import { closeServer, type OpenAICompatFixture, startOpenAICompatFixture } from "../harness/openai-compat-fixture.js";
@@ -120,4 +124,64 @@ describe("contracts/gemma-4 channel filtering", () => {
 		strictEqual(result.text, reply);
 		strictEqual(result.thinking, "");
 	});
+});
+
+const catalog = new FileKnowledgeBase(fileURLToPath(new URL("../../src/domains/providers/models/", import.meta.url)));
+
+for (const [id, family] of [
+	["LilaRest/gemma-4-31B-it-NVFP4-turbo", "gemma-4-31b-it-nvfp4-turbo"],
+	["Jackrong/Gemopus-4-31B-it-GGUF", "gemopus-4-31b-it"],
+] as const) {
+	for (const runtime of ["lmstudio", "openai-compat"] as const) {
+		it(`filters ${family} through ${runtime} using the shipped catalog`, async () => {
+			const kb = catalog.lookup(id);
+			ok(kb);
+			strictEqual(kb.entry.family, family);
+			const reply = "<|channel>thought\nfixture reasoning<channel|>Visible answer.";
+			const server = await startOpenAICompatFixture(reply, {
+				models: [{ id }],
+				replyChunks: ["<|chan", "nel>thought\nfixture rea", "soning<chan", "nel|>Visible ", "answer."],
+			});
+			fixtures.push(server);
+			const resolved = synthLocalModel({
+				target: { id: "fixture", runtime, url: server.url, lifecycle: "user-managed" },
+				wireModelId: id,
+				kb,
+				defaultCapabilities: EMPTY_CAPABILITIES,
+				apiFamily: "openai-completions",
+				provider: runtime,
+				baseUrlForTarget: (url) => `${url}/v1`,
+			}) as Model<"openai-completions">;
+			for (const method of ["stream", "streamSimple"] as const) {
+				const stream = openAICompletionsApiProvider[method](
+					resolved,
+					{ messages: [{ role: "user", content: "hello", timestamp: 0 }] },
+					{ apiKey: "fixture" },
+				);
+				let text = "";
+				let thinking = "";
+				for await (const event of stream) {
+					if (event.type === "error") throw new Error(event.error.errorMessage);
+					if (event.type === "text_delta") text += event.delta;
+					if (event.type === "thinking_delta") thinking += event.delta;
+				}
+				strictEqual(text, "Visible answer.");
+				strictEqual(thinking, "fixture reasoning");
+				const final = await stream.result();
+				deepStrictEqual(final.content, [
+					{ type: "thinking", thinking },
+					{ type: "text", text },
+				]);
+			}
+		});
+	}
+}
+
+it("handles an empty thought region with every marker boundary split", () => {
+	const wire = "<|channel>thought\n<channel|>Answer.";
+	for (let split = 1; split < wire.length; split++) {
+		const segments = filtered([wire.slice(0, split), wire.slice(split)]);
+		strictEqual(segments.filter((segment) => segment.kind === "thinking").length, 0);
+		strictEqual(segments.map((segment) => segment.content).join(""), "Answer.");
+	}
 });
