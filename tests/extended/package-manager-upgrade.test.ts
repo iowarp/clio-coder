@@ -14,10 +14,13 @@ test("post-install upgrade previews local migrations without registry lookup or 
 				"--input-type=module",
 				"-e",
 				`import { runUpgradeCommand } from ${JSON.stringify(new URL("../../src/cli/upgrade.ts", import.meta.url).href)};
-			process.exitCode = await runUpgradeCommand(["--post-install", "--dry-run"]);`,
+			process.exitCode = await runUpgradeCommand(["--post-install", "--dry-run"], {
+				lookUpAvailableVersion: async () => { throw new Error("post-install must not query the registry"); },
+				runNpmInstall: async () => { throw new Error("post-install must not replace the package"); },
+			});`,
 			],
 			{
-				env: { ...process.env, ...home.env, NODE_ENV: "test", CLIO_CODER_TEST_UPGRADE_AVAILABLE: "99.0.0" },
+				env: { ...process.env, ...home.env },
 				encoding: "utf8",
 				timeout: 10_000,
 			},

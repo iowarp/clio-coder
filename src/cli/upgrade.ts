@@ -86,24 +86,10 @@ function parseUpgradeArgs(argv: ReadonlyArray<string>): UpgradeOptions {
  * the installed version is the newest one.
  */
 type RegistryLookup =
-	| { asked: false; reason: "source checkout" | "network checks are disabled" | "post-install checks" }
+	| { asked: false; reason: "source checkout" | "post-install checks" }
 	| { asked: true; version: string | null };
 
-function testSeam(name: string): string | undefined {
-	if (process.env.NODE_ENV !== "test") return undefined;
-	return process.env[name];
-}
-
-async function lookUpAvailableVersion(
-	channel: Channel,
-	method: "source" | "npm",
-	noNetwork: boolean,
-): Promise<RegistryLookup> {
-	const seam = testSeam("CLIO_CODER_TEST_UPGRADE_AVAILABLE");
-	// `unreachable` stands in for a registry that answered nothing, which is the
-	// only way to reach that branch without a network in the test.
-	if (seam) return { asked: true, version: seam === "unreachable" ? null : seam };
-	if (noNetwork) return { asked: false, reason: "network checks are disabled" };
+async function lookUpAvailableVersion(channel: Channel, method: "source" | "npm"): Promise<RegistryLookup> {
 	if (method === "source") return { asked: false, reason: "source checkout" };
 	try {
 		const res = await fetch(`https://registry.npmjs.org/@iowarp/clio-coder/${channel}`, {
@@ -149,16 +135,10 @@ async function runChild(command: string, args: ReadonlyArray<string>, label: str
 }
 
 async function runNpmInstall(channel: Channel): Promise<void> {
-	if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "npm") {
-		throw new Error("npm ERR! 404 Not Found (mock failure)");
-	}
 	await runChild("npm", ["install", "-g", `@iowarp/clio-coder@${channel}`], "npm install");
 }
 
 async function runDoctorFixAfterInstall(): Promise<void> {
-	if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "doctor") {
-		throw new Error("mock doctor fix failure");
-	}
 	await runChild("clio-coder", ["doctor", "--fix"], "clio-coder doctor --fix");
 }
 
@@ -168,7 +148,29 @@ async function runPostInstallUpgrade(opts: UpgradeOptions): Promise<void> {
 	await runChild("clio-coder", args, "clio-coder upgrade --post-install");
 }
 
-export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<number> {
+export interface UpgradeDependencies {
+	detectInstallMethod: typeof detectInstallMethod;
+	lookUpAvailableVersion: typeof lookUpAvailableVersion;
+	runNpmInstall: typeof runNpmInstall;
+	runDoctorFixAfterInstall: typeof runDoctorFixAfterInstall;
+	runPostInstallUpgrade: typeof runPostInstallUpgrade;
+	runPending: typeof runPending;
+}
+
+const DEFAULT_DEPENDENCIES: UpgradeDependencies = {
+	detectInstallMethod,
+	lookUpAvailableVersion,
+	runNpmInstall,
+	runDoctorFixAfterInstall,
+	runPostInstallUpgrade,
+	runPending,
+};
+
+export async function runUpgradeCommand(
+	argv: ReadonlyArray<string>,
+	dependencies: Partial<UpgradeDependencies> = {},
+): Promise<number> {
+	const deps = { ...DEFAULT_DEPENDENCIES, ...dependencies };
 	let opts: UpgradeOptions;
 	try {
 		opts = parseUpgradeArgs(argv);
@@ -186,14 +188,13 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 
 	const before = getVersionInfo().clio;
 	const stateDir = resolveClioDirs().state;
-	const method = detectInstallMethod();
+	const method = deps.detectInstallMethod();
 	const methodLabel = method === "source" ? "source checkout" : opts.postInstall ? "package install" : "npm global";
 	presenter.setMethod(methodLabel);
 
-	const noNetwork = Boolean(testSeam("CLIO_CODER_TEST_UPGRADE_NO_NETWORK"));
 	const lookup: RegistryLookup = opts.postInstall
 		? { asked: false, reason: "post-install checks" }
-		: await lookUpAvailableVersion(opts.channel, method, noNetwork);
+		: await deps.lookUpAvailableVersion(opts.channel, method);
 	const availableVersion = lookup.asked ? lookup.version : null;
 
 	presenter.step(`Installation method: ${methodLabel}`);
@@ -223,8 +224,8 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	// "Already current" is a claim about a version that was compared. A lookup
 	// that was made and came back empty has compared nothing, so it does not get
 	// to make it: the run falls through and attempts the install, which is what
-	// the operator asked for. A lookup that was never owed (a checkout, or the
-	// network seam) leaves the recorded state version to decide.
+	// the operator asked for. A lookup that was never owed for a checkout or
+	// post-install checks leaves the recorded state version to decide.
 	const versionIsCurrent =
 		(lookup.asked ? lookup.version === before : true) && (recorded === null || recorded === before);
 	const hasPendingMigrations = pendingMigrationIds.length > 0;
@@ -260,11 +261,9 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		presenter.note("Running post-install checks with the active clio-coder binary.");
 	} else if (method === "source") {
 		presenter.note("Source checkout: no npm install to run.");
-	} else if (noNetwork) {
-		presenter.note("CLIO_CODER_TEST_UPGRADE_NO_NETWORK is set; skipping npm install.");
 	} else {
 		try {
-			await runNpmInstall(opts.channel);
+			await deps.runNpmInstall(opts.channel);
 			presenter.completedStep(`Installed @iowarp/clio-coder@${opts.channel}`);
 		} catch (err) {
 			presenter.fail("npm install failed", err instanceof Error ? err.message : String(err));
@@ -276,7 +275,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 			return 1;
 		}
 		try {
-			await runPostInstallUpgrade(opts);
+			await deps.runPostInstallUpgrade(opts);
 			presenter.done("Done");
 			return 0;
 		} catch (err) {
@@ -293,10 +292,7 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 	} else {
 		let result: Awaited<ReturnType<typeof runPending>>;
 		try {
-			if (testSeam("CLIO_CODER_TEST_UPGRADE_FAIL") === "migration") {
-				throw new Error("mock migration failure in 2026-09-01-settings-v2");
-			}
-			result = await runPending(stateDir);
+			result = await deps.runPending(stateDir);
 		} catch (err) {
 			presenter.fail("migration failed", err instanceof Error ? err.message : String(err));
 			presenter.commandAdvice(
@@ -312,13 +308,13 @@ export async function runUpgradeCommand(argv: ReadonlyArray<string>): Promise<nu
 		else for (const id of applied) presenter.completedStep(`Applied migration ${id}`);
 	}
 
-	if (method === "source" || noNetwork) {
+	if (method === "source") {
 		const refresh = describeRefresh();
 		initializeClioHome();
 		presenter.completedStep(`Refreshed ${refresh}`);
 	} else {
 		try {
-			await runDoctorFixAfterInstall();
+			await deps.runDoctorFixAfterInstall();
 			presenter.completedStep("Checked the install with clio-coder doctor --fix");
 		} catch (err) {
 			presenter.fail("doctor fix failed", err instanceof Error ? err.message : String(err));

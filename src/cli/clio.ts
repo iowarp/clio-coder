@@ -13,7 +13,22 @@ function terminalLeaseEligible(
 	return !options.headless && !options.acp && env.CLIO_CODER_INTERACTIVE === "1";
 }
 
-export async function runClioCommand(options: BootOptions = {}): Promise<number> {
+export interface ClioCommandDependencies {
+	bootOrchestrator: typeof import("../entry/orchestrator.js").bootOrchestrator;
+}
+
+const DEFAULT_DEPENDENCIES: ClioCommandDependencies = {
+	bootOrchestrator: async (options) => {
+		const { bootOrchestrator } = await import("../entry/orchestrator.js");
+		return bootOrchestrator(options);
+	},
+};
+
+export async function runClioCommand(
+	options: BootOptions = {},
+	dependencies: Partial<ClioCommandDependencies> = {},
+): Promise<number> {
+	const deps = { ...DEFAULT_DEPENDENCIES, ...dependencies };
 	// Bare `clio` (no subcommand) boots interactive mode implicitly, but only
 	// when stdin is a real TTY. Piped or /dev/null stdin (used by verify.ts,
 	// CI runners, and non-interactive scripts) should fall through to the
@@ -69,18 +84,7 @@ export async function runClioCommand(options: BootOptions = {}): Promise<number>
 				}
 			}
 		}
-		// Deterministic built-PTY interleaving seam. It is unavailable outside
-		// NODE_ENV=test and bounded even under a malformed value.
-		if (terminalLease && process.env.NODE_ENV === "test") {
-			const requestedDelay = Number.parseInt(process.env.CLIO_CODER_TEST_STAGE1_DELAY_MS ?? "0", 10);
-			const delayMs = Number.isFinite(requestedDelay) ? Math.max(0, Math.min(5_000, requestedDelay)) : 0;
-			if (delayMs > 0) await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-			if (process.env.CLIO_CODER_TEST_STAGE1_FAIL === "1") {
-				throw new Error("injected Stage 1 hydration failure");
-			}
-		}
-		const { bootOrchestrator } = await import("../entry/orchestrator.js");
-		const result = await bootOrchestrator({
+		const result = await deps.bootOrchestrator({
 			...options,
 			...(startupSettings ? { startupSettings } : {}),
 			...(terminalLease ? { terminalLease } : {}),

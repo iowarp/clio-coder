@@ -212,7 +212,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 		try {
 			mkdirSync(join(home.root, "config"), { recursive: true });
 			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
-			const env = { ...home.env, CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" };
+			const env = home.env;
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
 			match(first.output, /4 migrations applied/u);

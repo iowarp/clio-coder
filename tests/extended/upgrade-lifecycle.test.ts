@@ -1,9 +1,9 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import { runUpgradeCommand } from "../../src/cli/upgrade.js";
+import { runUpgradeCommand, type UpgradeDependencies } from "../../src/cli/upgrade.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
@@ -19,11 +19,11 @@ const MIGRATION_IDS = [
 async function upgrade(
 	temp: LifecycleHome,
 	argv: ReadonlyArray<string>,
-	extraEnv: Record<string, string> = {},
+	dependencies: Partial<UpgradeDependencies> = {},
 ): Promise<{ code: number; stdout: string }> {
 	resetXdgCache();
 	try {
-		return await runInHome({ ...temp, env: { ...temp.env, ...extraEnv } }, () => runUpgradeCommand(argv));
+		return await runInHome(temp, () => runUpgradeCommand(argv, { detectInstallMethod: () => "source", ...dependencies }));
 	} finally {
 		resetXdgCache();
 	}
@@ -37,14 +37,18 @@ function currentHome(): LifecycleHome {
 	return temp;
 }
 
-const NO_NETWORK = { CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1" };
+const FAIL_MIGRATION: Partial<UpgradeDependencies> = {
+	runPending: async () => {
+		throw new Error("fixture migration failure");
+	},
+};
 
 describe("contracts/upgrade-lifecycle", () => {
 	it("reports the detected facts before doing anything", async () => {
 		const temp = currentHome();
 		try {
 			const version = getVersionInfo().clio;
-			const { code, stdout } = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_AVAILABLE: version });
+			const { code, stdout } = await upgrade(temp, [], { lookUpAvailableVersion: async () => ({ asked: true, version }) });
 			strictEqual(code, 0);
 			match(stdout, /Installation method: (source checkout|npm global)/u);
 			match(stdout, new RegExp(`Current version: ${version}`, "u"));
@@ -59,7 +63,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		const temp = currentHome();
 		try {
 			const version = getVersionInfo().clio;
-			const { code, stdout } = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_AVAILABLE: version });
+			const { code, stdout } = await upgrade(temp, [], { lookUpAvailableVersion: async () => ({ asked: true, version }) });
 			strictEqual(code, 0);
 			match(stdout, new RegExp(`Already on ${version}, with no pending migrations`, "u"));
 			ok(!/Applied migration/u.test(stdout), `nothing ran:\n${stdout}`);
@@ -74,12 +78,14 @@ describe("contracts/upgrade-lifecycle", () => {
 			// A lookup that failed compared nothing. Treating its null as "same as
 			// installed" told an offline user they were up to date and skipped the
 			// install they had asked for.
-			const failed = await upgrade(temp, ["--dry-run"], { CLIO_CODER_TEST_UPGRADE_AVAILABLE: "unreachable" });
+			const failed = await upgrade(temp, ["--dry-run"], {
+				lookUpAvailableVersion: async () => ({ asked: true, version: null }),
+			});
 			ok(!/Already on /u.test(failed.stdout), `an unanswered lookup is not a current version:\n${failed.stdout}`);
 			match(failed.stdout, /Available version: unknown \(the registry could not be reached\)/u);
 
 			// A lookup that was never owed is a different fact, and says so.
-			const skipped = await upgrade(temp, ["--dry-run"], NO_NETWORK);
+			const skipped = await upgrade(temp, ["--dry-run"]);
 			match(skipped.stdout, /Available version: not checked/u);
 		} finally {
 			temp.cleanup();
@@ -89,7 +95,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	it("previews the install step and every pending migration by id, changing nothing", async () => {
 		const temp = createLifecycleHome("clio-coder-test-upgrade-dry-");
 		try {
-			const { code, stdout } = await upgrade(temp, ["--dry-run"], NO_NETWORK);
+			const { code, stdout } = await upgrade(temp, ["--dry-run"]);
 			strictEqual(code, 0);
 			match(stdout, /Would apply 4 pending migrations:/u);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(id.replace(/\./gu, "\\."), "u"));
@@ -104,7 +110,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	it("puts the dry-run plan in the JSON report, not only in the prose", async () => {
 		const temp = createLifecycleHome("clio-coder-test-upgrade-json-");
 		try {
-			const { code, stdout } = await upgrade(temp, ["--dry-run", "--json"], NO_NETWORK);
+			const { code, stdout } = await upgrade(temp, ["--dry-run", "--json"]);
 			strictEqual(code, 0);
 
 			const parsed = JSON.parse(stdout) as {
@@ -128,7 +134,7 @@ describe("contracts/upgrade-lifecycle", () => {
 	it("applies pending migrations and reports the count", async () => {
 		const temp = createLifecycleHome("clio-coder-test-upgrade-run-");
 		try {
-			const { code, stdout } = await upgrade(temp, [], NO_NETWORK);
+			const { code, stdout } = await upgrade(temp, []);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
 			match(stdout, /4 migrations applied/u);
@@ -144,17 +150,17 @@ describe("contracts/upgrade-lifecycle", () => {
 				["--channel=beta", "--dry-run"],
 				["--channel", "beta", "--dry-run"],
 			]) {
-				const { code, stdout } = await upgrade(temp, argv, NO_NETWORK);
+				const { code, stdout } = await upgrade(temp, argv);
 				strictEqual(code, 0, `${argv.join(" ")} must parse`);
 				// Only meaningful on an npm install; a source checkout prints no
 				// channel line, so assert it is never the wrong one.
 				ok(!/Channel: latest/u.test(stdout), `--channel beta must not read as latest:\n${stdout}`);
 			}
 			for (const argv of [["--channel=unknown"], ["--channel"], ["--channel", "--dry-run"]]) {
-				const { code } = await upgrade(temp, argv, NO_NETWORK);
+				const { code } = await upgrade(temp, argv);
 				strictEqual(code, 2, `${argv.join(" ")} must be a usage error`);
 			}
-			strictEqual((await upgrade(temp, ["--nope"], NO_NETWORK)).code, 2);
+			strictEqual((await upgrade(temp, ["--nope"])).code, 2);
 		} finally {
 			temp.cleanup();
 		}
@@ -163,13 +169,13 @@ describe("contracts/upgrade-lifecycle", () => {
 	it("names the command to run by hand when a migration fails, and says so in JSON", async () => {
 		const temp = createLifecycleHome("clio-coder-test-upgrade-fail-");
 		try {
-			const plain = await upgrade(temp, [], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_FAIL: "migration" });
+			const plain = await upgrade(temp, [], FAIL_MIGRATION);
 			strictEqual(plain.code, 1);
 			match(plain.stdout, /clio-coder upgrade --skip-migrations/u);
 
 			// fail() used to serialize the report before the advice was recorded,
 			// so a scripted caller got the error and not the recovery.
-			const json = await upgrade(temp, ["--json"], { ...NO_NETWORK, CLIO_CODER_TEST_UPGRADE_FAIL: "migration" });
+			const json = await upgrade(temp, ["--json"], FAIL_MIGRATION);
 			strictEqual(json.code, 1);
 			const parsed = JSON.parse(json.stdout) as {
 				status: string;
@@ -183,27 +189,66 @@ describe("contracts/upgrade-lifecycle", () => {
 			temp.cleanup();
 		}
 	});
+});
 
-	it("ignores test seams when NODE_ENV is unset", async () => {
-		const temp = createLifecycleHome("clio-coder-test-upgrade-ungated-");
-		const savedArgv1 = process.argv[1] ?? "";
-		process.argv[1] = resolve("dist/cli/index.js");
+for (const failedStep of ["npm", "post-install", "doctor"] as const) {
+	it(`reports ${failedStep} failure and stops the remaining upgrade steps`, async () => {
+		const temp = createLifecycleHome("clio-coder-upgrade-runner-failure-");
+		const calls: string[] = [];
+		const run = async (step: string): Promise<void> => {
+			calls.push(step);
+			if (step === failedStep) throw new Error(`fixture ${step} failure`);
+		};
 		try {
-			const { code, stdout } = await upgrade(temp, [], {
-				NODE_ENV: "",
-				CLIO_CODER_TEST_UPGRADE_AVAILABLE: "99.99.99",
-				CLIO_CODER_TEST_UPGRADE_FAIL: "migration",
-				CLIO_CODER_TEST_UPGRADE_NO_NETWORK: "1",
+			const { code, stdout } = await upgrade(temp, failedStep === "doctor" ? ["--post-install", "--json"] : ["--json"], {
+				detectInstallMethod: () => "npm",
+				lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
+				runNpmInstall: async () => run("npm"),
+				runPostInstallUpgrade: async () => run("post-install"),
+				runPending: async () => {
+					await run("migration");
+					return { applied: [], allApplied: [], available: [] };
+				},
+				runDoctorFixAfterInstall: async () => run("doctor"),
 			});
-			strictEqual(code, 0);
-			ok(!/99\.99\.99/u.test(stdout), "mock version was ignored");
-			ok(!/mock migration failure/u.test(stdout), "mock migration failure was ignored");
-			ok(!/CLIO_CODER_TEST_UPGRADE_NO_NETWORK is set/u.test(stdout), "no-network seam was ignored");
-			match(stdout, /Available version: not checked \(source checkout\)/u);
-			match(stdout, /4 migrations applied/u);
+			strictEqual(code, 1);
+			const report = JSON.parse(stdout);
+			strictEqual(report.status, "error");
+			match(report.errors.join("\n"), new RegExp(`fixture ${failedStep} failure`, "u"));
+			ok(report.advice.some((entry: { command: string }) => entry.command.includes("clio-coder doctor --fix")));
+			deepStrictEqual(
+				calls,
+				failedStep === "npm" ? ["npm"] : failedStep === "post-install" ? ["npm", "post-install"] : ["migration", "doctor"],
+			);
 		} finally {
-			process.argv[1] = savedArgv1;
 			temp.cleanup();
 		}
 	});
+}
+
+it("hands post-install checks to the installed binary with the selected options", async () => {
+	const temp = createLifecycleHome("clio-coder-upgrade-handoff-");
+	const calls: string[] = [];
+	try {
+		const { code } = await upgrade(temp, ["--channel", "beta", "--skip-migrations"], {
+			detectInstallMethod: () => "npm",
+			lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
+			runNpmInstall: async (channel) => {
+				calls.push(`install:${channel}`);
+			},
+			runPostInstallUpgrade: async (options) => {
+				calls.push(`post:${options.channel}:${options.skipMigrations}`);
+			},
+			runPending: async () => {
+				throw new Error("the old process must not run migrations");
+			},
+			runDoctorFixAfterInstall: async () => {
+				throw new Error("the old process must not run doctor");
+			},
+		});
+		strictEqual(code, 0);
+		deepStrictEqual(calls, ["install:beta", "post:beta:true"]);
+	} finally {
+		temp.cleanup();
+	}
 });
