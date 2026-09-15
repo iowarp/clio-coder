@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { TreeSnapshot, TreeSnapshotNode } from "../../domains/session/tree/navigator.js";
 import {
@@ -21,17 +22,19 @@ const VISIBLE_ROWS = 16;
  * /tree navigator overlay. Behaviors:
  *   - One row per node, indented two spaces per branch level (not per message)
  *   - Shift+T toggles operator-local timestamps on/off
+ *   - `p` filters to nodes whose session cwd matches the current cwd
+ *   - `s` cycles between tree order and most recent first
  *   - `e` enters label edit submode (Enter commits, Esc cancels)
  *   - Enter on a row switches the active append point to that turn id
  *   - Esc closes the overlay
- *
- * Cwd-toggle (`p`) and sort-order (`s`) are not implemented.
  *
  * The overlay queries `session.tree()` on open and after any mutation so
  * label edits are reflected without a close/reopen cycle.
  */
 export interface OpenTreeOverlayDeps {
-	session: SessionContract;
+	session: Pick<SessionContract, "tree" | "editLabel">;
+	/** The current workspace directory. Defaults to the process cwd. */
+	cwd?: string;
 	onSwitchTurn: (turnId: string) => void;
 	onClose: () => void;
 }
@@ -204,6 +207,8 @@ export class TreeOverlayView implements Component {
 	private highlight = 0;
 	private scrollTop = 0;
 	private showTimestamps = false;
+	private currentCwdOnly = false;
+	private sortOrder: "tree" | "recent" = "tree";
 	private submode: Submode = "browse";
 	private labelBuffer = "";
 	private readonly labelInput = new Input();
@@ -221,7 +226,8 @@ export class TreeOverlayView implements Component {
 		initial: TreeSnapshot | null,
 	) {
 		this.snapshot = initial;
-		this.rows = initial ? flattenTreeSnapshot(initial) : [];
+		this.rows = [];
+		this.rebuildRows();
 	}
 
 	private invalidateLayout(): void {
@@ -242,15 +248,27 @@ export class TreeOverlayView implements Component {
 		return this.rows[this.highlight] ?? null;
 	}
 
+	private rebuildRows(): void {
+		const selectedId = this.currentRow()?.node.id;
+		const snapshot = this.snapshot;
+		const matchesCwd = snapshot?.meta.cwd && resolve(snapshot.meta.cwd) === resolve(this.deps.cwd ?? process.cwd());
+		this.rows = snapshot && (!this.currentCwdOnly || matchesCwd) ? flattenTreeSnapshot(snapshot) : [];
+		if (this.sortOrder === "recent") {
+			this.rows.sort((a, b) => Date.parse(b.node.at) - Date.parse(a.node.at));
+			this.rows = this.rows.map((row) => ({ ...row, depth: 0 }));
+		}
+		const selectedIndex = this.rows.findIndex((row) => row.node.id === selectedId);
+		this.highlight = selectedIndex < 0 ? 0 : selectedIndex;
+		this.invalidateLayout();
+	}
+
 	private refresh(): void {
 		try {
 			this.snapshot = this.deps.session.tree();
-			this.rows = flattenTreeSnapshot(this.snapshot);
 		} catch {
 			this.snapshot = null;
-			this.rows = [];
 		}
-		this.invalidateLayout();
+		this.rebuildRows();
 	}
 
 	render(width: number): string[] {
@@ -262,7 +280,14 @@ export class TreeOverlayView implements Component {
 		if (this.rows.length === 0) {
 			// The overlay navigates the CURRENT session's turn tree; an empty
 			// tree means no turns yet, not a missing session list.
-			lines.push(theme.fg("muted", "(no turns in this session yet)"));
+			lines.push(
+				theme.fg(
+					"muted",
+					this.currentCwdOnly && this.snapshot && Object.keys(this.snapshot.nodesById).length > 0
+						? "(no turns match the current cwd; press p to show all)"
+						: "(no turns in this session yet)",
+				),
+			);
 		} else {
 			const end = Math.min(this.rows.length, this.scrollTop + VISIBLE_ROWS);
 			for (let i = this.scrollTop; i < end; i++) {
@@ -303,6 +328,8 @@ export class TreeOverlayView implements Component {
 			{ key: "↑↓", verb: "move" },
 			{ key: "Enter", verb: "switch" },
 			{ key: "e", verb: "label" },
+			{ key: "p", verb: `cwd:${this.currentCwdOnly ? "current" : "all"}` },
+			{ key: "s", verb: this.sortOrder },
 			{ key: "Shift+T", verb: `ts:${tsLabel}` },
 		]);
 	}
@@ -328,7 +355,17 @@ export class TreeOverlayView implements Component {
 			this.deps.onClose();
 			return;
 		}
-		// Empty snapshot: only Esc is meaningful; swallow everything else.
+		if (data === "p") {
+			this.currentCwdOnly = !this.currentCwdOnly;
+			this.rebuildRows();
+			return;
+		}
+		if (data === "s") {
+			this.sortOrder = this.sortOrder === "tree" ? "recent" : "tree";
+			this.rebuildRows();
+			return;
+		}
+		// Filtering and sorting remain available when the visible list is empty.
 		if (this.rows.length === 0) return;
 		// Arrows: CSI A/B for up/down.
 		if (matchesKey(data, "up")) {
@@ -406,7 +443,7 @@ export class TreeOverlayView implements Component {
 	}
 }
 
-function loadInitialSnapshot(session: SessionContract): TreeSnapshot | null {
+function loadInitialSnapshot(session: OpenTreeOverlayDeps["session"]): TreeSnapshot | null {
 	try {
 		return session.tree();
 	} catch {

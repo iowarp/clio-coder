@@ -198,7 +198,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/resume` | `/resume` | Resume a past session |
 | `/new` | `/new` | Start a fresh session |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
-| `/tree` | `/tree` | Open session tree navigator |
+| `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd and `s` to cycle tree order or most recent first. |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
