@@ -39,6 +39,12 @@ export const DECLARED_CHECK_KINDS: ReadonlyArray<DeclaredCheckKind> = ["command"
 export interface DeclaredNumericCompare {
 	/** Repository-relative JSON file of the same shape as the command's stdout. */
 	reference: string;
+	/**
+	 * At least one of `relative`, `absolute`, `ulp`, plus the optional rule
+	 * fields `combine` (`all`, the default, or `any`) and `nonFinite` (`fail`,
+	 * the default, or `match`). A catalog that omits the rule fields judges
+	 * exactly as before they existed.
+	 */
 	tolerance: NumericTolerance;
 }
 
@@ -80,7 +86,14 @@ export type ProjectCatalogLoadResult = { ok: true; source: DeclaredCheckSource |
 
 const ROOT_FIELDS = new Set(["version", "checks"]);
 const CHECK_FIELDS = new Set(["id", "description", "command", "cwd", "timeoutMs", "tags"]);
-/** Version 2 adds the kind and its parameters; every one is optional and kind-gated. */
+/**
+ * Version 2 adds the kind and its parameters; every one is optional and
+ * kind-gated. The numeric tolerance object's own fields (`relative`,
+ * `absolute`, `ulp`, `combine`, `nonFinite`) are validated by
+ * `normalizeNumericTolerance`, so this version admits a `combine` or
+ * `nonFinite` rule without a catalog version bump: a file that omits them
+ * keeps the original strict-conjunction, non-finite-fails judgement.
+ */
 const CHECK_FIELDS_V2 = new Set([...CHECK_FIELDS, "kind", "reference", "tolerance", "budget", "baseline"]);
 const TAG_PATTERN = /^[a-z0-9][a-z0-9._-]*$/;
 const SHELL_EXECUTABLES = new Set([

@@ -1,17 +1,31 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { runHostVerification } from "../../src/domains/dispatch/host-verification.js";
 import { loadProjectVerifierCatalog, parseProjectVerifierCatalogText } from "../../src/tools/verify/catalog.js";
+import { verifyTool } from "../../src/tools/verify/index.js";
 import {
 	compareNumeric,
 	normalizeNumericTolerance,
 	parseNumericPayload,
+	renderNumericReport,
 	ulpDistance,
 } from "../../src/tools/verify/numeric.js";
-import { extractNumericPayloadText, runProjectCheck } from "../../src/tools/verify/scripts.js";
+import {
+	extractNumericPayloadText,
+	JUDGED_CHECK_MAX_OUTPUT_BYTES,
+	runProjectCheck,
+} from "../../src/tools/verify/scripts.js";
+
+/** A report with its text provenance removed, for comparing verdicts judged from differently labeled inputs. */
+function verdictOf(report: unknown): unknown {
+	if (report === null || typeof report !== "object") return report;
+	const { reference: _reference, actual: _actual, ...verdict } = report as Record<string, unknown>;
+	return verdict;
+}
 
 const roots: string[] = [];
 const originalCwd = process.cwd();
@@ -126,7 +140,7 @@ describe("numeric-compare tolerance math", () => {
 	it("still rejects unrepresentable relative errors and independent absolute or ulp failures", () => {
 		const unbounded = compareNumeric({ v: Number.MAX_VALUE }, { v: Number.MIN_VALUE }, { relative: Number.MAX_VALUE });
 		strictEqual(unbounded.passed, false);
-		strictEqual(unbounded.keys[0]?.worst?.relative, Number.POSITIVE_INFINITY);
+		strictEqual(unbounded.keys[0]?.worst?.relative, "Infinity");
 		deepStrictEqual(unbounded.keys[0]?.failed, ["relative"]);
 		const report = compareNumeric(
 			{ v: -Number.MAX_VALUE / 2 },
@@ -135,7 +149,7 @@ describe("numeric-compare tolerance math", () => {
 		);
 		strictEqual(report.passed, false);
 		strictEqual(report.keys[0]?.worst?.relative, 1.5);
-		strictEqual(report.keys[0]?.worst?.absolute, Number.POSITIVE_INFINITY);
+		strictEqual(report.keys[0]?.worst?.absolute, "Infinity");
 		deepStrictEqual(report.keys[0]?.failed, ["absolute", "ulp"]);
 	});
 
@@ -174,10 +188,30 @@ describe("numeric-compare tolerance math", () => {
 		deepStrictEqual(failed.keys[0]?.failed, ["ulp"]);
 	});
 
-	it("requires every named tolerance to hold", () => {
+	it("requires every named tolerance to hold unless combine is any", () => {
 		const report = compareNumeric({ v: 1.5 }, { v: 1 }, { relative: 1, absolute: 0.1 });
 		strictEqual(report.passed, false);
+		strictEqual(report.combine, "all");
+		strictEqual(report.nonFinite, "fail");
 		deepStrictEqual(report.keys[0]?.failed, ["absolute"]);
+		deepStrictEqual(report.keys[0]?.held, ["relative"]);
+		deepStrictEqual(report.keys[0]?.violated, ["absolute"]);
+		strictEqual(report.rule, "all of relative<=1, absolute<=0.1 must hold; non-finite values fail");
+		const any = compareNumeric({ v: 1.5 }, { v: 1 }, { relative: 1, absolute: 0.1, combine: "any" });
+		strictEqual(any.passed, true);
+		strictEqual(any.combine, "any");
+		deepStrictEqual(any.keys[0]?.failed, []);
+		deepStrictEqual(any.keys[0]?.held, ["relative"]);
+		deepStrictEqual(any.keys[0]?.violated, ["absolute"]);
+		strictEqual(any.rule, "any of relative<=1, absolute<=0.1 may hold; non-finite values fail");
+		match(any.keys[0]?.detail ?? "", /^v: within tolerance by relative \(absolute violated\), worst actual=1\.5/u);
+		const rendered = renderNumericReport(any);
+		match(rendered, /\nrule: any of relative<=1, absolute<=0\.1 may hold; non-finite values fail\n/u);
+		deepStrictEqual(
+			any.tolerance,
+			{ relative: 1, absolute: 0.1, combine: "any" },
+			"declared tolerance is echoed as written",
+		);
 	});
 
 	it("compares arrays elementwise, reports the worst element, and fails on length mismatch", () => {
@@ -306,6 +340,27 @@ describe("verifier catalog kinds", () => {
 				{ version: 2, checks: [{ ...base, kind: "command", reference: "ref.json" }] },
 				/kind 'command' does not accept reference/u,
 			],
+			[
+				{
+					version: 2,
+					checks: [{ ...base, kind: "numeric-compare", reference: "ref.json", tolerance: { ulp: 1, combine: "either" } }],
+				},
+				/^\.clio-coder\/verifiers\.yaml: checks\[0\]\.tolerance\.combine must be all or any$/u,
+			],
+			[
+				{
+					version: 2,
+					checks: [{ ...base, kind: "numeric-compare", reference: "ref.json", tolerance: { ulp: 1, nonFinite: "ignore" } }],
+				},
+				/^\.clio-coder\/verifiers\.yaml: checks\[0\]\.tolerance\.nonFinite must be fail or match$/u,
+			],
+			[
+				{
+					version: 2,
+					checks: [{ ...base, kind: "numeric-compare", reference: "ref.json", tolerance: { combine: "any" } }],
+				},
+				/checks\[0\]\.tolerance must name at least one of relative, absolute, or ulp/u,
+			],
 			[{ version: 3, checks: [] }, /unsupported version 3; supported versions are 1 and 2/u],
 		];
 		for (const [text, expected] of cases) {
@@ -318,6 +373,13 @@ describe("verifier catalog kinds", () => {
 				version: 2,
 				checks: [
 					{ ...base, id: "n", kind: "numeric-compare", reference: "ref.json", tolerance: { relative: 1e-6 } },
+					{
+						...base,
+						id: "o",
+						kind: "numeric-compare",
+						reference: "ref.json",
+						tolerance: { relative: 1e-6, absolute: 1e-9, combine: "any", nonFinite: "match" },
+					},
 					{ ...base, id: "p", kind: "perf-budget", baseline: "b.json", tolerance: { relative: 0.2 } },
 					{ ...base, id: "q", kind: "perf-budget", budget: { wallTimeMs: 50, tolerance: { relative: 0.1 } } },
 				],
@@ -330,11 +392,19 @@ describe("verifier catalog kinds", () => {
 			accepted.source?.checks.map((check) => [check.id, check.kind]),
 			[
 				["n", "numeric-compare"],
+				["o", "numeric-compare"],
 				["p", "perf-budget"],
 				["q", "perf-budget"],
 			],
 		);
-		deepStrictEqual(accepted.source?.checks[1]?.perf, { baseline: "b.json", tolerance: { relative: 0.2 } });
+		deepStrictEqual(accepted.source?.checks[0]?.numeric?.tolerance, { relative: 1e-6 }, "no defaults are filled in");
+		deepStrictEqual(accepted.source?.checks[1]?.numeric?.tolerance, {
+			relative: 1e-6,
+			absolute: 1e-9,
+			combine: "any",
+			nonFinite: "match",
+		});
+		deepStrictEqual(accepted.source?.checks[2]?.perf, { baseline: "b.json", tolerance: { relative: 0.2 } });
 	});
 });
 
@@ -363,12 +433,136 @@ describe("numeric-compare through the verify runner", () => {
 		const result = await runProjectCheck(check);
 		strictEqual(result.kind, "ok", JSON.stringify(result));
 		if (result.kind !== "ok") return;
-		match(result.output, /^numeric-compare passed: 2 key\(s\) within tolerance/u);
-		const report = result.details?.report as { kind: string; passed: boolean; failedKeys: string[] };
+		match(
+			result.output,
+			/^numeric-compare passed: 2 key\(s\) within tolerance\nrule: relative<=1e-6 must hold; non-finite values fail\n/u,
+		);
+		match(
+			result.output,
+			/\nreference: tests\/reference\/stats\.json sha256=[0-9a-f]{12} \(\d+B\)\nactual: sha256=[0-9a-f]{12} \(\d+B\)\n/u,
+		);
+		const report = result.details?.report as {
+			kind: string;
+			passed: boolean;
+			failedKeys: string[];
+			reference?: { source: string; path?: string; sha256: string; bytes: number };
+			actual?: { sha256: string; bytes: number };
+		};
 		strictEqual(report.kind, "numeric-compare");
 		strictEqual(report.passed, true);
 		strictEqual(result.details?.kind, "numeric-compare");
 		strictEqual(result.details?.check, "stats");
+		const referenceText = JSON.stringify({ mean: 1, grid: [1, 2, 3] });
+		deepStrictEqual(report.reference, {
+			source: "reference 'tests/reference/stats.json'",
+			path: "tests/reference/stats.json",
+			sha256: createHash("sha256").update(referenceText).digest("hex"),
+			bytes: Buffer.byteLength(referenceText),
+		});
+		const payloadText = JSON.stringify({ mean: 1.0000001, grid: [1, 2, 3] });
+		deepStrictEqual(report.actual, {
+			sha256: createHash("sha256").update(payloadText).digest("hex"),
+			bytes: Buffer.byteLength(payloadText),
+		});
+		deepStrictEqual(result.details?.judgement, {
+			execution: "succeeded",
+			validation: "passed",
+			scientificValidity: "not established by this check",
+		});
+	});
+
+	it("fails before judgement when the command's output overruns the judged-check ceiling", async () => {
+		const root = workspace({
+			".clio-coder/verifiers.yaml": catalog({
+				id: "flood",
+				description: "Prints more than the ceiling",
+				kind: "numeric-compare",
+				command: [
+					"node",
+					"-e",
+					`const chunk="1".repeat(1<<20);for(let i=0;i<${Math.ceil(JUDGED_CHECK_MAX_OUTPUT_BYTES / (1 << 20)) + 2};i+=1)process.stdout.write(chunk);`,
+				],
+				reference: "ref.json",
+				tolerance: { absolute: 0 },
+				cwd: ".",
+				timeoutMs: 120_000,
+				tags: [],
+			}),
+			"ref.json": JSON.stringify({ mean: 1 }),
+		});
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		if (!loaded.ok || loaded.source === null) throw new Error("catalog must load");
+		const check = loaded.source.checks[0];
+		if (check === undefined) throw new Error("expected a check");
+		const result = await runProjectCheck(check);
+		strictEqual(result.kind, "error");
+		if (result.kind !== "error") return;
+		strictEqual(
+			result.message,
+			`verify: numeric-compare command output exceeded ${JUDGED_CHECK_MAX_OUTPUT_BYTES} bytes before judgement`,
+		);
+		strictEqual(result.details?.outputCapped, true);
+		strictEqual("report" in (result.details ?? {}), false);
+		deepStrictEqual(result.details?.judgement, {
+			execution: "output-capped",
+			validation: "not-run",
+			scientificValidity: "not established by this check",
+		});
+	});
+
+	it("refuses a reference file over the byte ceiling before reading it and reads one exactly at it", async () => {
+		const cap = JUDGED_CHECK_MAX_OUTPUT_BYTES;
+		const root = workspace({
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					{
+						id: "over",
+						description: "Reference past the cap",
+						kind: "numeric-compare",
+						command: printing({ mean: 1 }),
+						reference: "over.json",
+						tolerance: { absolute: 0 },
+						cwd: ".",
+						timeoutMs: 30_000,
+						tags: [],
+					},
+					{
+						id: "at",
+						description: "Reference at the cap",
+						kind: "numeric-compare",
+						command: printing({ mean: 1 }),
+						reference: "at.json",
+						tolerance: { absolute: 0 },
+						cwd: ".",
+						timeoutMs: 30_000,
+						tags: [],
+					},
+				],
+			}),
+			"over.json": `{"mean":1}${" ".repeat(cap - 9)}`,
+			"at.json": `{"mean":1}${" ".repeat(cap - 10)}`,
+		});
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		if (!loaded.ok || loaded.source === null) throw new Error("catalog must load");
+		const [at, over] = loaded.source.checks;
+		if (at === undefined || over === undefined) throw new Error("expected two checks");
+		const refused = await runProjectCheck(over);
+		strictEqual(refused.kind, "error");
+		if (refused.kind !== "error") return;
+		strictEqual(refused.message, `verify: reference 'over.json' exceeds the ${cap}-byte cap (${cap + 1} bytes)`);
+		strictEqual("report" in (refused.details ?? {}), false);
+		deepStrictEqual(refused.details?.judgement, {
+			execution: "succeeded",
+			validation: "not-run",
+			scientificValidity: "not established by this check",
+		});
+		const judged = await runProjectCheck(at);
+		strictEqual(judged.kind, "ok", JSON.stringify(judged));
+		const report = judged.details?.report as { reference?: { bytes: number } };
+		strictEqual(report.reference?.bytes, cap);
 	});
 
 	it("fails with the report when a key is out of tolerance, and before judgement when the command fails", async () => {
@@ -414,11 +608,94 @@ describe("numeric-compare through the verify runner", () => {
 		match(drifted.message, /mean: failed absolute at worst actual=1\.5 expected=1 abs=0\.5/u);
 		const report = drifted.details?.report as { passed: boolean; failedKeys: string[] };
 		deepStrictEqual(report.failedKeys, ["mean"]);
+		deepStrictEqual(drifted.details?.judgement, {
+			execution: "succeeded",
+			validation: "failed",
+			scientificValidity: "not established by this check",
+		});
 		const crashed = await runProjectCheck(crash);
 		strictEqual(crashed.kind, "error");
 		if (crashed.kind !== "error") return;
 		match(crashed.message, /numeric-compare command exited with code 3 before judgement/u);
 		strictEqual("report" in (crashed.details ?? {}), false);
+		deepStrictEqual(crashed.details?.judgement, {
+			execution: "failed",
+			validation: "not-run",
+			scientificValidity: "not established by this check",
+		});
+	});
+
+	it("attaches the exit-code judgement to a plain command check", async () => {
+		const root = workspace({
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 2,
+				checks: [
+					{ id: "ok", description: "Exits 0", command: ["node", "-e", "0"], cwd: ".", timeoutMs: 30_000, tags: [] },
+					{
+						id: "bad",
+						description: "Exits 4",
+						command: ["node", "-e", "process.exit(4)"],
+						cwd: ".",
+						timeoutMs: 30_000,
+						tags: [],
+					},
+				],
+			}),
+		});
+		process.chdir(root);
+		const loaded = loadProjectVerifierCatalog(root);
+		if (!loaded.ok || loaded.source === null) throw new Error("catalog must load");
+		const [bad, good] = loaded.source.checks;
+		if (bad === undefined || good === undefined) throw new Error("expected two checks");
+		const passed = await runProjectCheck(good);
+		strictEqual(passed.kind, "ok");
+		deepStrictEqual(passed.details?.judgement, {
+			execution: "succeeded",
+			validation: "exit-code",
+			scientificValidity: "not established by this check",
+		});
+		const failed = await runProjectCheck(bad);
+		strictEqual(failed.kind, "error");
+		deepStrictEqual(failed.details?.judgement, {
+			execution: "failed",
+			validation: "exit-code",
+			scientificValidity: "not established by this check",
+		});
+	});
+});
+
+describe("package-script checks through the verify tool", () => {
+	it("carries the exit-code judgement on every package script it runs and none on a refusal", async () => {
+		const root = workspace({
+			"package.json": JSON.stringify({ scripts: { test: "node -e 0", lint: "exit 4", start: "node -e 0" } }),
+		});
+		process.chdir(root);
+		const passed = await verifyTool.run({ check: "test" });
+		strictEqual(passed.kind, "ok", JSON.stringify(passed));
+		strictEqual(passed.details?.exitCode, 0);
+		deepStrictEqual(passed.details?.argv, ["npm", "run", "test"]);
+		deepStrictEqual(passed.details?.source, { kind: "package.json", path: join(root, "package.json") });
+		deepStrictEqual(passed.details?.judgement, {
+			execution: "succeeded",
+			validation: "exit-code",
+			scientificValidity: "not established by this check",
+		});
+		const failed = await verifyTool.run({ check: "lint" });
+		strictEqual(failed.kind, "error");
+		ok(typeof failed.details?.exitCode === "number" && failed.details.exitCode !== 0);
+		deepStrictEqual(failed.details?.judgement, {
+			execution: "failed",
+			validation: "exit-code",
+			scientificValidity: "not established by this check",
+		});
+		// A script outside the verification family and a missing script are
+		// refused before anything runs, so there is no execution to judge.
+		for (const check of ["start", "test:missing"]) {
+			const refused = await verifyTool.run({ check });
+			strictEqual(refused.kind, "error", check);
+			strictEqual("judgement" in (refused.details ?? {}), false, check);
+			strictEqual("exitCode" in (refused.details ?? {}), false, check);
+		}
 	});
 });
 
@@ -469,7 +746,14 @@ describe("numeric-compare under host verification", () => {
 			const report = host?.checks[0]?.report;
 			ok(report?.kind === "numeric-compare");
 			strictEqual(report.keys.length, 1);
-			deepStrictEqual(report, ordinary.details?.report);
+			// Ordinary verify labels the reference by its catalog path and host
+			// verification by its sealed absolute path, so the provenance differs
+			// while the verdict must not; the digests name the same bytes.
+			deepStrictEqual(verdictOf(report), verdictOf(ordinary.details?.report));
+			const ordinaryReport = ordinary.details?.report as { reference?: { path?: string; sha256: string } };
+			strictEqual(ordinaryReport.reference?.path, "ref.json");
+			strictEqual(report.reference?.sha256, ordinaryReport.reference?.sha256);
+			strictEqual(report.reference?.path, join(root, "ref.json"), "host verification labels the sealed path");
 		}
 	});
 
@@ -523,7 +807,8 @@ describe("numeric-compare under host verification", () => {
 			const result = host?.checks[0];
 			strictEqual(result?.exitCode, stdout === "" ? 1 : 0);
 			if (stdout === "") match(result?.outputTail ?? "", /command output.*not valid JSON/u);
-			else deepStrictEqual(result?.report, ordinary.details?.report);
+			// Same verdict; the reference labels differ between the two paths.
+			else deepStrictEqual(verdictOf(result?.report), verdictOf(ordinary.details?.report));
 			ok(result?.artifactPath);
 			ok(readFileSync(result.artifactPath, "utf8").includes(diagnostic), "stderr remains in the diagnostic artifact");
 		});
