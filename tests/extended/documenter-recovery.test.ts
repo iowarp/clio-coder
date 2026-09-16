@@ -208,7 +208,7 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 }, async () => {
 	const evidence = JSON.stringify({
 		findings: [
-			{ claim: "The fixture imports node assertions", path: "tests/contracts/documenter-recovery.test.ts", line: 1 },
+			{ claim: "The fixture imports node assertions", path: "tests/extended/documenter-recovery.test.ts", line: 1 },
 		],
 		needsSplit: false,
 		proposedSubtasks: [],
@@ -231,9 +231,13 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 		});
 		const first = receipts.find((r) => r.agentId === "scout");
 		const dependent = receipts.find((r) => r.agentId === "documenter");
+		strictEqual(first?.outcome, "succeeded");
+		strictEqual(first?.quality.resultContract?.conformance, "pass");
 		strictEqual(first?.quality.resultContract?.quality, "pass");
 		strictEqual(dependent?.outcome, "succeeded");
 		strictEqual(dependent?.quality.resultContract?.conformance, "pass");
+		// A conforming report does not turn unobserved validation claims into measured quality.
+		strictEqual(dependent?.quality.resultContract?.quality, "unmeasured");
 		strictEqual(dependent?.pipeline?.fromRunId, first?.runId);
 		strictEqual(dependent?.output?.text, report(LIMITATION));
 		deepStrictEqual(bundle.contract.snapshot().running, []);

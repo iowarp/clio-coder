@@ -17,6 +17,30 @@ import { makeScratchHome } from "../harness/scratch-env.js";
 
 const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;
 
+function hasTool(request: Record<string, unknown>, name: string): boolean {
+	return (
+		Array.isArray(request.tools) &&
+		request.tools.some((tool) => (tool as { function?: { name?: string } })?.function?.name === name)
+	);
+}
+
+function assertTerminalArtifact(stdout: string): void {
+	const events = stdout
+		.split("\n")
+		.filter(Boolean)
+		.map((line) => JSON.parse(line));
+	const results = events.filter((event) => event.type === "tool_execution_end" && event.toolName === "gateway");
+	strictEqual(results.length, 1);
+	strictEqual(results[0].isError, false);
+	strictEqual(results[0].result.details.capability, "artifact");
+	strictEqual(results[0].result.terminate, true);
+	const calls = events.filter((event) => event.type === "tool_execution_start" && event.toolName === "gateway");
+	strictEqual(calls.length, 1);
+	strictEqual(calls[0].toolCallId, results[0].toolCallId);
+	strictEqual(calls[0].args.op, "call");
+	strictEqual(calls[0].args.capability, "artifact");
+}
+
 function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 	return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
 		execFile(
@@ -38,7 +62,10 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 	test(`built headless artifact and eval: ${scenario}`, async () => {
 		const scratch = makeScratchHome("clio-coder-headless-artifact-");
 		const fixture = await startOpenAICompatFixture("unexpected follow-up", {
-			toolCall: { name: "artifact", arguments: { kind: "report", content: "fixture report\n" } },
+			toolCall: {
+				name: "gateway",
+				arguments: { op: "call", capability: "artifact", args: { kind: "report", content: "fixture report\n" } },
+			},
 			usage: {
 				prompt_tokens: 17,
 				completion_tokens: 5,
@@ -125,8 +152,7 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 			const stderr = String(result.artifacts.stderr);
 			doesNotMatch(stderr, /auto-build failed|receipt write failed/u);
 			if (succeeded) {
-				match(stdout, /"toolName":"artifact"/u);
-				match(stdout, /"terminate":true/u);
+				assertTerminalArtifact(stdout);
 				doesNotMatch(stdout, /unexpected follow-up/u);
 				const events = stdout
 					.split("\n")
@@ -154,6 +180,11 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 			strictEqual(
 				fixture.requests.filter((request) => request.stream !== false).length,
 				scenario.startsWith("recovered") ? 2 : 1,
+			);
+			ok(
+				fixture.requests
+					.filter((request) => request.stream !== false)
+					.every((request) => hasTool(request, "gateway") && !hasTool(request, "artifact")),
 			);
 			const calls = JSON.parse(String(result.artifacts.callLedger)) as unknown[];
 			const tracked = result.verdict?.trackedMetrics;
@@ -223,16 +254,17 @@ for (const scenario of ["clean", "recovered", "recovered-gated", "terminal-error
 // contract, then ends the turn with the artifact tool.
 test("built headless artifact: a completed dispatch builds its evidence under a fresh pinned state dir", async () => {
 	const scratch = makeScratchHome("clio-coder-headless-artifact-dispatch-");
-	const hasTool = (request: Record<string, unknown>, name: string): boolean =>
-		Array.isArray(request.tools) &&
-		request.tools.some((tool) => (tool as { function?: { name?: string } })?.function?.name === name);
 	const fixture = await startOpenAICompatFixture("worker done: nothing to change\n", {
 		// The worker's own conversation has no dispatch tool and gets the text
 		// reply, which the artifact-report contract accepts as-is.
 		toolCall: (request) => {
 			if (!hasTool(request, "dispatch")) return null;
 			if (!hasToolExchange(request)) return { name: "dispatch", arguments: { task: "Say hello", agent: "wiki-writer" } };
-			return { name: "artifact", arguments: { kind: "report", content: "fixture report\n" }, id: "call-clio-tool-2" };
+			return {
+				name: "gateway",
+				arguments: { op: "call", capability: "artifact", args: { kind: "report", content: "fixture report\n" } },
+				id: "call-clio-tool-2",
+			};
 		},
 	});
 	try {
@@ -258,7 +290,16 @@ test("built headless artifact: a completed dispatch builds its evidence under a 
 		strictEqual(direct.code, 0, direct.stderr);
 		doesNotMatch(direct.stderr, /auto-build failed|receipt write failed/u);
 		match(direct.stdout, /"toolName":"dispatch"/u);
-		match(direct.stdout, /"toolName":"artifact"/u);
+		assertTerminalArtifact(direct.stdout);
+		strictEqual(readFileSync(join(workspace, ".clio-coder/artifacts/REPORT.md"), "utf8"), "fixture report\n");
+		const streaming = fixture.requests.filter((request) => request.stream !== false);
+		// One parent dispatch, one worker reply, and one terminal gateway call.
+		// Repeated calls to the obsolete direct artifact surface used to grow
+		// this history until the fixture answered a checkpoint request with worker prose.
+		strictEqual(streaming.length, 3);
+		strictEqual(streaming.filter((request) => hasTool(request, "dispatch")).length, 2);
+		ok(streaming.every((request) => !hasTool(request, "artifact")));
+		ok(streaming.filter((request) => hasTool(request, "dispatch")).every((request) => hasTool(request, "gateway")));
 		const journal = readRunJournal(stateDir);
 		ok(journal);
 		const dispatched = journal.receipts.filter((receipt) => receipt.agentId === "wiki-writer");
@@ -288,7 +329,10 @@ test("built headless artifact and eval: task deadline ends the Clio run it is ti
 	// The model answers the artifact call only long after the deadline. A run
 	// the deadline never reached would go on to write the artifact.
 	const fixture = await startOpenAICompatFixture("unexpected follow-up", {
-		toolCall: { name: "artifact", arguments: { kind: "report", content: "fixture report\n" } },
+		toolCall: {
+			name: "gateway",
+			arguments: { op: "call", capability: "artifact", args: { kind: "report", content: "fixture report\n" } },
+		},
 		responseHeaderDelaysMs: [30_000],
 	});
 	try {
@@ -347,7 +391,7 @@ test("built headless artifact and eval: task deadline ends the Clio run it is ti
 		strictEqual(result.pass, false, detail);
 		strictEqual(result.failureClass, "runner_failed", detail);
 		strictEqual(result.metrics["task.solved"], false, detail);
-		doesNotMatch(String(result.artifacts.stdout), /"toolName":"artifact"/u);
+		doesNotMatch(String(result.artifacts.stdout), /"toolName":"(?:artifact|gateway)"/u);
 		strictEqual(result.metrics["receipt.sealed"], true, detail);
 		strictEqual(result.metrics["receipt.count"], 1, detail);
 		strictEqual(result.metrics["receipt.integrityValid"], true, detail);
