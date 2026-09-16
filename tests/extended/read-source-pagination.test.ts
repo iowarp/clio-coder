@@ -1,10 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { closeSync, openSync, statSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, it } from "node:test";
+import { after, afterEach, before, beforeEach, describe, it } from "node:test";
 import { configureGuardrails } from "../../src/core/guardrails.js";
 import type { Observation } from "../../src/tools/observation.js";
-import { readTool } from "../../src/tools/read.js";
+import { type ReadFileIdentity, readTool } from "../../src/tools/read.js";
 import { makeScratchHome, type ScratchHome } from "../harness/scratch-env.js";
 
 describe("read source-line pagination through the source tool API", () => {
@@ -233,5 +233,116 @@ describe("read source-line pagination through the source tool API", () => {
 		const blank = await read(`head\n${"é".repeat(700)}\n\n`, { tail: 2, line_numbers: true });
 		strictEqual(blank.body, "3 | ");
 		strictEqual(blank.observation.shownCount, 1);
+	});
+});
+
+describe("read windowed reader on a 300 MB sparse file", () => {
+	const WIDTH = 64;
+	const HEAD_LINES = 2048; // 128 KiB of real text before the hole, so the first scan chunk is real.
+	const TAIL_LINES = 16384; // 1 MiB of real text after it.
+	const SIZE = 300 * 1024 * 1024;
+	const HOLE_LINE = HEAD_LINES + 1;
+	const TOTAL_LINES = HEAD_LINES + 1 + TAIL_LINES;
+	const RSS_LIMIT = 64 * 1024 * 1024;
+	let scratch: ScratchHome;
+	let path: string;
+
+	/** A 64-byte line labelled with its own physical line number. */
+	function fixedLine(index: number): string {
+		const label = `L${String(index).padStart(10, "0")} `;
+		return `${label}${"x".repeat(WIDTH - label.length - 1)}\n`;
+	}
+
+	function writeLines(fd: number, first: number, last: number, position: number): void {
+		const perChunk = Math.floor((1024 * 1024) / WIDTH);
+		let cursor = position;
+		for (let start = first; start <= last; start += perChunk) {
+			const end = Math.min(last, start + perChunk - 1);
+			const chunk = Buffer.from(Array.from({ length: end - start + 1 }, (_, i) => fixedLine(start + i)).join(""));
+			writeSync(fd, chunk, 0, chunk.length, cursor);
+			cursor += chunk.length;
+		}
+	}
+
+	before(() => {
+		scratch = makeScratchHome("clio-coder-read-300mb-");
+		path = join(scratch.dir, "huge.log");
+		// Real head lines, a hole of zeros that forms one physical line, one
+		// terminator, real tail lines. The hole is never shown, but a reader
+		// that pulls the whole file into memory materializes every zero.
+		const fd = openSync(path, "w");
+		try {
+			writeLines(fd, 1, HEAD_LINES, 0);
+			const terminator = SIZE - TAIL_LINES * WIDTH - 1;
+			writeSync(fd, Buffer.from("\n"), 0, 1, terminator);
+			writeLines(fd, HEAD_LINES + 2, TOTAL_LINES, terminator + 1);
+		} finally {
+			closeSync(fd);
+		}
+		strictEqual(statSync(path).size, SIZE);
+	});
+	after(() => {
+		scratch.cleanup();
+	});
+
+	async function measured(args: { offset?: number; limit?: number; tail?: number; line_numbers?: boolean }) {
+		const before = process.memoryUsage().rss;
+		const result = await readTool.run({ path, ...args });
+		const growth = process.memoryUsage().rss - before;
+		ok(growth < RSS_LIMIT, `rss grew by ${growth} bytes during read(${JSON.stringify(args)})`);
+		return result;
+	}
+
+	function body(output: string): string {
+		const notice = output.indexOf("\n\n[read:");
+		return notice < 0 ? output : output.slice(0, notice);
+	}
+
+	it("tails the last lines through a bounded window with an honest N+ total", async () => {
+		const warm = await readTool.run({ path, tail: 1 });
+		ok(warm.kind === "ok");
+		const result = await measured({ tail: 5 });
+		ok(result.kind === "ok");
+		strictEqual(body(result.output), Array.from({ length: 5 }, (_, i) => fixedLine(TOTAL_LINES - 4 + i)).join(""));
+		const observation = result.details?.observation as Observation;
+		strictEqual(observation.shownCount, 5);
+		strictEqual(observation.totalCount, null);
+		strictEqual(observation.totalBytes, SIZE);
+		strictEqual(observation.next, "tail=10");
+		match(result.output, /\[read: 5\/5\+ lines shown \(320B of 300\.0MB\) \| next: tail=10\]$/);
+		const file = result.details?.file as ReadFileIdentity;
+		strictEqual(file.bytes, SIZE);
+		strictEqual(file.mtimeMs, statSync(path).mtimeMs);
+	});
+
+	it("reads offset/limit windows near the end without holding the file", async () => {
+		const offset = TOTAL_LINES - 9;
+		const result = await measured({ offset, limit: 5 });
+		ok(result.kind === "ok");
+		strictEqual(body(result.output), Array.from({ length: 5 }, (_, i) => fixedLine(offset + i)).join(""));
+		const observation = result.details?.observation as Observation;
+		strictEqual(observation.totalCount, null);
+		strictEqual(observation.next, `offset=${offset + 5}`);
+		match(result.output, /\[read: 5\/5\+ lines shown \(320B of 300\.0MB\) \| next: offset=\d+\]$/);
+		const numbered = await measured({ offset: HEAD_LINES + 2, limit: 1, line_numbers: true });
+		ok(numbered.kind === "ok");
+		strictEqual(body(numbered.output), `${HEAD_LINES + 2} | ${fixedLine(HEAD_LINES + 2)}`);
+	});
+
+	it("scans to EOF for a beyond-end offset and still reports the exact total in bounded memory", async () => {
+		const beyond = await measured({ offset: TOTAL_LINES + 1 });
+		ok(beyond.kind === "error");
+		match(beyond.message, new RegExp(`beyond end of file \\(${TOTAL_LINES} lines total\\)`));
+		strictEqual((beyond.details?.file as ReadFileIdentity).bytes, SIZE);
+		const last = await measured({ offset: TOTAL_LINES });
+		ok(last.kind === "ok");
+		strictEqual(body(last.output), fixedLine(TOTAL_LINES));
+		strictEqual((last.details?.observation as Observation).truncated, false);
+	});
+
+	it("refuses the zero-filled line as binary with the absolute NUL offset", async () => {
+		const hole = await measured({ offset: HOLE_LINE });
+		ok(hole.kind === "error");
+		match(hole.message, new RegExp(`looks binary: NUL byte at byte offset ${HEAD_LINES * WIDTH} of 300\\.0MB`));
 	});
 });
