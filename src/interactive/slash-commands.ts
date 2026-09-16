@@ -1,3 +1,4 @@
+import { mcpCommandOutput } from "../cli/mcp.js";
 import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
@@ -135,6 +136,7 @@ export interface LibraryBrowseRequest {
 }
 
 type SlashCommandVariant =
+	| { kind: "mcp"; argv: string[] }
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
@@ -1225,6 +1227,29 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		fromArgs: fromArgsOrUsage("prompts", { kind: "resources", tab: "prompt" }),
 		handle(_command, ctx) {
 			ctx.openSkillsHub?.({ tab: "prompt" });
+		},
+	},
+	{
+		name: "mcp",
+		description: "List MCP servers or manage explicit trust with trust <id> [class] and untrust <id>",
+		group: "Inspect",
+		kinds: ["mcp"],
+		args: {
+			positionals: [
+				{ name: "action", required: false, values: ["list", "trust", "untrust"] },
+				{ name: "id", required: false },
+				{ name: "class", required: false },
+			],
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "mcp", reason: parsed.error };
+			const [action = "list", id, actionClass] = parsed.positionals;
+			return { kind: "mcp", argv: [action, ...(id ? [id] : []), ...(actionClass ? ["--action-class", actionClass] : [])] };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "mcp") return;
+			const result = mcpCommandOutput(command.argv);
+			ctx.notice(result.code ? "error" : "info", result.text);
 		},
 	},
 	{

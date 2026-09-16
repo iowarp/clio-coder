@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -14,6 +14,10 @@ import {
 } from "../../src/domains/dispatch/host-verification.js";
 import { declaredScopeIntent } from "../../src/domains/dispatch/intent.js";
 import { adaptRunReceiptValidationStatus } from "../../src/domains/evidence/trust-status.js";
+
+import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
+import { JUDGED_CHECK_MAX_OUTPUT_BYTES, runProjectCheck } from "../../src/tools/verify/scripts.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
@@ -153,6 +157,32 @@ describe("host verification judgment identity", () => {
 			request: { resolvedVerification: [resolvedCheck] },
 			workerSuccessful: true,
 			stateDir: scratch.stateDir,
+		});
+	}
+
+	for (const field of ["combine", "nonFinite"] as const) {
+		it(`invalidates memo evidence when tolerance ${field} changes and seals the reference path`, async () => {
+			const scratch = makeScratch();
+			const reference = join(scratch.project, "reference.json");
+			writeFileSync(reference, '{"value":2}');
+			const base: ResolvedCheck = {
+				...measurement(scratch),
+				kind: "numeric-compare",
+				numeric: { reference, tolerance: { absolute: 0, combine: "all", nonFinite: "fail" } },
+			};
+			const first = await verify(scratch, "first", base);
+			strictEqual(first?.status, "verified");
+			const report = first?.checks[0]?.report;
+			ok(report?.kind === "numeric-compare");
+			strictEqual(report.reference?.path, reference);
+			const changed = structuredClone(base);
+			ok(changed.numeric);
+			if (field === "combine") changed.numeric.tolerance.combine = "any";
+			else changed.numeric.tolerance.nonFinite = "match";
+			const second = await verify(scratch, "changed", changed);
+			strictEqual(second?.status, "verified");
+			strictEqual(second?.checks[0]?.memo, false);
+			strictEqual(runCount(scratch), 2);
 		});
 	}
 
@@ -612,5 +642,119 @@ describe("batch-settled host verification", () => {
 		strictEqual(none, undefined);
 		deepStrictEqual(failed, { status: "skipped", reason: "worker_not_successful", checks: [] });
 		strictEqual(runCount(scratch), 1);
+	});
+});
+
+describe("host verification capture and provenance parity", () => {
+	for (const size of [2 * 1024 * 1024, JUDGED_CHECK_MAX_OUTPUT_BYTES + 4096]) {
+		it(`agrees with direct verification for ${size} bytes of numeric output`, async () => {
+			const env = await isolateClioEnv("clio-host-capture-");
+			const previous = process.cwd();
+			try {
+				const scratch = makeScratch();
+				process.chdir(scratch.project);
+				const reference = join(scratch.project, "reference.json");
+				writeFileSync(reference, '{"value":2}');
+				const argv = [process.execPath, "-e", `process.stdout.write(" ".repeat(${size}) + '{"value":2}');`];
+				mkdirSync(join(scratch.project, ".clio-coder"), { recursive: true });
+				writeFileSync(
+					join(scratch.project, ".clio-coder", "verifiers.yaml"),
+					JSON.stringify({
+						version: 2,
+						checks: [
+							{
+								id: "value",
+								description: "Large measurement",
+								kind: "numeric-compare",
+								command: argv,
+								reference: "reference.json",
+								tolerance: { absolute: 0 },
+								cwd: ".",
+								timeoutMs: 30_000,
+								tags: [],
+							},
+						],
+					}),
+				);
+				const loaded = loadProjectVerifierCatalog(scratch.project);
+				ok(loaded.ok && loaded.source);
+				const declared = loaded.source.checks[0];
+				ok(declared);
+				const direct = await runProjectCheck(declared);
+				const host = await runHostVerification({
+					runId: "large",
+					workerSuccessful: true,
+					stateDir: scratch.stateDir,
+					request: {
+						resolvedVerification: [
+							{
+								check: "value",
+								argv,
+								cwd: scratch.project,
+								timeoutMs: 30_000,
+								kind: "numeric-compare",
+								numeric: { reference, tolerance: { absolute: 0 } },
+							},
+						],
+					},
+				});
+				const check = host?.checks[0];
+				ok(check);
+				if (size < JUDGED_CHECK_MAX_OUTPUT_BYTES) {
+					strictEqual(direct.kind, "ok");
+					strictEqual(host?.status, "verified");
+					ok(check.report?.kind === "numeric-compare");
+					strictEqual(check.report.reference?.path, reference);
+					const directReport = direct.details?.report as { reference?: { sha256: string }; actual?: { sha256: string } };
+					strictEqual(check.report.reference?.sha256, directReport.reference?.sha256);
+					strictEqual(check.report.actual?.sha256, directReport.actual?.sha256);
+				} else {
+					strictEqual(direct.kind, "error");
+					if (direct.kind !== "error") return;
+					strictEqual(host?.status, "rejected");
+					strictEqual(check.report, undefined);
+					const reason = `output exceeded ${JUDGED_CHECK_MAX_OUTPUT_BYTES} bytes before judgement`;
+					ok(direct.message.includes(reason));
+					ok(check.outputTail?.includes(reason));
+					match(check.outputTail ?? "", /captured output was truncated/);
+					strictEqual(check.outputTail?.includes("not valid JSON"), false);
+				}
+			} finally {
+				process.chdir(previous);
+				env.restore();
+			}
+		});
+	}
+
+	it("seals absolute paths for both numeric references and performance baselines", async () => {
+		const scratch = makeScratch();
+		const reference = join(scratch.project, "reference.json");
+		const baseline = join(scratch.project, "baseline.json");
+		writeFileSync(reference, '{"value":2}');
+		writeFileSync(baseline, '{"version":1,"wallTimeMs":60000}');
+		const base = {
+			check: "value",
+			argv: [process.execPath, "-e", "console.log(JSON.stringify({ value: 2 }))"],
+			cwd: scratch.project,
+			timeoutMs: 30_000,
+		};
+		const result = await runHostVerification({
+			runId: "provenance",
+			workerSuccessful: true,
+			stateDir: scratch.stateDir,
+			request: {
+				resolvedVerification: [
+					{ ...base, kind: "numeric-compare", numeric: { reference, tolerance: { absolute: 0 } } },
+					{ ...base, kind: "perf-budget", perf: { baseline } },
+				],
+			},
+		});
+		strictEqual(result?.status, "verified");
+		const numeric = result?.checks[0]?.report;
+		const perf = result?.checks[1]?.report;
+		ok(numeric?.kind === "numeric-compare");
+		ok(perf?.kind === "perf-budget");
+		strictEqual(numeric.reference?.path, reference);
+		strictEqual(perf.baseline?.path, baseline);
 	});
 });

@@ -38,7 +38,7 @@ Fields:
   --tags <a,b>            comma-separated catalog tags
   --kind <kind>           command (default), numeric-compare, or perf-budget
   --reference <path>      numeric-compare: repository-relative reference JSON of string -> number | number[]
-  --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?}, at least one;
+  --tolerance <json>      numeric-compare: {"relative"?,"absolute"?,"ulp"?,"combine"?:all|any,"nonFinite"?:fail|match}, at least one numeric bound;
                           perf-budget with --baseline: {"relative"} headroom over the baseline
   --budget-ms <number>    perf-budget: wall-time bound in milliseconds
   --budget-relative <r>   perf-budget with --budget-ms: fractional headroom over the bound

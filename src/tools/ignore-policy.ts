@@ -3,10 +3,11 @@ import { dirname, join } from "node:path";
 import { toPosixPath } from "./path-utils.js";
 
 /**
- * One ignore policy for every path-walking OBSERVE tool. grep (rg), find (fd),
- * and the pure-Node fallback walkers all answer "which parts of the tree are
- * visible" from this module so the three surfaces never disagree about
- * gitignored, generated, or clio-internal paths.
+ * Shared exclusions for path-walking OBSERVE tools. Native rg/fd searches
+ * honor gitignore rules as well as generated-directory and internal-state
+ * exclusions. Pure-Node fallback walkers apply GENERATED_DIRS and internal
+ * exclusions only; they do not interpret .gitignore or .ignore files, so their
+ * visible paths can differ from native searches.
  *
  * The policy has three layers:
  *   1. ALWAYS excluded: clio-internal state and .git. Never searchable unless
@@ -14,7 +15,8 @@ import { toPosixPath } from "./path-utils.js";
  *      .clio-coder explicitly means the caller wants those paths).
  *   2. .gitignore: honored natively by rg/fd. Outside a git repo the binaries
  *      get --no-require-git so plain .gitignore/.ignore files still apply;
- *      inside a repo the default git-aware behavior keeps parent ignore rules
+ *      fallback walkers do not apply this layer. Inside a repo the default
+ *      git-aware behavior keeps parent ignore rules
  *      from leaking across nested-repo boundaries.
  *   3. GENERATED_DIRS: universal build/dependency noise force-excluded even
  *      when a project forgets to gitignore it.

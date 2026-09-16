@@ -260,6 +260,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["fleet", async (subArgs) => (await import("./fleet.js")).runFleetCommand(subArgs)],
 	["library", async (subArgs) => (await import("./library.js")).runLibraryCommand(subArgs)],
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
+	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
 	["web", async (subArgs) => (await import("./web.js")).runWebCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],

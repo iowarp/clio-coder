@@ -5,15 +5,15 @@ import { dirname, join, resolve } from "node:path";
 import { PATH_BOUNDARY_MAX_ENTRIES, pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
-import { judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
+import { JUDGED_CHECK_MAX_OUTPUT_BYTES, judgeNumericTexts, judgePerfTexts } from "../../tools/verify/scripts.js";
 import { FLEET_COMMAND_BASE_ENV, type FleetCommand } from "../agents/fleet-commands.js";
-import { runCodeStep } from "./code-step.js";
+import { CODE_STEP_CAPTURE_MAX_BYTES, runCodeStep } from "./code-step.js";
 import type { DispatchRequest } from "./contract.js";
 import type { RunHostVerification, RunHostVerificationAttribution, RunHostVerificationCheck } from "./types.js";
 import { captureWorkspaceSnapshot } from "./write-boundary.js";
 
 const OUTPUT_TAIL_BYTES = 2_048;
-const MEMO_VERSION = 2;
+const MEMO_VERSION = 3;
 
 type ResolvedCheck = NonNullable<DispatchRequest["resolvedVerification"]>[number];
 
@@ -164,6 +164,7 @@ function judgeResolvedCheck(
 			referenceText,
 			resolvedCheck.numeric.tolerance,
 			`reference '${resolvedCheck.numeric.reference}'`,
+			resolvedCheck.numeric.reference,
 		);
 		if (report instanceof Error) return { exitCode: 1, outputTail: `numeric-compare: ${report.message}` };
 		return { exitCode: report.passed ? 0 : 1, report, outputTail: outputTail(report.summary) };
@@ -214,20 +215,25 @@ async function runResolvedCheck(input: {
 			outputExcerpt: "",
 		};
 	}
+	const judged = resolvedCheck.kind === "numeric-compare" || resolvedCheck.kind === "perf-budget";
+	const captureMaxBytes = judged ? JUDGED_CHECK_MAX_OUTPUT_BYTES : CODE_STEP_CAPTURE_MAX_BYTES;
 	const outcome = await runCodeStep({
 		stepId: `verification-${input.index + 1}-${resolvedCheck.check.replace(/[^a-z0-9._-]/giu, "_")}`,
 		command,
 		workspaceRoot: resolvedCheck.cwd,
 		artifactDir: join(input.stateDir, "artifacts", input.runId, "verification"),
 		env: input.env,
+		maxOutputBytes: captureMaxBytes,
 	});
 	const artifactPath = outcome.record.artifactPaths[0];
-	const judgement = judgeResolvedCheck(
-		resolvedCheck,
-		outcome.record.exitCode,
-		outcome.record.durationMs,
-		outcome.stdout,
-	);
+	// outputTruncated also covers the report excerpt; only capture loss prevents judgement.
+	const judgement =
+		judged && outcome.record.outputTruncated && outcome.record.outputBytes > captureMaxBytes
+			? {
+					exitCode: 1,
+					outputTail: `verify: ${resolvedCheck.kind} command output exceeded ${captureMaxBytes} bytes before judgement; captured output was truncated`,
+				}
+			: judgeResolvedCheck(resolvedCheck, outcome.record.exitCode, outcome.record.durationMs, outcome.stdout);
 	const check: RunHostVerificationCheck = {
 		check: resolvedCheck.check,
 		argv: [...outcome.record.argv],
@@ -307,11 +313,7 @@ function checkDedupeKey(resolvedCheck: ResolvedCheck): string {
 					: {
 							reference: numeric.reference,
 							referenceDigest: sha256(JSON.stringify(readSealedFile(numeric.reference) ?? null)),
-							tolerance: {
-								absolute: numeric.tolerance.absolute,
-								relative: numeric.tolerance.relative,
-								ulp: numeric.tolerance.ulp,
-							},
+							tolerance: numeric.tolerance,
 						},
 			perf:
 				perf === undefined

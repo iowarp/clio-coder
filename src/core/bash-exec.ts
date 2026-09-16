@@ -21,7 +21,14 @@ export const BASH_HARD_CAP_BYTES = 16 * 1024 * 1024;
 
 const CLIO_CONTROL_ENV_KEYS = ["CLIO_CODER_INTERACTIVE", "BASH_ENV", "ENV"] as const;
 
-export interface BashCommandResult {
+export interface BashStreamByteCounts {
+	observedStdoutBytes: number;
+	observedStderrBytes: number;
+	retainedStdoutBytes: number;
+	retainedStderrBytes: number;
+}
+
+export interface BashCommandResult extends Partial<BashStreamByteCounts> {
 	error: NodeJS.ErrnoException | null;
 	stdout: string;
 	stderr: string;
@@ -60,6 +67,8 @@ export interface BashProgressScheduler {
 }
 
 export interface BashOutputProgressController {
+	/** Raw stream byte counts, independent of UTF-8 decoding and capture clipping. */
+	byteCounts(): BashStreamByteCounts;
 	/** Emit the initial empty cumulative snapshot, when a callback is configured. */
 	start(): void;
 	/** Accept one stream chunk. Returns true only when this chunk reaches the hard cap. */
@@ -90,6 +99,12 @@ export function createBashOutputProgressController(
 	const stdoutDecoder = new StringDecoder("utf8");
 	const stderrDecoder = new StringDecoder("utf8");
 	let decodersFinished = false;
+	const counts: BashStreamByteCounts = {
+		observedStdoutBytes: 0,
+		observedStderrBytes: 0,
+		retainedStdoutBytes: 0,
+		retainedStderrBytes: 0,
+	};
 	let outputBytes = 0;
 	let outputCapped = false;
 	let updateTimer: unknown = null;
@@ -144,16 +159,22 @@ export function createBashOutputProgressController(
 	};
 
 	return {
+		byteCounts: () => ({ ...counts }),
 		start(): void {
 			if (phase !== "active" || onUpdate === undefined) return;
 			updateDirty = true;
 			emitUpdate();
 		},
 		append(target, chunk): boolean {
-			if (phase !== "active" || outputCapped) return false;
+			if (phase !== "active") return false;
+			if (target === "stdout") counts.observedStdoutBytes += chunk.byteLength;
+			else counts.observedStderrBytes += chunk.byteLength;
+			if (outputCapped) return false;
 			const remaining = BASH_HARD_CAP_BYTES - outputBytes;
 			const accepted = chunk.byteLength <= remaining ? chunk : chunk.subarray(0, Math.max(0, remaining));
 			outputBytes += accepted.byteLength;
+			if (target === "stdout") counts.retainedStdoutBytes += accepted.byteLength;
+			else counts.retainedStderrBytes += accepted.byteLength;
 			if (accepted.byteLength > 0) {
 				const decoded = target === "stdout" ? stdoutDecoder.write(accepted) : stderrDecoder.write(accepted);
 				if (target === "stdout") stdout += decoded;
@@ -213,7 +234,7 @@ function parseNullDelimitedEnv(raw: string): NodeJS.ProcessEnv | null {
 }
 
 function captureLoginEnv(): Promise<NodeJS.ProcessEnv | null> {
-	return new Promise((resolve) => {
+	return new Promise<NodeJS.ProcessEnv | null>((resolve) => {
 		let stdout = "";
 		let settled = false;
 		const finish = (value: NodeJS.ProcessEnv | null): void => {
@@ -266,7 +287,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		enabled: gitCommitAttributionEnabled(process.env),
 	});
 	reportCommitAttributionDiagnostic(attribution.diagnostic);
-	return new Promise((resolve) => {
+	return new Promise<BashCommandResult>((resolve) => {
 		const timeout = clampTimerDelayMs(options.timeoutMs ?? 300_000);
 		let aborted = false;
 		let timedOut = false;
@@ -377,6 +398,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			resolveAfterCancellation({
 				error: error as NodeJS.ErrnoException,
 				...finalOutput,
+				...output.byteCounts(),
 				exitCode: null,
 				signal: null,
 				aborted,
@@ -401,6 +423,7 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 			resolveAfterCancellation({
 				error,
 				...finalOutput,
+				...output.byteCounts(),
 				exitCode: code,
 				signal: signalName,
 				aborted,

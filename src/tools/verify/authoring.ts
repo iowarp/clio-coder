@@ -716,7 +716,7 @@ function validationContractProposals(workspaceRoot: string, diagnostics: string[
  * command is deliberately absent, so the proposal cannot become executable
  * until the operator confirms an exact argv through `verifiers add`.
  */
-function numericContractProposals(workspaceRoot: string): NumericProposal[] {
+function numericContractProposals(workspaceRoot: string, diagnostics: string[]): NumericProposal[] {
 	const loaded = loadValidationContract(workspaceRoot);
 	if (!loaded.ok || loaded.contract === null) return [];
 	const proposals: NumericProposal[] = [];
@@ -724,7 +724,12 @@ function numericContractProposals(workspaceRoot: string): NumericProposal[] {
 	for (const artifact of loaded.contract.artifacts ?? []) {
 		if (artifact.numerical_tolerances === undefined) continue;
 		const tolerance = normalizeNumericTolerance(artifact.numerical_tolerances);
-		if (tolerance instanceof Error) continue;
+		if (tolerance instanceof Error) {
+			diagnostics.push(
+				`${loaded.path}: artifact ${JSON.stringify(artifact.path)} numeric proposal skipped: ${tolerance.message}`,
+			);
+			continue;
+		}
 		const base = slug(path.basename(artifact.path).replace(/\.[^.]+$/u, ""), "artifact");
 		const preferred = boundedId(`numeric-${base}`);
 		let id = preferred;
@@ -842,7 +847,7 @@ export function discoverVerifierAuthoring(workspaceRoot = process.cwd()): Verifi
 		activeChecks,
 		existingChecks,
 		proposals,
-		numericProposals: numericContractProposals(workspaceRoot),
+		numericProposals: numericContractProposals(workspaceRoot, diagnostics),
 		diagnostics,
 		manualEntry,
 		...(typeof catalogText === "string" ? { catalogText } : {}),

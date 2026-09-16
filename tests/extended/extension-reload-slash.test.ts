@@ -1,4 +1,6 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { ExtensionReloadOutcome } from "../../src/entry/extension-reload.js";
 import {
@@ -9,6 +11,7 @@ import {
 	parseSlashCommand,
 	type SlashCommandContext,
 } from "../../src/interactive/slash-commands.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const committed: ExtensionReloadOutcome = {
 	status: "committed",
@@ -113,4 +116,30 @@ describe("/extensions reload", () => {
 			["warn", "extensions: generation 3 committed (unchanged); hooks: 1 registered, 1 dropped, 2 issues, 1 overridden"],
 		);
 	});
+});
+
+it("routes MCP listing and trust mutations through the slash harness", async () => {
+	const env = await isolateClioEnv("clio-mcp-slash-");
+	const previous = process.cwd();
+	try {
+		mkdirSync(join(env.dir, ".clio-coder"));
+		writeFileSync(join(env.dir, ".clio-coder", "mcp.yaml"), "version: 1\nservers:\n  - id: files\n    command: node\n");
+		process.chdir(env.dir);
+		const harness = context({});
+		for (const input of ["/mcp", "/mcp trust files read", "/mcp", "/mcp untrust files", "/mcp trust missing"])
+			dispatchSlashCommand(parseSlashCommand(input), harness.ctx);
+		strictEqual(harness.notices.length, 5);
+		strictEqual(harness.notices[0]?.[1].includes("trust=untrusted"), true);
+		strictEqual(harness.notices[1]?.[1].includes("mcp: trusted files"), true);
+		strictEqual(harness.notices[2]?.[1].includes("trust=trusted actionClass=read"), true);
+		strictEqual(harness.notices[3]?.[1], "mcp: untrusted files (record removed)");
+		strictEqual(harness.notices[4]?.[0], "error");
+		strictEqual(
+			commandReference().some((entry) => entry.name === "mcp"),
+			true,
+		);
+	} finally {
+		process.chdir(previous);
+		env.restore();
+	}
 });

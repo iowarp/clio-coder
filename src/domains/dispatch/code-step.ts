@@ -53,6 +53,8 @@ export interface CodeStepRunInput {
 	workspaceRoot: string;
 	/** Absolute directory the command log is written to; omitted means no artifact. */
 	artifactDir?: string;
+	/** Shared stdout/stderr capture ceiling; defaults to CODE_STEP_CAPTURE_MAX_BYTES. */
+	maxOutputBytes?: number;
 	/** Full process environment the allowlist is drawn from. Defaults to the orchestrator's. */
 	env?: NodeJS.ProcessEnv;
 	/**
@@ -221,6 +223,9 @@ interface SpawnOutcome {
 
 async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: ReadonlyArray<string>): Promise<SpawnOutcome> {
 	const command = input.command;
+	const captureMaxBytes = input.maxOutputBytes ?? CODE_STEP_CAPTURE_MAX_BYTES;
+	if (!Number.isSafeInteger(captureMaxBytes) || captureMaxBytes <= 0)
+		throw new Error("code step: maxOutputBytes must be a positive safe integer");
 	const [executable, ...args] = argv;
 	if (executable === undefined) throw new Error(`code step: command '${command.id}' has no executable`);
 	return await new Promise<SpawnOutcome>((resolvePromise) => {
@@ -247,8 +252,8 @@ async function spawnCommand(input: CodeStepRunInput, cwd: string, argv: Readonly
 		});
 		const collect = (chunk: Buffer, stdout: boolean): void => {
 			outputBytes += chunk.length;
-			if (captured >= CODE_STEP_CAPTURE_MAX_BYTES) return;
-			const room = CODE_STEP_CAPTURE_MAX_BYTES - captured;
+			if (captured >= captureMaxBytes) return;
+			const room = captureMaxBytes - captured;
 			const slice = chunk.length <= room ? chunk : chunk.subarray(0, room);
 			chunks.push(slice);
 			if (stdout) stdoutChunks.push(slice);

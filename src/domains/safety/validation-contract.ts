@@ -3,6 +3,7 @@ import path from "node:path";
 import { parseDocument } from "yaml";
 import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { byteLength } from "../../tools/truncate-utf8.js";
+import { MAX_ULP_TOLERANCE } from "../../tools/verify/numeric.js";
 import { compareCodepoints } from "../evidence/ordering.js";
 
 /**
@@ -215,8 +216,8 @@ function validateTolerances(value: unknown, location: string): ValidationNumeric
 	}
 	if (Object.hasOwn(value, "ulp")) {
 		const ulp = value.ulp;
-		if (typeof ulp !== "number" || !Number.isInteger(ulp) || ulp < 0) {
-			return new Error(`${location}.ulp must be a non-negative integer`);
+		if (typeof ulp !== "number" || !Number.isInteger(ulp) || ulp < 0 || ulp > MAX_ULP_TOLERANCE) {
+			return new Error(`${location}.ulp must be a non-negative integer no greater than ${MAX_ULP_TOLERANCE}`);
 		}
 		tolerances.ulp = ulp;
 	}

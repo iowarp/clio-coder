@@ -1,5 +1,5 @@
 import { Type } from "typebox";
-import { BASH_HARD_CAP_BYTES, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
+import { BASH_HARD_CAP_BYTES, type BashCommandResult, combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { resolveSafeCwd } from "../core/safe-exec.js";
 import { ToolNames } from "../core/tool-names.js";
 import { expandPath } from "./path-utils.js";
@@ -11,8 +11,9 @@ import {
 	type ToolResultContextDisposition,
 	type ToolResultDisposition,
 } from "./result-disposition.js";
+import { writeToolOffload } from "./result-shaping.js";
 import { DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
-import { byteLength } from "./truncate-utf8.js";
+import { byteLength, truncateUtf8 } from "./truncate-utf8.js";
 
 // The registry's bounded model projection and operator presentation share this
 // cap. Both are tail-biased for Bash because diagnostics usually land last.
@@ -120,6 +121,91 @@ function bashResultDetails(
 		retainedBytes: byteLength(rawOutput),
 		stdoutBytes: byteLength(result.stdout),
 		stderrBytes: byteLength(result.stderr),
+		observedStdoutBytes: result.observedStdoutBytes,
+		observedStderrBytes: result.observedStderrBytes,
+		retainedStdoutBytes: result.retainedStdoutBytes,
+		retainedStderrBytes: result.retainedStderrBytes,
+	};
+}
+
+/** Finalize cap retention before projection so every policy carries the actual outcome. */
+export function bashOutputCapResult(
+	result: BashCommandResult,
+	policy: BashOutputPolicy,
+	context?: { sessionId?: string; toolResultMaxBytes?: number },
+): ToolResult {
+	const raw = combineBashOutput(result);
+	const bytes = byteLength(raw);
+	const cap = Math.min(BASH_DISPLAY_MAX_BYTES, context?.toolResultMaxBytes ?? BASH_DISPLAY_MAX_BYTES);
+	const bodyBudget = Math.max(0, cap - 2048);
+	const showBody = policy === "full" || policy === "bounded";
+	const inline = showBody && bytes <= bodyBudget;
+	const preview = inline
+		? raw
+		: showBody
+			? truncateTail(raw, { maxBytes: Math.max(1, bodyBudget), maxLines: DEFAULT_MAX_LINES }).content
+			: "";
+	let offloadPath: string | null = null;
+	let savedBytes = 0;
+	let discardedBytes = 0;
+	let retention: string;
+	if (inline) {
+		retention = `Partial output shown inline (${bytes} decoded output bytes).`;
+	} else {
+		const saved = truncateUtf8(raw, BASH_HARD_CAP_BYTES, "");
+		offloadPath = writeToolOffload(saved, context, BASH_HARD_CAP_BYTES);
+		if (offloadPath !== null) {
+			savedBytes = byteLength(saved);
+			discardedBytes = bytes - savedBytes;
+			retention = `Partial output offloaded to ${offloadPath} (${savedBytes} decoded output bytes saved).`;
+			if (discardedBytes > 0)
+				retention += ` Retention truncated by the ${BASH_HARD_CAP_BYTES}-byte (16 MiB) offload ceiling; ${discardedBytes} decoded output bytes discarded from the offload.`;
+		} else {
+			discardedBytes = bytes - byteLength(preview);
+			retention = `Partial-output retention failed; no offload was written. ${byteLength(preview)} decoded output bytes shown inline; ${discardedBytes} decoded output bytes discarded.`;
+		}
+	}
+	const status = `bash: command output exceeded the ${BASH_HARD_CAP_BYTES}-byte (16 MiB) hard cap and was stopped. Observed stdout: ${result.observedStdoutBytes ?? "unavailable"} bytes, stderr: ${result.observedStderrBytes ?? "unavailable"} bytes; retained stream stdout: ${result.retainedStdoutBytes ?? "unavailable"} bytes, stderr: ${result.retainedStderrBytes ?? "unavailable"} bytes. ${retention} Use run_script to stream unbounded output to .clio-coder/runs/<runId>/ instead.`;
+	const message = preview.length > 0 ? `${preview}\n\n${status}` : status;
+	const disposition = normalizedBashDisposition(policy);
+	return {
+		kind: "error",
+		message,
+		modelContext: message,
+		details: {
+			...bashResultDetails(result, raw, "output-cap"),
+			retention: {
+				status: inline ? "inline" : offloadPath === null ? "failed" : discardedBytes > 0 ? "truncated" : "offloaded",
+				savedBytes,
+				discardedBytes,
+				...(offloadPath === null ? {} : { offloadPath }),
+			},
+			resultSize: {
+				bytes,
+				shownBytes: byteLength(message),
+				maxBytes: cap,
+				truncated: !inline,
+				policy,
+				...(offloadPath === null ? {} : { offloadPath }),
+			},
+			resultDisposition: {
+				version: 1,
+				applications: 1,
+				presentation: { ...disposition.presentation, content: message },
+				context: {
+					requestedMode: policy === "metadata-only" ? "metadata-only" : disposition.context.mode,
+					appliedMode: disposition.context.mode,
+					maxBytes: cap,
+				},
+				capturedBytes: bytes,
+				displayedBytes: byteLength(message),
+				contextBytes: byteLength(message),
+				presentationTruncated: !inline,
+				contextTruncated: !inline,
+				retrieval: retention,
+				...(offloadPath === null ? {} : { offloadPath }),
+			},
+		},
 	};
 }
 
@@ -157,7 +243,7 @@ function observeToolsNudge(command: string, sessionId: string | undefined): stri
 export const bashTool: ToolSpec = {
 	name: ToolNames.Bash,
 	description:
-		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms, and use output_policy for bounded diagnostic tail (default), summary, metadata-only, or budget-limited full output. Network reachability follows the host environment and OS isolation; disabling web_fetch does not isolate bash networking.",
+		"Execute a bash command in a fresh child at the workspace root (or explicit cwd); shell state does not persist across calls. Combined stdout and stderr have a 16 MiB hard cap that stops the child; use run_script to stream unbounded output to .clio-coder/runs/<runId>/. The default timeout is 300s; use panes for long-lived processes or an explicit timeout_ms, and use output_policy for bounded diagnostic tail (default), summary, metadata-only, or budget-limited full output. Network reachability follows the host environment and OS isolation; disabling web_fetch does not isolate bash networking.",
 	parameters: Type.Object({
 		command: Type.String({ description: "Bash command to execute." }),
 		cwd: Type.Optional(
@@ -238,14 +324,7 @@ export const bashTool: ToolSpec = {
 					details: bashResultDetails(result, rawOutput, "timeout"),
 				};
 			}
-			if (outputCapped) {
-				const status = `bash: command output exceeded ${BASH_HARD_CAP_BYTES} bytes and was stopped`;
-				return {
-					kind: "error",
-					message: output.length > 0 ? `${output}\n\n${status}` : status,
-					details: bashResultDetails(result, rawOutput, "output-cap"),
-				};
-			}
+			if (outputCapped) return bashOutputCapResult(result, outputPolicy, options);
 			if (error) {
 				const code = typeof error.code === "number" ? error.code : (error as { code?: string }).code;
 				const status = `bash: command failed (exit ${code ?? "?"})`;
