@@ -949,6 +949,13 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			return true;
 		},
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+			// A nested invocation (the gateway calling the capability the model
+			// asked for) is the same model call the outer gateway occurrence
+			// already counted and fingerprinted. Counting it again would spend
+			// the worker cap and the turn budget twice per gateway call, and its
+			// inner fingerprint would never repeat across a model's retries the
+			// outer one does not already show.
+			if (input.metadata?.nested === true) return [];
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);

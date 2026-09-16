@@ -8,14 +8,16 @@ import { configureGuardrails } from "../../src/core/guardrails.js";
 import { installPlugin, pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
 import { createContextTool } from "../../src/tools/context/index.js";
+import { createClioLibraryTool } from "../../src/tools/gateway/clio-context-tools.js";
 import type { ToolInvokeOptions } from "../../src/tools/registry.js";
 
 /**
- * context(scope="library") is a bounded, body-free READ over the shared
- * inventory. These contracts hold it to that: real Materio identities, honest
- * ownership and origin, stable pages, budget reserved before any discovery,
- * no mutation, no source fetch, no internal agents, and no library at all for
- * a native worker.
+ * clio_library, the gateway capability that took over context(scope="library"),
+ * is a bounded, body-free READ over the shared inventory. These contracts hold
+ * it to that: real Materio identities, honest ownership and origin, stable
+ * pages, budget reserved before any discovery, no mutation, no source fetch,
+ * no internal agents, and no library at all for a native worker. The last
+ * contract pins the context tool's own refusal of the moved scope.
  */
 
 const materioSource = fileURLToPath(new URL("../../library/plugins/materio/", import.meta.url));
@@ -67,8 +69,8 @@ interface LibraryPayload {
 	diagnostics?: string[];
 }
 
-function contextTool(cwd: string, deps: Record<string, unknown> = {}) {
-	return createContextTool({ getCwd: () => cwd, ...deps });
+function libraryTool(cwd: string, deps: Record<string, unknown> = {}) {
+	return createClioLibraryTool({ getCwd: () => cwd, ...deps });
 }
 
 async function read(
@@ -76,7 +78,7 @@ async function read(
 	args: Record<string, unknown> = {},
 	options: ToolInvokeOptions = {},
 ): Promise<LibraryPayload> {
-	const result = await contextTool(cwd).run({ scope: "library", ...args }, options);
+	const result = await libraryTool(cwd).run({ ...args }, options);
 	strictEqual(result.kind, "ok", result.kind === "error" ? result.message : "expected an ok read");
 	if (result.kind !== "ok") throw new Error("unreachable");
 	const payload = JSON.parse(result.output) as LibraryPayload;
@@ -110,7 +112,7 @@ function listTree(root: string): string[] {
 	}
 }
 
-describe("context(scope=library)", () => {
+describe("clio_library (the former context library scope)", () => {
 	afterEach(() => {
 		configureGuardrails(undefined);
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -296,10 +298,7 @@ describe("context(scope=library)", () => {
 	it("keeps a page inside a nearly spent reservation instead of returning a stub", async () => {
 		const project = withMaterio();
 		configureGuardrails({ observationTurnBudgetBytes: 1500 });
-		const result = await contextTool(project).run(
-			{ scope: "library", limit: 50 },
-			{ sessionId: "library-context", turnId: "tiny" },
-		);
+		const result = await libraryTool(project).run({ limit: 50 }, { sessionId: "library-context", turnId: "tiny" });
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") throw new Error("unreachable");
 		const payload = JSON.parse(result.output) as LibraryPayload;
@@ -341,18 +340,18 @@ describe("context(scope=library)", () => {
 		const project = withMaterio();
 		configureGuardrails({ observationTurnBudgetBytes: 1024 });
 		const options: ToolInvokeOptions = { sessionId: "library-context", turnId: "turn-1" };
-		const first = await contextTool(project).run({ scope: "library", limit: 5 }, options);
+		const first = await libraryTool(project).run({ limit: 5 }, options);
 		strictEqual(first.kind, "ok");
 
 		// The second call must short-circuit on the exhausted pool. A cwd getter
 		// that throws proves the handler was never reached: if discovery ran, the
 		// result would be the inventory error instead of the budget notice.
-		const guarded = createContextTool({
+		const guarded = createClioLibraryTool({
 			getCwd: () => {
 				throw new Error("inventory reached despite an exhausted observation pool");
 			},
 		});
-		const second = await guarded.run({ scope: "library" }, options);
+		const second = await guarded.run({}, options);
 		strictEqual(second.kind, "ok");
 		if (second.kind !== "ok") throw new Error("unreachable");
 		ok(!second.output.includes("inventory reached"), second.output);
@@ -386,10 +385,10 @@ describe("context(scope=library)", () => {
 		);
 	});
 
-	it("refuses the scope in a native worker registry", async () => {
+	it("refuses the read in a native worker registry", async () => {
 		const project = withMaterio();
-		const worker = createContextTool({ getCwd: () => project, skillMarketplace: false });
-		const result = await worker.run({ scope: "library" }, {});
+		const worker = createClioLibraryTool({ getCwd: () => project, skillMarketplace: false });
+		const result = await worker.run({}, {});
 		strictEqual(result.kind, "error");
 		if (result.kind !== "error") throw new Error("unreachable");
 		ok(result.message.includes("unavailable"), result.message);
@@ -400,11 +399,11 @@ describe("context(scope=library)", () => {
 		const project = withMaterio();
 		const rows = await collect(project);
 		ok(ownedBy(rows, "plugin:materio", "skill").length > 0, "the ordinary run lists skills");
-		const quiet = createContextTool({
+		const quiet = createClioLibraryTool({
 			getCwd: () => project,
 			getSkillLoaderOptions: () => ({ disableDiscovery: true, trustProjectCompatRoots: false }),
 		});
-		const result = await quiet.run({ scope: "library", limit: 50 }, {});
+		const result = await quiet.run({ limit: 50 }, {});
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") throw new Error("unreachable");
 		const payload = JSON.parse(result.output) as LibraryPayload;
@@ -437,14 +436,21 @@ describe("context(scope=library)", () => {
 		strictEqual(projected.join("|"), direct.join("|"));
 	});
 
-	it("leaves the other context scopes and their error text intact", async () => {
+	it("leaves the remaining context scopes intact and points the moved scope at the gateway", async () => {
 		const project = withMaterio();
-		const unknown = await contextTool(project).run({ scope: "packages" }, {});
+		const context = createContextTool({ getCwd: () => project });
+		const unknown = await context.run({ scope: "packages" }, {});
 		strictEqual(unknown.kind, "error");
 		if (unknown.kind !== "error") throw new Error("unreachable");
-		ok(unknown.message.includes("workspace, docs, skills, library, or recall"), unknown.message);
+		ok(unknown.message.includes("workspace, skills, or recall"), unknown.message);
 
-		const skills = await contextTool(project).run({ scope: "skills" }, {});
+		const moved = await context.run({ scope: "library" }, {});
+		strictEqual(moved.kind, "error");
+		if (moved.kind !== "error") throw new Error("unreachable");
+		ok(moved.message.includes('capability="clio_library"'), moved.message);
+		ok(moved.message.includes("gateway("), moved.message);
+
+		const skills = await context.run({ scope: "skills" }, {});
 		strictEqual(skills.kind, "ok");
 		if (skills.kind !== "ok") throw new Error("unreachable");
 		ok(skills.output.includes("Available skills."), skills.output.slice(0, 200));

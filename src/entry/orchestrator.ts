@@ -1726,6 +1726,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				})
 			: null;
 	registerAllTools(toolRegistry, {
+		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,
 		...(session
 			? {

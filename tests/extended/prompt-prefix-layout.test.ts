@@ -18,8 +18,11 @@ import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
  * moving with it.
  */
 
+/**
+ * The session's direct surface: attached schemas only. artifact, git, and
+ * web_fetch left it for the gateway in v0.4.9; gateway and run_script joined.
+ */
 const FULL_TOOL_SURFACE = [
-	"artifact",
 	"ask_user",
 	"bash",
 	"code_nav",
@@ -27,15 +30,15 @@ const FULL_TOOL_SURFACE = [
 	"dispatch",
 	"edit",
 	"find",
-	"git",
+	"gateway",
 	"grep",
 	"ls",
 	"monitor",
 	"read",
+	"run_script",
 	"steer",
 	"tasks",
 	"verify",
-	"web_fetch",
 	"write",
 ];
 
@@ -168,6 +171,20 @@ describe("compiled main prompt: determinism", () => {
 			second.sections.map((section) => section.id),
 			first.sections.map((section) => section.id),
 		);
+	});
+
+	it("lists the direct surface verbatim and projects a capability list onto it", () => {
+		const compiled = compile(table, compileInputs());
+		const line = compiled.systemPrompt.split("\n").find((entry) => entry.startsWith("Direct tools:"));
+		ok(line !== undefined, "the tool contract names the direct surface");
+		for (const name of ["`gateway`", "`run_script`"]) ok(line.includes(name), `${name} is on the direct surface`);
+		for (const name of ["`artifact`", "`git`", "`web_fetch`"])
+			ok(!line.includes(name), `${name} is a gateway capability`);
+		// A worker's admitted list names capabilities; the prompt still shows
+		// only the attached schemas, with gateway standing in for the rest.
+		const projected = compile(table, compileInputs({ toolNames: ["read", "git", "web_fetch", "artifact"] }));
+		const projectedLine = projected.systemPrompt.split("\n").find((entry) => entry.startsWith("Direct tools:"));
+		strictEqual(projectedLine, "Direct tools: `gateway`, `read`.");
 	});
 
 	it("does not depend on tool-name or hint registration order", () => {

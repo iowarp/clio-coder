@@ -20,7 +20,7 @@ import { codeNavTool } from "../../src/tools/codewiki/code-nav.js";
 import { codeNavToolSurface } from "../../src/tools/codewiki/code-nav-surface.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { toolResultContextText } from "../../src/tools/result-disposition.js";
-import { webFetchTool } from "../../src/tools/web-fetch.js";
+import { webFetchTool, webReadTool } from "../../src/tools/web-fetch.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 function allowAllSafety() {
@@ -216,6 +216,21 @@ describe("tool boundary contract", () => {
 			strictEqual(readReceived()?.header, "tool-wire");
 			strictEqual(readReceived()?.body, "snowman=☃");
 			if (result.kind === "ok") ok(result.output.includes("transport-ok"));
+			// web_read shares the transport and drops everything that could send
+			// data outward: the same arguments reach the server as a bare GET.
+			const read = await webReadTool.run({
+				url: `http://127.0.0.1:${address.port}/echo`,
+				method: "post",
+				headers: { "X-Contract": "tool-wire" },
+				body: "snowman=☃",
+				format: "raw",
+				timeout_ms: 2_000,
+			});
+			strictEqual(read.kind, "ok");
+			strictEqual(readReceived()?.method, "GET");
+			strictEqual(readReceived()?.header, "");
+			strictEqual(readReceived()?.body, "");
+			if (read.kind === "ok") ok(read.output.includes("transport-ok"));
 		} finally {
 			if (previousPrivateNetwork === undefined) delete process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK;
 			else process.env.CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK = previousPrivateNetwork;

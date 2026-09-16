@@ -22,6 +22,7 @@
  */
 
 import { isAbsolute, normalize, relative, resolve } from "node:path";
+import { effectiveToolCall } from "../../tools/surface.js";
 import { decisionRationale } from "./decision-board.js";
 import type { DecisionLedgerEntry, SessionEntry } from "./entries.js";
 import { filterEntriesToActivePath } from "./tree/active-path.js";
@@ -369,7 +370,10 @@ function stringField(record: Record<string, unknown> | null, ...keys: string[]):
 	return null;
 }
 
-function pathFromCall(toolName: string, args: unknown, cwd: string | null, into: Set<string>): void {
+function pathFromCall(recordedTool: string, recordedArgs: unknown, cwd: string | null, into: Set<string>): void {
+	// A gateway call is the capability it reached: an artifact written through
+	// the gateway touched the same path a direct artifact call would have.
+	const { toolName, args } = effectiveToolCall(recordedTool, recordedArgs);
 	if (!READ_LEDGER_TOOLS.has(toolName)) return;
 	const record = isRecord(args) ? args : null;
 	const named = stringField(record, "path", "file_path", "filePath");

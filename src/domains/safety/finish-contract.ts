@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import {
@@ -295,9 +296,14 @@ function mutatingToolCall(entry: unknown): MutationCandidate | null {
 	if (record?.kind !== "message" || record.role !== "tool_call") return null;
 	const payload = asRecord(record.payload);
 	if (payload === null) return null;
-	const toolName = stringFromFirst(payload, ["name", "toolName", "tool"]);
-	if (toolName === null) return null;
-	const args = asRecord(payload.args ?? payload.arguments ?? payload.input) ?? undefined;
+	const recordedTool = stringFromFirst(payload, ["name", "toolName", "tool"]);
+	if (recordedTool === null) return null;
+	// An artifact written through the gateway mutates the same path a direct
+	// artifact call would, so the call unwraps to the capability first.
+	const { toolName, args } = effectiveToolCall(
+		recordedTool,
+		asRecord(payload.args ?? payload.arguments ?? payload.input) ?? undefined,
+	);
 	const paths = mutationPathsForTool(toolName, args);
 	if (paths.length === 0) return null;
 	const toolCallId = stringFromFirst(payload, ["toolCallId", "tool_call_id", "id"]) ?? turnIdOf(entry);

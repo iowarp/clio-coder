@@ -162,6 +162,7 @@ const EXECUTION_TOOLS = new Set<string>([ToolNames.Bash, ToolNames.Verify]);
 export const WRITE_ROOT_REFUSED_TOOLS: ReadonlySet<string> = new Set<string>([
 	ToolNames.Bash,
 	ToolNames.Verify,
+	ToolNames.RunScript,
 	ToolNames.Dispatch,
 ]);
 
@@ -633,6 +634,12 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 		case ToolNames.Find: {
 			const target = pathArg(args) ?? ".";
 			return [{ operation: "read", path: target }];
+		}
+		case ToolNames.Data: {
+			// data streams one named file; a zero-access path is refused here,
+			// before the reader opens it, exactly as a read of the same path.
+			const target = pathArg(args);
+			return target === null ? [] : [{ operation: "read", path: target }];
 		}
 		case ToolNames.Write:
 		case ToolNames.Edit: {

@@ -621,6 +621,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
 			supportsImages: model.input.includes("image"),
+			// The admitted capability list, so the gateway calls only what the
+			// recipe declared: the same bound the attached schemas already honor.
+			allowedTools: input.allowedTools,
 			...(agentSkillPolicy ? { pendingSkillPolicy: agentSkillPolicy } : {}),
 		}),
 	});

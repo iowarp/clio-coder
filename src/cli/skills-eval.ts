@@ -26,6 +26,7 @@ import {
 	type SkillEvalScenario,
 } from "../domains/resources/index.js";
 import { NO_NETWORK_TOOLS_ENV } from "../tools/network-policy.js";
+import { effectiveToolCall } from "../tools/surface.js";
 import { formatColumns, printError } from "./shared.js";
 
 /**
@@ -845,9 +846,14 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 			continue;
 		}
 		if (event.type === "tool_execution_start") {
-			const tool = readString(event.toolName) ?? readString(event.tool) ?? "tool";
-			const args = event.args ?? event.arguments ?? event.input;
+			const recordedTool = readString(event.toolName) ?? readString(event.tool) ?? "tool";
+			const recordedArgs = event.args ?? event.arguments ?? event.input;
 			const callId = readString(event.toolCallId);
+			// A gateway call is judged as the capability it reached: an artifact
+			// written through the gateway is still the terminal answer.
+			const effective = effectiveToolCall(recordedTool, recordedArgs);
+			const tool = effective.toolName;
+			const args = effective.viaGateway ? effective.args : recordedArgs;
 			if (callId !== null && loadsSkillBody(tool, args)) skillBodyCallIds.add(callId);
 			lines.push(`TOOL ${tool} args=${preview(args)}`);
 			// Terminating tools end the turn with no assistant text; their content

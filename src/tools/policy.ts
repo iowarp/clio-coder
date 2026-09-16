@@ -1,5 +1,6 @@
 import { type BuiltinToolName, isBuiltinToolName, type ToolName, ToolNames } from "../core/tool-names.js";
 import { type ActionClass, classify } from "../domains/safety/action-classifier.js";
+import { DATA_OBSERVATION_SELF_CAP_BYTES, GATEWAY_FIND_SELF_CAP_BYTES } from "./gateway/caps.js";
 import { OBSERVATION_POLICY_SLACK_BYTES, OBSERVE_SELF_CAPS } from "./observation.js";
 import { readMaxBytes } from "./read.js";
 import type { ToolExecutionMode, ToolSpec } from "./registry.js";
@@ -11,7 +12,15 @@ import type { ToolExecutionMode, ToolSpec } from "./registry.js";
  * differently from what the policy engine assumes.
  */
 
-export type ToolPlane = "observe" | "mutate" | "execute" | "orchestrate" | "retrieve" | "interact" | "artifact";
+export type ToolPlane =
+	| "observe"
+	| "mutate"
+	| "execute"
+	| "orchestrate"
+	| "retrieve"
+	| "interact"
+	| "artifact"
+	| "gateway";
 
 interface PlaneExpectation {
 	plane: ToolPlane;
@@ -29,6 +38,12 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.CodeNav]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Context]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.CredentialPresent]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	// clio_docs and clio_library are the bundled-documentation and recipe-catalog
+	// reads that used to be context scopes; same envelope, same read class.
+	[ToolNames.ClioDocs]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	[ToolNames.ClioLibrary]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	// data streams structured files and never writes; parallel like read.
+	[ToolNames.Data]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Write]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Edit]: { plane: "mutate", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Bash]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
@@ -36,6 +51,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// its containment posture, read class for its safety disposition.
 	[ToolNames.Git]: { plane: "execute", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Verify]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
+	// run_script runs one interpreter over one workspace script and projects
+	// itself to a bash command for the policy engine; execute class, sequential.
+	[ToolNames.RunScript]: { plane: "execute", actionClass: "execute", executionMode: "sequential" },
 	[ToolNames.Dispatch]: { plane: "orchestrate", actionClass: "dispatch", executionMode: "sequential" },
 	// monitor never mutates a run, so it stays read class and parallel.
 	[ToolNames.Monitor]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
@@ -62,16 +80,25 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// nothing else. Read class so it never trips a safety gate; sequential so
 	// two decisions in one batch never race the supersede lookup.
 	[ToolNames.Decide]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// web_read is the GET-only half of the split: no method, headers, or body,
+	// so it is never an outward action.
+	[ToolNames.WebRead]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
+	// gateway lists, describes, and calls secondary capabilities. Its own class
+	// is read; a call carries the capability's class through the same admission.
+	// Sequential because a call may park for approval or run a sequential
+	// capability, and two such calls in one batch must not interleave.
+	[ToolNames.Gateway]: { plane: "gateway", actionClass: "read", executionMode: "sequential" },
 };
 
 /**
  * OBSERVE envelope members and their self-caps. The registry policy cap must
  * sit at or above self cap + slack so the envelope's own notice line survives
  * the backstop. credential_present sits in the OBSERVE plane but returns a
- * typed boolean, so it carries no envelope cap.
+ * typed boolean, so it carries no envelope cap. The gateway is listed for its
+ * find listing, which uses the envelope's JSON stub rule.
  */
 const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]> = [
 	[ToolNames.Read, () => readMaxBytes()],
@@ -79,16 +106,11 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 	[ToolNames.Find, () => OBSERVE_SELF_CAPS.find],
 	[ToolNames.Ls, () => OBSERVE_SELF_CAPS.ls],
 	[ToolNames.CodeNav, () => OBSERVE_SELF_CAPS.codeNav],
-	[
-		ToolNames.Context,
-		() =>
-			Math.max(
-				OBSERVE_SELF_CAPS.contextDocs,
-				OBSERVE_SELF_CAPS.contextSkills,
-				OBSERVE_SELF_CAPS.contextWorkspace,
-				OBSERVE_SELF_CAPS.contextLibrary,
-			),
-	],
+	[ToolNames.Context, () => Math.max(OBSERVE_SELF_CAPS.contextSkills, OBSERVE_SELF_CAPS.contextWorkspace)],
+	[ToolNames.ClioDocs, () => OBSERVE_SELF_CAPS.contextDocs],
+	[ToolNames.ClioLibrary, () => OBSERVE_SELF_CAPS.contextLibrary],
+	[ToolNames.Data, () => DATA_OBSERVATION_SELF_CAP_BYTES],
+	[ToolNames.Gateway, () => GATEWAY_FIND_SELF_CAP_BYTES],
 ];
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
@@ -104,7 +126,7 @@ const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
  */
 const LEDGER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Ledger]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
-const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebFetch]);
+const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebRead, ToolNames.WebFetch]);
 
 export interface BuiltinToolPolicyOptions {
 	includeSessionTools?: boolean;

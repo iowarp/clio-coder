@@ -391,22 +391,29 @@ function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Reco
 	};
 }
 
-function runDocsScope(
+/**
+ * The bundled-documentation read: a corpus listing without a query, ranked
+ * sections with one. Exported for the `clio_docs` gateway capability, which
+ * is this function under its own tool name; `toolName` labels the envelope
+ * notice and the error prefix.
+ */
+export function runDocsScope(
 	args: Record<string, unknown>,
 	reservation: ObservationReservation,
 	options: ToolInvokeOptions | undefined,
+	toolName: string = ToolNames.Context,
 ): ToolResult {
 	const query = typeof args.query === "string" ? args.query.trim() : "";
 	if (query.length === 0) {
 		// No query: return the corpus listing (files + counts) the model needs to
 		// pick a search term, instead of an error that wastes a round.
 		const corpus = listDocsCorpus();
-		if (!corpus.ok) return { kind: "error", message: `context: ${corpus.message}` };
+		if (!corpus.ok) return { kind: "error", message: `${toolName}: ${corpus.message}` };
 		// Compact JSON: docs payloads charge the shared per-turn observation
 		// pool, and 2-space indentation roughly doubles the bytes for zero
 		// model-visible information.
 		return finalizeObservation({
-			tool: ToolNames.Context,
+			tool: toolName,
 			unit: "entries",
 			format: "json",
 			output: JSON.stringify(corpus.payload),
@@ -418,9 +425,9 @@ function runDocsScope(
 		});
 	}
 	const outcome = searchDocs(query, args.limit);
-	if (!outcome.ok) return { kind: "error", message: `context: ${outcome.message}` };
+	if (!outcome.ok) return { kind: "error", message: `${toolName}: ${outcome.message}` };
 	return finalizeObservation({
-		tool: ToolNames.Context,
+		tool: toolName,
 		unit: "sections",
 		format: "json",
 		output: JSON.stringify(outcome.payload),
@@ -698,48 +705,37 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 		...contextToolSurface,
 		async run(args, options): Promise<ToolResult> {
 			const scope = typeof args.scope === "string" ? args.scope : "";
-			if (scope !== "workspace" && scope !== "docs" && scope !== "skills" && scope !== "library" && scope !== "recall") {
+			if (scope === "docs" || scope === "library") {
+				// The two secondary reads moved behind the gateway. Name the exact
+				// replacement so a model that learned the old scope recovers in one
+				// step instead of retrying the same shape.
+				const capability = scope === "docs" ? ToolNames.ClioDocs : ToolNames.ClioLibrary;
 				return {
 					kind: "error",
-					message: `context: scope must be workspace, docs, skills, library, or recall; got '${scope}'`,
+					message: `context: scope "${scope}" is a gateway capability now: call gateway(op="call", capability="${capability}", args={...}) or gateway(op="describe", capability="${capability}") for its arguments.`,
 				};
 			}
-			const selfCap =
-				scope === "docs"
-					? OBSERVE_SELF_CAPS.contextDocs
-					: scope === "skills"
-						? OBSERVE_SELF_CAPS.contextSkills
-						: scope === "library"
-							? OBSERVE_SELF_CAPS.contextLibrary
-							: OBSERVE_SELF_CAPS.contextWorkspace;
+			if (scope !== "workspace" && scope !== "skills" && scope !== "recall") {
+				return {
+					kind: "error",
+					message: `context: scope must be workspace, skills, or recall; got '${scope}'`,
+				};
+			}
+			const selfCap = scope === "skills" ? OBSERVE_SELF_CAPS.contextSkills : OBSERVE_SELF_CAPS.contextWorkspace;
 			// Reserved before any scope handler runs, so an exhausted pool answers
-			// with the notice and the library inventory is never walked at all.
+			// with the notice and no scope does its work for nothing.
 			const reservation = reserveObservation(selfCap, options);
 			if (reservation.exhausted) {
 				return observationBudgetExhausted({
 					tool: ToolNames.Context,
-					unit: scope === "docs" ? "sections" : scope === "skills" || scope === "library" ? "entries" : "results",
+					unit: scope === "skills" ? "entries" : "results",
 					reservation,
 					subject: `scope=${scope}`,
 					hint: "Continue in a follow-up turn.",
 				});
 			}
 			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);
-			if (scope === "docs") return runDocsScope(args, reservation, options);
 			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
-			if (scope === "library") {
-				const { runLibraryScope } = await import("./library.js");
-				return runLibraryScope(
-					{
-						getCwd: () => cwdFromDeps(deps),
-						...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
-						...(deps.getSkillLoaderOptions ? { skillLoaderOptions: deps.getSkillLoaderOptions() } : {}),
-					},
-					args,
-					reservation,
-					options,
-				);
-			}
 			return runSkillsScope(deps, args, reservation, options);
 		},
 	};

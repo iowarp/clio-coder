@@ -2,7 +2,7 @@ import { UNTRUSTED_CONTENT_BANNER } from "../core/untrusted-content.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import { fetchWebUrl } from "./web-fetch-network.js";
-import { webFetchToolSurface } from "./web-fetch-surface.js";
+import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_MAX_BYTES = 600_000;
@@ -757,5 +757,30 @@ export const webFetchTool: ToolSpec = {
 			clearTimeout(timer);
 			externalSignal?.removeEventListener("abort", onExternalAbort);
 		}
+	},
+};
+
+/** The GET-only arguments web_read forwards; method, headers, and body cannot reach the request. */
+const WEB_READ_ARGUMENT_KEYS = ["url", "timeout_ms", "max_bytes", "format"] as const;
+
+/**
+ * web_read is web_fetch with the request shape fixed to a plain GET. One
+ * implementation: the arguments are projected onto the read-only subset and
+ * the same fetch, summaries, binary refusal, private-network gate, and byte
+ * caps apply. Only the message prefix changes, so an error names the tool
+ * that was called.
+ */
+export const webReadTool: ToolSpec = {
+	...webReadToolSurface,
+	async run(args, options): Promise<ToolResult> {
+		const projected: Record<string, unknown> = {};
+		for (const key of WEB_READ_ARGUMENT_KEYS) {
+			if (args[key] !== undefined) projected[key] = args[key];
+		}
+		const result = await webFetchTool.run(projected, options);
+		if (result.kind === "error") {
+			return { ...result, message: result.message.replace(/^web_fetch:/u, "web_read:") };
+		}
+		return result;
 	},
 };

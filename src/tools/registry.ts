@@ -33,6 +33,7 @@ import { type DispatchPlanView, describeDispatchPlan } from "./dispatch-plan.js"
 import type { ToolPresentationPolicy } from "./presentation.js";
 import type { ToolResultDigest, ToolResultDisposition } from "./result-disposition.js";
 import { DEFAULT_TOOL_RESULT_MAX_BYTES, shapeToolResult, toolResultDigestFor } from "./result-shaping.js";
+import { type ToolPlacement, toolSpecPlacement } from "./surface.js";
 
 /**
  * Tool registry. Admission point for every tool call. Delegates classification
@@ -120,6 +121,13 @@ export interface ToolSpec {
 	description: string;
 	sourceInfo?: ToolSourceInfo;
 	metadata?: ToolMetadata;
+	/**
+	 * Which surface carries this tool: `direct` attaches its schema on every
+	 * turn, `gateway` hides it behind `gateway` find/describe/call. Absent means
+	 * the name's placement in src/tools/surface.ts. Placement changes what the
+	 * model sees, never admission: `invoke` runs any registered spec by name.
+	 */
+	placement?: ToolPlacement;
 	/**
 	 * TypeBox schema advertised to the model so it knows which named
 	 * parameters the tool accepts. Must be a Type.Object(...). Runtime
@@ -243,6 +251,20 @@ export interface ToolInvokeOptions {
 	/** Registry-authenticated one-shot operator approval for this execution. */
 	approval?: { requestId: string; requestedBy: string; actionClass: ActionClass };
 	/**
+	 * True for an invocation a tool body makes on the model's behalf (the
+	 * gateway calling the capability it was asked for). The nested call keeps
+	 * its own admission, hooks, and evidence; the flag only tells the loop
+	 * guard that the model's one call has already been counted.
+	 */
+	nested?: boolean;
+	/**
+	 * The capability surface this run was admitted to, when the run is
+	 * narrower than the registry (a worker). The gateway refuses to call any
+	 * capability outside it, so a recipe's declared tools bound the gateway
+	 * exactly as they bound the attached schemas.
+	 */
+	allowedTools?: ReadonlyArray<ToolName>;
+	/**
 	 * How long this call sat parked awaiting an operator decision, reported when
 	 * the park resolves. A caller timing the invocation is measuring the tool,
 	 * and the park is the operator, so the two have to be separable: without
@@ -359,14 +381,16 @@ export interface PermissionRequiredMeta {
 
 export interface ToolRegistry {
 	register(spec: ToolSpec): void;
-	/** Tools visible in the single operating posture. Models only see these. */
+	/** Direct-placed tools: the ones whose schemas the model sees attached. */
 	listVisible(): ReadonlyArray<ToolSpec>;
-	/** Tools registered overall. For /audit, /doctor. */
+	/** Tools registered overall, direct and gateway. For /audit, /doctor, and the bootstrap policy assertion. */
 	listAll(): ReadonlyArray<ToolSpec>;
-	/** Lookup by tool id. */
+	/** Lookup by tool id, whatever its placement. */
 	get(name: ToolName): ToolSpec | undefined;
-	/** Tool names registered in the single operating posture. */
+	/** Names of the direct-placed tools, in registration order. */
 	listRegistered(): ReadonlyArray<ToolName>;
+	/** Gateway-placed tools: reachable through `gateway` find/describe/call, never attached. */
+	listGateway(): ReadonlyArray<ToolSpec>;
 	/**
 	 * Admission point. Classifies, evaluates safety, and either runs or
 	 * returns a rejection. Never throws on safety rejections. When the
@@ -484,6 +508,14 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 					...callerOptions,
 					...(allowsObservationPath ? { allowsObservationPath } : {}),
 				});
+				// A body that delegated to a nested invocation the registry refused
+				// (the gateway calling a denied capability) hands the refusal back
+				// whole, and this call settles as that same blocked verdict: the
+				// model, telemetry, and the ledger then see exactly what a direct
+				// call to the capability would have produced.
+				const nestedBlocked = nestedBlockedVerdict(result);
+				if (nestedBlocked !== null) return nestedBlocked;
+				decision = nestedDecisions.get(result) ?? decision;
 				const digest = toolResultDigestFor(spec, result, resultDisposition, options);
 				const afterEffects = runToolHook("after_tool", spec, call, decision, options, result, digest);
 				const finalResult = shapeToolResult(
@@ -805,8 +837,12 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		},
 		listAll: () => Array.from(tools.values()),
 		get: (name) => tools.get(name),
-		listRegistered: () => Array.from(tools.keys()),
-		listVisible: () => Array.from(tools.values()),
+		listRegistered: () =>
+			Array.from(tools.values())
+				.filter((spec) => toolSpecPlacement(spec) === "direct")
+				.map((spec) => spec.name),
+		listVisible: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "direct"),
+		listGateway: () => Array.from(tools.values()).filter((spec) => toolSpecPlacement(spec) === "gateway"),
 		async invoke(call, options) {
 			const admissionCall = prepareAdmissionCall(tools.get(call.tool as ToolName), call);
 			const outcome = admit(admissionCall, undefined, options);
@@ -1035,6 +1071,54 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 const GUARD_BLOCK_REASON_CODE = "guard_block";
 
 /**
+ * Details key under which a tool body hands a refused nested verdict back to
+ * the registry. Written by {@link nestedBlockedResult}, read once by `runSpec`,
+ * never persisted: the registry settles the outer call as that verdict.
+ */
+const nestedDecisions = new WeakMap<ToolResult, SafetyDecision>();
+
+/** Carry trusted in-process delegation authority without adding model-visible metadata. */
+export function nestedExecutedResult(result: ToolResult, decision: SafetyDecision): ToolResult {
+	nestedDecisions.set(result, decision);
+	return result;
+}
+
+const NESTED_BLOCKED_DETAIL = "nestedBlockedVerdict";
+
+interface NestedBlockedMarker {
+	reason: string;
+	decision: SafetyDecision;
+}
+
+/**
+ * The result a tool body returns when a nested `invoke` it made on the model's
+ * behalf came back blocked. The gateway uses it so a capability the registry
+ * refused (denied at read-only, not approved, guarded) refuses the gateway
+ * call identically instead of dressing the refusal as a tool error.
+ */
+export function nestedBlockedResult(verdict: Extract<RegistryVerdict, { kind: "blocked" }>): ToolResult {
+	const marker: NestedBlockedMarker = { reason: verdict.reason, decision: verdict.decision };
+	return { kind: "error", message: verdict.reason, details: { [NESTED_BLOCKED_DETAIL]: marker } };
+}
+
+function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { kind: "blocked" }> | null {
+	if (result.kind !== "error") return null;
+	const marker = result.details?.[NESTED_BLOCKED_DETAIL];
+	if (typeof marker !== "object" || marker === null) return null;
+	const { reason, decision } = marker as Partial<NestedBlockedMarker>;
+	if (
+		typeof reason !== "string" ||
+		typeof decision !== "object" ||
+		decision === null ||
+		typeof decision.kind !== "string" ||
+		typeof decision.classification !== "object"
+	) {
+		return null;
+	}
+	return { kind: "blocked", reason, decision };
+}
+
+/**
  * Terminal blocked verdict for a before_tool guard block (loop guard,
  * protected artifacts, dispatch dedup, declarative block rules) on a call
  * whose admission already passed. The decision is re-shaped as a block, and
@@ -1256,6 +1340,10 @@ function buildToolHookInput(
 	// Computed for before_tool only; after_tool consumers identify the call
 	// via toolCallId.
 	if (hook === "before_tool") metadata.callFingerprint = hashToolCall(spec.name, call.args ?? {});
+	// A nested invocation (gateway → capability) is the model's one call seen
+	// twice by the hook layer; the loop guard counts and fingerprints only the
+	// outer occurrence. Every other hook still fires under the inner name.
+	if (options?.nested === true) metadata.nested = true;
 	const validationCommand = detectedValidationCommand(call);
 	if (validationCommand !== null) {
 		metadata.validationCommand = validationCommand;

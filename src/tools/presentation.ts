@@ -58,11 +58,15 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.CodeNav]: FOLDED,
 	[ToolNames.Context]: FOLDED,
 	[ToolNames.CredentialPresent]: FOLDED,
+	[ToolNames.ClioDocs]: FOLDED,
+	[ToolNames.ClioLibrary]: FOLDED,
+	[ToolNames.Data]: FOLDED,
 	[ToolNames.Write]: FOLDED_WITH_DIFF,
 	[ToolNames.Edit]: FOLDED_WITH_DIFF,
 	[ToolNames.Bash]: FOLDED,
 	[ToolNames.Git]: FOLDED,
 	[ToolNames.Verify]: FOLDED,
+	[ToolNames.RunScript]: FOLDED,
 	[ToolNames.Dispatch]: FOLDED,
 	[ToolNames.Monitor]: FOLDED,
 	[ToolNames.Steer]: FOLDED,
@@ -71,9 +75,11 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Panes]: FOLDED,
 	[ToolNames.Limitation]: FOLDED,
 	[ToolNames.Decide]: FOLDED,
+	[ToolNames.WebRead]: FOLDED,
 	[ToolNames.WebFetch]: FOLDED,
 	[ToolNames.AskUser]: FOLDED,
 	[ToolNames.Artifact]: FOLDED,
+	[ToolNames.Gateway]: FOLDED,
 };
 
 function readStringField(args: unknown, key: string): string | null {

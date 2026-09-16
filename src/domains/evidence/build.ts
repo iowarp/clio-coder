@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { rawDurationMs } from "../../core/timers.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import type {
 	RunEnvelope,
 	RunKind,
@@ -573,7 +574,12 @@ function validationToolCallCandidate(
 	runSources: ReadonlyArray<EvidenceRunSource>,
 ): ValidationToolCallCandidate | null {
 	const call = extractSessionToolCall(entry, linked);
-	if (validationToolCallSummary(call.tool, call.args) === null) return null;
+	// The capability a gateway call reached is what ran; a validation command
+	// is recognized under that name, never under `gateway`.
+	const effective = effectiveToolCall(call.tool, call.args);
+	if (validationToolCallSummary(effective.toolName, effective.viaGateway ? effective.args : call.args) === null) {
+		return null;
+	}
 	return {
 		toolCallId: call.id,
 		runId: validationRunIdFor(linked, runSources),
@@ -1025,7 +1031,15 @@ function extractSessionToolCall(entry: MessageEntry, linked: LinkedSessionEntry)
 		block?.arguments ??
 		block?.args ??
 		undefined;
-	return { id, tool, args, timestamp: entry.timestamp, link: linked.link, sessionId: linked.sessionId };
+	const effective = effectiveToolCall(tool, args);
+	return {
+		id,
+		tool: effective.toolName,
+		args: effective.args ?? args,
+		timestamp: entry.timestamp,
+		link: linked.link,
+		sessionId: linked.sessionId,
+	};
 }
 
 function extractSessionToolResult(entry: MessageEntry, linked: LinkedSessionEntry): SessionToolResult {
@@ -1047,10 +1061,18 @@ function extractSessionToolResult(entry: MessageEntry, linked: LinkedSessionEntr
 		payload?.out ??
 		payload?.content ??
 		(contentText.length > 0 ? contentText : entry.payload);
+	const effective = effectiveToolCall(tool, undefined, payloadObject(result)?.details ?? payload?.details);
+	const resultObject = payloadObject(result);
+	const details = payloadObject(resultObject?.details);
+	let projectedResult = result;
+	if (effective.viaGateway && resultObject && details) {
+		const { capability: _capability, ...innerDetails } = details;
+		projectedResult = { ...resultObject, details: innerDetails };
+	}
 	return {
 		id,
-		tool,
-		result,
+		tool: effective.toolName,
+		result: projectedResult,
 		isError: payload?.isError === true || payload?.error === true,
 		timestamp: entry.timestamp,
 		link: linked.link,
@@ -1351,8 +1373,13 @@ function renderTranscript(
 	}
 	if (sessionLinks.entries.length > 0) {
 		lines.push("", "## Linked Session Transcript");
+		const calls = new Map<string, string>();
 		for (const linked of sessionLinks.entries) {
-			lines.push(...renderSessionTranscriptEntry(linked));
+			if (linked.entry.kind === "message" && linked.entry.role === "tool_call") {
+				const call = extractSessionToolCall(linked.entry, linked);
+				calls.set(call.id, call.tool);
+			}
+			lines.push(...renderSessionTranscriptEntry(linked, calls));
 		}
 	}
 	lines.push("");
@@ -1379,7 +1406,7 @@ function transcriptRunLink(link: SessionRunLink): string {
 	return "";
 }
 
-function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
+function renderSessionTranscriptEntry(linked: LinkedSessionEntry, calls: ReadonlyMap<string, string>): string[] {
 	const entry = linked.entry;
 	const prefix = `- ${entry.timestamp} session=${linked.sessionId}${transcriptRunLink(linked.link)}`;
 	if (entry.kind === "message") {
@@ -1391,7 +1418,8 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry): string[] {
 			const result = extractSessionToolResult(entry, linked);
 			const id = result.id === null ? "" : ` id=${result.id}`;
 			const error = result.isError ? " error=true" : "";
-			return [`${prefix} tool_result ${result.tool}${id}${error}: ${previewUnknown(result.result)}`];
+			const tool = result.id === null ? result.tool : (calls.get(result.id) ?? result.tool);
+			return [`${prefix} tool_result ${tool}${id}${error}: ${previewUnknown(result.result)}`];
 		}
 		const text = collapseWhitespace(extractTextFromPayload(entry.payload));
 		const rendered = text.length > 0 ? truncateText(text, TRANSCRIPT_TEXT_MAX_CHARS) : previewUnknown(entry.payload);

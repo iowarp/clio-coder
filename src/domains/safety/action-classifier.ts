@@ -89,10 +89,22 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.Grep:
 		case ToolNames.Find:
 		case ToolNames.Ls:
+		// web_read is the GET-only half of the web split: no method, headers,
+		// or body can make it outward, so it is read class unconditionally.
+		case ToolNames.WebRead:
 		case ToolNames.WebFetch:
 		case ToolNames.Git:
 		case ToolNames.CodeNav:
 		case ToolNames.Context:
+		// clio_docs and clio_library read Clio's bundled documentation and the
+		// recipe catalog; data streams structured files. None writes.
+		case ToolNames.ClioDocs:
+		case ToolNames.ClioLibrary:
+		case ToolNames.Data:
+		// gateway lists and describes capabilities on its own; a call carries
+		// the capability's own class through a nested admission, so the outer
+		// call stays read class.
+		case ToolNames.Gateway:
 		case ToolNames.Monitor:
 		case ToolNames.AskUser:
 		case ToolNames.CredentialPresent:
@@ -124,6 +136,10 @@ function baseClassify(tool: string): ActionClass | null {
 			return "write";
 		case ToolNames.Bash:
 		case ToolNames.Verify:
+		// run_script runs an interpreter over a workspace script; its
+		// safetyCall projects the exact argv to a bash command so the policy
+		// engine applies the shell rules to it.
+		case ToolNames.RunScript:
 			return "execute";
 		case ToolNames.Dispatch:
 		case ToolNames.Steer:

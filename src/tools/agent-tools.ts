@@ -30,6 +30,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../eng
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
 import { isDispositionedToolResultError, toolResultContextText } from "./result-disposition.js";
+import { toolSpecPlacement, withGatewayForCapabilities } from "./surface.js";
 
 /**
  * Lightweight per-call observability hook. Default no-op so unused
@@ -308,9 +309,10 @@ function errorMessage(err: unknown): string {
  * (`Value.Check` answers identically with and without), so the copy handed
  * to the agent loop drops every `~`-prefixed key. Symbol keys are copied
  * through untouched because pi-ai picks its coercion path by the TypeBox
- * kind symbol on the root schema.
+ * kind symbol on the root schema. Exported for the gateway's describe, which
+ * hands a capability's schema to the model through a result the same way.
  */
-function wireParameterSchema<T>(schema: T): T {
+export function wireParameterSchema<T>(schema: T): T {
 	if (Array.isArray(schema)) return schema.map((entry) => wireParameterSchema(entry)) as T;
 	if (typeof schema !== "object" || schema === null) return schema;
 	const source = schema as Record<PropertyKey, unknown>;
@@ -374,30 +376,41 @@ function toAgentTool(
  *   1. tools registered on the supplied registry
  *   2. tools whose id appears in `allowedTools`
  *
- * When `allowedTools` is undefined, step 3 is skipped.
+ * projected onto the direct surface: a gateway-placed capability on the
+ * effective list is reachable through the attached `gateway` tool, never as
+ * a schema of its own. When `allowedTools` is undefined, step 2 is skipped.
  */
 export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 	const specs: ToolSpec[] = [];
 	for (const name of effectiveToolNames(input)) {
 		const spec = input.registry.get(name);
-		if (spec) specs.push(spec);
+		if (spec && toolSpecPlacement(spec) === "direct") specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
 	return specs.map((spec) => toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions));
 }
 
 /**
- * The effective tool surface for one worker run, as names. This is the single
+ * The effective capability surface for one run, as names. This is the single
  * narrowing used both to build the executable tool set and to compute the
  * signature the worker attests, so an attested identity can never describe a
  * different surface than the one the agent actually gets.
+ *
+ * The list names capabilities, whatever their placement: a recipe that admits
+ * `git` keeps `git` here, and because `git` sits behind the gateway the list
+ * gains `gateway` as well (the same rule dispatch admission applies to the
+ * list it approves, so the two signatures agree). `resolveAgentTools` then
+ * attaches only the direct-placed names, and the gateway enforces this list
+ * on every call it makes on the run's behalf.
  */
 export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetry" | "invokeOptions">): ToolName[] {
 	const profileContext = {
 		...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
 		...(input.task !== undefined ? { task: input.task } : {}),
 	};
-	const toolIds = applyToolProfile(input.registry.listRegistered(), input.toolProfile, profileContext);
+	const gatewayNames = input.registry.listGateway().map((spec) => spec.name);
+	const registered = [...input.registry.listRegistered(), ...gatewayNames];
+	const toolIds = applyToolProfile(registered, input.toolProfile, profileContext);
 	const allowed = input.allowedTools ? new Set<string>(input.allowedTools) : null;
 	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const names: ToolName[] = [];
@@ -408,7 +421,8 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 		if (allowed && !allowed.has(name)) continue;
 		names.push(name);
 	}
-	return names;
+	if (input.registry.get(ToolNames.Gateway) === undefined) return names;
+	return withGatewayForCapabilities(names);
 }
 
 /**

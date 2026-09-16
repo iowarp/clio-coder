@@ -1,4 +1,5 @@
 import { isAbsolute, relative, resolve } from "node:path";
+import { effectiveToolCall } from "../../tools/surface.js";
 
 export type SessionArtifactTool = "artifact" | "write" | "edit";
 export type SessionArtifactKind = "plan" | "review" | "report";
@@ -61,7 +62,13 @@ export function foldSessionArtifacts(
 		if (!isRecord(raw) || raw.kind !== "message" || raw.role !== "tool_result") continue;
 		if (typeof raw.turnId !== "string" || typeof raw.timestamp !== "string") continue;
 		const payload = raw.payload;
-		if (!isRecord(payload) || !isSessionArtifactTool(payload.toolName)) continue;
+		if (!isRecord(payload) || typeof payload.toolName !== "string") continue;
+		const result = payload.result;
+		const details = isRecord(result) && isRecord(result.details) ? result.details : null;
+		// An artifact written through the gateway is recorded under `gateway`
+		// with the capability stamped on its details; it is the same write.
+		const toolName = effectiveToolCall(payload.toolName, undefined, details ?? undefined).toolName;
+		if (!isSessionArtifactTool(toolName)) continue;
 		if (
 			payload.isError === true ||
 			payload.outcome === "error" ||
@@ -71,12 +78,10 @@ export function foldSessionArtifacts(
 		) {
 			continue;
 		}
-		const result = payload.result;
-		if (!isRecord(result) || !isRecord(result.details) || !Array.isArray(result.details.paths)) continue;
-		const artifactKind =
-			payload.toolName === "artifact" && isSessionArtifactKind(result.details.kind) ? result.details.kind : undefined;
+		if (!isRecord(result) || details === null || !Array.isArray(details.paths)) continue;
+		const artifactKind = toolName === "artifact" && isSessionArtifactKind(details.kind) ? details.kind : undefined;
 		const pathsSeenInResult = new Set<string>();
-		for (const recordedPath of result.details.paths) {
+		for (const recordedPath of details.paths) {
 			if (typeof recordedPath !== "string" || recordedPath.trim().length === 0) continue;
 			const normalized = normalizedWorkspacePath(recordedPath, workspace);
 			if (normalized === null || pathsSeenInResult.has(normalized)) continue;
@@ -86,7 +91,7 @@ export function foldSessionArtifacts(
 			writeIndex += 1;
 			lastByPath.set(normalized, {
 				path: recordedPath,
-				tool: payload.toolName,
+				tool: toolName,
 				...(artifactKind ? { artifactKind } : {}),
 				turnId: raw.turnId,
 				timestamp: raw.timestamp,

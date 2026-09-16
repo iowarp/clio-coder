@@ -1,10 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { Type } from "typebox";
 import { artifactDefaultPath, CLIO_ARTIFACT_DIR } from "../core/artifact-paths.js";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
-import { withFileMutationQueue } from "./file-mutation-queue.js";
+import { type AtomicPublishResult, publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -13,6 +12,12 @@ import type { ToolResult, ToolSpec } from "./registry.js";
  * a Markdown artifact and terminates the turn: writing the artifact IS the
  * answer, so pi-agent-core skips the follow-up LLM call that would only
  * summarize it.
+ *
+ * Placement: gateway. The terminal contract survives the indirection because
+ * the gateway propagates `terminate`, `details.kind`, and `details.paths`
+ * from this result unchanged, so the turn still ends and `/view` still lists
+ * the document. The write is an atomic publish (temp file, fsync, rename) so
+ * a failed write never leaves a half-written artifact behind.
  *
  * A pathless call lands under `.clio-coder/artifacts/`, not in the repo working
  * tree. A turn nobody asked for a file from used to drop REPORT.md into the
@@ -58,11 +63,9 @@ async function writeTerminalArtifact(
 	}
 	const title = typeof args.title === "string" ? args.title.trim() : "";
 	const body = title.length > 0 && !content.trimStart().startsWith("#") ? `# ${title}\n\n${content}` : content;
+	let published: AtomicPublishResult;
 	try {
-		await withFileMutationQueue(target, async () => {
-			mkdirSync(path.dirname(target), { recursive: true });
-			writeFileSync(target, body, "utf8");
-		});
+		published = await withFileMutationQueue(target, () => publishFileAtomically(target, body));
 	} catch (err) {
 		return { kind: "error", message: `artifact: ${err instanceof Error ? err.message : String(err)}` };
 	}
@@ -70,10 +73,15 @@ async function writeTerminalArtifact(
 	const bytes = Buffer.byteLength(body, "utf8");
 	return {
 		kind: "ok",
-		output: `wrote ${kind} artifact (${bytes}B) to ${rel}`,
+		output: `wrote ${kind} artifact (${bytes}B) to ${rel}${published.durabilityWarning ? `\n${published.durabilityWarning}` : ""}`,
 		// shownBytes is the artifact's real size; the ledger otherwise measures
 		// this confirmation sentence (a 4753B plan rendered as "60B", #76).
-		details: { kind, paths: [target], observation: { shownBytes: bytes } },
+		details: {
+			kind,
+			paths: [target],
+			observation: { shownBytes: bytes },
+			file: { before: published.before, after: published.after },
+		},
 		// Writing the artifact is the whole turn; terminate skips the follow-up
 		// LLM call that would only restate what was just written.
 		terminate: true,

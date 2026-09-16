@@ -1,4 +1,5 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
+import { ToolNames } from "../core/tool-names.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -18,6 +19,9 @@ import { createDecideTool } from "./decide.js";
 import { editTool } from "./edit.js";
 import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
+import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
+import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
+import { createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -27,10 +31,11 @@ import { networkToolsDisabled } from "./network-policy.js";
 import { assertBuiltinToolPolicy } from "./policy.js";
 import { readTool } from "./read.js";
 import type { ToolRegistry } from "./registry.js";
+import { runScriptToolSurface } from "./run-script.js";
 import { gitTool } from "./safe-exec.js";
 import { createTasksTool } from "./tasks.js";
 import { verifyToolSurface } from "./verify/surface.js";
-import { webFetchToolSurface } from "./web-fetch-surface.js";
+import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
 import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
@@ -61,6 +66,12 @@ export interface CoreToolBootstrapDeps {
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	>;
 	skillMarketplace?: boolean;
+	/**
+	 * Local MCP servers the gateway may launch. The session bootstrap builds
+	 * one per process; worker registries carry none, so a worker's gateway
+	 * reaches builtin and extension capabilities only.
+	 */
+	mcpCapabilities?: McpCapabilitySource;
 }
 
 export interface CoreToolRegistration {
@@ -96,6 +107,14 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...builtin(lsTool, { path: "src/tools/ls.ts", scope: "core" }),
 	});
 	if (includeNetworkTools) {
+		// Both halves of the web split share one implementation module; the
+		// read half never carries a method, headers, or a body.
+		registry.register({
+			...builtin(
+				lazyTool(webReadToolSurface, async () => (await import("./web-fetch.js")).webReadTool),
+				{ path: "src/tools/web-fetch.ts", scope: "core" },
+			),
+		});
 		registry.register({
 			...builtin(
 				lazyTool(webFetchToolSurface, async () => (await import("./web-fetch.js")).webFetchTool),
@@ -110,6 +129,30 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		...builtin(
 			lazyTool(verifyToolSurface, async () => (await import("./verify/index.js")).verifyTool),
 			{ path: "src/tools/verify/index.ts", scope: "core" },
+		),
+	});
+	const getWorkspaceRoot = (): string => deps.session?.current()?.cwd ?? process.cwd();
+	// run_script's module exports its name as a dynamic tool name; it registers
+	// under the canonical builtin so the plane table and classifier own it.
+	registry.register({
+		...builtin(
+			lazyTool({ ...runScriptToolSurface, name: ToolNames.RunScript }, async () => ({
+				...(await import("./run-script.js")).createRunScriptTool({ getWorkspaceRoot }),
+				name: ToolNames.RunScript,
+			})),
+			{ path: "src/tools/run-script.ts", scope: "core" },
+		),
+	});
+	registry.register({
+		...builtin(
+			lazyTool(
+				{
+					...dataToolSurface,
+					prepareAdmissionArguments: (args) => prepareDataAdmissionArguments(args, getWorkspaceRoot()),
+				},
+				async () => (await import("./gateway/data-tool.js")).createDataTool({ getCwd: getWorkspaceRoot }),
+			),
+			{ path: "src/tools/gateway/data-tool.ts", scope: "core" },
 		),
 	});
 	registry.register({
@@ -184,6 +227,34 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	});
 	registry.register({
 		...builtin(createArtifactTool({ getCwd: skillToolDeps.getCwd }), { path: "src/tools/artifact.ts", scope: "core" }),
+	});
+	// The two Clio-internal reads that left the context schema, under their
+	// own names behind the gateway; same scope functions, same worker refusal.
+	registry.register({
+		...builtin(
+			lazyTool(clioDocsToolSurface, async () => (await import("./gateway/clio-context-tools.js")).createClioDocsTool()),
+			{ path: "src/tools/gateway/clio-context-tools.ts", scope: "core" },
+		),
+	});
+	registry.register({
+		...builtin(
+			lazyTool(clioLibraryToolSurface, async () =>
+				(await import("./gateway/clio-context-tools.js")).createClioLibraryTool({
+					getCwd: skillToolDeps.getCwd,
+					...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
+					...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
+				}),
+			),
+			{ path: "src/tools/gateway/clio-context-tools.ts", scope: "core" },
+		),
+	});
+	// The gateway itself: direct, one fixed schema, reaching every
+	// gateway-placed spec above through the registry's own admission.
+	registry.register({
+		...builtin(createGatewayTool({ registry, ...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}) }), {
+			path: "src/tools/gateway/index.ts",
+			scope: "core",
+		}),
 	});
 	// The coordination board exists only inside a dispatch: a worker process
 	// binds the port, the session never does, and without a port the tool can

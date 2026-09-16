@@ -46,6 +46,7 @@ import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runti
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
+import { withGatewayForCapabilities } from "../../tools/surface.js";
 import {
 	applyTaskWorktree,
 	cleanupTaskWorktree,
@@ -1692,12 +1693,19 @@ function effectiveToolNames(
 		(tool): tool is ToolName =>
 			(isBuiltinToolName(tool) || harnessTools.has(tool)) &&
 			tool !== ToolNames.AskUser &&
-			!(networkStripped && tool === ToolNames.WebFetch) &&
+			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&
 			(target.runtime.id !== "claude-sdk" || isClaudeCanonicalTool(tool)),
 	);
-	return [...new Set(names)].sort();
+	// A native worker reaches a gateway-placed capability (git, web_fetch, an
+	// extension command) through the attached `gateway` tool, so the admitted
+	// list gains `gateway` whenever it names one. The worker's own narrowing
+	// (tools/agent-tools.ts effectiveToolNames) applies the same rule, which is
+	// what keeps the approved tool signature equal to the attested one.
+	const mediated = target.runtime.kind === "http" && target.runtime.id !== "claude-sdk";
+	const surface = mediated ? withGatewayForCapabilities(names) : [...new Set(names)];
+	return surface.sort();
 }
 
 /**
@@ -5824,6 +5832,7 @@ export function createDispatchBundle(
 					cwd: lifecycle.cwd,
 					networkAllowed:
 						lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
+						lifecycle.admission.allowedTools.includes(ToolNames.WebRead) ||
 						lifecycle.target.runtime.externalAgentLoop?.network === "externally-governed-unobserved",
 					observedRunEffects,
 					filesystem: nodeResultContractFilesystem(),

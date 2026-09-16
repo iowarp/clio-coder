@@ -146,11 +146,13 @@ export function withModelSkillActivation(
 
 /**
  * Tools admitted regardless of any active skill narrowing: context so the
- * remaining requested skills of the same turn can still load, and ask_user as
+ * remaining requested skills of the same turn can still load, ask_user as
  * the escape hatch the block message points at when a workflow genuinely
- * needs a tool its skill did not declare.
+ * needs a tool its skill did not declare, and gateway because find and
+ * describe are harmless and a gateway call is checked again, under the
+ * capability's own name, by the nested admission it makes.
  */
-const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["context", "ask_user"]);
+const SKILL_SURFACE_EXEMPT_TOOLS: ReadonlySet<string> = new Set(["context", "ask_user", "gateway"]);
 
 export interface SkillToolSurfaceViolation {
 	/** Every loaded skill that contributed a declaration to the merged surface. */

@@ -25,6 +25,7 @@
  */
 
 import { basename, isAbsolute, join, normalize, resolve } from "node:path";
+import { effectiveToolCall } from "../../../tools/surface.js";
 import type { MessageEntry, SessionEntry } from "../../session/entries.js";
 import type { WorkingSetRef } from "./contract.js";
 import { isTurnStart } from "./horizon.js";
@@ -175,8 +176,12 @@ interface ToolCallFacts {
 	argsKey: string;
 }
 
-function callFacts(toolName: string, args: unknown): ToolCallFacts {
-	return { toolName, args, argsKey: args === undefined ? "" : stableStringify(args) };
+function callFacts(recordedTool: string, recordedArgs: unknown): ToolCallFacts {
+	// A gateway call indexes as the capability it reached (git reads the cwd,
+	// artifact writes its path), never as an opaque `gateway` observation.
+	const effective = effectiveToolCall(recordedTool, recordedArgs);
+	const args = effective.viaGateway ? effective.args : recordedArgs;
+	return { toolName: effective.toolName, args, argsKey: args === undefined ? "" : stableStringify(args) };
 }
 
 function stringField(record: Record<string, unknown> | null, ...keys: string[]): string | null {

@@ -346,6 +346,8 @@ export async function runLibraryScope(
 	args: Record<string, unknown>,
 	reservation: ObservationReservation,
 	options: ToolInvokeOptions | undefined,
+	/** The tool the envelope notice names; the `clio_library` gateway capability passes its own. */
+	toolName: string = ToolNames.Context,
 ): Promise<ToolResult> {
 	if (deps.skillMarketplace === false) {
 		return { kind: "error", message: WORKER_UNAVAILABLE };
@@ -446,7 +448,7 @@ export async function runLibraryScope(
 	};
 
 	return finalizeObservation({
-		tool: ToolNames.Context,
+		tool: toolName,
 		unit: "entries",
 		format: "json",
 		output: JSON.stringify(payload),

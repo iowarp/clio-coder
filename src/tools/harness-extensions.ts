@@ -64,6 +64,9 @@ function createCommandTool(extension: LoadableExtension, tool: ExtensionCommandT
 		parameters: tool.inputSchema as TSchema,
 		baseActionClass: "execute",
 		executionMode: "sequential",
+		// Reached through gateway find/describe/call; the spec, its execute
+		// class, and its bash projection are unchanged by the placement.
+		placement: "gateway",
 		sourceInfo: { path: extension.manifestPath, scope: "domain", extension: extension.provenance },
 		metadata: {
 			objective: tool.description,

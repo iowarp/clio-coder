@@ -22,6 +22,7 @@ import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
 import { toolResultPresentationPolicy, toolResultPresentationText } from "../../tools/result-disposition.js";
+import { effectiveToolCall } from "../../tools/surface.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
@@ -214,11 +215,16 @@ const PRIMARY_ARG_FIELD: Record<string, string> = {
 	bash: "command",
 	grep: "pattern",
 	find: "pattern",
+	web_read: "url",
 	web_fetch: "url",
 	git: "op",
 	verify: "check",
+	run_script: "script",
 	code_nav: "query",
 	context: "scope",
+	clio_docs: "query",
+	clio_library: "query",
+	data: "path",
 	artifact: "kind",
 	monitor: "run_id",
 	steer: "run_id",
@@ -252,10 +258,31 @@ function summarizeWebFetchArgs(args: unknown): string {
 	return truncate(jsonStringifySafe(Object.keys(compact).length > 0 ? compact : args), WEB_FETCH_ARG_PREVIEW_LIMIT);
 }
 
+/**
+ * A gateway call reads as the capability it reached: `find` and `describe`
+ * name what was asked, `call` renders the capability's own summary so a row
+ * says `git status` rather than an opaque gateway argument dump.
+ */
+function summarizeGatewayArgs(args: unknown): string {
+	if (!isPlainObject(args)) return truncate(jsonStringifySafe(redactToolArgs(args)), ARG_PREVIEW_LIMIT);
+	const op = typeof args.op === "string" ? args.op : "";
+	if (op === "find") {
+		const query = readStringField(args, "query");
+		return truncate(query === null || query.length === 0 ? "find" : `find ${query}`, ARG_PREVIEW_LIMIT);
+	}
+	const capability = readStringField(args, "capability") ?? "";
+	if (op === "describe") return truncate(`describe ${capability}`.trim(), ARG_PREVIEW_LIMIT);
+	const effective = effectiveToolCall("gateway", args);
+	if (!effective.viaGateway) return truncate(jsonStringifySafe(redactToolArgs(args)), ARG_PREVIEW_LIMIT);
+	const inner = summarizeArgs(effective.toolName, effective.args);
+	return truncate(inner.length > 0 ? `${effective.toolName} ${inner}` : effective.toolName, ARG_PREVIEW_LIMIT);
+}
+
 function summarizeArgs(toolName: string, args: unknown): string {
 	if (isEmptyArgs(args)) return "";
 	const safeArgs = redactToolArgs(args);
-	if (toolName === "web_fetch") return summarizeWebFetchArgs(safeArgs);
+	if (toolName === "web_fetch" || toolName === "web_read") return summarizeWebFetchArgs(safeArgs);
+	if (toolName === "gateway") return summarizeGatewayArgs(args);
 	const primary = capturedPrimaryArg(toolName, args);
 	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
 	return truncate(jsonStringifySafe(safeArgs), ARG_PREVIEW_LIMIT);
@@ -635,9 +662,32 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
+	web_read: (args) => buildFieldSublineBody(args, "url", "reading "),
 	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
 	git: (args) => buildFieldSublineBody(args, "op", "git "),
 	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
+	run_script: (args) => buildFieldSublineBody(args, "script", "running ", { wrapInBackticks: true }),
+	data: (args) => {
+		const op = readStringField(args, "op") ?? "inspecting";
+		const path = readStringField(args, "path");
+		return path === null ? op : `${op} ${path}`;
+	},
+	gateway: (args) => {
+		if (!isPlainObject(args)) return null;
+		const op = typeof args.op === "string" ? args.op : "";
+		if (op === "find") {
+			const query = readStringField(args, "query");
+			return query === null || query.length === 0 ? "finding capabilities" : `finding capabilities \`${query}\``;
+		}
+		if (op === "describe") {
+			const capability = readStringField(args, "capability");
+			return capability === null ? "describing a capability" : `describing ${capability}`;
+		}
+		const effective = effectiveToolCall("gateway", args);
+		if (!effective.viaGateway) return null;
+		const inner = SUBLINE_BODY_BUILDERS[effective.toolName]?.(effective.args);
+		return inner !== null && inner !== undefined ? `${inner} (via gateway)` : `calling ${effective.toolName}`;
+	},
 	code_nav: (args) => {
 		const mode = readStringField(args, "mode");
 		const query = readStringField(args, "query")?.trim() ?? "";
@@ -715,9 +765,9 @@ function buildSublineBody(
 		}
 		return SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
 	}
-	if (toolName === "web_fetch") {
+	if (toolName === "web_fetch" || toolName === "web_read") {
 		const meta = status === undefined ? null : webFetchMeta(result);
-		const body = SUBLINE_BODY_BUILDERS.web_fetch?.(args) ?? buildGenericToolBody(toolName, args);
+		const body = SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
 		return `${body}${meta ? dim(` · ${meta}`) : ""}`;
 	}
 	if (toolName === "bash") {

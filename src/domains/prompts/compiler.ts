@@ -4,6 +4,7 @@ import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { ToolName } from "../../core/tool-names.js";
 import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
+import { directSurfaceNames } from "../../tools/surface.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
@@ -290,15 +291,20 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 			"This target cannot call tools; answer from the visible user request and compact context only.",
 		].join("\n");
 	}
-	const names = [
+	const capabilityNames = [
 		...new Set((inputs.toolNames ?? []).map((name) => name.trim()).filter((name) => name.length > 0)),
 	].sort();
+	// A worker's admitted list names capabilities behind the gateway (git,
+	// web_fetch, an extension command); the attached schemas are their direct
+	// projection, with `gateway` standing in for every capability it reaches.
+	const names = directSurfaceNames(capabilityNames).sort();
 	const canDispatch = sessionCanDispatch(inputs);
 	const canListSkills = sessionHasContext(inputs);
 	// Asked twice in one session which tools it had, a live model gave two
 	// different answers and invented `web_find`. The authoritative list is one
 	// line above; pointing at it beats letting the model recall the schemas.
 	const admitted = new Set(names);
+	const hasGateway = admitted.has("gateway");
 	const inventoryGuidance = [
 		"When asked what tools you have, copy the Direct tools line verbatim and call nothing",
 		...(canDispatch
@@ -307,14 +313,22 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 				]
 			: []),
 		...(canListSkills ? ['context(scope="skills") answers only a question about skills'] : []),
+		...(hasGateway ? ['gateway(op="find") answers a question about secondary capabilities'] : []),
 	].join("; ");
 	const capabilityKinds = [
 		"direct tools are attached schemas",
+		...(hasGateway ? ["secondary capabilities are reached through gateway find, describe, and call"] : []),
 		...(canDispatch ? ["fleet agents are workers behind dispatch"] : []),
 		...(canListSkills ? ["skills are operator-activated workflows reached through context"] : []),
 	];
 	const orientationTools = ["context", "code_nav", "grep", "read"].filter((name) => admitted.has(name));
-	const validationTools = ["verify", "git"].filter((name) => admitted.has(name));
+	// git sits behind the gateway, so it validates through gateway(call git)
+	// whenever the gateway is attached; a registry that placed it direct still
+	// names it plainly.
+	const validationTools = [
+		...(admitted.has("verify") ? ["verify"] : []),
+		...(admitted.has("git") ? ["git diff"] : hasGateway ? ['gateway(op="call", capability="git") diff'] : []),
+	];
 	const lines = [
 		"# Tool Contract",
 		TOOL_RESULT_TRUST_CONTRACT,
@@ -333,17 +347,15 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 					`For narrow file or symbol orientation, prefer ${orientationTools.join(", ")} instead of assuming source-tree details were preloaded.`,
 				]
 			: []),
-		...(validationTools.length > 0
-			? [
-					`Validate with ${validationTools.map((name) => (name === "git" ? "git diff" : name)).join(" or ")} before final claims.`,
-				]
-			: []),
-		`When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema and adjust the arguments${canListSkills ? ', or query context(scope="docs") for that tool\'s usage' : ""}.`,
+		...(validationTools.length > 0 ? [`Validate with ${validationTools.join(" or ")} before final claims.`] : []),
+		`When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema and adjust the arguments${hasGateway ? ', or read that tool\'s usage with gateway(op="call", capability="clio_docs", args={query})' : ""}.`,
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
-	// removes its hint with no compiler edit.
-	const hints = canonicalToolPromptHints(inputs.toolPromptHints ?? [], new Set(names));
+	// removes its hint with no compiler edit. A capability reached through the
+	// gateway keeps its hint: the guidance is about the capability, not the
+	// schema that carries it.
+	const hints = canonicalToolPromptHints(inputs.toolPromptHints ?? [], new Set([...capabilityNames, ...names]));
 	for (const entry of hints) {
 		lines.push(entry.hint);
 	}

@@ -153,8 +153,8 @@ class TerminationCoordinator {
 	onDrain(hook: Hook, options?: { timeoutMs: number }): void {
 		this.drainHooks.push(registeredHook(hook, options));
 	}
-	onTerminate(hook: Hook): void {
-		this.terminateHooks.push({ run: hook });
+	onTerminate(hook: Hook, options?: { timeoutMs: number }): void {
+		this.terminateHooks.push(registeredHook(hook, options));
 	}
 	onPersist(hook: Hook, options?: { timeoutMs: number }): void {
 		this.persistHooks.push(registeredHook(hook, options));

@@ -21,6 +21,7 @@ import {
 } from "../../src/domains/extensions/state.js";
 import { attestedToolSignature, createWorkerSafety, createWorkerToolRegistry } from "../../src/engine/worker-tools.js";
 import { registerAllTools } from "../../src/tools/bootstrap.js";
+import { createGatewayTool } from "../../src/tools/gateway/index.js";
 import { registerHarnessExtensionTools } from "../../src/tools/harness-extensions.js";
 import { applyToolProfile } from "../../src/tools/profiles.js";
 import { createRegistry } from "../../src/tools/registry.js";
@@ -224,16 +225,58 @@ describe("harness extension executable capabilities", () => {
 		equal(verdict.kind, "blocked");
 		if (verdict.kind === "blocked") equal(verdict.reason, "capability denied");
 	});
-	it("loads user capabilities into session and worker registries while narrow profiles exclude them", () => {
+	it("loads user capabilities into session and worker registries behind the gateway while narrow profiles exclude them", () => {
 		const data = fixture();
 		ok(installExtension(data.source, { cwd: data.cwd, scope: "user" }).extension?.loadable);
 		const registry = createWorkerToolRegistry();
 		ok(registry.get(testName));
+		// Registered, reachable by name, and never attached: the command sits on
+		// the gateway surface, not on the direct one.
+		ok(!registry.listRegistered().includes(testName), "an extension command must not be a direct tool");
+		ok(
+			registry.listGateway().some((spec) => spec.name === testName),
+			"an extension command is a gateway capability",
+		);
 		const sessionRegistry = createRegistry({ safety: createWorkerSafety({ cwd: data.cwd }) });
-		registerAllTools(sessionRegistry);
+		registerAllTools(sessionRegistry, { mcpCapabilities: false });
 		ok(sessionRegistry.get(testName));
+		ok(!sessionRegistry.listRegistered().includes(testName));
 		deepStrictEqual(applyToolProfile([testName], "minimal-local"), []);
 		deepStrictEqual(applyToolProfile([testName], "full-agent"), [testName]);
+	});
+	it("runs an installed command through the gateway with its execute class, provenance, and denial intact", async () => {
+		const { registry, cwd } = installed();
+		registry.register(createGatewayTool({ registry }));
+		const text = "through the gateway";
+		const verdict = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: testName, args: { text } },
+		});
+		equal(verdict.kind, "ok");
+		if (verdict.kind !== "ok" || verdict.result.kind !== "ok") throw new Error(JSON.stringify(verdict));
+		deepStrictEqual(JSON.parse(verdict.result.output), { input: { text }, secret: null, cwd });
+		equal(verdict.result.details?.capability, testName);
+		ok(verdict.result.details?.extension, "the extension provenance rides the gateway result");
+		const listing = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "fixture" } });
+		if (listing.kind !== "ok" || listing.result.kind !== "ok") throw new Error(JSON.stringify(listing));
+		const entry = (
+			JSON.parse(listing.result.output) as { capabilities: Array<Record<string, unknown>> }
+		).capabilities.find((candidate) => candidate.name === testName);
+		deepStrictEqual(
+			{ kind: entry?.kind, actionClass: entry?.actionClass },
+			{ kind: "extension", actionClass: "execute" },
+		);
+		// read-only denies the command through the gateway exactly as it denies
+		// the command by name: the gateway call itself settles as that block.
+		const readOnly = createRegistry({ safety: createWorkerSafety({ cwd }), autonomy: () => "read-only" });
+		registerHarnessExtensionTools(readOnly, cwd);
+		readOnly.register(createGatewayTool({ registry: readOnly }));
+		const denied = await readOnly.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: testName, args: { text } },
+		});
+		equal(denied.kind, "blocked", JSON.stringify(denied));
+		if (denied.kind === "blocked") ok(denied.reason.includes(testName), denied.reason);
 	});
 	it("enforces command timeout, output cap, and cancellation", async () => {
 		for (const [script, limits, expected] of [
@@ -270,15 +313,19 @@ describe("harness extension executable capabilities", () => {
 			};
 			const preview = bundle.contract.preview?.(request);
 			ok(preview);
+			// The command is a gateway capability, so the admitted surface gains
+			// `gateway` on both sides: the plan the orchestrator approves and the
+			// surface the worker attests are computed from the same rule.
+			const surface = [...allowedTools, ToolNames.Gateway];
 			equal(
 				preview.toolSignature,
 				createHash("sha256")
-					.update(JSON.stringify([...allowedTools].sort()))
+					.update(JSON.stringify([...surface].sort()))
 					.digest("hex"),
 			);
 			equal(
 				attestedToolSignature({ allowedTools, toolsSupported: true, agentId: "coder", task: request.task }),
-				toolSignatureOf(allowedTools),
+				toolSignatureOf(surface),
 			);
 			disableExtension("fixture", { cwd: data.cwd, scope: "user" });
 			throws(() => bundle.contract.preview?.(request), /extension_fixture__inspect/);

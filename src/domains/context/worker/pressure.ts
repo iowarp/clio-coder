@@ -1,4 +1,5 @@
 import type { AgentMessage } from "../../../engine/types.js";
+import { effectiveToolCall } from "../../../tools/surface.js";
 import { estimateAgentContextBreakdown, estimateAgentMessageTokens } from "../../session/context-accounting.js";
 import { contextHash, messageToolCalls } from "./snapshot.js";
 
@@ -93,9 +94,12 @@ export function createWorkerContextGuard(archive: (ref: string, message: AgentMe
 				const projected = { ...message, content };
 				replace(index, message, projected);
 			} else if (message.role === "toolResult" && !message.isError) {
-				const name = toolCalls.get(message.toolCallId)?.name;
+				const call = toolCalls.get(message.toolCallId);
+				// A gateway call carries its capability's read semantics: a page
+				// fetched through the gateway is as evictable as a direct fetch.
+				const name = call ? effectiveToolCall(call.name, call.arguments).toolName : undefined;
 				// Only observations with known read semantics. Preserve mutations and opaque tools.
-				if (!name || !["read", "grep", "find", "ls", "code_nav", "web_fetch"].includes(name)) continue;
+				if (!name || !["read", "grep", "find", "ls", "code_nav", "web_read", "web_fetch"].includes(name)) continue;
 				if (JSON.stringify(message.content).length < 1000) continue;
 				const ref = key(message);
 				const file = archive(ref, structuredClone(message));

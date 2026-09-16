@@ -526,6 +526,15 @@ describe("mcp stdio client", () => {
 		await waitFor(() => !processAlive(pid));
 	});
 
+	it("the synchronous exit backstop does nothing before launch or after completed teardown", async () => {
+		const c = client();
+		deepStrictEqual(await recordGroupSignals(async () => c.killOwnedOnExit()), []);
+		strictEqual(c.pid, undefined);
+		await c.initialize();
+		deepStrictEqual(await c.close(), { complete: true });
+		deepStrictEqual(await recordGroupSignals(async () => c.killOwnedOnExit()), []);
+	});
+
 	it("close ends the process group, rejects pending calls, and is idempotent", async () => {
 		const c = client();
 		await c.initialize();
@@ -616,6 +625,7 @@ describe("mcp stdio client", () => {
 		]);
 		ok(!processAlive(pgid), "the leader itself did die");
 		const after = await recordGroupSignals(async () => {
+			c.killOwnedOnExit();
 			deepStrictEqual(await c.close(), expected, "a repeated close reports the same outcome");
 		});
 		deepStrictEqual(after, [], "the released id is never probed or signalled again");
@@ -640,6 +650,7 @@ describe("mcp stdio client", () => {
 			[-pgid, "SIGKILL"],
 		]);
 		const after = await recordGroupSignals(async () => {
+			c.killOwnedOnExit();
 			deepStrictEqual(await c.close(), expected);
 		});
 		deepStrictEqual(after, []);

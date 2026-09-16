@@ -149,6 +149,8 @@ export interface McpClient {
 	callTool(name: string, args: Record<string, unknown>, options?: McpCallToolOptions): Promise<McpToolCallResult>;
 	/** Resolves with the teardown outcome; an incomplete teardown is flagged there and in state(), not thrown. */
 	close(): Promise<McpTeardownOutcome>;
+	/** Synchronous exit backstop. Signals only a currently owned group; use close() for awaited teardown. */
+	killOwnedOnExit(): void;
 	state(): McpClientState;
 	serverInfo(): McpServerInfo | null;
 	/** Set by `notifications/tools/list_changed`; cleared by acknowledgeToolsChanged. */
@@ -880,6 +882,11 @@ export function createMcpStdioClient(spec: McpServerSpec, options: McpClientOpti
 		listTools,
 		callTool,
 		close,
+		killOwnedOnExit: () => {
+			// ESRCH releases ownership before the asynchronous teardown record settles.
+			// Check the live ownership state, never the retained pid or final outcome.
+			if (groupOwned()) signalGroup("SIGKILL");
+		},
 		state: () => {
 			const cleanup = { cleanupIncomplete: teardown?.complete === false, teardown };
 			return status === "failed"
