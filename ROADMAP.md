@@ -14,7 +14,7 @@ the product surfaces those systems opened.
 
 ## v0.4.9 — Scientific tool quality and capability gateway
 
-The implementation is landed on the candidate branch; the release cut is still pending. This milestone improves file I/O, scientific processing, and inspectable verification while moving secondary capabilities behind one admitted gateway. See [the individual tool audit](docs/process/tool-audit-v0.4.9.md) for contracts, limitations, and commit status.
+The implementation is landed on the candidate branch, and the local v0.4.9 candidate is dated 2026-09-16; candidate qualification and publication remain pending. This milestone improves file I/O, scientific processing, and inspectable verification while moving secondary capabilities behind one admitted gateway. See [the individual tool audit](docs/process/tool-audit-v0.4.9.md) for contracts, limitations, and commit status.
 
 - [x] Windowed text reads, honest encoding/identity, atomic write/edit, bounded diffs, and explicit search completeness and symlink listings.
 - [x] Direct run_script with streamed logs, provenance, partial-output outcomes, bounded process-group cleanup and pipe draining, and run retention.

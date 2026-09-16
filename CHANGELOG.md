@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## Unreleased
+## 0.4.9 - 2026-09-16
 
 ### read
 

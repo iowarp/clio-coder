@@ -73,11 +73,12 @@ setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
 it. An optional local **browser app** over the same runtime is described under
 [Optional browser app](#optional-browser-app). The first session does not need it.
 
-**New in 0.4.8:** More reliable live settings, provider accounting and runtime
-cleanup, an npm-backed installer, and an optional web app with documentation
-generated from the Markdown guides. See the
-[changelog](CHANGELOG.md) for release details and [Install](#install) for source
-builds and other package managers.
+**New in 0.4.9:** File tools report bounded reads, atomic edits, and partial
+search results more precisely. Script runs retain streamed logs and provenance,
+and scientific verification exposes explicit tolerance and non-finite policies.
+A capability gateway adds data inspection and trusted local MCP alongside
+secondary tools. See the [changelog](CHANGELOG.md) for release details and
+[Install](#install) for source builds and other package managers.
 
 ## Built for scientific software
 
@@ -372,7 +373,7 @@ can also be installed with your package manager. See
 From source, the latest stable release uses the pinned pnpm workflow:
 
 ```bash
-git clone --branch v0.4.8 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.4.9 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
