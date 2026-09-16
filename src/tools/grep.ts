@@ -1,5 +1,7 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path, { join, relative } from "node:path";
+import { setImmediate as yieldToLoop } from "node:timers/promises";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
@@ -18,7 +20,16 @@ import {
 } from "./observation.js";
 import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
+import {
+	createSearchDiagnostics,
+	finishSearch,
+	newSearchCompleteness,
+	type SearchCompleteness,
+	searchNotice,
+	skipSearchPath,
+	spawnLineStream,
+	validateSearchPatternSize,
+} from "./spawn-hygiene.js";
 import { GREP_MAX_LINE_LENGTH, truncateHead, truncateLine } from "./truncate.js";
 
 const DEFAULT_LIMIT = 100;
@@ -68,6 +79,8 @@ interface RenderedLine {
 }
 
 interface GrepRenderInput {
+	search: SearchCompleteness;
+	fallback?: boolean;
 	withheldPaths: number;
 	mode: GrepMode;
 	lines: RenderedLine[];
@@ -88,16 +101,21 @@ const NO_MATCH_OUTPUT = "No matches found";
  * rendering when anything was cut, and close the envelope.
  */
 function renderGrepResult(input: GrepRenderInput): ToolResult {
-	const { mode, lines, matchCount, limitHit, limit, linesTruncated, reservation, options } = input;
+	const { mode, lines, matchCount, limitHit, limit, linesTruncated, reservation, options, search } = input;
+	const fallbackNotice = input.fallback
+		? "\n[Fallback search uses GENERATED_DIRS only; .gitignore is not applied.]"
+		: "";
 	if (lines.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Grep,
 			withheldPaths: input.withheldPaths,
 			unit: MODE_UNITS[mode],
-			output: NO_MATCH_OUTPUT,
+			output:
+				(search.complete ? NO_MATCH_OUTPUT : "Search incomplete") + searchNotice(search, 0, "matches") + fallbackNotice,
+			details: { search },
 			shownCount: 0,
-			totalCount: 0,
-			truncated: false,
+			totalCount: search.complete ? 0 : null,
+			truncated: !search.complete,
 			reservation,
 			...(options ? { options } : {}),
 		});
@@ -115,7 +133,11 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 	} else {
 		shownCount = truncation.outputLines;
 	}
-	const truncated = limitHit || truncation.truncated;
+	if (truncation.truncated && search.complete) {
+		search.complete = false;
+		search.reason = "limit";
+	}
+	const truncated = !search.complete || limitHit || truncation.truncated;
 	const next = limitHit ? `limit=${limit * 2}` : truncation.truncated && mode === "content" ? "mode=files" : undefined;
 	let output = truncation.content;
 	if (linesTruncated) {
@@ -125,12 +147,13 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 		tool: ToolNames.Grep,
 		withheldPaths: input.withheldPaths,
 		unit: MODE_UNITS[mode],
-		output,
+		output: output + searchNotice(search, shownCount, "matches") + fallbackNotice,
+		details: { search },
 		// Offload only when the byte cap cut collected content; a bare match
 		// limit continues via `next`, and the offload would duplicate the body.
 		...(truncation.truncated ? { fullOutput } : {}),
 		shownCount,
-		totalCount: limitHit ? null : matchCount,
+		totalCount: search.complete ? matchCount : null,
 		truncated,
 		...(next !== undefined ? { next } : {}),
 		reservation,
@@ -237,22 +260,31 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		}
 	};
 
+	const search = newSearchCompleteness();
+	const diagnostics = createSearchDiagnostics(search, (filePath) => input.pathFilter.allows(path.resolve(filePath)));
 	const result = await spawnLineStream(input.rgPath, buildRgArgs(input), {
 		...(input.options?.signal ? { signal: input.options.signal } : {}),
 		onLine: input.mode === "content" ? onContentLine : onListLine,
+		onStderrLine: diagnostics.onLine,
 	});
-	if (result.aborted) return { kind: "error", message: "grep: operation aborted" };
-	if (result.timedOut) {
+	finishSearch(search, result);
+	if (result.spawnError !== null) return { kind: "error", message: `grep: failed to run rg: ${result.spawnError}` };
+	if (
+		!result.aborted &&
+		!result.timedOut &&
+		!result.stoppedEarly &&
+		result.exitCode !== 0 &&
+		result.exitCode !== 1 &&
+		matchCount === 0 &&
+		(diagnostics.realError || (search.skipped.count === 0 && !search.skipped.unknown))
+	) {
 		return {
 			kind: "error",
-			message: `grep: rg timed out after ${SEARCH_SPAWN_TIMEOUT_MS / 1000}s. Narrow the pattern, path, or glob, lower context, or use mode=files.`,
+			message: `grep: rg rejected the search or failed (exit code ${result.exitCode}). Check the pattern and search path.`,
 		};
 	}
-	if (result.spawnError !== null) return { kind: "error", message: `grep: failed to run rg: ${result.spawnError}` };
-	if (!result.stoppedEarly && result.exitCode !== 0 && result.exitCode !== 1) {
-		return { kind: "error", message: `grep: ${result.stderr.trim() || `ripgrep exited with code ${result.exitCode}`}` };
-	}
 	return renderGrepResult({
+		search,
 		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
 		lines: rendered,
@@ -310,7 +342,8 @@ interface FallbackSearchInput {
  * already-in-memory file content, never a second read. Aggregates the same
  * three mode shapes as the rg path.
  */
-function fallbackGrep(input: FallbackSearchInput): ToolResult {
+async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
+	const search = newSearchCompleteness();
 	const built = buildMatchRegex(input.pattern, input.literal, input.ignoreCase);
 	if (!built.ok) return { kind: "error", message: built.message };
 	const regex = built.regex;
@@ -337,21 +370,32 @@ function fallbackGrep(input: FallbackSearchInput): ToolResult {
 		rendered.push({ text: truncatedLine.text, isMatch });
 	};
 
-	const searchFile = (filePath: string): void => {
-		if (limitHit || !input.pathFilter.allows(filePath)) return;
+	const searchFile = async (filePath: string): Promise<void> => {
+		if (limitHit || signal?.aborted || !input.pathFilter.allows(filePath)) return;
 		let buffer: Buffer;
 		try {
-			const stat = statSync(filePath);
-			if (!stat.isFile() || stat.size > FALLBACK_MAX_FILE_BYTES) return;
-			buffer = readFileSync(filePath);
+			const fileStat = await stat(filePath);
+			if (!fileStat.isFile() || fileStat.size > FALLBACK_MAX_FILE_BYTES) {
+				skipSearchPath(search, filePath, input.pathFilter.allows);
+				return;
+			}
+			buffer = await readFile(filePath);
 		} catch {
+			skipSearchPath(search, filePath, input.pathFilter.allows);
 			return;
 		}
-		if (looksBinary(buffer)) return;
+		if (looksBinary(buffer)) {
+			skipSearchPath(search, filePath, input.pathFilter.allows);
+			return;
+		}
 		const lines = buffer.toString("utf8").replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
 		const rel = formatPath(filePath, input.searchPath, input.isDirectory);
 		let fileMatches = 0;
 		for (let i = 0; i < lines.length; i += 1) {
+			if (i % 1024 === 0) {
+				await yieldToLoop();
+				if (signal?.aborted) return;
+			}
 			const lineText = lines[i] ?? "";
 			regex.lastIndex = 0;
 			if (!regex.test(lineText)) continue;
@@ -384,35 +428,46 @@ function fallbackGrep(input: FallbackSearchInput): ToolResult {
 		}
 	};
 
-	const walk = (dir: string): void => {
+	const walk = async (dir: string): Promise<void> => {
+		await yieldToLoop();
 		if (limitHit || signal?.aborted) return;
 		let entries: import("node:fs").Dirent[];
 		try {
-			entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+			entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
 		} catch {
+			skipSearchPath(search, dir, input.pathFilter.allows);
 			return;
 		}
 		for (const entry of entries) {
 			if (limitHit || signal?.aborted) return;
 			const absPath = join(dir, entry.name);
+			if (!input.pathFilter.allows(absPath)) continue;
 			if (entry.isDirectory()) {
 				if (ignored.has(entry.name)) continue;
-				walk(absPath);
+				await walk(absPath);
 				continue;
 			}
-			if (!entry.isFile()) continue;
+			if (!entry.isFile()) {
+				skipSearchPath(search, absPath, input.pathFilter.allows);
+				continue;
+			}
 			if (globMatcher) {
 				const relPath = normalizeGlobInput(relative(input.searchPath, absPath));
 				if (!globMatcher.test(relPath)) continue;
 			}
-			searchFile(absPath);
+			await searchFile(absPath);
 		}
 	};
 
-	if (input.isDirectory) walk(input.searchPath);
-	else searchFile(input.searchPath);
-	if (signal?.aborted) return { kind: "error", message: "grep: operation aborted" };
+	if (input.isDirectory) await walk(input.searchPath);
+	else await searchFile(input.searchPath);
+	if (signal?.aborted || limitHit) {
+		search.complete = false;
+		search.reason = signal?.aborted ? "cancelled" : "limit";
+	}
 	return renderGrepResult({
+		fallback: true,
+		search,
 		withheldPaths: input.pathFilter.withheldPaths,
 		mode: input.mode,
 		lines: rendered,
@@ -427,7 +482,7 @@ function fallbackGrep(input: FallbackSearchInput): ToolResult {
 
 export const grepTool: ToolSpec = {
 	name: ToolNames.Grep,
-	description: `Search file contents with ripgrep. mode=content (default) returns matching lines with paths and line numbers, mode=files returns only matching file paths, mode=count returns per-file match counts. Respects .gitignore and skips generated dirs unless include_ignored=true. Capped at ${DEFAULT_LIMIT} matches by default; truncated results say how to continue and where the full output was saved.`,
+	description: `Search file contents with ripgrep. mode=content (default) returns matching lines with paths and line numbers, mode=files returns only matching file paths, mode=count returns per-file match counts. Respects .gitignore and skips generated dirs unless include_ignored=true. Without rg, the async fallback uses GENERATED_DIRS only and does not apply .gitignore; unreadable, binary, oversized files and symlinks are reported as skipped. Capped at ${DEFAULT_LIMIT} matches by default; truncated results say how to continue and where the full output was saved.`,
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Search pattern (regex by default)." }),
 		path: Type.Optional(Type.String({ description: "Directory or file to search." })),
@@ -499,7 +554,7 @@ export const grepTool: ToolSpec = {
 			if (rgPath) return await runRipgrep({ rgPath, ...shared });
 			// rg absent (offline/weak node): degrade to a bounded pure-Node search
 			// instead of failing content search outright.
-			return fallbackGrep(shared);
+			return await fallbackGrep(shared);
 		} finally {
 			releaseObservation(reservation);
 		}

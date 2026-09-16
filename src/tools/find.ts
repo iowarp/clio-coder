@@ -1,6 +1,6 @@
 import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { StringEnum } from "../engine/ai.js";
@@ -18,7 +18,16 @@ import {
 } from "./observation.js";
 import { resolveReadPath, toPosixPath } from "./path-utils.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
-import { SEARCH_SPAWN_TIMEOUT_MS, spawnLineStream, validateSearchPatternSize } from "./spawn-hygiene.js";
+import {
+	createSearchDiagnostics,
+	finishSearch,
+	newSearchCompleteness,
+	type SearchCompleteness,
+	searchNotice,
+	skipSearchPath,
+	spawnLineStream,
+	validateSearchPatternSize,
+} from "./spawn-hygiene.js";
 import { truncateHead } from "./truncate.js";
 
 const DEFAULT_LIMIT = 500;
@@ -32,9 +41,9 @@ type FindOrder = "path" | "mtime";
 // Build fd's argv. Ignore semantics (hidden files, .gitignore honoring,
 // generated-dir excludes, include_ignored) come entirely from the shared
 // ignore policy so grep and find never disagree about tree visibility.
-function buildFdArgs(pattern: string, searchPath: string, maxResults: number, includeIgnored: boolean): string[] {
+function buildFdArgs(pattern: string, searchPath: string, collectLimit: number, includeIgnored: boolean): string[] {
 	const args = ["--glob", "--color=never", ...fdIgnoreArgs(searchPath, includeIgnored)];
-	args.push("--max-results", String(maxResults));
+	args.push("--show-errors", "--max-results", String(collectLimit));
 	let effectivePattern = pattern;
 	if (pattern.includes("/")) {
 		args.push("--full-path");
@@ -52,33 +61,45 @@ async function fdFind(
 	searchPath: string,
 	collectLimit: number,
 	includeIgnored: boolean,
+	search: SearchCompleteness,
+	allows: (path: string) => boolean,
 	signal?: AbortSignal,
 ): Promise<{ ok: true; paths: string[] } | { ok: false; message: string }> {
 	const lines: string[] = [];
+	const diagnostics = createSearchDiagnostics(search, (path) => allows(resolve(process.cwd(), path)));
 	const result = await spawnLineStream(fdPath, buildFdArgs(pattern, searchPath, collectLimit, includeIgnored), {
 		...(signal ? { signal } : {}),
+		onStderrLine: diagnostics.onLine,
 		onLine(line, stop) {
 			lines.push(line);
 			if (lines.length >= collectLimit) stop();
 		},
 	});
-	if (result.aborted) return { ok: false, message: "find: operation aborted" };
-	if (result.timedOut) {
-		return {
-			ok: false,
-			message: `find: fd timed out after ${SEARCH_SPAWN_TIMEOUT_MS / 1000}s. Narrow the pattern or path, or lower limit.`,
-		};
+	finishSearch(search, result);
+	if (!result.aborted && !result.timedOut && !result.stoppedEarly && result.exitCode !== 0) {
+		search.complete = false;
+		search.reason = "errors";
 	}
 	if (result.spawnError !== null) return { ok: false, message: `find: failed to run fd: ${result.spawnError}` };
-	if (!result.stoppedEarly && result.exitCode !== 0 && lines.length === 0) {
-		return { ok: false, message: `find: ${result.stderr.trim() || `fd exited with code ${result.exitCode}`}` };
+	if (
+		!result.aborted &&
+		!result.timedOut &&
+		!result.stoppedEarly &&
+		result.exitCode !== 0 &&
+		lines.length === 0 &&
+		(diagnostics.realError || (search.skipped.count === 0 && !search.skipped.unknown))
+	) {
+		return {
+			ok: false,
+			message: `find: fd rejected the search or failed (exit code ${result.exitCode}). Check the glob and search path.`,
+		};
 	}
 	const paths = lines
-		.map((rawLine) => rawLine.replace(/\r$/, "").trim())
+		.map((rawLine) => rawLine.replace(/\r$/, ""))
 		.filter((line) => line.length > 0)
 		.map((line) => {
 			const hadTrailingSlash = line.endsWith("/") || line.endsWith("\\");
-			let relPath = line.startsWith(searchPath) ? line.slice(searchPath.length + 1) : relative(searchPath, line);
+			let relPath = relative(searchPath, line);
 			if (hadTrailingSlash && !relPath.endsWith("/")) relPath += "/";
 			return toPosixPath(relPath);
 		});
@@ -94,6 +115,8 @@ async function fallbackFind(
 	searchPath: string,
 	collectLimit: number,
 	includeIgnored: boolean,
+	search: SearchCompleteness,
+	allows: (path: string) => boolean,
 	signal?: AbortSignal,
 ): Promise<string[]> {
 	const matcher = compileGlobRegex(pattern.includes("/") ? pattern : `**/${pattern}`);
@@ -105,11 +128,13 @@ async function fallbackFind(
 		try {
 			entries = (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
 		} catch {
+			skipSearchPath(search, dir, allows);
 			return;
 		}
 		for (const entry of entries) {
 			if (out.length >= collectLimit || signal?.aborted) return;
 			const absPath = join(dir, entry.name);
+			if (!allows(absPath)) continue;
 			if (entry.isDirectory() && !entry.isSymbolicLink()) {
 				if (ignored.has(entry.name)) continue;
 				const relDir = `${toPosixPath(relative(searchPath, absPath))}/`;
@@ -117,7 +142,13 @@ async function fallbackFind(
 				await walk(absPath);
 				continue;
 			}
-			if (!entry.isFile()) continue;
+			if (entry.isSymbolicLink()) {
+				try {
+					if (statSync(absPath).isDirectory()) skipSearchPath(search, absPath, allows);
+				} catch {
+					skipSearchPath(search, absPath, allows);
+				}
+			} else if (!entry.isFile()) continue;
 			const relPath = toPosixPath(relative(searchPath, absPath));
 			if (matcher.test(normalizeGlobInput(relPath))) out.push(relPath);
 		}
@@ -133,14 +164,21 @@ interface OrderedPaths {
 	candidateCap: number | null;
 }
 
-function orderByMtime(paths: string[], searchPath: string, limit: number, candidateCap: number): OrderedPaths {
+function orderByMtime(
+	paths: string[],
+	searchPath: string,
+	limit: number,
+	candidateCap: number,
+	search: SearchCompleteness,
+): OrderedPaths {
 	const candidateCapHit = paths.length >= candidateCap;
 	const stamped = paths.map((relPath) => {
 		let mtimeMs = 0;
 		try {
 			mtimeMs = statSync(join(searchPath, relPath)).mtimeMs;
 		} catch {
-			// Entries that vanish mid-scan sort last instead of failing the call.
+			// Entries that vanish mid-scan sort last and remain explicitly incomplete.
+			skipSearchPath(search, join(searchPath, relPath));
 		}
 		return { relPath, mtimeMs };
 	});
@@ -149,6 +187,8 @@ function orderByMtime(paths: string[], searchPath: string, limit: number, candid
 }
 
 function renderFindResult(input: {
+	search: SearchCompleteness;
+	fallback: boolean;
 	withheldPaths: number;
 	ordered: OrderedPaths;
 	collected: number;
@@ -158,16 +198,27 @@ function renderFindResult(input: {
 	reservation: ObservationReservation;
 	options: ToolInvokeOptions | undefined;
 }): ToolResult {
-	const { ordered, collected, collectLimit, limit, order, reservation, options } = input;
+	const { ordered, collected, collectLimit, limit, order, reservation, options, search } = input;
+	if ((collected > limit || collected >= collectLimit || ordered.candidateCapHit) && search.complete) {
+		search.complete = false;
+		search.reason = "limit";
+	}
+	const coverageNotice = input.fallback
+		? "\n[Fallback search uses GENERATED_DIRS only; .gitignore is not applied.]"
+		: "\n[Native fd search: skipped symlinked directories are not counted.]";
 	if (ordered.paths.length === 0) {
 		return finalizeObservation({
 			tool: ToolNames.Find,
 			withheldPaths: input.withheldPaths,
 			unit: "paths",
-			output: "No visible files found matching pattern",
+			output:
+				(search.complete ? "No visible files found matching pattern" : "Search incomplete") +
+				searchNotice(search, 0, "paths") +
+				coverageNotice,
+			details: { search, symlinkDirectories: { counted: input.fallback } },
 			shownCount: 0,
-			totalCount: collected >= collectLimit ? null : 0,
-			truncated: collected >= collectLimit,
+			totalCount: search.complete ? 0 : null,
+			truncated: !search.complete,
 			...(collected >= collectLimit ? { next: `limit=${limit * 2}` } : {}),
 			reservation,
 			...(options ? { options } : {}),
@@ -181,10 +232,14 @@ function renderFindResult(input: {
 	const limitHit = collected > limit || collected >= collectLimit;
 	// Unknown totals: the collector stopped at its cap, so matches beyond it
 	// exist but were never counted.
-	const totalKnown = !limitHit && !ordered.candidateCapHit;
-	const truncated = limitHit || ordered.candidateCapHit || truncation.truncated;
+	if (truncation.truncated && search.complete) {
+		search.complete = false;
+		search.reason = "limit";
+	}
+	const totalKnown = search.complete;
+	const truncated = !search.complete || limitHit || ordered.candidateCapHit || truncation.truncated;
 	const next = limitHit ? `limit=${limit * 2}` : ordered.candidateCapHit ? "order=path" : undefined;
-	const details: Record<string, unknown> = {};
+	const details: Record<string, unknown> = { search, symlinkDirectories: { counted: input.fallback } };
 	if (order === "mtime" && ordered.candidateCap !== null) {
 		details.candidates = {
 			cap: ordered.candidateCap,
@@ -197,7 +252,7 @@ function renderFindResult(input: {
 		tool: ToolNames.Find,
 		withheldPaths: input.withheldPaths,
 		unit: "paths",
-		output: truncation.content,
+		output: truncation.content + searchNotice(search, truncation.outputLines, "paths") + coverageNotice,
 		// Offload only when the byte cap cut collected paths; a bare result
 		// limit continues via `next`, and the offload would duplicate the body.
 		...(truncation.truncated ? { fullOutput } : {}),
@@ -214,7 +269,7 @@ function renderFindResult(input: {
 export const findTool: ToolSpec = {
 	name: ToolNames.Find,
 	description:
-		"Find files and directories by glob pattern (supports *, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. order=path (default) returns fd's native order; order=mtime returns newest first from a bounded candidate set. Truncated results say how to continue and where the full list was saved.",
+		"Find files and directories by glob pattern (supports *, **, ?, [abc]); returns paths relative to the search directory. Respects .gitignore and skips generated dirs (node_modules, dist, build, ...) unless include_ignored=true. Symlinked directories are never followed. Only the fallback counts skipped symlinked directories; native fd leaves that count unmeasured, as indicated by details.symlinkDirectories.counted=false. Without fd the fallback uses GENERATED_DIRS only, with no .gitignore support. order=path (default) returns fd's native order; order=mtime returns newest first from a bounded candidate set. Truncated results say how to continue and where the full list was saved.",
 	parameters: Type.Object({
 		pattern: Type.String({ description: "Glob pattern, e.g. 'src/**/*.ts'." }),
 		path: Type.Optional(Type.String({ description: "Directory to search in." })),
@@ -260,28 +315,52 @@ export const findTool: ToolSpec = {
 		commitObservationReservation(reservation);
 		try {
 			let collectedPaths: string[];
+			const search = newSearchCompleteness();
+			const pathFilter = createObservationPathFilter(process.cwd(), options?.allowsObservationPath);
 			const fdPath = resolveFdBinary();
 			if (fdPath) {
-				const result = await fdFind(fdPath, pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+				const result = await fdFind(
+					fdPath,
+					pattern,
+					searchPath,
+					collectLimit,
+					includeIgnored,
+					search,
+					pathFilter.allows,
+					options?.signal,
+				);
 				if (!result.ok) return { kind: "error", message: result.message };
 				collectedPaths = result.paths;
 			} else {
 				try {
-					collectedPaths = await fallbackFind(pattern, searchPath, collectLimit, includeIgnored, options?.signal);
+					collectedPaths = await fallbackFind(
+						pattern,
+						searchPath,
+						collectLimit,
+						includeIgnored,
+						search,
+						pathFilter.allows,
+						options?.signal,
+					);
 				} catch (err) {
 					const message = err instanceof Error ? err.message : String(err);
 					return { kind: "error", message: `find: ${message}` };
 				}
 			}
 
+			if (options?.signal?.aborted) {
+				search.complete = false;
+				search.reason = "cancelled";
+			}
 			const collectedCount = collectedPaths.length;
-			const pathFilter = createObservationPathFilter(process.cwd(), options?.allowsObservationPath);
 			collectedPaths = collectedPaths.filter((entry) => pathFilter.allows(join(searchPath, entry)));
 			const ordered: OrderedPaths =
 				order === "mtime"
-					? orderByMtime(collectedPaths, searchPath, limit, collectLimit)
+					? orderByMtime(collectedPaths, searchPath, limit, collectLimit, search)
 					: { paths: collectedPaths.slice(0, limit), candidateCapHit: false, candidateCap: null };
 			return renderFindResult({
+				search,
+				fallback: !fdPath,
 				withheldPaths: pathFilter.withheldPaths,
 				ordered,
 				collected: collectedCount,
