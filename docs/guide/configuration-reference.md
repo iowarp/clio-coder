@@ -1255,6 +1255,8 @@ Keys of the local-model knowledge base in `src/domains/providers/models/local-mo
 | `quirks.thinking.mechanism` |  | One of `effort-levels`, `budget-tokens`, `on-off`, `always-on`, `none`; it picks the thinking payload shape, reasoning class and level labels, overriding inference from `thinkingFormat`. |
 | `quirks.thinkingControl` |  | Free-text note on how a family's template gates thinking (for example a `<\|think\|>` system token); provenance only; nothing in src reads it. |
 
+The measured `mini/qwopus3.8-27b-dense` LiteLLM route family has a narrow catalog entry for its reported `low`, `medium`, and `xhigh` effort vocabulary. On the `mini/qwopus3.8-27b-dense-q6` deployment, Clio omitted effort and the upstream template rejected `high`, behavior consistent with an incompatible deployment default; the precise upstream cause was not inspected. Clio maps configured `high` or `max` to `xhigh` and explicitly forwards the resolved effort through LiteLLM. This entry comes from the 2026-09-16 server diagnostic and same-route validation; it does not assign capabilities to other Qwopus models by name similarity or change the selected model.
+
 ## Bounding constants
 
 Compiled-in limits (context budgets, retry counts, cache sizes, timeouts) are code-owned invariants, not configuration. They live beside the code that enforces them and change only through a source change with a changelog line.

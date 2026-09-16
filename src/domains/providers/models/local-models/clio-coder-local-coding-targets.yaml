@@ -636,6 +636,37 @@
         turns when the workflow is iterative; the budget caps runaway chains.
     serving: "Official Qwen card recommends max output 32768 tokens for standard queries (81920 only for math/code competitions). Coding sampler is the precise variant; preserve thinking blocks across turns for iterative workflows."
 
+- family: qwopus3.8-27b-dense
+  matchPatterns:
+    - mini/qwopus3.8-27b-dense
+  capabilities:
+    reasoning: true
+  quirks:
+    measuredUnder:
+      runtime: "LiteLLM route mini/qwopus3.8-27b-dense-q6; model_info.runtime llama.cpp"
+      date: "2026-09-16"
+      source: "Operator report and current-source request to blade-gateway, reproduced during v0.4.9 closeout"
+      note: |
+        The exact route rejected an omitted effort with Jinja's diagnostic
+        Unexpected reasoning effort high. Supported types are xhigh
+        (default), medium, and low. Clio's captured request carried only
+        enable_thinking true. The upstream behavior is consistent with an
+        incompatible deployment default; its precise cause was not inspected.
+        These effort levels come from that server diagnostic, not from
+        Qwen or Qwopus name similarity. Other capabilities remain supplied
+        by the route probe; no sampler, hardware, or context size is inherited.
+    thinking:
+      mechanism: effort-levels
+      effortByLevel:
+        low: low
+        medium: medium
+        xhigh: xhigh
+      guidance: |
+        The measured mini/qwopus3.8-27b-dense-q6 route accepts low, medium,
+        and xhigh, and rejects high. Clio maps high and max to xhigh and
+        explicitly forwards that supported effort through LiteLLM. Omitting
+        active effort can expose an incompatible deployment default.
+
 - family: qwen3.8-27b
   matchPatterns:
     - qwen3.8-27b

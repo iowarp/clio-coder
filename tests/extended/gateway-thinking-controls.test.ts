@@ -122,3 +122,50 @@ test("unknown gateway routes do not invent an effort-only protocol or suppress o
 		await fixture.close();
 	}
 });
+
+test("reported Qwopus route sends only its evidenced effort vocabulary through LiteLLM", async () => {
+	strictEqual(kb.lookup("mini/qwopus3.8-9b"), null);
+	for (const modelId of ["mini/qwopus3.8-27b-dense", "mini/qwopus3.8-27b-dense-q6"]) {
+		const fixture = await startGatewayThinkingFixture("llama.cpp", modelId);
+		try {
+			const target = { id: "blade-gateway", runtime: "litellm", url: fixture.url, defaultModel: modelId };
+			const probe = await litellm.probe?.(target, { credentialsPresent: new Set(), httpTimeoutMs: 1000 });
+			ok(probe?.ok);
+			const hit = kb.lookup(modelId);
+			ok(hit);
+			strictEqual(hit.entry.family, "qwopus3.8-27b-dense");
+			const model = applyModelCapabilityPatch(
+				litellm.synthesizeModel(target, modelId, hit),
+				probe.modelCapabilities?.[modelId],
+			) as Model<"openai-completions">;
+			for (const [level, effort] of [
+				["low", "low"],
+				["medium", "medium"],
+				["high", "xhigh"],
+				["xhigh", "xhigh"],
+				["max", "xhigh"],
+			] as const) {
+				const result = await openAICompletionsApiProvider
+					.streamSimple(
+						model,
+						{ messages: [{ role: "user", content: "17 times 19", timestamp: 0 }] },
+						{ apiKey: "fixture", reasoning: level },
+					)
+					.result();
+				strictEqual(result.stopReason, "stop");
+				const request = fixture.requests.at(-1);
+				strictEqual(request?.model, modelId);
+				strictEqual(request?.reasoning_effort, effort);
+				deepStrictEqual(request?.allowed_openai_params, ["reasoning_effort"]);
+				deepStrictEqual(resolveModelRuntimeCapabilitiesForModel(model, level).thinking.supportedLevels, [
+					"off",
+					"low",
+					"medium",
+					"xhigh",
+				]);
+			}
+		} finally {
+			await fixture.close();
+		}
+	}
+});

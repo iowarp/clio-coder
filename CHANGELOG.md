@@ -40,6 +40,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Render structured-only MCP results in bounded model-visible text, preserving numeric source literals in both the projection and retained evidence.
 - Resolve overlapping MCP server prefixes deterministically and report conflicting tool names as unregistrable, preserving server identity and authority during lazy discovery.
 
+### model compatibility
+
+- Record the measured mini/qwopus3.8-27b-dense route's low/medium/xhigh effort vocabulary. Map high/max to xhigh and forward the explicit effort through LiteLLM to avoid the observed upstream rejection, consistent with an incompatible deployment default.
+
 ### context, web, and artifacts
 
 - Keep workspace, skills, and recall on context; move documentation and recipe browsing to gateway capabilities clio_docs and clio_library.
