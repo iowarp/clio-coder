@@ -118,7 +118,7 @@ export function refusalFromError(error: unknown, path: string, signal?: AbortSig
 	return refusal("read-error", `cannot read ${path}: ${message}`, { path });
 }
 
-export function abortedRefusal(path: string): DataRefusal {
+function abortedRefusal(path: string): DataRefusal {
 	return refusal("aborted", "aborted before the scan finished", { path });
 }
 
@@ -380,7 +380,7 @@ export const MAX_NUMBER_LITERAL_CHARS = 512;
  * makes the form comparable across the source text and what JavaScript prints
  * for the double it parsed to. Null when the text is not a plain decimal.
  */
-export function canonicalDecimal(literal: string): string | null {
+function canonicalDecimal(literal: string): string | null {
 	const match = /^([+-]?)(\d*)(?:\.(\d*))?(?:[eE]([+-]?\d+))?$/u.exec(literal);
 	if (match === null) return null;
 	const intDigits = match[2] ?? "";
@@ -419,11 +419,6 @@ export function numberLiteralPrecision(literal: string): PrecisionKind | null {
 	if (exponent >= 0 && Math.abs(value) > Number.MAX_SAFE_INTEGER) return "unsafe-integer";
 	if (digits.length > MAX_SIGNIFICANT_DIGITS) return "excess-digits";
 	return "inexact";
-}
-
-export function clampInteger(value: unknown, fallback: number, min: number, max: number): number {
-	if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
-	return Math.min(max, Math.max(min, Math.floor(value)));
 }
 
 /**

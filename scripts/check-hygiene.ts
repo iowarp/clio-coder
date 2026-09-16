@@ -1286,10 +1286,14 @@ function checkPromptsDocLinks(): void {
 	const routing = table.byId.get("identity.docs-routing");
 	if (!routing) {
 		fail("prompts", "identity.docs-routing must be registered");
-	} else if (!/call context \(scope="docs", query=<the question>\) before answering/.test(routing.body)) {
+	} else if (
+		!/call gateway\(op="call", capability="clio_docs", args=\{query: <the question>\}\) before answering and before any workspace search/.test(
+			routing.body,
+		)
+	) {
 		fail(
 			"prompts",
-			'identity.docs-routing must direct the model to call context(scope="docs") before answering, not merely note that docs exist',
+			'identity.docs-routing must direct the model to call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search, not merely note that docs exist',
 		);
 	}
 	const named = [...selfAwareness.body.matchAll(/docs\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.md/g)].map((m) => m[0]);

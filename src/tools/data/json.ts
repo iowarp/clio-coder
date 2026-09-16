@@ -733,7 +733,7 @@ export class JsonValueBuilder {
 	}
 }
 
-export function escapePointerSegment(segment: string): string {
+function escapePointerSegment(segment: string): string {
 	return segment.replace(/~/gu, "~0").replace(/\//gu, "~1");
 }
 

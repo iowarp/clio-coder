@@ -161,7 +161,7 @@ export function runRecordsDir(workspaceRoot: string): string {
 	return path.join(path.resolve(workspaceRoot), ...RUN_RECORDS_RELATIVE_DIR.split("/"));
 }
 
-export function runRecordPaths(workspaceRoot: string, runId: string): RunRecordPaths {
+function runRecordPaths(workspaceRoot: string, runId: string): RunRecordPaths {
 	const dir = path.join(runRecordsDir(workspaceRoot), runId);
 	return {
 		runId,
@@ -201,7 +201,7 @@ function abortError(signal: AbortSignal): Error {
 	return error;
 }
 
-export function isAbortError(error: unknown): boolean {
+function isAbortError(error: unknown): boolean {
 	return error instanceof Error && error.name === "AbortError";
 }
 

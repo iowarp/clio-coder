@@ -258,7 +258,7 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
  * Judged checks attach their own facts before reaching here and keep them; a
  * result without exec facts (a refusal before anything ran) gets none.
  */
-export function withCommandJudgement(result: ToolResult): ToolResult {
+function withCommandJudgement(result: ToolResult): ToolResult {
 	const details = result.details ?? {};
 	if (details.judgement !== undefined) return result;
 	// The exec record always names exitCode (a number, or null for a signal

@@ -113,7 +113,7 @@ export function skipSearchPath(
 }
 
 /** Parse the path prefix, independently of the language used for OS error text. */
-export function searchDiagnosticPath(line: string): string | null {
+function searchDiagnosticPath(line: string): string | null {
 	const cleaned = line.replace(/^(?:rg: |\[fd error\]:? )/, "").replace(/^IO error for operation on /, "");
 	if (/^(?:regex parse error|error parsing (?:glob|regex)|invalid (?:glob|regex)|error:|Usage:)/i.test(cleaned))
 		return null;

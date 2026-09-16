@@ -75,7 +75,7 @@ export type NumericFailureReason =
  */
 export type ReportedNumber = number | "NaN" | "Infinity" | "-Infinity";
 
-export function reportedNumber(value: number): ReportedNumber {
+function reportedNumber(value: number): ReportedNumber {
 	if (Number.isNaN(value)) return "NaN";
 	if (value === Number.POSITIVE_INFINITY) return "Infinity";
 	if (value === Number.NEGATIVE_INFINITY) return "-Infinity";
@@ -290,11 +290,11 @@ export function parseNumericPayload(text: string, label: string): NumericPayload
 	return Object.fromEntries(entries);
 }
 
-export function effectiveNumericCombine(tolerance: NumericTolerance): NumericToleranceCombine {
+function effectiveNumericCombine(tolerance: NumericTolerance): NumericToleranceCombine {
 	return tolerance.combine ?? DEFAULT_NUMERIC_COMBINE;
 }
 
-export function effectiveNumericNonFinite(tolerance: NumericTolerance): NumericNonFinitePolicy {
+function effectiveNumericNonFinite(tolerance: NumericTolerance): NumericNonFinitePolicy {
 	return tolerance.nonFinite ?? DEFAULT_NUMERIC_NON_FINITE;
 }
 

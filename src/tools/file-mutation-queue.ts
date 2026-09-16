@@ -98,7 +98,7 @@ export async function publishFileAtomically(
 			throw error;
 		});
 		if (previous && !previous.isFile()) throw new Error(`Refusing directory or non-file target: ${filePath}`);
-		tempPath = join(dirname(target), `.clio-publish-${randomUUID()}.tmp`);
+		tempPath = join(dirname(target), `.clio-coder-publish-${randomUUID()}.tmp`);
 		const handle = await open(tempPath, "wx", previous ? previous.mode & 0o7777 : 0o666);
 		let after: FileIdentity;
 		try {

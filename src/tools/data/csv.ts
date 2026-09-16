@@ -397,7 +397,7 @@ export function headerLooksLikeNames(record: ReadonlyArray<string>): boolean {
 	return record.length > 0 && record.every((cell) => cell.trim().length > 0 && classifyCell(cell.trim()) === "string");
 }
 
-export function defaultColumnName(index: number): string {
+function defaultColumnName(index: number): string {
 	return `column_${index + 1}`;
 }
 
