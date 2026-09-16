@@ -1,4 +1,4 @@
-import { ok } from "node:assert/strict";
+import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
@@ -29,6 +29,58 @@ describe("gateway in the session prompt", () => {
 	});
 	afterEach(() => env.restore());
 
+	for (const surface of [
+		{ name: "context and gateway", toolNames: [ToolNames.Context, ToolNames.Gateway], providerSupportsTools: true },
+		{ name: "context only", toolNames: [ToolNames.Context], providerSupportsTools: true },
+		{ name: "gateway only", toolNames: [ToolNames.Gateway], providerSupportsTools: true },
+		{ name: "no tools", toolNames: [], providerSupportsTools: true },
+		{
+			name: "a provider without tool calls",
+			toolNames: [ToolNames.Context, ToolNames.Gateway],
+			providerSupportsTools: false,
+		},
+	]) {
+		it(`gates documentation and skill catalog guidance for ${surface.name}`, () => {
+			const compiled = compile(loadFragments(), {
+				identity: "identity.clio",
+				operatingContract: "operating.contract",
+				safety: "safety.auto-edit",
+				sessionInputs: {
+					provider: "local",
+					model: "stable-model",
+					contextWindow: 32_768,
+					providerSupportsTools: surface.providerSupportsTools,
+					toolNames: surface.toolNames,
+					// Hints must not make an unattached tool available.
+					toolPromptHints: [...toolPromptHintsForNames([ToolNames.Context, ToolNames.Gateway], "session")],
+				},
+			});
+			const hasGateway = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Gateway);
+			const hasContext = surface.providerSupportsTools && surface.toolNames.includes(ToolNames.Context);
+			strictEqual(compiled.systemPrompt.includes("# Clio documentation routing"), hasGateway);
+			strictEqual(
+				compiled.fragmentManifest.some((fragment) => fragment.id === "identity.docs-routing"),
+				hasGateway,
+			);
+			strictEqual(compiled.systemPrompt.includes('capability="clio_docs"'), hasGateway);
+			strictEqual(
+				compiled.sections.some((section) => section.id === "skills"),
+				hasContext,
+			);
+			strictEqual(compiled.systemPrompt.includes('context (scope="skills")'), hasContext);
+			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasContext);
+			if (hasContext) {
+				match(
+					compiled.systemPrompt,
+					/If gateway is on the attached direct-tool surface, use\s+gateway\(op="call", capability="clio_library", args=\{\}\) to read the catalog\s+of recipes and installable packages; it activates and installs nothing\./,
+				);
+				ok(compiled.systemPrompt.includes("Without gateway, this catalog route is unavailable."));
+				match(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
+			}
+			doesNotMatch(compiled.systemPrompt, /\bcontext\s*\(\s*scope\s*=\s*["'](?:docs|library)["']/);
+		});
+	}
+
 	it("lists the direct surface, points tool usage at the gateway, and shrinks the attached schema bytes", async () => {
 		const bundle = makeDispatchBundle(dispatchStubContext());
 		await bundle.extension.start();
@@ -58,6 +110,17 @@ describe("gateway in the session prompt", () => {
 				},
 			});
 			const lines = compiled.systemPrompt.split("\n");
+			ok(
+				compiled.systemPrompt.includes(
+					'For a question about Clio herself, call gateway(op="call", capability="clio_docs", args={query: <the question>}) before answering and before any workspace search, then read the document it names from the installed documentation path above.',
+				),
+				"The compiled identity routes Clio questions through gateway before answering or searching the workspace.",
+			);
+			doesNotMatch(
+				compiled.systemPrompt,
+				/\bcontext\s*\(\s*scope\s*=\s*["']docs["']/,
+				"The compiled prompt must not instruct the retired context docs call.",
+			);
 			const direct = lines.find((line) => line.startsWith("Direct tools:"));
 			ok(direct !== undefined);
 			ok(direct.includes("`gateway`") && direct.includes("`run_script`"), direct);
@@ -91,6 +154,11 @@ describe("gateway in the session prompt", () => {
 			ok(total < HANDOFF_TOTAL_BYTES, `attached bytes ${total} must stay below the handoff's ${HANDOFF_TOTAL_BYTES}`);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
+			doesNotMatch(
+				compiled.systemPrompt,
+				/\bcontext\s*\(\s*scope\s*=\s*["']library["']/,
+				"The compiled prompt must not instruct the retired context library call, including across line breaks.",
+			);
 		} finally {
 			await bundle.extension.stop?.();
 		}

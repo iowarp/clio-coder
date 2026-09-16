@@ -236,10 +236,9 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 }
 
 /**
- * Whether `context` is on the session's surface. The Skills passage, the docs
- * routing directive, and the Tool Contract's skills clause follow the same
- * rule as dispatch: text that teaches a call to `context` renders only when
- * `context` is there to be called.
+ * Whether `context` is on the session's surface. The Skills passage and the
+ * Tool Contract's skills clause follow the same rule as dispatch: text that
+ * teaches a call to `context` renders only when `context` is there to be called.
  */
 function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
@@ -590,10 +589,13 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	let identityBody = identity.body;
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
-	// The routing directive teaches a call to `context`, so like the Skills
-	// passage it renders only when `context` is on the surface. The paths and
-	// the code-outranks-docs rule name no tool and stay unconditional.
-	const docsRouting = selfAwareness && sessionHasContext(session) ? table.byId.get("identity.docs-routing") : undefined;
+	// The routing directive teaches a gateway call, so it renders only when
+	// gateway is on the surface and the provider supports tool calls. The paths
+	// and the code-outranks-docs rule name no tool and stay unconditional.
+	const docsRouting =
+		selfAwareness && session.providerSupportsTools !== false && toolSurfaceHasTool(session.toolNames, "gateway")
+			? table.byId.get("identity.docs-routing")
+			: undefined;
 	if (selfAwareness) {
 		const packageRoot = resolvePackageRoot();
 		// The live home, not the XDG default: an isolated CLIO_CODER_HOME or a
