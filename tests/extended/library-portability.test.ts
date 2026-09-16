@@ -4,29 +4,29 @@
  *
  * These are static repository contracts. They deliberately do not shell out to
  * a host CLI, because a host binary is not something this repository owns or
- * can require in CI. `scripts/verify-portable-hosts.sh` reproduces the host
- * behavior asserted here against the real Claude Code and Codex CLIs in
- * throwaway homes; the layouts below were measured on Claude Code 2.1.267 and
- * Codex 0.153.3.
+ * can require in CI. The host layouts were measured on Claude Code 2.1.267
+ * and Codex 0.153.3; these checks cover canonical sources and optional link
+ * setup, not live host discovery.
  */
 
 import { deepStrictEqual, equal, ok } from "node:assert/strict";
 import {
 	cpSync,
-	existsSync,
 	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { after, describe, it } from "node:test";
-import { stringify as stringifyYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import { renderLibraryMarketplace } from "../../scripts/generate-library-marketplace.js";
 
@@ -120,29 +120,78 @@ describe("the portable inclusion rule", () => {
 	});
 });
 
-describe("Codex skills roots", () => {
+describe("canonical portable skill roots", () => {
 	/**
-	 * Codex scans `$REPO_ROOT/.agents/skills`, recurses into subdirectories and
-	 * follows symlinks at that location. Two links therefore publish the whole
-	 * canonical catalog to a Codex session started in a clone, with no copied
-	 * SKILL.md bodies and no wrapper tree.
+	 * The canonical trees ship in library/**. Host discovery links are optional
+	 * operator setup: a01edb61 removed the generated checkout links. Exercise
+	 * that setup in a temporary directory without requiring a local .agents tree.
 	 */
-	const expected: ReadonlyArray<[string, string]> = [
-		["clio-coder", "../../library/skills"],
-		["materio", "../../library/plugins/materio/skills"],
+	const roots: ReadonlyArray<[string, string]> = [
+		["clio-coder", "library/skills"],
+		["materio", "library/plugins/materio/skills"],
 	];
+	const fixture = mkdtempSync(join(tmpdir(), "clio-coder-portable-links-"));
+	after(() => rmSync(fixture, { recursive: true, force: true }));
 
-	it("links the canonical directories and nothing else", () => {
-		const root = join(REPO_ROOT, ".agents", "skills");
-		const entries = readdirSync(root).sort();
-		deepStrictEqual(entries, expected.map(([name]) => name).sort());
-		for (const [name, target] of expected) {
-			const link = join(root, name);
-			ok(lstatSync(link).isSymbolicLink(), `.agents/skills/${name} must stay a symlink, never a copy`);
-			equal(readlinkSync(link).split("\\").join("/"), target, `.agents/skills/${name} must point at the canonical tree`);
-			const resolved = resolve(root, target);
-			ok(existsSync(join(resolved)), `.agents/skills/${name} target is missing`);
-			ok(!relative(REPO_ROOT, resolved).startsWith(".."), `.agents/skills/${name} must stay inside the repository`);
+	function skillFiles(root: string): string[] {
+		return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+			const file = join(root, entry.name);
+			if (entry.isDirectory()) return skillFiles(file);
+			return entry.name === "SKILL.md" ? [file] : [];
+		});
+	}
+
+	it("ships the complete pinned skill inventory in canonical trees", () => {
+		const manifest = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8")) as { files: string[] };
+		ok(manifest.files.includes("library/**"), "The package must include the canonical library trees.");
+		const registry = parseYaml(readFileSync(join(REPO_ROOT, "library/registry.yaml"), "utf8")) as {
+			entries: Array<{ kind: string; name: string; sourceUrl: string; provides: Array<{ kind: string; name: string }> }>;
+		};
+		const curated = registry.entries.filter((entry) => entry.kind === "skill");
+		ok(curated.length > 0, "The curated skill inventory must not be empty.");
+		deepStrictEqual(
+			skillFiles(join(REPO_ROOT, "library/skills")).sort(),
+			curated.map((entry) => join(REPO_ROOT, "library", entry.sourceUrl, "SKILL.md")).sort(),
+		);
+		const materio = registry.entries.find((entry) => entry.kind === "plugin" && entry.name === "materio");
+		ok(materio, "The Materio bundle must remain pinned.");
+		const bundledSkills = materio.provides.filter((entry) => entry.kind === "skill");
+		ok(bundledSkills.length > 0, "The Materio skill inventory must not be empty.");
+		deepStrictEqual(
+			skillFiles(join(REPO_ROOT, "library/plugins/materio/skills"))
+				.map((file) => {
+					const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(readFileSync(file, "utf8"))?.[1];
+					ok(frontmatter, `${file} must have skill frontmatter.`);
+					return (parseYaml(frontmatter) as { name: string }).name;
+				})
+				.sort(),
+			bundledSkills.map((entry) => entry.name).sort(),
+		);
+	});
+
+	it("exposes exactly the canonical skills through optional host links without copying bodies", () => {
+		for (const [name, target] of roots) {
+			const canonical = realpathSync(join(REPO_ROOT, target));
+			const withinRepo = relative(realpathSync(REPO_ROOT), canonical);
+			ok(
+				!isAbsolute(withinRepo) && withinRepo !== ".." && !withinRepo.startsWith(`..${sep}`),
+				`${target} must resolve inside the repository.`,
+			);
+			const link = join(fixture, name);
+			const linkTarget = relative(fixture, canonical);
+			symlinkSync(linkTarget, link, "dir");
+			ok(lstatSync(link).isSymbolicLink(), `${name} must be a link, never a copy.`);
+			equal(readlinkSync(link), linkTarget);
+			equal(realpathSync(link), canonical);
+			const files = skillFiles(canonical);
+			ok(files.length > 0, `${target} must expose portable skills.`);
+			deepStrictEqual(
+				skillFiles(link)
+					.map((file) => realpathSync(file))
+					.sort(),
+				files.map((file) => realpathSync(file)).sort(),
+			);
 		}
+		deepStrictEqual(readdirSync(fixture).sort(), roots.map(([name]) => name).sort());
 	});
 });
