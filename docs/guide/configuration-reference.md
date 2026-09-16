@@ -575,6 +575,19 @@ Grouped by command. Global flags appear under `global`.
 | `--with-requirements` | For `library install`, also install the entry's unsatisfied requirements instead of refusing. |
 | `-h` | Short form of --help. |
 
+### `mcp`
+
+Operator commands are `clio-coder mcp list [--json]`, `clio-coder mcp trust <id> [--action-class read|execute|unknown] [--json]`, and `clio-coder mcp untrust <id> [--json]`. `--help`/`-h` prints help even with `--json`. Interactive `/mcp list`, `/mcp trust <id> [read|execute|unknown]`, and `/mcp untrust <id>` use the same outcomes. These commands inspect configuration or mutate trust without launching a server.
+
+| JSON response | Shape |
+| --- | --- |
+| list | `{servers: [...], diagnostics: [...], trustDiagnostics: [...]}`; servers include declaration and `trust: {status, actionClass, reason?}` |
+| trust | `{ok: true, record: {projectRoot, id, digest, actionClass, trustedAt}}` |
+| untrust | `{ok: true, removed: boolean}` |
+| mutation or usage error | `{ok: false, message: string}` with a one-line reason |
+
+Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage. List keeps its list response shape and exits 1 when config or trust diagnostics exist. CLI trust/untrust requires a declared project id; user declarations are trusted by authorship. Trust-file corruption is reported without overwriting it. See [the configuration contract](#local-stdio-mcp-configuration-and-trust).
+
 ### `memory`
 
 | Flag | Controls |
@@ -779,6 +792,40 @@ Grouped by command. Global flags appear under `global`.
 | `--yes` | For mutating verifiers commands, confirm the write after the preview prints; without it nothing changes. |
 | `-h` | Short form of --help. |
 
+## Local stdio MCP configuration and trust
+
+Source: `src/domains/gateway/mcp/config.ts`, `trust.ts`, and `client.ts`. The optional user file is `<Clio config directory>/mcp.yaml`; the project file is `<workspace>/.clio-coder/mcp.yaml`. `clio-coder paths` locates the config directory. A user declaration shadows a project declaration of the same id with a diagnostic. Malformed files contribute no servers. This release supports local stdio only, with no remote transport or OAuth fields.
+
+```yaml
+version: 1
+servers:
+  - id: analysis
+    command: node
+    args: [tools/mcp-server.mjs]
+    cwd: .
+    env:
+      ANALYSIS_MODE: readonly
+    timeoutMs: 60000
+```
+
+| Field | Contract |
+| --- | --- |
+| `version`, `servers` | Required root fields; version 1, at most 32 server declarations per file. |
+| `servers[].id` | Required, at most 32 characters, matches `[a-z0-9][a-z0-9_-]*`; duplicate ids fail within a file. |
+| `servers[].command` | Required executable basename on PATH or absolute path, at most 512 bytes. Relative executable paths, shell command strings, and explicit shell executables are refused. |
+| `servers[].args` | Optional string array, default empty; at most 64 entries of 4096 bytes each. |
+| `servers[].cwd` | Optional, at most 512 bytes. Project cwd defaults to the workspace and must remain inside it, including symlinks. User cwd defaults to the config directory; it may be config-relative or absolute. |
+| `servers[].env` | Optional string map, default empty; at most 64 keys matching `[A-Z_][A-Z0-9_]*`, with values at most 4096 bytes. Adds to the safe environment allowlist. |
+| `servers[].timeoutMs` | Optional positive integer at most 900000; overrides request timeout. Default client request timeout is 60000 ms; initialize is bounded at 15000 ms. |
+
+The YAML file is capped at 256 KiB; aliases and unknown fields are rejected. NUL-containing command/argument/environment/cwd values are refused. Launch-time canonical cwd checks are admission checks, not ongoing filesystem isolation.
+
+User-scope declarations are trusted by authorship and get action class `unknown`. Project servers require `clio-coder mcp trust analysis` or `/mcp trust analysis`; an optional `--action-class read|execute|unknown` selects authority, with `unknown` as default. Trust is stored in user `<config>/mcp-trust.json`, version 1, mode 0600, with at most 256 records and 1 MiB. Each record binds canonical `projectRoot`, `id`, declaration `digest`, `actionClass`, and `trustedAt`. Editing command, arguments, cwd, environment, or timeout makes the record stale and requires review and re-trust. Trust does not come from a server annotation or a model-authored claim.
+
+Gateway discovery is lazy and session-cached. Untrusted or stale project declarations never spawn; failed or cancelled discovery is not silently restarted in that session. Trust changes should be used by a new session, since the running source resolved configuration once. Cancelling discovery closes its shared connection and fails its waiters. Session shutdown awaits client-owned teardown; the exit backstop signals only a still-owned process group.
+
+Transport bounds are 4 MiB per incoming JSON-RPC line, 4 MiB pending outbound bytes, 16 KiB stderr tail, 1 MiB normalized result text, and at most 500 tools or 100 pages per server discovery. Gateway result shaping adds its own bounded model projection. Request timeout or per-call abort can fail one call without closing a ready server; discovery cancellation closes the shared connection. Teardown uses TERM, a 3000 ms grace, KILL, and 2000 ms bounded confirmation, reporting incomplete cleanup. Launching an MCP server is not sandboxing; remote MCP/OAuth and general OS isolation are deferred.
+
 ## Project files
 
 Keys read from files under `.clio-coder/` in the repository.
@@ -977,11 +1024,43 @@ Arguments the model can send on `dispatch`, `bash`, `context`, and `verify`, gro
 | Argument | Class | Controls |
 |---|---|---|
 | `context.include_tree` | policy | scope=skills: list files under the skill base_dir. |
-| `context.limit` | policy | scope=docs: max sections (default 5, max 12). |
+| `context.limit` | policy | scope=recall discovery: max refs (default 8, max 12). |
 | `context.name` | task | scope=skills: skill name to load; omit to list. |
-| `context.query` | task | scope=docs: question or terms; omit to list the corpus. |
+| `context.query` | task | scope=recall discovery: path, tool, or ref terms; omit to list. |
 | `context.ref` | task | scope=recall: ref of the evicted item, as named in its marker. |
-| `context.scope` | policy | Context source. |
+| `context.scope` | policy | workspace, skills, or recall. |
+| `context.offset` | policy | Zero-based recall discovery offset; follow nextOffset. |
+
+### `gateway`
+
+| Argument | Class | Controls |
+| --- | --- | --- |
+| `gateway.op` | task | find, describe, or call. |
+| `gateway.query` | task | Case-insensitive find filter over name/description. |
+| `gateway.capability` | task | Name returned by find, required for describe/call. |
+| `gateway.args` | task | Capability arguments from its describe schema. |
+
+### `run_script`
+
+| Argument | Class | Controls |
+| --- | --- | --- |
+| `run_script.interpreter` | task | PATH name: python3, python, node, bash, sh, Rscript, julia, perl, ruby, octave. |
+| `run_script.script` | task | Regular script file inside the workspace; symlink escapes refused. |
+| `run_script.args` | task | Script argv, at most 64 entries, 4096 bytes each. |
+| `run_script.interpreter_args` | task | Pre-script argv with the same bounds; omitted defaults to Python -u or empty for other interpreters. |
+| `run_script.cwd` | task | Workspace-relative directory, default root. |
+| `run_script.timeout_ms` | policy | Positive integer, default 600000, clamped above 21600000. |
+| `run_script.inputs` | task | Up to 64 workspace-relative provenance references, not isolation. |
+| `run_script.outputs` | task | Up to 64 expected output references, observed after execution. |
+| `run_script.env` | task | Up to 32 uppercase/underscore keys, values at most 4096 bytes; manifest stores keys only. |
+
+### Gateway capability arguments
+
+`clio_docs` takes optional `query` and `limit` (default 5, max 12). `clio_library` takes `query`, `kind`, `ref`, `limit` (default 20, max 50), and zero-based `offset`. These replace context's docs/library scopes. `web_read` accepts `url`, `timeout_ms`, `max_bytes`, and `format`, without method, headers, or body. `web_fetch` retains the full HTTP surface.
+
+`data` requires `op: inspect|select|validate` and `path`, with optional `format: csv|tsv|json|jsonl`, `delimiter`, `header: auto|true|false`, `sample_rows` (10, max 1000), `max_rows` (100000, null for all), zero-based `offset`, `limit` (50, max 1000), `columns` (CSV names/indices), and RFC 6901 `pointer` (JSON). All are nested under `gateway.args`; the capability is read-only.
+
+`read.line_numbers` requests source line prefixes; tail numbering is refused above the 32 MiB line-count budget. For complete argument and result contracts, see [Tool usage](tool-usage.md).
 
 ### `dispatch`
 

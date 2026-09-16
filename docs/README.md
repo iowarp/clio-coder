@@ -189,7 +189,7 @@ ships the Markdown reference used by both the application and agents. A root `CL
 only when present, such as in a source checkout. The index is deterministic and needs no
 network or embedding service (`src/tools/context/docs-engine.ts`).
 
-**Searching and then reading.** `context(scope="docs", query="…")` returns
+**Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})` returns
 section headings with citations such as `docs/architecture/safety-model.md`.
 Citations are **package-relative**, and this is the step that matters when the
 workspace is someone else's repository: reading `docs/architecture/safety-model.md`

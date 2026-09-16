@@ -35,6 +35,7 @@ Markdown.
 | Task-memory handoffs | `.clio-coder/handoffs/` | Agent-to-agent |
 | Dispatch proposals | `.clio-coder/proposals/` | Agent-to-agent |
 | Compete worktrees | `.clio-coder/worktrees/` | Agent-to-agent |
+| Script runs | `.clio-coder/runs/<runId>/` | Human transient and provenance |
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
 | Approved memory | XDG data `memory/` | Human transient (`clio-coder memory`) |
@@ -49,7 +50,7 @@ Markdown.
 
 ## The `artifact` tool default
 
-`artifact(kind: plan|review|report)` without a `path` writes to
+`gateway(op="call", capability="artifact", args={kind: "plan"|"review"|"report", content: ...})` without a `path` writes to
 `.clio-coder/artifacts/` under the workspace root. Passing `path` writes exactly
 there instead, working tree included, because a path the user named is a file
 the user asked for. A path that escapes the workspace is refused.
@@ -61,6 +62,16 @@ before the tool runs. A default keyed on a session id or a timestamp would make
 that prediction impossible and leave the safety layer guarding a path nobody
 writes. The consequence is one file per kind: a second report overwrites the
 first. Keep several by naming explicit paths.
+
+## Script run records and retention
+
+`run_script` creates `.clio-coder/runs/<runId>/` with `stdout.log`, `stderr.log`, and an atomically written `run.json` manifest (version 1). The id is a UTC timestamp plus six random hexadecimal characters. Source: `src/core/run-records.ts` and `src/tools/run-script.ts`.
+
+The manifest records script path, canonical path, byte size and SHA-256, interpreter name/resolved path/arguments, exact argv, workspace-relative cwd, timeout, start/end times and duration, environment key names, outcome, effective `exitCode`, observed `leaderExit`, signal, stream byte counts, log paths, input identities, output status, `cleanup`, and `pipeDrainIncomplete`. Environment values are never recorded there. Regular-file hashes cover at most 64 MiB; omitted hashes carry `too-large`, `cancelled`, or `unreadable`. These are observed identities, not immutable snapshots. Logs stream to disk and have no total byte ceiling; bounded terminal tails are not the full log.
+
+Failure does not erase partial logs or outputs. Outcomes include `cleanup-incomplete` and `pipe-drain-incomplete`, with effective failure even if the leader exited zero. The first means original-group teardown could not be confirmed; the second means the one-second post-exit drain bound expired. Escaped processes can remain alive and outputs can still change. See [execution and cleanup](../guide/tool-usage.md#run_script-stream-a-scientific-processing-step-to-disk).
+
+After each run, `sweepRunRecords` keeps the newest 100 completed records by completion time. Recent manifest-less directories are treated as active; those at least 24 hours old are orphan candidates. Retention reads at most 64 KiB per manifest in chunks of at most 8 KiB. Oversized or malformed regular manifests fall back to opened-file mtime for ordering. Nonregular manifests, symlinked run directories, changed identities, and inaccessible entries are explicitly skipped and counted, not followed or silently removed. The sweep reports `removed`, `kept`, `active`, and `skipped`. This bounds metadata reads, not total directory enumeration or disk usage. Preserve needed evidence outside this retention tree before it ages out.
 
 ## `.clio-coder/` and git
 

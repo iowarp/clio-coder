@@ -2,6 +2,51 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### read
+
+- Read text of any size through bounded windows; count exact lines only through 32 MiB, keep a separate 20 MB (20000000 bytes) image ceiling, refuse binary/invalid UTF-8 with offsets, report file identity and observed changes, and provide honest tail continuation and numbering limits.
+
+### write and edit
+
+- Publish atomically to real symlink targets with mode preservation, before/after file identities, and explicit durability warnings. Bound previous-content diff reads and skip diffs above 1 MiB.
+- Edit refuses binary, invalid UTF-8, mixed or bare-CR endings; preserves BOM and uniform line endings; requires exact matching above 1 MiB. External writers remain unlocked.
+
+### bash
+
+- Keep the combined 16 MiB stop-on-output contract while distinguishing observed and retained bytes and reporting actual inline, offloaded, discarded, or failed retention under every output policy. Point large-output processing to run_script.
+
+### grep, find, and ls
+
+- Preserve partial search results on timeout, cancellation, and recoverable errors, with completeness, skipped counts, bounded samples, and unknown-coverage notices. Disclose fallback ignore differences and native find's uncounted symlink-directory skips while preserving fd glob behavior.
+- List symlink targets, broken links, and inspection failures explicitly. Select the alphabetical prefix asynchronously with bounded retained entries and report selection metadata.
+
+### run_script
+
+- Add direct script execution with an explicit interpreter, argv, cwd, timeout, declared environment and file references, disk-streamed stdout/stderr, bounded progress, and a run manifest under `.clio-coder/runs/`.
+- Preserve actual leader exit beside effective failure for incomplete group cleanup or pipe draining; bound post-exit draining to one second and state escaped-process limits. Keep 100 completed run records with bounded retention metadata reads and explicit skipped entries.
+
+### verify
+
+- Add explicit all/any tolerance combination and fail/match non-finite policy, safe-integer ULP bounds, lossless non-finite report spellings, reference/payload provenance, and separate execution/validation/scientific-validity judgements.
+- Add version-2 performance baseline environments and informational mismatch reports. Refuse judgement of capped output; align direct and host verification at the 32 MiB judged capture/reference ceiling.
+
+### gateway and MCP
+
+- Add find/describe/call routing for secondary builtins, extension commands, and trusted local stdio MCP, preserving inner authority, worker attestation, terminal results, and exported evidence identity.
+- Add strict user/project mcp.yaml configuration, digest-bound project trust, `clio-coder mcp list|trust|untrust`, and interactive `/mcp`. Cancel shared discovery with owned cleanup and await teardown on shutdown; exit cleanup stays client-owned.
+
+### context, web, and artifacts
+
+- Keep workspace, skills, and recall on context; move documentation and recipe browsing to gateway capabilities clio_docs and clio_library.
+- Separate gateway GET-only web_read from full web_fetch requests. Move git, evidence, and credential_present behind the same gateway.
+- Move artifact behind the gateway with atomic publication and its existing terminal turn contract intact.
+
+### data
+
+- Add gateway inspection, selection, and validation for CSV/TSV and JSON/JSONL with streaming readers, explicit exact/sampled/cut views, precision and sentinel reporting, bounded captures, and actionable unsupported-format refusals.
+
 ## 0.4.8 - 2026-09-12
 
 Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.

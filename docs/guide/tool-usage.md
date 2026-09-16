@@ -1,17 +1,38 @@
 # Tool Usage Reference
 
-This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `context(scope="docs", query=...)` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
+This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `gateway(op="call", capability="clio_docs", args={query: ...})` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
 In the current source tree, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
 
+## gateway: discover and call secondary capabilities
+
+One direct tool exposes `op="find"|"describe"|"call"`, optional `query`, `capability`, and `args`. Source: `src/tools/gateway/index.ts`. `find` filters names and descriptions case-insensitively and returns at most 300 capability rows within a 32 KiB observation allowance, with `name`, `kind` (`builtin`, `extension`, `mcp`), description, and action class. `describe` returns the full description, wire parameter schema, and authority notes. `call` validates `args` and invokes the capability through the registry under its own authority. Direct tools cannot be called through the gateway.
+
+| Placement | Capabilities |
+| --- | --- |
+| Direct | read, write, edit, bash, grep, find, ls, context, code_nav, verify, run_script, gateway |
+| Direct, subject to dependency wiring | dispatch, monitor, steer, tasks, ledger, panes, limitation, decide, ask_user |
+| Gateway | artifact, web_read, web_fetch, git, evidence, credential_present, clio_docs, clio_library, data |
+| Gateway, when installed or trusted | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
+
+Placement is defined by `src/tools/surface.ts`. The gateway does not grant additional permission. Inner admission preserves safety policy, skill restrictions, approvals, action class, cancellation, result shaping, and evidence. The outer call is counted once; `details.capability` lets ledger consumers recover the underlying tool. A gateway artifact preserves its terminal result and completes the turn. Native workers whose recipe names a gateway capability attach and attest `gateway`, while the admitted capability list still limits find, describe, and call. Worker registries do not receive an MCP source in this release.
+
+Trusted local stdio MCP servers connect lazily. `find` discovers trusted servers; `describe` or `call` connects only the owning server. Untrusted project servers are listed with the `clio-coder mcp trust <id>` or `/mcp trust <id>` remedy and are never launched. Cancelling discovery closes the shared connection, fails other waiters, and does not restart it silently during that session. See [MCP configuration](configuration-reference.md#local-stdio-mcp-configuration-and-trust).
+
+```text
+gateway(op="find", query="data")
+gateway(op="describe", capability="data")
+gateway(op="call", capability="data", args={op: "inspect", path: "results.csv"})
+```
+
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
-The six envelope-backed OBSERVE tools (read, grep, find, ls, code_nav,
-context) share one result envelope, implemented in `src/tools/observation.ts`.
+The envelope-backed OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`,
+`context`, `clio_docs`, `clio_library`, and `data`) and `gateway` find listings share one result envelope, implemented in `src/tools/observation.ts`.
 The OBSERVE policy plane also contains `credential_present`, whose deliberately
 minimal result does not use that envelope.
 
-Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, context 16KB for scope=docs and scope=library, and 50KB for scope=skills/workspace.
+Per-call byte caps: read 50KB (`safety.limits.readBytesPerCall`), grep 16KB for mode=content and 8KB for mode=files/count, find 8KB, ls 8KB, code_nav 16KB, `clio_docs` and `clio_library` 16KB, `context` 50KB for skills/workspace, `data` 32KiB, and `gateway` find 32KiB.
 
 Truncated text results append exactly one notice line:
 
@@ -23,9 +44,9 @@ Segments that do not apply are omitted. `<total>` renders as `N+` when the searc
 
 Offload: when the byte cap cut content that was already collected, the complete rendering is written to `<clio-coder state dir>/scratch/<sessionId>/<sha256 of the captured text>.txt` and the notice's `full:` segment names the path. Read it with `read` using offset/limit. Tools offload only when the byte cap cut collected content; a bare item-limit truncation continues via `next` and does not offload. `read` never offloads, because the source file is directly re-addressable via `offset`.
 
-JSON-format results (code_nav, context scope=docs/workspace) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
+JSON-format results (including code_nav, context workspace, clio_docs, data, and gateway find) never get an appended notice. An oversize JSON payload is replaced whole by the parseable stub `{"error":"result exceeded <cap>","offloadPath":"...","next":"..."}` so the model never receives JSON cut mid-document. Empty results are also valid JSON with empty arrays and `next` populated.
 
-Turn budget: all six OBSERVE tools draw from one shared pool of 192KB per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
+Turn budget: all envelope-backed tools draw from one shared pool of 192KB per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
 
 ## read: page through a file with offset, limit, and tail
 
@@ -37,10 +58,11 @@ Arguments:
 - `offset` (optional). 1-indexed start line; default 1.
 - `limit` (optional). Max lines to return.
 - `tail` (optional). Return the last N lines (jump to EOF). Overrides offset/limit.
+- `line_numbers` (optional boolean). Prefix text with source line numbers; default false.
 
-Each call is capped at 2000 lines or `safety.limits.readBytesPerCall`, whichever hits first; the per-turn observation budget can shrink it further. Files larger than 20MB error outright; use grep/find to locate the relevant region instead. A missing file errors with a hint to locate it via code_nav, find, or ls.
+Each call is capped at 2000 lines or `safety.limits.readBytesPerCall`, whichever hits first; the per-turn observation budget can shrink it further. Text files of any size are read through bounded windows. Exact line counting stops at a 32 MiB file-size budget; larger files report an unknown total (`N+`). Images retain a 20 MB (20000000 bytes) ceiling and require model vision support. NUL bytes and invalid UTF-8 in the inspected bytes are refused with zero-based byte offsets instead of being decoded as text. A bounded read does not validate unread regions. A missing file errors with a hint to locate it via code_nav, find, or ls.
 
-Continuation: a truncated result's notice carries `next: offset=<first unshown line>`. read does not offload; the file itself is the continuation source. If a single line exceeds the byte cap, the result is that line's UTF-8 prefix plus an explanatory note suggesting grep with a narrower pattern or edit with exact surrounding text. An `offset` beyond EOF errors with the file's total line count.
+Continuation: a truncated result's notice carries `next: offset=<first unshown line>`. read does not offload; the file itself is the continuation source. If a single line exceeds the byte cap, the result is that line's UTF-8 prefix plus an explanatory note suggesting grep with a narrower pattern or edit with exact surrounding text. An `offset` beyond EOF reports the observed end. When the total is unknown, tail continuation can widen to `tail=2N`; with a known total it can use an exact offset/limit window. `tail` with `line_numbers=true` is refused above the line-count budget because absolute line numbers are unknown. `details.file` records bytes and mtime, and `details.fileChange` reports observed identity changes during reading. A file identity is an observation, not a snapshot or lock against external writers.
 
 Reach for read when you know the path and need contents. Use grep first to find where something lives, then read the cited region with offset/limit instead of paging a large file from the top. Use `tail` for logs and build output where the interesting lines are at the end.
 
@@ -59,9 +81,13 @@ Arguments:
 - `path` (required).
 - `edits` (required). Array of `{oldText, newText}` objects. Each `oldText` must match exactly one region of the original file, and regions must not overlap.
 
-Matching runs a cascade: exact substring match first, then a fuzzy match that normalizes Unicode punctuation, non-breaking spaces, and trailing whitespace, then an indentation-relaxed match that compares lines with leading whitespace stripped and re-applies the file's actual indentation to `newText`. If `oldText` matches more than once the call errors and asks for more surrounding context; if it matches nowhere the call errors telling you the text must match exactly including whitespace and newlines; if the result would be byte-identical the call errors with "No changes made".
+For files at most 1 MiB, matching runs a cascade: exact substring match first, then a fuzzy match that normalizes Unicode punctuation, non-breaking spaces, and trailing whitespace, then an indentation-relaxed match that compares lines with leading whitespace stripped and re-applies the file's actual indentation to `newText`. If `oldText` matches more than once the call errors and asks for more surrounding context; if it matches nowhere the call errors telling you the text must match exactly including whitespace and newlines; if the result would be byte-identical the call errors with "No changes made".
 
-The file's BOM and CRLF/LF line endings are preserved: content is normalized to LF for matching and the original ending restored on write. Same-file mutations from edit and write are serialized through a mutation queue. Success returns `edited <path>: N replacement(s)` plus a one-line validation nudge (rerun the failing test or verify; navigation tools do not validate edits), with `details = {diff, firstChangedLine, paths}`.
+Files above 1 MiB require exact matching and do not use fuzzy or indentation fallback. The editor refuses NUL and invalid UTF-8 with zero-based byte offsets, mixed LF/CRLF endings, and bare CR endings. It preserves a BOM and uniform LF or CRLF. It still holds the source and replacement in memory; it is not a streaming transformation.
+
+Edit and write serialize same-target mutations and publish atomically through a temporary file in the real target directory, file fsync, and rename. Symlink paths retain their link and update the real target; existing mode bits are preserved. Directories are refused. Ownership, ACLs, extended attributes, and old timestamps are not copied. External writers are not locked: the last rename wins, and an earlier read is not an edit precondition. Failure before rename leaves the target unpublished; a directory-fsync failure after rename reports successful publication with a durability warning. Shared-filesystem durability depends on its rename/fsync guarantees.
+
+Success returns replacement counts and a validation nudge with `details.paths`, `details.file = {before: {bytes, mtimeMs} | null, after: {bytes, mtimeMs}}`, and a diff with `firstChangedLine` when eligible. If either version exceeds 1 MiB, diff construction is skipped with an explicit notice.
 
 Argument tolerance: `edits` sent as a JSON string is parsed, and a legacy top-level `{oldText, newText}` pair is folded into `edits`.
 
@@ -84,9 +110,9 @@ Arguments:
 - `path` (required).
 - `content` (required). The full file contents.
 
-Success reports the byte count written. If the previous content ended with a newline and the new content does not, the result appends a note so the dropped trailing newline is visible. Writes to the same path are serialized with edit through the file mutation queue.
+Success reports the byte count written. If the previous content ended with a newline and the new content does not, the result appends a note so the dropped trailing newline is visible. Writes use the same atomic publisher, symlink-target behavior, mode preservation, mutation queue, external-writer limitations, and `details.file` before/after identities as edit. A diff is generated only when both versions are at most 1 MiB; otherwise the result names the skipped diff. Reading the previous content for comparison is bounded to 1 MiB plus one overflow byte.
 
-Use write for new files or full regeneration. Use edit for surgical changes to an existing file; write replaces everything and produces no diff.
+Use write for new files or full regeneration. Use edit for surgical changes to an existing file; write replaces everything, with a bounded diff when eligible.
 
 ```text
 write(path="src/tools/new-tool.ts", content="import { Type } from \"typebox\";\n...")
@@ -110,7 +136,7 @@ The default `bounded` policy keeps a tail-biased model excerpt under the 16KB re
 
 Presentation is independent from model context. The operator-facing display remains folded and tail-biased under every policy. When the display or selected context omits captured content, the terminal result writes one per-session scratch artifact and names it in the result. Live updates use the selected policy, remain bounded, and never write per-update artifacts. Every terminal result records requested and applied context modes, captured/displayed/context bytes, truncation or downgrade state, and any offload path. Exit code, signal, timeout, abort, and output-cap facts survive every policy. Scratch retrieval may contain the raw retained output; the deterministic `summary` projection is the redacted surface.
 
-A command producing more than 16MB of combined output is stopped with an error. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole; the operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
+A command producing more than 16 MiB of combined stdout/stderr is stopped with an error. The cap result distinguishes raw observed bytes from retained bytes and states where the partial output went: inline, a named offload, or explicitly discarded bytes when retention was cut or failed. Observed bytes count data received through settlement, not hypothetical output from an uninterrupted command. The diagnostic survives summary and metadata-only dispositions. Use `run_script` for disk-streamed output beyond this cap. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole; the operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
 
 Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that `cat`, shell `grep`, and shell `find` do not. Prefer `verify` over bash for declared package scripts and project-catalog entries, since verify produces typed evidence.
 
@@ -120,6 +146,61 @@ bash(command="git log --oneline -10")
 bash(command="npm run build", timeout_ms=600000)
 bash(command="npm run test", timeout_ms=600000, output_policy="summary")
 bash(command="make artifact", output_policy="metadata-only")
+```
+
+## run_script: stream a scientific processing step to disk
+
+Runs one workspace script on the existing safe-exec substrate, with separate stdout/stderr logs and a provenance manifest. Sources: `src/tools/run-script.ts`, `src/core/run-records.ts`, `src/core/safe-exec.ts`. Execute class; sequential. Its `safetyCall` projects the interpreter vector and cwd to Bash admission, so the interpreter allowlist does not bypass execution policy or create a sandbox.
+
+Arguments:
+
+- `interpreter` (required). A PATH-resolved name: `python3`, `python`, `node`, `bash`, `sh`, `Rscript`, `julia`, `perl`, `ruby`, or `octave`. Interpreter paths are refused.
+- `script` (required). A regular file inside the workspace; canonical path containment rejects symlink escapes.
+- `args` and `interpreter_args` (optional string arrays). At most 64 entries each, 4096 UTF-8 bytes per entry, without NUL. Interpreter arguments precede the script. Omission supplies `-u` for Python and no flags for the other interpreters; explicit `[]` suppresses that default.
+- `cwd` (optional). Workspace-relative working directory, default root; canonical containment applies.
+- `timeout_ms` (optional). Default 600000. Must be a positive integer; values above 21600000 clamp to that six-hour maximum. Zero, negatives, and fractions are refused.
+- `inputs` and `outputs` (optional). Up to 64 workspace-relative declared references each. These are provenance only and do not restrict what the process can read or write.
+- `env` (optional string map). Up to 32 declared keys matching `[A-Z_][A-Z0-9_]*`, each value at most 4096 bytes. The child receives the safe-exec environment plus these entries. The manifest records declared keys and secret-shaped `redactedKeys`, never environment values. Arguments and script output remain literal records; do not put secrets there expecting environment redaction.
+
+Logs stream to `.clio-coder/runs/<runId>/stdout.log` and `stderr.log`, avoiding Bash's 16 MiB in-memory output ceiling. Disk usage is not capped by the bounded model view. Progress is throttled to 250 ms with 2 KiB tails per stream; terminal tails retain 8 KiB each. `run.json` records script identity, resolved interpreter, exact argv, cwd, timeout, timing, environment keys, input identities, and outputs marked `created`, `modified`, `unchanged`, or `absent`. Hashing regular files is bounded at 64 MiB; `sha256: null` carries `hashOmitted: too-large|cancelled|unreadable`. No dependency installation or automatic retry occurs.
+
+Terminal outcomes are `succeeded`, `failed`, `timed-out`, `aborted`, `spawn-failed`, `cleanup-incomplete`, and `pipe-drain-incomplete`. Every unsuccessful outcome returns an error with retained logs and observed partial outputs. `exitCode` is effective execution status; `leaderExit` preserves the actual leader code/signal (or null if not observed). Cleanup or drain failure turns leader code 0 into effective code 1. Cancellation after the leader exited can retain `exitCode=0` with `aborted=true`; inspect the outcome and flags as well as the code. Neither a leader's zero exit nor a declared output's existence establishes a valid scientific result; run `verify` separately.
+
+On POSIX the runner cleans the original process group after leader exit as well as on timeout/cancellation: TERM, a 3000 ms grace, KILL, then at most 1000 ms to observe group disappearance. `cleanup.incomplete` means members survived that bound. Independently, a 1000 ms deadline after leader exit bounds pipe draining; `pipeDrainIncomplete` means logs may be incomplete even when the original group is gone. Cancellation remains active until settlement. Escaped processes are not contained or signalled, and outputs may still change. A probe or signal returning ESRCH permanently closes group ownership; later timers and cancellation cannot reopen it. The residual probe-to-signal PGID-reuse race is accepted, not eliminated. Windows uses direct-child cleanup rather than claiming POSIX process-group containment.
+
+After a run, retention keeps the newest 100 completed records, preserves active runs, and considers manifest-less directories orphaned after 24 hours. Metadata reads are bounded and nonregular entries are explicitly skipped. See [run record placement](../architecture/artifact-placement.md#script-run-records-and-retention).
+
+```text
+run_script(interpreter="python3", script="scripts/analyze.py", args=["inputs.csv", "out/stats.json"], inputs=["inputs.csv"], outputs=["out/stats.json"], timeout_ms=600000)
+verify(check="compare-stats")
+```
+
+## data: inspect structured files through the gateway
+
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL. Sources: `src/tools/gateway/data-tool.ts`, `src/tools/data/`. Required arguments are `op` and `path`; `format` can select `csv|tsv|json|jsonl` explicitly. Inspection never rewrites a file or installs a parser.
+
+| Argument | Meaning |
+| --- | --- |
+| `delimiter`, `header` | CSV/TSV delimiter override and header `auto` (default), true, or false. Delimiter detection considers comma, tab, semicolon, and pipe. |
+| `sample_rows` | Inspection preview, default 10, maximum 1000. |
+| `max_rows` | Inspection/validation scan bound, default 100000; null requests a whole-file scan. |
+| `offset`, `limit` | Selection window, zero-based offset, default 50 results, maximum 1000. |
+| `columns` | CSV/TSV projection by header names or zero-based indices. |
+| `pointer` | JSON RFC 6901 pointer; empty string selects the document. |
+
+Inspection reports schema/types, dimensions or counts, and a bounded sample. Selection returns rows, records, or a JSON value. Validation reports format validity only for the portion actually scanned; a bounded partial verdict is not whole-file validation. `rowCount: null` means the scan stopped early. JSON syntax faults carry location diagnostics; duplicate-key reporting and bounded tracking are explicit rather than silently certifying uniqueness.
+
+Every result reports `view = {exact, sampled, converted}`. `sampled=true` identifies a scan that stopped before EOF. `exact=false, sampled=false` means the scan completed but a selected value was cut to budget, with `$summary` or `$truncated` markers. Inspection samples are previews: a cut sample does not invalidate exact full-scan counts. `converted` stays false for these readers. Format validation proves neither physical meaning nor a transformation's correctness.
+
+CSV values remain source strings. Empty cells and sentinels (`NA`, `N/A`, `NaN`, `null`, `NULL`, `None`, `-`) are counted separately and never silently converted to zero or null. Numeric issues are `unsafe-integer`, `excess-digits`, `inexact`, `overflow`, `underflow`, or `oversized-literal`. JSON numbers that cannot be represented honestly use `$literal` and `precision` instead of rounded values. Source ordering and explicit missing-value tokens are retained; units receive no inferred conversion. Numeric extrema with precision issues are labelled approximate.
+
+Readers stream with bounded captures. CSV fields are limited to 1048576 characters and records to 16777216; JSONL lines to 1048576 characters; JSON nesting to 1024. JSON captures bound keys, strings, duplicate tracking, and precision samples, with omissions reported. The gateway data result uses a 32 KiB observation cap and the shared turn budget; an oversize JSON rendering uses the envelope's parseable offload stub. Binary/NUL content, invalid UTF-8 (with byte offset), invalid syntax, unsupported formats, absent pointers, and unknown columns produce actionable failures. HDF5, NetCDF, and Parquet require `run_script` with an operator-provided library. Publish transformed data through an explicit script or atomic file mutation, then validate the output's schema, precision, missing values, and scientific invariants.
+
+```text
+gateway(op="call", capability="data", args={op: "inspect", path: "results.csv", max_rows: null})
+gateway(op="call", capability="data", args={op: "select", path: "results.csv", columns: ["time", "mass"], offset: 100, limit: 20})
+gateway(op="call", capability="data", args={op: "select", path: "results.json", pointer: "/runs/0"})
+gateway(op="call", capability="data", args={op: "validate", path: "results.jsonl", max_rows: null})
 ```
 
 ## grep: search file contents with ripgrep
@@ -138,13 +219,13 @@ Arguments:
 - `limit` (optional). Max matches; default 100.
 - `include_ignored` (optional boolean).
 
-Visibility follows the shared ignore policy (`src/tools/ignore-policy.ts`): `.gitignore` is honored natively, `.clio-coder`/`.fallow`/`.git` are always excluded, and a fixed generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `target`, `.venv`, `.next`, `.cache`, `.pytest_cache`, `.turbo`) is force-excluded even when a project forgot to gitignore it. `include_ignored=true` lifts the gitignore and generated layers together; the clio-internal layer always stands. Pointing `path` directly inside an excluded directory searches it. grep and find answer visibility from the same policy, so `grep mode=files` and `find` never disagree about which paths exist.
+Visibility follows the shared ignore policy (`src/tools/ignore-policy.ts`): `.gitignore` is honored natively, `.clio-coder`/`.fallow`/`.git` are always excluded, and a fixed generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `target`, `.venv`, `.next`, `.cache`, `.pytest_cache`, `.turbo`) is force-excluded even when a project forgot to gitignore it. `include_ignored=true` lifts the gitignore and generated layers together; the clio-internal layer always stands. Pointing `path` directly inside an excluded directory searches it. Native rg/fd honor `.gitignore`; the pure-Node fallbacks use only the generated-directory and internal exclusions and do not parse `.gitignore`. Their results disclose this difference, so native and fallback visibility need not agree.
 
-Rendering: match lines print as `path:line: text`, context lines as `path-line- text`. Lines longer than 500 characters are cut with a note suggesting read for the full line. No matches returns `No matches found`.
+Rendering: match lines print as `path:line: text`, context lines as `path-line- text`. Lines longer than 500 characters are cut with a note suggesting read for the full line. A complete empty search reports no matches; an incomplete empty search says so explicitly.
 
-Truncation: hitting the match limit gives `next: limit=<2x>` with the total rendered as `N+`. Hitting the byte cap (16KB content, 8KB files/count) offloads the full rendering and, in content mode, suggests `next: mode=files`. Searches are killed after 30 seconds with a hint to narrow the pattern, path, or glob.
+Truncation: hitting the match limit gives `next: limit=<2x>` with the total rendered as `N+`. Hitting the byte cap (16KB content, 8KB files/count) offloads the full rendering and, in content mode, suggests `next: mode=files`. At 30 seconds the search stops and returns collected matches with an incompleteness notice. Narrow the pattern, path, or glob to continue.
 
-The fallback searcher (rg absent) skips files over 20MB and binary files, walks the same ignored-dir set, and stops at the match limit.
+Native and fallback results include `details.search = {complete, reason?, skipped: {count, samples, unknown?}}`. Reasons are `timeout`, `errors`, `limit`, or `cancelled`. Counts describe observed skips, samples are bounded and protected-path filtered, and `unknown=true` means diagnostic coverage could not be determined. Recoverable native errors retain matches; invalid patterns still error. The asynchronous fallback counts unreadable, oversized (over 20 MB (20000000 bytes)), and binary skips and yields during traversal.
 
 Reach for grep to find where something lives; use mode=files to map breadth cheaply before reading, and mode=count to size a rename or sweep.
 
@@ -171,7 +252,7 @@ Results are relative to the search directory, with a `/` suffix on directories. 
 
 `order="mtime"` never walks the whole tree: it collects a bounded candidate set of `max(4 * limit, 2000)` paths, stats only those, sorts newest first, and slices to `limit`. `details.candidates = {cap, collected, capHit, note?}` records the bound; when the cap was hit the ordering is approximate and `next: order=path` is suggested.
 
-Truncation: hitting the result limit gives `next: limit=<2x>` with the total rendered as `N+`; the 8KB byte cap offloads the full path list. No matches returns `No files found matching pattern`. Searches are killed after 30 seconds.
+Truncation: hitting the result limit gives `next: limit=<2x>` with the total rendered as `N+`; the 8KB byte cap offloads the full path list. A complete empty result says `No visible files found matching pattern`; incomplete searches say `Search incomplete`. Searches stop after 30 seconds and retain partial results with the same `details.search` contract as grep. Native fd keeps its own glob ranges and smart-case semantics; fallback glob matching is not a promise of complete fd parity. Neither traversal follows symlinked directories. Fallback traversal counts those skips; native fd reports `details.symlinkDirectories.counted=false` and a rendered notice because it does not count them.
 
 Reach for find when you know the file's name or shape; use `order="mtime"` with a small limit to answer "what changed recently". When you know contents but not names, use `grep mode=files` instead.
 
@@ -191,7 +272,7 @@ Arguments:
 - `path` (optional). Default `.`.
 - `limit` (optional). Max entries; default 500.
 
-Entries are sorted alphabetically case-insensitively, directories carry a `/` suffix, and dotfiles are included. ls reads the directory raw and applies no ignore policy, so `node_modules/` and `.git/` appear if present. Entries that vanish or cannot be statted mid-scan are skipped. An empty directory returns `(empty directory)`.
+Entries are sorted alphabetically case-insensitively, directories carry a `/` suffix, and dotfiles are included. ls reads the directory raw and applies no ignore policy, so `node_modules/` and `.git/` appear if present. Symlinks render as `name@ -> target`, or `name@ (broken)` for broken links. Entries that cannot be inspected remain visible with an error marker, and `details.skipped` counts failures with bounded samples. Asynchronous enumeration retains only the requested alphabetical prefix in an O(limit) heap and stats selected entries; `details.selection` reports that bounded selection. Case-insensitive ties preserve enumeration order. Finding the alphabetical prefix still requires enumerating the directory. An empty directory returns `(empty directory)`.
 
 Truncation: hitting the entry limit gives `next: limit=<2x>`; the 8KB byte cap offloads the full listing. Reach for ls to orient in one directory; use find for recursive matching.
 
@@ -223,8 +304,8 @@ Returns a JSON presence summary mapping containing:
 - `fileMissing`: True if the file path was specified but does not exist.
 
 ```text
-credential_present(name="OPENAI_API_KEY")
-credential_present(name="MY_SECRET_KEY", source="file", file=".env")
+gateway(op="call", capability="credential_present", args={name: "OPENAI_API_KEY"})
+gateway(op="call", capability="credential_present", args={name: "MY_SECRET_KEY", source: "file", file: ".env"})
 ```
 
 ## dispatch: run bounded tasks on fleet agents
@@ -339,9 +420,16 @@ checks:
     tags: [scientific, performance]
 ```
 
-Every check has a `kind`, absent or `command` by default. A version 1 file still loads and every check there is `kind: command`; the kind fields require `version: 2`. `kind: command` reads the exit code. `kind: numeric-compare` runs the command, parses its stdout as a JSON object of `string -> number | number[]`, and judges it against `reference` (a repository-relative JSON file of the same shape) under `tolerance`, which names at least one of `relative`, `absolute`, or `ulp`; a value passes only when every named tolerance holds, a key missing on either side fails with the key named, arrays compare elementwise and fail on length mismatch, and `NaN` or infinity fails. `kind: perf-budget` runs the command and judges the wall time the harness measured against either `budget: {wallTimeMs, tolerance?: {relative}}` or `baseline`, a repository-relative JSON `{wallTimeMs}` that `clio-coder verifiers baseline <id>` records from one clean run, with an optional `tolerance: {relative}` of headroom over it. Exactly one of `budget` and `baseline` is present. A command that exits non-zero, times out, or is aborted fails before any judgement. Both kinds record a structured `report` on the `verify` result details and on the host-verification check of a dispatch receipt (per-key worst deviation and the failed tolerance, or measured time, effective budget, and ratio); a failing judgement is a check failure, not a new evidence category.
+Every check has a `kind`, absent or `command` by default. A version 1 file still loads and every check there is `kind: command`; the kind fields require `version: 2`. `kind: command` reads the exit code. `kind: numeric-compare` runs the command, parses its stdout as a JSON object of `string -> number | number[]`, and judges it against `reference` (a repository-relative JSON file of the same shape) under `tolerance`, which names at least one of `relative`, `absolute`, or `ulp`; a value uses `tolerance.combine: all|any` (default `all`) to require all named bounds or at least one. Missing keys and array-length mismatches fail independently of combination. `tolerance.nonFinite: fail|match` defaults to `fail`; `match` accepts NaN paired with NaN and same-signed infinities. `ulp` must be an integer at most `Number.MAX_SAFE_INTEGER` (9007199254740991). This is a conjunction/disjunction of individual bounds, not an additive absolute-plus-relative formula. `kind: perf-budget` runs the command and judges the wall time the harness measured against either `budget: {wallTimeMs, tolerance?: {relative}}` or `baseline`, a repository-relative versioned JSON baseline that `clio-coder verifiers baseline <id>` records from one clean run, with an optional `tolerance: {relative}` of headroom over it. Exactly one of `budget` and `baseline` is present. A command that exits non-zero, times out, or is aborted fails before any judgement. Both kinds record a structured `report` on the `verify` result details and on the host-verification check of a dispatch receipt (per-key worst deviation and the failed tolerance, or measured time, effective budget, and ratio); a failing judgement is a check failure, not a new evidence category.
 
-Version 2 keeps version 1's strictness. Every root and check field shown above is required, unknown fields fail, and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
+
+Judged command capture and numeric reference reads have a 32 MiB ceiling. Output-cap, execution, timeout, or abort failures prevent judgement; partial JSON never earns a pass. Reports record effective `combine`, `nonFinite`, and a readable `rule`; numeric provenance includes `reference` (source, path when supplied, SHA-256, bytes) and `actual` (SHA-256, bytes of the extracted payload). Non-finite report numbers serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`, never JSON null. These report spellings do not extend the input JSON grammar. Relative deviation against zero is zero for equality and undefined for a nonzero actual, so an absolute bound with `combine: any` can admit near-zero values.
+
+Each declared check carries `judgement = {execution, validation, scientificValidity}`. Execution reports `succeeded`, `failed`, `timed-out`, `aborted`, or `output-capped`; validation is `passed`, `failed`, `exit-code` (ordinary command checks), or `not-run`. `scientificValidity` remains `"not established by this check"`. A tolerance pass does not establish the physical validity of a model.
+
+New performance baselines are version 2 and record `wallTimeMs`, `check`, `recordedAt`, and `environment` (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`). Version 1 still loads without an environment. Reports retain baseline path/hash/bytes and compare baseline/current environments in `environment.differing`; differences are informational and do not change the declared time-budget verdict.
+
+Version 2 keeps version 1's strictness. The root version/checks and core check fields (`id`, `description`, `command`, `cwd`, `timeoutMs`, `tags`) are required; kind-specific fields follow the contracts above. Unknown fields and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
 
 Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.
 
@@ -419,48 +507,48 @@ Commands map directly to git subprocess execution:
 - `op="log"` runs `git log --oneline -n <limit>` listing recent commit shas and subjects.
 
 ```text
-git(op="status")
-git(op="diff", stat=true)
-git(op="diff", path="src/tools/safe-exec.ts")
-git(op="log", limit=10)
+gateway(op="call", capability="git", args={op: "status"})
+gateway(op="call", capability="git", args={op: "diff", stat: true})
+gateway(op="call", capability="git", args={op: "diff", path: "src/tools/safe-exec.ts"})
+gateway(op="call", capability="git", args={op: "log", limit: 10})
 ```
 
-## context: workspace snapshot, docs retrieval, skills, and the library catalog
+## context: workspace, skill activation, and recall
 
-One OBSERVE entry point for material about the working environment rather than the tree itself. Sources: `src/tools/context/index.ts`, `src/tools/context/docs-engine.ts`, `src/tools/context/library.ts`.
+Direct OBSERVE retrieval of the working environment. Source: `src/tools/context/index.ts`.
 
-Arguments:
+Arguments are `scope` (`workspace`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills; read-only and suggest activation require an explicit operator request, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace and skills use a 50KB cap.
 
-- `scope` (required). `workspace`, `docs`, `skills`, `library`, or `recall`.
-- `query` (scope=docs). Question or terms; omit to list the corpus (files plus doc/section counts) instead of searching. At scope=library, name, owner, or description terms.
-- `limit` (scope=docs). Max sections; default 5, max 12. At scope=library, max rows; default 20, max 50.
-- `name` (scope=skills). Skill to load; omit to list.
-- `kind` (scope=library). One of `skill`, `agent`, `prompt`, `fleet`, or `plugin`.
-- `ref` (scope=library). An exact `kind:name` package reference, a resource key, or a bare runtime name.
-- `offset` (scope=library, scope=recall). Zero-based; follow the reported `nextOffset`.
-- `include_tree` (scope=skills, boolean). List up to 50 files under the skill's base_dir.
+```text
+context(scope="workspace")
+context(scope="skills", name="context-prime", include_tree=true)
+context(scope="recall", ref="<turnId>", offset=0)
+```
 
-`scope="workspace"` returns the session's git/project snapshot as JSON, probing and caching it on first call. When model-visible skills are installed, the payload carries a one-line `skills` pointer (count plus the suggest protocol) so orientation surfaces the catalog; the pointer never includes catalog entries and never changes the load gate. It requires a bound session; worker registries without one get a clean error. 50KB cap.
+## clio_docs: retrieve bundled documentation through the gateway
 
-`scope="docs"` runs deterministic, offline retrieval over Clio's recursively
+Source: `src/tools/gateway/clio-context-tools.ts` and `src/tools/context/docs-engine.ts`. Arguments: `query` (omit for the corpus), `limit` (default 5, max 12).
+
+`clio_docs` runs deterministic, offline retrieval over Clio's recursively
 bundled Markdown tree under `docs/` plus README.md, CHANGELOG.md, and
 CLIO-CODER.md, indexed as heading-delimited sections with light stemming, Clio
 vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with `next` populated (the closest vocabulary expansion, or `query=overview`). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old `docs_search` `file` filter was dropped in the consolidation. Omitting `query` returns the corpus listing (the file set plus doc and section counts, the same `corpus` shape a search carries) so the model can pick a term without wasting a round on a `requires query` error.
 
-`scope="skills"` with no `name` lists installed skills with descriptions. A matching suggestion uses `Suggested skill: /skill <name>` and continues the task without activating a skill. At `read-only` and `suggest`, loading requires an explicit operator request; at `auto-edit` and `full-auto`, policy permits activation of installed skills without that request. Recipe-bound workers may load only their declared skills. Installation, availability, and activation are separate: even `full-auto` requires a bound operator acceptance for a marketplace installation. A pending request's task text is surfaced with the body. Marketplace-installed skills are drift-checked against their pinned hash; a mismatch annotates the result with a `skill_drift` warning but never blocks. 50KB cap; a truncated body offloads in full.
+```text
+gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evidence", limit: 8})
+```
 
-`scope="library"` is the read-only recipe catalog, backed by the same bounded inventory `clio-coder library recipes --json` reads, and it activates, installs, registers and pins nothing. Rows are tagged and never mixed up with one another. A `resource` row is a recipe that actually loaded: its runtime name (skill frontmatter name, agent recipe id, prompt path with colons, fleet contract name), owning package or `core`/`user`/`project`/`compat` source class, scope, origin evidence, format, and the invocation that works. A `hint` row is a catalog claim about one member of a package: it names the owning package, that owner's installed copy states, and the member's own state (`not-installed` when the owner is not installed, `unknown` when the owner is installed and the member did not turn up), and it never carries an invocation because nothing loaded it. A `package` row is the install target itself with its version, origin, installed copies, and bounded `provides` hints; a package with no hints reports its contents as unknown until inspection rather than empty.
+## clio_library: inspect the recipe catalog through the gateway
+
+Source: `src/tools/gateway/clio-context-tools.ts` and `src/tools/context/library.ts`. Arguments: `query`, `kind` (`skill`, `agent`, `prompt`, `fleet`, `plugin`), `ref`, `limit` (default 20, max 50), and zero-based `offset`.
+
+`clio_library` is the read-only recipe catalog, backed by the same bounded inventory `clio-coder library recipes --json` reads, and it activates, installs, registers and pins nothing. Rows are tagged and never mixed up with one another. A `resource` row is a recipe that actually loaded: its runtime name (skill frontmatter name, agent recipe id, prompt path with colons, fleet contract name), owning package or `core`/`user`/`project`/`compat` source class, scope, origin evidence, format, and the invocation that works. A `hint` row is a catalog claim about one member of a package: it names the owning package, that owner's installed copy states, and the member's own state (`not-installed` when the owner is not installed, `unknown` when the owner is installed and the member did not turn up), and it never carries an invocation because nothing loaded it. A `package` row is the install target itself with its version, origin, installed copies, and bounded `provides` hints; a package with no hints reports its contents as unknown until inspection rather than empty.
 
 The model view is the model audience: internal and shadow agents, untrusted, invalid, shadowed and manual-only resources are not listed. `kind="plugin"` returns plugin-kind install targets only; any recipe kind returns the loaded resources of that kind plus the installable owners that provide it, so an Agents or Prompts query finds the owning bundle before it is installed and without fetching its source. `ref` may match one exact resource key, several same-named records across kinds (the payload says so and each row carries its `key`), or a package, which opens that package's members. A run started with `--no-skills` lists no skill rows, because nothing in it can load one. Instruction bodies and absolute recipe paths are never returned. 16KB cap: the page is fitted to the remaining budget before it is rendered, so `limit` is an upper bound and `nextOffset` carries the remainder; `total` counts what the inventory returned and is flagged `totalIsLowerBound` when the inventory hit its own record cap. Worker registries have no library projection of their own and get a clean unavailable error.
 
 ```text
-context(scope="workspace")
-context(scope="docs", query="dispatch receipts evidence", limit=8)
-context(scope="skills")
-context(scope="skills", name="context-prime", include_tree=true)
-context(scope="library", kind="agent", query="materials")
-context(scope="library", ref="plugin:materio")
-context(scope="library", limit=20, offset=20)
+gateway(op="call", capability="clio_library", args={kind: "agent", query: "materials"})
+gateway(op="call", capability="clio_library", args={ref: "plugin:materio"})
 ```
 
 ## code_nav: navigate the codewiki index
@@ -498,7 +586,7 @@ code_nav(mode="entries")
 code_nav(mode="wiki")
 ```
 
-## web_fetch: fetch http(s) URLs and convert HTML to markdown
+## web_read and web_fetch: read web pages or make full HTTP requests
 
 Fetches content from an http(s) URL. HTML content is automatically cleaned and converted to readable Markdown. Source: `src/tools/web-fetch.ts`. Read class; parallel.
 
@@ -520,9 +608,15 @@ Specialized behaviors:
 - **Binary formats**: Non-text, binary, or unsupported content types are rejected.
 
 ```text
-web_fetch(url="https://arxiv.org/abs/2303.17564")
-web_fetch(url="https://github.com/iowarp/clio-coder/tree/main/docs")
-web_fetch(url="https://example.com", format="raw")
+gateway(op="call", capability="web_fetch", args={url: "https://arxiv.org/abs/2303.17564"})
+gateway(op="call", capability="web_fetch", args={url: "https://github.com/iowarp/clio-coder/tree/main/docs"})
+gateway(op="call", capability="web_fetch", args={url: "https://example.com", format: "raw"})
+```
+
+`web_read` is the gateway GET-only projection with `url`, `timeout_ms`, `max_bytes`, and `format`; it accepts no method, headers, or body and is read class. Use `web_fetch` for full requests, including authentication headers; non-GET methods or a body retain outward-action classification. Both share the existing fetcher, private-network policy, binary refusal, and read cap.
+
+```text
+gateway(op="call", capability="web_read", args={url: "https://example.com"})
 ```
 
 ## monitor: inspect dispatched runs
@@ -581,13 +675,15 @@ Declares and tracks the agent's own working plan. Source: `src/tools/tasks.ts`. 
 
 Arguments:
 
-- `action` (required). `plan`, `add`, `start`, `done`, `block`, `drop`, or `list`.
+- `action` (required). `plan`, `add`, `pick`, `start`, `done`, `block`, `drop`, or `list`.
 - `title` (required for `plan`). The board title.
 - `tasks` (required for `plan` and `add`). Task titles as an array of strings.
-- `id` (required for `start`, `done`, `block`, `drop`). A task id like `t2`.
-- `note` (optional). Evidence of completion on `done`; the reason on `block` (required there) and `drop`.
+- `id` (required for `pick`, `start`, `done`, `block`, `drop`). A task id like `t2`, or an operator task id like `u2` for pick.
+- `note` (required for `done` and `block`). Evidence of completion on done, a blocking reason on block, or an optional reason on drop.
 
 `action="plan"` declares a titled board and replaces any prior board; tasks get sequential ids `t1..tN` and start pending. `start` marks one task active and parks any other active task back to pending, so the board always names exactly one current focus. `done` completes a task; its `note` is recorded on the session ledger as passed validation evidence, so a completed task carries its receipt rather than a bare status flip. `block` requires a reason and is the honest state for work waiting on the operator; blocked tasks never trigger the turn-end nudge. `drop` cancels a task; ids are never reused. Every action returns the whole rendered board, so the current state always sits in the latest tool result.
+
+`pick` links a selected operator task to the session board. Calls can reconcile the Clio-owned operator inbox, and linked done updates its durable status. A self-authored plan is not operator authorization.
 
 Every mutation persists a full-snapshot `taskLedger` entry in the session ledger: the board replays from the JSONL alone, survives `/resume` and `/fork`, costs nothing at compaction, and feeds the footer tasks row plus the `/tasks` overlay. When a tool-calling turn settles while pending or active tasks remain, the `nudge.open-tasks` middleware carries the turn onward once with the open-task list; record the honest state (`done` with evidence, `block` with a reason, or `drop`) instead of stopping with a stale board.
 
@@ -673,9 +769,9 @@ Arguments:
 `list` returns the bounded newest-first inventory: provenance, tags, totals, and a worst-run trust verdict per bundle. `inspect` returns the bundle overview, the per-run trust axes and verdict, the gate decisions, and the findings. `run` resolves `run-<runId>` and builds the bundle when it is absent; a run with no ledger row is reported absent with `artifactAbsent: true` in the details. Results are capped at 16KB, and a truncated result stays valid JSON with a `preview`. Provenance requires this tool and Verifier may use it.
 
 ```text
-evidence(mode="list")
-evidence(mode="inspect", id="run-r-42")
-evidence(mode="run", runId="r-42")
+gateway(op="call", capability="evidence", args={mode: "list"})
+gateway(op="call", capability="evidence", args={mode: "inspect", id: "run-r-42"})
+gateway(op="call", capability="evidence", args={mode: "run", runId: "r-42"})
 ```
 
 ## limitation: record what a turn could not verify
@@ -743,7 +839,7 @@ ask_user(action="complete", summary="Operator selected SQLite.", decisions=[{key
 
 ## artifact: plans, reviews, and reports
 
-Terminal document writers behind one surface. Source: `src/tools/artifact.ts`.
+Terminal document writers reached through `gateway(op="call", capability="artifact", args={...})`. Atomic publication uses the same publisher as write and reports any post-publication durability warning. Source: `src/tools/artifact.ts`.
 
 Arguments:
 
@@ -752,14 +848,14 @@ Arguments:
 - `title` (optional). Document title.
 - `path` (optional). Override the default path under `.clio-coder/artifacts/`.
 
-`kind=plan|review|report` writes a Markdown document to `.clio-coder/artifacts/PLAN.md`, `REVIEW.md`, or `REPORT.md` by default, so a turn nobody asked a file from never litters the working tree; `path` may override the destination but must stay inside the workspace. See [artifact-placement.md](../architecture/artifact-placement.md) for the full contract. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
+`kind=plan|review|report` writes a Markdown document to `.clio-coder/artifacts/PLAN.md`, `REVIEW.md`, or `REPORT.md` by default, so a turn nobody asked a file from never litters the working tree; `path` may override the destination but must stay inside the workspace. See [artifact-placement.md](../architecture/artifact-placement.md) for the full contract. When `content` does not already start with `#`, a non-empty `title` is prepended as an H1. The gateway preserves `terminate`, `details.kind`, and `details.paths`. These kinds are TERMINAL: writing the artifact completes the turn and the harness skips the follow-up model call, so the artifact body itself is the answer. Put everything the reader needs in `content`; there is no closing message after the write.
 
 Skills are not artifacts. A skill is a `SKILL.md` folder, and the active skill trees (`.clio-coder/skills/`, `.clio-coder/plugins/`, `.clio-coder/extensions/`, and their user-scope counterparts) are operator-owned: model-side writes and deletes there are refused, reads are not. Draft a skill somewhere else in the workspace, check it with `clio-coder library validate <path>`, and leave installation to the operator through `clio-coder library install` or `/library`. The `skill-craft` shipped skill documents the format and craft rules.
 
 ```text
-artifact(kind="plan", content="# Migration plan\n\n## Step 1 ...")
-artifact(kind="report", title="Benchmark results", path="docs/reports/bench.md", content="...")
-artifact(kind="review", content="# Review: toolkit-v2\n\n## Findings ...")
+gateway(op="call", capability="artifact", args={kind: "plan", content: "# Migration plan\n\n## Step 1 ..."})
+gateway(op="call", capability="artifact", args={kind: "report", title: "Benchmark results", path: "docs/reports/bench.md", content: "..."})
+gateway(op="call", capability="artifact", args={kind: "review", content: "# Review: toolkit-v2\n\n## Findings ..."})
 ```
 
 ## Headless declared verifier commands
