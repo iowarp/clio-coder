@@ -132,6 +132,104 @@ describe("gateway MCP capabilities", () => {
 		env.restore();
 	});
 
+	it("keeps structured-only MCP results visible through the gateway", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, source } = wire(scene);
+		open.push(source);
+		const data = { mass: 12, unit: "kg", valid: true };
+		const response = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { result: { content: [], structuredContent: data } } },
+		});
+		deepStrictEqual(payloadOf(response), data);
+	});
+
+	it("keeps malformed MCP results unsuccessful through the gateway", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, source } = wire(scene);
+		open.push(source);
+		const malformed = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { result: { content: [], isError: "true" } } },
+		});
+		ok(malformed.kind === "ok" && malformed.result.kind === "error", JSON.stringify(malformed));
+		ok(malformed.result.message.includes("protocol"));
+	});
+
+	it("preserves raw-wire numeric literals through gateway output and serialized evidence", async () => {
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-numeric-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, source } = wire(scene);
+		open.push(source);
+		const response = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "call", capability: ECHO, args: {} } });
+		ok(response.kind === "ok" && response.result.kind === "ok", JSON.stringify(response));
+		const expected =
+			'{"integer":9007199254740993,"decimal":0.1000000000000000055511151231257827,"huge":1e400,"negativeZero":-0,"nested":[1e400,-0]}';
+		strictEqual(response.result.output, expected);
+		const evidence = JSON.parse(JSON.stringify(response.result.details));
+		strictEqual(evidence.structuredContentJson, expected);
+		deepStrictEqual(evidence.structuredContent.huge, { $literal: "1e400" });
+		deepStrictEqual(evidence.structuredContent.negativeZero, { $literal: "-0" });
+	});
+
+	it("resolves overlapping server namespaces independently of config and discovery order", async () => {
+		for (const ids of [
+			["a", "a__b"],
+			["a__b", "a"],
+		]) {
+			for (const discoverFirst of [false, true]) {
+				const scene = scenario();
+				writeFileSync(
+					join(scene.configDir, "mcp.yaml"),
+					JSON.stringify({
+						version: 1,
+						servers: ids.map((id) => ({ id, command: process.execPath, args: [FIXTURE, "normal"] })),
+					}),
+				);
+				const registry = createRegistry({
+					safety: createWorkerSafety({ cwd: scene.project }),
+					autonomy: () => "full-auto",
+				});
+				const source = createMcpCapabilitySource({
+					cwd: scene.project,
+					configDir: scene.configDir,
+					registry,
+					clientFactory: (spec, options) => {
+						const client = createMcpStdioClient(spec, { ...options, killGraceMs: 50 });
+						if (spec.id === "a") {
+							const listTools = client.listTools.bind(client);
+							client.listTools = async () => {
+								const listing = await listTools();
+								const echo = listing.tools[0];
+								ok(echo);
+								return { ...listing, tools: [...listing.tools, { ...echo, name: "b__echo" }] };
+							};
+						}
+						return client;
+					},
+				});
+				open.push(source);
+				if (discoverFirst) await source.list();
+				const ensured = await source.ensure("mcp_a__b__echo");
+				ok(ensured.spec, ensured.reason);
+				if (!discoverFirst) deepStrictEqual(source.connectedIds(), ["a__b"]);
+				ok(source.authorityNote("mcp_a__b__echo")?.startsWith("Local stdio MCP server a__b ("));
+				const listing = await source.list();
+				deepStrictEqual(listing.servers.find((server) => server.id === "a")?.unregistrable, ["b__echo"]);
+				const result = await ensured.spec.run({ text: "right server" });
+				strictEqual(result.kind, "ok");
+				strictEqual(result.details?.server, "a__b");
+				strictEqual(result.details?.tool, "echo");
+				await source.close();
+			}
+		}
+	});
+
 	it("never signals after ESRCH when the exit backstop runs before teardown settlement", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);

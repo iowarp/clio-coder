@@ -75,6 +75,14 @@ function isJsonRpcId(value: unknown): value is JsonRpcId {
 	return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
 }
 
+// Transport-only metadata cannot be supplied by a server field. The result
+// object remains the key until its pending request reaches the tool decoder.
+const structuredJson = new WeakMap<object, string>();
+
+export function structuredContentJson(result: object): string | undefined {
+	return structuredJson.get(result);
+}
+
 /** Classify one decoded JSON value as a request, notification, or response, or name why it is none of them. */
 export function classifyJsonRpcMessage(value: unknown): JsonRpcMessage | McpError {
 	if (!isRecord(value)) return new McpError("protocol", "message is not a JSON object");
@@ -124,7 +132,41 @@ export function parseJsonRpcLine(line: Buffer): JsonRpcMessage | McpError {
 	}
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(text) as unknown;
+		// Node >=22.19 supports source-aware revivers and rawJSON. Keep numeric
+		// source tokens without changing protocol IDs, schemas, or other fields.
+		const sources = new WeakMap<object, Map<string, string>>();
+		parsed = JSON.parse(text, function (this: object, key: string, value: unknown, context?: { source: string }) {
+			if (typeof value === "number") {
+				if (context?.source === undefined) throw new Error("JSON numeric source tokens are unavailable");
+				let entries = sources.get(this);
+				if (entries === undefined) {
+					entries = new Map();
+					sources.set(this, entries);
+				}
+				entries.set(key, context.source);
+			}
+			return value;
+		}) as unknown;
+		if (isRecord(parsed) && isRecord(parsed.result) && isRecord(parsed.result.structuredContent)) {
+			const content = parsed.result.structuredContent;
+			// ES2022 typings predate this supported Node runtime API. No custom
+			// tokenizer is needed, and the existing incoming-line cap bounds it.
+			const rawJSON = (JSON as JSON & { rawJSON(source: string): unknown }).rawJSON;
+			const exact = JSON.stringify(content, function (this: object, key: string, value: unknown) {
+				const source = sources.get(this)?.get(key);
+				return source === undefined ? value : rawJSON(source);
+			});
+			// Plain JSON evidence must survive cloning and serialization as well.
+			// Tag tokens that Number cannot round-trip instead of retaining rounded
+			// numbers, Infinity (which serializes to null), or a signless zero.
+			parsed.result.structuredContent = JSON.parse(
+				JSON.stringify(content, function (this: object, key: string, value: unknown) {
+					const source = sources.get(this)?.get(key);
+					return source !== undefined && JSON.stringify(value) !== source ? { $literal: source } : value;
+				}),
+			) as unknown;
+			structuredJson.set(parsed.result, exact);
+		}
 	} catch (error) {
 		return new McpError(
 			"protocol",

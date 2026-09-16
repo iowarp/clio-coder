@@ -31,6 +31,7 @@ import {
 	type JsonRpcMessage,
 	MCP_PROTOCOL_VERSION,
 	McpError,
+	structuredContentJson,
 } from "./protocol.js";
 
 export const MCP_CLIENT_NAME = "clio-coder";
@@ -130,7 +131,10 @@ export type McpContentBlock =
 export interface McpToolCallResult {
 	content: McpContentBlock[];
 	isError: boolean;
+	/** JSON-safe values; numeric tokens that do not round-trip use {$literal: source}. */
 	structuredContent?: unknown;
+	/** Normalized structured JSON retaining numeric source tokens, bounded by the incoming-line cap. */
+	structuredContentJson?: string;
 	/** Bounded plain rendering of the content blocks. */
 	text: string;
 	textTruncated: boolean;
@@ -353,9 +357,23 @@ export function renderMcpContent(
 
 function parseToolCallResult(value: unknown, maxTextBytes: number): McpToolCallResult | McpError {
 	if (!isRecord(value)) return new McpError("protocol", "tools/call result is not an object");
-	const rawContent = Array.isArray(value.content) ? value.content : [];
-	const content = rawContent.map(normalizeContentBlock);
-	const rendered = renderMcpContent(content, maxTextBytes);
+	if (!Array.isArray(value.content)) return new McpError("protocol", "tools/call result.content must be an array");
+	if (value.isError !== undefined && typeof value.isError !== "boolean") {
+		return new McpError("protocol", "tools/call result.isError must be a boolean");
+	}
+	if (value.structuredContent !== undefined && !isRecord(value.structuredContent)) {
+		return new McpError("protocol", "tools/call result.structuredContent must be an object");
+	}
+	const content = value.content.map(normalizeContentBlock);
+	const structuredText = structuredContentJson(value);
+	// Use transport-retained numeric tokens, not reserialized JS numbers.
+	// The evidence object uses explicit $literal tags for non-round-trips.
+	const rendered = renderMcpContent(
+		content.length === 0 && value.structuredContent !== undefined
+			? [{ type: "text", text: structuredText ?? JSON.stringify(value.structuredContent) }]
+			: content,
+		maxTextBytes,
+	);
 	const result: McpToolCallResult = {
 		content,
 		isError: value.isError === true,
@@ -363,6 +381,7 @@ function parseToolCallResult(value: unknown, maxTextBytes: number): McpToolCallR
 		textTruncated: rendered.truncated,
 	};
 	if (value.structuredContent !== undefined) result.structuredContent = value.structuredContent;
+	if (structuredText !== undefined) result.structuredContentJson = structuredText;
 	return result;
 }
 

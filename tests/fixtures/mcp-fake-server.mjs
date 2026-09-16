@@ -56,6 +56,19 @@ const lines = createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE
 function handleToolCall(id, params) {
 	const name = params?.name;
 	const args = params?.arguments ?? {};
+	if (mode === "raw-result") {
+		reply(id, args.result);
+		return;
+	}
+	if (mode === "raw-numeric-result") {
+		// Deliberately emit literals without first converting them to JS numbers.
+		const structured =
+			'{"integer":9007199254740993,"decimal":0.1000000000000000055511151231257827,"huge":1e400,"negativeZero":-0,"nested":[1e400,-0]}';
+		process.stdout.write(
+			`{"jsonrpc":"2.0","id":${JSON.stringify(id)},"result":{"content":[],"structuredContent":${structured}}}\n`,
+		);
+		return;
+	}
 	switch (name) {
 		case "echo":
 			reply(id, { content: [{ type: "text", text: JSON.stringify(args) }] });

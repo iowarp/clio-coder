@@ -36,6 +36,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 - Add find/describe/call routing for secondary builtins, extension commands, and trusted local stdio MCP, preserving inner authority, worker attestation, terminal results, and exported evidence identity.
 - Add strict user/project mcp.yaml configuration, digest-bound project trust, `clio-coder mcp list|trust|untrust`, and interactive `/mcp`. Cancel shared discovery with owned cleanup and await teardown on shutdown; exit cleanup stays client-owned.
+- Reject malformed MCP call result envelopes instead of reporting successful empty results.
+- Render structured-only MCP results in bounded model-visible text, preserving numeric source literals in both the projection and retained evidence.
+- Resolve overlapping MCP server prefixes deterministically and report conflicting tool names as unregistrable, preserving server identity and authority during lazy discovery.
 
 ### context, web, and artifacts
 

@@ -302,11 +302,69 @@ describe("mcp stdio client", () => {
 		);
 	});
 
+	it("rejects malformed tools/call envelopes instead of reporting an empty success", async () => {
+		const c = client("raw-result");
+		for (const result of [
+			{},
+			{ content: { error: "operation failed" } },
+			{ content: null },
+			{ content: [], isError: "true" },
+			{ content: [], isError: 0 },
+			{ content: [], structuredContent: "not an object" },
+		]) {
+			await rejectsWithCode(c.callTool("echo", { result }), "protocol", /tools\/call/u);
+		}
+		const empty = await c.callTool("echo", { result: { content: [], isError: false } });
+		strictEqual(empty.isError, false);
+		strictEqual(empty.text, "");
+	});
+
+	it("projects structured-only results into bounded model-visible text", async () => {
+		const c = client("raw-result", { maxResultTextBytes: 256 });
+		const data = { mass: 9007199254740991, unit: "kg", valid: true };
+		for (const isError of [false, true]) {
+			const result = await c.callTool("echo", { result: { content: [], structuredContent: data, isError } });
+			deepStrictEqual(JSON.parse(result.text), data);
+			deepStrictEqual(result.structuredContent, data);
+			deepStrictEqual(result.content, []);
+			strictEqual(result.isError, isError);
+			strictEqual(result.textTruncated, false);
+		}
+		const large = await c.callTool("echo", {
+			result: { content: [], structuredContent: { value: "α".repeat(1000) } },
+		});
+		strictEqual(large.textTruncated, true);
+		ok(Buffer.byteLength(large.text) <= 256);
+		match(large.text, /mcp result text truncated/u);
+	});
+
 	it("maps a JSON-RPC error response to a server error carrying the server's error object", async () => {
 		const c = client();
 		const error = await rejectsWithCode(c.callTool("nope", {}), "server", /unknown tool: nope/);
 		deepStrictEqual(error.data, { code: -32602, message: "unknown tool: nope" });
 		strictEqual(c.state().status, "ready");
+	});
+
+	it("preserves raw-wire numeric literals in structured text and retained evidence", async () => {
+		const expected =
+			'{"integer":9007199254740993,"decimal":0.1000000000000000055511151231257827,"huge":1e400,"negativeZero":-0,"nested":[1e400,-0]}';
+		for (const maxResultTextBytes of [1024, 96]) {
+			const c = client("raw-numeric-result", { maxResultTextBytes });
+			const result = await c.callTool("echo", {});
+			strictEqual(result.structuredContentJson, expected);
+			deepStrictEqual(JSON.parse(JSON.stringify(result.structuredContent)), {
+				integer: { $literal: "9007199254740993" },
+				decimal: { $literal: "0.1000000000000000055511151231257827" },
+				huge: { $literal: "1e400" },
+				negativeZero: { $literal: "-0" },
+				nested: [{ $literal: "1e400" }, { $literal: "-0" }],
+			});
+			strictEqual(result.isError, false);
+			strictEqual(result.textTruncated, maxResultTextBytes === 96);
+			ok(Buffer.byteLength(result.text) <= maxResultTextBytes);
+			if (maxResultTextBytes === 1024) strictEqual(result.text, expected);
+			else match(result.text, /mcp result text truncated/u);
+		}
 	});
 
 	it("times out one request without killing the server", async () => {

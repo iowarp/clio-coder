@@ -247,6 +247,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						contentTypes: result.content.map((block) => block.type),
 						textTruncated: result.textTruncated,
 						...(result.structuredContent !== undefined ? { structuredContent: result.structuredContent } : {}),
+						...(result.structuredContentJson !== undefined ? { structuredContentJson: result.structuredContentJson } : {}),
 					};
 					if (result.isError) return { kind: "error", message: `${name}: ${result.text || "tool error"}`, details };
 					const images = imageBlocks(result);
@@ -304,7 +305,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				state.truncated = listing.truncated;
 				for (const tool of listing.tools) {
 					const name = mcpToolName(declaration.id, tool.name);
-					if (name === null || registry.get(name) !== undefined) {
+					if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) {
 						state.unregistrable.push(tool.name);
 						continue;
 					}
@@ -368,10 +369,19 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	};
 
 	const ownerOf = (name: string): ServerState | null => {
+		// IDs and tool names may contain __. Reserve each composed name for
+		// the longest declared server prefix, including untrusted declarations,
+		// so discovery order cannot change either routing or authority.
+		let owner: ServerState | null = null;
 		for (const state of resolveStates().values()) {
-			if (name.startsWith(`mcp_${state.declaration.id}__`)) return state;
+			if (
+				name.startsWith(`mcp_${state.declaration.id}__`) &&
+				(owner === null || state.declaration.id.length > owner.declaration.id.length)
+			) {
+				owner = state;
+			}
 		}
-		return null;
+		return owner;
 	};
 
 	return {
@@ -398,7 +408,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			}
 			await discover(owner, invokeOptions?.signal);
 			const spec = registry.get(name as DynamicToolName);
-			if (spec !== undefined) return { spec };
+			if (spec !== undefined && owner.registered.includes(spec.name as DynamicToolName)) return { spec };
 			return {
 				spec: null,
 				reason:
