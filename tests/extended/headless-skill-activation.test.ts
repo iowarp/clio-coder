@@ -1,6 +1,6 @@
 import { match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
@@ -86,7 +86,7 @@ async function runCli(
 	});
 }
 
-function writeSkill(dir: string, name: string): string {
+function writeSkill(dir: string, name: string, narrowing = true): string {
 	const directory = join(dir, name);
 	mkdirSync(directory, { recursive: true });
 	writeFileSync(
@@ -95,7 +95,7 @@ function writeSkill(dir: string, name: string): string {
 			"---",
 			`name: ${name}`,
 			`description: ${name} workflow for the headless activation contract.`,
-			"allowed-tools: read, grep",
+			...(narrowing ? ["allowed-tools: read, grep"] : []),
 			"---",
 			"",
 			`HEADLESS_SKILL_BODY_${name.toUpperCase().replace(/-/gu, "_")}`,
@@ -125,11 +125,13 @@ function contextToolResult(events: Array<Record<string, unknown>>): string {
 async function headlessSkillTurn(
 	autonomy: string,
 	skillName: string,
+	narrowing = true,
 ): Promise<{
 	stdout: string;
 	stderr: string;
 	code: number | null;
 	skillDir: string;
+	root: string;
 }> {
 	const scratch = scratchHome();
 	const fixed = await runCli(["doctor", "--fix"], { env: scratch.env });
@@ -141,7 +143,7 @@ async function headlessSkillTurn(
 	});
 	fixtures.push(fixture);
 	seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, autonomy);
-	const skillDir = writeSkill(scratch.root, "headless-interview");
+	const skillDir = writeSkill(scratch.root, "headless-interview", narrowing);
 	const turn = await runCli(
 		[
 			"--no-context-files",
@@ -156,7 +158,7 @@ async function headlessSkillTurn(
 		],
 		{ env: scratch.env },
 	);
-	return { ...turn, skillDir };
+	return { ...turn, skillDir, root: scratch.root };
 }
 
 describe("headless skill activation by autonomy level", () => {
@@ -201,6 +203,25 @@ describe("headless skill activation by autonomy level", () => {
 			.map((event) => String(event.text ?? ""))
 			.join("\n");
 		match(notices, /Skill activated: headless-interview \(model\)/u, turn.stdout);
+	});
+
+	it("records a skill without tool narrowing as a known selection so compaction can still cut", async () => {
+		const turn = await headlessSkillTurn("full-auto", "headless-interview", false);
+		strictEqual(turn.code, 0, turn.stderr);
+		const events = jsonEvents(turn.stdout);
+		match(contextToolResult(events), /HEADLESS_SKILL_BODY_HEADLESS_INTERVIEW/u, turn.stdout);
+		const ledgers = readdirSync(join(turn.root, "state", "sessions"), { recursive: true, encoding: "utf8" }).filter(
+			(file) => file.endsWith("current.jsonl"),
+		);
+		strictEqual(ledgers.length, 1, ledgers.join(", "));
+		const states = readFileSync(join(turn.root, "state", "sessions", ledgers[0] ?? ""), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { customType?: string; data?: { unknown?: boolean; activationRefs?: unknown[] } })
+			.filter((entry) => entry.customType === "skillContextState");
+		strictEqual(states.length, 1, "the settled turn persists one skill selection");
+		strictEqual(states[0]?.data?.unknown, undefined, "an unknown selection blocks every later compaction");
+		strictEqual(states[0]?.data?.activationRefs?.length, 1);
 	});
 
 	it("keeps activation operator-gated at suggest", async () => {
