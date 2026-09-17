@@ -644,6 +644,7 @@ const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder
  */
 function replayedUserText(entry: MessageEntry): string {
 	const obj = payloadObject(entry.payload);
+	if (typeof obj?.displayText === "string" && obj.displayText.length > 0) return obj.displayText;
 	if (typeof obj?.operatorText === "string") return obj.operatorText;
 	let text = extractTurnText(entry.payload);
 	for (;;) {

@@ -78,6 +78,9 @@ export interface TurnPersistence {
 	 * (reminder block, skill preamble, handoff, then the operator's words);
 	 * `operatorText`, when it differs, is what the operator actually typed and
 	 * is what a transcript replay renders under the operator marker.
+	 * `displayText` is the literal editor input when an expansion (a prompt
+	 * template or command) replaced it; the session picker and replay show it,
+	 * while compaction keeps reasserting the expanded `operatorText`.
 	 */
 	appendSubmittedUserTurn(
 		agentRuntime: AgentRuntime,
@@ -85,6 +88,7 @@ export interface TurnPersistence {
 		images: ReadonlyArray<unknown> | undefined,
 		synthetic: boolean,
 		operatorText?: string,
+		displayText?: string,
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
@@ -404,7 +408,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			finishTracedTurn("success", null);
 		},
 
-		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText): string | null {
+		appendSubmittedUserTurn(agentRuntime, text, images, synthetic, operatorText, displayText): string | null {
 			if (!deps.session) return null;
 			if (!deps.session.current()) {
 				deps.session.create({
@@ -415,6 +419,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			}
 			const payload: Record<string, unknown> = images ? { content: [{ type: "text", text }, ...images] } : { text };
 			if (operatorText !== undefined && operatorText !== text) payload.operatorText = operatorText;
+			if (displayText !== undefined && displayText !== (operatorText ?? text)) payload.displayText = displayText;
 			if (synthetic) {
 				payload.synthetic = true;
 				payload.source = "middleware_request_continuation";

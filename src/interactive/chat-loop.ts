@@ -1292,6 +1292,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				images,
 				options.requestContinuation === true,
 				text,
+				options.display?.text,
 			);
 			// An interrupt was submitted while a run was active, so no caller drew
 			// it in the transcript; render it here, after the cancel notice and the

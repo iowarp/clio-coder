@@ -95,6 +95,12 @@ function extractMessageText(payload: unknown): string | null {
  * operator-authored remains, so the caller moves on to the next turn.
  */
 function operatorTextOfUserPayload(payload: unknown): string | null {
+	// An expansion (prompt template, command) replaced the typed input. The
+	// typed input is the title; the expansion starts with generated scaffolding.
+	if (payload && typeof payload === "object" && typeof (payload as { displayText?: unknown }).displayText === "string") {
+		const typed = collapseWhitespace((payload as { displayText: string }).displayText);
+		if (typed.length > 0) return typed;
+	}
 	if (
 		payload &&
 		typeof payload === "object" &&
