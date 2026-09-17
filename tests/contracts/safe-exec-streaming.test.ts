@@ -442,7 +442,7 @@ describe("runCommandVector output sink", () => {
 		}
 		const root = workspace();
 		const pidFile = join(root, "grandchild.pid");
-		const started = Date.now();
+		const started = performance.now();
 		const result = await runCommandVector(
 			process.execPath,
 			["-e", leaderWithResistantDescendant("setInterval(() => {}, 1000);"), pidFile],
@@ -461,7 +461,7 @@ describe("runCommandVector output sink", () => {
 		strictEqual(state, "gone", `descendant ${pid} was reaped after the timeout`);
 		strictEqual(result.descendantsCleaned, true, "the result says descendants had to be cleaned");
 		strictEqual(result.cleanupIncomplete, false);
-		const elapsed = Date.now() - started;
+		const elapsed = Math.round(performance.now() - started);
 		ok(elapsed >= 1000 + 400, `the result waited for the grace to elapse: ${elapsed}ms`);
 		ok(elapsed < 1000 + 400 + 1500, `the result resolved once the group was gone: ${elapsed}ms`);
 	});
@@ -473,7 +473,7 @@ describe("runCommandVector output sink", () => {
 		}
 		const root = workspace();
 		const pidFile = join(root, "grandchild.pid");
-		const started = Date.now();
+		const started = performance.now();
 		const result = await runCommandVector(
 			process.execPath,
 			["-e", leaderWithResistantDescendant("process.exit(7);"), pidFile],
@@ -491,7 +491,7 @@ describe("runCommandVector output sink", () => {
 		strictEqual(state, "gone", `descendant ${pid} was reaped after the unexpected leader exit`);
 		strictEqual(result.descendantsCleaned, true, "the result says descendants had to be cleaned");
 		strictEqual(result.cleanupIncomplete, false);
-		const elapsed = Date.now() - started;
+		const elapsed = Math.round(performance.now() - started);
 		ok(elapsed >= 300, `cleanup gave the descendant the SIGTERM grace: ${elapsed}ms`);
 		ok(elapsed < 300 + 1500, `the result resolved once the group was gone: ${elapsed}ms`);
 	});
