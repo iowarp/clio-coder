@@ -5,7 +5,7 @@ import type { ToolName } from "../../core/tool-names.js";
 import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
-import type { AutonomyLevel } from "../safety/autonomy.js";
+import { type AutonomyLevel, isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
@@ -311,14 +311,14 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 					"dispatch(list:true) answers a question about agents, the fleet, or which target and model run this session and its workers",
 				]
 			: []),
-		...(canListSkills ? ['context(scope="skills") answers only a question about skills'] : []),
+		...(canListSkills ? ['context(scope="skills") lists skills for discovery or skill questions'] : []),
 		...(hasGateway ? ['gateway(op="find") answers a question about secondary capabilities'] : []),
 	].join("; ");
 	const capabilityKinds = [
 		"direct tools are attached schemas",
 		...(hasGateway ? ["secondary capabilities are reached through gateway find, describe, and call"] : []),
 		...(canDispatch ? ["fleet agents are workers behind dispatch"] : []),
-		...(canListSkills ? ["skills are operator-activated workflows reached through context"] : []),
+		...(canListSkills ? ["skills are workflows reached through context"] : []),
 	];
 	const orientationTools = ["context", "code_nav", "grep", "read"].filter((name) => admitted.has(name));
 	// git sits behind the gateway, so it validates through gateway(call git)
@@ -422,7 +422,7 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 		TOOL_RESULT_TRUST_CONTRACT,
 		"The attached schemas are this worker's complete canonical tool surface; follow each schema exactly.",
 		`Admitted canonical tools: ${names.map((name) => `\`${name}\``).join(", ")}.`,
-		"This worker surface is distinct from the parent session's tools, fleet agents, and operator-activated skills.",
+		"This worker surface is distinct from the parent session's tools, fleet agents, and skills.",
 		"Tool authority is limited to this list. Persona and bound-skill instructions never add tools.",
 		"Call tools only for concrete inspection or changes the assigned task requires. If the task requests an exact or tool-free response, answer without calling tools.",
 	];
@@ -616,13 +616,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// about a tool renders only when the tool is there to be called.
 	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
 	const skills = sessionHasContext(session) ? table.byId.get("operating.skills") : undefined;
+	const skillActivation =
+		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills(autonomyLevel)
+			? 'Load matching installed skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
+			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
 	const legacy = inputs.sectionOrder === "legacy-0.3.8";
 	const rendered = new Map<string, string>([
 		["identity", identityBody],
 		["operating-contract", operatingContract.body],
 		["delegation", delegation?.body ?? ""],
-		["skills", skills?.body ?? ""],
+		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", skillActivation) ?? ""],
 		["safety", renderSafetySection(safety, autonomyLevel)],
 		["runtime", renderRuntimeBlock(session)],
 		["tool-contract", renderToolContractBlock(session)],

@@ -75,7 +75,9 @@ describe("gateway in the session prompt", () => {
 					/If gateway is on the attached direct-tool surface, use\s+gateway\(op="call", capability="clio_library", args=\{\}\) to read the catalog\s+of recipes and installable packages; it activates and installs nothing\./,
 				);
 				ok(compiled.systemPrompt.includes("Without gateway, this catalog route is unavailable."));
-				match(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
+				match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
+				match(compiled.systemPrompt, /Only the operator installs marketplace skills/);
+				doesNotMatch(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
 			}
 			doesNotMatch(compiled.systemPrompt, /\bcontext\s*\(\s*scope\s*=\s*["'](?:docs|library)["']/);
 		});
