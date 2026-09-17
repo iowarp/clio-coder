@@ -1,4 +1,5 @@
 import { basename } from "node:path";
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import type { SessionContract, SessionMeta } from "../../domains/session/contract.js";
 import {
 	getKeybindings,
@@ -22,15 +23,12 @@ export const SESSION_ESCAPE_GRACE_MS = 75;
 const ESC = String.fromCharCode(27);
 
 /**
- * SelectList allocates the primary column to the label and uses any
- * remaining width for the description. The picker treats the meta strip
- * (status glyph, time, count, target) as the primary column and the
- * conversation preview as the description, so users scan the right column
- * for the topic they remember.
+ * Identity owns the primary column. SelectList drops the secondary metadata
+ * when space is tight, so the task remains recognizable at narrow widths.
  */
 const SESSION_LAYOUT: SelectListLayoutOptions = {
-	minPrimaryColumnWidth: 52,
-	maxPrimaryColumnWidth: 60,
+	minPrimaryColumnWidth: 32,
+	maxPrimaryColumnWidth: 52,
 };
 
 /**
@@ -44,20 +42,21 @@ export function formatRelativeTime(iso: string | null | undefined, now: number =
 }
 
 function shortTarget(meta: SessionMeta): string {
-	const target = meta.target?.trim();
-	const model = meta.model?.trim();
+	const target = sanitizeCallTargetText(meta.target ?? "");
+	const model = sanitizeCallTargetText(meta.model ?? "");
 	if (!target && !model) return "no target";
 	if (target && model) return `${target}/${model}`;
-	return target ?? model ?? "no target";
+	return target || model || "no target";
 }
 
 function previewLine(meta: SessionMeta): string {
-	const explicit = meta.firstMessagePreview?.trim();
+	const explicit = sanitizeCallTargetText(meta.firstMessagePreview ?? "");
 	if (explicit) return explicit;
-	const name = meta.name?.trim();
+	const name = sanitizeCallTargetText(meta.name ?? "");
 	if (name) return `(${name})`;
-	const cwdLeaf = meta.cwd ? basename(meta.cwd) : "";
-	return cwdLeaf ? `(no preview · ${cwdLeaf})` : "(no preview)";
+	const cwdLeaf = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "");
+	const id = sanitizeCallTargetText(meta.id) || "Unnamed session";
+	return `${id} · ${cwdLeaf || "no preview"}`;
 }
 
 function metaStrip(meta: SessionMeta, now: number): string {
@@ -70,17 +69,17 @@ function metaStrip(meta: SessionMeta, now: number): string {
 }
 
 /**
- * Pure builder used by the /resume overlay. Each row carries a meta strip
- * (status, last-activity, msg count, target/model) in the primary column
- * and the first user-message preview in the description column.
+ * The first message or fallback identity stays visible as metadata yields.
+ * Keep the canonical ID as the selection value, independent of display text.
  */
 function buildSessionItems(sessions: ReadonlyArray<SessionMeta>, now: number = Date.now()): SelectItem[] {
 	return sessions.map((meta) => {
-		const labels = meta.labels && meta.labels.length > 0 ? `  labels: ${meta.labels.join(", ")}` : "";
+		const labels = meta.labels?.map(sanitizeCallTargetText).filter(Boolean).join(", ");
+		const details = [metaStrip(meta, now), labels ? `labels: ${labels}` : ""].filter(Boolean);
 		return {
 			value: meta.id,
-			label: metaStrip(meta, now),
-			description: `${previewLine(meta)}${labels}`,
+			label: previewLine(meta),
+			description: details.join(" · "),
 		};
 	});
 }
@@ -128,6 +127,7 @@ function createSessionOverlayBox(
 	const allSessions = [...sessions];
 	let filtered = [...sessions];
 	let lastQuery = "";
+	let selectedSessionId: string | undefined;
 	let list = buildList(filtered);
 	let pendingEscape = "";
 	let pendingEscapeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -173,15 +173,20 @@ function createSessionOverlayBox(
 	}
 
 	function applyFilter(): void {
+		// Keep identity through reordering and an empty-result query/undo.
+		selectedSessionId = list.getSelectedItem()?.value ?? selectedSessionId;
 		filtered = filterSessions(allSessions, lastQuery);
 		list = buildList(filtered);
+		const selectedIndex = filtered.findIndex((session) => session.id === selectedSessionId);
+		if (selectedIndex >= 0) list.setSelectedIndex(selectedIndex);
+		selectedSessionId = list.getSelectedItem()?.value ?? selectedSessionId;
 		rebuildChildren();
 	}
 
 	function commitSelection(): void {
-		const first = filtered[0];
-		if (!first) return;
-		onSelect(first.id);
+		const selected = list.getSelectedItem();
+		if (!selected) return;
+		onSelect(selected.value);
 		closeOverlay();
 	}
 
