@@ -544,6 +544,40 @@ describe("session integrity", () => {
 				}
 			});
 		}
+		it(`${transition} reopens and restamps version 3 in one metadata publication`, async () => {
+			const current = createSessionBundle({ bus: { emit: () => {} } } as unknown as DomainContext).contract;
+			const old = current.create({ cwd: scratch.dir });
+			const candidate = createSession({ cwd: scratch.dir });
+			await candidate.writer.close();
+			const paths = sessionPaths(candidate.meta);
+			fs.writeFileSync(paths.meta, JSON.stringify({ ...readSessionMeta(candidate.meta.id), sessionFormatVersion: 3 }));
+			const before = fs.readFileSync(paths.meta);
+			const rename = fs.renameSync;
+			let publications = 0;
+			let refuse = true;
+			fs.renameSync = (from, to) => {
+				if (resolve(to.toString()) !== resolve(paths.meta)) return rename(from, to);
+				publications += 1;
+				if (refuse) throw new Error("injected metadata publication failure");
+				return rename(from, to);
+			};
+			syncBuiltinESMExports();
+			try {
+				throws(() => current[transition](candidate.meta.id), /injected metadata publication failure/u);
+				deepStrictEqual(fs.readFileSync(paths.meta), before);
+				strictEqual(current.current()?.id, old.id);
+				refuse = false;
+				publications = 0;
+				current[transition](candidate.meta.id);
+				strictEqual(publications, 1);
+				strictEqual(readSessionMeta(candidate.meta.id).endedAt, null);
+				strictEqual(readSessionMeta(candidate.meta.id).sessionFormatVersion, 4);
+			} finally {
+				fs.renameSync = rename;
+				syncBuiltinESMExports();
+				await current.close();
+			}
+		});
 		for (const mode of ["zero", "throw"] as const) {
 			it(`${transition} preserves both lifecycle states when headerless normalization encounters ${mode}`, async () => {
 				const events: unknown[] = [];

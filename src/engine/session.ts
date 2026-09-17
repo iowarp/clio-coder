@@ -906,7 +906,10 @@ export function openSession(id: string): ClioSessionReader {
 	};
 }
 
-export function resumeSession(id: string): {
+export function resumeSession(
+	id: string,
+	options: { sessionFormatVersion?: number } = {},
+): {
 	meta: ClioSessionMeta;
 	writer: ClioSessionWriter;
 	tree: ReadonlyArray<SessionTreeNode>;
@@ -919,10 +922,15 @@ export function resumeSession(id: string): {
 	const writer = createWriter(meta, existingTree, existingFileEntries);
 	// Prepare headerless ledgers before publishing that a closed session has
 	// reopened. A failed normalization must preserve its prior ended state.
-	if (meta.endedAt !== null) {
-		const reopened = { ...meta, endedAt: null };
+	// Reopening and a migration restamp are one atomic publication: a refused
+	// resume can never leave the session marked open under its old version.
+	const restamp = options.sessionFormatVersion;
+	const restamped = restamp !== undefined && meta.sessionFormatVersion !== restamp;
+	if (meta.endedAt !== null || restamped) {
+		const reopened = { ...meta, endedAt: null, ...(restamped ? { sessionFormatVersion: restamp } : {}) };
 		atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
 		meta.endedAt = null;
+		if (restamped) meta.sessionFormatVersion = restamp;
 	}
 	return { meta, writer, tree: existingTree };
 }

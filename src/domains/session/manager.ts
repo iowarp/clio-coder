@@ -78,14 +78,14 @@ export function resumeSessionState(sessionId: string): {
 	// the domain caller parks its current writer. The engine reader retains
 	// its established tolerance for interrupted JSONL fragments.
 	collectSessionEntries(candidate.turns(), paths.current);
-	const { meta, writer, tree } = engineResumeSession(sessionId);
+	// The ledger needed no transformation; only the stamp moves, so the next
+	// reader does not re-run the same no-op. It lands in the same metadata
+	// publication that reopens the session.
+	const { meta, writer, tree } = engineResumeSession(
+		sessionId,
+		migration.migrated ? { sessionFormatVersion: migration.to } : {},
+	);
 	const state: SessionManagerState = { meta: meta as SessionMeta, writer };
-	if (migration.migrated) {
-		// The ledger needed no transformation; only the stamp moves, so the next
-		// reader does not re-run the same no-op.
-		state.meta.sessionFormatVersion = migration.to;
-		persistSessionMeta(state);
-	}
 	return { state, nodes: tree };
 }
 
