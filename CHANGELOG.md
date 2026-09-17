@@ -75,6 +75,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Record fleet preflight results again, through `clio-coder doctor --fix`. Since 0.4.1 no command wrote the preflight store, so dispatch admission refused every SSH node while advising a plain `doctor` run that could not help. Plain `doctor` stays observation-only and says whether the node is recorded. Verified with a real worker dispatched to a homelab node over SSH.
 - Name write-root confinement in the dispatch refusal when it, not the runtime, removed a required tool, with the remedy for read-only or worktree runs.
 - Verify a preserved skill load when its `context` call shared a parallel tool batch. The ledger chains entries linearly, so the strict parent check failed for batched loads, the fail-closed clamp then protected everything after the activation, and the session could never compact. Found in a live WTF-P session that stalled at 80% context with `/context compact` reporting nothing to compact.
+- Record a loaded skill that declares no tool narrowing as a known selection. It was persisted as unknown, which also forced the compaction clamp for the rest of the session.
 - Clear the remaining lint findings and split the web framework into its own chunk, which removes the oversized entry-chunk warning.
 
 ## 0.4.8 - 2026-09-12

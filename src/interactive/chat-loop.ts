@@ -686,10 +686,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				(policy?.requests.length ?? 0) > 0)
 		) {
 			const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+			// A loaded skill that declares no tool narrowing arms no surface, yet its
+			// instructions are in context. Record it from the loading policy: an
+			// unknown selection would block every later compaction of this session.
 			const selection = next
 				? mainSkillContextState(entries, next)
-				: (policy?.loadedSkillNames.size ?? 0) > 0
-					? null
+				: policy !== undefined && policy.loadedSkillNames.size > 0
+					? mainSkillContextState(entries, policy)
 					: { version: 1 as const, activationRefs: [] };
 			const data = selection ?? { version: 1 as const, activationRefs: [], unknown: true as const };
 			if (JSON.stringify(data) !== JSON.stringify(latestSkillContextState(entries))) {
