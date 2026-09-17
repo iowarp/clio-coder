@@ -45,6 +45,11 @@ export interface ClioSessionMeta {
 
 Format version `CURRENT_SESSION_FORMAT_VERSION = 4` (`src/engine/session.ts`) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.
 
+Session admission checks metadata format before any recovering ledger read. It
+validates replay entries before parking the current session. Required headerless
+ledger normalization must succeed before reopened candidate metadata is published;
+a refused candidate leaves the current session usable.
+
 ---
 
 ## 3. Append-Only Context Ledger (`current.jsonl`)
@@ -85,8 +90,9 @@ Subsequent lines represent typed `SessionEntry` objects (`src/domains/session/en
 ### Write Durability & Atomicity
 
 - Appends hold an open `O_APPEND` file descriptor across the writer lifetime (`src/engine/session.ts:openSync`).
-- Each line append is executed via a single `write(2)` call.
-- `fsyncSync` is debounced during high-frequency streaming turns and unconditionally forced on checkpoint (`persistTree`) and session shutdown (`close`).
+- A complete UTF-8 line is written before its entry or tree node is acknowledged. Legal short writes continue from the remaining byte offset. Zero progress or a write error fails the append and attempts to truncate its partial bytes back to the previous length; rollback and cleanup failures retain their causes.
+- `fsyncSync` is debounced during high-frequency streaming turns and forced for pending ledger writes on checkpoint (`persistTree`), explicit flush and session shutdown (`close`). A failed append retains the flush obligation for previously accepted bytes and rollback changes even when its descriptor is retired. Explicit flush failures remain visible and retryable.
+- Atomic ledger replacements complete, flush and close their temporary file before publication. An incomplete replacement leaves the previous canonical ledger in place. These guarantees retain the existing single-owner assumption; they do not introduce cross-process locking or a transaction across all session files.
 - Torn last lines resulting from abrupt system crashes or power losses are tolerated by the ledger reader (`src/engine/session.ts:readSessionFileEntries`), which logs a warning and skips the incomplete trailing record.
 
 ---

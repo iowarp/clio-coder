@@ -321,7 +321,7 @@ bank. `/handoff` during an in-flight turn is refused with a notice rather than
 queued, because a document summarizing a session that is still moving would be
 wrong by the time it was read.
 
-The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list.
+The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list. Task identity occupies the primary column, with the session name or ID as a fallback; metadata yields as the terminal narrows. Filtering preserves the selected session when it still matches, and undo from an empty result restores that selection. Confirmation resumes the visibly selected session, including with customized list bindings.
 
 Only active commands run. Typing anything command-shaped that the registry does
 not own checks the loaded prompt templates across native and foreign prompt roots.
@@ -608,6 +608,11 @@ cancel it with `Esc`) and while a permission ask is parked (it is already
 waiting on you). A steer that arrives as the run ends is resubmitted as a fresh
 prompt. Headless `--steer-channel` lines are always next-slot steers.
 
+Explicitly addressed worker steering stays addressed to that worker. A stale,
+completed, ambiguous or unavailable target produces a notice and preserves the
+draft; it does not become a new main-agent prompt. The late-steer resubmission
+above applies to an unaddressed steer for the main agent.
+
 For running dispatches, the editor also accepts:
 
 ```text
@@ -877,7 +882,7 @@ The footer owns live activity. Transcript actions have static running or outcome
 
 The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:
 
-- **Welcome header:** Before your first prompt the header is three rows and no box: a masthead (`>C_ Clio Coder v0.4.7` on the left, `~/iowarp/clio-coder · main*` on the right), the route (`✓ dynamo · qwen3.8-27b`), and one next step (`describe a task · Enter to send · / for commands`). The next step names whatever actually blocks work first: no route or model sends you to `/model`, an unavailable or degraded route to `/settings targets`, a missing or stale `CLIO-CODER.md` to `/context init` or `/context refresh`. A healthy route shows no latency; a failing one shows its reason. Your first submit collapses the header to one live row, `>C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*`, which follows a mid-session model change. `/new` returns to the three-row form; `/resume`, `/tree`, `/fork`, `/handoff` and `--continue` open collapsed. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header) for the width-degradation order and route vocabulary.
+- **Welcome header:** Before your first prompt the header is three rows and no box: a masthead (`>C_ Clio Coder v0.4.7` on the left, `~/iowarp/clio-coder · main*` on the right), the route (`✓ dynamo · qwen3.8-27b`), and one next step (`describe a task · Enter to send · / for commands`). The next step names whatever actually blocks work first: no route or model sends you to `/model`, an unavailable or degraded route to `/settings targets`, a missing or stale `CLIO-CODER.md` to `/context init` or `/context refresh`. A healthy route shows no latency; a failing one shows its reason. Your first submit collapses the header to one live row, `>C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*`, which follows a mid-session model change. `/new` returns to the three-row form; `/resume`, `/tree`, `/fork` and `/handoff` collapse it after a successful transition. Interactive resume uses `/resume`; `--continue` is a headless `clio-coder run` option. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header) for the width-degradation order and route vocabulary.
 - **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). The hydrated composer keeps target/model fields separate until rendering. Narrow labels retain a recognizable family and variant, such as `blade… · qwopus3.…dense-q6 · low`. Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Ctrl+J newline` at wider widths.
 - **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful, shortening workspace parents and dropping branch decoration before live activity or worker counts; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Ctrl+G x] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.

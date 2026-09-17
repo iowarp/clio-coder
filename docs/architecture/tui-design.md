@@ -258,10 +258,10 @@ contracts: `tests/extended/welcome-boot-header.test.ts`.
   any handler appends transcript output, on all three submit paths (ordinary
   submit, admission of a queued boot submission, interrupt-submit). `/new`
   returns to the launchpad. `/resume`, `/tree`, `/fork` and `/handoff` collapse
-  it, so a rebuilt transcript is never shown under fresh-start onboarding, and
-  `clio-coder --continue` / `--session <id>` opens directly in the collapsed
-  header once `session.resume()` has actually succeeded. Transitions are
-  idempotent.
+  it after a successful session transition, so a rebuilt transcript is never
+  shown under fresh-start onboarding. Interactive resume starts inside the app
+  with `/resume`; `--continue` and `--session <id>` belong to the headless
+  `clio-coder run` command. Transitions are idempotent.
 
 - **No filesystem work on the render path**, in any state, including the first
   frame and render-cache hits. Project-context state comes from the context
@@ -362,9 +362,16 @@ The right-hand label shows `model · thinking`. Thinking level colors map as: `o
 ### 6.5 Transcript Notices
 Replay and system tags (e.g. `[retry]`, `[model]`) are wrapped in `dim` brackets with a `muted` message. Retry tags use `warning` amber.
 
+Provider failures use a bounded, sanitized diagnosis in the primary transcript,
+retaining available HTTP status and actionable route advice. Provider retry labels
+identify their layer; running and waiting phases do not repeat the same error body.
+Live and replay previews use the current terminal height and output-style row
+budget. `/view transcript` and export retain the available redacted diagnostic;
+upstream SDK truncation cannot be undone by the presentation layer.
+
 ### 6.6 Output Style Receipts
 
-Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
+Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Replay treats tool-use messages as intermediate; they cannot create a successful receipt on an earlier failed or cancelled turn. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
 
 ### 6.7 Code Ink (Syntax Highlighting)
 
@@ -421,7 +428,7 @@ The `/settings` overlay is a full-screen transactional control center:
 An ordinary card defaults to run identity, abbreviated route, a task preview, status, trust/evidence, telemetry and one current-operation row when available. A long task keeps two wrapped rows plus an Enter-detail disclosure. Fleet phase appears only when the run has a recorded fleet position. Route abbreviation preserves its distinguishing suffix. Retry, control and evidence warnings remain visible when present. An ordinary completed, sealed and mediated run with no validation or independent review shows `unverified; no validation observed` in its compact trust row. Enter restores every canonical provenance clause. This shortening applies only when context is recorded and completion evidence is absent; exceptional, unknown or failed states keep the full trust summary visible. Execution completion and receipt sealing do not establish scientific validation.
 
 - **`doing`** shows `now <tool> <verb> <object>` for the current call. Between calls it can show the worker phase and `last <tool> <verb> <object>` for its most recent completed call. Descriptors come from the worker seam; raw arguments never reach the renderer. A thinking phase exposes no reasoning text.
-- **Enter detail** restores the full wrapped route and task, exposes policy and budget facts, and adds the available answer. The answer uses a `│` rail, retaining up to six wrapped prose rows plus an overflow disclosure for omitted lines/bytes and the `/view dispatch:<runId>` inspection route. This cap applies to the answer preview, not to the complete expanded card.
+- **Enter detail** restores the full wrapped route and task, exposes policy and budget facts, and adds the available answer. The answer uses a `│` rail, retaining up to six wrapped prose rows plus an overflow disclosure for omitted lines/bytes and the `/view dispatch:<runId>` inspection route. This cap applies to the answer preview, not to the complete expanded card. Recognized complete results use the same readable contract presentation as the transcript only when an integrity-verified receipt supplies the declared kind and passing conformance. Partial, malformed, unknown or nonconforming output remains an honest excerpt. Contract conformance does not imply validation; reproduction and other qualification facts remain visible, and inspection retains the available raw output.
 
 Detail follows selection rather than pinning to a run. Empty boards show `Use /run or /delegate to start a run.` and advertise only closing. Narrow active hints prioritize supported steering and cancellation over navigation/detail hints; Enter remains available to expand. HTTP/SDK runs expose steering only in supported live states, ACP and subprocess runs do not, and terminal rows expose neither steering nor cancellation.
 
