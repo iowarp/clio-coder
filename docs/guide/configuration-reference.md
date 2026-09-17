@@ -87,7 +87,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | Default ms an ACP agent has to answer `initialize` (integer >= 1, at most the max timer delay); never zero-disabled; applies next dispatch. |  |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | Default ms an ACP permission request may wait for an operator (integer >= 1); applies next dispatch. |  |
 | `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | Default governance for ACP agents without their own: `clio-coder-policy`, `agent-managed`, `deny-all` (legacy `clio-policy` is normalized with a warning); applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
-| `integrations.externalAgents.defaults.turnTimeoutMs` | `300000` | Default ms one ACP turn may take before it is cancelled (integer >= 1); applies next dispatch. |  |
+| `integrations.externalAgents.defaults.turnTimeoutMs` | `0` | Default ms one ACP turn may take before it is cancelled (integer >= 0; 0 disables); applies next dispatch. |  |
 | `integrations.externalAgents.entries` | `[]` | ACP delegation agents for `/delegate` and dispatch: list of stdio agent definitions with unique ids (`auto` reserved), each inheriting `defaults.*` where unset; applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.externalAgents.entries[].args` | `[]` | Argument list for the ACP stdio command (list of strings, duplicates dropped); empty when absent. |  |
 | `integrations.externalAgents.entries[].command` |  | ACP stdio command spawned for the agent (newline-delimited JSON-RPC per ACP v1); required. |  |
@@ -100,7 +100,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `integrations.externalAgents.entries[].projectContext` | `none` | Project context sent to this agent as a dynamic message: `none` (default; repo conventions never leave the machine) or `bounded` (the bounded projection). |  |
 | `integrations.externalAgents.entries[].stallTimeoutMs` | `300000` | Event-inactivity stall window in ms: when no `session/update` arrives for this long the reconciler cancels the turn and finalizes the run as stalled; `<= 0` disables; 300000 when absent. |  |
 | `integrations.externalAgents.entries[].toolGovernance` |  | Who governs the agent's tool calls: `clio-coder-policy` (Clio's autonomy matrix), `agent-managed`, `deny-all`; absent inherits `defaults.toolGovernance`; `agent-managed` refuses `run --autonomy`. |  |
-| `integrations.externalAgents.entries[].turnTimeoutMs` |  | Per-agent ms one ACP turn may take before cancellation (integer >= 1); absent inherits `defaults.turnTimeoutMs`. |  |
+| `integrations.externalAgents.entries[].turnTimeoutMs` |  | Per-agent ms one ACP turn may take before cancellation (integer >= 0; 0 disables); absent inherits `defaults.turnTimeoutMs`. |  |
 | `integrations.git.commitAttribution` | `true` | Evidence-aware role trailers on commits created through Clio (boolean); applies immediately for subsequent commits. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.library.catalog` | `null` | Path of the private resource-library catalog (string or null); null means `<configDir>/library.yaml`; applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.library.confirmedRemote` | `null` | Remote URL written by `clio-coder library remote confirm <url>`; must equal `remote` before sync or push may run (string or null); applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
@@ -209,6 +209,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_DATA_DIR` | `platform default (`$XDG_DATA_HOME/clio-coder`, else `~/.local/share/clio-coder`)` | Absolute path for the data root; beats `CLIO_CODER_HOME/data` and the platform default, and the fleet-view pane child re-pins it from argv. | env > `CLIO_CODER_HOME/data` > `XDG_DATA_HOME` or platform default |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | `unset (disabled)` | Exactly `1` prints timed `[clio-coder:shutdown]` phase lines and full stack traces of failing domain `stop()` hooks to stderr during shutdown. |  |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | `86400000` | Positive integer milliseconds a persisted endpoint slot count stays valid for an endpoint this process has not probed; older records are ignored and pruned. | env > built-in default (no settings key) |
+| `CLIO_CODER_ENTRY` | `unset` | Exported by the eval suite runner into a task runner's environment with the path of the Clio entry under evaluation (`src/domains/eval/suites/run.ts`). Clio itself never reads it. |  |
 | `CLIO_CODER_EVAL_RUNNER_STDOUT_FILE` | `unset` | Set by the eval suite runner to the path of the captured runner stdout JSONL for a task's measure step; read only by external graders (evals/behavioral-corpus-grader.mjs), never by src. |  |
 | `CLIO_CODER_FORCE_COMPACT` | `unset (disabled)` | Exactly `1` on the interactive process forces the pre-submit compaction to run on every turn while set, regardless of the context threshold. |  |
 | `CLIO_CODER_GIT_COMMITS_ENABLED` | `unset (in-process reads treat it as enabled; the hook requires exactly `1`)` | Set by Clio to `1`/`0` from `integrations.git.commitAttribution` for itself and child seams; the managed hook exits unless it is exactly `1`, while absent counts as enabled in process. | `integrations.git.commitAttribution` writes it; env is the transport, not an operator override |
@@ -244,9 +245,6 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | `unset` | Path to a skill-marketplace index file consulted after the catalog; an explicit indexPath option beats it and the built-in index path is the fallback. | explicit indexPath option > env > default index path |
 | `CLIO_CODER_STATE_DIR` | `platform default (`$XDG_STATE_HOME/clio-coder`, else `~/.local/state/clio-coder`)` | Absolute path for the state root; beats `CLIO_CODER_HOME/state` and the platform default, and the fleet-view pane child re-pins it from argv. | env > `CLIO_CODER_HOME/state` > `XDG_STATE_HOME` or platform default |
 | `CLIO_CODER_STATUS_STUCK_MS` | `180000` | Positive number of milliseconds of elapsed turn time after which the status watchdog reports the turn as stuck (tier 4). |  |
-| `CLIO_CODER_TEST_STAGE1_DELAY_MS` | `0` | Under `NODE_ENV=test` only, integer milliseconds (clamped to 0..5000) to sleep between the Stage 0 shell mount and Stage 1 hydration for PTY tests. |  |
-| `CLIO_CODER_TEST_STAGE1_FAIL` | `unset (disabled)` | Under `NODE_ENV=test` only, exactly `1` throws an injected Stage 1 hydration failure after the instant shell mounts. |  |
-| `CLIO_CODER_TEST_UPGRADE_NO_NETWORK` | `unset (disabled)` | Any non-empty value makes `clio-coder upgrade` skip the npm install step so upgrade tests run offline. |  |
 | `CLIO_CODER_TIMING` | `unset (disabled)` | Exactly `1` prints the startup timer report after the banner, but only on the bannered non-interactive boot (not the TUI, headless, or ACP paths). |  |
 | `CLIO_CODER_TRACE_BOOT` | `unset (disabled)` | Exactly `1` writes a `[clio-coder:boot] +<ms> <phase>` line to stderr for every boot phase marker, including startup-timer marks. |  |
 | `CLIO_CODER_TRACE_MAX_BYTES` | `134217728` | Integer of at least 1048576 bytes the SQLite trace mirror may occupy before the oldest terminal runs are pruned; smaller or invalid values fall back. | env > built-in default (no settings key) |
@@ -276,7 +274,6 @@ Read from the process environment at boot unless the row says otherwise.
 | `NO_COLOR` | `unset` | Any non-empty value drops every foreground and background SGR color from the theme; bold, dim, italic, and underline stay. |  |
 | `NODE_COMPILE_CACHE` | `unset (Clio uses `<cache>/v8-compile-cache` once the cache root exists)` | Presence (even empty) means the operator owns the V8 compile cache: Clio calls `enableCompileCache()` with no directory and never injects its own cache into workers. |  |
 | `NODE_DISABLE_COMPILE_CACHE` | `unset` | Presence disables Clio's compile cache for this process and stops the worker spawn from injecting one. |  |
-| `NODE_ENV` | `unset` | Exactly `test` unlocks the Stage 1 interleaving seams (`CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL`); no other value matters. |  |
 | `NODE_OPTIONS` | `unset` | Scanned for `--trace-warnings`; when present, the trace store stops suppressing Node's `node:sqlite` ExperimentalWarning. |  |
 | `OLLAMA_NUM_PARALLEL` | `1` | Positive integer parallel slot count assumed for a local Ollama server during discovery; anything else counts as 1. |  |
 | `PATH` | `unset` | Searched for executables by interop CLI detection, toolchain resolution, the uninstall shadow check, and editor probing; the bash tool's login-env capture is discarded without it. |  |
@@ -433,7 +430,7 @@ Grouped by command. Global flags appear under `global`.
 
 | Flag | Controls |
 |---|---|
-| `--fix` | Repair structure (missing directories and template files, credential file permissions) instead of the read-only diagnosis. |
+| `--fix` | Repair structure (missing directories and template files, credential file permissions) and record fleet preflight results instead of the read-only diagnosis. |
 | `--help` | Print the command's usage and exit. |
 | `--json` | Emit JSON instead of the human-readable rendering. |
 | `-h` | Short form of --help. |
@@ -524,6 +521,7 @@ Grouped by command. Global flags appear under `global`.
 | `--acp` | Startup alias for the `acp` subcommand: rewrites the rest of the line onto `clio-coder acp`, so every trailing option is parsed by the ACP parser. |
 | `--all` | With `--help`, appends the `clio-coder dev` command list (components, evolve, share) to the top-level help; no effect otherwise. |
 | `--api-key` | Startup flag taking a literal key that overrides the stored credential for the target this invocation resolves; must precede the subcommand. |
+| `--autonomy` | Startup flag setting the interactive session's autonomy to `read-only`, `suggest`, `auto-edit`, or `full-auto` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `--continue` | Refused before the subcommand: exits 2 with the hint that sessions are resumed from inside the app by typing /resume; nothing is parsed from it. `run --continue` is a separate flag. |
 | `--help` | Print the top-level command list and exit 0 when given before any subcommand. |
 | `--no-context-files` | Startup flag that skips CLIO-CODER.md project-context injection for this invocation; must precede the subcommand (run rejects it with a position hint). |
@@ -619,7 +617,10 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 
 | Flag | Controls |
 |---|---|
+| `--force` | For `panes install`, overwrite an existing installation without prompting. |
 | `--help` | Print the command's usage and exit. |
+| `--json` | Emit JSON instead of the human-readable rendering. |
+| `-f` | Short form of --force. |
 | `-h` | Short form of --help. |
 
 ### `paths`
@@ -642,6 +643,7 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--dry-run` | Print the listing of what each selected root holds and change nothing. |
 | `--force` | Required for destructive execution; without it the command lists and refuses. |
 | `--help` | Print the command's usage and exit. |
+| `--json` | Emit JSON instead of the human-readable rendering. |
 | `--state` | Reset the state root only (every session transcript and its audit trail); the default level when no level flag is given. |
 | `-f` | Short form of --force. |
 | `-h` | Short form of --help. |
@@ -718,6 +720,15 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--thinking` | For `targets profile set`, the profile's thinking level: off, minimal, low, medium, high, xhigh, or max. |
 | `-h` | Short form of --help. |
 
+### `tasks`
+
+| Flag | Controls |
+|---|---|
+| `--expect` | For `tasks add`, repeatable repository-relative output file path expected by the task. |
+| `--help` | Print the command's usage and exit. |
+| `--verify` | For `tasks add`, repeatable verification check id (with optional `:timeoutMs` suffix) declared in `package.json` or `.clio-coder/verifiers.yaml`. |
+| `-h` | Short form of --help. |
+
 ### `tools`
 
 | Flag | Controls |
@@ -750,6 +761,9 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--dry-run` | Print what would be removed, including the per-project directories, and change nothing. |
 | `--force` | Required for destructive execution; without it the command lists and refuses. |
 | `--help` | Print the command's usage and exit. |
+| `--json` | Emit JSON instead of the human-readable rendering. |
+| `--keep-config` | Preserve the configuration root (`settings.yaml`, credentials). |
+| `--keep-data` | Preserve the data root (`memory`, evidence, vendored tools). |
 | `--remove-binary` | Also remove the launcher symlink when it points at this installation; a real file or a link elsewhere is kept and reported. |
 | `-f` | Short form of --force. |
 | `-h` | Short form of --help. |
@@ -761,6 +775,7 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--channel` | npm dist-tag to install: `latest`, `beta`, or `dev`; only the `--channel=<chan>` form is parsed; npm installs only. |
 | `--dry-run` | Print the planned npm install, migrations, and state refresh and change nothing. |
 | `--help` | Print the command's usage and exit. |
+| `--json` | Emit JSON instead of the human-readable rendering. |
 | `--post-install` | Internal marker the upgrade passes to its re-exec of the newly installed binary: skip the npm install and run migrations and doctor checks. |
 | `--skip-migrations` | Skip the data-dir migrations after the install step. |
 | `-h` | Short form of --help. |
@@ -779,6 +794,9 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 
 | Flag | Controls |
 |---|---|
+| `--baseline` | For `verifiers add`/`edit`, repository-relative baseline JSON path for a perf-budget check. |
+| `--budget-ms` | For `verifiers add`/`edit`, wall-time bound in milliseconds for a perf-budget check. |
+| `--budget-relative` | For `verifiers add`/`edit`, fractional headroom over the bound for a perf-budget check. |
 | `--command` | For `verifiers add` (required) and `edit`, the check's argv as a JSON string array. |
 | `--cwd` | For `verifiers add`/`edit`, repository-relative working directory of the check. |
 | `--description` | For `verifiers add` (required) and `edit`, the check's description text. |
@@ -787,9 +805,12 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--help` | Print the verifiers usage and exit. |
 | `--id` | For `verifiers add`, the new check's id (required). |
 | `--json` | For `verifiers inspect`, the only accepted argument; emits the fixed machine-readable catalog projection. |
+| `--kind` | For `verifiers add`/`edit`, check kind: `command`, `numeric-compare`, or `perf-budget`. |
+| `--reference` | For `verifiers add`/`edit`, repository-relative reference JSON path for a numeric-compare check. |
 | `--rename` | For `verifiers author`, an `<old>=<new>` rename of a discovered check id; repeatable. |
 | `--tags` | For `verifiers add`/`edit`, comma-separated catalog tags. |
 | `--timeout-ms` | For `verifiers add`/`edit`, positive integer timeout in milliseconds. |
+| `--tolerance` | For `verifiers add`/`edit`, tolerance JSON object specifying numeric or perf-budget bounds. |
 | `--yes` | For mutating verifiers commands, confirm the write after the preview prints; without it nothing changes. |
 | `-h` | Short form of --help. |
 
@@ -825,13 +846,13 @@ User-scope declarations are trusted by authorship and get action class `unknown`
 
 Gateway discovery is lazy and session-cached. Untrusted or stale project declarations never spawn; failed or cancelled discovery is not silently restarted in that session. Trust changes should be used by a new session, since the running source resolved configuration once. Cancelling discovery closes its shared connection and fails its waiters. Session shutdown awaits client-owned teardown; the exit backstop signals only a still-owned process group.
 
-Transport bounds are 4 MiB per incoming JSON-RPC line, 4 MiB pending outbound bytes, 16 KiB stderr tail, 1 MiB normalized result text, and at most 500 tools or 100 pages per server discovery. Gateway result shaping adds its own bounded model projection. Request timeout or per-call abort can fail one call without closing a ready server; discovery cancellation closes the shared connection. Teardown uses TERM, a 3000 ms grace, KILL, and 2000 ms bounded confirmation, reporting incomplete cleanup. Launching an MCP server is not sandboxing; remote MCP/OAuth and general OS isolation are deferred.
+Transport bounds are 4 MiB per incoming JSON-RPC line, 4 MiB pending outbound bytes, 16 KiB stderr tail, 1 MiB normalized result text, and at most 500 tools or 100 pages per server discovery. Gateway result shaping bounds one MCP result to 16 KiB in model context, offloading larger results to disk artifacts with preview and reference. Request timeout or per-call abort can fail one call without closing a ready server; discovery cancellation closes the shared connection. Teardown uses TERM, a 3000 ms grace, KILL, and 2000 ms bounded confirmation, reporting incomplete cleanup. Launching an MCP server is not sandboxing; remote MCP/OAuth and general OS isolation are deferred.
 
 ## Project files
 
 Keys read from files under `.clio-coder/` in the repository.
 
-Project safety, hooks, and settings are ignored until the operator reviews them with `clio-coder config trust safety|hooks|settings` and approves the printed digest with `--hash`. Consent binds one canonical workspace and one surface's content and source location. Changes, local override additions, and safety-policy relocation require a new review. Startup names skipped files; `config inspect` shows effective safety provenance and trust. Settings and safety apply on restart; new hooks apply after extension reload, while changed or revoked published hooks stop before their next execution. `CLIO-CODER.md` remains project text and does not grant configuration authority.
+Project safety, hooks, and settings are ignored until the operator reviews them with `clio-coder config trust safety|hooks|settings` and approves the printed digest with `--hash`. Consent binds one canonical workspace and one surface's content and source location. Changes, local override additions, and safety-policy relocation require a new review. Startup names skipped files; `config inspect` shows effective safety provenance, trust, and names ignored project settings under the Settings header. Settings and safety apply on restart; new hooks apply after extension reload, while changed or revoked published hooks stop before their next execution. `CLIO-CODER.md` remains project text and does not grant configuration authority.
 
 ### `.clio-coder/agents`
 

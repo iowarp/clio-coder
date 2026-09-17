@@ -128,10 +128,11 @@ the node's real SSH channel:
 Run it with `clio-coder doctor`. Plain doctor is diagnostic and read-only: it
 reports the live probe rows but does not create or refresh
 `fleet-preflight.json`, and therefore does not change dispatch eligibility.
+Run `clio-coder doctor --fix` to record passing preflight results into
+`fleet-preflight.json` and make verified nodes dispatch-eligible.
 Placement still reads a pre-existing record under the state directory, keyed by
 node and project root; a changed host, changed project root, or local
-`clio-coder` upgrade invalidates that record and admission fails closed. The
-current CLI exposes no mutating doctor preflight that refreshes it. Failing
+`clio-coder` upgrade invalidates that record and admission fails closed. Failing
 nodes are doctor warnings rather than a failure of the local installation.
 
 ## Placement and process-safe admission

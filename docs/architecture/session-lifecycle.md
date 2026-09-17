@@ -68,7 +68,7 @@ The first line of `current.jsonl` is the canonical session header:
 
 Subsequent lines represent typed `SessionEntry` objects (`src/domains/session/entries.ts`):
 
-1. **`message`**: User inputs, assistant responses, and tool calls/results.
+1. **`message`**: User inputs, assistant responses, and tool calls/results. User turn payloads carry the prompt `text` sent to the model, and may carry `operatorText` (the raw input before scaffold expansion) and `displayText` (the literal editor input when a prompt template or command expansion replaced it, rendered by the session picker and transcript replay).
    ```typescript
    export interface MessageEntry {
      kind: "message";

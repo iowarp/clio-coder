@@ -607,10 +607,11 @@ paths and stop startup so stale configuration does not silently change runtime
 behavior.
 
 Plain `clio-coder doctor` is read-only. `clio-coder doctor --fix` creates missing
-directories and template files, repairs credential permissions, and refreshes
-install metadata. It validates `settings.yaml` directly against the current
-schema but never rewrites removed keys or migrates an old settings shape. Any
-unknown or retired key remains a validation error on that doctor run.
+directories and template files, repairs credential permissions, refreshes
+install metadata, and records fleet preflight results. It validates
+`settings.yaml` directly against the current schema but never rewrites removed
+keys or migrates an old settings shape. Any unknown or retired key remains a
+validation error on that doctor run.
 Registered `clio-coder upgrade` migrations are the narrow exception. Upgrade
 moves a version-1 or unversioned settings document into the version-2 areas,
 records the migration, and keeps the byte-exact original as
@@ -810,7 +811,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | `integrations.projectResources.trustProjectImports` | `false` | boolean | next turn |
 | `integrations.externalAgents.entries` | `[]` | list of validated ACP agent definitions | next dispatch |
 | `integrations.externalAgents.defaults.connectTimeoutMs` | `30000` | integer ≥ 1 | next dispatch |
-| `integrations.externalAgents.defaults.turnTimeoutMs` | `300000` | integer ≥ 1 | next dispatch |
+| `integrations.externalAgents.defaults.turnTimeoutMs` | `0` | integer ≥ 0; `0` disables the turn timeout | next dispatch |
 | `integrations.externalAgents.defaults.permissionTimeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `integrations.externalAgents.defaults.toolGovernance` | `clio-coder-policy` | `clio-coder-policy`, `agent-managed`, `deny-all` | next dispatch |
 | `integrations.runtimePlugins` | `[]` | list of plugin package names | restart |

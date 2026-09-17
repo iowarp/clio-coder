@@ -19,7 +19,7 @@ lifecycle operations.
 | Set up a new installation | `clio-coder configure` | Quick Connect: endpoint, key if needed, model, Connect; then start `clio-coder`. |
 | Change a connection | `clio-coder configure --section targets` | Add or edit endpoints, credentials, and models; choose role defaults. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
-| Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions. |
+| Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
 | Start configuration over | `clio-coder reset --config` | Reset settings, preserve credentials and history, then run `clio-coder configure`. |
 | Emulate a fresh user | `clio-coder reset --all` | Remove all four user roots, recreate defaults, then run `clio-coder configure`. |
@@ -221,7 +221,7 @@ Runs a series of health sweeps across the environment:
 *   Asserts owner-only permissions on credentials (`0o600`).
 *   Reports the installed Clio, Node, platform, and engine package readiness.
 *   Checks config, data, state, cache, and state metadata freshness. It also warns when an OpenAI-compatible or Anthropic-compatible target appears to be a native LM Studio or Ollama server that should be converted.
-*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential permissions, and refresh install metadata. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; paths with no registered migration still require deliberate editing.
+*   *Recovery:* Run `clio-coder doctor --fix` to create missing directories and templates, repair credential permissions, refresh install metadata, and record fleet preflight results. Settings are always validated against the current schema; `--fix` does not rewrite removed keys or migrate an older settings file. Run `clio-coder upgrade` for registered lifecycle migrations, including removal of the retired `panes.agents` and `panes.keepFailed` keys; paths with no registered migration still require deliberate editing.
 
 ### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.

@@ -60,7 +60,7 @@ These names follow an upstream or operating-system convention. They are not subs
 | `SSH_CONNECTION`, `SSH_TTY`, `TMUX`, `STY` | Remote-session and terminal-multiplexer detection used by the adaptive stream-pacing policy (`src/interactive/stream-pacing-policy.ts`). |
 | `COLUMNS` | Fallback text width for non-TTY CLI output (`src/cli/text-layout.ts`). |
 | `TZ` | Local timestamp formatting and daily audit-log date boundaries (`src/interactive/format-time.ts`, `src/domains/safety/audit.ts`). |
-| `CI`, `NODE_ENV` | CI-sensitive presentation behavior and test/development-only seams. Neither grants tool authority. |
+| `CI` | CI-sensitive presentation behavior. It grants no tool authority. |
 
 ## Debug and trace toggles
 
@@ -102,6 +102,7 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_INTERACTIVE` | Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (`src/cli/clio.ts`, `src/core/bash-exec.ts`). |
 | `CLIO_CODER_RUN_OVERRIDES` | JSON envelope for run-scoped CLI options (`--max-context-tokens`, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (`src/core/run-overrides.ts`). |
 | `CLIO_CODER_EVAL_RUNNER_STDOUT_FILE` | Set by the eval runner for the `clio-coder run` child it spawns; the child appends its stdout to that path so the runner can read it after exit (`src/domains/eval/suites/run.ts`). |
+| `CLIO_CODER_ENTRY` | Exported by the eval suite runner into a task runner's environment with the path of the Clio entry under evaluation (`src/domains/eval/suites/run.ts`). Clio itself never reads it. |
 | `CLIO_CODER_YAZI_PICK_TOKEN` | Per-session token the yazi file-pane integration hands its yazi child and expects back on a pick, so a pick from another session is ignored (`src/domains/mux/yazi/session.ts`, `src/domains/mux/yazi/profile.ts`). |
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
@@ -113,10 +114,6 @@ Set by Clio for its own processes; not operator knobs.
 | Variable | Purpose |
 | --- | --- |
 | `CLIO_CODER_WORKER_FAUX` (+ `_MODEL`, `_TEXT`, `_STOP_REASON`, `_ERROR_MESSAGE`) | Fake worker model for tests (`src/engine/ai.ts`). |
-| `CLIO_CODER_TEST_UPGRADE_NO_NETWORK` | Skips npm install during upgrade tests (`src/cli/upgrade.ts`). |
-| `CLIO_CODER_TEST_UPGRADE_AVAILABLE` | Sets mock available version for upgrade tests; `unreachable` stands for a registry that answered nothing (`src/cli/upgrade.ts`). |
-| `CLIO_CODER_TEST_UPGRADE_FAIL` | Injects mock failures (`npm` or `migration`) for upgrade tests (`src/cli/upgrade.ts`). |
-| `CLIO_CODER_TEST_STAGE1_DELAY_MS`, `CLIO_CODER_TEST_STAGE1_FAIL` | `NODE_ENV=test`-only, bounded instant-shell interleaving and injected hydration failure seams for the built PTY acceptance suite (`src/cli/clio.ts`). |
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 
 Variables used only by external benchmark harnesses or install scripts are not

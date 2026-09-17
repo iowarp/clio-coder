@@ -21,7 +21,7 @@ Trusted local stdio MCP servers connect lazily. `find` discovers trusted servers
 
 When server IDs contain `__`, the longest declared server prefix owns the capability name, regardless of discovery order or trust status. For servers `a` and `a__b`, `mcp_a__b__echo` belongs to `a__b`; server `a` cannot register its own `b__echo` tool under that name and reports it as unregistrable. Rename the conflicting server or tool to expose both.
 
-MCP call results require a content array, an optional boolean `isError`, and an optional object `structuredContent`; malformed envelopes fail as protocol errors.
+MCP call results require a content array, an optional boolean `isError`, and an optional object `structuredContent`; malformed envelopes fail as protocol errors. One MCP call result is bounded to 16 KiB (16,384 bytes) in the model context envelope; larger results are stored as external artifacts and replaced with a preview and pointer.
 
 Results with an empty content array and structured content render that object as bounded JSON text for the model, with truncation reported explicitly. Numeric source tokens are preserved, including large integers, long decimals, overflowing exponents, and negative zero. Evidence retains normalized `structuredContentJson` with those tokens under the incoming-line cap; in the JSON-safe `structuredContent` object, numbers that do not round-trip through JavaScript use `{"$literal":"<source token>"}`. Whitespace and object-key formatting are normalized; this is not a byte-for-byte wire archive.
 

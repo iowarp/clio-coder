@@ -21,6 +21,9 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder --help [--all]` | Print the command list. `--all` appends every command under `clio-coder dev`. |
 | `clio-coder --api-key <key>` | Override the active target API key for one invocation. |
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
+| `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
+| `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
+| `clio-coder --autonomy <level>` | Start this interactive session at `read-only`, `suggest`, `auto-edit`, or `full-auto` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
 | `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
@@ -42,16 +45,19 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio-coder doctor [--fix] [--json]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, and refresh install metadata. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. |
+| `clio-coder doctor [--fix] [--json]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, refresh install metadata, and record fleet preflight results. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. |
+| `clio-coder mcp list\|trust\|untrust` | List configured MCP servers or manage explicit project trust with `trust <id> [--action-class read\|execute\|unknown]` and `untrust <id>`. |
 | `clio-coder tools list [--json]` | List the pinned external tool registry and whether each program resolves from `PATH`, Clio's vendored data directory, or nowhere. |
 | `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
 | `clio-coder tools install <id> [--force] [--json]` | Download the platform asset, verify every declared checksum, and atomically vendor it. |
 | `clio-coder tools remove <id>\|--all [--json]` | Remove Clio-vendored copies without touching a program found on `PATH`. |
 | `clio-coder panes install` | Alias for `clio-coder tools install herdr`. |
 | `clio-coder panes theme` | Print Clio's theme tokens as a herdr `[theme.custom]` block to paste into herdr's `config.toml`; Clio never edits that file itself. See [Panes and the Files Pane](panes-and-files.md). |
-| `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force]` | Reset selected Clio Coder state. `--state` is the default level. |
-| `clio-coder uninstall [--dry-run] [--remove-binary] [--force]` | Remove Clio Coder state and print uninstall guidance. |
-| `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
+| `clio-coder tasks [list\|add\|hand\|done\|drop]` | List, add, hand, finish, or drop project operator tasks. |
+| `clio-coder verifiers discover\|inspect\|author\|validate\|edit\|dry-run` | Discover, inspect, author, validate, edit, or dry-run project checks. |
+| `clio-coder reset [--state\|--data\|--cache\|--auth\|--config\|--all] [--dry-run] [--force] [--json]` | Reset selected Clio Coder state. `--state` is the default level. |
+| `clio-coder uninstall [--dry-run] [--remove-binary] [--keep-config] [--keep-data] [--force] [--json]` | Remove Clio Coder state and print uninstall guidance. |
+| `clio-coder upgrade [--dry-run] [--channel=<latest\|beta\|dev>] [--skip-migrations] [--json]` | Refresh state metadata, apply migrations, and update npm installs when applicable. |
 | `clio-coder agents [--json] [--all]` | List discovered agent specs. |
 | `clio-coder fleet list\|run\|status\|drain\|resume` | List fleet contracts, run one, show dispatch state, or control admission. `drain` denies new execution starts for up to one hour and preserves running work; `resume` reopens admission immediately. `run <name>` takes `[--var k=v ...]` and `[--json]`; `status`, `drain`, and `resume` each take `[--json]`. |
 | `clio-coder fleet view <runId\|fleetRootId> [--follow]` | Read the append-only run journal after verifying receipt trust. A fleet root prints its durable step index. Without `--follow`, the width-bounded snapshot is plain text with no ANSI control bytes. `--follow` requires an interactive terminal and one run id; `fleet view --help` prints this subcommand's own usage, including `--watch`. |
@@ -173,7 +179,8 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/library` | `/library [inspect \| install \| remove <ref>] [import <path-or-url>] [reload]` | Open the full-screen Library with Skills, Agents, Prompts, Fleets and Plugins tabs. A named reference opens the browser on that row; `install`, `remove` and `import` show a reviewed plan first and write nothing until it is accepted. `reload` refreshes installed recipe resources. Alt+L opens the same browser. |
 | `/skills` | `/skills` | Open the Library on Skills. |
 | `/prompts` | `/prompts` | Open the Library on Prompts. |
-| `/extensions` | `/extensions [reload]` | Inspect harness extensions or reload their hooks and operator runtimes. |
+| `/mcp` | `/mcp [list] \| /mcp trust <id> [class] \| /mcp untrust <id>` | List MCP servers or manage explicit trust for project MCP servers with optional action class |
+| `/extensions` | `/extensions [reload]` | Inspect harness extensions or reload their commands, hooks and operator UI |
 | `/interop` | `/interop` | Inspect another local coding agent and review adoption of supported resources. |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
@@ -188,7 +195,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
-| `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
+| `/memory` | `/memory [seed]` | Inspect, promote, or seed task memory |
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes zoom [target] \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane (`files`, `logs`, `shell`, `files --once`, or a command); a second open focuses the pane already there |
 | `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
