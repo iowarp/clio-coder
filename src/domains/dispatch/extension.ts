@@ -1724,13 +1724,23 @@ function assertPostRuntimeToolCompatibility(
 	spec: ReturnType<typeof normalizeAgentSpec>,
 	effectiveTools: ReadonlyArray<ToolName>,
 	target: ResolvedTarget,
+	writeConfined: boolean,
 ): void {
 	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
 		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
 	});
 	if (compatibility.compatible) return;
+	// Name the narrowing that removed the tool: blaming the runtime sends the
+	// caller to another model when its own write roots caused the refusal.
+	const confined = writeConfined
+		? compatibility.missingRequired.filter((tool) => WRITE_ROOT_REFUSED_TOOLS.has(tool))
+		: [];
+	const cause =
+		confined.length > 0
+			? `; declared write roots remove ${confined.join(", ")}, so omit write roots (use autonomy: "read-only" or worktree: true) for this agent`
+			: "";
 	throw new Error(
-		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}`,
+		`dispatch: admission denied: agent '${agentId}' is incompatible with runtime '${target.runtime.id}' after tool narrowing; missing required tools: ${compatibility.missingRequired.join(", ")}${cause}`,
 	);
 }
 
@@ -3743,7 +3753,7 @@ export function createDispatchBundle(
 			),
 			req,
 		);
-		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target);
+		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
 			allowedTools: effectiveTools,
@@ -6334,7 +6344,13 @@ export function createDispatchBundle(
 			),
 			req,
 		);
-		assertPostRuntimeToolCompatibility(req.agentId, agentSpec, effectiveTools, target);
+		assertPostRuntimeToolCompatibility(
+			req.agentId,
+			agentSpec,
+			effectiveTools,
+			target,
+			pathScope.writeBoundaries.length > 0,
+		);
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);
