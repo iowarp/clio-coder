@@ -18,6 +18,7 @@ import { performance } from "node:perf_hooks";
 import { readClioVersion } from "../../core/package-root.js";
 import { shellQuote } from "../../core/shell-quote.js";
 import { clioStateDir } from "../../core/xdg.js";
+import { atomicWrite } from "../../engine/session.js";
 import {
 	evaluateRouteFacts,
 	type FactState,
@@ -91,6 +92,20 @@ export function readFleetPreflightRecords(): FleetPreflightRecord[] {
 	}
 }
 
+/**
+ * Upsert records keyed by (nodeId, projectRoot). Only `clio-coder doctor --fix`
+ * writes: plain doctor stays observation-only, and dispatch admission fails
+ * closed on a node that has no stored passing record.
+ */
+export function recordFleetPreflight(records: ReadonlyArray<FleetPreflightRecord>): void {
+	const merged = new Map<string, FleetPreflightRecord>();
+	for (const record of [...readFleetPreflightRecords(), ...records]) {
+		merged.set(`${record.nodeId}\0${record.projectRoot}`, record);
+	}
+	const file: FleetPreflightStoreFile = { version: 2, records: [...merged.values()] };
+	atomicWrite(storePath(), JSON.stringify(file, null, 2));
+}
+
 export interface FleetPreflightVerdict {
 	ok: boolean;
 	reason: string | null;
@@ -110,19 +125,19 @@ export function fleetPreflightVerdict(
 	if (!record) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' has not passed the fleet preflight for ${projectRoot}; run 'clio-coder doctor'`,
+			reason: `node '${node.id}' has not passed the fleet preflight for ${projectRoot}; run 'clio-coder doctor --fix'`,
 		};
 	}
 	if (record.host !== node.host) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' preflight was recorded for host '${record.host}' but the node now points at '${node.host}'; run 'clio-coder doctor'`,
+			reason: `node '${node.id}' preflight was recorded for host '${record.host}' but the node now points at '${node.host}'; run 'clio-coder doctor --fix'`,
 		};
 	}
 	if (record.localVersion !== readClioVersion()) {
 		return {
 			ok: false,
-			reason: `node '${node.id}' preflight predates a local clio-coder upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio-coder doctor'`,
+			reason: `node '${node.id}' preflight predates a local clio-coder upgrade (${record.localVersion} -> ${readClioVersion()}); run 'clio-coder doctor --fix'`,
 		};
 	}
 	if (!record.ok) {

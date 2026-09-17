@@ -482,7 +482,10 @@ export function formatDoctorReport(findings: DoctorFinding[]): string {
  * to the durable preflight store that dispatch placement consults. A failing
  * node is a WARN (ineligible for placement), never fatal.
  */
-export async function runDoctorFleetChecks(projectRoot: string = process.cwd()): Promise<DoctorFinding[]> {
+export async function runDoctorFleetChecks(
+	projectRoot: string = process.cwd(),
+	options: { fix?: boolean } = {},
+): Promise<DoctorFinding[]> {
 	let settings: ReturnType<typeof readSettings>;
 	try {
 		settings = readSettings();
@@ -491,7 +494,7 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 	}
 	const nodes = settings.fleet?.nodes ?? [];
 	if (nodes.length === 0) return [];
-	const { runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
+	const { recordFleetPreflight, runFleetNodePreflight } = await import("../dispatch/fleet-preflight.js");
 	// Endpoint facts are per node. Every configured target is probed from every
 	// node, because a `localhost` URL names a different machine on each one and
 	// an orchestrator-side probe would describe none of them.
@@ -502,12 +505,23 @@ export async function runDoctorFleetChecks(projectRoot: string = process.cwd()):
 		...(target.defaultModel !== undefined ? { wireModelId: target.defaultModel } : {}),
 	}));
 	const records = await Promise.all(nodes.map((node) => runFleetNodePreflight(node, projectRoot, { targets })));
+	// Placement admits a node only from a stored record. Plain doctor observes;
+	// --fix is the run that may write state, so it is the one that records.
+	let recorded = options.fix === true;
+	if (recorded) {
+		try {
+			recordFleetPreflight(records);
+		} catch {
+			recorded = false;
+		}
+	}
+	const admission = recorded ? "recorded for dispatch" : "not recorded, run doctor --fix to admit this node";
 	return records.map((record) => ({
 		ok: true,
 		level: record.ok ? "ok" : "warn",
 		name: `fleet node ${record.nodeId}`,
 		detail: record.ok
-			? `eligible: ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}, ${
+			? `eligible (${admission}): ${record.host} clio ${record.remoteVersion ?? "(custom entry)"}, path parity for ${record.projectRoot}, ${
 					record.targets.filter((fact) => fact.reachable === "true").length
 				}/${record.targets.length} targets reachable from the node`
 			: `ineligible: ${record.detail ?? "preflight failed"}`,

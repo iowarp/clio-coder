@@ -20,6 +20,8 @@ const HELP = `clio-coder doctor [--fix] [--json]
 Diagnose Clio Coder state without creating files. On a home Clio has never
 written to, doctor says so in one row and exits 0. Use --fix to repair structure:
 missing directories, missing template files, and credential permissions.
+--fix also records the fleet preflight, which is what admits an SSH node to
+dispatch for the current project root; plain doctor only reports it.
 Settings are validated directly against the current schema.
 Pass --json to emit a machine-readable report on stdout.
 `;
@@ -63,7 +65,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	const interopChecks = untouched ? [] : await runDoctorInteropChecks();
 	// Fleet preflight probes each configured node over SSH and persists the
 	// per-node eligibility verdicts dispatch placement enforces.
-	const fleetChecks = untouched ? [] : await runDoctorFleetChecks();
+	const fleetChecks = untouched ? [] : await runDoctorFleetChecks(process.cwd(), { fix });
 	// Resolution reads PATH and the vendor root and creates nothing, but on an
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.

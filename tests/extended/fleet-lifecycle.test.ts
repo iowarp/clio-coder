@@ -8,7 +8,11 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { capacityDrain, setCapacityDraining } from "../../src/domains/dispatch/capacity-lease.js";
 import { compileExecutionPlan } from "../../src/domains/dispatch/execution-plan.js";
 import type { ExecutionStepResult } from "../../src/domains/dispatch/execution-scheduler.js";
-import { runFleetNodePreflight } from "../../src/domains/dispatch/fleet-preflight.js";
+import {
+	fleetPreflightVerdict,
+	recordFleetPreflight,
+	runFleetNodePreflight,
+} from "../../src/domains/dispatch/fleet-preflight.js";
 import { planFleetResume } from "../../src/domains/dispatch/fleet-run.js";
 import {
 	materializePendingGateDecision,
@@ -295,6 +299,11 @@ printf '%s\\n' 'clio-coder-preflight/1' 'cwd=ok' 'clioCoder=custom-entry' 'state
 			pathParity: true,
 			stateDirWritable: true,
 		});
+		// Admission reads only the stored record, so a passing probe admits
+		// nothing until it is recorded (doctor --fix).
+		strictEqual(fleetPreflightVerdict(node, scratch).ok, false);
+		recordFleetPreflight([canonical]);
+		deepStrictEqual(fleetPreflightVerdict(node, scratch), { ok: true, reason: null });
 
 		const legacySsh = join(scratch, "legacy-ssh.sh");
 		writeFileSync(
