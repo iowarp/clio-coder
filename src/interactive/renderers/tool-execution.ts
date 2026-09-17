@@ -16,7 +16,7 @@ import { previewBudget, previewRows } from "./preview.js";
  */
 
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
-import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -616,7 +616,12 @@ function buildFieldSublineBody(
 ): string | null {
 	const value = readStringField(args, key);
 	if (value === null) return null;
-	const preview = truncate(key === "command" ? stripShellWrapperForDisplay(value) : value, ARG_PREVIEW_LIMIT);
+	// One array element is one terminal row to the diff renderer. A multi-line
+	// command or an escape sequence inside this row shifted every row below it.
+	const preview = truncate(
+		sanitizeCallTargetText(key === "command" ? stripShellWrapperForDisplay(value) : value),
+		ARG_PREVIEW_LIMIT,
+	);
 	if (options.wrapInBackticks) return `${lead}\`${preview}\``;
 	return `${lead}${preview}`;
 }
@@ -959,9 +964,14 @@ function isEmptyResult(result: unknown): boolean {
 	return false;
 }
 
+/**
+ * Tool output is untrusted terminal input. Cursor movement, backspaces and
+ * carriage returns inside a row break the diff renderer's one-row-per-line
+ * accounting, so everything but the line structure is neutralized here.
+ */
 function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string {
-	if (typeof result === "string") return truncate(result, limit);
-	return truncate(jsonStringifySafe(result), limit);
+	const text = typeof result === "string" ? result : jsonStringifySafe(result);
+	return truncate(sanitizeMultilineDisplayText(text).text, limit);
 }
 
 function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isError: boolean): string[] {

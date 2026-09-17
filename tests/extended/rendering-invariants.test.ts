@@ -191,6 +191,35 @@ describe("Clio rendering invariants", () => {
 		doesNotMatch(resumed, /visible before pause/u);
 	});
 
+	it("renders one physical row per line for a multi-line bash command and cursor-moving output", () => {
+		// pi-tui's diff renderer treats each array element as one terminal row. A
+		// raw newline or cursor movement inside one shifts every row below it, and
+		// the composer border kept residue from a bash row after a tool batch.
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: the control bytes are the subject
+		const control = /[\x00-\x08\x0a-\x1f\x7f]/u;
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+			panel.applyEvent({
+				type: "tool_execution_start",
+				toolCallId: "tool-1",
+				toolName: "bash",
+				args: { command: "cd /var/tmp &&\nls -la\r\n\x1b[2Aecho done" },
+			} as never);
+			const assertRows = (phase: string): void => {
+				for (const line of panel.render(80)) {
+					// biome-ignore lint/suspicious/noControlCharactersInRegex: SGR is the one sequence a row may carry
+					const unstyled = line.replace(/\x1b\[[0-9;]*m/gu, "").replace(/\x1b\]8;[^\x07\x1b]*(?:\x07|\x1b\\)/gu, "");
+					doesNotMatch(unstyled, control, `${style} ${phase}: ${JSON.stringify(line)}`);
+				}
+			};
+			assertRows("live");
+			updateTool(panel, "Progress 1\x1b[1A\x1b[2K\rProgress 2\b\b");
+			assertRows("partial");
+			endTool(panel, "Progress 1\x1b[1A\x1b[2K\rProgress 2\b\b\x07");
+			assertRows("settled");
+		}
+	});
+
 	it("clears partial state at terminal settlement and ignores late updates", () => {
 		const panel = createChatPanel({ getOutputStyle: () => "detailed", now: () => 1_000 });
 		startTool(panel);
