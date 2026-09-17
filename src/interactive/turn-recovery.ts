@@ -275,7 +275,8 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 						maxAttempts: settings.maxRetries,
 						errorMessage: message,
 					});
-					deps.emitNotice(message);
+					// The exhausted status already exposes this failure and retains its full
+					// diagnostic. A second raw notice bypasses bounded error presentation.
 					pruneFailedAssistantFromContext(agentRuntime.agent);
 					return true;
 				}

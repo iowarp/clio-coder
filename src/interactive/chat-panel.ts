@@ -12,7 +12,8 @@ import { codeInk } from "./renderers/code-ink.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
-import { formatRetryStatus } from "./renderers/retry-status.js";
+import { presentProviderError, providerErrorEvidence } from "./renderers/provider-error.js";
+import { renderRetryStatus } from "./renderers/retry-status.js";
 import {
 	canGroupObservation,
 	renderToolAwaitingApproval,
@@ -223,7 +224,12 @@ type AssistantSegment = TextSegment | ToolSegment | ErrorSegment | ThinkingSegme
  * A caller-rendered block receives the frame's transcript detail policy so a
  * block such as the operator's `!` bash row follows the same preset as the panel. Blocks that ignore it are unaffected.
  */
-type ReplayBlockRenderer = (width: number, detail: TranscriptDetailPolicy, unbounded?: boolean) => string[];
+type ReplayBlockRenderer = (
+	width: number,
+	detail: TranscriptDetailPolicy,
+	unbounded?: boolean,
+	terminalRows?: number,
+) => string[];
 
 type TranscriptEntry =
 	| { role: "user"; text: string; status?: () => UserTurnStatus }
@@ -460,7 +466,7 @@ function scopeTerminalErrorAfterSuccessfulTool(
 	const reason = terminalError.slice("[error] ".length);
 	const timedOut = /\b(?:timed?\s*out|timeout)\b/i.test(reason);
 	const modelFailure = timedOut
-		? "main model response timed out after successful tool result"
+		? `main model response timed out after successful tool result: ${reason}`
 		: `main model response failed after successful tool result: ${reason}`;
 	const detachedDispatchSucceeded = successfulTools.some(
 		(segment) =>
@@ -604,9 +610,9 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
  * message text rather than plain markdown, so a failed turn is visibly a
  * failure. Each source line wraps to width and carries the error color.
  */
-function renderErrorSegmentLines(seg: ErrorSegment, width: number): string[] {
+function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: boolean): string[] {
 	const out: string[] = [];
-	for (const line of seg.text.split("\n")) {
+	for (const line of (unbounded ? providerErrorEvidence(seg.text) : presentProviderError(seg.text)).split("\n")) {
 		for (const wrapped of wrapTextWithAnsi(line, width)) {
 			out.push(`${RED_CRIT}${wrapped}${RESET}`);
 		}
@@ -813,7 +819,7 @@ function renderEntryLines(
 	terminalRows: number,
 ): string[] {
 	if (entry.role === "replayBlock") {
-		return entry.renderBlock(width, detail);
+		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "user") {
 		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
@@ -827,7 +833,7 @@ function renderEntryLines(
 		return rendered;
 	}
 	if (entry.role === "retryStatus") {
-		return wrapTextWithAnsi(formatRetryStatus(entry.status), width);
+		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "worker") {
 		return renderWorkerEntryLines(entry.state, width, { detail, terminalRows, unbounded: unboundedToolBodies });
@@ -888,8 +894,13 @@ function renderEntryLines(
 			labeled = true;
 			continue;
 		}
-		const rendered =
-			seg.kind === "text" ? renderTextSegmentLines(seg, proseWidth) : renderErrorSegmentLines(seg, proseWidth);
+		let rendered =
+			seg.kind === "text"
+				? renderTextSegmentLines(seg, proseWidth)
+				: renderErrorSegmentLines(seg, proseWidth, unboundedToolBodies);
+		if (seg.kind === "error" && !unboundedToolBodies) {
+			rendered = previewRows(rendered, previewBudget(detail.errorRows, terminalRows), proseWidth);
+		}
 		if (rendered.length === 0) continue;
 		const isSkillSuggestion = seg.kind === "text" && findSkillSuggestionLine(seg) !== null;
 		if (!labeled && !isSkillSuggestion) {
@@ -1331,6 +1342,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			for (const entry of transcript) {
 				if (entry.role === "assistant") {
 					for (const seg of entry.segments) {
+						if (seg.kind === "error") add("Provider or terminal error", () => providerErrorEvidence(seg.text).split("\n"));
 						if (seg.kind === "thinking" && seg.text) add("Thinking · supplied reasoning", () => seg.text.split("\n"));
 						if (seg.kind === "tool")
 							add(`${seg.name} · ${seg.id}`, () =>
@@ -1350,6 +1362,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 								),
 							);
 					}
+				} else if (entry.role === "retryStatus" && entry.status.errorMessage) {
+					add("Provider retry diagnostic", () => providerErrorEvidence(entry.status.errorMessage ?? "").split("\n"));
 				} else if (entry.role === "worker") {
 					add(`${entry.state.agentId} · worker ${entry.state.runId}`, () =>
 						renderWorkerEntryLines(entry.state, 120, { unbounded: true }),

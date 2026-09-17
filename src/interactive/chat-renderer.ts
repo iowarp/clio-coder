@@ -53,12 +53,12 @@ import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
-import { isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
+import { hasStructuredToolCall, isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
 import type { ChatPanel } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
-import { formatRetryStatus } from "./renderers/retry-status.js";
+import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
 import {
 	classifyStreamEvent,
@@ -823,7 +823,13 @@ function renderBashExecutionEntry(
 	);
 }
 
-function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
+function renderRetryStatusEntry(
+	entry: CustomEntry,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	unbounded: boolean,
+	terminalRows: number,
+): string[] {
 	const data = payloadObject(entry.data);
 	if (!data) return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
 	const rawPhase = data.phase;
@@ -848,7 +854,7 @@ function renderRetryStatusEntry(entry: CustomEntry, width: number): string[] {
 		...(typeof data.delayMs === "number" ? { delayMs: data.delayMs } : {}),
 		...(typeof data.seconds === "number" ? { seconds: data.seconds } : {}),
 	};
-	return wrapTextWithAnsi(formatRetryStatus(status), width);
+	return renderRetryStatus(status, width, detail, unbounded, terminalRows);
 }
 
 /**
@@ -868,8 +874,14 @@ function rendersCustomEntry(entry: CustomEntry): boolean {
 	return entry.display === true;
 }
 
-function renderCustomEntry(entry: CustomEntry, width: number): string[] {
-	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width);
+function renderCustomEntry(
+	entry: CustomEntry,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	unbounded: boolean,
+	terminalRows: number,
+): string[] {
+	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width, detail, unbounded, terminalRows);
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
 		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] carried from session ${entry.data.fromSessionId}`), width);
 	}
@@ -1269,9 +1281,16 @@ export function rehydrateChatPanelFromTurns(
 							(message as { stopReason?: string; errorMessage?: string }).stopReason = failure.stopReason;
 							(message as { stopReason?: string; errorMessage?: string }).errorMessage = failure.errorMessage;
 						}
+						const stopReason = (message as { stopReason?: string }).stopReason;
+						const terminalFailure = stopReason === "error" || stopReason === "aborted" || stopReason === "length";
+						const continues = !terminalFailure && (stopReason === "toolUse" || hasStructuredToolCall(message));
+						// Tool-use messages continue this run. Settling before their tool rows
+						// exist can attach a Done receipt to an earlier visible failure.
+						// Keep incomplete replay pending until a terminal assistant arrives.
+						if (continues) chatPanel.applyEvent({ type: "message_start", message });
 						chatPanel.applyEvent({ type: "message_end", message });
 						runAssistantMessages.push(message);
-						chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages });
+						if (!continues) chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages });
 					}
 					break;
 				}
@@ -1347,7 +1366,10 @@ export function rehydrateChatPanelFromTurns(
 				break;
 			}
 			case "custom":
-				if (rendersCustomEntry(entry)) chatPanel.appendReplayBlock((width) => renderCustomEntry(entry, width));
+				if (rendersCustomEntry(entry))
+					chatPanel.appendReplayBlock((width, detail, unbounded, terminalRows = 40) =>
+						renderCustomEntry(entry, width, detail, unbounded === true || options.unboundedToolBodies === true, terminalRows),
+					);
 				break;
 			case "modelChange":
 				chatPanel.appendReplayBlock((width) => renderModelChangeEntry(entry, width));
