@@ -2,6 +2,11 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Fixed
+- Read the context window a resident Ollama model is actually served at from `/api/ps`, so an `ollama-native` target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
+
 ## 0.4.9 - 2026-09-17
 
 ### read
