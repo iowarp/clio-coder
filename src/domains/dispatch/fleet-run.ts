@@ -788,6 +788,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 			beginWriteBoundary: (window, stepIds) => boundaryEnforcer.begin(window, stepIds),
 			verifyWriteBoundary: (window, stepIds) => boundaryEnforcer.verify(window, stepIds),
 			cancel: (assignmentId) => dispatch.abort(assignmentId),
+			drainMember: (assignmentId) => dispatch.drainMember?.(assignmentId) ?? Promise.resolve(),
 			release: (ownerId) => {
 				if (ownerId === NO_WORKER_RESERVATION) return;
 				dispatch.reservations?.release(ownerId);

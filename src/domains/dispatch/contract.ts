@@ -349,6 +349,13 @@ export interface DispatchContract {
 	abort(runId: string, reason?: AbortReason): void;
 
 	/**
+	 * Wait for one member's attempts, queued retries and retry admissions to
+	 * settle. Does not cancel work; fleet owners call synchronous abort first
+	 * when stopping. Other members and the global drain lifecycle are untouched.
+	 */
+	drainMember?(runId: string): Promise<void>;
+
+	/**
 	 * Queue operator guidance on a running HTTP or SDK worker. A logical
 	 * assignment id addresses its current attempt. The text is sent as a JSON
 	 * line on the worker's open stdin and injected into its transcript at the

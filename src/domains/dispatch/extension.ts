@@ -2883,11 +2883,30 @@ export function createDispatchBundle(
 		rootRunId: string;
 		terminalCandidate: RunReceipt;
 		timer: ReturnType<typeof setTimeout>;
+		settleCanceled: () => void;
 	}
 	const retryQueue = new Map<string, RetryQueueEntry>();
 	const retryBackoff = new Map<string, BackoffState>();
 	const retryReasons = new Map<string, string>();
 	const assignmentRootsByAttempt = new Map<string, string>();
+	// Fleet lineage is shared ancestry, not control ownership. Keep each
+	// member's retry chain distinct without changing persisted lineage.
+	const controlRootsByAttempt = new Map<string, string>();
+	const controlAttempts = new Map<string, { lineage: RunLineage; reservation: DispatchRequest["reservation"] }>();
+	const canceledControlRoots = new Set<string>();
+	const memberWork = new Map<string, Set<Promise<unknown>>>();
+	function trackMemberWork(runId: string, operation: Promise<unknown>): void {
+		const root = controlRootsByAttempt.get(runId) ?? runId;
+		const work = memberWork.get(root) ?? new Set<Promise<unknown>>();
+		memberWork.set(root, work);
+		work.add(operation);
+		const settled = (): void => {
+			work.delete(operation);
+			if (work.size === 0) memberWork.delete(root);
+		};
+		operation.then(settled, settled);
+	}
+
 	const assignments = new AssignmentRegistry({
 		onStreamError: (error) => reportDispatchDiagnostic("assignment event stream", error),
 	});
@@ -2919,6 +2938,20 @@ export function createDispatchBundle(
 	function lineageFor(req: DispatchRequest, runId: string): RunLineage {
 		const lineage = req.lineage ? { ...req.lineage } : { parentRunId: null, rootRunId: runId, attempt: 0, depth: 0 };
 		assignmentRootsByAttempt.set(runId, lineage.rootRunId);
+		const parent = lineage.parentRunId === null ? undefined : controlAttempts.get(lineage.parentRunId);
+		// Repair ordinals and fleet ancestry do not establish a retry. Only a
+		// known consecutive attempt of the same reservation member can do so.
+		const continuesParent =
+			parent !== undefined &&
+			parent.lineage.rootRunId === lineage.rootRunId &&
+			parent.lineage.depth === lineage.depth &&
+			parent.lineage.attempt + 1 === lineage.attempt &&
+			parent.reservation?.ownerId === req.reservation?.ownerId &&
+			parent.reservation?.memberId === req.reservation?.memberId;
+		const priorControl =
+			continuesParent && lineage.parentRunId !== null ? controlRootsByAttempt.get(lineage.parentRunId) : undefined;
+		controlRootsByAttempt.set(runId, priorControl ?? runId);
+		controlAttempts.set(runId, { lineage, reservation: req.reservation });
 		return lineage;
 	}
 
@@ -2985,7 +3018,8 @@ export function createDispatchBundle(
 
 	/** A reserved plan member owns its retry chain independently of the shared fleet root assignment. */
 	function retryChainIsLive(run: ActiveRun): boolean {
-		if (run.aborted) return false;
+		if (run.aborted || canceledControlRoots.has(controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId))
+			return false;
 		const reservation = run.req.reservation;
 		if (reservation === undefined) return assignments.get(run.lineage.rootRunId)?.status === "running";
 		try {
@@ -3069,9 +3103,18 @@ export function createDispatchBundle(
 		const attempt = run.lineage.attempt + 1;
 		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
 		const dueAt = now() + delayMs;
+		let settleCanceled!: () => void;
+		let rejectContinuation!: (error: unknown) => void;
+		const continuation = new Promise<void>((resolve, reject) => {
+			settleCanceled = resolve;
+			rejectContinuation = reject;
+		});
+		trackMemberWork(run.runId, continuation);
 		const timer = setTimeout(() => {
 			retryQueue.delete(run.runId);
-			void executeRetry(run, attempt, reason, decision);
+			// Ownership starts at scheduling, covering admission before a handle
+			// exists and terminal receipt work after the handle arrives.
+			executeRetry(run, attempt, reason, decision).then(settleCanceled, rejectContinuation);
 		}, delayMs);
 		retryQueue.set(run.runId, {
 			runId: run.runId,
@@ -3084,6 +3127,7 @@ export function createDispatchBundle(
 			rootRunId,
 			terminalCandidate: receipt,
 			timer,
+			settleCanceled,
 		});
 		context.bus.emit(BusChannels.DispatchProgress, {
 			runId: run.runId,
@@ -3184,6 +3228,7 @@ export function createDispatchBundle(
 		// the worktree it created). A retry shares the assignment lineage but
 		// must receive its own ledger/run identity.
 		delete retryReq.runIdHint;
+		let terminal: Promise<RunReceipt> | undefined;
 		const reasonKey = retryReasonKey(run.lineage.rootRunId, attempt);
 		retryReasons.set(reasonKey, reason);
 		try {
@@ -3249,6 +3294,10 @@ export function createDispatchBundle(
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
 			}
 			const handle = await dispatch(retryReq, undefined, run.hostRun === undefined ? undefined : { hostRun: run.hostRun });
+			// Cancellation can arrive while retry admission is awaiting a handle.
+			if (canceledControlRoots.has(controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId)) {
+				contract.abort(handle.runId);
+			}
 			// The assignment folds every attempt into one stream with a reset marker.
 			const marker: AssignmentAttemptStartEvent = {
 				type: "attempt_start",
@@ -3270,6 +3319,7 @@ export function createDispatchBundle(
 				runtimeKind: run.runtimeKind,
 				event: marker,
 			});
+			terminal = handle.finalPromise;
 			handle.finalPromise.catch((error) => {
 				assignments.reject(asAssignmentId(run.lineage.rootRunId), error);
 				reportDispatchDiagnostic(`finalize retry run ${handle.runId}`, error);
@@ -3302,6 +3352,7 @@ export function createDispatchBundle(
 				outcomeDetail: denial,
 			});
 		}
+		await terminal;
 	}
 
 	function requireLedger(): Ledger {
@@ -6177,7 +6228,11 @@ export function createDispatchBundle(
 		}
 		// Requests carrying lineage are internal attempts (retry or nested
 		// orchestration) and retain the per-attempt handle contract.
-		if (req.lineage) return { ...handle, finalPromise: handle.finalPromise.finally(() => writerLease?.release()) };
+		if (req.lineage) {
+			const finalPromise = handle.finalPromise.finally(() => writerLease?.release());
+			trackMemberWork(handle.runId, finalPromise);
+			return { ...handle, finalPromise };
+		}
 
 		const assignment = assignments.open(handle.runId, assignmentPolicyFor(handle.effectiveRequest));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
@@ -6936,6 +6991,7 @@ export function createDispatchBundle(
 	function settleQueuedAssignmentsForShutdown(): void {
 		for (const [finishedRunId, entry] of retryQueue) {
 			clearTimeout(entry.timer);
+			entry.settleCanceled();
 			if (assignments.get(entry.rootRunId)?.status === "running") {
 				settleAssignmentDurably(asAssignmentId(entry.rootRunId), entry.terminalCandidate, "canceled");
 			}
@@ -6981,11 +7037,28 @@ export function createDispatchBundle(
 		return stored?.assignmentId ?? ledger?.get(id)?.lineage?.rootRunId ?? id;
 	}
 
+	function controlRootFor(id: string): string {
+		const exact = controlRootsByAttempt.get(id);
+		if (exact !== undefined) return exact;
+		const roots = new Set<string>();
+		for (const [attempt, root] of assignmentRootsByAttempt) {
+			if (root === id) roots.add(controlRootsByAttempt.get(attempt) ?? root);
+		}
+		if (roots.size > 1) {
+			throw new Error(`dispatch: '${id}' names multiple fleet members; use a concrete member or assignment id`);
+		}
+		return roots.values().next().value ?? assignmentRootFor(id);
+	}
+
 	function currentAssignmentRun(id: string): ActiveRun | null {
-		const rootRunId = assignmentRootFor(id);
+		// An exact live attempt is authoritative even if a sibling has a higher
+		// attempt ordinal. Completed IDs may follow only their own retry chain.
+		const exact = active.get(id);
+		if (exact !== undefined) return exact;
+		const rootRunId = controlRootFor(id);
 		let current: ActiveRun | null = null;
 		for (const run of active.values()) {
-			if (run.lineage.rootRunId !== rootRunId) continue;
+			if ((controlRootsByAttempt.get(run.runId) ?? run.lineage.rootRunId) !== rootRunId) continue;
 			if (current === null || run.lineage.attempt > current.lineage.attempt) current = run;
 		}
 		return current;
@@ -7039,8 +7112,25 @@ export function createDispatchBundle(
 				await Promise.allSettled([...assignmentWrites]);
 			},
 		},
+		async drainMember(runId) {
+			const root = controlRootFor(runId);
+			const errors: unknown[] = [];
+			while (true) {
+				const pending = [...(memberWork.get(root) ?? [])];
+				const live = currentAssignmentRun(runId);
+				if (live !== null) pending.push(live.finalPromise);
+				if (pending.length === 0) break;
+				for (const result of await Promise.allSettled(pending)) {
+					if (result.status === "rejected" && !errors.includes(result.reason)) errors.push(result.reason);
+				}
+			}
+			if (errors.length === 1) throw errors[0];
+			if (errors.length > 1) throw new AggregateError(errors, "dispatch member drain failed", { cause: errors[0] });
+		},
 		abort(runId, reason) {
-			const rootRunId = assignmentRootFor(runId);
+			const rootRunId = controlRootFor(runId);
+			const run = currentAssignmentRun(runId);
+			canceledControlRoots.add(rootRunId);
 			const queued = pendingCapacity.get(rootRunId);
 			if (queued !== undefined && capacityAdmission.cancel(rootRunId)) {
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel-queued`);
@@ -7058,10 +7148,13 @@ export function createDispatchBundle(
 				persistAssignment(cancelStoredAssignment(rootRunId), `${rootRunId}:cancel`);
 			}
 			for (const [finishedRunId, retry] of retryQueue) {
-				if (retry.rootRunId !== rootRunId) continue;
+				if ((controlRootsByAttempt.get(finishedRunId) ?? retry.rootRunId) !== rootRunId) continue;
 				clearTimeout(retry.timer);
+				retry.settleCanceled();
 				retryQueue.delete(finishedRunId);
-				settleAssignmentDurably(asAssignmentId(rootRunId), retry.terminalCandidate, "canceled");
+				if (retry.rootRunId === rootRunId) {
+					settleAssignmentDurably(asAssignmentId(rootRunId), retry.terminalCandidate, "canceled");
+				}
 				context.bus.emit(BusChannels.RunAborted, {
 					source: "dispatch_abort",
 					runId: finishedRunId,
@@ -7076,7 +7169,6 @@ export function createDispatchBundle(
 					event: { type: "retry_canceled", attempt: retry.attempt },
 				});
 			}
-			const run = currentAssignmentRun(rootRunId);
 			if (!run) return;
 			emitRunAborted(run, "dispatch_abort");
 			run.aborted = true;

@@ -141,6 +141,8 @@ export interface ExecutionSchedulerAdapter {
 	 */
 	verifyWriteBoundary?(window: string, stepIds: ReadonlyArray<string>): Promise<ExecutionWriteBoundaryOutcome>;
 	cancel(assignmentId: string): void;
+	/** Wait for owned continuations, including retry admission, before release. */
+	drainMember?(assignmentId: string): Promise<void>;
 	release(ownerId: string): void;
 	releaseUnconsumed(ownerId: string): void;
 	/** Persist a settled result after boundary enforcement and before a dependent starts. */
@@ -230,7 +232,6 @@ export async function executePlan(
 	// A plan with a single agent step has no peers, so it gets no board.
 	const ledgerId = agentSteps.length >= 2 ? `ledger-plan-${plan.hash.slice(0, 12)}-${Date.now().toString(36)}` : null;
 	const ledger = ledgerId === null ? undefined : { id: ledgerId, sequence: 0 };
-	if (ledgerId !== null) await openAgentLedger(ledgerId);
 	const admissions = agentSteps.map((step) => adapter.preflight(step));
 	const reservation = adapter.reserve(plan, admissions);
 	const reservationOwners = new Set([reservation.ownerId]);
@@ -239,7 +240,10 @@ export async function executePlan(
 	const skipped = new Set<string>();
 	const unneeded = new Set<string>();
 	const needsDecision: string[] = [];
-	const running = new Map<string, { assignmentId: string | null }>();
+	const running = new Map<string, { assignmentId: string | null; canceled: boolean }>();
+	const cleanupErrors: unknown[] = [];
+	const memberIds = new Set<string>();
+	const canceledSteps = new Set<string>();
 	/** Per-check verdict, so a loop's resolution is recomputed from live results. */
 	const checkPassed = new Map<string, boolean>();
 	/** Findings a failed agent verification threaded to its repair attempt. */
@@ -258,11 +262,19 @@ export async function executePlan(
 	// aborted through this signal, which the runner turns into a process-group
 	// kill on the whole command tree.
 	const codeAbort = new AbortController();
+	const cancelOne = (owned: { assignmentId: string | null; canceled: boolean }): void => {
+		if (owned.assignmentId === null || owned.canceled) return;
+		owned.canceled = true;
+		try {
+			adapter.cancel(owned.assignmentId);
+		} catch (error) {
+			cleanupErrors.push(error);
+		}
+	};
 	const cancelOwned = (): void => {
 		stopped = true;
-		for (const owned of running.values()) if (owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
 		codeAbort.abort();
-		for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
+		for (const owned of running.values()) cancelOne(owned);
 	};
 	signal?.addEventListener("abort", cancelOwned, { once: true });
 
@@ -277,42 +289,44 @@ export async function executePlan(
 		results.set(step.id, result);
 		if (isWorkspaceMutator(step)) lastMutationSeq = sequence;
 	};
-	for (const step of plan.steps) {
-		const result = replayed.get(step.id);
-		if (result === undefined) continue;
-		if (!result.succeeded || !result.integrityValid) {
-			throw new Error(`execution plan: replayed step '${step.id}' is not a completed successful step`);
-		}
-		recordCompletion(step, result);
-		if (step.loop?.role === "check" && step.kind === "code") {
-			checkPassed.set(step.id, result.succeeded);
-			attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
-		}
-		if (step.loop?.role === "check" && step.kind === "agent") {
-			const loop = loopsById.get(step.loop.loopId);
-			const decide = adapter.decideLoop;
-			if (loop === undefined || decide === undefined) {
-				throw new Error(`execution plan: replayed loop check '${step.id}' has no decider`);
+	const replayPrefix = async (): Promise<void> => {
+		for (const step of plan.steps) {
+			const result = replayed.get(step.id);
+			if (result === undefined) continue;
+			if (!result.succeeded || !result.integrityValid) {
+				throw new Error(`execution plan: replayed step '${step.id}' is not a completed successful step`);
 			}
-			const decision = await decide({
-				loop,
-				step,
-				attempt: step.loop.attempt,
-				terminalAttempt: step.loop.attempt >= loop.maxAttempts,
-				result,
-				priorResults: results,
-			});
-			checkPassed.set(step.id, decision.resolved);
-			attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
-			if (decision.findings !== null) loopFindings.set(`${loop.id}:${step.loop.attempt}`, decision.findings);
-			if (decision.needsDecision !== undefined && decision.needsDecision !== null) {
-				needsDecision.push(decision.needsDecision);
+			recordCompletion(step, result);
+			if (step.loop?.role === "check" && step.kind === "code") {
+				checkPassed.set(step.id, result.succeeded);
+				attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
+			}
+			if (step.loop?.role === "check" && step.kind === "agent") {
+				const loop = loopsById.get(step.loop.loopId);
+				const decide = adapter.decideLoop;
+				if (loop === undefined || decide === undefined) {
+					throw new Error(`execution plan: replayed loop check '${step.id}' has no decider`);
+				}
+				const decision = await decide({
+					loop,
+					step,
+					attempt: step.loop.attempt,
+					terminalAttempt: step.loop.attempt >= loop.maxAttempts,
+					result,
+					priorResults: results,
+				});
+				checkPassed.set(step.id, decision.resolved);
+				attemptsRun.set(step.loop.loopId, (attemptsRun.get(step.loop.loopId) ?? 0) + 1);
+				if (decision.findings !== null) loopFindings.set(`${loop.id}:${step.loop.attempt}`, decision.findings);
+				if (decision.needsDecision !== undefined && decision.needsDecision !== null) {
+					needsDecision.push(decision.needsDecision);
+				}
+			}
+			if (step.loop?.role === "repair") {
+				repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
 			}
 		}
-		if (step.loop?.role === "repair") {
-			repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
-		}
-	}
+	};
 
 	/**
 	 * A failed predecessor normally disqualifies its dependents. Two deliberate
@@ -422,7 +436,10 @@ export async function executePlan(
 	): Promise<ExecutionStepResult> => {
 		const runCode = adapter.runCode;
 		if (runCode === undefined) throw new Error(`execution plan: no runner for code step '${step.id}'`);
-		return await runCode(step, handoffs, codeAbort.signal, results);
+		const result = await runCode(step, handoffs, codeAbort.signal, results);
+		if (!codeAbort.signal.aborted) return result;
+		canceledSteps.add(step.id);
+		return { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan canceled this step" };
 	};
 
 	/**
@@ -447,6 +464,7 @@ export async function executePlan(
 		}
 		let halt = false;
 		for (const id of [...candidates].sort()) {
+			if (stopped || signal?.aborted) return true;
 			const step = stepsById.get(id);
 			if (step?.kind !== "code") continue;
 			const spent = revalidations.get(id) ?? 0;
@@ -474,7 +492,7 @@ export async function executePlan(
 				if (plan.onFailure === "stop") {
 					stopped = true;
 					codeAbort.abort();
-					for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
+
 					halt = true;
 				}
 			}
@@ -544,7 +562,12 @@ export async function executePlan(
 			return { loopId: loop.id, resolved: false, attempts, repairs, reason };
 		});
 
+	let outcome: ExecutionPlanResult | undefined;
+	let primaryError: unknown;
+	let failed = false;
 	try {
+		if (ledgerId !== null) await openAgentLedger(ledgerId);
+		await replayPrefix();
 		let waveIndex = 0;
 		while (waveIndex < plan.waves.length) {
 			const wave = plan.waves[waveIndex];
@@ -588,56 +611,119 @@ export async function executePlan(
 					boundaryWindow,
 					group.map((entry) => entry.step),
 				);
-				const started = await Promise.all(
-					launch.map(async ({ step, handoffs }) => ({
-						step,
-						handle: await adapter.run(
-							step,
-							handoffs,
-							{ ownerId: reservationByStep.get(step.id) ?? reservation.ownerId, memberId: step.id },
-							ledger,
-						),
-					})),
-				);
-				for (const { step, handle } of started) running.set(step.id, { assignmentId: handle.assignmentId });
-				const onSettled = (step: ExecutionPlanStep, result: ExecutionStepResult): void => {
-					if (isPlanFailure(step, result) && plan.onFailure === "stop") {
-						stopped = true;
-						for (const [runningStepId, owned] of running) {
-							if (runningStepId !== step.id && owned.assignmentId !== null) adapter.cancel(owned.assignmentId);
-						}
-						codeAbort.abort();
-						for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
-					}
+				const failures: unknown[] = [];
+				const fail = (error: unknown): void => {
+					failures.push(error);
+					cancelOwned();
 				};
-				const ran = await Promise.all([
-					...started.map(async ({ step, handle }) => {
-						const result = await handle.result;
-						onSettled(step, result);
-						return { step: step as ExecutionPlanStep, result };
+				const onSettled = (step: ExecutionPlanStep, result: ExecutionStepResult): void => {
+					if (isPlanFailure(step, result) && plan.onFailure === "stop") cancelOwned();
+				};
+				const terminals: Array<Promise<PromiseSettledResult<{ step: ExecutionPlanStep; result: ExecutionStepResult }>[]>> =
+					[];
+				// Own each launch independently and observe its terminal promise as
+				// soon as it arrives, even while a sibling is still starting.
+				await Promise.allSettled(
+					launch.map(async ({ step, handoffs }) => {
+						if (stopped || signal?.aborted) return;
+						const owned = { assignmentId: null as string | null, canceled: false };
+						running.set(step.id, owned);
+						try {
+							const handle = await adapter.run(
+								step,
+								handoffs,
+								{ ownerId: reservationByStep.get(step.id) ?? reservation.ownerId, memberId: step.id },
+								ledger,
+							);
+							owned.assignmentId = handle.assignmentId;
+							memberIds.add(handle.assignmentId);
+							const terminal = handle.result.then(
+								(result) => {
+									// Preserve receipt references and output; this overlay records
+									// scheduler cancellation, not a fabricated worker receipt.
+									if (owned.canceled) canceledSteps.add(step.id);
+									const settled = owned.canceled
+										? { ...result, succeeded: false, failureReason: result.failureReason ?? "execution plan canceled this step" }
+										: result;
+									onSettled(step, settled);
+									if (settled.succeeded) running.delete(step.id);
+									return { step: step as ExecutionPlanStep, result: settled };
+								},
+								(error: unknown) => {
+									fail(error);
+									throw error;
+								},
+							);
+							terminals.push(Promise.allSettled([terminal]));
+							if (stopped || signal?.aborted) cancelOne(owned);
+						} catch (error) {
+							running.delete(step.id);
+							fail(error);
+						}
+						return;
 					}),
-					...codeWork.map(async ({ step, handoffs }) => {
-						const result = await runCodeStepNode(step, handoffs);
-						onSettled(step, result);
-						return { step: step as ExecutionPlanStep, result };
-					}),
-				]);
+				);
+				// Code work retains the startup barrier and shares cancellation with
+				// agents, but has no assignment handle to release.
+				const codeTerminals =
+					stopped || signal?.aborted
+						? []
+						: codeWork.map(async ({ step, handoffs }) => {
+								try {
+									const result = await runCodeStepNode(step, handoffs);
+									onSettled(step, result);
+									return { step: step as ExecutionPlanStep, result };
+								} catch (error) {
+									fail(error);
+									throw error;
+								}
+							});
+				const outcomes = (await Promise.all([...terminals, Promise.allSettled(codeTerminals)])).flat();
+				for (const id of memberIds) {
+					try {
+						await adapter.drainMember?.(id);
+						memberIds.delete(id);
+					} catch (error) {
+						fail(error);
+					}
+				}
+				const ran = outcomes.flatMap((outcome) => (outcome.status === "fulfilled" ? [outcome.value] : []));
+				const settlementOrder = [...launch, ...codeWork].map(({ step }) => step.id);
+				ran.sort((a, b) => settlementOrder.indexOf(a.step.id) - settlementOrder.indexOf(b.step.id));
+
 				// The boundary is settled before anything is recorded or handed on, so
 				// a rolled-back step never appears upstream of the work it would have
 				// contaminated.
-				const settled = await closeBoundary(boundaryWindow, enforced, ran);
+				let settled: typeof ran;
+				try {
+					settled = await closeBoundary(boundaryWindow, enforced, ran);
+				} catch (error) {
+					if (failures.length === 0) throw error;
+					throw new AggregateError([...failures, error], "execution plan failure and boundary verification failed", {
+						cause: failures[0],
+					});
+				}
 				for (const { step, result } of settled) {
-					running.set(step.id, { assignmentId: result.assignmentId });
 					recordCompletion(step, result);
-					await adapter.onStepSettled?.(step, result);
+					try {
+						await adapter.onStepSettled?.(step, result);
+					} catch (error) {
+						failures.push(error);
+						cancelOwned();
+					}
 					if (step.loop?.role === "repair") {
 						repairsRun.set(step.loop.loopId, (repairsRun.get(step.loop.loopId) ?? 0) + 1);
 					}
 					running.delete(step.id);
 				}
+				if (failures.length === 1) throw failures[0];
+				if (failures.length > 1)
+					throw new AggregateError(failures, "execution plan launch or result failed", { cause: failures[0] });
 				// Loop continuation is decided after the wave settles, so a gate's
 				// verdict is read from a sealed result rather than from a live stream.
-				for (const { step, result } of settled) await settleCheck(step, result);
+				for (const { step, result } of settled) {
+					if (!signal?.aborted && !canceledSteps.has(step.id)) await settleCheck(step, result);
+				}
 				// A loop that spent its last attempt without converging ends the run
 				// under a stop policy, whether the verdict came from an exit code or
 				// from a gate that answered "no" perfectly well.
@@ -647,7 +733,6 @@ export async function executePlan(
 				});
 				if ((exhausted || settled.some(({ step, result }) => isPlanFailure(step, result))) && plan.onFailure === "stop") {
 					stopped = true;
-					for (const ownerId of reservationOwners) adapter.releaseUnconsumed(ownerId);
 				}
 			}
 			if (!stopped && adapter.spliceAfter !== undefined) {
@@ -682,7 +767,7 @@ export async function executePlan(
 			}
 			waveIndex += 1;
 		}
-		return {
+		outcome = {
 			planHash: plan.hash,
 			results,
 			skipped: [...skipped],
@@ -693,11 +778,51 @@ export async function executePlan(
 			writeBoundaries: [...writeBoundaries],
 		};
 	} catch (error) {
+		failed = true;
+		primaryError = error;
 		cancelOwned();
-		throw error;
 	} finally {
 		signal?.removeEventListener("abort", cancelOwned);
-		for (const ownerId of reservationOwners) adapter.release(ownerId);
-		if (ledgerId !== null) await closeAgentLedger(ledgerId);
+		for (const id of memberIds) {
+			try {
+				await adapter.drainMember?.(id);
+			} catch (error) {
+				cleanupErrors.push(error);
+			}
+		}
+
+		// Every started launch and terminal is settled before capacity or the
+		// shared ledger is released, including late handles after cancellation.
+		for (const ownerId of reservationOwners) {
+			if (stopped || signal?.aborted) {
+				try {
+					adapter.releaseUnconsumed(ownerId);
+				} catch (error) {
+					cleanupErrors.push(error);
+				}
+			}
+			try {
+				adapter.release(ownerId);
+			} catch (error) {
+				cleanupErrors.push(error);
+			}
+		}
+		if (ledgerId !== null) {
+			try {
+				await closeAgentLedger(ledgerId);
+			} catch (error) {
+				cleanupErrors.push(error);
+			}
+		}
 	}
+	if (cleanupErrors.length > 0) {
+		throw new AggregateError(
+			failed ? [primaryError, ...cleanupErrors] : cleanupErrors,
+			"execution plan cleanup failed",
+			failed ? { cause: primaryError } : undefined,
+		);
+	}
+	if (failed) throw primaryError;
+	if (outcome === undefined) throw new Error("execution plan did not produce an outcome");
+	return outcome;
 }
