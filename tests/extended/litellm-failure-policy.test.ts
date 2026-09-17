@@ -39,6 +39,7 @@ describe("LiteLLM interactive failure policy", () => {
 				baseDelayMs: 1,
 				maxDelayMs: 1,
 				streamStallMs: 1,
+				firstTokenStallMs: 1,
 			}),
 			markPersistedUserEcho: async () => undefined,
 			emitRetryStatus: () => {

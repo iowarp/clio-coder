@@ -42,6 +42,7 @@ export const DEFAULT_RETRY_SETTINGS: RetrySettings = {
 	baseDelayMs: 2000,
 	maxDelayMs: 60000,
 	streamStallMs: 180000,
+	firstTokenStallMs: 600000,
 };
 
 /**

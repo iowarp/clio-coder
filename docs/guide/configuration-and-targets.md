@@ -714,6 +714,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.retry.baseDelayMs` | `2000` | integer ≥ 0 | next turn |
 | `chat.retry.maxDelayMs` | `60000` | integer ≥ 0 | next turn |
 | `chat.retry.streamStallMs` | `180000` | integer ≥ 0; `0` disables the stall timer | next turn |
+| `chat.retry.firstTokenStallMs` | `600000` | integer ≥ 0; silence allowed before a call's first token; `0` never aborts before the first token | next turn |
 
 ### Fleet
 

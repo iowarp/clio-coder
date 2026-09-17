@@ -1309,12 +1309,13 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 						"baseDelayMs",
 						"maxDelayMs",
 						"streamStallMs",
+						"firstTokenStallMs",
 					]);
 					if ("enabled" in chat.retry) {
 						const parsed = expectBoolean(issues, "chat.retry.enabled", chat.retry.enabled);
 						if (parsed !== undefined) settings.chat.retry.enabled = parsed;
 					}
-					for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs"] as const) {
+					for (const key of ["maxRetries", "baseDelayMs", "maxDelayMs", "streamStallMs", "firstTokenStallMs"] as const) {
 						if (!(key in chat.retry)) continue;
 						const parsed = expectInteger(issues, `chat.retry.${key}`, chat.retry[key], { min: 0 });
 						if (parsed !== undefined) settings.chat.retry[key] = parsed;

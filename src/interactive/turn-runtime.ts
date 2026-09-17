@@ -571,20 +571,30 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			stallTimer = setTimeout(
 				() => {
 					stallTimer = null;
-					const stallMs = deps.retrySettings().streamStallMs;
+					const retry = deps.retrySettings();
 					// Zero disables the escalation; an operator who wants a stream to
 					// hang forever keeps that by setting `retry.streamStallMs: 0`.
-					if (stallMs <= 0) return;
+					if (retry.streamStallMs <= 0) return;
 					if (stallSuspendDepth > 0 || toolsInFlight > 0) {
-						armStallTimer(stallMs);
+						armStallTimer(retry.streamStallMs);
 						return;
 					}
+					// Silence before a call's first delta is not silence mid-stream. A
+					// local server that slept reloads the model and prefills cold before
+					// it can emit anything, which is minutes of healthy quiet; a stream
+					// that already produced output and stops is a wedged slot.
+					const awaitingFirstToken = apiCallStartedAt !== null && apiCallFirstDeltaAt === null;
+					if (awaitingFirstToken && retry.firstTokenStallMs <= 0) {
+						armStallTimer(retry.streamStallMs);
+						return;
+					}
+					const stallMs = awaitingFirstToken ? Math.max(retry.firstTokenStallMs, retry.streamStallMs) : retry.streamStallMs;
 					const idleMs = performance.now() - lastActivityAt;
 					if (idleMs < stallMs) {
 						armStallTimer(stallMs - idleMs);
 						return;
 					}
-					state.streamStallReason = `stream stalled: no output from ${localRuntime.targetId} for ${Math.round(idleMs / 1000)}s, aborting (stream timeout)`;
+					state.streamStallReason = `stream stalled: no ${awaitingFirstToken ? "first token" : "output"} from ${localRuntime.targetId} for ${Math.round(idleMs / 1000)}s, aborting (stream timeout)`;
 					localRuntime.agent.abort();
 				},
 				Math.max(1, delayMs),
@@ -767,7 +777,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						typeof assistantEvent.delta === "string" &&
 						assistantEvent.delta.length > 0);
 				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventClock;
-				if (hasDelta && apiCallFirstDeltaAt === null) apiCallFirstDeltaAt = eventClock;
+				if (hasDelta && apiCallFirstDeltaAt === null) {
+					apiCallFirstDeltaAt = eventClock;
+					// The timer may be armed for the longer first-token window; the
+					// stream is live now, so the mid-stream window applies from here.
+					const stallMs = deps.retrySettings().streamStallMs;
+					clearStallTimer();
+					if (stallMs > 0) armStallTimer(stallMs);
+				}
 			}
 			if (enrichedEvent.type === "agent_end") {
 				context.noteRunCacheSummary(enrichedEvent.messages, runFirstCallVerdict);

@@ -217,6 +217,13 @@ export interface RetrySettings {
 	maxDelayMs: number;
 	/** Silence on an in-flight stream past this many ms is treated as a wedged backend: abort and retry. */
 	streamStallMs: number;
+	/**
+	 * Silence allowed before a call's first token. A local server that slept
+	 * reloads the model and prefills cold before it can emit anything, so this
+	 * window is longer than the mid-stream one. 0 never aborts a call that has
+	 * not started streaming.
+	 */
+	firstTokenStallMs: number;
 }
 
 export const OUTPUT_STYLES = ["compact", "standard", "detailed"] as const;
@@ -485,6 +492,7 @@ export const DEFAULT_SETTINGS = {
 			baseDelayMs: 2000,
 			maxDelayMs: 60000,
 			streamStallMs: 180000,
+			firstTokenStallMs: 600000,
 		} as RetrySettings,
 	} as ChatSettings,
 	fleet: {
@@ -620,6 +628,7 @@ chat:
     baseDelayMs: 2000
     maxDelayMs: 60000
     streamStallMs: 180000
+    firstTokenStallMs: 600000
 
 fleet:
   default:

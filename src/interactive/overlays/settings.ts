@@ -230,6 +230,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"retry.baseDelayMs": "Base delay (ms)",
 	"retry.maxDelayMs": "Max delay (ms)",
 	"retry.streamStallMs": "Stream stall timeout (ms)",
+	"retry.firstTokenStallMs": "First token timeout (ms)",
 	"terminal.showTerminalProgress": "Terminal progress badges",
 	"terminal.outputVerbosity": "Output style",
 	"terminal.tuiMode": "TUI mode",
@@ -347,7 +348,14 @@ export const SETTINGS_SECTION_ROWS = {
 		"context.workingSet.protectLastTurns",
 		"context.workingSet.minEvictableTokens",
 	],
-	retry: ["retry.enabled", "retry.maxRetries", "retry.baseDelayMs", "retry.maxDelayMs", "retry.streamStallMs"],
+	retry: [
+		"retry.enabled",
+		"retry.maxRetries",
+		"retry.baseDelayMs",
+		"retry.maxDelayMs",
+		"retry.streamStallMs",
+		"retry.firstTokenStallMs",
+	],
 	terminal: [
 		"terminal.showTerminalProgress",
 		"terminal.outputVerbosity",
@@ -450,6 +458,7 @@ const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"retry.baseDelayMs": "Initial retry delay in milliseconds.",
 	"retry.maxDelayMs": "Maximum retry delay in milliseconds.",
 	"retry.streamStallMs": "Silence on an in-flight stream past this long is treated as a wedged backend.",
+	"retry.firstTokenStallMs": "Silence allowed before a call's first token, for backends that load the model on demand.",
 	"terminal.showTerminalProgress": "Emit OSC 9;4 progress badges during agent turns.",
 	"terminal.outputVerbosity": "How much reasoning, tool input, and live tool output appears in the transcript.",
 	"terminal.tuiMode": "Use regular terminal scrollback or a fullscreen transcript with a sticky composer and footer.",
@@ -508,6 +517,8 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 		"Covers the wiki documenter and the bootstrap scout. Continuous output satisfies the heartbeat watchdog and a run mid-generation spends no tool calls, so this is the only guard that ends a degenerate generator. Healthy runs finish in minutes. Whole milliseconds of at least 1 · default: 900000 (15 minutes).",
 	"retry.streamStallMs":
 		"Measured from the last token received, not from the request, so a slow-but-alive stream is never aborted. The retry then follows the same enabled/maxRetries/delay settings above. Whole milliseconds · default: 180000 (three minutes).",
+	"retry.firstTokenStallMs":
+		"Measured from the request until the first token. A local server that slept reloads the model and prefills cold first, so this window is longer than the stream stall timeout; the larger of the two applies. 0 never aborts a call that has not started streaming. Whole milliseconds · default: 600000 (ten minutes).",
 	"library.catalog":
 		"Absolute path, or blank for the catalog in your config directory. The catalog is the index `clio-coder library` reads; installed resources land in the usual skill and resource roots either way. Default: blank.",
 	"library.remote":
@@ -1925,6 +1936,9 @@ function buildSettingItems(settings: Readonly<ClioSettings>, options?: BuildSett
 		settingItem("retry.streamStallMs", String(retry.streamStallMs), {
 			values: ["60000", "120000", "180000", "300000", "600000"],
 		}),
+		settingItem("retry.firstTokenStallMs", String(retry.firstTokenStallMs), {
+			values: ["180000", "300000", "600000", "900000", "1800000"],
+		}),
 		settingItem("terminal.showTerminalProgress", String(terminal.terminalProgress), {
 			values: ["false", "true"],
 		}),
@@ -2750,6 +2764,11 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 		case "retry.streamStallMs":
 			applyNonNegativeInteger(value, (next) => {
 				settings.chat.retry.streamStallMs = next;
+			});
+			return;
+		case "retry.firstTokenStallMs":
+			applyNonNegativeInteger(value, (next) => {
+				settings.chat.retry.firstTokenStallMs = next;
 			});
 			return;
 		case "library.catalog":
