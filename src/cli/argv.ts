@@ -8,6 +8,16 @@
  */
 
 import chalk from "chalk";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+
+// A type-only import keeps this module out of the domain graph; `satisfies`
+// fails the build if the levels ever drift from the safety domain's list.
+const AUTONOMY_LEVELS = [
+	"read-only",
+	"suggest",
+	"auto-edit",
+	"full-auto",
+] as const satisfies ReadonlyArray<AutonomyLevel>;
 
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
@@ -75,6 +85,8 @@ export interface GlobalCliFlags {
 	 * both beat the `panes.enabled` setting; absent means the setting decides.
 	 */
 	panes?: "with" | "without";
+	/** `--autonomy <level>` before any subcommand: one interactive session at that level. */
+	autonomy?: AutonomyLevel;
 	rest: string[];
 	error?: string;
 }
@@ -136,6 +148,7 @@ export function extractGlobalFlags(
 	let noContextFiles = false;
 	let noSkills = false;
 	let panes: "with" | "without" | undefined;
+	let autonomy: AutonomyLevel | undefined;
 	const skillPaths: string[] = [];
 	for (let i = 0; i < argv.length; i++) {
 		const arg = argv[i];
@@ -174,6 +187,23 @@ export function extractGlobalFlags(
 			panes = arg === "--with-panes" ? "with" : "without";
 			continue;
 		}
+		if (arg === "--autonomy") {
+			const value = argv[i + 1];
+			if (value === undefined || !AUTONOMY_LEVELS.includes(value as AutonomyLevel)) {
+				return {
+					noContextFiles,
+					noSkills,
+					skillPaths,
+					rest,
+					error: `--autonomy must be one of: ${AUTONOMY_LEVELS.join("|")}`,
+					...(apiKey === undefined ? {} : { apiKey }),
+					...(panes === undefined ? {} : { panes }),
+				};
+			}
+			autonomy = value as AutonomyLevel;
+			i += 1;
+			continue;
+		}
 		if (arg === "--api-key" || arg === "--skill") {
 			const value = argv[i + 1];
 			if (value === undefined || value.startsWith("-") || isSubcommand(value)) {
@@ -209,5 +239,6 @@ export function extractGlobalFlags(
 		rest,
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(panes === undefined ? {} : { panes }),
+		...(autonomy === undefined ? {} : { autonomy }),
 	};
 }

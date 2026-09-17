@@ -1196,7 +1196,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createDispatchDomainModule({
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
-				autonomyOverride: options.headless?.autonomy !== undefined,
+				autonomyOverride: (options.headless?.autonomy ?? options.autonomy) !== undefined,
 				// The domain owns the durable journal here, not the dispatch
 				// tool's event registry: `/run`, a watchdog run, and a model
 				// dispatch all have to leave the same transcript behind, and only
@@ -1580,6 +1580,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const resolveBaselineAutonomy = (): AutonomyLevel =>
 		effectiveSettingsForDispatch?.().safety.autonomy ??
 		options.headless?.autonomy ??
+		options.autonomy ??
 		(config?.get() ?? readSettings()).safety.autonomy ??
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
@@ -1801,8 +1802,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// flag was keyed by the bare word, which wrote a top-level `autonomy` key
 	// nothing reads, so `run --autonomy full-auto` compiled and admitted at
 	// whatever settings.yaml said.
+	// The interactive `clio-coder --autonomy <level>` seeds the same override.
+	const startupAutonomy = options.headless?.autonomy ?? options.autonomy;
 	const sessionOverrides: SessionOverrides = new Map(
-		options.headless?.autonomy === undefined ? [] : [["safety.autonomy", options.headless.autonomy]],
+		startupAutonomy === undefined ? [] : [["safety.autonomy", startupAutonomy]],
 	);
 	// The effective view is derived by deep-cloning the saved snapshot, and it
 	// is read on the tool-admission hot path (every call resolves autonomy

@@ -28,6 +28,8 @@ export interface BootOptions {
 	startupSettings?: Readonly<ClioSettings>;
 	/** `--with-panes` / `--no-panes`. The flag beats `panes.enabled` in both directions. */
 	panes?: "with" | "without";
+	/** Global `--autonomy <level>`: a one-session override for the interactive app; settings.yaml is untouched. */
+	autonomy?: AutonomyLevel;
 	headless?: {
 		prompt: string;
 		images?: ReadonlyArray<ImageContent>;

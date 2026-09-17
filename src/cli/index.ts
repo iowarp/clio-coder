@@ -20,6 +20,7 @@ process.env.AI_AGENT = AI_AGENT_NAME;
 // its own chunk.
 import { traceBoot } from "../core/boot-trace.js";
 import { incompleteInstallationAdvice } from "../core/incomplete-installation.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { extractGlobalFlags, parseFlags, printError } from "./argv.js";
 
 const HELP = `Clio Coder command line
@@ -38,6 +39,7 @@ Usage:
   clio-coder --no-context-files, -nc  skip CLIO-CODER.md project-context injection
   clio-coder --with-panes         activate the panes extension (terminal panes for workers and tools)
   clio-coder --no-panes           keep panes off even when settings turn them on
+  clio-coder --autonomy <level>   start this interactive session at read-only|suggest|auto-edit|full-auto
   clio-coder configure            interactive first-run/configuration wizard
   clio-coder targets              list configured targets, health, auth, and capabilities
   clio-coder targets add          add a target interactively or via flags
@@ -71,6 +73,7 @@ Usage:
   clio-coder trace                query or view the durable dispatch trace mirror
   clio-coder extensions           install, list, enable, disable, or remove extension packages
   clio-coder library              register, install, update, import, inspect, and manage packages of every kind
+  clio-coder mcp list|trust|untrust  list MCP servers and manage trust for project-declared servers
   clio-coder tasks                list, add, hand, finish, or drop project operator tasks
   clio-coder verifiers            discover, inspect, author, validate, edit, or dry-run project checks
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
@@ -122,6 +125,7 @@ interface CliBootOptions {
 	noSkills?: boolean;
 	skillPaths?: string[];
 	panes?: "with" | "without";
+	autonomy?: AutonomyLevel;
 }
 
 type CommandHandler = (subArgs: string[], bootOptions: CliBootOptions) => Promise<number>;
@@ -154,6 +158,7 @@ async function main(argv: string[]): Promise<number> {
 		noSkills,
 		skillPaths,
 		panes,
+		autonomy,
 		rest,
 		error: globalFlagError,
 	} = extractGlobalFlags(argv, isCommandToken);
@@ -182,10 +187,17 @@ async function main(argv: string[]): Promise<number> {
 		...(skillPaths.length > 0 ? { skillPaths } : {}),
 		...(panes === undefined ? {} : { panes }),
 	};
+	if (autonomy !== undefined && subcommand) {
+		// Silently dropping a safety level would be worse than refusing it.
+		printError(
+			`--autonomy before a subcommand applies to the interactive session only. For a headless turn use: clio-coder run --autonomy ${autonomy} "<task>"`,
+		);
+		return 2;
+	}
 	if (!subcommand) {
 		await enableBootCompileCache();
 		const { runClioCommand } = await import("./clio.js");
-		return runClioCommand(bootOptions);
+		return runClioCommand({ ...bootOptions, ...(autonomy === undefined ? {} : { autonomy }) });
 	}
 
 	return dispatch(subcommand, subArgs, bootOptions);

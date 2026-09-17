@@ -249,6 +249,32 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 		}
 	});
 
+	it("accepts --autonomy for the interactive session and refuses it where it would be dropped", async () => {
+		// WTF-P's guide and a published tutorial start a supervised session with
+		// `clio-coder --autonomy suggest`, which failed as an unknown global option.
+		const home = isolatedHome("clio-coder-autonomy-boot-");
+		try {
+			mkdirSync(join(home.root, "config"), { recursive: true });
+			writeFileSync(join(home.root, "config", "settings.yaml"), V1_SETTINGS);
+			strictEqual((await run(["upgrade"], home.env)).code, 0);
+			const settingsPath = join(home.root, "config", "settings.yaml");
+			writeFileSync(settingsPath, readFileSync(settingsPath, "utf8").replace("http://127.0.0.1:1234", endpoint));
+			const saved = readFileSync(settingsPath, "utf8");
+
+			const bogus = await run(["--autonomy", "yolo"], home.env);
+			strictEqual(bogus.code, 2, bogus.output);
+			match(bogus.output, /--autonomy must be one of: read-only\|suggest\|auto-edit\|full-auto/u);
+			const dropped = await run(["--autonomy", "suggest", "doctor"], home.env);
+			strictEqual(dropped.code, 2, dropped.output);
+			match(dropped.output, /clio-coder run --autonomy suggest/u);
+
+			await reachEditor(launch(["--autonomy", "suggest"], { ...home.env, CLIO_CODER_INTERACTIVE: "1" }));
+			strictEqual(readFileSync(settingsPath, "utf8"), saved, "a one-session override must not rewrite settings.yaml");
+		} finally {
+			home.cleanup();
+		}
+	});
+
 	it("takes a genuinely empty home through first-run setup to the editor over ordinary process I/O", async () => {
 		const home = isolatedHome("clio-coder-fresh-boot-");
 		let cli: RunningCli | undefined;
