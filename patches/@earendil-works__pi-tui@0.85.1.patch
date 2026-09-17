@@ -68,7 +68,7 @@ index 982a3d9888fa79ed008f643beaf9461b068aed9e..b0166fca1076ab108f88874f9c776734
      constructor(options?: InputOptions);
      getValue(): string;
      setValue(value: string): void;
-+    applyEdit(operation: "undo" | "deleteCharBackward" | "deleteCharForward" | "deleteWordBackward" | "deleteWordForward" | "deleteToLineStart" | "deleteToLineEnd"): void;
++    applyEdit(operation: "undo" | "clear" | "deleteCharBackward" | "deleteCharForward" | "deleteWordBackward" | "deleteWordForward" | "deleteToLineStart" | "deleteToLineEnd"): void;
      handleInput(data: string): void;
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
@@ -76,7 +76,7 @@ diff --git a/dist/components/input.js b/dist/components/input.js
 index 5e7fffa205390c2b2ff906a5386275c9197490fa..e572c2b3ec0b05710141fb752cddd8f1fcf4b134 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
-@@ -40,6 +40,18 @@ export class Input {
+@@ -40,6 +40,26 @@ export class Input {
          this.value = value;
          this.cursor = Math.min(this.cursor, value.length);
      }
@@ -84,6 +84,14 @@ index 5e7fffa205390c2b2ff906a5386275c9197490fa..e572c2b3ec0b05710141fb752cddd8f1
 +    applyEdit(operation) {
 +        switch (operation) {
 +            case "undo": this.undo(); break;
++            case "clear":
++                if (this.value.length === 0) break;
++                this.pushUndo();
++                this.killRing.push(this.value, { prepend: false, accumulate: false });
++                this.lastAction = "kill";
++                this.value = "";
++                this.cursor = 0;
++                break;
 +            case "deleteCharBackward": this.handleBackspace(); break;
 +            case "deleteCharForward": this.handleForwardDelete(); break;
 +            case "deleteWordBackward": this.deleteWordBackwards(); break;

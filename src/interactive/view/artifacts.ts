@@ -1125,11 +1125,12 @@ export class WorkspaceArtifactProvider implements ArtifactProvider {
 				{
 					id: `workspace:${path}`,
 					category: this.category,
-					title: safeTitle(`${artifact.path} · ${artifact.tool}${kind}`, artifact.path),
+					title: safeTitle(`${basename(path)} · ${relative(workspace, path)} · ${artifact.tool}${kind}`, basename(path)),
 					timestamp: parseTime(artifact.timestamp),
 					sizeBytes: maybeSizeBytes(path),
 					path,
-					description: `${artifact.tool}${kind} · ${overwriteLabel}`,
+					description: `${artifact.tool}${kind} · ${overwriteLabel} · Workspace: ${workspace} · Turn: ${artifact.turnId}`,
+					...(this.deps.sessionMeta ? { sessionId: this.deps.sessionMeta.id } : {}),
 					toolName: artifact.tool,
 					searchText: [
 						artifact.path,

@@ -9,7 +9,7 @@ overrides:
 
 patchedDependencies:
   '@earendil-works/pi-tui@0.85.1':
-    hash: ec19082bc22b52105d8b41b3c957d11d17891b655fb25a53515e5de501ef3cfc
+    hash: a4d1575eb8ae41230a75d3e75db31c4d2611c0e8e53d4beeb563b6868a6fe0eb
     path: patches/@earendil-works__pi-tui@0.85.1.patch
 
 importers:
@@ -24,7 +24,7 @@ importers:
         version: 0.85.1(@modelcontextprotocol/sdk@1.30.0(zod@4.5.4))(ws@8.21.3)(zod@4.5.4)
       '@earendil-works/pi-tui':
         specifier: 0.85.1
-        version: 0.85.1(patch_hash=ec19082bc22b52105d8b41b3c957d11d17891b655fb25a53515e5de501ef3cfc)
+        version: 0.85.1(patch_hash=a4d1575eb8ae41230a75d3e75db31c4d2611c0e8e53d4beeb563b6868a6fe0eb)
       '@silvia-odwyer/photon-node':
         specifier: ^0.3.4
         version: 0.3.4
@@ -2712,7 +2712,7 @@ snapshots:
 
   '@earendil-works/pi-telemetry@0.85.1': {}
 
-  '@earendil-works/pi-tui@0.85.1(patch_hash=ec19082bc22b52105d8b41b3c957d11d17891b655fb25a53515e5de501ef3cfc)':
+  '@earendil-works/pi-tui@0.85.1(patch_hash=a4d1575eb8ae41230a75d3e75db31c4d2611c0e8e53d4beeb563b6868a6fe0eb)':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5

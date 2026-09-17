@@ -1,6 +1,6 @@
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import {
 	type Component,
-	fuzzyFilter,
 	Input,
 	Markdown,
 	matchesKey,
@@ -168,10 +168,6 @@ function isNonEmptySearchValue(value: string | undefined): value is string {
 	return typeof value === "string" && value.trim().length > 0;
 }
 
-function broadFilterText(artifact: ViewArtifact): string {
-	return `${artifact.id} ${artifact.category} ${artifact.title}`;
-}
-
 function artifactSearchValues(artifact: ViewArtifact): string[] {
 	return [
 		artifact.id,
@@ -188,8 +184,12 @@ function artifactSearchValues(artifact: ViewArtifact): string[] {
 	].filter(isNonEmptySearchValue);
 }
 
-function categoryFilterText(artifact: ViewArtifact): string {
-	return artifactSearchValues(artifact).join(" ");
+function matchesFilterText(artifact: ViewArtifact, query: string): boolean {
+	const values = artifactSearchValues(artifact).map((value) => value.toLocaleLowerCase());
+	return query
+		.toLocaleLowerCase()
+		.split(/\s+/u)
+		.every((token) => values.some((value) => value.includes(token)));
 }
 
 function matchesExactArtifactValue(artifact: ViewArtifact, value: string): boolean {
@@ -225,10 +225,10 @@ function filterViewArtifacts(artifacts: ReadonlyArray<ViewArtifact>, query: stri
 	if (parsed.kind === "category") {
 		const categoryArtifacts = artifacts.filter((artifact) => artifact.category === parsed.category);
 		if (parsed.value.length === 0) return categoryArtifacts;
-		return fuzzyFilter(categoryArtifacts, parsed.value, categoryFilterText);
+		return categoryArtifacts.filter((artifact) => matchesFilterText(artifact, parsed.value));
 	}
 	if (parsed.text.length === 0) return [...artifacts];
-	return fuzzyFilter([...artifacts], parsed.text, broadFilterText);
+	return artifacts.filter((artifact) => matchesFilterText(artifact, parsed.text));
 }
 
 function artifactsInCategoryOrder(artifacts: ReadonlyArray<ViewArtifact>): ViewArtifact[] {
@@ -418,6 +418,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 			{ key: "PgUp/PgDn", verb: "page" },
 			{ key: "g/G", verb: "top/bottom" },
 			...(canVerify ? [{ key: "v", verb: "verify" }] : []),
+			{ key: "i", verb: "info" },
 			{ key: "o", verb: "path" },
 		],
 		"back",
@@ -446,31 +447,44 @@ export class ViewOverlayView implements Component {
 	private artifactError: string | null = null;
 	private content: LoadedContent | null = null;
 	private loadToken = 0;
+	private refreshToken = 0;
+	private showProvenance = false;
 	private lastContentWidth = 80;
 	private lastContentBodyHeight = 1;
 	private readonly verifications = new Map<string, ViewVerificationState>();
 
 	constructor(private readonly options: ViewOverlayOptions) {
 		this.filterText = options.initialFilter ?? "";
-		this.filterInput.setValue(this.filterText);
+		this.filterInput.handleInput(`\x1b[200~${this.filterText}\x1b[201~`);
 	}
 
 	refresh(): void {
+		const refreshToken = ++this.refreshToken;
+		const selected = this.selectedArtifact();
+		this.loadToken += 1;
 		this.loadingArtifacts = true;
 		this.artifactError = null;
 		this.options.requestRender?.();
 		void (async () => {
 			try {
-				this.artifacts = await listViewArtifacts(this.options.providers);
-				this.selectedIndex = initialViewSelection(this.artifacts, this.filterText);
+				const artifacts = await listViewArtifacts(this.options.providers);
+				if (refreshToken !== this.refreshToken) return;
+				this.artifacts = artifacts;
+				const retainedIndex = selected
+					? this.filteredArtifacts().findIndex((artifact) => artifactKey(artifact) === artifactKey(selected))
+					: -1;
+				this.selectedIndex = retainedIndex >= 0 ? retainedIndex : initialViewSelection(this.artifacts, this.filterText);
 				this.contentScrollOffset = 0;
 				this.content = null;
 			} catch (err) {
+				if (refreshToken !== this.refreshToken) return;
 				this.artifactError = err instanceof Error ? err.message : String(err);
 				this.artifacts = [];
 			} finally {
-				this.loadingArtifacts = false;
-				this.options.requestRender?.();
+				if (refreshToken === this.refreshToken) {
+					this.loadingArtifacts = false;
+					this.options.requestRender?.();
+				}
 			}
 		})();
 	}
@@ -490,6 +504,8 @@ export class ViewOverlayView implements Component {
 	}
 
 	private selectIndex(next: number): void {
+		this.loadToken += 1;
+		this.showProvenance = false;
 		const filtered = this.filteredArtifacts();
 		if (filtered.length === 0) {
 			this.selectedIndex = 0;
@@ -513,14 +529,17 @@ export class ViewOverlayView implements Component {
 	}
 
 	private ensureContentLoaded(artifact: ViewArtifact | undefined): void {
-		if (!artifact) return;
+		if (!artifact) {
+			this.content = null;
+			return;
+		}
 		const key = artifactKey(artifact);
 		if (this.content?.key === key) return;
 		const token = ++this.loadToken;
 		this.content = { key, status: "loading", lines: [clioTheme().fg("dim", "loading artifact…")], format: "text" };
 		void (async () => {
 			try {
-				const loaded = await artifact.load();
+				const loaded = await Promise.resolve().then(() => artifact.load());
 				if (token !== this.loadToken) return;
 				this.content = { key, status: "loaded", lines: loaded.lines, format: loaded.format };
 			} catch (err) {
@@ -540,6 +559,20 @@ export class ViewOverlayView implements Component {
 	}
 
 	private renderedContentLines(width: number): string[] {
+		if (this.showProvenance) {
+			const artifact = this.selectedArtifact();
+			if (!artifact) return [];
+			return [
+				`Title: ${artifact.title}`,
+				`Category: ${artifact.category}`,
+				`ID: ${artifact.id}`,
+				`Path: ${artifact.path ?? "No backing path"}`,
+				...(artifact.sessionId ? [`Session: ${artifact.sessionId}`] : []),
+				...(artifact.runId ? [`Run: ${artifact.runId}`] : []),
+				...(artifact.correlationId ? [`Correlation: ${artifact.correlationId}`] : []),
+				...(artifact.description ? [`Details: ${artifact.description}`] : []),
+			].flatMap((line) => wrapTextWithAnsi(sanitizeCallTargetText(line), Math.max(1, width)));
+		}
 		const content = this.content;
 		if (!content) return [];
 		if (content.status === "error") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
@@ -572,10 +605,30 @@ export class ViewOverlayView implements Component {
 		}
 
 		const filtered = this.filteredArtifacts();
-		if (filtered.length === 0) return this.fixedLines([...lines, theme.fg("dim", "No matching details.")], width, height);
+		lines.push(
+			padAnsi(
+				theme.fg(
+					this.focus === "list" ? "accent" : "dim",
+					`List · ${filtered.length}/${this.artifacts.length} · ←→ category`,
+				),
+				width,
+				ELLIPSIS,
+			),
+		);
+		if (filtered.length === 0)
+			return this.fixedLines(
+				[
+					...lines,
+					theme.fg("dim", "No matching details."),
+					theme.fg("muted", "Ctrl+U clears the filter."),
+					theme.fg("dim", "Try workspace: or receipt:"),
+				],
+				width,
+				height,
+			);
 		const rows = groupedViewRows(filtered);
 		const selectedRow = rows.findIndex((row) => row.type === "item" && row.itemIndex === this.selectedIndex);
-		const rowHeight = Math.max(1, height - 1);
+		const rowHeight = Math.max(1, height - lines.length);
 		if (selectedRow >= 0) {
 			if (selectedRow < this.listScrollOffset) this.listScrollOffset = selectedRow;
 			if (selectedRow >= this.listScrollOffset + rowHeight) this.listScrollOffset = selectedRow - rowHeight + 1;
@@ -614,7 +667,21 @@ export class ViewOverlayView implements Component {
 		this.ensureContentLoaded(artifact);
 		this.lastContentWidth = width;
 		const verification = artifact ? this.verifications.get(artifactKey(artifact)) : undefined;
-		const header = buildArtifactHeaderLines(artifact, verification, width);
+		const header = [
+			padAnsi(
+				clioTheme().fg(
+					this.focus === "content" ? "accent" : "dim",
+					this.showProvenance
+						? "Provenance · i preview · Esc list"
+						: this.focus === "content"
+							? "Preview · i info · Esc list"
+							: "Preview · Enter/Tab focus",
+				),
+				width,
+				ELLIPSIS,
+			),
+			...buildArtifactHeaderLines(artifact, verification, width),
+		];
 		const bodyHeight = Math.max(0, height - header.length);
 		this.lastContentBodyHeight = Math.max(1, bodyHeight);
 		const body = this.renderedContentLines(width);
@@ -657,6 +724,7 @@ export class ViewOverlayView implements Component {
 			matchesKey(data, "shift+tab") ||
 			(this.focus === "list" && matchesKey(data, "enter"))
 		) {
+			if (this.focus === "list" && !this.selectedArtifact()) return;
 			this.focus = this.focus === "list" ? "content" : "list";
 			this.options.requestRender?.();
 			return;
@@ -667,6 +735,12 @@ export class ViewOverlayView implements Component {
 		}
 		if (matchesKey(data, "right")) {
 			this.selectCategory(1);
+			return;
+		}
+		if (this.focus === "content" && data === "i") {
+			this.showProvenance = !this.showProvenance;
+			this.contentScrollOffset = 0;
+			this.options.requestRender?.();
 			return;
 		}
 		if (this.focus === "content" && data === "v") {
@@ -704,7 +778,9 @@ export class ViewOverlayView implements Component {
 			return true;
 		}
 		const previous = this.filterText;
-		this.filterInput.handleInput(data);
+		if (matchesKey(data, "ctrl+u")) {
+			this.filterInput.applyEdit("clear");
+		} else this.filterInput.handleInput(data);
 		this.filterText = this.filterInput.getValue();
 		if (previous !== this.filterText) {
 			this.selectInitialFilterMatch();
