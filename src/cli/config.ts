@@ -24,6 +24,10 @@ function renderText(cwd: string): string {
 
 	out.push("Settings (only keys a layer set; everything else is built-in):");
 	if (graph.settings.length === 0) out.push("  (none; all built-in defaults)");
+	// An ignored layer explains a value better than the value does. Left to the
+	// trailing Issues block, an untrusted project file read as a setting that
+	// silently failed to apply.
+	for (const issue of graph.issues) if (issue.startsWith("settings ")) out.push(`  ! ${issue}`);
 	for (const entry of graph.settings) {
 		out.push(`  ${entry.key} = ${JSON.stringify(entry.value)}  [${entry.source}]`);
 	}

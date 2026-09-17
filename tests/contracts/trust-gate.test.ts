@@ -203,6 +203,33 @@ test("S3-01: CLI review is read-only and approval refuses a stale digest", async
 	}
 });
 
+test("config inspect names an ignored project settings layer beside the settings it failed to change", async () => {
+	const home = await isolateClioEnv("clio-coder-trust-gate-");
+	try {
+		const workspace = join(home.dir, "workspace");
+		mkdirSync(join(workspace, ".clio-coder"), { recursive: true });
+		writeFileSync(join(workspace, ".clio-coder", "settings.yaml"), "chat:\n  retry:\n    streamStallMs: 600000\n");
+		const cli = new URL("../../src/cli/config.ts", import.meta.url).href;
+		const child = spawnSync(
+			process.execPath,
+			[
+				"--import",
+				new URL("../../node_modules/tsx/dist/loader.mjs", import.meta.url).href,
+				"--input-type=module",
+				"-e",
+				`import {runConfigCommand} from ${JSON.stringify(cli)}; runConfigCommand(['inspect']);`,
+			],
+			{ cwd: workspace, encoding: "utf8", env: process.env },
+		);
+		strictEqual(child.status, 0, child.stderr);
+		const settingsBlock = child.stdout.slice(0, child.stdout.indexOf("\n\n", child.stdout.indexOf("Settings (")));
+		match(settingsBlock, /! settings project: .*untrusted; project settings ignored.*config trust settings/u);
+		ok(!settingsBlock.includes("600000"));
+	} finally {
+		home.restore();
+	}
+});
+
 test("S3-01: untrusted project hooks and settings cannot acquire operator authority", async () => {
 	const home = await isolateClioEnv("clio-coder-trust-gate-");
 	try {
