@@ -19,6 +19,7 @@ import type {
 	LibraryResource,
 	LibraryResourceKind,
 } from "../../domains/resources/index.js";
+import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { clioTheme, GLYPH } from "../theme/index.js";
 import type { ListOverlayItem } from "./list-overlay.js";
 
@@ -113,13 +114,19 @@ export function libraryStatusLine(
 	const theme = clioTheme();
 	const mode = view.mode === "browse" ? "Browse" : "Installed";
 	const scope = view.scope === "user" ? "User" : "Project";
-	const core = `${mode} · ${scope}`;
-	if (width < 34) return theme.fg("accent", `${mode}·${scope}`);
-	const parts = [theme.fg("accent", core)];
-	if (view.member) parts.push(theme.fg("dim", `members of ${view.member.ref}`));
-	if (width >= 56) parts.push(theme.fg("dim", `${counts.rows} row${counts.rows === 1 ? "" : "s"}`));
-	if (counts.notices > 0) parts.push(theme.fg("warning", `${counts.notices} notice${counts.notices === 1 ? "" : "s"}`));
+	const unit = view.member ? "member" : view.mode === "browse" ? "package" : "entry";
+	const plural = unit === "entry" ? "entries" : `${unit}s`;
+	const total = `${counts.rows} ${counts.rows === 1 ? unit : plural}`;
+	if (width < 34) return theme.fg("accent", `${mode}·Actions:${scope}`);
+	const parts =
+		width < 72
+			? [theme.fg("accent", width >= 48 ? `${mode} ${total}` : total), theme.fg("dim", `s:${scope}`)]
+			: [theme.fg("accent", `${mode} · Actions: ${scope}`), theme.fg("dim", total)];
+	if (counts.notices > 0)
+		parts.push(theme.fg("warning", `n:${counts.notices} ${counts.notices === 1 ? "notice" : "notices"}`));
+	else if (width < 72) parts.push(theme.fg("dim", "n notices"));
 	if (counts.truncated) parts.push(theme.fg("warning", "incomplete results"));
+	if (view.member && width >= 72) parts.push(theme.fg("dim", `members of ${sanitizeCallTargetText(view.member.ref)}`));
 	return parts.join(theme.fg("frame", " │ "));
 }
 
@@ -178,7 +185,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 			enable: !!here,
 			update: !!here,
 			use: false,
-			open: true,
+			open: subject.record.copies.length > 0,
 			reasons,
 		};
 	}
@@ -246,7 +253,7 @@ export function libraryRowActions(subject: LibraryRowSubject, view: LibraryView)
 		enable: !!owner && selected,
 		update: !!owner && selected,
 		use: usable,
-		open: !!owner,
+		open: false,
 		reasons,
 	};
 }
@@ -256,7 +263,7 @@ function copyStateWord(copy: LibraryCopy): string {
 	if (copy.state === "loadable") return theme.fg("success", "loadable");
 	if (copy.state === "disabled") return theme.fg("warning", "disabled");
 	if (copy.state === "shadowed") return theme.fg("dim", "shadowed");
-	return theme.fg("error", copy.state);
+	return theme.fg("error", sanitizeCallTargetText(copy.state));
 }
 
 function availabilityWord(resource: LibraryResource): string {
@@ -264,15 +271,33 @@ function availabilityWord(resource: LibraryResource): string {
 	if (resource.availability === "available") return theme.fg("success", "available");
 	if (resource.availability === "untrusted") return theme.fg("warning", "untrusted");
 	if (resource.availability === "shadowed") return theme.fg("dim", "shadowed");
-	return theme.fg("error", resource.availability);
+	return theme.fg("error", sanitizeCallTargetText(resource.availability));
 }
 
-function metaOf(parts: ReadonlyArray<string | undefined>): string {
-	return parts.filter((part): part is string => !!part && part.length > 0).join(" · ");
+/** Plain fields are external text; callbacks compose only trusted semantic styling. */
+function metaOf(parts: ReadonlyArray<string | (() => string) | undefined>): string {
+	return parts
+		.map((part) => (typeof part === "function" ? part() : part === undefined ? "" : sanitizeCallTargetText(part)))
+		.filter(Boolean)
+		.join(" · ");
 }
 
 function packageDetail(record: LibraryPackageRecord, view: LibraryView, actions: LibraryRowActions): string[] {
-	const lines = [`# ${record.name}`, `**Kind:** ${record.kind}`, `**Origin:** ${libraryOriginLabel(record.origin)}`];
+	const provider = record.kind !== view.category;
+	const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
+	const lines = [
+		`# ${record.name}`,
+		`**Kind:** ${record.kind}${provider ? ` provider package for ${view.category} recipes` : " package"}`,
+		`**Actions (${view.scope}):** ${libraryActionSummary(actions)}`,
+		"b shows loaded recipes in Installed. Tab toggles detail; PgUp/PgDn scroll.",
+		...(provider ? ["Catalog hints describe potential recipes, not loaded resources."] : []),
+		...(hints.length
+			? [
+					`**Catalog hints (${view.category === "plugin" ? "all kinds" : view.category}):** ${hints.map((hint) => `${hint.kind}:${hint.name}`).join(", ")}`,
+				]
+			: []),
+		`**Origin:** ${libraryOriginLabel(record.origin)}`,
+	];
 	const detail = libraryOriginDetail(record.origin);
 	if (detail) lines.push(`**Source:** \`${detail}\``);
 	lines.push(`**Format:** ${libraryFormatLabel(record.format)}`);
@@ -285,8 +310,8 @@ function packageDetail(record: LibraryPackageRecord, view: LibraryView, actions:
 	);
 	lines.push(`**Selected scope:** ${view.scope}`);
 	if (record.requires?.length) lines.push(`**Requires:** ${record.requires.join(", ")}`);
-	if (record.provides?.length)
-		lines.push(`**Catalog hints:** ${record.provides.map((hint) => `${hint.kind}:${hint.name}`).join(", ")}`);
+	if (view.category !== "plugin" && (record.provides?.length ?? 0) > hints.length)
+		lines.push("Other recipe kinds are listed in the Plugins category.");
 	if (record.provides === undefined && record.copies.length === 0)
 		lines.push("**Contents:** unknown until this package is inspected or installed.");
 	for (const reason of actions.reasons) lines.push(`**Note:** ${reason}`);
@@ -379,9 +404,51 @@ export interface LibraryRowSet {
 	truncated: boolean;
 }
 
-function push(set: LibraryRowSet, id: string, subject: LibraryRowSubject, item: Omit<ListOverlayItem, "id">): void {
+function libraryActionSummary(actions: LibraryRowActions): string {
+	return [
+		actions.use ? "v use" : undefined,
+		actions.open ? "Enter members" : "Enter detail",
+		actions.install ? "i review install" : undefined,
+		actions.enable ? "e review enable/disable" : undefined,
+		actions.update ? "u review update" : undefined,
+		actions.remove ? "r review remove" : undefined,
+	]
+		.filter(Boolean)
+		.join(" · ");
+}
+
+function push(
+	set: LibraryRowSet,
+	view: LibraryView,
+	id: string,
+	subject: LibraryRowSubject,
+	item: Omit<ListOverlayItem, "id">,
+): void {
 	set.subjects.set(id, subject);
-	set.items.push({ id, ...item });
+	const detail = item.detail;
+	set.items.push({
+		id,
+		...item,
+		label:
+			subject.kind === "notice"
+				? clioTheme().fg("warning", sanitizeCallTargetText(item.label))
+				: sanitizeCallTargetText(item.label),
+		...(detail
+			? {
+					detail: (width: number) => {
+						const lines = detail(width).map((line) => sanitizeMultilineDisplayText(line).text);
+						if (subject.kind !== "package" && subject.kind !== "notice")
+							lines.splice(
+								1,
+								0,
+								`**Actions:** ${libraryActionSummary(libraryRowActions(subject, view))}`,
+								"Tab toggles detail. PgUp/PgDn scroll.",
+							);
+						return lines;
+					},
+				}
+			: {}),
+	});
 }
 
 /**
@@ -472,11 +539,11 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		for (const member of options.inspection.resources) {
 			const subject: LibraryRowSubject = { kind: "member", owner, member };
 			const actions = libraryRowActions(subject, view);
-			push(set, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
+			push(set, view, `mem:${owner.ref}@${owner.scope}#${member.kind}:${member.name}`, subject, {
 				label: member.name,
 				meta: metaOf([
 					member.kind,
-					member.valid ? theme.fg("success", "valid") : theme.fg("error", "invalid"),
+					() => (member.valid ? theme.fg("success", "valid") : theme.fg("error", "invalid")),
 					member.componentId ? `component ${member.componentId}` : undefined,
 				]),
 				group: LIBRARY_GROUP_MEMBERS,
@@ -488,7 +555,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 				kind: "notice",
 				message: `${item.kind} ${item.id} is declared package metadata, not a recipe. It runs only on an explicit request.`,
 			};
-			push(set, `note:ancillary:${item.kind}:${item.id}`, subject, {
+			push(set, view, `note:ancillary:${item.kind}:${item.id}`, subject, {
 				label: `${item.kind}: ${item.id}`,
 				meta: theme.fg("dim", "companion file"),
 				group: LIBRARY_GROUP_NOTICES,
@@ -498,7 +565,7 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		}
 		for (const diagnostic of options.inspection.diagnostics) {
 			const subject: LibraryRowSubject = { kind: "notice", message: diagnostic };
-			push(set, `note:member-diag:${set.notices}`, subject, {
+			push(set, view, `note:member-diag:${set.notices}`, subject, {
 				label: `${theme.fg("warning", GLYPH.warnInline)} ${diagnostic}`,
 				meta: theme.fg("dim", "inspection"),
 				group: LIBRARY_GROUP_NOTICES,
@@ -512,15 +579,20 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 			const actions = libraryRowActions(subject, view);
 			const here = record.copies.find((copy) => copy.scope === view.scope);
 			const hints = (record.provides ?? []).filter((hint) => view.category === "plugin" || hint.kind === view.category);
-			push(set, `pkg:${record.ref}`, subject, {
-				label: record.name,
+			push(set, view, `pkg:${record.ref}`, subject, {
+				label: record.kind !== view.category ? `${record.name} [${record.kind}]` : record.name,
 				meta: metaOf([
+					here ? `${here.scope} ${here.state}` : `not installed (${view.scope})`,
+					hints.length > 0 ? `${hints.length} ${view.category === "plugin" ? "recipe" : view.category} hints` : undefined,
 					libraryOriginLabel(record.origin),
 					record.version ? `v${record.version}` : undefined,
-					here ? theme.fg("success", `${here.scope} ${here.state}`) : theme.fg("dim", "not in this scope"),
-					hints.length > 0 ? `${hints.length} hinted` : undefined,
 				]),
-				group: record.copies.length > 0 ? LIBRARY_GROUP_INSTALLED : LIBRARY_GROUP_AVAILABLE,
+				group:
+					record.kind !== view.category
+						? "Provider packages"
+						: record.copies.length > 0
+							? LIBRARY_GROUP_INSTALLED
+							: LIBRARY_GROUP_AVAILABLE,
 				detail: () => packageDetail(record, view, actions),
 			});
 		}
@@ -528,13 +600,13 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		for (const copy of inventory.copies) {
 			const subject: LibraryRowSubject = { kind: "copy", copy };
 			const actions = libraryRowActions(subject, view);
-			push(set, `copy:${copy.ref}@${copy.scope}`, subject, {
+			push(set, view, `copy:${copy.ref}@${copy.scope}`, subject, {
 				label: copy.name,
 				meta: metaOf([
-					libraryOriginLabel(copy.origin),
 					copy.scope,
-					copyStateWord(copy),
-					copy.trust === "foreign" ? theme.fg("warning", "foreign") : undefined,
+					() => copyStateWord(copy),
+					libraryOriginLabel(copy.origin),
+					copy.trust === "foreign" ? () => theme.fg("warning", "foreign") : undefined,
 				]),
 				group: LIBRARY_GROUP_INSTALLED,
 				detail: () => copyDetail(copy, view, actions),
@@ -543,12 +615,12 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		for (const resource of inventory.resources) {
 			const subject: LibraryRowSubject = { kind: "recipe", resource };
 			const actions = libraryRowActions(subject, view);
-			push(set, `res:${resource.key}`, subject, {
+			push(set, view, `res:${resource.key}`, subject, {
 				label: resource.name,
 				meta: metaOf([
-					libraryOriginLabel(resource.origin),
+					() => availabilityWord(resource),
 					resource.owner ? resource.owner.ref : resource.source.class,
-					availabilityWord(resource),
+					libraryOriginLabel(resource.origin),
 				]),
 				group: resource.owner ? LIBRARY_GROUP_INSTALLED : LIBRARY_GROUP_UNMANAGED,
 				detail: () => resourceDetail(resource, actions),
@@ -562,11 +634,18 @@ export function buildLibraryRows(options: LibraryRowOptions): LibraryRowSet {
 		(entry): entry is string => entry !== undefined,
 	)) {
 		const subject: LibraryRowSubject = { kind: "notice", message };
-		push(set, `note:${set.notices}`, subject, {
+		push(set, view, `note:${set.notices}`, subject, {
 			label: `${theme.fg("warning", GLYPH.warnInline)} ${message}`,
 			meta: theme.fg("dim", "library"),
 			group: LIBRARY_GROUP_NOTICES,
-			detail: () => ["# Library notice", "", message],
+			detail: () => [
+				"# Library notice",
+				"",
+				"Discovery notices cover all categories.",
+				"From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
+				"",
+				message,
+			],
 		});
 		set.notices += 1;
 	}

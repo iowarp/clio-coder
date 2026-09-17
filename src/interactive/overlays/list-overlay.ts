@@ -45,6 +45,8 @@ export interface ListOverlayTab {
 	id: string;
 	label: string;
 	items: () => ReadonlyArray<ListOverlayItem>;
+	/** Optional footer count wording; defaults to the count followed by the tab label. */
+	countLabel?: (count: number) => string;
 }
 
 export interface ListOverlayOptions {
@@ -381,7 +383,8 @@ export class ListOverlayView implements Component {
 		const tab = this.activeTab();
 		if (tab === undefined) return null;
 		const count = this.tabCounts.get(tab.id) ?? this.items.length;
-		return { key: "←→", verb: `tab · ${count} ${tab.label.toLowerCase()}`, short: "tab", critical: true };
+		const countLabel = tab.countLabel?.(count) ?? `${count} ${tab.label.toLowerCase()}`;
+		return { key: "←→", verb: `tab · ${countLabel}`, short: "tab", critical: true };
 	}
 
 	getHint(): string {

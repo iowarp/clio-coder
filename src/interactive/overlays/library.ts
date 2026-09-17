@@ -48,10 +48,10 @@ export const LIBRARY_TITLE = "Library";
 
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_BROWSE =
-	"No packages of this kind in the index. Register one with clio-coder library register <path>, or press o to import from another local agent.";
+	"No packages of this kind in the index. Browse counts packages, not runnable recipes. Press b for loaded recipes in Installed. Register one with clio-coder library register <path>, or press o to import from another local agent.";
 /** @internal exported for contract tests */
 export const LIBRARY_EMPTY_INSTALLED =
-	"Nothing of this kind is installed or loaded here. Press b for Browse to see what can be installed.";
+	"No entries of this kind are listed by the Library inventory. Action scope selects a package destination, not which recipes can run. Press b for installable packages.";
 
 export interface LibraryOverlayDeps {
 	/** The package lifecycle. Plans are reviewed before anything is written. */
@@ -204,13 +204,17 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 			...(failure ? { failure } : {}),
 		});
 		if (category === view.category) rowSet = set;
-		return set.items;
+		return set.items.filter((item) => set.subjects.get(item.id)?.kind !== "notice");
 	};
 
 	const tabs: ListOverlayTab[] = LIBRARY_TABS.map((tab) => ({
 		id: tab.id,
 		label: tab.label,
 		items: () => rowsFor(tab.id),
+		countLabel: (count) => {
+			const unit = view.member && tab.id === view.category ? "member" : view.mode === "browse" ? "package" : "entry";
+			return `${count} ${count === 1 ? unit : unit === "entry" ? "entries" : `${unit}s`}`;
+		},
 	}));
 
 	// eslint-disable-next-line prefer-const -- the action closures need the handle they are opened from.
@@ -429,8 +433,45 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		handle.refreshTabs();
 	};
 
+	/** A child keeps the resource browser's cursor, search draft and focus intact. */
+	const openNotices = (): void => {
+		if (busy) return;
+		busy = true;
+		const items = rowSet.items.filter((item) => rowSet.subjects.get(item.id)?.kind === "notice");
+		const close = (): void => {
+			child = null;
+			busy = false;
+			notices.hide();
+			if (closed) return;
+			handle.setHidden(false);
+			handle.focus();
+		};
+		handle.setHidden(true);
+		const notices = (deps.openList ?? openListOverlay)(tui, {
+			markerId: "library",
+			title: "Library notices",
+			items,
+			filterable: true,
+			explicitSearch: true,
+			fullScreen: true,
+			layout: "split",
+			status: () => `${items.length} ${items.length === 1 ? "notice" : "notices"} · browse focus: n back`,
+			emptyMessage:
+				"No notices in this view. From browse focus, n returns to resources. Esc clears a filter or leaves search focus before returning to the parent browser.",
+			globalHints: [{ key: "n", verb: "resources", critical: true }],
+			globalActions: { n: close },
+			onClose: close,
+		});
+		child = { hide: () => notices.hide(), release: () => {} };
+		notices.toggleDetail();
+	};
+
 	const status = (width: number): string =>
-		libraryStatusLine(view, { rows: rowSet.items.length, notices: rowSet.notices, truncated: rowSet.truncated }, width);
+		libraryStatusLine(
+			view,
+			{ rows: rowSet.items.length - rowSet.notices, notices: rowSet.notices, truncated: rowSet.truncated },
+			width,
+		);
 
 	/**
 	 * The keys the selected row actually offers.
@@ -447,7 +488,7 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		const actions = libraryRowActions(subject, view);
 		const entries: Array<{ key: string; verb: string }> = [];
 		if (actions.use) entries.push({ key: "v", verb: "use" });
-		if (actions.open) entries.push({ key: "Enter", verb: "members" });
+		entries.push({ key: "Enter", verb: actions.open ? "members" : "detail" });
 		if (actions.install) entries.push({ key: "i", verb: "install" });
 		if (actions.enable)
 			entries.push({
@@ -497,10 +538,12 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		globalHints: [
 			{ key: "b", verb: "browse/installed", short: "view", critical: true },
 			{ key: "s", verb: "user/project", short: "scope", critical: true },
+			{ key: "n", verb: "notices", critical: true },
 			{ key: "o", verb: "import" },
 			{ key: "R", verb: "refresh" },
 		],
 		globalActions: {
+			n: openNotices,
 			b: () => {
 				view.mode = view.mode === "browse" ? "installed" : "browse";
 				view.member = undefined;
@@ -546,6 +589,10 @@ export function openLibraryOverlay(tui: TUI, deps: LibraryOverlayDeps): OverlayH
 		},
 		onClose: deps.onClose,
 	});
+
+	// The narrow layout opens with the selected inspector visible. Tab retains
+	// its existing toggle; wide layouts already draw detail beside the list.
+	handle.toggleDetail();
 
 	/**
 	 * What `/library <verb> <ref>` asked for, run after the caller has this

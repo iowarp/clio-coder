@@ -256,7 +256,7 @@ describe("library browser projection", () => {
 		const rows = buildLibraryRows({ inventory: selectForCategory(inventory(), view), view });
 		equal(rows.items.length, 1);
 		const detail = plain((rows.items[0]?.detail?.(80) ?? []).join("\n"));
-		match(detail, /Catalog hints:.*skill:materio-lab/);
+		match(detail, /Catalog hints \(skill\):.*materio-lab/);
 		equal(rows.items[0]?.id, "pkg:plugin:materio");
 	});
 
@@ -727,6 +727,7 @@ describe("library browser behavior", () => {
 		equal(state.options.onBack?.active(), false);
 		state.press("\r");
 		equal(state.options.onBack?.active(), true);
+		match(plain(state.mount().getHint()), /tab · 1 member/);
 		deepStrictEqual(
 			state.rows("plugin").map((item) => item.id),
 			["mem:plugin:materio@user#skill:materio-lab"],
@@ -867,7 +868,7 @@ describe("library browser behavior", () => {
 		state.options.globalActions?.b?.();
 		const installed = state.mount();
 		installed.setViewportRows(18);
-		match(plain(installed.render(100).join("\n")), /Nothing of this kind is installed/);
+		match(plain(installed.render(100).join("\n")), /No entries of this kind/);
 	});
 
 	it("keeps `o` as the separate local-agent discovery route", () => {
