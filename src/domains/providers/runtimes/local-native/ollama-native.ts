@@ -26,7 +26,13 @@ interface OllamaTagsResponse {
 }
 
 interface OllamaPsResponse {
-	models?: Array<{ name?: unknown; model?: unknown; size?: unknown; size_vram?: unknown }>;
+	models?: Array<{
+		name?: unknown;
+		model?: unknown;
+		size?: unknown;
+		size_vram?: unknown;
+		context_length?: unknown;
+	}>;
 }
 
 function positiveNumber(value: unknown): number | undefined {
@@ -42,7 +48,11 @@ function ollamaParallelSlots(): number {
  * Resident models reported by `/api/ps`, keyed by wire id. Best-effort: the
  * probe still succeeds on `/api/tags` alone, so an `/api/ps` failure (older
  * server, transient error) simply omits load state rather than failing
- * discovery. Captures the VRAM/total footprint Ollama reports for each.
+ * discovery. Captures the VRAM/total footprint Ollama reports for each, and the
+ * window the model is actually loaded at: Ollama serves a resident model at
+ * `context_length`, which is routinely far below the model's own maximum
+ * (`OLLAMA_CONTEXT_LENGTH`, or the server default), and that smaller number is
+ * the one a run has to be planned against.
  */
 async function probeResidentModelStates(
 	base: string,
@@ -62,6 +72,8 @@ async function probeResidentModelStates(
 		if (sizeVram !== undefined) status.sizeVramBytes = sizeVram;
 		const size = positiveNumber(row?.size);
 		if (size !== undefined) status.sizeBytes = size;
+		const contextLength = positiveNumber(row?.context_length);
+		if (contextLength !== undefined) status.contextLength = contextLength;
 		states[id] = status;
 	}
 	return Object.keys(states).length > 0 ? states : undefined;
