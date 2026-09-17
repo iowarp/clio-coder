@@ -120,6 +120,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	normalizeCostProvenance,
 	ProvidersDomainModule,
+	probeCapabilitiesForModel,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
 	resolveEndpointCapacities,
@@ -603,6 +604,17 @@ function agentRoleToolWarnings(providers: ProvidersContract, settings: Readonly<
 			if (!status) continue;
 			const capabilities = resolveModelCapabilities(status, wireModelId, providers.knowledgeBase);
 			if (supportsAgentRoleTools(capabilities)) continue;
+			// A target that was never probed has reported nothing about this model:
+			// the flag is only the runtime's conservative floor. Dispatch admission
+			// probes the route itself before it refuses a worker.
+			const declared =
+				status.target.capabilities?.tools ?? providers.knowledgeBase?.lookup(wireModelId)?.entry.capabilities?.tools;
+			if (
+				declared === undefined &&
+				status.health.lastCheckAt === null &&
+				probeCapabilitiesForModel(status, wireModelId) === null
+			)
+				continue;
 			warnings.push(
 				`${role.label} model '${wireModelId}' on target '${targetId}' ${AGENT_ROLE_TOOLS_REQUIRED_REASON}. ` +
 					`Pick another model, or state the correction in a model-catalog.d entry if the provider's flag is wrong.`,

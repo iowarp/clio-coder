@@ -55,7 +55,11 @@ export {
 } from "./endpoint-slots-store.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
-export { applyModelCapabilityPatch, resolveModelCapabilities } from "./model-capabilities.js";
+export {
+	applyModelCapabilityPatch,
+	probeCapabilitiesForModel,
+	resolveModelCapabilities,
+} from "./model-capabilities.js";
 export {
 	canonicalizeWireModelId,
 	contextSlotsForModel,
