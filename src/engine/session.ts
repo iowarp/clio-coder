@@ -9,7 +9,7 @@
  *
  * Atomicity:
  *   - Appends go to an O_APPEND fd held for the writer's lifetime; each line
- *     is one write(2). fsync is debounced after appends and forced on
+ *     uses complete byte writes. fsync is debounced after appends and forced on
  *     checkpoint (`persistTree`) and `close`. A torn last line from a crash
  *     is tolerated by the reader (skipped with a warning).
  *   - `replaceEntries` rewrites current.jsonl via `writeJsonlFileAtomic`
@@ -28,6 +28,7 @@ import {
 	constants as fsConstants,
 	fstatSync,
 	fsyncSync,
+	ftruncateSync,
 	mkdirSync,
 	openSync,
 	readdirSync,
@@ -35,6 +36,7 @@ import {
 	readSync,
 	renameSync,
 	statSync,
+	unlinkSync,
 	writeSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -197,6 +199,31 @@ function serializeJsonl(entries: ReadonlyArray<unknown>): string {
 	return `${lines.join("\n")}\n`;
 }
 
+/** Complete UTF-8 bytes even when write(2) makes only partial progress. */
+function writeAll(fd: number, bytes: Buffer): void {
+	let offset = 0;
+	while (offset < bytes.length) {
+		const written = writeSync(fd, bytes, offset, bytes.length - offset);
+		if (written <= 0) throw new Error(`session JSONL write made no progress after ${offset} of ${bytes.length} bytes`);
+		offset += written;
+	}
+}
+
+/** Roll back a failed append so a retry cannot fuse onto its partial record. */
+function appendAll(fd: number, bytes: Buffer): void {
+	const size = fstatSync(fd).size;
+	try {
+		writeAll(fd, bytes);
+	} catch (error) {
+		try {
+			ftruncateSync(fd, size);
+		} catch (rollbackError) {
+			throw new AggregateError([error, rollbackError], "session JSONL append and rollback failed; reopen to recover");
+		}
+		throw error;
+	}
+}
+
 /**
  * Rewrite a JSONL file through `<target>.tmp` and rename over the target.
  * A crash or interruption before the rename leaves the original target
@@ -213,10 +240,21 @@ function writeJsonlFileAtomic(
 	const tmp = `${targetPath}.tmp`;
 	const fd = openSync(tmp, "w");
 	try {
-		writeSync(fd, body);
-		fsyncSync(fd);
-	} finally {
-		closeSync(fd);
+		try {
+			writeAll(fd, Buffer.from(body, "utf8"));
+			fsyncSync(fd);
+		} finally {
+			closeSync(fd);
+		}
+	} catch (error) {
+		// A missing target can recover from .tmp, so an incomplete write
+		// must not leave a candidate that recovery could promote.
+		try {
+			unlinkSync(tmp);
+		} catch (cleanupError) {
+			throw new AggregateError([error, cleanupError], "session JSONL write and temporary cleanup failed");
+		}
+		throw error;
 	}
 	options.beforeRename?.(tmp, targetPath);
 	renameSync(tmp, targetPath);
@@ -633,10 +671,7 @@ export function appendSessionFileEntry(targetPath: string, entry: unknown): void
 	const line = Buffer.from(`${endsWithNewline(appendPath) ? "" : "\n"}${serialized}\n`, "utf8");
 	const fd = openSync(appendPath, fsConstants.O_WRONLY | fsConstants.O_APPEND);
 	try {
-		const written = writeSync(fd, line);
-		if (written !== line.length) {
-			throw new Error(`short session JSONL append: wrote ${written} of ${line.length} bytes`);
-		}
+		appendAll(fd, line);
 		fsyncSync(fd);
 	} finally {
 		closeSync(fd);
@@ -655,6 +690,9 @@ function createWriter(
 	let closed = false;
 	let appendFd: number | null = null;
 	let fsyncTimer: NodeJS.Timeout | null = null;
+	// Descriptor cleanup must not discard accepted bytes or rollback changes
+	// still owed to the next debounce, checkpoint, flush, or close.
+	let pendingFsync = false;
 
 	// One-time normalization for resumes of pre-header files: rewrite once so
 	// fd-appended lines land after a header. Disk and memory match from here on.
@@ -668,7 +706,10 @@ function createWriter(
 		appendFd = openSync(paths.current, "a");
 		// Terminating the fragment keeps the reader's torn-tail behavior:
 		// it skips exactly one invalid line with a warning.
-		if (tornTail) writeSync(appendFd, "\n");
+		if (tornTail) {
+			pendingFsync = true;
+			appendAll(appendFd, Buffer.from("\n"));
+		}
 		return appendFd;
 	}
 
@@ -676,28 +717,52 @@ function createWriter(
 		if (fsyncTimer !== null) return;
 		fsyncTimer = setTimeout(() => {
 			fsyncTimer = null;
-			if (appendFd === null) return;
 			try {
-				fsyncSync(appendFd);
+				flushPendingAppends();
 			} catch {
-				// A concurrent close already flushed and released the fd.
+				// Keep the obligation pending. Explicit flush/checkpoint/close
+				// retries and reports an error if storage is still unavailable.
 			}
 		}, APPEND_FSYNC_DEBOUNCE_MS);
 		fsyncTimer.unref?.();
 	}
 
+	function flushPendingAppends(): void {
+		if (appendFd !== null) {
+			fsyncSync(appendFd);
+			pendingFsync = false;
+			return;
+		}
+		if (!pendingFsync || stateRootRemoved()) return;
+		// Reopen without O_CREAT or tail normalization: flushing after a failed
+		// append must neither recreate removed state nor alter retained bytes.
+		const fd = openSync(paths.current, fsConstants.O_WRONLY | fsConstants.O_APPEND);
+		try {
+			fsyncSync(fd);
+		} catch (error) {
+			try {
+				closeSync(fd);
+			} catch (closeError) {
+				throw new AggregateError([error, closeError], "session JSONL flush and close failed");
+			}
+			throw error;
+		}
+		closeSync(fd);
+		pendingFsync = false;
+	}
+
 	function closeAppendFd(opts: { flush: boolean }): void {
+		if (opts.flush) flushPendingAppends();
 		if (fsyncTimer !== null) {
 			clearTimeout(fsyncTimer);
 			fsyncTimer = null;
 		}
 		if (appendFd === null) return;
-		try {
-			if (opts.flush) fsyncSync(appendFd);
-		} finally {
-			closeSync(appendFd);
-			appendFd = null;
-		}
+		const fd = appendFd;
+		// A failed close can already have released the OS descriptor. Never
+		// retain that ambiguous number for a later append or duplicate close.
+		appendFd = null;
+		closeSync(fd);
 	}
 
 	function appendLine(entry: unknown): void {
@@ -705,7 +770,21 @@ function createWriter(
 		if (serialized === undefined) {
 			throw new Error("session JSONL entry is not serializable");
 		}
-		writeSync(openAppendFd(), `${serialized}\n`);
+		try {
+			const fd = openAppendFd();
+			pendingFsync = true;
+			appendAll(fd, Buffer.from(`${serialized}\n`, "utf8"));
+		} catch (error) {
+			// Reopening rechecks the tail even if rollback itself failed.
+			try {
+				closeAppendFd({ flush: false });
+			} catch (closeError) {
+				throw new AggregateError([error, closeError], "session JSONL append and close failed");
+			} finally {
+				scheduleFsync();
+			}
+			throw error;
+		}
 		scheduleFsync();
 	}
 
@@ -747,7 +826,7 @@ function createWriter(
 		},
 		async persistTree(): Promise<void> {
 			// Checkpoint: make appended lines durable alongside the tree.
-			if (appendFd !== null) fsyncSync(appendFd);
+			flushPendingAppends();
 			// `paths` was resolved at construction, but atomicWrite mkdirs the
 			// session directory again, so an uninstall that has already removed the
 			// state root would be undone here. Fsyncing the held fd first is safe
@@ -756,7 +835,7 @@ function createWriter(
 			atomicWrite(paths.tree, JSON.stringify(tree, null, 2));
 		},
 		flushAppends(): void {
-			if (appendFd !== null) fsyncSync(appendFd);
+			flushPendingAppends();
 		},
 		async close(): Promise<void> {
 			if (closed) return;
@@ -835,13 +914,15 @@ export function resumeSession(id: string): {
 	const dir = findSessionDir(id);
 	const metaPath = join(dir, "meta.json");
 	const meta = readMetaFile(metaPath);
-	// resume reopens an active session; clear endedAt if it was set by a prior close
-	if (meta.endedAt !== null) {
-		meta.endedAt = null;
-		atomicWrite(metaPath, JSON.stringify(meta, null, 2));
-	}
 	const existingFileEntries = readSessionFileEntries(join(dir, "current.jsonl"));
 	const existingTree = recoverTreeFromJsonl(readTreeFile(join(dir, "tree.json")), existingFileEntries);
 	const writer = createWriter(meta, existingTree, existingFileEntries);
+	// Prepare headerless ledgers before publishing that a closed session has
+	// reopened. A failed normalization must preserve its prior ended state.
+	if (meta.endedAt !== null) {
+		const reopened = { ...meta, endedAt: null };
+		atomicWrite(metaPath, JSON.stringify(reopened, null, 2));
+		meta.endedAt = null;
+	}
 	return { meta, writer, tree: existingTree };
 }

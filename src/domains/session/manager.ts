@@ -6,10 +6,12 @@ import {
 	type ClioTurnRecord,
 	createSession as engineCreateSession,
 	resumeSession as engineResumeSession,
+	openSession,
 	readSessionMeta,
 	type SessionTreeNode,
 	sessionPaths,
 } from "../../engine/session.js";
+import { collectSessionEntries } from "./compaction/session-entries.js";
 import type { SessionEntryInput, SessionMeta, TurnInput } from "./contract.js";
 import { isSessionEntry, type SessionEntry } from "./entries.js";
 import { runMigrations } from "./migrations/index.js";
@@ -71,6 +73,11 @@ export function resumeSessionState(sessionId: string): {
 	const persistedMeta = readSessionMeta(sessionId) as SessionMeta;
 	const paths = sessionPaths(persistedMeta);
 	const migration = runMigrations(persistedMeta, paths.meta);
+	const candidate = openSession(sessionId);
+	// Use the replay schema before engineResumeSession clears endedAt or
+	// the domain caller parks its current writer. The engine reader retains
+	// its established tolerance for interrupted JSONL fragments.
+	collectSessionEntries(candidate.turns(), paths.current);
 	const { meta, writer, tree } = engineResumeSession(sessionId);
 	const state: SessionManagerState = { meta: meta as SessionMeta, writer };
 	if (migration.migrated) {
