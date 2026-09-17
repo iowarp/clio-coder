@@ -126,7 +126,7 @@ export interface EditorSubmitController {
 	shutdownEditorBash(): Promise<void>;
 }
 
-type EditorSteerSubmission = "unhandled" | "accepted" | "rejected";
+type EditorSteerSubmission = "accepted" | "rejected";
 
 /** Owns editor submission and the one local bash process attached to it. */
 export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubmitController {
@@ -284,10 +284,17 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		let running: RunningDispatchRef[] = [];
 		try {
 			running = deps.dispatch.snapshot().running.map((run) => ({ runId: run.runId, agentId: run.agentId }));
-		} catch {
-			running = [];
+		} catch (err) {
+			const msg = err instanceof Error ? err.message : String(err);
+			deps.notify(
+				"error",
+				`cannot resolve steer to @${mention.target}: ${msg}; retry when Fleet Runs is available`,
+				`steer:${mention.target}`,
+			);
+			return "rejected";
 		}
-		if (running.length === 0) return "unhandled";
+		// The parser owns addressed syntax even after the last worker exits.
+		// File completion quotes bare filenames that would otherwise match it.
 		const resolution = resolveSteerTarget(mention.target, running);
 		if (resolution.kind === "match") {
 			try {
@@ -314,14 +321,16 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		deps.notify(
 			"warning",
-			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running)}`,
+			`no running dispatch matches @${mention.target}; running: ${formatSteerCandidates(running) || "none"}; choose an active target in Fleet Runs or remove the @target to send to the main agent`,
 			`steer:${mention.target}`,
 		);
 		return "rejected";
 	};
 
-	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean =>
-		submitEditorSteerMention(mention) !== "unhandled";
+	const handleEditorSteerMention = (mention: { target: string; text: string }): boolean => {
+		submitEditorSteerMention(mention);
+		return true;
+	};
 
 	const submitEditorText = (text: string): void => {
 		const literalText = unguardPastedEditorOperator(text);
@@ -344,18 +353,16 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const steerMention = parseEditorSteerMention(trimmed);
 		if (steerMention) {
 			const submission = submitEditorSteerMention(steerMention);
-			if (submission !== "unhandled") {
-				if (submission === "accepted") {
-					deps.editor.addToHistory(literalText);
-					deps.editor.setText("");
-				} else {
-					// Resolution and dispatch failures are correctable rejections. Pi
-					// has already cleared the editor, so explicitly restore the draft.
-					deps.editor.setText(literalText);
-				}
-				deps.ui.requestRender();
-				return;
+			if (submission === "accepted") {
+				deps.editor.addToHistory(literalText);
+				deps.editor.setText("");
+			} else {
+				// Resolution and dispatch failures are correctable rejections. Pi
+				// has already cleared the editor, so explicitly restore the draft.
+				deps.editor.setText(literalText);
 			}
+			deps.ui.requestRender();
+			return;
 		}
 		const command = parseSlashCommand(trimmed);
 		if (command.kind === "editor" || command.kind === "interrupt") {
@@ -419,14 +426,12 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const steerMention = parseEditorSteerMention(trimmed);
 		if (steerMention) {
 			const submission = submitEditorSteerMention(steerMention);
-			if (submission !== "unhandled") {
-				if (submission === "rejected") {
-					throw new Error("queued boot steer was not admitted; preserving it for recovery");
-				}
-				deps.editor.addToHistory(literalText);
-				deps.ui.requestRender();
-				return;
+			if (submission === "rejected") {
+				throw new Error("queued boot steer was not admitted; preserving it for recovery");
 			}
+			deps.editor.addToHistory(literalText);
+			deps.ui.requestRender();
+			return;
 		}
 		const command = parseSlashCommand(trimmed);
 		if (isRejectedCommand(command)) {
