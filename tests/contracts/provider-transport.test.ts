@@ -38,11 +38,13 @@ import {
 	parseAntigravityStreamLine,
 } from "../../src/engine/antigravity/subprocess-runtime.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
+import { restoreTruncatedErrorBody } from "../../src/engine/provider-error-body.js";
 import type { OverlayHandle, TUI } from "../../src/engine/tui.js";
 import type { OverlayState } from "../../src/interactive/overlay-key-routing.js";
 import { createOverlayModelSelectors } from "../../src/interactive/overlay-model-selectors.js";
 import type { OpenModelScopeOverlayDeps } from "../../src/interactive/overlays/model-scope.js";
 import { ModelOverlayView, type ModelRow } from "../../src/interactive/overlays/model-selector.js";
+import { presentProviderError } from "../../src/interactive/renderers/provider-error.js";
 import { resolveWorkerRuntime } from "../../src/worker/runtime-registry.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -431,6 +433,33 @@ describe("provider transport boundary", () => {
 		ok(failure.includes("target 'blade'"), failure);
 		ok(failure.includes("/model"), failure);
 		ok(failure.includes("did not retry or substitute"), failure);
+	});
+
+	it("restores the provider error body that the SDK truncated and keeps route advice visible", async () => {
+		const model = litellmRuntime.synthesizeModel(
+			{ id: "blade", runtime: "litellm", url: "http://blade.example:4000" },
+			"dynamo/qwen3.8-27b",
+			null,
+		) as Model<"openai-completions">;
+		const detail = `${"x".repeat(20_000)}TAIL-EVIDENCE`;
+		let failure = "";
+		const context = { messages: [{ role: "user", content: "hello", timestamp: 0 }] } as unknown as Context;
+		for await (const event of openAICompletionsApiProvider.streamSimple(model, context, {
+			apiKey: "test-key",
+			fetch: async () =>
+				new Response(JSON.stringify({ error: { message: detail, type: "server_error" } }), {
+					status: 503,
+					headers: { "content-type": "application/json" },
+				}),
+		})) {
+			if (event.type === "error") failure = event.error.errorMessage ?? "";
+		}
+		ok(failure.includes("TAIL-EVIDENCE"), failure.slice(-300));
+		ok(!failure.includes("[truncated"), failure.slice(-300));
+		ok(presentProviderError(failure).includes("select a different route with /model"));
+		// A body that is not the one the SDK truncated never rewrites its diagnostic.
+		const capped = `503: ${"y".repeat(4000)}... [truncated 9 chars]`;
+		strictEqual(restoreTruncatedErrorBody(capped, JSON.stringify({ error: { message: detail } })), capped);
 	});
 
 	it("does not claim structured output when LiteLLM publishes no capability metadata", () => {

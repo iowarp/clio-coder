@@ -35,6 +35,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
+import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
 import { ensureLmStudioResidency } from "./lmstudio.js";
@@ -110,6 +111,8 @@ interface ResponseModelIdCapture {
 	backendTimings: BackendCompletionTimings | null;
 	backendTimingsSource: BackendTimingsSource | null;
 	gatewayRouting: GatewayRoutingObservation | null;
+	/** Latest non-2xx body, read from a clone before the SDK truncates its copy. */
+	errorBody: Promise<string | null> | null;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
@@ -212,6 +215,7 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 	if (runtimeMetadata(model)?.runtimeId === "litellm") {
 		capture.gatewayRouting = liteLLMGatewayRoutingFromHeaders(response.headers);
 	}
+	if (!response.ok) capture.errorBody = captureErrorBody(response);
 	if (!response.body || !response.headers.get("content-type")?.toLowerCase().includes("text/event-stream")) {
 		return response;
 	}
@@ -247,6 +251,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		backendTimings: null,
 		backendTimingsSource: backendTimingsSourceForModel(model),
 		gatewayRouting: null,
+		errorBody: null,
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -271,6 +276,9 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
 				} else if (event.type === "error") {
+					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
+						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
+					}
 					event.error.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.error.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.error.backendTimings = capture.backendTimings;

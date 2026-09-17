@@ -4,6 +4,7 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 
 const SCAN_LIMIT = 8_192;
 const DISPLAY_LIMIT = 600;
+const ROUTE_ADVICE_TAIL = 1_024;
 
 /** Discard incomplete control sequences at the scan boundary, including their payload. */
 function terminalSafePrefix(value: string, limit: number): string {
@@ -56,12 +57,15 @@ export function providerErrorEvidence(value: string, scanLimit = value.length): 
 export function presentProviderError(value: string): string {
 	const available = providerErrorEvidence(value, SCAN_LIMIT);
 	// Preserve the actual Clio wrapper suffix; never infer a retry policy from
-	// provider error codes. SDK-capped bodies leave this advice in the scan window.
-	const routeParts = available.match(
+	// provider error codes. A restored body can push this advice past the scan
+	// window, so a long diagnostic is matched on its bounded tail instead.
+	const beyondScan = value.length > SCAN_LIMIT;
+	const routeParts = (beyondScan ? providerErrorEvidence(value.slice(-ROUTE_ADVICE_TAIL)) : available).match(
 		/\n\n((LiteLLM route [^\n]+ failed\.) (Clio did not retry or substitute another model); (select a different route with \/model, then resend\.))$/,
 	);
 	const routeAdvice = routeParts?.[1];
-	const sample = routeAdvice ? available.slice(0, available.length - routeAdvice.length).trimEnd() : available;
+	const sample =
+		routeAdvice && !beyondScan ? available.slice(0, available.length - routeAdvice.length).trimEnd() : available;
 	let summary = sample;
 	const jsonStart = sample.indexOf("{");
 	const html = /<!doctype\s+html|<html\b/i.test(sample);
