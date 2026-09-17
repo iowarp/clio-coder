@@ -95,6 +95,8 @@ export async function probeOpenAICompatReasoning(opts: ProbeReasoningOptions): P
 		});
 		const latencyMs = Math.round(performance.now() - started);
 		if (!response.ok) {
+			await response.body?.cancel();
+			controller.signal.throwIfAborted();
 			return { reasoning: false, latencyMs, error: `HTTP ${response.status}: ${response.statusText}` };
 		}
 		const data = (await response.json()) as ChatCompletionResponse;

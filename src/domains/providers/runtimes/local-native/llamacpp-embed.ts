@@ -54,27 +54,6 @@ function flattenNativeEmbedding(entry: NativeEmbeddingItem): number[] {
 	return value as number[];
 }
 
-async function postJson<T>(
-	url: string,
-	body: unknown,
-	signal: AbortSignal | undefined,
-): Promise<{ status: number; data: T | null }> {
-	const init: RequestInit = {
-		method: "POST",
-		headers: { "content-type": "application/json" },
-		body: JSON.stringify(body),
-	};
-	if (signal) init.signal = signal;
-	const response = await fetch(url, init);
-	if (!response.ok) return { status: response.status, data: null };
-	try {
-		const data = (await response.json()) as T;
-		return { status: response.status, data };
-	} catch {
-		return { status: response.status, data: null };
-	}
-}
-
 const llamacppEmbedRuntime: RuntimeDescriptor = {
 	id: "llamacpp-embed",
 	displayName: "llama.cpp (embeddings)",
@@ -90,16 +69,16 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const probeResponse = await fetch(`${base}/embedding`, {
+		const probeResponse = await probeHttp({
+			url: `${base}/embedding`,
 			method: "POST",
+			timeoutMs: ctx.httpTimeoutMs,
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ content: "probe" }),
 			...(ctx.signal ? { signal: ctx.signal } : {}),
-		}).catch((err) => {
-			return new Response(null, { status: 599, statusText: String(err) });
 		});
 		if (!probeResponse.ok) {
-			return { ok: false, error: `/embedding not available: HTTP ${probeResponse.status}` };
+			return { ok: false, error: `/embedding not available: ${probeResponse.error}` };
 		}
 		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const result: ProbeResult = { ok: true };
@@ -129,12 +108,15 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		if (!base) throw new Error("target has no url");
 		const modelId = target.defaultModel ?? "default";
 		const inputs = Array.isArray(input) ? input : [input];
-		const oai = await postJson<OaiEmbeddingResponse>(
-			`${base}/v1/embeddings`,
-			{ input: inputs, model: modelId, encoding_format: "float" },
-			ctx.signal,
-		);
-		if (oai.data && Array.isArray(oai.data.data)) {
+		const oai = await probeJson<OaiEmbeddingResponse>({
+			url: `${base}/v1/embeddings`,
+			method: "POST",
+			timeoutMs: ctx.httpTimeoutMs,
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({ input: inputs, model: modelId, encoding_format: "float" }),
+			...(ctx.signal ? { signal: ctx.signal } : {}),
+		});
+		if (oai.ok && oai.data && Array.isArray(oai.data.data)) {
 			const rows = oai.data.data;
 			const sorted = [...rows].sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
 			const vectors = sorted.map((row) => row.embedding ?? []);
@@ -148,6 +130,13 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 			if (tokens !== undefined) result.tokensUsed = tokens;
 			return result;
 		}
+		// Only endpoint-unavailable responses permit trying the native route.
+		// Cancellation, transport failures and malformed successes must not
+		// submit a second inference request.
+		if (oai.status === undefined || ![404, 405, 501].includes(oai.status)) {
+			throw new Error(`llama.cpp embedding failed: ${oai.error ?? "invalid OAI embedding response"}`);
+		}
+		if (ctx.signal?.aborted) throw new Error("llama.cpp embedding failed: aborted by caller");
 		const probeOpts = { url: `${base}/embedding`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const native = await (ctx.signal
 			? probeJson<NativeEmbeddingItem[]>({

@@ -13,11 +13,16 @@ export interface HttpProbeOptions {
 
 export type JsonProbeOptions = HttpProbeOptions;
 
-export interface JsonProbeResult<T = unknown> extends ProbeResult {
+export interface HttpProbeResult extends ProbeResult {
+	/** Status of a completed HTTP response; absent when body/transport work fails. */
+	status?: number;
+}
+
+export interface JsonProbeResult<T = unknown> extends HttpProbeResult {
 	data?: T;
 }
 
-export async function probeHttp(opts: HttpProbeOptions): Promise<ProbeResult> {
+export async function probeHttp(opts: HttpProbeOptions): Promise<HttpProbeResult> {
 	return runProbe(opts, false);
 }
 
@@ -55,13 +60,13 @@ async function runProbe<T>(opts: HttpProbeOptions, readJson: boolean): Promise<J
 			await response.body?.cancel();
 			controller.signal.throwIfAborted();
 			return ok
-				? { ok: true, latencyMs }
-				: { ok: false, latencyMs, error: `HTTP ${response.status}: ${response.statusText}` };
+				? { ok: true, latencyMs, status: response.status }
+				: { ok: false, latencyMs, status: response.status, error: `HTTP ${response.status}: ${response.statusText}` };
 		}
 		parsingJson = true;
 		const data = (await response.json()) as T;
 		controller.signal.throwIfAborted();
-		return { ok: true, latencyMs, data };
+		return { ok: true, latencyMs, status: response.status, data };
 	} catch (err) {
 		return {
 			ok: false,

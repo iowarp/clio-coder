@@ -51,14 +51,19 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
 		const modelId = target.defaultModel ?? "default";
-		const probeResponse = await fetch(`${base}/reranking`, {
+		const probeResponse = await probeHttp({
+			url: `${base}/reranking`,
 			method: "POST",
+			timeoutMs: ctx.httpTimeoutMs,
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ query: "probe", documents: ["a"], model: modelId }),
 			...(ctx.signal ? { signal: ctx.signal } : {}),
-		}).catch((err) => new Response(null, { status: 599, statusText: String(err) }));
-		if (!(probeResponse.status === 200 || probeResponse.status === 202)) {
-			return { ok: false, error: `/reranking not available: HTTP ${probeResponse.status}` };
+		});
+		if (!probeResponse.ok || !(probeResponse.status === 200 || probeResponse.status === 202)) {
+			return {
+				ok: false,
+				error: `/reranking not available: ${probeResponse.error ?? `HTTP ${probeResponse.status}`}`,
+			};
 		}
 		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
 		const result: ProbeResult = { ok: true };

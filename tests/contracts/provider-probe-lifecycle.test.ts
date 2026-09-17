@@ -38,6 +38,7 @@ it("bounds JSON consumption after immediate headers and closes the response", as
 	assert.equal(received, true);
 	assert.equal(result.ok, false);
 	assert.equal(result.error, "timeout after 150ms");
+	assert.equal(result.status, undefined);
 	assert.equal(result.data, undefined);
 	assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 	for (let i = 0; i < 50 && !closed; i++) await delay(10);
@@ -58,6 +59,7 @@ it("keeps caller cancellation attached while awaiting the body", async (t) => {
 	const result = await probeJson({ url, timeoutMs: 1000, signal: caller.signal });
 	assert.equal(result.ok, false);
 	assert.equal(result.error, "aborted by caller");
+	assert.equal(result.status, undefined);
 	assert.equal(result.data, undefined);
 	assert.ok(observedListeners > 0);
 	assert.equal(getEventListeners(caller.signal, "abort").length, 0);
@@ -88,6 +90,7 @@ for (const probe of [probeHttp, probeJson]) {
 		const result = await probe({ url, timeoutMs: 100, signal: caller.signal });
 		assert.equal(result.ok, false);
 		assert.equal(result.error, "aborted by caller");
+		assert.equal(result.status, undefined);
 		assert.equal(requests, 0);
 		assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 	});
@@ -105,6 +108,7 @@ for (const probe of [probeHttp, probeJson]) {
 			const caller = new AbortController();
 			const result = await probe({ url, timeoutMs: 1000, signal: caller.signal });
 			assert.equal(result.ok, status === 200);
+			assert.equal(result.status, status);
 			if (status !== 200) assert.match(result.error ?? "", new RegExp(`^HTTP ${status}:`));
 			assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 			for (let i = 0; i < 50 && !closed; i++) await delay(10);
@@ -119,6 +123,7 @@ it("preserves malformed JSON diagnostics and cleans up the caller listener", asy
 	const result = await probeJson({ url, timeoutMs: 1000, signal: caller.signal });
 	assert.equal(result.ok, false);
 	assert.match(result.error ?? "", /^JSON parse: .+/);
+	assert.equal(result.status, undefined);
 	assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 });
 
@@ -146,6 +151,7 @@ it("preserves POST headers, body, JSON data and header latency", async (t) => {
 	});
 	assert.equal(result.ok, true);
 	assert.deepEqual(result.data, { data: [1, 2, 3] });
+	assert.equal(result.status, 200);
 	assert.equal(method, "POST");
 	assert.equal(header, "present");
 	assert.equal(body, '{"input":"fixture"}');
@@ -163,7 +169,9 @@ it("retains HEAD 405 connectivity semantics without inventing JSON or inference 
 		res.writeHead(405);
 		res.end();
 	});
-	assert.equal((await probeHttp({ url, method: "HEAD", timeoutMs: 1000 })).ok, true);
+	const head = await probeHttp({ url, method: "HEAD", timeoutMs: 1000 });
+	assert.equal(head.ok, true);
+	assert.equal(head.status, 405);
 	const json = await probeJson({ url, method: "HEAD", timeoutMs: 1000 });
 	assert.equal(json.ok, false);
 	assert.match(json.error ?? "", /^JSON parse:/);
@@ -176,6 +184,7 @@ it("retains actionable transport diagnostics when the server closes the socket",
 	assert.equal(result.ok, false);
 	assert.match(result.error ?? "", /other side closed/);
 	assert.match(result.error ?? "", /UND_ERR_SOCKET/);
+	assert.equal(result.status, undefined);
 });
 
 for (const probe of [probeHttp, probeJson]) {
@@ -191,6 +200,7 @@ for (const probe of [probeHttp, probeJson]) {
 			const result = await probe({ url, timeoutMs: cause === "caller" ? 1000 : 100, signal: caller.signal });
 			assert.equal(result.ok, false);
 			assert.equal(result.error, cause === "caller" ? "aborted by caller" : "timeout after 100ms");
+			assert.equal(result.status, undefined);
 			assert.ok((result.latencyMs ?? -1) >= 0);
 			assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 		});
@@ -217,6 +227,7 @@ it("cancels a continuously growing JSON body at the existing deadline", async (t
 	const result = await probeJson({ url, timeoutMs: 150 });
 	assert.equal(result.ok, false);
 	assert.equal(result.error, "timeout after 150ms");
+	assert.equal(result.status, undefined);
 	assert.ok(chunks > 0);
 	for (let i = 0; i < 50 && !closed; i++) await delay(10);
 	assert.equal(closed, true);
