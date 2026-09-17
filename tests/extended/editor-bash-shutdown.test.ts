@@ -19,7 +19,9 @@ function identity(pid: number): Identity | null {
 		if (!fields?.[19]) throw new Error("invalid process identity");
 		return { pid, group: Number(fields[2]), start: fields[19], state: fields[0] ?? "" };
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+		const code = (error as NodeJS.ErrnoException).code;
+		// Linux may report a process disappearing during stat as either error.
+		if (code === "ENOENT" || code === "ESRCH") return null;
 		throw error;
 	}
 }
