@@ -185,7 +185,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/agents` | `/agents` | Open the Library on Agents. |
 | `/cost` | `/cost` | Show session token and cost totals |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
-| `/fleet` | `/fleet run [--var <key=value>] <name>` | Open Settings → Fleet, or run a fleet contract with an approval preview |
+| `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |
 | `/tasks` | `/tasks add [--expect <path>] [--verify <checkId>[:timeoutMs]] <text> \| /tasks hand <id> \| /tasks done <id> \| /tasks drop <id>` | Show the session board or manage project operator tasks |
 | `/memory` | `/memory seed` | Inspect, promote, or seed task memory |
@@ -219,6 +219,14 @@ completion note alone does not satisfy acceptance. `clio-coder tasks list`,
 `hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
 Retired commands are rejected before model submission. Old Library browsing forms, including `/resources`, `/library <kind>` and `/agents connect`, explain the canonical route. Browse with `/library`, `/skills`, `/agents` or `/prompts`; use `/interop` for local-agent adoption and `/extensions` for harness extensions.
+
+In `/library`, `b` switches between Browse packages and Installed entries. Agents and Fleets may show `[plugin]` provider packages with category-specific catalog hints; use Installed to find loaded recipes. Status and footer counts distinguish packages, entries and members with correct singular/plural forms, and do not imply every entry is runnable. `s` chooses User or Project as the destination for package actions; it does not filter the inventory by execution scope. Install, import and removal still require their existing review. Narrow layouts open with the selected detail visible, and Tab toggles it.
+
+Library discovery notices have their own searchable `n` view and independent count. From browse focus, `n` opens notices or returns from notices to resources. While search has edit focus, `n` types into the filter. Esc clears a filter or leaves search focus before returning to the parent browser. Your resource selection, filter draft, browse focus and detail position survive the visit. Notices are evidence to inspect and have no package action. Enter opens members only for a package that supports that operation; otherwise it opens detail.
+
+`/view [filter]` searches resource identity and available provenance with case-insensitive literal terms. Every whitespace-separated term must occur; fuzzy abbreviations do not match. A category prefix such as `dispatch:<runId>` limits the search to that category, while an ordinary query searches across the supplied categories. Left/Right moves between categories with matches without clearing the query. Match/total counts describe the current filter without hiding global evidence at the provider level. The filter persists through preview, back and refresh within the open overlay, and an initial query starts with its cursor at the end. While editing the filter, Ctrl+U clears the whole query even with customized movement keys; undo restores its full text and cursor, and clearing an already empty filter does not consume an undo step.
+
+Workspace output rows show their basename before the relative path. In View preview, press `i` for scrollable provenance with the full backing path and available session/run/correlation identities; press `i` again for content. This toggle resets the pane's scroll position. `o` reports the backing path, and `v` verifies resources that support verification. Enter or Tab opens a selected preview; Esc returns to the list, then closes. Empty results keep focus in the list. View's literal search is separate from the shared ListOverlay fuzzy search described below.
 
 `/context` with no arguments opens the context-window ledger overlay, including
 the working-set section (policy, evicted items and tokens, events, recalls, churn).
@@ -351,7 +359,7 @@ Configuration lives in one place: the `/settings` overlay. `/settings <section>`
 
 Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 
-Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `Alt+W` Fleet Runs board, which also steers and cancels them. `Enter` opens the selected run's worker detail: the phase, the running call with its redacted action descriptor, and the bounded tail of the worker's own prose.
+Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `/fleet` or `Alt+W` Fleet Runs board. Its default cards show task previews, route, status, trust/evidence, telemetry and the current operation when available. `Enter` expands the selected card to show its full task and route, policy and budget, and bounded answer. Long task previews explicitly point to Enter detail. Empty boards offer `/run` or `/delegate` and no selection action. An ordinary sealed completion without validation shows `unverified; no validation observed`; Enter restores the full provenance summary. Unknown or failed trust facts remain visible by default. Completion is not scientific validation.
 
 `/run` and `/delegate` put the worker's answer on screen. Both echo the typed
 line dim above the block, then stream the run into the transcript as an attributed
@@ -360,7 +368,7 @@ or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's prose down a rai
 one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
 token count, duration, and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
 with the failure reason printed on the rail above the footer when a run fails.
-Model-launched workers use `◆` and operator-launched workers use `◇`; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity, and Compact keeps identity and outcome. The footer shows the active worker count alongside the main agent's phase. Use `/view transcript` or `/view dispatch:<runId>` for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.
+Model-launched workers use `◆` and operator-launched workers use `◇`; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity labeled `now:` for current work and `last:` for completed calls, and Compact keeps identity and outcome. Pending checkpoint questions remain visible in Compact. The footer shows the active worker count alongside the main agent's phase. Use `/view transcript` or `/view dispatch:<runId>` for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.
 
 That block is the only place a `/run` answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
@@ -388,8 +396,8 @@ rather than dropped, because the operator named that run.
 
 `/new` resets the transcript and the pool bare `/share` draws from, so a run
 from the previous session cannot be shared into the new one. Worker tool
-arguments never cross at all: the transcript carries tool names only, the same
-rule the dispatch board follows.
+arguments never cross as raw input: transcript and board activity can show tool
+names and their redacted action descriptors.
 
 Blocks survive a resume. Each attempt writes a `workerRun` session entry naming
 the run, its origin, and its runtime, and `/resume` rebuilds the block from that
@@ -614,7 +622,7 @@ do not accidentally become steering requests.
 The `Alt+W` Fleet Runs board makes this control path discoverable: use
 Up/Down or `j`/`k` to select a run, `s` to close the board and prefill its
 exact `@<runId> ` steering prefix, and `x` to cancel a live worker or queued
-retry. A steer first reports `queued`; only the worker's
+retry. At narrow widths, the footer prioritizes available steer/cancel actions over navigation and detail hints; Enter still expands the selected card. Completed runs offer no steer/cancel actions. A steer first reports `queued`; only the worker's
 `clio_coder_steer_received` acknowledgement reports `received`. Single-shot
 subprocess runtimes and ACP delegation do not expose a live steering channel
 and are labeled accordingly.
@@ -870,11 +878,11 @@ The footer owns live activity. Transcript actions have static running or outcome
 The Clio TUI has been enhanced to maximize readability, operational focus, and command discovery:
 
 - **Welcome header:** Before your first prompt the header is three rows and no box: a masthead (`>C_ Clio Coder v0.4.7` on the left, `~/iowarp/clio-coder · main*` on the right), the route (`✓ dynamo · qwen3.8-27b`), and one next step (`describe a task · Enter to send · / for commands`). The next step names whatever actually blocks work first: no route or model sends you to `/model`, an unavailable or degraded route to `/settings targets`, a missing or stale `CLIO-CODER.md` to `/context init` or `/context refresh`. A healthy route shows no latency; a failing one shows its reason. Your first submit collapses the header to one live row, `>C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*`, which follows a mid-session model change. `/new` returns to the three-row form; `/resume`, `/tree`, `/fork`, `/handoff` and `--continue` open collapsed. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header) for the width-degradation order and route vocabulary.
-- **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Ctrl+J newline` at wider widths.
-- **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
+- **Unmistakable Clio Composer:** The input editor features an explicit left section tag reflecting current prompt semantics (`MESSAGE` while idle, `FOLLOW-UP` while Clio runs, and orange `STEER` when Enter steers in-flight execution). The hydrated composer keeps target/model fields separate until rendering. Narrow labels retain a recognizable family and variant, such as `blade… · qwopus3.…dense-q6 · low`. Includes the dim placeholder `Ask Clio…  / for commands` and lower-rail hint `Enter send · Ctrl+J newline` at wider widths.
+- **Progressively Disclosed Footer:** The compact footer uses a quiet two-zone status layout that suppresses idle decoration (`tools none`, `◌ idle`, and duplicate turn receipts). Line 1 displays workspace location, git branch/dirty state, and active phase only when meaningful, shortening workspace parents and dropping branch decoration before live activity or worker counts; Line 2 displays the context window gauge, current Output style, and session cost. `Alt+U` toggles the expanded dashboard, which orders information by operational urgency (Activity, Context, Session, Workspace).
 - **Footer Notification Degradation Ladder:** The footer notification badge reserves the severity head (`glyph count noun`) and `[Ctrl+G x] dismiss` tail first, allocating remaining width to an ellipsized message body. Under narrow terminal constraints, it degrades cleanly down the ladder without clipping action keys.
 - **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
-- **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor output verbosity (`minimal` none, `default` compact dim `turn · in N · out M`, `verbose` full receipt with call counts, cache reads/writes, reasoning provenance, and verification caveats).
+- **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor Output style: Compact omits the separate receipt, Standard shows a small completion line with available duration, and Detailed includes available call counts, token usage and reasoning provenance.
 - **Transactional Settings Center:** Open `/settings` or deep-link to one of
   `chat`, `fleet`, `targets`, `context`, `safety`, `interface`, or
   `integrations`. Value edits construct change plans offering `Apply this
@@ -918,7 +926,7 @@ The detail pane displays structured descriptions, usage, or state metadata using
 ### Responsive Width Adaptation
 
 All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
-- `/view` falls back to one pane on narrow terminals. Type to filter, use Enter to read, Escape to return to the list, and Escape again to close. Ctrl+U clears the filter; long text wraps and scrolls. Tab also switches panes.
+- `/view` falls back to one pane on narrow terminals. Type to filter, use Enter to read, Escape to return to the list, and Escape again to close. Ctrl+U clears the whole query while the filter has focus; long preview text wraps and scrolls. Tab also switches panes.
 - Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and `Esc` backtracking.
 - Text content and detail descriptions wrap cleanly without line truncation.
 

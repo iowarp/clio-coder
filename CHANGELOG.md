@@ -54,6 +54,13 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 - Add gateway inspection, selection, and validation for CSV/TSV and JSON/JSONL with streaming readers, explicit exact/sampled/cut views, precision and sentinel reporting, bounded captures, and actionable unsupported-format refusals.
 
+### terminal workbench
+
+- Use case-insensitive literal search terms across View resource identity and provenance, show match counts, and place the cursor at the end of an initial query. Ctrl+U clears the whole filter independently of customized cursor bindings, with one-step undo restoring the query and cursor. Workspace outputs lead with their basename and relative path; preview offers scrollable provenance with `i` and retains selection across refresh.
+- Separate Library discovery notices into a searchable `n` view that preserves the resource browser on return. Use package, entry, and member units consistently in status and footer counts; label plugin providers in recipe categories, explain package action scope, and open narrow layouts with detail visible. Notice-return guidance respects search focus, and trusted state colors survive sanitization of external metadata.
+- Preserve raw target/model fields until composer rendering, retaining recognizable target, model family, and variant suffixes at narrow widths. Sanitize identity and workspace text before abbreviation. Keep workspace identity and live worker counts visible in the footer. Fleet Runs shows current operations and compact task previews, with the full route and task, available policy and budget details, and a bounded answer excerpt available through Enter detail; complete available evidence remains inspectable through `/view`; control hints reflect the selected run's capabilities. Ordinary unvalidated completions retain an explicit unverified/validation summary, with full provenance on Enter and exceptional trust facts still visible.
+- Distinguish current worker operations from completed calls in Detailed previews while retaining pending checkpoint questions and canonical evidence.
+
 ## 0.4.8 - 2026-09-12
 
 Clio Coder 0.4.8 strengthens the terminal and headless harness: settings take effect consistently, provider and usage records stay tied to the right request, and startup, reload and shutdown retain their cleanup guarantees. Start with `clio-coder configure`, then `clio-coder` for interactive work or `clio-coder run` for headless tasks. The optional web app and local PWA add another way to reach the same runtime; they do not replace the CLI, TUI or ACP.

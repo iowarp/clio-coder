@@ -24,6 +24,8 @@ The governing principle: **the user reads state from color, structure from frame
 
 Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
 
+Detailed worker activity puts `now:` operations before newest-first `last:` calls; settled entries do not advertise stale current work. Pending checkpoint questions remain visible even in Compact.
+
 Use **/view transcript** to select full available reasoning, tool arguments/results, local shell output, or worker details. Search the list, press Enter to inspect, and Escape to return. Offloaded tool and dispatch output remains available in the other `/view` categories; missing or truncated captured content is identified. Inspection applies secret redaction, and `!!` output remains excluded from model context.
 
 Output style changes presentation only. **Shift+Tab** still changes the model's thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. `/output` now explains how to reach Alt+O and Settings. Existing `minimal`, `default`, and `verbose` preferences map to `compact`, `standard`, and `detailed` without rewriting other preferences.
@@ -110,7 +112,7 @@ Standardized formatters live in [src/interactive/theme/labels.ts](../../src/inte
 - **Duration**: `formatCompactMs` is the unified duration formatter, yielding compact outputs (`860ms`, `4.2s`, `42s`, `1m36s`).
 - **Token Counts**: `formatFooterTokens` formats footer and chip counts (`842`, `12.4k`, `1.2M`). Full numeric strings via `toLocaleString` are reserved for detailed tables like the context legend.
 - **Cost**: The shared `formatUsd` formatter handles dollar values, printing up to four decimal places when under one cent.
-- **Model IDs**: `abbreviateModelId` keeps whole dash-separated parts of model names up to 18 characters; if the parts still overflow, it clips the ID at 18 characters.
+- **Model IDs**: `abbreviateModelId` fits the model label to 24 terminal cells, allocating space to the model family and suffix before shortening its placement prefix. It preserves complete graphemes and marks omissions with `…`. The hydrated presentation passes raw, structured target/model fields through the editor callback; the composer formats them once at its actual width, retaining the full route when it fits and letting placement yield to target, family and variant when it does not. Raw identity and workspace text is sanitized before width measurement or grapheme splitting, so OSC/CSI payloads and control bytes cannot become visible label fragments. Abbreviations are display labels; full routes remain available in model/settings inspection and Fleet Runs detail.
 
 ---
 
@@ -141,7 +143,7 @@ Overlay frames share the island's top border rules and include keyboard shortcut
 └─ [Tab] mode · [Esc] close ─────────────────┘
 ```
 
-Fleet run cards add two bounded budget rows when native dispatch admission supplies an envelope. The `policy` row shows the recipe default or exact pin, its optional maximum, and the invocation request. The `budget` row shows the effective phase, the operator lifetime cap, and the clamp or retry/revision escalation reason. Historical or external-agent rows without this provenance omit both rows.
+Expanded Fleet run cards show available policy and budget details when native dispatch admission supplies an envelope. These values wrap and may occupy several rows; the default card omits them. The `policy` row shows the recipe default or exact pin, its optional maximum, and the invocation request. The `budget` row shows the effective phase, the operator lifetime cap, and the clamp or retry/revision escalation reason. Historical or external-agent rows without this provenance omit both rows.
 
 ### 4.3 Section Headers
 
@@ -296,14 +298,14 @@ Starting Clio · you can type now
   - `FOLLOW-UP` (muted) while Clio is actively processing a run.
   - `STEER` (neon orange) when Enter will actively steer in-flight work.
   - When the draft scrolls, the active mode folds into the scroll indicator row so the orange warning remains visible.
-- **Top Rail Metadata**: The top rail right displays target/model and thinking level with two-step color hierarchy: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
+- **Top Rail Metadata**: The top rail right displays target/model and thinking level. Narrow labels budget target and model separately, for example `blade… · qwopus3.…dense-q6 · low`, so the gateway does not consume the model family or variant. Thinking levels use a two-step color hierarchy: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
 - **Empty-State Placeholder**: Displays dim prompt `Ask Clio…  / for commands`.
 - **Lower Rail Affordance**: On terminals at or above 60 columns, the bottom rail displays `Enter send · Ctrl+J newline` (or resolved keybindings).
 
 ### 5.3 Progressively Disclosed Footer
 
 - **Compact Mode (Quiet Idle)**: Two always-on lines that eliminate idle telemetry noise (suppresses `tools none`, `◌ idle`, and duplicate turn receipts):
-  - **Line 1 (Workspace & Readiness)**: CWD path, git branch/dirty state, and active phase pill only when meaningful.
+  - **Line 1 (Workspace & Readiness)**: CWD path, git branch/dirty state, and active phase pill only when meaningful. Long workspace parents and branch decoration yield before current activity; the workspace suffix and live worker count remain visible at narrow widths, including while the main agent is idle.
   - **Line 2 (Context & Style)**: Context window meter, Output style, and session cost.
 - **Expanded Mode (`Alt+U`)**: Four responsive sections ordered by operational urgency rather than a static telemetry grid:
   1. `Activity`: Live agent phase, active workers, running tool calls.
@@ -414,12 +416,14 @@ The `/settings` overlay is a full-screen transactional control center:
 
 ### 7.2 Fleet Runs Board
 
-The `Alt+W` board renders one card per run from the observability run projection, which owns lifecycle, worker progress, receipt trust, retries, cancellation, fleet positions, and evidence readiness; the board owns only ordering, selection, and rendering. The default list is compact: run id, route, task, status, telemetry, retry, tool names, and proof. `Enter` opens the selected run's worker detail, which adds two rows to that card and nothing to any other:
+`/fleet` and `Alt+W` open Fleet Runs; `/settings fleet` opens fleet configuration. The board consumes the observability run projection, which owns lifecycle, worker progress, receipt trust, retries, cancellation, fleet positions and evidence readiness. The board owns selection and rendering; council members remain grouped in a council card.
 
-- **`doing`**: the phase (`◐ thinking` in `reason`, `◑ writing` in `accent`, `⚙ tool` in `action`, `◔ waiting` in `info`) followed by the running call as `<tool> <verb> <object>`, or the last finished call as `last <tool> <verb> <object>`. The verb and object come from a descriptor composed at the worker seam; raw arguments never reach the renderer.
-- **`answer`**: the newest rows of the worker's bounded prose on a `│` rail with a hanging indent under the key, then a dim row naming the lines and bytes the bounds refused and the `/view dispatch:<runId>` deep link.
+An ordinary card defaults to run identity, abbreviated route, a task preview, status, trust/evidence, telemetry and one current-operation row when available. A long task keeps two wrapped rows plus an Enter-detail disclosure. Fleet phase appears only when the run has a recorded fleet position. Route abbreviation preserves its distinguishing suffix. Retry, control and evidence warnings remain visible when present. An ordinary completed, sealed and mediated run with no validation or independent review shows `unverified; no validation observed` in its compact trust row. Enter restores every canonical provenance clause. This shortening applies only when context is recorded and completion evidence is absent; exceptional, unknown or failed states keep the full trust summary visible. Execution completion and receipt sealing do not establish scientific validation.
 
-Wrapping happens before the row cap, so the block is at most six rows tall at any width and a streaming answer cannot make the card grow under the operator. Detail follows the cursor rather than pinning to a run, and closing the board closes it. Reasoning text is never rendered; the `thinking` phase word is the whole of what the board says about it.
+- **`doing`** shows `now <tool> <verb> <object>` for the current call. Between calls it can show the worker phase and `last <tool> <verb> <object>` for its most recent completed call. Descriptors come from the worker seam; raw arguments never reach the renderer. A thinking phase exposes no reasoning text.
+- **Enter detail** restores the full wrapped route and task, exposes policy and budget facts, and adds the available answer. The answer uses a `│` rail, retaining up to six wrapped prose rows plus an overflow disclosure for omitted lines/bytes and the `/view dispatch:<runId>` inspection route. This cap applies to the answer preview, not to the complete expanded card.
+
+Detail follows selection rather than pinning to a run. Empty boards show `Use /run or /delegate to start a run.` and advertise only closing. Narrow active hints prioritize supported steering and cancellation over navigation/detail hints; Enter remains available to expand. HTTP/SDK runs expose steering only in supported live states, ACP and subprocess runs do not, and terminal rows expose neither steering nor cancellation.
 
 ### 7.3 Task and Decision Boards
 
@@ -430,6 +434,18 @@ Wrapping happens before the row cap, so the block is at most six rows tall at an
 ### 7.4 Slash Autocomplete Command Palette
 - **Grouped Palette**: Typing `/` opens a grouped command palette (ordered by `Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints and formatted descriptions.
 - **One Canonical Spelling**: Autocomplete, help, and parsing expose the same unique slash-command names; no alias rows compete with canonical commands.
+
+### 7.5 View Artifact Inspection
+
+View uses explicit list/preview focus labels and match/total counts. Search requires every whitespace-separated term to occur literally, case-insensitively, in resource identity or available provenance; paths remain intact terms. Category prefixes such as `dispatch:<runId>` constrain the same search. Left/Right selects among nonempty categories in the current results; it does not remove the filter. Filtering does not change provider scope or discard global evidence. Initial query editing starts at the end, and selection is retained by resource identity across refresh. Filters persist within one overlay lifetime. In list focus, Ctrl+U uses Input's semantic clear operation without synthesized movement keys: it saves one undo snapshot and the complete killed value, so undo restores query and cursor and yank can restore the full query. Clearing an empty filter changes neither history nor the kill ring.
+
+Workspace outputs lead with their basename and workspace-relative path. In preview, `i` toggles scrollable provenance including the full backing path and available session, run and correlation identities; `o` keeps its backing-path notice and `v` retains available verification. Toggling provenance resets that pane's scroll offset. At narrow widths, Enter opens preview and Esc returns to the list before closing; empty results cannot acquire preview focus. Content loading is deferred off the synchronous render stack, and stale loads or refreshes cannot replace newer selection/results.
+
+### 7.6 Library Browsing and Notices
+
+Library status and footer counts distinguish Browse packages, Installed entries and inspected members, with correct singular/plural forms, separately from discovery notices. From browse focus, `n` opens the searchable child notice view and returns from it to resources. While search has edit focus, `n` is filter text; Esc clears a filter or leaves search focus before returning to the parent browser. Returning restores the original browser's selection, filter draft, browse focus and detail position. Notices retain their individual evidence and offer no package mutation or recipe-use action. Count units describe the selected inventory view, not the number of runnable recipes; unavailable Installed entries remain visible.
+
+Agents and Fleets label plugin provider packages as `[plugin]` and show only the selected category's catalog hints. Those hints do not claim a recipe is loaded. `b` switches Browse/Installed; `Actions: User/Project` (or the compact `s:User/Project` label) identifies the destination for package lifecycle actions, not an inventory scope filter. Narrow status lines retain the `n` notice affordance. The selected inspector opens below the split threshold as well as beside the list at wider widths, puts applicable actions before long provenance, and retains Tab and page-scroll navigation. Enter says `members` only when it opens package members, otherwise `detail`. Plain external metadata is sanitized before composition with trusted semantic state colors, so available, unavailable and other states retain their theme styling. All lifecycle actions retain their existing review paths.
 
 ---
 
@@ -469,7 +485,7 @@ memory ID, and leave approval to the separate reviewed memory lifecycle.
 
 Clio pins pi-tui 0.85.1 with a tracked pnpm patch for one pre-viewport input
 policy, public existing search focus/operations, and semantic Editor/Input
-edits. Production consumes these only through src/engine. The patch adds no
+edits, including atomic Input clear with native undo and kill-ring preservation. Production consumes these only through src/engine. The patch adds no
 renderer, decoder or search implementation. Published dist bundles patched
 JavaScript and the pure JavaScript transitive dependencies; the pinned installed
 Pi package supplies native Darwin/Windows helpers through its package resolver.
