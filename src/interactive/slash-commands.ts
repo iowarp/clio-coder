@@ -874,7 +874,7 @@ export interface BuiltinSlashCommand {
 	match?(trimmed: string): SlashCommand | null;
 	fromArgs?(parsed: ParsedArgs, trimmed: string): SlashCommand;
 	/** Execute `command` against `ctx`. Called only for kinds declared in `kinds`. */
-	handle(command: SlashCommand, ctx: SlashCommandContext): void | "rejected";
+	handle(command: SlashCommand, ctx: SlashCommandContext): undefined | "rejected";
 }
 
 const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;

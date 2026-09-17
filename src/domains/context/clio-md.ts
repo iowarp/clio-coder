@@ -130,7 +130,7 @@ function normalizeNestedMarkdown(value: string): string {
 	let cursor = 0;
 	for (const match of mask.matchAll(/^(#{1,2})(\s+)/gm)) {
 		if (match.index === undefined) continue;
-		out += body.slice(cursor, match.index) + "###" + (match[2] ?? "");
+		out += `${body.slice(cursor, match.index)}###${match[2] ?? ""}`;
 		cursor = match.index + match[0].length;
 	}
 	return out + body.slice(cursor);

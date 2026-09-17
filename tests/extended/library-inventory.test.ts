@@ -36,6 +36,7 @@ function fixture(root: string, name: string, options: { duplicateSkill?: boolean
 	write(
 		root,
 		`prompts/${name}/help.md`,
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: the literal unresolved component reference is the broken-prompt fixture.
 		`---\ndescription: ${name} help\n---\n${options.brokenPrompt ? "Read ${component:resource:missing}" : "Help text."}\n`,
 	);
 	write(

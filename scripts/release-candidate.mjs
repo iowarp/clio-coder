@@ -63,7 +63,7 @@ try {
 		writeFileSync(`${artifact}.sha256`, `${sha256}  candidate.tgz\n`);
 		writeFileSync(
 			receiptPath,
-			JSON.stringify({ schema: 1, commit, sha256, node: process.version, qualifiedAt: Date.now() }) + "\n",
+			`${JSON.stringify({ schema: 1, commit, sha256, node: process.version, qualifiedAt: Date.now() })}\n`,
 			{ mode: 0o600 },
 		);
 		if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `artifact=${artifact}\n`);
