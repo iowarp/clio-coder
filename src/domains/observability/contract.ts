@@ -76,6 +76,8 @@ export interface ObservabilityRunSummary {
 	contextWindow?: number;
 	lastContextTokens?: number;
 	progress?: WorkerProgressSnapshot;
+	/** Existing validator identity/conformance, admitted with the verified receipt answer. */
+	resultContract?: { kind: string; conformance: string };
 	receiptId?: string;
 	retry?: { attempt: number; dueAtMs: number; reason: string };
 	steerAcknowledgement?: { receivedAtMs: number; chars: number };
@@ -132,7 +134,9 @@ export interface ObservabilitySnapshot {
 /** Runtime readers supplied after dispatch is composed, avoiding a domain dependency cycle. */
 export interface ObservabilityRunReaders {
 	dispatchSnapshot?: () => DispatchSnapshot;
-	readReceipt?: (runId: string) => { text?: string; trust?: CanonicalTrustStatus } | null;
+	readReceipt?: (
+		runId: string,
+	) => { text?: string; trust?: CanonicalTrustStatus; contractKind?: string; contract?: string } | null;
 }
 
 /** Run projection controls shared by the contract and the in-memory projection. */

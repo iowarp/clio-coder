@@ -401,6 +401,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	function applyIdentity(summary: RunEntry, id: Partial<DispatchRunIdentity>): void {
 		// A lifecycle update must earn its trust again from the current receipt.
 		delete summary.trust;
+		delete summary.resultContract;
 		if (typeof id.agentId === "string" && id.agentId.length > 0) summary.agentId = id.agentId;
 		if (typeof id.targetId === "string" && id.targetId.length > 0) summary.targetId = id.targetId;
 		if (typeof id.wireModelId === "string" && id.wireModelId.length > 0) summary.modelId = id.wireModelId;
@@ -459,11 +460,20 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 	}
 
 	function settleFromReceipt(summary: RunEntry): void {
+		delete summary.resultContract;
 		try {
 			const facts = runReaders.readReceipt?.(summary.runId);
 			// A failed or retired seal cannot supply the board's terminal answer.
 			const text = facts?.trust?.artifactIntegrity.state === "verified" ? facts.text : undefined;
 			summary.progressFold.settle(typeof text === "string" && text.trim().length > 0 ? text : undefined);
+			if (
+				typeof text === "string" &&
+				text.trim().length > 0 &&
+				typeof facts?.contractKind === "string" &&
+				typeof facts.contract === "string"
+			) {
+				summary.resultContract = { kind: facts.contractKind, conformance: facts.contract };
+			}
 			if (facts?.trust !== undefined) summary.trust = summarizeTrustStatus(facts.trust);
 		} catch {
 			summary.progressFold.settle();

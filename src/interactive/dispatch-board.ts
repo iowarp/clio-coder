@@ -29,6 +29,7 @@ import { formatWorkerContextMeter } from "./context-meter.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
 import { type CouncilGroupView, type CouncilMemberView, councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
+import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
 import {
 	type ClioTheme,
 	type ClioToken,
@@ -122,6 +123,7 @@ export interface DispatchBoardRow {
 	 * worker is doing rather than a richer spinner.
 	 */
 	progress?: WorkerProgressSnapshot;
+	resultContract?: ObservabilityRunSummary["resultContract"];
 	/**
 	 * Id of the receipt sealed for this run (`receipts/<runId>.json`, the id
 	 * `clio-coder trace` takes). Set only once a terminal dispatch event has
@@ -494,24 +496,36 @@ function progressAnswerLines(
 	progress: WorkerProgressSnapshot,
 	runId: string,
 	contentWidth: number,
+	contract: ObservabilityRunSummary["resultContract"],
 ): string[] {
 	if (progress.tailText.length === 0) return [];
 	const gutter = CARD_KV_KEY_WIDTH + 1;
 	const railWidth = Math.max(1, contentWidth - gutter - 2);
+	const presented = presentWorkerContractAnswer(
+		progress.tailText,
+		contract,
+		progress.droppedLines === 0 && progress.droppedBytes === 0,
+		progress.settled,
+	);
+	const source = presented
+		? [...(presented.footer ? [presented.footer] : []), ...presented.lines]
+		: safeWorkerAnswerText(progress.tailText).split("\n");
 	const wrapped: string[] = [];
-	for (const line of progress.tailText.split("\n")) {
+	for (const line of source) {
 		for (const row of wrapTextWithAnsi(sanitizeCallTargetText(line), railWidth)) wrapped.push(row);
 	}
-	const shown = wrapped.slice(Math.max(0, wrapped.length - WORKER_PROGRESS_CARD_ROWS));
+	const shown = progress.settled
+		? wrapped.slice(0, WORKER_PROGRESS_CARD_ROWS)
+		: wrapped.slice(Math.max(0, wrapped.length - WORKER_PROGRESS_CARD_ROWS));
 	const hiddenRows = wrapped.length - shown.length;
 	const rail = theme.fg("dim", `${GLYPH.rail} `);
 	const body = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
 	const hiddenLines = progress.droppedLines + hiddenRows;
 	if (hiddenLines > 0 || progress.droppedBytes > 0) {
 		const facts = [
+			`/view dispatch:${runId}`,
 			...(hiddenLines > 0 ? [`${hiddenLines} more line${hiddenLines === 1 ? "" : "s"}`] : []),
 			...(progress.droppedBytes > 0 ? [`${progress.droppedBytes} bytes outran the view`] : []),
-			`/view dispatch:${runId}`,
 		];
 		body.push(`${rail}${theme.fg("dim", truncateToWidth(facts.join(" · "), railWidth, "…", false))}`);
 	}
@@ -703,7 +717,8 @@ function renderDispatchCard(
 	if (row.progress) {
 		const doing = progressActionLine(theme, row.progress, contentWidth);
 		if (doing !== null) bodyLines.push(doing);
-		if (options.expanded === true) bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth));
+		if (options.expanded === true)
+			bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth, row.resultContract));
 	}
 	if (row.steerAcknowledgement) {
 		bodyLines.push(
@@ -1148,6 +1163,7 @@ function toRow(entry: ObservabilityRunSummary, now: number): DispatchBoardRow {
 	const progress = entry.progress;
 	return {
 		...(progress !== undefined ? { progress } : {}),
+		...(entry.resultContract !== undefined ? { resultContract: entry.resultContract } : {}),
 		runId: entry.runId,
 		agentId: entry.agentId,
 		...(entry.agentAudience !== undefined ? { agentAudience: entry.agentAudience } : {}),

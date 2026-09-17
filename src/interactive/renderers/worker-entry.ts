@@ -2,19 +2,21 @@ import { redactSecretString } from "../../domains/safety/redaction.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
 import { previewBudget, previewRows } from "./preview.js";
+import {
+	exactWorkerAnswerObject,
+	type PresentedContractAnswer,
+	presentWorkerContractAnswer,
+	safeWorkerAnswerText,
+} from "./worker-answer.js";
+
 /** Bounded worker summaries share the main transcript's output style. */
 
-import { parseJsonObjectPayload } from "../../core/json-payload.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
+import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
-import {
-	type WorkerEntryState,
-	type WorkerPresentedResultContract,
-	type WorkerReceiptSummary,
-	workerAskedByModel,
-} from "../worker-stream.js";
+import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
@@ -88,7 +90,11 @@ const CHECKPOINT_PREFIX = /^\s*(?:needs_input\b|task_blocked\b|##\s*CHECKPOINT R
 const CHECKPOINT_PREVIEW_ROWS = 16;
 
 export function workerNeedsInput(entry: Pick<WorkerEntryState, "text" | "receipt">): boolean {
-	return entry.receipt !== undefined && entry.receipt.stillRunning !== true && CHECKPOINT_PREFIX.test(entry.text);
+	return (
+		entry.receipt !== undefined &&
+		entry.receipt.stillRunning !== true &&
+		CHECKPOINT_PREFIX.test(entry.text.trim().replace(/^```[A-Za-z0-9_-]*[^\S\r\n]*\r?\n/u, ""))
+	);
 }
 
 function needsInputUnit(): string {
@@ -144,151 +150,20 @@ function railLines(text: string, token: ClioToken, width: number): string[] {
 	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, row)}`);
 }
 
-/** A worker's terminal JSON payload, using the same tolerant reader as its result contract. */
-function structuredAnswer(text: string): Record<string, unknown> | null {
-	const parsed = parseJsonObjectPayload(text);
-	return parsed.ok ? parsed.value : null;
+function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
+	if (entry.receipt?.trust?.artifactIntegrity.state !== "verified") return null;
+	const kind = entry.receipt?.contractKind;
+	const conformance = entry.receipt?.contract;
+	return presentWorkerContractAnswer(
+		entry.text,
+		kind && conformance ? { kind, conformance } : undefined,
+		entry.droppedLines === 0 && (entry.progress?.droppedBytes ?? 0) === 0,
+		!entry.pending && !isPending(entry),
+	);
 }
 
 const isStringArray = (value: unknown): value is string[] =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string");
-
-function reportString(value: unknown): string | null {
-	return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
-}
-
-interface PresentedContractAnswer {
-	lines: string[];
-	footer?: string;
-}
-
-function debuggerReport(value: Record<string, unknown>): PresentedContractAnswer | null {
-	const diagnosis = reportString(value.diagnosis);
-	const reproduction = value.reproduction;
-	if (
-		diagnosis === null ||
-		(reproduction !== "reproduced" && reproduction !== "not-reproduced" && reproduction !== "unknown") ||
-		!isStringArray(value.evidence)
-	) {
-		return null;
-	}
-	return {
-		lines: [
-			diagnosis,
-			...(value.evidence.length === 0 ? ["Evidence: none"] : ["Evidence:", ...value.evidence.map((item) => `- ${item}`)]),
-		],
-		footer: `reproduction ${reproduction}`,
-	};
-}
-
-function verifierReport(value: Record<string, unknown>): PresentedContractAnswer | null {
-	if ((value.verdict !== "pass" && value.verdict !== "fail") || !Array.isArray(value.checks)) return null;
-	const lines: string[] = [];
-	for (const raw of value.checks) {
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-		const check = raw as Record<string, unknown>;
-		const name = reportString(check.name);
-		const evidence = reportString(check.evidence);
-		if (name === null || evidence === null || typeof check.passed !== "boolean") return null;
-		lines.push(`${check.passed ? GLYPH.ok : GLYPH.error} ${name}: ${evidence}`);
-	}
-	return { lines: lines.length === 0 ? ["No checks reported."] : lines, footer: `verdict ${value.verdict}` };
-}
-
-function researchReport(value: Record<string, unknown>): PresentedContractAnswer | null {
-	if ((value.source !== "local" && value.source !== "external") || !Array.isArray(value.findings)) return null;
-	const lines: string[] = [];
-	for (const raw of value.findings) {
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-		const finding = raw as Record<string, unknown>;
-		const claim = reportString(finding.claim);
-		const evidence = reportString(finding.evidence);
-		if (claim === null || evidence === null) return null;
-		lines.push(`- ${claim}`, `  citation: ${evidence}`);
-	}
-	return { lines: lines.length === 0 ? ["No findings reported."] : lines, footer: `source ${value.source}` };
-}
-
-function worldKnowledgeReport(value: Record<string, unknown>): PresentedContractAnswer | null {
-	if (
-		(value.discovery !== "performed" &&
-			value.discovery !== "caller-supplied-only" &&
-			value.discovery !== "unavailable") ||
-		!Array.isArray(value.facts) ||
-		!isStringArray(value.synthesis) ||
-		!isStringArray(value.uncertainties) ||
-		!isStringArray(value.followUpVerification)
-	) {
-		return null;
-	}
-	const lines: string[] = [];
-	for (const raw of value.facts) {
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-		const fact = raw as Record<string, unknown>;
-		const claim = reportString(fact.claim);
-		const evidence = reportString(fact.evidence);
-		if (claim === null || evidence === null || !isStringArray(fact.sources)) return null;
-		lines.push(`- ${claim}`, `  support: ${evidence}`);
-		if (fact.sources.length > 0) lines.push(`  sources: ${fact.sources.join(", ")}`);
-	}
-	if (value.synthesis.length > 0) lines.push("Synthesis:", ...value.synthesis.map((item) => `- ${item}`));
-	if (value.uncertainties.length > 0) lines.push("Uncertainties:", ...value.uncertainties.map((item) => `- ${item}`));
-	if (value.followUpVerification.length > 0) {
-		lines.push("Verify next:", ...value.followUpVerification.map((item) => `- ${item}`));
-	}
-	return { lines: lines.length === 0 ? ["No findings reported."] : lines, footer: `discovery ${value.discovery}` };
-}
-
-function scoutReport(value: Record<string, unknown>): PresentedContractAnswer | null {
-	if (!Array.isArray(value.findings) || typeof value.needsSplit !== "boolean") return null;
-	const lines: string[] = [];
-	for (const raw of value.findings) {
-		if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-		const finding = raw as Record<string, unknown>;
-		const claim = reportString(finding.claim);
-		if (claim === null) return null;
-		const path = reportString(finding.path);
-		const line = typeof finding.line === "number" && Number.isSafeInteger(finding.line) ? finding.line : null;
-		lines.push(path !== null && line !== null ? `- ${claim} — ${path}:${line}` : `- ${claim} (ungrounded lead)`);
-	}
-	if (value.needsSplit) {
-		if (!Array.isArray(value.proposedSubtasks)) return null;
-		lines.push("Split recommended:");
-		for (const raw of value.proposedSubtasks) {
-			if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
-			const subtask = raw as Record<string, unknown>;
-			const task = reportString(subtask.task);
-			const id = reportString(subtask.id);
-			if (task === null || id === null) return null;
-			lines.push(`- ${id}: ${task}`);
-		}
-	}
-	return {
-		lines: lines.length === 0 ? ["No findings reported."] : lines,
-		footer: value.needsSplit ? "split needed" : "no split needed",
-	};
-}
-
-function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
-	if (entry.receipt?.contract !== "pass" || entry.receipt.contractKind === undefined || entry.droppedLines !== 0) {
-		return null;
-	}
-	const value = structuredAnswer(entry.text);
-	if (value === null) return null;
-	const kind: WorkerPresentedResultContract = entry.receipt.contractKind;
-	switch (kind) {
-		case "debugger-report":
-			return debuggerReport(value);
-		case "verifier-report":
-			return verifierReport(value);
-		case "research-report":
-			return researchReport(value);
-		case "world-knowledge-report":
-			return worldKnowledgeReport(value);
-		case "scout-report":
-			return scoutReport(value);
-	}
-}
 
 /**
  * A mutation report as prose: the paths it changed, each validation with its
@@ -317,16 +192,23 @@ function mutationReportLines(value: Record<string, unknown>): string[] | null {
 
 /**
  * The body's source lines. A structured answer (a result-contract JSON object)
- * never reaches the rail raw: a mutation report reads as prose, and any other
- * object is pretty-printed so its keys line up instead of wrapping mid-string.
+ * uses its receipt identity for a readable preview. Unknown objects retain
+ * their original numeric source tokens instead of being parsed and reserialized.
  * Truncated text is not one object and passes through as the prose it is.
  */
 function bodySourceLines(entry: WorkerEntryState): string[] {
-	const structured = entry.droppedLines === 0 ? structuredAnswer(entry.text) : null;
-	if (structured === null) return entry.text.split("\n");
+	if (
+		entry.pending ||
+		entry.receipt?.trust?.artifactIntegrity.state !== "verified" ||
+		entry.droppedLines !== 0 ||
+		(entry.progress?.droppedBytes ?? 0) !== 0
+	)
+		return safeWorkerAnswerText(entry.text).split("\n");
+	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
+	if (structured === null) return safeWorkerAnswerText(entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
 	if (presented !== null) return presented.lines;
-	return mutationReportLines(structured) ?? JSON.stringify(structured, null, 2).split("\n");
+	return mutationReportLines(structured)?.map(safeWorkerAnswerText) ?? safeWorkerAnswerText(entry.text).split("\n");
 }
 
 function bodyLines(entry: WorkerEntryState, width: number, unbounded: boolean): string[] {
@@ -334,7 +216,7 @@ function bodyLines(entry: WorkerEntryState, width: number, unbounded: boolean): 
 	// its first token) gets no rail at all rather than one blank rail row.
 	if (entry.text.length === 0) return [];
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	const source = bodySourceLines(entry);
+	const source = unbounded ? safeWorkerAnswerText(entry.text).split("\n") : bodySourceLines(entry);
 	const capped = unbounded || source.length <= BODY_LINE_LIMIT ? source : source.slice(0, BODY_LINE_LIMIT);
 	const hiddenLines = entry.droppedLines + (source.length - capped.length);
 	const out: string[] = [];
@@ -417,6 +299,15 @@ export function renderWorkerEntryLines(
 	options: WorkerEntryRenderOptions,
 ): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
+	const integrity = entry.receipt?.trust;
+	const provenance =
+		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
+			? []
+			: railLines(
+					`receipt: ${integrity ? (retiredIntegrityVersionOf(integrity.artifactIntegrity) !== null ? "seal retired" : trustStateWord("artifactIntegrity", integrity.artifactIntegrity.state)) : "integrity unavailable"}; raw output, not admitted as evidence`,
+					"warning",
+					safeWidth,
+				);
 	const quality = isPending(entry)
 		? []
 		: railLines(
@@ -434,6 +325,7 @@ export function renderWorkerEntryLines(
 			...(tools ? [tools] : []),
 			...failureLines(entry, safeWidth),
 			footerLine(entry, safeWidth),
+			...provenance,
 			...quality,
 		].map(redactSecretString);
 	}
@@ -479,6 +371,7 @@ export function renderWorkerEntryLines(
 					safeWidth,
 				)
 			: []),
+		...provenance,
 		...quality,
 	].map(redactSecretString);
 }
