@@ -2,7 +2,7 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## 0.4.9 - 2026-09-16
+## 0.4.9 - 2026-09-17
 
 ### read
 
@@ -64,12 +64,15 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### maintenance reliability
 
 - Keep stale or unavailable addressed worker steering out of the main conversation and preserve the rejected draft. Preserve session-picker selection through filtering and undo, honor the selected row with customized confirmation, and prioritize task identity in narrow terminals.
-- Bound provider-error previews by terminal rows, retain actionable status and route advice, and distinguish provider retries from fleet retries. Keep complete available redacted diagnostics in inspection and export; upstream-truncated bytes remain unavailable. Replaying intermediate tool-use messages no longer attaches a successful completion footer to an earlier failed or cancelled turn.
+- Bound provider-error previews by terminal rows, retain actionable status and route advice, and distinguish provider retries from fleet retries. Keep complete available redacted diagnostics in inspection and export. On OpenAI-compatible routes, restore the error body the SDK truncates at 4000 characters when the captured response provably matches it, bounded at 65536 characters; other adapters keep the upstream cap. Replaying intermediate tool-use messages no longer attaches a successful completion footer to an earlier failed or cancelled turn.
 - Complete partial UTF-8 session writes before acknowledging entries, roll back failed appends, and retain pending durability flushes through descriptor cleanup. Validate session format and replay entries before switching owners, and prepare migrated ledgers before publishing reopened lifecycle state.
 - Keep provider deadlines and caller cancellation active through response bodies and release unread probe responses. Apply the same lifetime to native capability and embedding requests; permit native embedding fallback only for completed endpoint-unavailable responses, preserving the existing healthy vector and reranking contracts.
 - Render recognized completed worker contracts consistently in Fleet Runs and the transcript using verified receipt identity and conformance. Preserve raw evidence, partial-output disclosure and the distinction between execution, contract conformance and validation.
 - Align installed-skill activation guidance with the existing autonomy policy while preserving operator-gated marketplace installation, recipe restrictions and first-turn discovery. The corrected instructions replace contradictory wording without growing the prompt.
 - Retain scheduler ownership of workers across partial parallel startup and cancellation until their terminal cleanup settles. Keep concrete fleet-member steering, permission responses and cancellation within the addressed member or assignment retry chain instead of selecting a sibling with shared ancestry.
+- Reopen and restamp a migrated version-3 session in one atomic metadata publication, so a refused resume leaves the prior metadata intact instead of marking the candidate open under its old version.
+- Stop the boot-time tool-support warning for targets that were never probed; a cold gateway route reports nothing about its model until a probe, catalog entry or target flag states it.
+- Clear the remaining lint findings and split the web framework into its own chunk, which removes the oversized entry-chunk warning.
 
 ## 0.4.8 - 2026-09-12
 
