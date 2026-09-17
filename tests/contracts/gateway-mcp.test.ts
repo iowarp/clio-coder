@@ -1,7 +1,7 @@
 import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -144,6 +144,29 @@ describe("gateway MCP capabilities", () => {
 			args: { op: "call", capability: ECHO, args: { result: { content: [], structuredContent: data } } },
 		});
 		deepStrictEqual(payloadOf(response), data);
+	});
+
+	it("bounds a large MCP result in model context and offloads the full text", async () => {
+		// A 62 KB search result entered context verbatim under the 64 KiB session
+		// cap, and two of them stalled a 131k local model.
+		const scene = scenario();
+		writeConfig(scene.project, scene.markerPath, "raw-result");
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, source } = wire(scene);
+		open.push(source);
+		const text = `${"x".repeat(99)}\n`.repeat(622);
+		const response = await registry.invoke(
+			{
+				tool: ToolNames.Gateway,
+				args: { op: "call", capability: ECHO, args: { result: { content: [{ type: "text", text }] } } },
+			},
+			{ sessionId: "bound-session", toolCallId: "call-1", toolResultMaxBytes: 65_536 },
+		);
+		if (response.kind !== "ok" || response.result.kind !== "ok") throw new Error(JSON.stringify(response));
+		const size = response.result.details?.resultSize as { truncated?: boolean; offloadPath?: string } | undefined;
+		ok(Buffer.byteLength(response.result.output, "utf8") <= 20 * 1024, String(response.result.output.length));
+		strictEqual(size?.truncated, true);
+		ok(size?.offloadPath && readFileSync(size.offloadPath, "utf8").includes(text));
 	});
 
 	it("keeps malformed MCP results unsuccessful through the gateway", async () => {

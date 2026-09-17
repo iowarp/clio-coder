@@ -17,6 +17,9 @@ import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { ImageContent } from "../../engine/types.js";
 import type { ToolRegistry, ToolResult, ToolSpec } from "../registry.js";
 
+/** Model-visible bytes of one MCP result before the rest is offloaded. */
+const MCP_RESULT_CONTEXT_BYTES = 16 * 1024;
+
 /**
  * Local stdio MCP servers as gateway capabilities. The source reads the
  * declared servers once per session, launches a server only when it is
@@ -225,7 +228,15 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				objective: tool.description.trim().length > 0 ? tool.description.trim() : `MCP tool ${tool.name}`,
 				uiLabel: `${declaration.id}/${tool.name}`,
 				retrySafety: "unknown",
-				resultSizePolicy: { kind: "bounded", maxBytes: 600_000 },
+				// The session cap alone (64 KiB) let one search result spend a sixth
+				// of a 131k window. Bound MCP output like the built-in observation
+				// tools; the full text is offloaded and stays readable by path.
+				resultSizePolicy: {
+					kind: "bounded",
+					maxBytes: MCP_RESULT_CONTEXT_BYTES,
+					followUpHint:
+						"Call again with a narrower query or the server's own limit/page arguments, or read the offloaded file in windows.",
+				},
 				costLatency: "local_slow",
 			},
 			async run(args, invokeOptions): Promise<ToolResult> {
