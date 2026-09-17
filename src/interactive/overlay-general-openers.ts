@@ -31,7 +31,7 @@ import {
 } from "./dispatch-board.js";
 import { compileFleetRunPreview, type FleetRunPreview, type FleetRunPreviewInput } from "./fleet-run-preview.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
-import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { buildResponsiveHint, type HintEntry, showClioOverlayFrame } from "./overlay-frame.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import {
 	type ContextResetMutationChoice,
@@ -348,13 +348,20 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		deps.requestRender();
 	};
 
-	const dispatchBoardHint = (): string => {
+	const dispatchBoardHint = (innerWidth: number): string => {
 		const row = deps.dispatchBoard.selectedRow();
-		const entries = [{ key: "↑↓", verb: "select" }];
-		if (row) entries.push({ key: "Enter", verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail" });
-		if (row && isDispatchBoardRowSteerable(row)) entries.push({ key: "s", verb: "steer" });
-		if (row && isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel" });
-		return buildHint(entries);
+		const entries: HintEntry[] = [];
+		if (row) {
+			entries.push({ key: "↑↓", verb: "select" });
+			entries.push({
+				key: "Enter",
+				verb: deps.dispatchBoard.detailExpanded() ? "hide detail" : "detail",
+				critical: false,
+			});
+		}
+		if (row && isDispatchBoardRowSteerable(row)) entries.push({ key: "s", verb: "steer", critical: true });
+		if (row && isDispatchBoardRowCancellable(row)) entries.push({ key: "x", verb: "cancel", critical: true });
+		return buildResponsiveHint(entries)(innerWidth);
 	};
 
 	/**

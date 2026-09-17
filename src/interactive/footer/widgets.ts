@@ -38,6 +38,8 @@ import {
 	sectionTag,
 } from "../theme/index.js";
 
+import { fitIdentityLabel } from "../theme/labels.js";
+
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
 	errors: number;
@@ -263,20 +265,22 @@ export function compactPrimaryLine(
 	const safeWidth = Math.max(1, Math.floor(width));
 	let git = safeWidth >= COMPACT_GIT_MIN_WIDTH ? gitChip(theme, workspace.branch, workspace.dirty) : null;
 	let right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, true);
-	let left = joinSections(theme, [theme.fg("muted", workspace.cwd), git]);
+	// A long temporary parent must yield before the active worker count.
+	const cwd = fitIdentityLabel(workspace.cwd, Math.max(8, safeWidth - visibleWidth(right) - 1));
+	let left = joinSections(theme, [theme.fg("muted", cwd), git]);
+
+	if (git && visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
+		git = null;
+		left = theme.fg("muted", cwd);
+	}
 
 	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
 		right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, false);
 	}
 
-	if (git && visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
-		git = null;
-		left = theme.fg("muted", workspace.cwd);
-	}
-
 	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
 		const maxCwdWidth = Math.max(1, safeWidth - visibleWidth(right) - 1);
-		left = theme.fg("muted", truncateToWidth(workspace.cwd, maxCwdWidth, "…", true));
+		left = theme.fg("muted", fitIdentityLabel(workspace.cwd, maxCwdWidth));
 	}
 
 	return joinColumns(left, right, safeWidth);
@@ -1077,8 +1081,7 @@ function buildHarnessStatePill(
 	fleetSummaryIsAction = false,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const badge =
-		showBadge && safeWidth >= 48 ? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction) : "";
+	const badge = showBadge ? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction) : "";
 	// Idleness is absence of work, not a phase worth narrating. If a tool or
 	// fleet remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.

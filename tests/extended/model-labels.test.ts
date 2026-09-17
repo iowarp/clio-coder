@@ -9,7 +9,7 @@ describe("model labels", () => {
 		strictEqual(abbreviateModelId("mini/ornith1.5-35b-moe"), "mini/ornith1.5-35b-moe");
 	});
 
-	it("keeps the compact leaf behavior for unqualified model ids", () => {
-		strictEqual(abbreviateModelId("qwen3-coder-30b-a3b-instruct"), "qwen3-coder-30b");
+	it("marks omission while retaining the suffix for unqualified model ids", () => {
+		strictEqual(abbreviateModelId("qwen3-coder-30b-a3b-instruct"), "qwen3-coder…a3b-instruct");
 	});
 });

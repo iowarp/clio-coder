@@ -43,6 +43,7 @@ import {
 	screenTitle,
 	spinnerFrame,
 } from "./theme/index.js";
+import { fitIdentityLabel } from "./theme/labels.js";
 
 export type DispatchBoardStatus = ObservabilityRunSummary["status"];
 
@@ -474,8 +475,8 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	const current = progress.currentAction;
 	const recent = progress.recentActions[0];
 	const units: string[] = [];
-	if (phase !== null) units.push(phase);
-	if (current !== null) units.push(theme.fg("muted", actionPhrase(current)));
+	if (phase !== null && current === null) units.push(phase);
+	if (current !== null) units.push(theme.fg("muted", `now ${actionPhrase(current)}`));
 	else if (recent !== undefined) units.push(theme.fg("dim", `last ${actionPhrase(recent)}`));
 	if (units.length === 0) return null;
 	return cardUnitsLine(theme, "doing", units, contentWidth);
@@ -519,16 +520,29 @@ function progressAnswerLines(
 	return body.map((row, index) => `${index === 0 ? cardKvKey(theme, "answer") : " ".repeat(gutter)}${row}`);
 }
 
-/** Keep the canonical tier and every summary clause visible by wrapping the value under its card key. */
-function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: number): string[] {
+/** Compact ordinary unvalidated completions; preserve all exceptional facts and expanded provenance. */
+function trustCardLines(theme: ClioTheme, row: DispatchBoardRow, contentWidth: number, expanded: boolean): string[] {
 	const gutter = CARD_KV_KEY_WIDTH + 1;
 	const valueWidth = Math.max(1, contentWidth - gutter);
+	const axes = row.trust?.axes;
+	// Only the ordinary sealed, mediated completion without validation/review
+	// folds. Unknown, failed, inferred or exceptional provenance stays explicit.
+	const compact =
+		!expanded &&
+		row.status === "completed" &&
+		row.trust?.verdict === "unverified" &&
+		axes?.artifactIntegrity === "verified" &&
+		axes.validationGrounding === "absent" &&
+		axes.independentReview === "absent" &&
+		axes.autonomyEnforcement === "enforced" &&
+		axes.contextProvenance === "recorded" &&
+		axes.completionEvidence === "absent";
 	const trust =
 		row.trust === undefined
 			? theme.fg("dim", isTerminalStatus(row.status) ? "receipt not read back" : "not sealed yet")
 			: theme.fg(
 					trustVerdictToken(row.trust.verdict),
-					`${trustVerdictGlyph(row.trust.verdict)} ${row.trust.verdict}; ${row.trust.text}`,
+					`${trustVerdictGlyph(row.trust.verdict)} ${row.trust.verdict}; ${compact ? trustStateWord("validationGrounding", "absent") : row.trust.text}`,
 				);
 	const host =
 		row.hostVerification === undefined ? "" : ` · ${theme.fg("muted", `host checks ${row.hostVerification}`)}`;
@@ -565,7 +579,6 @@ function renderDispatchCard(
 	const statusStr = theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`);
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a";
-	const target = `${theme.fg("muted", `${row.runtimeKind}:${row.targetId}`)} ${theme.fg("dim", "▸")} ${theme.fg("muted", row.wireModelId)}`;
 
 	// The agent label is the frame title and can be arbitrarily long (agent ids
 	// are user data); clamp it so the title plus the elapsed meta never pushes
@@ -592,7 +605,8 @@ function renderDispatchCard(
 
 	// The model id is user data and can outrun the card; mark the cut with `…`
 	// rather than hard-clipping it mid-token into a string that reads whole.
-	const targetLine = truncateToWidth(`${cardKvKey(theme, "target")}${target}`, contentWidth, "…", false);
+	const targetKey = cardKvKey(theme, "target");
+	const targetLine = `${targetKey}${theme.fg("muted", fitIdentityLabel(sanitizeCallTargetText(`${row.runtimeKind}:${row.targetId} ▸ ${row.wireModelId}`), Math.max(1, contentWidth - visibleWidth(targetKey))))}`;
 	// Fleet facts: node placement (absent means local), gate role badge, and
 	// reroute lineage. Whole units so overflow drops a fact, never clips one.
 	const statusUnits = [
@@ -621,19 +635,28 @@ function renderDispatchCard(
 	// step it is; every other run leaves the cell empty rather than inventing a
 	// position, so the column reads as "not a fleet step" and not as wave zero.
 	const phaseCell = formatDispatchPhaseCell(row.phase, contentWidth);
+	const fullTask = row.taskSummary
+		? cardWrappedValueLines(theme, "task", theme.fg("muted", row.taskSummary), contentWidth)
+		: [];
+	const taskLines =
+		options.expanded === true || fullTask.length <= 3
+			? fullTask
+			: [...fullTask.slice(0, 2), theme.fg("dim", "… Enter detail for full task")];
 	const bodyLines = [
 		cardUnitsLine(theme, "run", [theme.fg("dim", row.runId)], contentWidth),
-		cardUnitsLine(
-			theme,
-			"phase",
-			[phaseCell === null ? theme.fg("dim", "—") : theme.fg("info", phaseCell)],
-			contentWidth,
-		),
-		targetLine,
-		...(row.taskSummary ? cardWrappedValueLines(theme, "task", theme.fg("muted", row.taskSummary), contentWidth) : []),
+		...(phaseCell === null ? [] : [cardUnitsLine(theme, "phase", [theme.fg("info", phaseCell)], contentWidth)]),
+		...(options.expanded === true
+			? cardWrappedValueLines(
+					theme,
+					"target",
+					theme.fg("muted", sanitizeCallTargetText(`${row.runtimeKind}:${row.targetId} ▸ ${row.wireModelId}`)),
+					contentWidth,
+				)
+			: [targetLine]),
+		...taskLines,
 		cardUnitsLine(theme, "status", statusUnits, contentWidth),
-		...trustCardLines(theme, row, contentWidth),
-		...(row.budget !== undefined
+		...trustCardLines(theme, row, contentWidth, options.expanded === true),
+		...(options.expanded === true && row.budget !== undefined
 			? [
 					...cardWrappedValueLines(
 						theme,
@@ -669,19 +692,18 @@ function renderDispatchCard(
 	// never arguments, across the stdout seam) and the recent-tool trail.
 	const currentTool = row.currentTool ?? null;
 	const recentTools = row.recentTools ?? [];
-	if (currentTool !== null || recentTools.length > 0) {
+	if (!row.progress && (currentTool !== null || recentTools.length > 0)) {
 		const toolUnits = [
 			currentTool !== null ? theme.fg("action", `${currentTool} running`) : theme.fg("dim", "idle"),
 			...(recentTools.length > 0 ? [theme.fg("muted", `recent ${recentTools.join(" ")}`)] : []),
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
 	}
-	// Live worker progress is expanded detail, never a default row: five running
-	// scouts must stay five compact cards until the operator opens one.
-	if (options.expanded === true && row.progress) {
+	// One current-operation row is useful at a glance; prose and policy expand on demand.
+	if (row.progress) {
 		const doing = progressActionLine(theme, row.progress, contentWidth);
 		if (doing !== null) bodyLines.push(doing);
-		bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth));
+		if (options.expanded === true) bodyLines.push(...progressAnswerLines(theme, row.progress, row.runId, contentWidth));
 	}
 	if (row.steerAcknowledgement) {
 		bodyLines.push(
@@ -922,11 +944,13 @@ function formatDispatchBoardLines(
 ): string[] {
 	if (rows.length === 0) {
 		const theme = clioTheme();
-		const lines = ["", "No fleet runs yet", "Delegated runs appear here with task, status, and telemetry.", ""];
-		return lines.map((line) => {
-			const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
-			return theme.fg("dim", " ".repeat(padding) + line);
-		});
+		const lines = ["", "No fleet runs yet", "Use /run or /delegate to start a run.", ""];
+		return lines
+			.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)))
+			.map((line) => {
+				const padding = Math.max(0, Math.floor((width - visibleWidth(line)) / 2));
+				return theme.fg("dim", " ".repeat(padding) + line);
+			});
 	}
 
 	const endpointActive: Record<string, number> = { ...foregroundStreamUsage() };

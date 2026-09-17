@@ -1,6 +1,7 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
+import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
 import { createEditorSubmitController } from "../../src/interactive/editor-submit.js";
 import {
 	createInteractivePresentation,
@@ -531,7 +532,7 @@ function noop(): void {}
  * transitions below run through the wiring the application uses rather than
  * through direct calls on the component.
  */
-function presentation(over: Partial<InteractivePresentationDeps> = {}) {
+function presentation(over: Partial<InteractivePresentationDeps> = {}, realEditor = false) {
 	let rendered = 0;
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
@@ -578,7 +579,10 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}) {
 			createContextActivityStore: () => ({ current: () => ({}), unsubscribe: noop }),
 			createNotificationCenter: () => ({ add: noop, list: () => [], dismiss: noop }),
 			buildFooter: () => ({ view, refresh: noop, dispose: noop, isExpanded: () => false }),
-			createEditor: () => ({ ...view, focused: false, setAutocompleteProvider: noop }),
+			createEditor: (_tui: unknown, chrome: EditorChrome) =>
+				realEditor
+					? new ClioEditor(new TuiMainScreen({ columns: 120, rows: 24, write: noop } as unknown as Terminal), chrome)
+					: { ...view, focused: false, setAutocompleteProvider: noop },
 			createAutocomplete: () => ({}),
 			createDispatchBoardView: () => view,
 			createChatRenderer: () => ({ mutate: (run: () => void) => run(), reset: (run: () => void) => run(), flush: noop }),
@@ -676,3 +680,45 @@ test("disposing the presentation disposes the header", () => {
 	// A disposed banner schedules nothing further; rendering must still be safe.
 	strictEqual(headerRows(built).length, 3);
 });
+
+for (const width of [40, 44, 60, 92, 120]) {
+	test(`production settings-to-composer identity preserves distinct families at ${width} columns`, () => {
+		let model = "very-long-placement/qwopus3.8-27b-q6";
+		const { presentation: built } = presentation(
+			{
+				getSettings: () =>
+					({
+						chat: { target: "blade-gateway", model, thinkingLevel: "low" },
+						interface: { mode: "regular", outputDetail: "standard", smoothStreaming: "off" },
+					}) as never,
+			},
+			true,
+		);
+		try {
+			const rails: string[] = [];
+			for (const placement of ["very-long-placement", "dynamo-long-placement"]) {
+				for (const family of ["qwopus3.8", "llamus3.8", "qwen3", "llama3"]) {
+					model = `${placement}/${family}-27b-q6`;
+					deepStrictEqual(built.editorChrome.getModelLabel(), { targetId: "blade-gateway", modelId: model });
+					const rows = built.editor.render(width);
+					for (const row of rows) ok(visibleWidth(row) <= width);
+					const rail = stripTerminalSequences(rows[0] ?? "");
+					ok(rail.includes(family.slice(0, 5)), rail);
+					ok(rail.includes("q6"), rail);
+					if (width >= 92) ok(rail.includes(model), rail);
+					rails.push(rail);
+				}
+			}
+			strictEqual(new Set(rails.slice(0, 4)).size, 4);
+			strictEqual(new Set(rails.slice(4)).size, 4);
+			// The callback carries raw fields; only rendering removes terminal payloads.
+			model = `very-long-placement/\x1b]0;FAKE_MODEL_NAME\x07qwopus3.8-27b-q6`;
+			const hostile = built.editor.render(width).map(stripTerminalSequences).join("\n");
+			ok(!hostile.includes("FAKE_MODEL_NAME"), hostile);
+			ok(hostile.includes("qwopus"), hostile);
+			ok(hostile.includes("q6"), hostile);
+		} finally {
+			built.dispose();
+		}
+	});
+}

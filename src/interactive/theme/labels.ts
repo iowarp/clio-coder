@@ -1,29 +1,50 @@
-/**
- * Abbreviate a wire model id for chips and dashboards without amputating a
- * meaningful placement prefix or version suffix. `dynamo/qwen3.8-27b` remains
- * visible as selected; only the leaf is shortened when the complete route is
- * wider than 24 characters.
- */
-export function abbreviateModelId(modelId: string | null | undefined): string {
-	const segments = (modelId ?? "").trim().split("/").filter(Boolean);
-	const base = segments.pop() ?? "";
-	if (base.length === 0) return "model";
-	const prefix = segments[0];
-	const maxLeaf = prefix ? Math.max(8, 24 - prefix.length - 1) : 18;
-	const parts = base.split("-").filter((part) => part.length > 0);
-	let leaf: string;
-	if (parts.length <= 1) leaf = base.length > maxLeaf ? base.slice(0, maxLeaf) : base;
-	else {
-		const kept: string[] = [];
-		for (const part of parts) {
-			const next = [...kept, part].join("-");
-			if (kept.length > 0 && next.length > maxLeaf) break;
-			kept.push(part);
-		}
-		const joined = kept.join("-");
-		leaf = joined.length > maxLeaf ? joined.slice(0, maxLeaf) : joined;
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { stripTerminalSequences, truncateToWidth, visibleWidth } from "../../engine/tui.js";
+
+const identitySegments = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/** Keep both placement and the distinguishing suffix when an identity must fit. */
+export function fitIdentityLabel(value: string, width: number): string {
+	value = sanitizeCallTargetText(value);
+	const room = Math.max(0, Math.floor(width));
+	if (visibleWidth(value) <= room) return value;
+	if (room <= 1) return room === 1 ? "…" : "";
+	const tailBudget = Math.ceil((room - 1) / 2);
+	let tail = "";
+	for (const { segment } of [...identitySegments.segment(value)].reverse()) {
+		if (visibleWidth(segment + tail) > tailBudget) break;
+		tail = segment + tail;
 	}
-	return prefix ? `${prefix}/${leaf}` : leaf;
+	const headBudget = room - 1 - visibleWidth(tail);
+	let head = "";
+	for (const { segment } of identitySegments.segment(value)) {
+		if (visibleWidth(head + segment) > headBudget) break;
+		head += segment;
+	}
+	return `${head}…${tail}`;
+}
+
+/** Compact wire identity with explicit omission and its version/quantization suffix. */
+export function abbreviateModelId(modelId: string | null | undefined): string {
+	const value = sanitizeCallTargetText(modelId ?? "");
+	if (value.length === 0) return "model";
+	if (visibleWidth(value) <= 24) return value;
+	const slash = value.lastIndexOf("/");
+	if (slash < 0) return fitIdentityLabel(value, 24);
+	const placement = value.slice(0, slash);
+	const model = value.slice(slash + 1);
+	const modelBudget = Math.min(18, visibleWidth(model));
+	return `${fitIdentityPrefix(placement, 23 - modelBudget)}/${fitIdentityLabel(model, modelBudget)}`;
+}
+
+/** Raw route fields stay separate until the surface knows its terminal-cell budget. */
+export interface TargetIdentity {
+	targetId: string | null | undefined;
+	modelId: string | null | undefined;
+}
+
+function fitIdentityPrefix(value: string, width: number): string {
+	return stripTerminalSequences(truncateToWidth(value, Math.max(0, width), "…", false));
 }
 
 export interface TargetLabelOptions {
@@ -31,6 +52,8 @@ export interface TargetLabelOptions {
 	separator?: string;
 	/** Off for surfaces with room for the whole wire id. */
 	abbreviate?: boolean;
+	/** Fit raw target/model fields once, preserving family and suffix before placement. */
+	width?: number;
 }
 
 /**
@@ -53,12 +76,25 @@ export function formatTargetLabel(
 	modelId: string | null | undefined,
 	options: TargetLabelOptions = {},
 ): string {
-	const target = (targetId ?? "").trim();
-	const model = (modelId ?? "").trim();
-	if (target.length === 0 && model.length === 0) return "not configured";
+	const target = sanitizeCallTargetText(targetId ?? "");
+	const model = sanitizeCallTargetText(modelId ?? "");
+	const fit = (label: string): string => (options.width === undefined ? label : fitIdentityLabel(label, options.width));
+	if (target.length === 0 && model.length === 0) return fit("not configured");
+	if (options.width !== undefined && target.length > 0 && model.length > 0) {
+		const width = Math.max(0, Math.floor(options.width));
+		const separator = options.separator ?? " · ";
+		const full = `${target}${separator}${model}`;
+		if (visibleWidth(full) <= width) return full;
+		const leaf = model.slice(model.lastIndexOf("/") + 1);
+		const available = width - visibleWidth(separator);
+		if (available < 9) return fitIdentityLabel(leaf, width);
+		const modelBudget = Math.min(visibleWidth(leaf), Math.max(8, Math.ceil(available * 0.7)));
+		const targetBudget = Math.min(visibleWidth(target), available - modelBudget);
+		return `${fitIdentityPrefix(target, targetBudget)}${separator}${fitIdentityLabel(leaf, available - targetBudget)}`;
+	}
 	const shown = options.abbreviate === false ? model : abbreviateModelId(model);
-	if (target.length === 0) return `no target · ${shown}`;
-	if (model.length === 0) return `${target} · no model`;
+	if (target.length === 0) return fit(`no target · ${shown}`);
+	if (model.length === 0) return fit(`${target} · no model`);
 	return `${target}${options.separator ?? " · "}${shown}`;
 }
 

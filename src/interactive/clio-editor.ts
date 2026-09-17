@@ -11,6 +11,7 @@ import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
+import { fitIdentityLabel, formatTargetLabel, type TargetIdentity } from "./theme/labels.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
 const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode(27)}[0m`;
@@ -26,8 +27,8 @@ function hasScrollIndicator(line: string): boolean {
 }
 
 export interface EditorChrome {
-	/** Target+model identity, e.g. `node-a·example-coder-model`. */
-	getModelLabel: () => string;
+	/** Raw route fields from presentation; startup/legacy labels remain opaque strings. */
+	getModelLabel: () => TargetIdentity | string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
 	/** Whether Enter currently targets the active Clio response. */
@@ -90,8 +91,15 @@ function styledThinkingHint(theme: ClioTheme, value: string): string {
 	}
 }
 
-function styledRailLabel(theme: ClioTheme, chrome: EditorChrome): string {
-	return `${theme.fg("dim", chrome.getModelLabel())} ${theme.fg("dim", "·")} ${styledThinkingHint(theme, chrome.getThinkingLabel())}`;
+function styledRailLabel(theme: ClioTheme, chrome: EditorChrome, width: number): string {
+	const thinking = styledThinkingHint(theme, chrome.getThinkingLabel());
+	const identity = chrome.getModelLabel();
+	const room = Math.max(1, width - visibleWidth(thinking) - 3);
+	const model =
+		typeof identity === "string"
+			? fitIdentityLabel(identity, room)
+			: formatTargetLabel(identity.targetId, identity.modelId, { width: room });
+	return `${theme.fg("dim", model)} ${theme.fg("dim", "·")} ${thinking}`;
 }
 
 function composerMode(chrome: EditorChrome, text: string): ComposerMode {
@@ -250,7 +258,7 @@ export class ClioEditor extends Editor {
 			lines[0] = rule(theme, safeWidth, {
 				left: mode,
 				leftToken: modeToken(mode),
-				right: styledRailLabel(theme, this.chrome),
+				right: styledRailLabel(theme, this.chrome, Math.max(1, safeWidth - visibleWidth(mode) - 5)),
 				fillToken: "frameStrong",
 				rightRaw: true,
 				rightTail: theme.style("frameStrong", "─", { bold: true }),

@@ -446,14 +446,15 @@ export function renderWorkerEntryLines(
 	const summary = bodySourceLines(entry).flatMap((line) =>
 		railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
 	);
-	const actions = entry.progress
-		? [...entry.progress.recentActions]
-				.reverse()
-				.concat(entry.progress.currentAction ? [entry.progress.currentAction] : [])
-		: [];
-	const trail = actions.flatMap((action) =>
+	// Current work leads the bounded preview; completed calls remain explicitly historical.
+	const current = isPending(entry) ? entry.progress?.currentAction : null;
+	const actions = [
+		...(current ? [{ action: current, label: "now" }] : []),
+		...(entry.progress?.recentActions ?? []).map((action) => ({ action, label: "last" })),
+	];
+	const trail = actions.flatMap(({ action, label }) =>
 		railLines(
-			`${GLYPH.phaseTool} ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
+			`${GLYPH.phaseTool} ${label}: ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
 			"muted",
 			safeWidth,
 		),
@@ -466,7 +467,7 @@ export function renderWorkerEntryLines(
 		...(detail.workerRows > 0 || needsInput ? previewRows(summary, summaryRows, safeWidth, entry.pending) : []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
 		...(tools ? [tools] : []),
-		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, true) : []),
+		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth) : []),
 		...failure,
 		...(presented ? railLines(presented, "muted", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),

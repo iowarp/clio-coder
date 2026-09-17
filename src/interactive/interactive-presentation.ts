@@ -40,7 +40,6 @@ import { parseSlashCommand, type RunIo } from "./slash-commands.js";
 import { createStatusController, type StatusController, type TurnSummary } from "./status/index.js";
 import type { SmoothStreamingMode } from "./stream-pacer.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
-import { formatTargetLabel } from "./theme/index.js";
 import { createWelcomeDashboard, type WelcomeDashboardComponent } from "./welcome-dashboard.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import type { WorkspaceFacts } from "./workspace-facts.js";
@@ -443,8 +442,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editorChrome: EditorChrome = {
 		getModelLabel: () => {
 			const current = deps.getSettings?.();
-			// The rail is the narrowest of the three, so it drops the spaces.
-			return formatTargetLabel(current?.chat?.target, current?.chat?.model, { separator: "·" });
+			// Keep raw fields separate through the terminal-lease proxy until render knows its width.
+			return { targetId: current?.chat?.target, modelId: current?.chat?.model };
 		},
 		getThinkingLabel: () => {
 			const current = deps.getSettings?.();
