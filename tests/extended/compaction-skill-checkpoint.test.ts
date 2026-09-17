@@ -806,6 +806,38 @@ describe("typed historical skill checkpoints (pure source)", () => {
 			strictEqual(isSessionEntry({ ...state, data }), false);
 	});
 
+	it("verifies a skill load whose call shared a parallel tool batch", () => {
+		// The ledger chains entries linearly, so a batched load's result hangs off
+		// the last sibling call instead of its own call.
+		const batched = (): SessionEntry[] => {
+			const { entries } = history();
+			const assistant = entries[1];
+			ok(assistant?.kind === "message");
+			(assistant.payload as { content: unknown[] }).content.push({
+				type: "toolCall",
+				id: "sibling",
+				name: "find",
+				arguments: { pattern: "*.md" },
+			});
+			entries.splice(
+				3,
+				0,
+				message("sibling-call", "tool_call", { toolCallId: "sibling", name: "find", args: { pattern: "*.md" } }, "call"),
+			);
+			const result = entries.find((entry) => entry.turnId === "result");
+			ok(result);
+			result.parentTurnId = "sibling-call";
+			return entries;
+		};
+		ok(captureSkillContext(batched(), selection));
+		// A chain that crosses another assistant message is a different exchange.
+		const crossed = batched();
+		const sibling = crossed.find((entry) => entry.turnId === "sibling-call");
+		ok(sibling?.kind === "message");
+		sibling.role = "assistant";
+		strictEqual(captureSkillContext(crossed, selection), undefined);
+	});
+
 	it("keeps protection with unknown, incomplete, ambiguous, mismatched or worker evidence", async () => {
 		const mutations: Array<(entries: SessionEntry[]) => void> = [
 			(entries) => {

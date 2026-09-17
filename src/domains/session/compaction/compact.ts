@@ -252,6 +252,29 @@ function findTurnStartForProtection(
 	return -1;
 }
 
+/**
+ * The ledger chains entries linearly, so a result's parent is its own call only
+ * when that call was alone in its batch. In a parallel batch the parent chain
+ * runs back through sibling calls, results and activation receipts. The load is
+ * still verifiable when that chain reaches the call without crossing another
+ * assistant or user message, which would make it a different exchange.
+ */
+function resultFollowsCallInBatch(
+	turn: ReadonlyArray<SessionEntry>,
+	resultEntry: SessionEntry,
+	call: SessionEntry,
+): boolean {
+	let parent = resultEntry.parentTurnId;
+	for (let hops = 0; hops < turn.length && parent; hops++) {
+		if (parent === call.turnId) return true;
+		const link = turn.find((candidate) => candidate.turnId === parent);
+		if (!link) return false;
+		if (link.kind === "message" && link.role !== "tool_call" && link.role !== "tool_result") return false;
+		parent = link.parentTurnId;
+	}
+	return false;
+}
+
 /** Recover only complete, uniquely paired historical main-agent loads. Never consult current disk. */
 export function captureSkillContext(
 	entries: ReadonlyArray<SessionEntry>,
@@ -337,7 +360,7 @@ export function captureSkillContext(
 			results.length !== 1 ||
 			resultEntry?.kind !== "message" ||
 			!turn.includes(resultEntry) ||
-			resultEntry.parentTurnId !== call.turnId ||
+			!resultFollowsCallInBatch(turn, resultEntry, call) ||
 			entry.parentTurnId !== request.turnId
 		)
 			return undefined;
