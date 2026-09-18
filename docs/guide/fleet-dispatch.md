@@ -784,9 +784,19 @@ that says nothing about the target, or never starts, frees the slot for the
 next dispatch to probe. The breaker is not persisted: `clio-coder targets` and
 `clio-coder doctor` run in their own processes and cannot see it, so the
 session's `/settings` targets rows are where an open, half-open, or probing
-route shows, with its remaining cooldown. A provider's context-overflow error and a response
-schema the server rejects are verdicts on the request, so they end the attempt
-without a retry and never count against the route.
+route shows, with its remaining cooldown. A provider's context-overflow error
+and a response schema the server rejects are verdicts on the request, so they
+never count against the route. A rejected schema ends the attempt without a
+retry. A context overflow is retried once, and only onto a route whose
+effective context window is strictly larger than the failed route's. The route
+is chosen like a target-excluding retry, except that another model on the same
+target also qualifies, and under `approved` failover it must be in the approved
+envelope. The retry counts against `fleet.retry.maxRetries`, and the attempt's
+retry reason in the assignment lineage reads
+`context-overflow: 8192 -> 32768 on big/qwen`. An overflow is not retried under
+`none` failover, when the failed attempt was itself an overflow retry, or when
+no eligible route has a larger window; the assignment then settles failed with
+an `outcomeDetail` that names the reason.
 
 Assignment status, attempt ids, and terminal run id are stored separately in
 `assignments.json` while each attempt keeps its own strict v20 receipt.
