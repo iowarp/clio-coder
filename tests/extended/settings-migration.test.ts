@@ -61,7 +61,7 @@ describe("settings and migration boundary", () => {
 		strictEqual(defaults.settings.safety.limits.sessionCostUsd, 5);
 		strictEqual(defaults.settings.chat.prewarm, false);
 		strictEqual(defaults.settings.chat.maxOutputTokens, 0);
-		strictEqual(defaults.settings.fleet.concurrency, 1);
+		strictEqual(defaults.settings.fleet.concurrency, "auto");
 		strictEqual(defaults.settings.fleet.permissions.mode, "deny");
 		strictEqual(defaults.settings.context.memory.target, null);
 		strictEqual(defaults.settings.interface.mode, "regular");

@@ -530,7 +530,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"library.sync":
 		"Off means `clio-coder library sync` and `push` refuse before touching the network, whatever the remote says. Legal values: true, false · default: false.",
 	"budget.concurrency":
-		"auto sizes local workers from usable CPUs and available memory, up to eight. A fixed number caps how many workers run at once; the default is one.",
+		"auto sizes local workers from usable CPUs and available memory, up to eight, and is the default. A fixed number caps how many workers run at once.",
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
 	"attribution.gitCommits":

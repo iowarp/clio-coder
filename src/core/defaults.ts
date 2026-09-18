@@ -516,7 +516,7 @@ export const DEFAULT_SETTINGS = {
 			mode: "deny" as WorkerPermissionMode,
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
-		concurrency: 1 as "auto" | number,
+		concurrency: "auto" as "auto" | number,
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
 			toolCallsPerRun: GUARDRAIL_DEFAULTS.workerToolCallCap,
@@ -650,7 +650,7 @@ fleet:
     escalation:
       timeoutMs: 120000
       fallback: deny
-  concurrency: 1
+  concurrency: auto
   retry:
     maxRetries: 2
     routeCooldownMs: 15000

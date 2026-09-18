@@ -1,5 +1,6 @@
-import { match, ok, strictEqual, throws } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { ConfigContract } from "../../src/domains/config/contract.js";
@@ -25,6 +26,22 @@ const GiB = 1024 * 1024 * 1024;
 function host(overrides: Partial<HostCapacityFacts> = {}): HostCapacityFacts {
 	return { cpus: 32, availableMemoryBytes: 64 * GiB, cgroupAvailableBytes: null, ...overrides };
 }
+
+describe("fleet.concurrency default", () => {
+	it("resolves a settings file without the key to auto and keeps an explicit value as written", () => {
+		const absent = validateSettings({ version: 2, fleet: { retry: { maxRetries: 2 } } });
+		deepStrictEqual(absent.issues, []);
+		strictEqual(absent.settings.fleet.concurrency, "auto");
+		strictEqual(resolveGlobalConcurrency(absent.settings.fleet.concurrency), AUTO_MAX_WORKERS);
+		for (const explicit of [1, "auto"] as const) {
+			const result = validateSettings({ version: 2, fleet: { concurrency: explicit } });
+			deepStrictEqual(result.issues, []);
+			strictEqual(result.settings.fleet.concurrency, explicit);
+		}
+		strictEqual(resolveGlobalConcurrency(1), 1);
+		deepStrictEqual(resolveLocalConcurrency(1, host()), { limit: 1, bound: "configured" });
+	});
+});
 
 describe("fleet.concurrency auto resolution", () => {
 	it("clamps a low-memory host to one local worker", () => {
