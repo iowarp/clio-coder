@@ -32,6 +32,7 @@ import {
 	inlineShellScript,
 	invokesClioSkillMutation,
 	scanShellLike,
+	scanShellLikeDeep,
 } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
@@ -580,7 +581,7 @@ function stripQuotes(token: string): string {
  */
 function bashPathTokenCandidates(command: string): string[] {
 	const candidates: string[] = [];
-	for (const scanned of scanShellLike(command)) {
+	for (const scanned of scanShellLikeDeep(command)) {
 		if (scanned.operator) continue;
 		const token = scanned.value;
 		if (token.length === 0) continue;
@@ -1219,7 +1220,7 @@ function packPayload(rules: ReadonlyArray<DamageControlRule>): Array<Record<stri
 function invokesTrustMutation(command: string): boolean {
 	// Wrappers, package launchers, quoted argv and source-tree CLI invocations
 	// must not turn an operator-only grant into model authority.
-	const words = scanShellLike(command)
+	const words = scanShellLikeDeep(command)
 		.filter((token) => !token.operator)
 		.map((token) => token.value);
 	return (

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { classify } from "../../src/domains/safety/action-classifier.js";
+import { protectedArtifactMutationBlockReason } from "../../src/domains/safety/protected-artifacts.js";
 
 /**
  * A bash write target is resolved from every directory the shell can be in
@@ -84,9 +85,10 @@ describe("bash write targets after cd, and links made in the same command", () =
 		ok(existsSync(join(deep, "sub.txt")));
 	});
 
-	it("keeps the directory before a cd wherever the command can run on without it", () => {
+	it("keeps the call's cwd as a base after every cd, however the cd is joined", () => {
 		const fromRoot = `write-path-outside-cwd: ${join(deep, "o.txt")}`;
-		// The cd may fail, or its subshell ends, and the write opens from the root.
+		// The cd may fail, run in a pipeline or a closed subshell, or be text the
+		// scanner reads as a cd; the write may open from the root in each case.
 		for (const command of [
 			"cd data; echo x > rootlink/o.txt",
 			"cd data || echo no; echo x > rootlink/o.txt",
@@ -94,12 +96,39 @@ describe("bash write targets after cd, and links made in the same command", () =
 			"true | cd data && echo x > rootlink/o.txt",
 			"! cd data && echo x > rootlink/o.txt",
 			"cd data && true || echo x > rootlink/o.txt",
+			"cd data && echo x > rootlink/o.txt",
+			"cd data || exit 1; echo x > rootlink/o.txt",
 		]) {
 			assertEscalated(command, [fromRoot]);
 		}
-		// What follows `&&` or `|| exit` runs only where the cd landed.
-		assertExecute("cd data && echo x > rootlink/o.txt");
-		assertExecute("cd data || exit 1; echo x > rootlink/o.txt");
+	});
+
+	it("classifies no command of the SEC3 review weaker than the parent did", () => {
+		const fromRoot = [`write-path-outside-cwd: ${join(deep, "o")}`];
+		// The base-dropping these defeated is gone: each fakes a cd the shell
+		// never keeps (`return` at top level, `&`, a backtick script, a heredoc
+		// line, `pushd +N`, `pushd -n`), and the write opens from the root.
+		for (const command of [
+			"cd nodir || return; echo x > rootlink/o",
+			"cd nodir || exit & echo x > rootlink/o",
+			"x=` cd nodir || exit `; echo x > rootlink/o",
+			"cat >/dev/null <<'EOF'\ncd nodir || exit\nEOF\necho x > rootlink/o",
+			"x=` cd data ` && echo x > rootlink/o",
+			"pushd data && pushd +1 && echo x > rootlink/o",
+			"pushd -n data && echo x > rootlink/o",
+		]) {
+			assertEscalated(command, fromRoot);
+		}
+		// `$(...)` stays inside the word it sits in, so the path after it is still
+		// resolved and still leaves the workspace.
+		for (const command of ["echo x > $(echo)/../../etc/x", "echo x >> x$(true)/../../outside/o"]) {
+			strictEqual(bashClass(command).actionClass, "system_modify", command);
+		}
+		const artifacts = [{ path: join(root, "src", "index.ts"), protectedAt: "t", reason: "r", source: "user" as const }];
+		const block = protectedArtifactMutationBlockReason({ artifacts }, ToolNames.Bash, {
+			command: "rm -rf $(echo)/../..",
+		});
+		ok(block !== null, "rm -rf $(echo)/../.. is rm -rf / and still hits the protected artifact block");
 	});
 
 	it("cannot place a relative write after a cd the shell expands at run time, or one a loop repeats", () => {
@@ -117,10 +146,11 @@ describe("bash write targets after cd, and links made in the same command", () =
 			"ln -s ../elsewhere l && echo x > l/ln.txt",
 			"ln -sfn ../elsewhere l",
 			"ln --symbolic ../elsewhere l",
-			"cd data && ln -s ../../elsewhere l",
 		]) {
 			assertEscalated(command, [outside]);
 		}
+		// After a cd the link may be made in data or, if the cd failed, in the root.
+		ok(bashClass("cd data && ln -s ../../elsewhere l").reasons.includes(outside));
 		assertEscalated('ln -s "$T" l', ["bash-symlink-outside-workspace: $T"]);
 		assertEscalated("cp -s /etc/passwd p", ["bash-symlink-outside-workspace: /etc/passwd"]);
 		// -t names the link directory; the target resolves from there.
@@ -143,16 +173,21 @@ describe("bash write targets after cd, and links made in the same command", () =
 			"cd src && ls",
 			"cd src && echo x > out.txt",
 			"ln -s ./a ./b",
-			"cd src && npm install && cd .. && npm test",
-			"cd src && npm run build > ../build.log 2>&1",
 			"(cd src && make) && echo done > status.txt",
-			"cd src && for f in *.ts; do echo $f; done > ../list.txt",
-			"cd src && ls | head > ../list.txt",
+			"cd src && for f in *.ts; do echo $f; done > list.txt",
 			"pushd src && echo x > a.txt && popd && echo y > b.txt",
 			"mkdir -p out && cd out && echo x > result.txt",
+			"diff <(ls src) <(ls .)",
 		]) {
 			assertExecute(command);
 		}
 		strictEqual(existsSync(join(deep, "out.txt")), false);
+	});
+
+	it("escalates, as the parent did, a `..` that leaves the workspace from the call's cwd", () => {
+		// If `cd src` failed, `cd ..` and `../build.log` would resolve from the
+		// root, so both stay escalated: the price of never dropping a base.
+		strictEqual(bashClass("cd src && npm install && cd .. && npm test").actionClass, "system_modify");
+		strictEqual(bashClass("cd src && npm run build > ../build.log 2>&1").actionClass, "system_modify");
 	});
 });
