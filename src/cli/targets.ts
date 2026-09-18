@@ -1099,7 +1099,7 @@ function residentModelsSummary(states: TargetStatus["discoveredModelStates"]): s
  */
 function formatContextWindow(
 	status: Pick<TargetStatus, "capabilities" | "contextWindowProvenance"> &
-		Partial<Pick<TargetStatus, "target" | "discoveredModelStates">>,
+		Partial<Pick<TargetStatus, "target" | "discoveredModelStates" | "runtime">>,
 ): string {
 	const window = status.capabilities.contextWindow;
 	const modelState = status.target?.defaultModel
@@ -1109,6 +1109,16 @@ function formatContextWindow(
 	// model allows, so both are named: the operator sees which one a run is
 	// planned against and how far the model could be raised (issue #375).
 	const serving = modelState?.contextLength;
+	// A configured `num_ctx` is what every request asks for, so the server
+	// serves that window from the next turn on, capped by the model maximum.
+	const requested = status.target ? status.runtime?.requestedContextWindow?.(status.target) : undefined;
+	if (requested !== undefined) {
+		const known = status.contextWindowProvenance !== "runtime-default";
+		const planned = known ? Math.min(requested, window) : requested;
+		const bounds = ["num_ctx", ...(serving !== undefined && serving !== planned ? [`serving ${serving}`] : [])];
+		if (known && window !== planned) bounds.push(`model max ${window}`);
+		return `ctx ${planned} (${bounds.join("; ")})`;
+	}
 	if (serving !== undefined && serving > 0) {
 		if (status.contextWindowProvenance === "configured" && window < serving) return `ctx ${window} (serving ${serving})`;
 		if (status.contextWindowProvenance === "runtime-default" || window === serving) return `ctx ${serving} (serving)`;

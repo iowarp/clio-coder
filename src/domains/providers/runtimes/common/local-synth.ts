@@ -25,6 +25,7 @@ export interface ClioLocalModelMetadata {
 		chatTemplateKwargsUnsupported?: boolean;
 		lmstudio?: TargetDescriptor["lmstudio"];
 		litellm?: TargetDescriptor["litellm"];
+		ollama?: TargetDescriptor["ollama"];
 		cache?: TargetDescriptor["cache"];
 	};
 }
@@ -114,6 +115,7 @@ export function synthLocalModel(input: LocalSynthesisInput): Model<Api> {
 			...(quirks ? { quirks } : {}),
 			...(target.lmstudio ? { lmstudio: target.lmstudio } : {}),
 			...(target.litellm ? { litellm: target.litellm } : {}),
+			...(target.ollama ? { ollama: target.ollama } : {}),
 			...(target.cache ? { cache: structuredClone(target.cache) } : {}),
 		},
 	};

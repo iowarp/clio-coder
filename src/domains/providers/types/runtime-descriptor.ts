@@ -189,6 +189,12 @@ export interface RuntimeDescriptor {
 	 */
 	hidden?: boolean;
 	probe?(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult>;
+	/**
+	 * Window this target asks the server to open the model at on every request,
+	 * when the runtime sends one (Ollama `num_ctx`). The server reloads the
+	 * model at that size, so it outranks whatever window is loaded now.
+	 */
+	requestedContextWindow?(target: TargetDescriptor): number | undefined;
 	probeModels?(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**
 	 * Optional per-model reasoning capability probe. Protocol-compatible local

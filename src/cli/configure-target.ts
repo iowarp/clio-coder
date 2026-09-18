@@ -420,6 +420,7 @@ export interface DescriptorParts {
 	reasoning?: boolean;
 	lmstudio?: TargetDescriptor["lmstudio"];
 	litellm?: TargetDescriptor["litellm"];
+	ollama?: TargetDescriptor["ollama"];
 }
 
 export function buildDescriptor(runtime: RuntimeDescriptor, id: string, parts: DescriptorParts): TargetDescriptor {
@@ -440,6 +441,7 @@ export function buildDescriptor(runtime: RuntimeDescriptor, id: string, parts: D
 	if (Object.keys(caps).length > 0) descriptor.capabilities = caps;
 	if (parts.lmstudio) descriptor.lmstudio = parts.lmstudio;
 	if (parts.litellm) descriptor.litellm = parts.litellm;
+	if (parts.ollama) descriptor.ollama = parts.ollama;
 	return descriptor;
 }
 

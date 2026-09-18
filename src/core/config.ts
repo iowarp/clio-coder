@@ -596,6 +596,7 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 		"cache",
 		"lmstudio",
 		"litellm",
+		"ollama",
 		"maxConcurrentRequests",
 	]);
 	const id = "id" in value ? expectString(issues, `${path}.id`, value.id) : undefined;
@@ -720,6 +721,19 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 	if ("litellm" in value) {
 		const v = validateLiteLLMSettings(issues, `${path}.litellm`, value.litellm);
 		if (v !== undefined) target.litellm = v;
+	}
+	if ("ollama" in value) {
+		if (!isPlainObject(value.ollama)) {
+			issues.add(`${path}.ollama`, `expected a map, got ${describe(value.ollama)}`);
+		} else {
+			issues.unknownKeys(`${path}.ollama`, value.ollama, ["numCtx"]);
+			const ollama: NonNullable<ClioSettings["targets"][number]["ollama"]> = {};
+			if ("numCtx" in value.ollama) {
+				const parsed = expectInteger(issues, `${path}.ollama.numCtx`, value.ollama.numCtx, { min: 1 });
+				if (parsed !== undefined) ollama.numCtx = parsed;
+			}
+			if (Object.keys(ollama).length > 0) target.ollama = ollama;
+		}
 	}
 	if ("maxConcurrentRequests" in value) {
 		const v = expectInteger(issues, `${path}.maxConcurrentRequests`, value.maxConcurrentRequests, { min: 1 });

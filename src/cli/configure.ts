@@ -529,6 +529,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 			...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 			...(existing?.litellm ? { litellm: existing.litellm } : {}),
+			...(existing?.ollama ? { ollama: existing.ollama } : {}),
 		}),
 	};
 	seed.capabilities = { ...existing?.capabilities, ...seed.capabilities };
@@ -565,6 +566,7 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 			...(args.reasoning !== undefined ? { reasoning: args.reasoning } : {}),
 			...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 			...(existing?.litellm ? { litellm: existing.litellm } : {}),
+			...(existing?.ollama ? { ollama: existing.ollama } : {}),
 		}),
 	};
 	descriptor.capabilities = { ...existing?.capabilities, ...descriptor.capabilities };
@@ -900,6 +902,7 @@ async function runTargetSetupInteractive(
 		...(defaults.reasoning !== undefined ? { reasoning: defaults.reasoning } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 		...(existing?.litellm ? { litellm: existing.litellm } : {}),
+		...(existing?.ollama ? { ollama: existing.ollama } : {}),
 	});
 
 	if (existing?.auth?.headers) tentative.auth = { ...tentative.auth, headers: existing.auth.headers };
@@ -997,6 +1000,7 @@ async function runTargetSetupInteractive(
 		...(reasoningChoice !== undefined ? { reasoning: reasoningChoice } : {}),
 		...(existing?.lmstudio ? { lmstudio: existing.lmstudio } : {}),
 		...(existing?.litellm ? { litellm: existing.litellm } : {}),
+		...(existing?.ollama ? { ollama: existing.ollama } : {}),
 	});
 	const descriptor: TargetDescriptor = {
 		...existing,

@@ -718,9 +718,16 @@ export function resolveContextWindowDetails(
 	const loadedWindow = positiveWindow(loadedContextWindow);
 	const probeWindow = positiveWindow(probedContextWindow);
 	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
+	const requestedWindow = positiveWindow(runtime.requestedContextWindow?.(target));
 	let effective: number;
 	let source: ContextWindowSource;
-	if (loadedWindow !== undefined && (overrideWindow === undefined || loadedWindow <= overrideWindow)) {
+	if (requestedWindow !== undefined) {
+		// The window every request asks for (Ollama `num_ctx`) is the one the
+		// server will reload the model at, so a smaller loaded window is about to
+		// stop being true. A smaller override or model maximum still caps it.
+		effective = Math.min(requestedWindow, overrideWindow ?? requestedWindow, probeWindow ?? requestedWindow);
+		source = probeWindow === effective && effective < requestedWindow ? "probe" : "target-override";
+	} else if (loadedWindow !== undefined && (overrideWindow === undefined || loadedWindow <= overrideWindow)) {
 		effective = loadedWindow;
 		source = "loaded";
 	} else if (overrideWindow !== undefined) {

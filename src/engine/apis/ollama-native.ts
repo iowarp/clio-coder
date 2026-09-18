@@ -52,6 +52,7 @@ interface ClioRuntimeMetadata {
 		gateway?: boolean;
 		family?: string;
 		quirks?: LocalModelQuirks;
+		ollama?: { numCtx?: number };
 	};
 }
 
@@ -234,6 +235,11 @@ function buildRequest(
 	if (samplingProfile) applyOllamaSamplingProfile(opts, samplingProfile);
 	if (options?.temperature !== undefined) opts.temperature = options.temperature;
 	opts.num_predict = remainingContextMaxTokens(model, context, options);
+	// Sent only when the operator configured it: a `num_ctx` that differs from
+	// the loaded one makes Ollama reload the model, which on a shared server
+	// evicts whatever window another client opened it at.
+	const numCtx = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder?.ollama?.numCtx;
+	if (numCtx !== undefined) opts.num_ctx = numCtx;
 	if (Object.keys(opts).length > 0) req.options = opts;
 	return req;
 }
