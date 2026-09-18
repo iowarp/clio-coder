@@ -169,7 +169,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].litellm.request.streamTimeoutSeconds` |  | Optional LiteLLM streaming timeout override sent as `x-litellm-stream-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
 | `targets[].litellm.request.tags` | `[clio-coder]` | Additional LiteLLM request tags (list of non-empty strings without commas); Clio always adds `clio-coder`. |  |
 | `targets[].litellm.request.timeoutSeconds` |  | Optional LiteLLM request/upstream timeout override sent as `x-litellm-timeout` (number from 0.001 through 86400); omit it to keep gateway policy. |  |
-| `targets[].ollama.numCtx` |  | Ollama `num_ctx` sent as `options.num_ctx` on every `ollama-native` chat request (integer >= 1), and the window Clio plans against, capped by the model maximum. Unset sends nothing; a changed `num_ctx` makes Ollama reload the model, which evicts other clients' window on a shared server. |  |
+| `targets[].ollama.numCtx` |  | Ollama `num_ctx` sent as `options.num_ctx` on every `ollama` chat request (integer >= 1), and the window Clio plans against, capped by the model maximum. Unset sends nothing; a changed `num_ctx` makes Ollama reload the model, which evicts other clients' window on a shared server. |  |
 | `targets[].maxConcurrentRequests` |  | Explicit request-slot limit for this inference endpoint (integer >= 1); overrides live slot discovery and is shared by every target on the same normalized URL; applies next turn. |  |
 | `targets[].cache.retention` | SDK default | Native Pi request cache policy: `none`, `short`, or `long`. Meaning depends on the selected API/model; this grants no management or paid-warming authority. | explicit call > target > Anthropic environment fallback > SDK default |
 | `targets[].cache.deployment.backend` | unset | Read-only binding to `llamacpp` or `vllm`; absence leaves warming ineligible. | target |
@@ -184,7 +184,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `targets[].pricing.cacheWrite` | `0` | USD rate for cache-write tokens (number >= 0); 0 when absent. |  |
 | `targets[].pricing.input` |  | USD rate per input token unit used for cost accounting when set, taking precedence over catalog pricing (number >= 0); required together with `output`. |  |
 | `targets[].pricing.output` |  | USD rate per output token unit for cost accounting (number >= 0); required together with `input`. |  |
-| `targets[].runtime` |  | Runtime descriptor id such as `lmstudio`, `llamacpp`, `openai-compat`, `anthropic`, `claude-sdk` (aliases like `lmstudio-native` are accepted); required. |  |
+| `targets[].runtime` |  | Runtime descriptor id such as `lmstudio`, `llamacpp`, `openai-compat`, `anthropic`, `claude-sdk` (the released aliases `lmstudio-native` and `ollama-native` are accepted); required. |  |
 | `targets[].url` |  | Base URL for HTTP runtimes, the server root or its `/v1` mount; absent uses the runtime's default URL. |  |
 | `targets[].wireModels` |  | Wire model ids the target advertises for routing and the picker (list of strings, deduplicated); merged with probe and catalog discovery. |  |
 | `version` | `2` | Schema version of the settings document; must be the integer `2` (a version-1 document is refused with a `clio-coder upgrade` hint); applies at restart. |  |

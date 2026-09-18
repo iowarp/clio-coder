@@ -43,6 +43,7 @@ const DEFAULT_PORTS: Record<string, number> = {
 	"lmstudio-native": 1234,
 	lmstudio: 1234,
 	"ollama-native": 11434,
+	ollama: 11434,
 	vllm: 8000,
 	sglang: 30000,
 	"lemonade-anthropic": 8000,
@@ -563,7 +564,7 @@ export function inventoryGap(runtime: RuntimeDescriptor, target: { url?: string 
 	return `${target.url ?? runtime.id} answered no model list; type the id the server serves`;
 }
 
-const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama-native", "lmstudio"]);
+const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio"]);
 
 // Generic protocol-compatible runtimes. They are classified local-http (they
 // carry a probe and no cloud catalog entry), but a hosted endpoint such as

@@ -61,7 +61,7 @@ confirm availability before a run.
 A model family is "sanctioned" only when we can say what was tested and under which runtime. It is not a blanket endorsement. For each family, capture:
 
 - exact model id / artifact / quantization;
-- provider or runtime surface (`lmstudio`, `ollama-native`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
+- provider or runtime surface (`lmstudio`, `ollama`, `llamacpp`, `openrouter`, `openai-codex`, etc.);
 - hardware and serving configuration;
 - context window and max output actually exercised;
 - tool-use, reasoning, vision, embeddings/rerank/FIM behavior where relevant;
@@ -184,7 +184,7 @@ fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit
 target, profile, roster member, command option, or in-session selection can
 override the applicable setting.
 
-- **Ollama Native (`ollama-native`):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
+- **Ollama (`ollama`, native API):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
 - **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.
 - **LiteLLM (`litellm`):** This is a gateway runtime, not an `openai-compat`
   alias. Discovery checks `/health/liveliness`, reads routed names and capability

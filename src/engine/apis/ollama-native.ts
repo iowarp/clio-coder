@@ -90,9 +90,9 @@ async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: 
 	if (!baseUrl) return;
 	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder;
 	const adapter: ResidencyAdapter = {
-		targetKey: residencyTargetKey("ollama-native", baseUrl),
+		targetKey: residencyTargetKey("ollama", baseUrl),
 		targetId: ollamaTargetId(model),
-		runtimeId: "ollama-native",
+		runtimeId: "ollama",
 		keepModelId: model.id,
 		managed: residencyManagedFor(metadata?.lifecycle),
 		strategy: "scheduler",
@@ -321,7 +321,7 @@ async function listResidentOllamaModels(client: OllamaEvictClient): Promise<Resi
  * weights release.
  */
 async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Record<string, string>): Promise<void> {
-	const owned = ownedModelsByTarget.get(residencyTargetKey("ollama-native", baseUrl));
+	const owned = ownedModelsByTarget.get(residencyTargetKey("ollama", baseUrl));
 	if (!owned?.has(modelId)) return;
 	await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
 	owned.delete(modelId);
@@ -380,7 +380,7 @@ registerExitRelease(() => releaseClioLoadedOllamaModels());
 
 // A dispatched worker's load becomes this process's to release (#379). The
 // endpoint comes from this process's own settings for the admitted target.
-registerWorkerLoadAdopter("ollama-native", (targetKey, endpoint, modelIds) => {
+registerWorkerLoadAdopter("ollama", (targetKey, endpoint, modelIds) => {
 	let owned = ownedModelsByTarget.get(targetKey);
 	if (!owned) {
 		owned = new Set<string>();
@@ -460,7 +460,7 @@ function runStream(
 	// still decides how a failed turn ends.
 	const stream = createDegradedInferenceStream({
 		targetId: ollamaTargetId(model),
-		runtimeId: "ollama-native",
+		runtimeId: "ollama",
 		model: model.id,
 		...(signal ? { signal } : {}),
 		...(baseUrl ? { listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)) } : {}),
@@ -573,7 +573,7 @@ function runStream(
 			for await (const chunk of iterator) {
 				const response = chunk as ChatResponse;
 				if (!recordedOwnership && model.baseUrl) {
-					const targetKey = residencyTargetKey("ollama-native", model.baseUrl);
+					const targetKey = residencyTargetKey("ollama", model.baseUrl);
 					let owned = ownedModelsByTarget.get(targetKey);
 					if (!owned) {
 						owned = new Set<string>();
@@ -589,7 +589,7 @@ function runStream(
 					if (firstRecord) {
 						reportClioModelLoad(
 							{
-								runtimeId: "ollama-native",
+								runtimeId: "ollama",
 								targetId: ollamaTargetId(model),
 								modelId: model.id,
 								aliasIds: loadedId === model.id ? [] : [loadedId],

@@ -36,6 +36,7 @@ import lmStudioRuntimeId from "./2026-08-18-lmstudio-runtime-id.js";
 import clioCoderNaming from "./2026-09-01-clio-coder-naming.js";
 import retirePanesKnobs from "./2026-09-01-retire-panes-knobs.js";
 import settingsV2 from "./2026-09-01-settings-v2.js";
+import ollamaRuntimeId from "./2026-09-18-ollama-runtime-id.js";
 
 export interface Migration {
 	id: string;
@@ -64,6 +65,7 @@ const REGISTRY: ReadonlyArray<Migration> = Object.freeze([
 	clioCoderNaming,
 	retirePanesKnobs,
 	lmStudioRuntimeId,
+	ollamaRuntimeId,
 ]);
 
 export function listMigrations(): ReadonlyArray<Migration> {

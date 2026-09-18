@@ -37,7 +37,7 @@ import {
 	supportGroupLabel,
 } from "../domains/providers/index.js";
 import { fingerprintNativeRuntime } from "../domains/providers/probe/fingerprint.js";
-import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
@@ -2356,13 +2356,13 @@ export async function runConfigureCommand(
 	if (runtimeId) {
 		runtime = getRuntimeRegistry().get(runtimeId);
 		if (!runtime) {
-			printError(`unknown runtime id: ${runtimeId}`);
+			const suggestion = closestRuntimeId(getRuntimeRegistry(), runtimeId);
+			printError(`unknown runtime id: ${runtimeId}${suggestion ? ` (did you mean '${suggestion}'?)` : ""}`);
 			process.stdout.write("run `clio-coder configure --list` to see registered runtimes\n");
 			return 2;
 		}
-		if (runtimeId === "lmstudio-native" && runtime.id === "lmstudio") {
-			warnLegacyNaming(runtimeId, runtime.id);
-		}
+		// Every registered alias is a released id kept for the compatibility window.
+		if (runtimeId !== runtime.id) warnLegacyNaming(runtimeId, runtime.id);
 	}
 	const hasTargetSetupFlag =
 		args.id !== undefined ||

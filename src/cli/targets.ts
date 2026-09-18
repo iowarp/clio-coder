@@ -12,6 +12,7 @@ import {
 } from "../core/config.js";
 import { THINKING_LEVELS, type ThinkingLevel } from "../core/defaults.js";
 import { loadDomains } from "../core/domain-loader.js";
+import { warnLegacyNaming } from "../core/naming-compat.js";
 import { ConfigDomainModule } from "../domains/config/index.js";
 import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
@@ -21,7 +22,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
 } from "../domains/providers/index.js";
-import { getRuntimeRegistry } from "../domains/providers/registry.js";
+import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
@@ -816,8 +817,15 @@ function runConvert(args: ReadonlyArray<string>): number {
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const runtime = registry.get(runtimeId);
 	if (!runtime) {
-		printError(`unknown runtime id: ${runtimeId} (run \`clio-coder configure --list\` to see registered runtimes)`);
+		const suggestion = closestRuntimeId(registry, runtimeId);
+		printError(
+			`unknown runtime id: ${runtimeId}${suggestion ? ` (did you mean '${suggestion}'?)` : ""} (run \`clio-coder configure --list\` to see registered runtimes)`,
+		);
 		return 2;
+	}
+	if (runtimeId !== runtime.id) {
+		warnLegacyNaming(runtimeId, runtime.id);
+		runtimeId = runtime.id;
 	}
 	const settings = readSettings();
 	const target = settings.targets.find((entry) => entry.id === id);

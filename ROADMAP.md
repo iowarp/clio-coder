@@ -220,6 +220,13 @@ lists.
       `src/domains/resources/skills/marketplace.ts`, and historical lists
       `LEGACY_EVENT_TYPES` and `LEGACY_HISTORY_LITERALS` in
       `src/domains/lifecycle/naming-history.ts`.
+- [ ] Retire the released runtime id aliases `lmstudio-native` and
+      `ollama-native`: the `aliases` entries on their descriptors
+      (`src/domains/providers/runtimes/local-native/lmstudio.ts`,
+      `src/domains/providers/runtimes/local-native/ollama.ts`) and in
+      `src/domains/providers/runtimes/boot-manifest.ts`, the legacy
+      `DEFAULT_PORTS` keys in `src/cli/configure-target.ts`, and the alias
+      warning in `src/cli/configure.ts` and `src/cli/targets.ts`.
 
 ## The 0.4.x arc
 

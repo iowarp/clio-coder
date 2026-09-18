@@ -13,6 +13,7 @@ const MIGRATION_IDS = [
 	"2026-09-01-clio-coder-naming",
 	"2026-09-01-retire-panes-knobs",
 	"2026-08-18-lmstudio-runtime-id",
+	"2026-09-18-ollama-runtime-id",
 ] as const;
 
 /** Upgrade caches the resolved state dir, so every run gets a fresh resolution. */
@@ -97,7 +98,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const { code, stdout } = await upgrade(temp, ["--dry-run"]);
 			strictEqual(code, 0);
-			match(stdout, /Would apply 4 pending migrations:/u);
+			match(stdout, /Would apply 5 pending migrations:/u);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(id.replace(/\./gu, "\\."), "u"));
 			match(stdout, /Would refresh state metadata/u);
 			match(stdout, /Dry run: no changes made/u);
@@ -137,7 +138,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			const { code, stdout } = await upgrade(temp, []);
 			strictEqual(code, 0);
 			for (const id of MIGRATION_IDS) match(stdout, new RegExp(`✓ Applied migration ${id}`, "u"));
-			match(stdout, /4 migrations applied/u);
+			match(stdout, /5 migrations applied/u);
 		} finally {
 			temp.cleanup();
 		}

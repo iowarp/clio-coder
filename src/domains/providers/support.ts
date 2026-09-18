@@ -55,7 +55,7 @@ const SUMMARY_BY_RUNTIME_ID: Readonly<Record<string, string>> = {
 	openai: "OpenAI Platform API",
 	"openai-codex": "ChatGPT Plus/Pro via Codex OAuth",
 	openrouter: "OpenRouter API",
-	"ollama-native": "Ollama native API",
+	ollama: "Ollama native API",
 	lmstudio: "LM Studio chat over OpenAI-compatible REST with native REST model management",
 	llamacpp: "llama.cpp server (auto-detect surface)",
 	"anthropic-compat": "Generic Anthropic-compatible REST",

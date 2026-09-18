@@ -54,7 +54,7 @@ function fixtureTurn(signal?: AbortSignal, options: { defaultClock?: boolean } =
 	const output = partial();
 	const source = createDegradedInferenceStream({
 		targetId: "mini",
-		runtimeId: "ollama-native",
+		runtimeId: "ollama",
 		model: "qwen3:32b",
 		...(signal ? { signal } : {}),
 		listResident: async () => [

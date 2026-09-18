@@ -1,13 +1,9 @@
 import { canonicalEndpointUrl } from "./endpoint-key.js";
 
 /** Runtime families whose model residency Clio can actively mutate. */
-export type ResidencyRuntimeId = "llamacpp" | "lmstudio" | "ollama-native";
+export type ResidencyRuntimeId = "llamacpp" | "lmstudio" | "ollama";
 
-const RESIDENCY_RUNTIME_IDS: ReadonlySet<string> = new Set<ResidencyRuntimeId>([
-	"llamacpp",
-	"lmstudio",
-	"ollama-native",
-]);
+const RESIDENCY_RUNTIME_IDS: ReadonlySet<string> = new Set<ResidencyRuntimeId>(["llamacpp", "lmstudio", "ollama"]);
 
 export function residencyTargetKey(runtimeId: ResidencyRuntimeId, baseUrl: string): string;
 export function residencyTargetKey(runtimeId: string, baseUrl: string | null | undefined): string | null;

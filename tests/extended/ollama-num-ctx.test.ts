@@ -5,7 +5,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 import { validateSettings } from "../../src/core/config.js";
 import { resolveContextWindowDetails } from "../../src/domains/providers/runtime-resolution.js";
-import ollamaNativeRuntime from "../../src/domains/providers/runtimes/local-native/ollama-native.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { ollamaNativeApiProvider } from "../../src/engine/apis/ollama-native.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -40,7 +40,7 @@ async function ollama(): Promise<{ url: string; chats: Array<{ options?: Record<
 }
 
 async function chat(target: TargetDescriptor): Promise<void> {
-	const model = ollamaNativeRuntime.synthesizeModel?.(target, MODEL, null) as Model<"ollama-native">;
+	const model = ollamaRuntime.synthesizeModel?.(target, MODEL, null) as Model<"ollama-native">;
 	const result = await ollamaNativeApiProvider
 		.stream(model, { messages: [{ role: "user", content: "hello", timestamp: 0 }] })
 		.result();
@@ -50,7 +50,7 @@ async function chat(target: TargetDescriptor): Promise<void> {
 it("sends a configured numCtx as options.num_ctx", async () => {
 	const server = await ollama();
 
-	await chat({ id: "o", runtime: "ollama-native", url: server.url, defaultModel: MODEL, ollama: { numCtx: 65_536 } });
+	await chat({ id: "o", runtime: "ollama", url: server.url, defaultModel: MODEL, ollama: { numCtx: 65_536 } });
 
 	strictEqual(server.chats[0]?.options?.num_ctx, 65_536);
 });
@@ -58,18 +58,18 @@ it("sends a configured numCtx as options.num_ctx", async () => {
 it("sends no num_ctx when none is configured, so a shared server is not made to reload", async () => {
 	const server = await ollama();
 
-	await chat({ id: "o", runtime: "ollama-native", url: server.url, defaultModel: MODEL });
+	await chat({ id: "o", runtime: "ollama", url: server.url, defaultModel: MODEL });
 
 	strictEqual(server.chats.length, 1);
 	strictEqual("num_ctx" in (server.chats[0]?.options ?? {}), false);
 });
 
 function plan(target: TargetDescriptor, maximum: number | null, loaded: number | null) {
-	return resolveContextWindowDetails(target, ollamaNativeRuntime, MODEL, null, maximum, loaded);
+	return resolveContextWindowDetails(target, ollamaRuntime, MODEL, null, maximum, loaded);
 }
 
 it("plans against numCtx over the loaded window the next request will replace", () => {
-	const target: TargetDescriptor = { id: "o", runtime: "ollama-native", ollama: { numCtx: 65_536 } };
+	const target: TargetDescriptor = { id: "o", runtime: "ollama", ollama: { numCtx: 65_536 } };
 
 	const details = plan(target, 262_144, 32_768);
 
@@ -78,7 +78,7 @@ it("plans against numCtx over the loaded window the next request will replace", 
 });
 
 it("caps numCtx at the model maximum and at a smaller explicit window", () => {
-	const target: TargetDescriptor = { id: "o", runtime: "ollama-native", ollama: { numCtx: 524_288 } };
+	const target: TargetDescriptor = { id: "o", runtime: "ollama", ollama: { numCtx: 524_288 } };
 	const capped = plan(target, 262_144, null);
 	strictEqual(capped.effectiveContextWindow, 262_144);
 	strictEqual(capped.contextWindowSource, "probe");
@@ -88,7 +88,7 @@ it("caps numCtx at the model maximum and at a smaller explicit window", () => {
 });
 
 it("keeps the loaded window in charge when numCtx is unset", () => {
-	const details = plan({ id: "o", runtime: "ollama-native" }, 262_144, 32_768);
+	const details = plan({ id: "o", runtime: "ollama" }, 262_144, 32_768);
 
 	strictEqual(details.effectiveContextWindow, 32_768);
 	strictEqual(details.contextWindowSource, "loaded");
@@ -96,7 +96,7 @@ it("keeps the loaded window in charge when numCtx is unset", () => {
 
 it("validates targets[].ollama.numCtx as a positive integer", () => {
 	const target = (ollama: unknown) => ({
-		targets: [{ id: "o", runtime: "ollama-native", url: "http://127.0.0.1:11434", ollama }],
+		targets: [{ id: "o", runtime: "ollama", url: "http://127.0.0.1:11434", ollama }],
 	});
 
 	const valid = validateSettings(target({ numCtx: 65_536 }));
@@ -110,25 +110,25 @@ it("validates targets[].ollama.numCtx as a positive integer", () => {
 });
 
 it("plans a cold model at the 131072 cap, not a larger model maximum", () => {
-	const details = plan({ id: "o", runtime: "ollama-native" }, 262_144, null);
+	const details = plan({ id: "o", runtime: "ollama" }, 262_144, null);
 
 	strictEqual(details.effectiveContextWindow, 131_072);
 	strictEqual(details.contextWindowSource, "probe");
 });
 
 it("plans a cold model whose maximum is below the cap at that maximum", () => {
-	strictEqual(plan({ id: "o", runtime: "ollama-native" }, 32_768, null).effectiveContextWindow, 32_768);
+	strictEqual(plan({ id: "o", runtime: "ollama" }, 32_768, null).effectiveContextWindow, 32_768);
 });
 
 it("plans a loaded model at its loaded window, not the cold cap", () => {
-	const details = plan({ id: "o", runtime: "ollama-native" }, 262_144, 32_768);
+	const details = plan({ id: "o", runtime: "ollama" }, 262_144, 32_768);
 
 	strictEqual(details.effectiveContextWindow, 32_768);
 	strictEqual(details.contextWindowSource, "loaded");
 });
 
 it("plans a cold model at a configured numCtx", () => {
-	const target: TargetDescriptor = { id: "o", runtime: "ollama-native", ollama: { numCtx: 65_536 } };
+	const target: TargetDescriptor = { id: "o", runtime: "ollama", ollama: { numCtx: 65_536 } };
 
 	strictEqual(plan(target, 262_144, null).effectiveContextWindow, 65_536);
 });

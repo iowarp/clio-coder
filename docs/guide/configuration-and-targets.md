@@ -160,7 +160,7 @@ regular interactive terminal. Use explicit flags for unattended target setup.
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
 - **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio`.
-- **[Ollama](https://ollama.com):** A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: `ollama-native`.
+- **[Ollama](https://ollama.com):** A lightweight, extensible framework for building and running LLMs locally. Target runtime ID: `ollama`.
 - **[llama.cpp](https://github.com/ggerganov/llama.cpp):** A minimal C/C++ implementation for local LLM inference. Target runtime ID: `llamacpp`.
 - **[vLLM](https://github.com/vllm-project/vllm):** A high-throughput and memory-efficient LLM serving engine. Target runtime ID: `vllm`.
 - **[SGLang](https://github.com/sgl-project/sglang):** A fast serving framework for large language models. Target runtime ID: `sglang`.
@@ -179,7 +179,7 @@ Common local runtime IDs and default URLs are:
 | Runtime | Target runtime id | Example local URL |
 | --- | --- | --- |
 | LM Studio | `lmstudio` | `http://127.0.0.1:1234` |
-| Ollama | `ollama-native` | `http://127.0.0.1:11434` |
+| Ollama | `ollama` | `http://127.0.0.1:11434` |
 | llama.cpp server | `llamacpp` | `http://127.0.0.1:8080` |
 | vLLM | `vllm` | `http://127.0.0.1:8000` |
 | SGLang | `sglang` | `http://127.0.0.1:30000` |
@@ -392,7 +392,7 @@ The limit is keyed on the endpoint rather than the target, so two targets pointe
 
 ### The `local-native` tier
 
-Three behaviors in this release are gated on a runtime's tier being `local-native` rather than on a target id or a server name, so it is worth stating what the tier is. It is a property of the runtime descriptor (`RuntimeTier` in `src/domains/providers/types/runtime-descriptor.ts`), and the runtimes that carry it are `llamacpp` with its completion, embedding, rerank, and Anthropic-surface variants, `lmstudio`, `ollama-native`, `vllm`, `sglang`, and the two `lemonade` surfaces. Everything else is `cloud`, `protocol`, or `subscription`.
+Three behaviors in this release are gated on a runtime's tier being `local-native` rather than on a target id or a server name, so it is worth stating what the tier is. It is a property of the runtime descriptor (`RuntimeTier` in `src/domains/providers/types/runtime-descriptor.ts`), and the runtimes that carry it are `llamacpp` with its completion, embedding, rerank, and Anthropic-surface variants, `lmstudio`, `ollama`, `vllm`, `sglang`, and the two `lemonade` surfaces. Everything else is `cloud`, `protocol`, or `subscription`.
 
 The tier means "an inference server the operator runs, whose prefix cache and resident model Clio's own behavior can displace." That is what the three gates are actually asking:
 
@@ -402,14 +402,18 @@ The tier means "an inference server the operator runs, whose prefix cache and re
 
 The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.
 
+### Ollama runtime id
+
+The canonical runtime id is `ollama`. The former `ollama-native` id remains an accepted alias scheduled for removal in v0.7.0. `--runtime ollama-native` still resolves and prints one deprecation warning naming `ollama`, a `settings.yaml` that still names `ollama-native` keeps loading unchanged, and `clio-coder upgrade` rewrites persisted targets to the canonical id. An unknown runtime id in `configure --runtime` or `targets convert --runtime` names the closest registered id when one is near.
+
 ### Ollama context window (`ollama.numCtx`)
 
-An `ollama-native` target sends no `num_ctx` by default, so Ollama opens the model at whatever window its server is configured for (`OLLAMA_CONTEXT_LENGTH`, a `num_ctx` in the Modelfile, or the server default). Clio reads that window back from `/api/ps` once the model is resident and plans against it. Before the model is resident, Clio plans against the smaller of the model maximum and 131,072 tokens. To ask for a specific window instead, set it on the target:
+An `ollama` target sends no `num_ctx` by default, so Ollama opens the model at whatever window its server is configured for (`OLLAMA_CONTEXT_LENGTH`, a `num_ctx` in the Modelfile, or the server default). Clio reads that window back from `/api/ps` once the model is resident and plans against it. Before the model is resident, Clio plans against the smaller of the model maximum and 131,072 tokens. To ask for a specific window instead, set it on the target:
 
 ```yaml
 targets:
   - id: local-ollama
-    runtime: ollama-native
+    runtime: ollama
     url: http://127.0.0.1:11434
     defaultModel: qwen3:30b-a3b-instruct-2507-q4_K_M
     ollama:
@@ -422,7 +426,7 @@ Ollama reloads a model whenever a request asks for a `num_ctx` different from th
 
 ### Ollama residency and release on exit
 
-Every chat request on an `ollama-native` target sends `keep_alive: -1`, so the model stays loaded for the whole session instead of expiring between turns. Ollama places and fits models itself, so Clio never unloads a model it did not load: models the operator or another client loaded, and models that were already resident when Clio first used them, stay loaded. When an interactive session switches models, Clio releases the model it loaded earlier before the next turn.
+Every chat request on an `ollama` target sends `keep_alive: -1`, so the model stays loaded for the whole session instead of expiring between turns. Ollama places and fits models itself, so Clio never unloads a model it did not load: models the operator or another client loaded, and models that were already resident when Clio first used them, stay loaded. When an interactive session switches models, Clio releases the model it loaded earlier before the next turn.
 
 When the process exits, Clio sends `keep_alive: 0` for each model this process loaded and pinned, so a finished `clio-coder run` does not hold its weights after it ends. A model counts as loaded by Clio when it was absent from `/api/ps` before Clio's first request for it and that request then answered. The release runs on every coordinated exit: a headless run that completes or fails, `run --timeout` (exit 124), SIGINT, SIGTERM, interactive quit, and a `clio-coder acp` session whose client closes the connection. It is bounded at two seconds, and a server that is unreachable or slow leaves the model loaded without changing the exit code. A target with `lifecycle: user-managed` is observe-only, so nothing is released there.
 
@@ -1136,7 +1140,7 @@ When a probed target reports no context window, Clio uses the runtime descriptor
 
 A runtime that reports the window a resident model is loaded at (LM Studio, and Ollama through `/api/ps`) bounds the session by that serving window, because a model open at 32,768 tokens rejects a longer prompt whatever its weights allow. The text output then names both numbers, as in `ctx 32768 (serving; model max 262144)`, so the operator can see which one a run is planned against. In JSON output the serving window is `discoveredModelStates.<model>.contextLength` and the maximum is `capabilities.contextWindow`.
 
-An `ollama-native` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident, Clio plans against the smaller of that maximum and 131,072 tokens, because Ollama opens a cold model at `OLLAMA_CONTEXT_LENGTH` or its server default and no API reports that window before load. The text output names both, as in `ctx 131072 (cold; model max 262144)`; a model whose maximum is below the cap shows its maximum alone. Once `/api/ps` reports the model loaded, its serving window replaces the cold figure. Set `ollama.numCtx` to plan against a window Clio requests rather than one it infers; it applies whether or not the model is resident.
+An `ollama` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident, Clio plans against the smaller of that maximum and 131,072 tokens, because Ollama opens a cold model at `OLLAMA_CONTEXT_LENGTH` or its server default and no API reports that window before load. The text output names both, as in `ctx 131072 (cold; model max 262144)`; a model whose maximum is below the cap shows its maximum alone. Once `/api/ps` reports the model loaded, its serving window replaces the cold figure. Set `ollama.numCtx` to plan against a window Clio requests rather than one it infers; it applies whether or not the model is resident.
 
 ---
 
@@ -1217,7 +1221,7 @@ Representative built-in runtime IDs:
 | Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
 | Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for structured `agy` external delegation |
-| Local native | `llamacpp`, `lmstudio`, `ollama-native`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
+| Local native | `llamacpp`, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
 Some hidden aliases exist for backward compatibility or special surfaces; use `clio-coder configure --list --all` to see them.
 
