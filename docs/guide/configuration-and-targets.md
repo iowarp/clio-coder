@@ -1091,7 +1091,7 @@ Useful flags:
 ## Target management
 
 ```bash
-clio-coder targets [--json] [--probe [--tools]] [--target <id>]
+clio-coder targets [--json] [--probe [--tools [--tools-timeout <seconds>]]] [--target <id>]
 clio-coder targets add [configure flags]
 clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                       [--fleet-target <id>] [--fleet-model <id>]
@@ -1119,8 +1119,10 @@ typed tool through the same engine stream path a chat turn uses, against the
 chat model when the target is the chat target and the target's default model
 otherwise. It never picks another model. The check passes only when the
 response streamed in more than one frame, carried a call to the probe tool, and
-the call's arguments parsed as JSON and matched the tool schema. It shares the
-probe's five-second timeout. The result appears in the notes column as
+the call's arguments parsed as JSON and matched the tool schema. It has its own
+generation timeout of 120 seconds, long enough for a cold load of a large local
+model; `--tools-timeout <seconds>` changes it. Plain `--probe` keeps its
+five-second HTTP timeout. The result appears in the notes column as
 `tools verified (<model>, <ms>)` or `tools failed (<model>): <reason>`, and as
 `toolProbe` in `--json`. A verified probe marks `tools` true for that model;
 runtime resolution then reports the provenance as `toolsVerification`, and a

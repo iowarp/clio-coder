@@ -322,6 +322,23 @@ describe("targets --probe --tools", () => {
 		deepStrictEqual(ollama.releases, []);
 		ok(ollama.resident.has(OLLAMA_MODEL));
 	});
+
+	it("gives a cold load its own generation timeout, bounded by --tools-timeout", async () => {
+		// Slower than the 5 s HTTP probe timeout, well inside the tool probe default.
+		const slow = await ollamaServer({ chatDelayMs: 5_500 });
+		const bounded = await ollamaServer({ chatDelayMs: 5_500 });
+
+		const [passed, timedOut] = await Promise.all([
+			runTargets(slow.url, ["--probe", "--tools", "--json"], slow.target),
+			runTargets(bounded.url, ["--probe", "--tools", "--tools-timeout", "1", "--json"], bounded.target),
+		]).then((outputs) => outputs.map((output) => (JSON.parse(output) as ToolProbeJson).targets[0]?.toolProbe));
+
+		strictEqual(passed?.error, undefined);
+		strictEqual(passed?.status, "verified");
+		strictEqual(timedOut?.status, "failed");
+		strictEqual(timedOut?.error, "timeout after 1000ms");
+		ok((timedOut?.latencyMs ?? Number.POSITIVE_INFINITY) < 5_000, `latency ${timedOut?.latencyMs}`);
+	});
 });
 
 describe("runtime resolution with a tool probe result", () => {

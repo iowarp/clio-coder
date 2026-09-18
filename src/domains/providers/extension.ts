@@ -40,6 +40,8 @@ import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "./types/runti
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
+/** The tool probe generates, so it can pay for a cold load of a large local model. */
+const DEFAULT_TOOL_PROBE_TIMEOUT_MS = 120_000;
 /** The key a turn sends to a target that needs none, matched so the probe request is the turn's. */
 const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 
@@ -477,7 +479,9 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			// The probe can load and pin a cold model, and `targets` never runs the
 			// orchestrator's release on exit, so the release happens here for every
 			// caller, on success, failure, and abort.
-			toolProbe = await releaseModelsLoadedDuring(() => runToolProbe(target, desc, probeCtx));
+			toolProbe = await releaseModelsLoadedDuring(() =>
+				runToolProbe(target, desc, probeCtx, options.toolsTimeoutMs ?? DEFAULT_TOOL_PROBE_TIMEOUT_MS),
+			);
 			options.signal?.throwIfAborted();
 			if (!currentProbeTarget(target)) return null;
 			const modelId = toolProbe.modelId;
@@ -527,6 +531,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		target: TargetDescriptor,
 		desc: RuntimeDescriptor,
 		probeCtx: ProbeContext,
+		timeoutMs: number,
 	): Promise<ToolCallVerification> {
 		const modelId = probeCandidateModelId(target);
 		const skipped = (error: string): ToolCallVerification => ({
@@ -553,7 +558,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const apiKey = targetRequiresAuth(target, desc) ? probeCtx.authToken : LOCAL_API_KEY_FALLBACK;
 		const result = await probeToolCall({
 			model,
-			timeoutMs: probeCtx.httpTimeoutMs,
+			timeoutMs,
 			...(apiKey !== undefined ? { apiKey } : {}),
 			...(probeCtx.signal ? { signal: probeCtx.signal } : {}),
 		});
