@@ -4,7 +4,24 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+### run
+
+- Seal a headless run that ends blocked and changes nothing as a no-op: the main-agent receipt carries a safety summary (decisions, blocked attempts, and a `noop` flag), and `run --fail-on-noop` turns such a run into exit 1 with outcome `failed` and detail `noop`. Report artifacts and repeated denials no longer mask a no-op. Without the flag the exit code and outcome are unchanged (#378).
+- Add `run --timeout <seconds>`, which ends the run through the same coordinated shutdown as SIGTERM, seals a `timed_out` receipt with status `failed`, and exits 124. A usage error exits 2 even when a timeout is set.
+- Add `run --cwd <dir>` with the semantics of `acp --cwd`, so an orchestrator can run Clio in a worktree without changing its own working directory.
+
+### safety
+
+- Follow dangling and chained symlinks when canonicalizing a path for admission, so a write or read through a link that points outside the workspace is classified by where it lands. Before this, `data/out.txt -> ../../escape.txt` was admitted as an in-workspace write and published outside the root.
+- Refuse a call that would park for operator approval when no permission listener is registered, instead of leaving it pending forever. Every interactive, worker, and ACP registry registers a listener; library callers and harnesses that build a bare registry no longer hang.
+
+### eval
+
+- Admit `custom.*` keys on the `clio-coder.eval.measure.v1` grader channel as finite numbers or booleans, and `custom.digest.*` keys as lowercase SHA-256 hex strings, stored per trial and usable by assertions and suite thresholds. A key the artifact redactor would rewrite fails the item instead of storing `[redacted]`.
+- Add the tool-bench harness under `evals/tool-bench/` with seeded search and holdout suites for the `edit`, `read`, and `write` tools that report latency, filesystem call counts, memory, CPU, and a behavior digest per scenario.
+
 ### providers
+- Flag llama.cpp idle-slot eviction in `targets --probe` and `doctor` when a router runs with `--kv-unified`, more than one slot, the host-RAM prompt cache, and idle-slot caching together, and name `--no-cache-idle-slots` as the fix.
 - Read the context window a resident Ollama model is actually served at from `/api/ps`, so an `ollama-native` target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
 - Read an Ollama model's maximum context window from `/api/show` (and from `/api/tags` where the server reports it there), so a model that is not resident is planned against the smaller of that maximum and 131072 tokens (Ollama opens a cold model at a window no API reports before load), and `clio-coder targets --probe` shows the serving window beside the maximum.
 - Report Ollama's HTTP 400 `exceed_context_size_error` with the server's own text instead of `[object Object]`, so a prompt past the serving window is recognised as a context overflow and the session compacts and retries instead of failing the turn.
