@@ -134,6 +134,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	requestedContextWindow(target: TargetDescriptor): number | undefined {
 		return target.ollama?.numCtx;
 	},
+	coldContextWindowCap: CLIO_MIN_CONTEXT_WINDOW,
 	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = targetBaseUrl(target);
 		if (!base) return { ok: false, error: "target has no url" };

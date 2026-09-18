@@ -195,6 +195,13 @@ export interface RuntimeDescriptor {
 	 * model at that size, so it outranks whatever window is loaded now.
 	 */
 	requestedContextWindow?(target: TargetDescriptor): number | undefined;
+	/**
+	 * Largest window to plan a model at while it is not resident, when the
+	 * runtime opens a cold model at a server-chosen size no API reports before
+	 * load (Ollama's `OLLAMA_CONTEXT_LENGTH`). A model maximum above it is what
+	 * the weights allow, not what the next load will serve.
+	 */
+	coldContextWindowCap?: number;
 	probeModels?(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]>;
 	/**
 	 * Optional per-model reasoning capability probe. Protocol-compatible local

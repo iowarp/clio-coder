@@ -719,6 +719,10 @@ export function resolveContextWindowDetails(
 	const probeWindow = positiveWindow(probedContextWindow);
 	const overrideWindow = positiveWindow(target.capabilities?.contextWindow);
 	const requestedWindow = positiveWindow(runtime.requestedContextWindow?.(target));
+	// Only a model maximum is capped here. A loaded window, an override, and a
+	// requested window each name what the server serves, and none of them is cold.
+	const coldCap = (maximum: number): number =>
+		Math.min(maximum, positiveWindow(runtime.coldContextWindowCap) ?? maximum);
 	let effective: number;
 	let source: ContextWindowSource;
 	if (requestedWindow !== undefined) {
@@ -734,13 +738,13 @@ export function resolveContextWindowDetails(
 		effective = overrideWindow;
 		source = "target-override";
 	} else if (probeWindow !== undefined) {
-		effective = probeWindow;
+		effective = coldCap(probeWindow);
 		// Not "loaded": a probed window is what the target reported for the
 		// model, and only a runtime that names its resident instance's window
 		// has said anything about what is serving right now.
 		source = "probe";
 	} else if (modelDeclared !== undefined) {
-		effective = modelDeclared;
+		effective = coldCap(modelDeclared);
 		source = modelDeclaredSource;
 	} else {
 		effective = declaredContextWindow;

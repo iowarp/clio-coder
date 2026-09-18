@@ -237,13 +237,34 @@ it("shows the serving window beside the model maximum in targets --probe", async
 	strictEqual(states["qwen3:30b-a3b-instruct"]?.contextLength, 32_768);
 });
 
-it("shows the model maximum, not the assumed default, when nothing is resident", async () => {
+it("shows the cold cap beside the model maximum when nothing is resident", async () => {
 	const { url } = await ollama({ tags: TAGS_0_18, show: SHOW_QWEN });
+
+	const { table, json } = await probeTable(url);
+
+	match(table, /ctx 131072 \(cold; model max 262144\)/);
+	strictEqual(table.includes("unverified runtime default"), false);
+	const row = json.find((entry) => (entry.target as { id: string }).id === "local-ollama");
+	strictEqual((row?.capabilities as { contextWindow: number }).contextWindow, 262_144);
+});
+
+it("shows a cold model maximum below the cap as is", async () => {
+	const { url } = await ollama({
+		tags: TAGS_0_18,
+		show: { ...SHOW_QWEN, model_info: { ...SHOW_QWEN.model_info, "qwen3moe.context_length": 32_768 } },
+	});
 
 	const { table } = await probeTable(url);
 
-	match(table, /ctx 262144(?! \()/);
-	strictEqual(table.includes("unverified runtime default"), false);
+	match(table, /ctx 32768(?! \()/);
+});
+
+it("shows a configured num_ctx on a cold model beside the model maximum", async () => {
+	const { url } = await ollama({ tags: TAGS_0_18, show: SHOW_QWEN });
+
+	const { table } = await probeTable(url, { ollama: { numCtx: 65_536 } });
+
+	match(table, /ctx 65536 \(num_ctx; model max 262144\)/);
 });
 
 it("ignores a Modelfile num_ctx when the target sends its own", async () => {
