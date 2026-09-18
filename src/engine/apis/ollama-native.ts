@@ -520,7 +520,7 @@ function runStream(
 			stream.end();
 		} catch (err) {
 			output.stopReason = aborted ? "aborted" : "error";
-			output.errorMessage = err instanceof Error ? err.message : String(err);
+			output.errorMessage = ollamaErrorMessage(err);
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
 		} finally {
@@ -528,6 +528,24 @@ function runStream(
 		}
 	})();
 	return stream;
+}
+
+/**
+ * The text of a failed Ollama request. The SDK builds its `ResponseError` from
+ * the body's `error` field and assumes it is a string, so an object-shaped body
+ * such as `{"error":{"type":"exceed_context_size_error","message":"request
+ * (8009 tokens) exceeds the available context size (2048 tokens), ..."}}`
+ * reaches here as the message "[object Object]" with the object kept on
+ * `error`. Reading the object back keeps the server's wording, which is what
+ * the context-overflow classifier matches on (issue #375).
+ */
+function ollamaErrorMessage(err: unknown): string {
+	if (!(err instanceof Error)) return String(err);
+	const detail = (err as { error?: unknown }).error;
+	if (!detail || typeof detail !== "object") return err.message;
+	const { message, type } = detail as { message?: unknown; type?: unknown };
+	const text = typeof message === "string" ? message : JSON.stringify(detail);
+	return typeof type === "string" ? `${type}: ${text}` : text;
 }
 
 function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions | undefined {
