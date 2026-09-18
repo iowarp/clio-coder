@@ -9,12 +9,20 @@ import type { ConfigContract } from "../config/contract.js";
 import { authNotRequiredStatus, openAuthStorage, resolveAuthTarget, targetRequiresAuth } from "./auth/index.js";
 import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
-import type { ContextWindowProvenance, ProvidersContract, TargetHealth, TargetStatus } from "./contract.js";
+import type {
+	ContextWindowProvenance,
+	LiveProbeOptions,
+	ProvidersContract,
+	TargetHealth,
+	TargetStatus,
+	ToolCallVerification,
+} from "./contract.js";
 import { credentialsPresent } from "./credentials.js";
 import { recordEndpointSlotsFromStatus } from "./endpoint-capacity.js";
 import { resolveProviderKnowledgeBaseRoots } from "./knowledge-base-path.js";
 import { probeCapabilitiesForModel } from "./model-capabilities.js";
 import { loadPluginRuntimes } from "./plugins.js";
+import { probeToolCall } from "./probe/tool-call.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
 import { listKnownModelsForRuntime } from "./support.js";
@@ -31,6 +39,8 @@ import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "./types/runti
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 const DEFAULT_PROBE_TIMEOUT_MS = 5_000;
+/** The key a turn sends to a target that needs none, matched so the probe request is the turn's. */
+const LOCAL_API_KEY_FALLBACK = "clio-coder-local-target";
 
 class NullKnowledgeBase implements KnowledgeBase {
 	lookup(_modelId: string): KnowledgeBaseHit | null {
@@ -347,6 +357,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			};
 			if (previous?.probeNotes && previous.probeNotes.length > 0) out.probeNotes = previous.probeNotes;
 			if (previous?.probeSurfaces) out.probeSurfaces = previous.probeSurfaces;
+			if (previous?.toolProbe) out.toolProbe = previous.toolProbe;
 			return out;
 		}
 		const availability = availabilityFor(desc, target, authStatusFor);
@@ -385,13 +396,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		};
 		if (merge.probeNotes && merge.probeNotes.length > 0) out.probeNotes = merge.probeNotes;
 		if (merge.probeSurfaces) out.probeSurfaces = merge.probeSurfaces;
+		if (previous?.toolProbe) out.toolProbe = previous.toolProbe;
 		return out;
 	}
 
 	async function probeTargetInternal(
 		target: TargetDescriptor,
 		live: boolean,
-		options?: { reasoning?: boolean; signal?: AbortSignal },
+		options?: { reasoning?: boolean } & LiveProbeOptions,
 	): Promise<TargetStatus | null> {
 		options?.signal?.throwIfAborted();
 		if (stopped) return null;
@@ -432,9 +444,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		options?.signal?.throwIfAborted();
 		if (!currentProbeTarget(target)) return null;
 		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
-			const settings = readConfig();
-			const orchestratorTarget = settings.chat.target === target.id ? settings.chat.model : null;
-			const candidateModelId = orchestratorTarget ?? target.defaultModel ?? null;
+			const candidateModelId = probeCandidateModelId(target);
 			if (candidateModelId) {
 				try {
 					const result = await desc.probeReasoning(target, candidateModelId, probeCtx);
@@ -461,11 +471,31 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 				}
 			}
 		}
+		let toolProbe: ToolCallVerification | null = null;
+		if (probeResult.ok && options?.tools === true) {
+			toolProbe = await runToolProbe(target, desc, probeCtx);
+			options.signal?.throwIfAborted();
+			if (!currentProbeTarget(target)) return null;
+			const modelId = toolProbe.modelId;
+			const capabilityModelId = probeResult.capabilityModelId ?? null;
+			if (toolProbe.status === "verified" && modelId && (capabilityModelId === null || capabilityModelId === modelId)) {
+				probeResult = {
+					...probeResult,
+					discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), tools: true },
+					modelCapabilities: {
+						...(probeResult.modelCapabilities ?? {}),
+						[modelId]: { ...(probeResult.modelCapabilities?.[modelId] ?? {}), tools: true },
+					},
+					capabilityModelId: capabilityModelId ?? modelId,
+				};
+			}
+		}
 		// Cancellation, target edits/removal, and shutdown revoke publication.
 		options?.signal?.throwIfAborted();
 		const current = currentProbeTarget(target);
 		if (!current) return null;
 		const status = buildStatus(current, desc, probeResult, previous);
+		if (toolProbe) status.toolProbe = toolProbe;
 		statuses.set(target.id, status);
 		if (probeResult.ok && probeResult.models !== undefined) {
 			recordTargetModelSnapshot(
@@ -480,6 +510,61 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		void recordEndpointSlotsFromStatus(status);
 		context.bus.emit(BusChannels.ProviderHealth, { id: target.id, status });
 		return status;
+	}
+
+	/** The only models an inference probe may touch: the chat model on this target, else its default. */
+	function probeCandidateModelId(target: TargetDescriptor): string | null {
+		const settings = readConfig();
+		const orchestratorModel = settings.chat.target === target.id ? settings.chat.model : null;
+		return orchestratorModel ?? target.defaultModel ?? null;
+	}
+
+	async function runToolProbe(
+		target: TargetDescriptor,
+		desc: RuntimeDescriptor,
+		probeCtx: ProbeContext,
+	): Promise<ToolCallVerification> {
+		const modelId = probeCandidateModelId(target);
+		const skipped = (error: string): ToolCallVerification => ({
+			status: "skipped",
+			modelId,
+			streamed: false,
+			frames: null,
+			toolCall: false,
+			argumentsValid: false,
+			latencyMs: null,
+			checkedAt: Date.now(),
+			error,
+		});
+		if (!modelId) return skipped("no chat or default model is set for this target");
+		// SDK and subprocess runtimes stream through their own worker runners,
+		// not the engine request path this probe exercises.
+		if (desc.kind !== "http") return skipped(`runtime kind '${desc.kind}' does not stream through the engine`);
+		let model: ReturnType<RuntimeDescriptor["synthesizeModel"]>;
+		try {
+			model = desc.synthesizeModel(target, modelId, kb.lookup(modelId));
+		} catch (err) {
+			return skipped(`model synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		const apiKey = targetRequiresAuth(target, desc) ? probeCtx.authToken : LOCAL_API_KEY_FALLBACK;
+		const result = await probeToolCall({
+			model,
+			timeoutMs: probeCtx.httpTimeoutMs,
+			...(apiKey !== undefined ? { apiKey } : {}),
+			...(probeCtx.signal ? { signal: probeCtx.signal } : {}),
+		});
+		const out: ToolCallVerification = {
+			status: result.ok ? "verified" : "failed",
+			modelId,
+			streamed: result.streamed,
+			frames: result.frames,
+			toolCall: result.toolCall,
+			argumentsValid: result.argumentsValid,
+			latencyMs: result.latencyMs,
+			checkedAt: Date.now(),
+		};
+		if (result.error !== undefined) out.error = result.error;
+		return out;
 	}
 
 	async function probeReasoningForModelInternal(targetId: string, modelId: string): Promise<boolean | null> {
@@ -517,13 +602,13 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 	}
 
-	async function probeAllLive(): Promise<void> {
+	async function probeAllLive(options?: LiveProbeOptions): Promise<void> {
 		const settings = readConfig();
 		const activeIds = new Set(settings.targets.map((ep) => ep.id));
 		for (const id of Array.from(statuses.keys())) {
 			if (!activeIds.has(id)) statuses.delete(id);
 		}
-		await Promise.all(settings.targets.map((ep) => probeTargetInternal(ep, true)));
+		await Promise.all(settings.targets.map((ep) => probeTargetInternal(ep, true, options)));
 	}
 
 	const extension: DomainExtension = {

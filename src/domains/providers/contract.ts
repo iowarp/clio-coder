@@ -69,6 +69,36 @@ export interface TargetStatus {
 	discoveredModelsSource?: "probe" | "cache" | "runtime" | "none";
 	/** Probe-only per-model load state keyed by wire model id. */
 	discoveredModelStates?: Readonly<Record<string, ProbeModelStatus>> | null;
+	/**
+	 * Result of the last opt-in live tool-call probe (`targets --probe --tools`).
+	 * Held in memory with the rest of the status; never persisted.
+	 */
+	toolProbe?: ToolCallVerification;
+}
+
+/**
+ * A live streamed tool-call check for one (target, model). `verified` means
+ * the model streamed a schema-valid call through the engine path a turn uses;
+ * `failed` carries the reason; `skipped` means the probe could not run.
+ */
+export interface ToolCallVerification {
+	status: "verified" | "failed" | "skipped";
+	modelId: string | null;
+	streamed: boolean;
+	/** Response frames the server sent; null when the transport was not observable. */
+	frames: number | null;
+	toolCall: boolean;
+	argumentsValid: boolean;
+	latencyMs: number | null;
+	/** Epoch ms when the probe finished. */
+	checkedAt: number;
+	error?: string;
+}
+
+export interface LiveProbeOptions {
+	/** Opt-in streamed tool-call probe. Generates tokens and can load a cold model. */
+	tools?: boolean;
+	signal?: AbortSignal;
 }
 
 export interface ProvidersContract {
@@ -87,16 +117,17 @@ export interface ProvidersContract {
 	/** Config-only readiness sweep. Does not hit the network. */
 	probeAll(): Promise<void>;
 
-	/** Live liveness + probeModels sweep. */
-	probeAllLive(): Promise<void>;
+	/** Live liveness + probeModels sweep. `tools: true` adds the streamed tool-call probe per target. */
+	probeAllLive(options?: LiveProbeOptions): Promise<void>;
 
 	/**
 	 * Probe a single target live. Null when the id is not in settings.targets.
 	 * `reasoning: false` skips an inference-based reasoning-capability probe while
-	 * retaining the target's liveness and model-catalog checks.
+	 * retaining the target's liveness and model-catalog checks. `tools: true`
+	 * adds the streamed tool-call probe against the chat or default model.
 	 */
 	/** Optional cancellation covers auth and metadata; a cancelled probe does not publish health. */
-	probeTarget(id: string, options?: { reasoning?: boolean; signal?: AbortSignal }): Promise<TargetStatus | null>;
+	probeTarget(id: string, options?: { reasoning?: boolean } & LiveProbeOptions): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
 	disconnectTarget(id: string): TargetStatus | null;

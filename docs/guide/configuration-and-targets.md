@@ -1091,7 +1091,7 @@ Useful flags:
 ## Target management
 
 ```bash
-clio-coder targets [--json] [--probe] [--target <id>]
+clio-coder targets [--json] [--probe [--tools]] [--target <id>]
 clio-coder targets add [configure flags]
 clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                       [--fleet-target <id>] [--fleet-model <id>]
@@ -1110,6 +1110,25 @@ clio-coder targets rename <old> <new>
 ```
 
 The `clio-coder targets` listing shows no breaker column, because the dispatch breaker lives in the memory of the session that dispatches and the listing process never dispatches. Inside a session, each `/settings` targets row shows its routes' breaker state: an open route takes over the health cell with its remaining cooldown (`○ open 42s`), a route whose probe is in flight shows `◐ probing`, and the row's detail line lists one phrase per route, such as `qwen open 42s after target-transient` or `coder 1 failure (target-overloaded)` for a closed route that has failed below the threshold.
+
+`clio-coder targets --probe` checks reachability, lists models, and runs the
+reasoning probe. It does not verify tool calls: the `tools` capability it shows
+is a runtime default or server metadata. Add `--tools` to check it live.
+`clio-coder targets --probe --tools` sends one small request with a single
+typed tool through the same engine stream path a chat turn uses, against the
+chat model when the target is the chat target and the target's default model
+otherwise. It never picks another model. The check passes only when the
+response streamed in more than one frame, carried a call to the probe tool, and
+the call's arguments parsed as JSON and matched the tool schema. It shares the
+probe's five-second timeout. The result appears in the notes column as
+`tools verified (<model>, <ms>)` or `tools failed (<model>): <reason>`, and as
+`toolProbe` in `--json`. A verified probe marks `tools` true for that model;
+runtime resolution then reports the provenance as `toolsVerification`, and a
+failed probe adds a `tools-probe-failed` warning to the next turn or dispatch
+on that model. The result lives only in the running process. The tool probe
+generates tokens and can load a cold model, so it runs only when asked. With
+`--target <id>` it probes just that target. SDK and subprocess runtimes are
+reported as skipped because they do not stream through the engine.
 
 `clio-coder targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
 
