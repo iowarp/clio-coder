@@ -3,7 +3,7 @@ import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
-import { releaseModelsLoadedDuring } from "../../engine/apis/residency.js";
+import { releaseModelsLoadedDuring, releaseScopeFor } from "../../engine/apis/residency.js";
 import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
@@ -476,12 +476,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		let toolProbe: ToolCallVerification | null = null;
 		if (probeResult.ok && options?.tools === true) {
-			// The probe can load and pin a cold model, and `targets` never runs the
-			// orchestrator's release on exit, so the release happens here for every
-			// caller, on success, failure, and abort.
-			toolProbe = await releaseModelsLoadedDuring(() =>
-				runToolProbe(target, desc, probeCtx, options.toolsTimeoutMs ?? DEFAULT_TOOL_PROBE_TIMEOUT_MS),
-			);
+			toolProbe = await runToolProbe(target, desc, probeCtx, options.toolsTimeoutMs ?? DEFAULT_TOOL_PROBE_TIMEOUT_MS);
 			options.signal?.throwIfAborted();
 			if (!currentProbeTarget(target)) return null;
 			const modelId = toolProbe.modelId;
@@ -556,12 +551,21 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			return skipped(`model synthesis failed: ${err instanceof Error ? err.message : String(err)}`);
 		}
 		const apiKey = targetRequiresAuth(target, desc) ? probeCtx.authToken : LOCAL_API_KEY_FALLBACK;
-		const result = await probeToolCall({
-			model,
-			timeoutMs,
-			...(apiKey !== undefined ? { apiKey } : {}),
-			...(probeCtx.signal ? { signal: probeCtx.signal } : {}),
-		});
+		// The probe can load and pin a cold model, and `targets` never runs the
+		// orchestrator's release on exit, so the release happens here for every
+		// caller, on success, failure, and abort. It is scoped to this server and
+		// this model: in-session `/doctor deep` shares the process with chat turns,
+		// and a model a concurrent turn loaded belongs to that turn.
+		const result = await releaseModelsLoadedDuring(
+			() =>
+				probeToolCall({
+					model,
+					timeoutMs,
+					...(apiKey !== undefined ? { apiKey } : {}),
+					...(probeCtx.signal ? { signal: probeCtx.signal } : {}),
+				}),
+			releaseScopeFor([target.url, model.baseUrl], [modelId, model.id]),
+		);
 		const out: ToolCallVerification = {
 			status: result.ok ? "verified" : "failed",
 			modelId,

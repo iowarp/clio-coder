@@ -42,6 +42,7 @@ import {
 	type RuntimeNoticeKind,
 	type RuntimeNoticePayload,
 } from "../../core/bus-events.js";
+import { canonicalEndpointUrl } from "../../core/endpoint-key.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
@@ -314,6 +315,24 @@ export const EXIT_RELEASE_MS = 2_000;
  */
 export type ReleaseScope = (targetKey: string, modelIds: ReadonlyArray<string>) => boolean;
 
+/**
+ * A release scope for one probe: the server reached at any of `baseUrls` and
+ * a resident entry answering to any of `modelIds`. Urls are compared by the
+ * same canonical endpoint the residency registry keys on.
+ */
+export function releaseScopeFor(
+	baseUrls: ReadonlyArray<string | null | undefined>,
+	modelIds: ReadonlyArray<string | null | undefined>,
+): ReleaseScope {
+	const keys = new Set(
+		baseUrls
+			.filter((url): url is string => typeof url === "string" && url.length > 0)
+			.map((url) => canonicalEndpointUrl(url) ?? url),
+	);
+	const ids = new Set(modelIds.filter((id): id is string => typeof id === "string" && id.length > 0));
+	return (targetKey, entryIds) => keys.has(targetKey) && entryIds.some((id) => ids.has(id));
+}
+
 const exitReleasers = new Set<(scope?: ReleaseScope) => Promise<void>>();
 
 /**
@@ -348,14 +367,22 @@ export async function releaseClioLoadedModelsOnExit(scope?: ReleaseScope): Promi
  * that loaded it, and a model resident before Clio touched it is never
  * Clio-loaded in the first place (#313). The release is bounded by
  * {@link EXIT_RELEASE_MS}.
+ *
+ * `scope` narrows the release further. In a process that also runs chat
+ * turns, "became Clio-loaded while the task ran" includes a model a concurrent
+ * turn loaded, so an in-session probe passes the one target and model it
+ * exercised and leaves every other load to the turn that made it.
  */
-export async function releaseModelsLoadedDuring<T>(task: () => Promise<T>): Promise<T> {
+export async function releaseModelsLoadedDuring<T>(task: () => Promise<T>, scope?: ReleaseScope): Promise<T> {
 	const before = new Set<string>();
 	for (const [targetKey, ids] of clioLoaded) for (const id of ids) before.add(`${targetKey}\n${id}`);
 	try {
 		return await task();
 	} finally {
-		await releaseClioLoadedModelsOnExit((targetKey, ids) => !ids.some((id) => before.has(`${targetKey}\n${id}`)));
+		await releaseClioLoadedModelsOnExit(
+			(targetKey, ids) =>
+				!ids.some((id) => before.has(`${targetKey}\n${id}`)) && (scope === undefined || scope(targetKey, ids)),
+		);
 	}
 }
 

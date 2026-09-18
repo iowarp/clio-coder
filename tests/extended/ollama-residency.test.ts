@@ -11,6 +11,8 @@ import { ollamaNativeApiProvider, releaseClioLoadedOllamaModels } from "../../sr
 import {
 	type ClioModelLoad,
 	releaseClioLoadedModelsOnExit,
+	releaseModelsLoadedDuring,
+	releaseScopeFor,
 	setModelLoadReportSink,
 } from "../../src/engine/apis/residency.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
@@ -213,4 +215,21 @@ it("never evicts a worker-reported model as a Clio straggler mid-session", async
 	strictEqual(target.resident.has("worker:latest"), true);
 	await releaseClioLoadedModelsOnExit();
 	deepStrictEqual([...target.unloads].sort(), ["chat2:latest", "chat:latest", "worker:latest"]);
+});
+
+it("releases only the probed model when a turn on another server loads one during the probe", async () => {
+	const probed = await fixture();
+	const turn = await fixture();
+	await releaseModelsLoadedDuring(
+		async () => {
+			strictEqual(await chat(probed.url, "probe:latest"), "stop");
+			strictEqual(await chat(turn.url, "turn:latest"), "stop");
+		},
+		releaseScopeFor([probed.url], ["probe:latest"]),
+	);
+	// The probe's own model goes; the concurrent turn's model stays pinned for it.
+	deepStrictEqual(probed.unloads, ["probe:latest"]);
+	deepStrictEqual(turn.unloads, []);
+	ok(turn.resident.has("turn:latest"));
+	await releaseClioLoadedModelsOnExit();
 });
