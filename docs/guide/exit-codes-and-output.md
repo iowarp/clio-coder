@@ -47,7 +47,7 @@ In headless execution (`clio-coder run`):
    ```text
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
-   The denial is delivered to the LLM as a tool result so the agent can adapt or report the limitation. If the run completes after the denial, the process exits `0` with the answer on `stdout`.
+   The denial is delivered to the LLM as a tool result so the agent can adapt or report the limitation. If the run completes after the denial, the process exits `0` with the answer on `stdout`, and the receipt records the denial under `safety.blockedAttempts` with `noop: true` when no write succeeded. `clio-coder run --fail-on-noop` makes that run exit `1` with receipt outcome `failed` and `outcomeDetail: "noop"` (see [Headless No-op Runs](commands-and-modes.md#headless-no-op-runs)).
 
 ---
 

@@ -2381,6 +2381,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				mode: options.headless.mode ?? "text",
 				...(options.headless.jsonEvents ? { jsonEvents: options.headless.jsonEvents } : {}),
 				...(options.headless.steerChannel ? { steerChannel: options.headless.steerChannel } : {}),
+				...(options.headless.failOnNoop === true ? { failOnNoop: true } : {}),
 				getSessionHeader: () => printJsonSessionHeader(session?.current() ?? null),
 			});
 			await termination.shutdown(code);

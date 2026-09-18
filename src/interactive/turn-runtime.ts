@@ -165,7 +165,10 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	 */
 	const toolOutcomes = new Map<
 		string,
-		Pick<ToolFinishEvent, "outcome" | "reason" | "durationMs" | "ruleId" | "reasonCode" | "policySource">
+		Pick<
+			ToolFinishEvent,
+			"outcome" | "reason" | "durationMs" | "actionClass" | "decision" | "ruleId" | "reasonCode" | "policySource"
+		>
 	>();
 	const toolTelemetry: ToolTelemetry = {
 		onFinish(event) {
@@ -174,6 +177,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				outcome: event.outcome,
 				...(event.reason === undefined ? {} : { reason: event.reason }),
 				durationMs: event.durationMs,
+				...(event.actionClass === undefined ? {} : { actionClass: event.actionClass }),
+				...(event.decision === undefined ? {} : { decision: event.decision }),
 				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
@@ -679,6 +684,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						? {}
 						: {
 								outcome: admission.outcome,
+								// The registry's per-call classification and admission
+								// decision. Headless receipts count safety decisions and
+								// tell a successful write from any other success with
+								// these, the same facts a worker's receipt is built from.
+								...(admission.actionClass === undefined ? {} : { actionClass: admission.actionClass }),
+								...(admission.decision === undefined ? {} : { decision: admission.decision }),
 								...(admission.ruleId === undefined ? {} : { ruleId: admission.ruleId }),
 								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),

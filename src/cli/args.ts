@@ -44,6 +44,8 @@ export interface RunCliArgs {
 	continueSession: boolean;
 	/** Directory the run enters before it resolves anything against the working directory. */
 	cwd?: string;
+	/** Fail a main-agent run whose receipt records a no-op. */
+	failOnNoop: boolean;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -59,6 +61,7 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		required: [],
 		noSkills: false,
 		continueSession: false,
+		failOnNoop: false,
 		skillPaths: [],
 		fileArgs: [],
 		messages: [],
@@ -224,6 +227,10 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (value !== null) {
 				parsed.steerChannel = value;
 			}
+			continue;
+		}
+		if (arg === "--fail-on-noop") {
+			parsed.failOnNoop = true;
 			continue;
 		}
 		if (arg === "--cwd") {
