@@ -73,7 +73,8 @@ interface NormalizedArtifact {
 	artifact: ProtectedArtifact;
 }
 
-const COMMAND_SEPARATORS = new Set([";", "&", "&&", "||", "|"]);
+// `(` and `)` open and close a subshell or group; each side starts a new command.
+const COMMAND_SEPARATORS = new Set([";", "&", "&&", "||", "|", "(", ")"]);
 const SHELL_WRAPPERS = new Set(["command", "builtin", "sudo", "doas"]);
 const SHELL_REDIRECTIONS = new Set([">", ">>", "<", "<<", "<<<", "<&", ">&", "<>", ">|", "&>", "&>>"]);
 const SHELL_WRITE_REDIRECTIONS = new Set([">", ">>", ">&", "<>", ">|", "&>", "&>>"]);
@@ -342,15 +343,221 @@ export function inlineShellScript(command: string): string | null {
 export function extractCommandCdTargets(command: string): string[] {
 	const targets: string[] = [];
 	for (const tokens of expandedShellSegments(command)) {
-		const segment = shellCommandArguments(tokens);
-		const commandIndex = commandTokenIndex(segment);
-		if (commandIndex === null) continue;
-		const executable = basenameToken(segment[commandIndex]);
-		if (executable !== "cd" && executable !== "pushd") continue;
-		const target = pathArgs(segment, commandIndex).at(0);
-		targets.push(target ?? "~");
+		const target = cdTarget(shellCommandArguments(tokens));
+		if (target !== null) targets.push(target);
 	}
 	return targets;
+}
+
+function cdTarget(segment: ReadonlyArray<string>): string | null {
+	const commandIndex = commandTokenIndex(segment);
+	if (commandIndex === null) return null;
+	const executable = basenameToken(segment[commandIndex]);
+	if (executable !== "cd" && executable !== "pushd") return null;
+	return pathArgs(segment, commandIndex).at(0) ?? "~";
+}
+
+/**
+ * A path-bearing step of a shell command, in the order the shell takes them.
+ * `link` is a link the command creates: `sources` are what it points at (a
+ * symbolic link's text, or the file a hard link shares), and `linkDirs` are the
+ * directories it may be created in, relative to where the shell is. A
+ * `separator` is the operator between two commands, `(` and `)` included; the
+ * script of an `sh -c` runs in a child shell, so it comes wrapped in a pair. A
+ * `group` opens or closes a compound command (`if`, a loop, `case`, `{`), whose
+ * inner `;` does not end the command around it. A cd is `unmodeled` when it can
+ * run more times than it is written, or resolve somewhere its text does not
+ * say: inside a loop, after a function definition, or with CDPATH named. It
+ * `mayFail` when what follows can run although it failed: under `!`, or in a
+ * command with `case`, whose pattern `)` makes the parentheses unreliable.
+ */
+export type CommandPathEvent =
+	| { kind: "cd"; target: string; mayFail: boolean; unmodeled: boolean }
+	| { kind: "group"; open: boolean }
+	| { kind: "popd" }
+	| { kind: "exit" }
+	| { kind: "write"; target: string }
+	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[] }
+	| { kind: "separator"; value: string };
+
+interface CommandPathWalkState {
+	events: CommandPathEvent[];
+	/** Loops open around the current segment; their cds may run any number of times. */
+	loopDepth: number;
+	/** A function is defined before this point, so a later call can rerun any cd. */
+	functionSeen: boolean;
+	/** CDPATH is named, so a relative cd may resolve against it instead. */
+	cdpath: boolean;
+	/** A `case` pattern ends in a bare `)`, so no parenthesis can be trusted as structure. */
+	caseSeen: boolean;
+}
+
+/** Words that open a loop whose condition and body may run more than once; `done` closes it. */
+const LOOP_WORDS: ReadonlySet<string> = new Set(["for", "while", "until", "select"]);
+const GROUP_OPENERS: ReadonlySet<string> = new Set(["{", "if", "for", "while", "until", "select", "case"]);
+const GROUP_CLOSERS: ReadonlySet<string> = new Set(["}", "fi", "done", "esac"]);
+
+/** The reserved words a segment starts with, and a leading for, case, or select. */
+function leadingShellWords(argv: ReadonlyArray<string>): string[] {
+	const words: string[] = [];
+	for (const word of argv) {
+		if (SHELL_RESERVED_PREFIXES.has(word)) {
+			words.push(word);
+			continue;
+		}
+		if (word === "for" || word === "case" || word === "select") words.push(word);
+		break;
+	}
+	return words;
+}
+
+/**
+ * The cd, write, and link steps of a command in order, with the operators
+ * between them, so a caller can resolve each write against every directory an
+ * earlier cd can leave the shell in. A segment's redirects open before its
+ * command runs, so its writes come before its cd.
+ */
+export function extractCommandPathWalk(command: string): CommandPathEvent[] {
+	const walk: CommandPathWalkState = {
+		events: [],
+		loopDepth: 0,
+		functionSeen: false,
+		cdpath: /\bCDPATH\b/u.test(command),
+		caseSeen: false,
+	};
+	collectPathWalk(command, 0, walk);
+	if (!walk.caseSeen) return walk.events;
+	return walk.events
+		.filter((event) => event.kind !== "separator" || (event.value !== "(" && event.value !== ")"))
+		.map((event) => (event.kind === "cd" ? { ...event, mayFail: true } : event));
+}
+
+function collectPathWalk(command: string, depth: number, walk: CommandPathWalkState): void {
+	const tokens = scanShellLike(command);
+	let segment: ShellToken[] = [];
+	for (const [index, token] of tokens.entries()) {
+		if (token.operator && COMMAND_SEPARATORS.has(token.value)) {
+			collectSegmentPathEvents(segment, depth, walk);
+			segment = [];
+			// `name()` defines a function whose body may run any number of times.
+			const next = tokens[index + 1];
+			if (token.value === "(" && next?.operator === true && next.value === ")") walk.functionSeen = true;
+			walk.events.push({ kind: "separator", value: token.value });
+			continue;
+		}
+		segment.push(token);
+	}
+	collectSegmentPathEvents(segment, depth, walk);
+}
+
+function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: number, walk: CommandPathWalkState): void {
+	if (segment.length === 0) return;
+	const argv = shellCommandArguments(segment);
+	const head = argv[0] ?? "";
+	if (GROUP_CLOSERS.has(head)) walk.events.push({ kind: "group", open: false });
+	if (head === "done" && walk.loopDepth > 0) walk.loopDepth -= 1;
+	if (head === "function") walk.functionSeen = true;
+	for (const word of leadingShellWords(argv)) {
+		if (GROUP_OPENERS.has(word)) walk.events.push({ kind: "group", open: true });
+		if (LOOP_WORDS.has(word)) walk.loopDepth += 1;
+		if (word === "case") walk.caseSeen = true;
+	}
+	const writes: string[] = [];
+	collectRedirectTargets(segment, writes);
+	collectInvokedWriteTargets(argv, writes);
+	collectInPlaceEditTargets(argv, writes);
+	for (const target of writes.filter(isInterestingWriteTarget)) walk.events.push({ kind: "write", target });
+	collectLinkEvents(argv, walk.events);
+	const commandIndex = commandTokenIndex(argv);
+	const cd = cdTarget(argv);
+	if (cd !== null) {
+		walk.events.push({
+			kind: "cd",
+			target: cd,
+			mayFail: argv.slice(0, commandIndex ?? 0).includes("!"),
+			unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath,
+		});
+	} else if (commandIndex !== null) {
+		const executable = basenameToken(argv[commandIndex]);
+		if (executable === "popd") walk.events.push({ kind: "popd" });
+		if (executable === "exit" || executable === "return") walk.events.push({ kind: "exit" });
+	}
+	const script = segmentShellScript(argv);
+	if (script !== null && depth < INNER_SHELL_MAX_DEPTH) {
+		walk.events.push({ kind: "separator", value: "(" });
+		collectPathWalk(script, depth + 1, walk);
+		walk.events.push({ kind: "separator", value: ")" });
+	}
+}
+
+/**
+ * `ln` (hard unless `-s`), `cp -s`, and `cp -l`. With `-t DIR` every link goes in
+ * DIR; with one operand it goes in the current directory; otherwise the last
+ * operand is either the link or, when it is a directory, where the links go,
+ * unless `-T` says it is never a directory.
+ */
+function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[]): void {
+	const cmdIndex = commandTokenIndex(argv);
+	if (cmdIndex === null) return;
+	const executable = basenameToken(argv[cmdIndex]);
+	if (executable !== "ln" && executable !== "cp") return;
+	let symbolic = false;
+	let hard = executable === "ln";
+	let targetDirectory: string | null = null;
+	let noTargetDirectory = false;
+	let endOfOptions = false;
+	const operands: string[] = [];
+	for (let index = cmdIndex + 1; index < argv.length; index += 1) {
+		const token = argv[index] ?? "";
+		if (endOfOptions || !token.startsWith("-") || token === "-") {
+			operands.push(token);
+			continue;
+		}
+		if (token === "--") {
+			endOfOptions = true;
+			continue;
+		}
+		if (token.startsWith("--")) {
+			const eq = token.indexOf("=");
+			const name = eq === -1 ? token : token.slice(0, eq);
+			const value = eq === -1 ? undefined : token.slice(eq + 1);
+			if (name === "--symbolic" || name === "--symbolic-link") symbolic = true;
+			else if (name === "--link") hard = true;
+			else if (name === "--no-target-directory") noTargetDirectory = true;
+			else if (name === "--target-directory") {
+				targetDirectory = value ?? argv[index + 1] ?? null;
+				if (value === undefined) index += 1;
+			} else if (name === "--suffix" && value === undefined) index += 1;
+			continue;
+		}
+		for (let at = 1; at < token.length; at += 1) {
+			const flag = token[at];
+			if (flag === "s") symbolic = true;
+			else if (flag === "l" && executable === "cp") hard = true;
+			else if (flag === "T") noTargetDirectory = true;
+			else if (flag === "t" || flag === "S") {
+				// The rest of the cluster, or the next word, is the option's argument.
+				const rest = token.slice(at + 1);
+				const value = rest.length > 0 ? rest : argv[index + 1];
+				if (rest.length === 0) index += 1;
+				if (flag === "t") targetDirectory = value ?? null;
+				break;
+			}
+		}
+	}
+	if (!symbolic && !hard) return;
+	let sources = operands;
+	let linkDirs = ["."];
+	if (targetDirectory !== null) {
+		linkDirs = [targetDirectory];
+		out.push({ kind: "write", target: targetDirectory });
+	} else if (operands.length > 1) {
+		const destination = operands.at(-1) as string;
+		sources = operands.slice(0, -1);
+		const parent = path.posix.dirname(destination);
+		linkDirs = noTargetDirectory ? [parent] : [parent, destination];
+	}
+	if (sources.length > 0) out.push({ kind: "link", symbolic, sources, linkDirs });
 }
 
 /**
@@ -945,7 +1152,7 @@ export function scanShellLike(command: string): ShellToken[] {
 			if (char === "\n") tokens.push({ value: ";", operator: true, quoted: false, start: index, end: index + 1 });
 			continue;
 		}
-		if (";&|><".includes(char)) {
+		if (";&|><()".includes(char)) {
 			pushCurrent(index);
 			const three = command.slice(index, index + 3);
 			const two = command.slice(index, index + 2);
@@ -981,11 +1188,33 @@ function splitSegments(tokens: ReadonlyArray<ShellToken>): ShellToken[][] {
 	return segments;
 }
 
+/**
+ * Reserved words that can stand before a command in the same segment: a brace
+ * group, a negation, and the heads of if, loop, and else bodies. Without them
+ * `if true; then cd /x; fi` read `then` as the command and hid the cd.
+ */
+const SHELL_RESERVED_PREFIXES: ReadonlySet<string> = new Set([
+	"{",
+	"!",
+	"if",
+	"then",
+	"elif",
+	"else",
+	"while",
+	"until",
+	"do",
+	"time",
+]);
+
 function commandTokenIndex(segment: ReadonlyArray<string>): number | null {
 	let index = 0;
 	while (index < segment.length) {
 		const token = segment[index];
 		if (token === undefined) return null;
+		if (SHELL_RESERVED_PREFIXES.has(token)) {
+			index += 1;
+			continue;
+		}
 		if (isEnvAssignment(token)) {
 			index += 1;
 			continue;
