@@ -49,6 +49,7 @@ In headless execution (`clio-coder run`):
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
    The denial is delivered to the LLM as a tool result so the agent can adapt or report the limitation. If the run completes after the denial, the process exits `0` with the answer on `stdout`, and the receipt records the denial under `safety.blockedAttempts` with `noop: true` when no write succeeded. `clio-coder run --fail-on-noop` makes that run exit `1` with receipt outcome `failed` and `outcomeDetail: "noop"` (see [Headless No-op Runs](commands-and-modes.md#headless-no-op-runs)).
+4. **No-op Runs Under `eval run`**: `clio-coder eval run` fails a task whose `clio-coder run` sealed `noop: true`, with failure class `noop`, even when the task's verifier passes on the untouched workspace. The suite runner reads the main-agent receipt from the item's own state journal, matched to the run by the session id in its `--json` header, and does not pass `--fail-on-noop`, so a nonzero runner exit still reports `runner_failed`. The result carries `result.noop` (absent when no matching receipt records the flag), and `artifacts.failureReason` names the blocked tool calls and their reasons, or says no mutating tool call succeeded. `eval run` prints that reason as a `failure:` line, the JUnit report puts it in the failure body, and the verdict records `machinery: "ok"` with reason `noop`, because the harness worked and the agent changed nothing.
 
 ---
 
