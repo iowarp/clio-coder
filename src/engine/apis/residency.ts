@@ -194,11 +194,52 @@ function forgetClioLoaded(targetKey: string, modelId: string): void {
 	clioLoaded.get(targetKey)?.delete(modelId);
 }
 
-function isClioLoaded(targetKey: string, entry: ResidentModelInfo): boolean {
+/**
+ * Drop a model Clio released outside the reconciler, such as the release on
+ * process exit, so neither the registry nor the TTL fast path still believes
+ * it resident.
+ */
+export function forgetReleasedModel(targetKey: string, modelId: string): void {
+	forgetClioLoaded(targetKey, modelId);
+	reconcileCache.delete(targetKey);
+}
+
+export function isClioLoaded(targetKey: string, entry: ResidentModelInfo): boolean {
 	const set = clioLoaded.get(targetKey);
 	if (!set) return false;
 	if (set.has(entry.modelId)) return true;
 	return (entry.aliasIds ?? []).some((id) => set.has(id));
+}
+
+// --- release on exit ------------------------------------------------------
+
+/** Total time the release on exit may take before shutdown moves on without it. */
+export const EXIT_RELEASE_MS = 2_000;
+
+const exitReleasers = new Set<() => Promise<void>>();
+
+/**
+ * Register a runtime's release of the models this process loaded and pinned.
+ * A runtime registers when its module loads, so a process that never reached
+ * the runtime has nothing to release and pays nothing at exit.
+ */
+export function registerExitRelease(release: () => Promise<void>): void {
+	exitReleasers.add(release);
+}
+
+/**
+ * Run every registered release. Each release bounds itself by
+ * {@link EXIT_RELEASE_MS}; a failure is swallowed so the exit code never
+ * depends on a server that is gone.
+ */
+export async function releaseClioLoadedModelsOnExit(): Promise<void> {
+	await Promise.all(
+		[...exitReleasers].map((release) =>
+			release().catch(() => {
+				// Best-effort: the model stays pinned.
+			}),
+		),
+	);
 }
 
 // --- TTL fast path ---------------------------------------------------------

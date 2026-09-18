@@ -185,7 +185,12 @@ import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
-import { declareRuntimeNoticeProducer, setProtectedModelsProvider } from "../engine/apis/residency.js";
+import {
+	declareRuntimeNoticeProducer,
+	EXIT_RELEASE_MS,
+	releaseClioLoadedModelsOnExit,
+	setProtectedModelsProvider,
+} from "../engine/apis/residency.js";
 import {
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
@@ -2186,6 +2191,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// impossible by ordering.
 		await chat.whenSettled();
 	});
+	// Every Ollama chat pins its model with keep_alive -1, and the ownership
+	// record dies with this process, so release the models this process loaded
+	// once the drain above has stopped the turn that could pin them again
+	// (#379). Terminate runs on every coordinated exit: a finished or failed
+	// headless run, --timeout, SIGINT, SIGTERM, and interactive quit. The
+	// release bounds itself, so an unreachable server never stalls the exit.
+	termination.onTerminate(() => releaseClioLoadedModelsOnExit(), { timeoutMs: EXIT_RELEASE_MS + 500 });
 
 	// A boot-time resume (headless --session or --continue) must replay the resumed
 	// session into the chat loop the same way the interactive /resume overlay

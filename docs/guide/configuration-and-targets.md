@@ -420,6 +420,14 @@ targets:
 
 Ollama reloads a model whenever a request asks for a `num_ctx` different from the one it is loaded at. On a server other clients share, that reload evicts the window they opened it at, and the next request from them reloads it back, so two clients with different windows will thrash the model. Leave `numCtx` unset on a shared server and raise `OLLAMA_CONTEXT_LENGTH` there instead.
 
+### Ollama residency and release on exit
+
+Every chat request on an `ollama-native` target sends `keep_alive: -1`, so the model stays loaded for the whole session instead of expiring between turns. Ollama places and fits models itself, so Clio never unloads a model it did not load: models the operator or another client loaded, and models that were already resident when Clio first used them, stay loaded. When an interactive session switches models, Clio releases the model it loaded earlier before the next turn.
+
+When the process exits, Clio sends `keep_alive: 0` for each model this process loaded and pinned, so a finished `clio-coder run` does not hold its weights after it ends. A model counts as loaded by Clio when it was absent from `/api/ps` before Clio's first request for it and that request then answered. The release runs on every coordinated exit: a headless run that completes or fails, `run --timeout` (exit 124), SIGINT, SIGTERM, and interactive quit. It is bounded at two seconds, and a server that is unreachable or slow leaves the model loaded without changing the exit code. A target with `lifecycle: user-managed` is observe-only, so nothing is released there.
+
+A process that crashes or is killed with SIGKILL releases nothing, and its models stay pinned until something unloads them, for example `ollama stop <model>`. A model whose first request never answered, such as a load that failed or was interrupted before the first response, is not recorded as Clio's and is not released either.
+
 ### LM Studio transport and settings
 
 The canonical runtime id is `lmstudio`. The former `lmstudio-native` id remains an accepted alias scheduled for removal in v0.7.0,
