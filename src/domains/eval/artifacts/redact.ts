@@ -9,6 +9,15 @@ const CREDENTIAL_PATTERNS: Array<[RegExp, string]> = [
 	[/\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret)\s*[:=]\s*)[^\s"',}]+/gi, "$1[redacted]"],
 ];
 
+/**
+ * True when storage would replace this key's value with `[redacted]`. Callers
+ * that admit caller-named keys use it to refuse such a key up front rather than
+ * let a measured number turn into a string on write.
+ */
+export function isRedactedArtifactKey(key: string): boolean {
+	return SENSITIVE_KEY.test(key);
+}
+
 export function redactArtifactForStorage<T>(value: T, env: NodeJS.ProcessEnv = process.env): T {
 	return redactValue(value, env) as T;
 }
