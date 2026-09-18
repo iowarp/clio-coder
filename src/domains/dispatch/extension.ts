@@ -259,6 +259,7 @@ import { defaultRoutingIntent } from "./routing-intent.js";
 import { attachRunEventJournalBridge, type RunEventJournalBridge } from "./run-event-journal-bridge.js";
 import { detectRunIdentity } from "./run-identity.js";
 import { type Ledger, newRunId, openLedger } from "./state.js";
+import { createTargetBreaker, type TargetBreakerBlock } from "./target-breaker.js";
 import {
 	countToolCalls,
 	hasPotentiallyMutatingAttempt,
@@ -446,6 +447,12 @@ export interface DispatchBundleOptions {
 
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 1000;
 const DEFAULT_RESILIENCE_COOLDOWN_MS = 15_000;
+
+/** A half-open route this dispatch was admitted to probe, keyed by its run id. */
+interface ProbeClaim {
+	key: string;
+	owner: string;
+}
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
@@ -2585,6 +2592,11 @@ export function createDispatchBundle(
 	};
 	const now = options?.now ?? (() => Date.now());
 	const monotonicNow = options?.monotonicNow ?? (() => performance.now());
+	const targetBreaker = createTargetBreaker({
+		monotonicNow,
+		cooldownMs: getResilienceCooldownMs,
+		threshold: () => getEffectiveSettings()?.fleet?.retry.breakerThreshold ?? 1,
+	});
 	// Durable evidence owner used by shadow observation and active readiness.
 	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
 
@@ -2592,7 +2604,6 @@ export function createDispatchBundle(
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 	const active = new Map<string, ActiveRun>();
 	const pendingCapacity = new Map<string, PendingCapacityAdmission>();
-	const targetCooldowns = new Map<string, { until: number; reason: string }>();
 	const ownedReservations = new Set<string>();
 	/**
 	 * Attribution from each finalized run's successful tool calls, newest last.
@@ -3539,27 +3550,38 @@ export function createDispatchBundle(
 		return `${targetId}\0${runtimeId}\0${wireModelId}`;
 	}
 
-	function targetCooldownReason(targetId: string, runtimeId: string, wireModelId: string): string | null {
-		const key = cooldownKey(targetId, runtimeId, wireModelId);
-		const cooldown = targetCooldowns.get(key);
-		if (!cooldown) return null;
-		const remaining = cooldown.until - now();
-		if (remaining <= 0) {
-			targetCooldowns.delete(key);
-			return null;
+	function describeTargetBlock(targetId: string, block: TargetBreakerBlock | null): string | null {
+		if (block === null) return null;
+		if (block.kind === "probing") {
+			return `target '${targetId}' is cooling down while one probe run tests it after ${block.reason}`;
 		}
-		return `target '${targetId}' is cooling down for ${Math.ceil(remaining / 1000)}s after ${cooldown.reason}`;
+		return `target '${targetId}' is cooling down for ${Math.ceil(block.remainingMs / 1000)}s after ${block.reason}`;
 	}
 
+	/** Read-only cooldown view for route planning; it never claims a half-open probe. */
+	function targetCooldownReason(targetId: string, runtimeId: string, wireModelId: string): string | null {
+		return describeTargetBlock(targetId, targetBreaker.blocked(cooldownKey(targetId, runtimeId, wireModelId)));
+	}
+
+	/**
+	 * Admission gate for a top-level run. A half-open route admits this run as
+	 * its probe; the claim goes into probeClaims so a dispatch that fails before
+	 * its run starts can hand the probe back.
+	 */
 	function assertTargetNotCoolingDown(
 		req: DispatchRequest,
 		targetId: string,
 		runtimeId: string,
 		wireModelId: string,
+		probeClaims: ProbeClaim[],
 	): void {
 		if (req.lineage !== undefined) return;
-		const reason = targetCooldownReason(targetId, runtimeId, wireModelId);
+		const key = cooldownKey(targetId, runtimeId, wireModelId);
+		const owner = req.runIdHint;
+		const block = owner === undefined ? targetBreaker.blocked(key) : targetBreaker.admit(key, owner);
+		const reason = describeTargetBlock(targetId, block);
 		if (reason !== null) throw new Error(`dispatch: ${reason}`);
+		if (owner !== undefined) probeClaims.push({ key, owner });
 	}
 
 	/** The target identity a request resolves to, without composing a worker. */
@@ -3618,6 +3640,7 @@ export function createDispatchBundle(
 	}
 
 	function recordTargetOutcome(
+		runId: string,
 		targetId: string,
 		runtimeId: string,
 		wireModelId: string,
@@ -3625,15 +3648,9 @@ export function createDispatchBundle(
 		exitCode: number,
 		failureClass: FailureClass,
 	): void {
-		const key = cooldownKey(targetId, runtimeId, wireModelId);
-		if (status === "completed" && exitCode === 0) {
-			targetCooldowns.delete(key);
-			return;
-		}
-		if (!affectsTargetBreaker(failureClass)) return;
-		const cooldownMs = getResilienceCooldownMs();
-		if (cooldownMs <= 0) return;
-		targetCooldowns.set(key, { until: now() + cooldownMs, reason: failureClass });
+		const outcome =
+			status === "completed" && exitCode === 0 ? "success" : affectsTargetBreaker(failureClass) ? "failure" : "neutral";
+		targetBreaker.record(cooldownKey(targetId, runtimeId, wireModelId), runId, outcome, failureClass);
 	}
 
 	function publishDispatchPathScope(req: DispatchRequest, pathScope: DispatchPathScope): void {
@@ -3977,6 +3994,7 @@ export function createDispatchBundle(
 		settings: EffectiveSettings,
 		timing: RunPhaseMarks,
 		routeDecision: RouteDecisionV1,
+		probeClaims: ProbeClaim[],
 		observer?: DispatchAdmissionObserver,
 		callerDeadlineAt?: number,
 		hostRun?: DispatchPreparationOptions["hostRun"],
@@ -4002,7 +4020,7 @@ export function createDispatchBundle(
 		const targetId = `delegation:${lifecycle.agentConfig.id}`;
 		const runtimeId = "acp";
 		const wireModelId = lifecycle.agentConfig.id;
-		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId);
+		assertTargetNotCoolingDown(req, targetId, runtimeId, wireModelId, probeClaims);
 
 		if (req.contextSeed) persistWorkerContextSeed(req.contextSeed);
 		assertBudgetAdmitsRoute(req, { rates: null, provenance: "unknown" }, settings);
@@ -4683,7 +4701,7 @@ export function createDispatchBundle(
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
 				await ledgerRef.persist();
 				active.delete(envelope.id);
-				recordTargetOutcome(targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
+				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
 				completeAssignmentAttempt(activeRun, receipt, finalOutcome, receipt.outcomeDetail ?? finalDetail, failureClass);
@@ -4711,7 +4729,7 @@ export function createDispatchBundle(
 				}
 				active.delete(envelope.id);
 				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
-				recordTargetOutcome(targetId, runtimeId, wireModelId, "failed", 1, "internal");
+				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, "failed", 1, "internal");
 				context.bus.emit(BusChannels.DispatchFailed, {
 					runId: envelope.id,
 					agentId: req.agentId,
@@ -4744,6 +4762,25 @@ export function createDispatchBundle(
 
 	async function dispatchAttempt(
 		req: DispatchRequest,
+		observer?: DispatchAdmissionObserver,
+		preparation?: DispatchPreparationOptions,
+		settlement?: BatchVerificationGate,
+	): ReturnType<typeof admitDispatchAttempt> {
+		const probeClaims: ProbeClaim[] = [];
+		try {
+			return await admitDispatchAttempt(req, probeClaims, observer, preparation, settlement);
+		} catch (error) {
+			// A half-open route admitted this dispatch as its probe, but the run never
+			// started. Without the release the route would wait on a probe outcome
+			// that cannot arrive.
+			for (const claim of probeClaims) targetBreaker.release(claim.key, claim.owner);
+			throw error;
+		}
+	}
+
+	async function admitDispatchAttempt(
+		req: DispatchRequest,
+		probeClaims: ProbeClaim[],
 		observer?: DispatchAdmissionObserver,
 		preparation?: DispatchPreparationOptions,
 		settlement?: BatchVerificationGate,
@@ -4845,6 +4882,7 @@ export function createDispatchBundle(
 				settings,
 				timing,
 				routeObservation.decision,
+				probeClaims,
 				observer,
 				preparation?.deadlineAt,
 				hostRun,
@@ -4873,6 +4911,7 @@ export function createDispatchBundle(
 			lifecycle.target.target.id,
 			lifecycle.target.runtime.id,
 			lifecycle.target.wireModelId,
+			probeClaims,
 		);
 
 		assertBudgetAdmitsRoute(req, lifecycle.target.effectivePricing, settings);
@@ -6098,6 +6137,7 @@ export function createDispatchBundle(
 				}
 				active.delete(envelope.id);
 				recordTargetOutcome(
+					envelope.id,
 					lifecycle.target.target.id,
 					lifecycle.target.runtime.id,
 					lifecycle.target.wireModelId,
@@ -6134,6 +6174,7 @@ export function createDispatchBundle(
 				active.delete(envelope.id);
 				settleAssignmentDurablyWithoutReceipt(lineage.rootRunId, envelope.id);
 				recordTargetOutcome(
+					envelope.id,
 					lifecycle.target.target.id,
 					lifecycle.target.runtime.id,
 					lifecycle.target.wireModelId,

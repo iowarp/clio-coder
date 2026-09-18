@@ -539,7 +539,10 @@ The `fleet.permissions.escalation` block defines parameters for escalation:
 - `fallback` (default `deny`): The fallback posture (`deny` or `fail`) applied upon timeout.
 
 `fleet.retry.routeCooldownMs` is the cooldown between retries on a failed
-route.
+route. `fleet.retry.breakerThreshold` is how many consecutive target failures
+open the route; after the cooldown one probe run tests it, and each failed
+probe doubles the cooldown up to five minutes. See
+[fleet-dispatch.md](fleet-dispatch.md#assignments-attempts-and-failover).
 
 `fleet.adaptiveRouting` controls the two independent activation boundaries for
 measured dispatch. Joint target/model/runtime/node selection becomes active
@@ -772,6 +775,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.concurrency` | `1` | `auto` or integer ≥ 1 | restart |
 | `fleet.retry.maxRetries` | `2` | integer ≥ 0 | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
+| `fleet.retry.breakerThreshold` | `1` | integer ≥ 1 | next dispatch |
 | `fleet.limits.toolCallsPerRun` | `150` | integer ≥ 1 | next dispatch |
 | `fleet.limits.internalRunTimeoutMs` | `900000` | integer ≥ 1 | next dispatch |
 | `fleet.history.maxRuns` | `1000` | integer ≥ 1 | next dispatch |

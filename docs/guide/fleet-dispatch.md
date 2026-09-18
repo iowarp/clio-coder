@@ -759,6 +759,24 @@ the correct and sufficient bound. A retry denied at admission settles the
 assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
+The cooldown is a per-route circuit breaker, keyed by target, runtime, and
+wire model, held in memory by the running process. A route starts closed.
+Each run that ends in a target-attributed failure (`target-auth`,
+`target-rate-limit`, `target-transient`, or `worker-runtime`) adds to a
+consecutive-failure count, and a success resets it. When the count reaches
+`fleet.retry.breakerThreshold` (default `1`, so the first failure trips it) the
+route opens for `fleet.retry.routeCooldownMs`. New dispatches to an open route
+reroute when their failover mode allows it and are refused otherwise. When the
+cooldown expires the route is half-open: the next new dispatch is admitted as
+the only probe, and every other dispatch still sees the route as cooling until
+that probe finishes. A probe success closes the route and resets the backoff.
+A probe failure reopens it with the cooldown doubled, up to five minutes (or
+the configured cooldown, if that is longer). A probe that ends for a reason
+that says nothing about the target, or never starts, frees the slot for the
+next dispatch to probe. A provider's context-overflow error and a response
+schema the server rejects are verdicts on the request, so they end the attempt
+without a retry and never count against the route.
+
 Assignment status, attempt ids, and terminal run id are stored separately in
 `assignments.json` while each attempt keeps its own strict v20 receipt.
 Pipelines and batches await assignment terminals, so downstream stages consume
