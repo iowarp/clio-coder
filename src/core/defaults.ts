@@ -88,6 +88,8 @@ export interface FleetPermissionsSettings {
 export interface FleetRetrySettings {
 	maxRetries: number;
 	routeCooldownMs: number;
+	/** Consecutive target failures that open a route's breaker; 1 trips on the first. */
+	breakerThreshold: number;
 }
 
 export interface FleetLimitsSettings {
@@ -515,7 +517,7 @@ export const DEFAULT_SETTINGS = {
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
 		concurrency: 1 as "auto" | number,
-		retry: { maxRetries: 2, routeCooldownMs: 15000 },
+		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
 			toolCallsPerRun: GUARDRAIL_DEFAULTS.workerToolCallCap,
 			internalRunTimeoutMs: GUARDRAIL_DEFAULTS.internalDispatchTimeoutMs,
@@ -652,6 +654,7 @@ fleet:
   retry:
     maxRetries: 2
     routeCooldownMs: 15000
+    breakerThreshold: 1
   limits:
     toolCallsPerRun: 150
     internalRunTimeoutMs: 900000

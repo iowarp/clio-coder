@@ -35,6 +35,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - `fleet.concurrency: auto` sizes the local node from usable CPUs, available memory, and any cgroup memory limit, up to 8 workers, instead of a fixed 4. SSH nodes and the global pool are not clamped by the orchestrator host, and the binding limit shows in `/settings`, the footer worker chip, and `clio-coder configure`.
 - A worker's provider context-overflow error ends the attempt without a retry and no longer trips the target's cooldown, since the same prompt overflows on every route.
 - A bare HTTP 500, "internal server error", `ECONNREFUSED`, `ECONNRESET`, or "fetch failed" from a worker is classified `target-transient` and retried on another target instead of being charged to the worker runtime.
+- The per-route target cooldown is now a half-open circuit breaker: `fleet.retry.breakerThreshold` (default 1) sets how many consecutive target failures open a route, one probe run tests it when the cooldown expires while other dispatches still see it cooling, and each failed probe doubles the cooldown up to five minutes.
 
 ## 0.4.9 - 2026-09-17
 

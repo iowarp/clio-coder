@@ -1596,6 +1596,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				[
 					["maxRetries", 0],
 					["routeCooldownMs", 0],
+					["breakerThreshold", 1],
 				],
 			],
 			[
