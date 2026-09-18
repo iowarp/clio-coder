@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
-import { canonicalizeExistingPath, canonicalizePath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
@@ -1041,6 +1041,10 @@ function recognizeCommandChain(
 			if (segment.length !== 2) return null;
 			const target = segment[1] ?? "";
 			if (target.startsWith("~") || !isUnderOrSame(path.resolve(callCwd, target), workspaceRoot)) return null;
+			// A shell `cd` is logical unless `-P` or `set -P` makes it physical;
+			// recognize it only when both readings stay inside.
+			const physical = canonicalizeRawPath(target, callCwd);
+			if (physical === null || !isUnderOrSame(physical, workspaceRoot)) return null;
 			ruleIds.push("builtin:cd-workspace");
 			continue;
 		}

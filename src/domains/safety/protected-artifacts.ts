@@ -1,6 +1,6 @@
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { isVerificationScriptName } from "../../core/verification-scripts.js";
 
@@ -1062,8 +1062,9 @@ function normalizePathKey(input: string): string | null {
 	if (isWindowsAbsolutePath(trimmed) && path.sep !== "\\") {
 		return toSlashKey(path.win32.normalize(trimmed));
 	}
+	// Physical, as the kernel resolves `link/..` in a command's path argument.
 	const resolved = path.isAbsolute(trimmed) ? trimmed : path.resolve(trimmed);
-	return toSlashKey(canonicalizeExistingPath(resolved));
+	return toSlashKey(canonicalizeRawPath(trimmed, process.cwd()) ?? canonicalizeExistingPath(resolved));
 }
 
 function wildcardRootKey(input: string): string | null {

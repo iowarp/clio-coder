@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { isSameOrDescendant, type PathPolicyOperation } from "./path-policy.js";
 import { extractCommandCdTargets } from "./protected-artifacts.js";
@@ -26,16 +26,25 @@ export function skillMutationReason(
 	// Existing shell inspection extracts literal path-bearing operations. Include
 	// their possible cd bases so a visible cd cannot hide the protected target.
 	// This deliberately cannot interpret arbitrary programs, variables or aliases.
+	// A shell cd is logical unless `-P` makes it physical, so both chains count.
 	if (command !== null) {
+		let logical = cwd;
+		let physical = cwd;
 		for (const destination of extractCommandCdTargets(command)) {
-			workingDirs.push(path.resolve(workingDirs.at(-1) ?? cwd, expandHome(destination)));
+			const next = expandHome(destination);
+			logical = path.resolve(logical, next);
+			physical = canonicalizeRawPath(next, physical) ?? path.resolve(physical, next);
+			workingDirs.push(logical);
+			if (physical !== logical) workingDirs.push(physical);
 		}
 	}
 	for (const target of targets) {
 		if (target.operation === "read") continue;
 		for (const directory of workingDirs) {
-			const lexical = path.resolve(directory, expandHome(target.path));
-			const resolved = canonicalizeExistingPath(lexical);
+			const raw = expandHome(target.path);
+			const lexical = path.resolve(directory, raw);
+			// Physical, as the kernel resolves `link/..` in a write target.
+			const resolved = canonicalizeRawPath(raw, directory) ?? canonicalizeExistingPath(lexical);
 			for (const root of roots) {
 				for (const boundary of [root, canonicalizeExistingPath(root)]) {
 					for (const candidate of [lexical, resolved]) {
