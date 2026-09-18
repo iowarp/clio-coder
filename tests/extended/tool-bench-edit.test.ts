@@ -6,7 +6,7 @@ import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
 import { promisify } from "node:util";
 import { DEFAULT_SEED, generateCorpus } from "../../evals/tool-bench/lib/corpus.js";
-import { renderEditSuite } from "../../evals/tool-bench/lib/suite-gen.js";
+import { renderSuite } from "../../evals/tool-bench/lib/suite-gen.js";
 
 const execFileAsync = promisify(execFile);
 const ROOT = resolve(import.meta.dirname, "../..");
@@ -40,7 +40,7 @@ async function inBatches<T, R>(items: readonly T[], size: number, fn: (item: T) 
 
 describe("tool-bench edit driver across processes", () => {
 	it("gives identical digests and fs_ops for every default scenario in two separate driver processes", async () => {
-		const ids = generateCorpus(DEFAULT_SEED, "search").map((scenario) => scenario.id);
+		const ids = generateCorpus("edit", DEFAULT_SEED, "search").map((scenario) => scenario.id);
 		const first = await inBatches(ids, 4, runDriver);
 		const second = await inBatches(ids, 4, runDriver);
 		for (const [index, id] of ids.entries()) {
@@ -59,7 +59,7 @@ describe("tool-bench edit driver across processes", () => {
 	it("lands the driver's metrics unchanged in a sealed eval artifact", async () => {
 		const scratch = mkdtempSync(join(tmpdir(), "clio-coder-tool-bench-suite-"));
 		// One task of the committed suite, pointed at this checkout by absolute path.
-		const suite = renderEditSuite("search", "default")
+		const suite = renderSuite("edit", "search", "default")
 			.split("\n  - id: ")
 			.slice(0, 2)
 			.join("\n  - id: ")
