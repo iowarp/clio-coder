@@ -39,7 +39,7 @@ const HELP = `clio-coder targets
 List and manage configured model targets.
 
 Usage:
-  clio-coder targets [--json] [--probe [--tools]] [--target <id>]
+  clio-coder targets [--json] [--probe [--tools [--tools-timeout <seconds>]]] [--target <id>]
   clio-coder targets add [configure flags]
   clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                        [--fleet-target <id>] [--fleet-model <id>]
@@ -81,6 +81,7 @@ interface ListArgs {
 	json: boolean;
 	probe: boolean;
 	tools: boolean;
+	toolsTimeoutMs?: number;
 	target?: string;
 	help: boolean;
 }
@@ -142,6 +143,15 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 			parsed.tools = true;
 			continue;
 		}
+		if (arg === "--tools-timeout") {
+			const value = args[i + 1];
+			const seconds = value === undefined ? Number.NaN : Number(value);
+			if (!Number.isFinite(seconds) || seconds <= 0)
+				throw new Error("--tools-timeout requires a positive number of seconds");
+			parsed.toolsTimeoutMs = Math.round(seconds * 1000);
+			i += 1;
+			continue;
+		}
 		if (arg === "--target") {
 			const value = args[i + 1];
 			if (!value) throw new Error("--target requires a value");
@@ -153,6 +163,7 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 		throw new Error(`unknown targets argument: ${arg}`);
 	}
 	if (parsed.tools && !parsed.probe) throw new Error("--tools requires --probe");
+	if (parsed.toolsTimeoutMs !== undefined && !parsed.tools) throw new Error("--tools-timeout requires --tools");
 	return parsed;
 }
 
@@ -195,8 +206,11 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 		try {
 			// The tool probe generates tokens, so `--target` narrows it to the one
 			// target the operator named instead of every configured target.
-			if (parsed.tools && parsed.target !== undefined) await providers.probeTarget(parsed.target, { tools: true });
-			else await providers.probeAllLive(parsed.tools ? { tools: true } : undefined);
+			const toolOptions = parsed.tools
+				? { tools: true, ...(parsed.toolsTimeoutMs !== undefined ? { toolsTimeoutMs: parsed.toolsTimeoutMs } : {}) }
+				: undefined;
+			if (toolOptions && parsed.target !== undefined) await providers.probeTarget(parsed.target, toolOptions);
+			else await providers.probeAllLive(toolOptions);
 		} catch (err) {
 			process.stderr.write(`targets: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}

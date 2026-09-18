@@ -98,6 +98,11 @@ export interface ToolCallVerification {
 export interface LiveProbeOptions {
 	/** Opt-in streamed tool-call probe. Generates tokens and can load a cold model. */
 	tools?: boolean;
+	/**
+	 * Generation timeout for the tool probe in ms. Defaults to 120 s so a cold
+	 * load of a large local model fits; the HTTP probe keeps its own timeout.
+	 */
+	toolsTimeoutMs?: number;
 	signal?: AbortSignal;
 }
 
