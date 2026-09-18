@@ -8,6 +8,7 @@ import {
 	runDoctorModelChecks,
 	runDoctorRuntimeChecks,
 } from "../domains/lifecycle/doctor.js";
+import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { namingFootprintFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
@@ -70,6 +71,10 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 	// untouched home there is no vendor root to look at and the answer would be
 	// "none" for every row regardless, so the sweep stays with the others.
 	const toolChecks = untouched ? [] : toolchainFindings({ panesEnabled, filesEnabled });
+	// Compilers, MPI, build systems, and the scheduler. Each probe resolves PATH
+	// and runs a bounded `--version` in a scratch directory, so it creates
+	// nothing and runs on an untouched home too.
+	const hpcChecks = await hpcToolchainFindings();
 	// The pane sweep pings a socket and reads PATH; it creates nothing except the
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
@@ -86,6 +91,7 @@ export async function runDoctorCommand(args: ReadonlyArray<string> = []): Promis
 		...interopChecks,
 		...fleetChecks,
 		...toolChecks,
+		...hpcChecks,
 		...paneChecks,
 		...namingChecks,
 		...contractChecks,

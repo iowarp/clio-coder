@@ -16,7 +16,8 @@ import { foldPromptCacheTelemetry, hasPromptCacheTelemetry, topExpectedColdReaso
 import { readStateInfoResult } from "./state.js";
 import { getVersionInfo } from "./version.js";
 
-export type DoctorLevel = "ok" | "warn" | "error";
+/** `info` reports a fact that needs no action, such as an optional tool that is absent. */
+export type DoctorLevel = "ok" | "info" | "warn" | "error";
 
 export interface DoctorFinding {
 	ok: boolean;
@@ -461,7 +462,7 @@ function foldDetail(detail: string): string {
 export function formatDoctorReport(findings: DoctorFinding[]): string {
 	const lines = findings.map((f) => {
 		const level = f.level ?? (f.ok ? "ok" : "error");
-		const badge = level === "ok" ? "OK" : level === "warn" ? "WARN" : "!! ";
+		const badge = level === "ok" ? "OK" : level === "info" ? "INFO" : level === "warn" ? "WARN" : "!! ";
 		return `${badge.padEnd(4)} ${f.name.padEnd(22)} ${foldDetail(f.detail)}`;
 	});
 	return lines.join("\n");
