@@ -36,6 +36,7 @@ export type OverlayLifecycleApplicationDeps = Pick<
 	| "dataDir"
 	| "dispatch"
 	| "getFleetNodes"
+	| "getRouteBreakers"
 	| "getSessionId"
 	| "getSettings"
 	| "getTaskBoard"
@@ -360,6 +361,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(deps.app.onSelectModel ? { onSelectModel: deps.app.onSelectModel } : {}),
 		...(deps.app.onSetThinkingLevel ? { onSetThinkingLevel: deps.app.onSetThinkingLevel } : {}),
 		...(deps.app.getFleetNodes ? { getFleetNodes: deps.app.getFleetNodes } : {}),
+		...(deps.app.getRouteBreakers ? { getRouteBreakers: deps.app.getRouteBreakers } : {}),
 		connectTarget: (targetId) => overlayAuth.openConnectFlow(targetId),
 		...(deps.app.interop ? { getInteropProposals: interopProposalsFor(deps.app.interop) } : {}),
 		...(openModelOverlayFactory ? { openModelOverlay: openModelOverlayFactory } : {}),

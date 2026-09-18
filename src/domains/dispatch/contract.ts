@@ -228,6 +228,22 @@ export interface DetachedBatchesContract {
 	markCollected(batchId: string): Promise<DetachedBatchRecord | null>;
 }
 
+/**
+ * One dispatch route's circuit breaker as operator surfaces show it. The
+ * breaker lives in this process's memory, so a process that never dispatches
+ * has nothing to show. remainingMs is read from the breaker's monotonic clock
+ * at the call and is for rendering only; never persist it.
+ */
+export interface RouteBreakerView {
+	targetId: string;
+	runtimeId: string;
+	wireModelId: string;
+	state: "open" | "half-open" | "probing" | "closed";
+	remainingMs: number;
+	reason: string;
+	consecutiveFailures: number;
+}
+
 export interface DispatchContract {
 	/** True when the domain event pump publishes DispatchProgress itself. */
 	readonly publishesProgress?: boolean;
@@ -385,6 +401,12 @@ export interface DispatchContract {
 
 	/** Read-only runtime snapshot for operator surfaces. */
 	snapshot(): DispatchSnapshot;
+
+	/**
+	 * Read-only breaker state for every route that is open, half-open, probing,
+	 * or closed with a nonzero failure count. Never claims a probe.
+	 */
+	routeBreakers?(): ReadonlyArray<RouteBreakerView>;
 
 	/** Drain active runs on shutdown (SIGTERM + grace + SIGKILL). */
 	drain(): Promise<void>;

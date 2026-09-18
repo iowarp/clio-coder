@@ -781,7 +781,10 @@ that probe finishes. A probe success closes the route and resets the backoff.
 A probe failure reopens it with the cooldown doubled, up to five minutes (or
 the configured cooldown, if that is longer). A probe that ends for a reason
 that says nothing about the target, or never starts, frees the slot for the
-next dispatch to probe. A provider's context-overflow error and a response
+next dispatch to probe. The breaker is not persisted: `clio-coder targets` and
+`clio-coder doctor` run in their own processes and cannot see it, so the
+session's `/settings` targets rows are where an open, half-open, or probing
+route shows, with its remaining cooldown. A provider's context-overflow error and a response
 schema the server rejects are verdicts on the request, so they end the attempt
 without a retry and never count against the route.
 

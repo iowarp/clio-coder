@@ -9,7 +9,7 @@ import { clioStateDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextState } from "../domains/context/index.js";
-import type { DispatchContract } from "../domains/dispatch/contract.js";
+import type { DispatchContract, RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { ExtensionsContract } from "../domains/extensions/index.js";
 import { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
 import type { InteropContract } from "../domains/interop/index.js";
@@ -197,6 +197,8 @@ export interface InteractiveDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Live fleet node snapshots for the /fleet nodes view and node-pin editor. */
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Live dispatch breaker state per route for the Settings → Targets rows. */
+	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Optional resolver for the active session id used as the cost overlay title suffix. */
 	getSessionId?: () => string | null;
 	/** Install the TUI-backed ask_user handler for this interactive process. */

@@ -74,6 +74,41 @@ describe("dispatch target breaker", () => {
 		strictEqual(breaker.blocked(ROUTE)?.kind, "probing");
 	});
 
+	it("snapshots open, half-open, probing, and failing-but-closed routes without claiming a probe", () => {
+		const { breaker, advance } = harness({ threshold: 2 });
+		const OTHER = "mini\0openai-compat\0llama";
+		const CLEAN = "mini\0openai-compat\0phi";
+		deepStrictEqual(breaker.snapshot(), []);
+		breaker.record(ROUTE, "run-1", "failure", "target-transient");
+		breaker.record(OTHER, "run-2", "failure", "target-transient");
+		breaker.record(CLEAN, "run-3", "failure", "target-transient");
+		breaker.record(CLEAN, "run-4", "success", "internal");
+		deepStrictEqual(breaker.snapshot(), [
+			{ key: ROUTE, state: "closed", remainingMs: 0, reason: "target-transient", consecutiveFailures: 1 },
+			{ key: OTHER, state: "closed", remainingMs: 0, reason: "target-transient", consecutiveFailures: 1 },
+		]);
+		breaker.record(ROUTE, "run-5", "failure", "target-overloaded");
+		breaker.record(OTHER, "run-6", "failure", "target-transient");
+		advance(4_000);
+		deepStrictEqual(breaker.snapshot()[0], {
+			key: ROUTE,
+			state: "open",
+			remainingMs: 11_000,
+			reason: "target-overloaded",
+			consecutiveFailures: 2,
+		});
+		advance(11_000);
+		strictEqual(breaker.snapshot()[0]?.state, "half-open");
+		strictEqual(breaker.admit(ROUTE, "run-7"), null, "the snapshot left the probe slot free");
+		deepStrictEqual(
+			breaker.snapshot().map((route) => [route.key, route.state, route.remainingMs]),
+			[
+				[ROUTE, "probing", 0],
+				[OTHER, "half-open", 0],
+			],
+		);
+	});
+
 	it("doubles the cooldown on each probe failure up to the cap", () => {
 		const { breaker, advance } = harness({ cooldownMs: 60_000 });
 		breaker.record(ROUTE, "run-0", "failure", "target-transient");
@@ -187,13 +222,21 @@ describe("dispatch admission through the target breaker", () => {
 			finishers[0]?.({ exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" });
 			await first.finalPromise;
 			await rejects(bundle.contract.dispatch(request), /cooling down for 15s after target-transient/);
+			const opened = bundle.contract.routeBreakers?.() ?? [];
+			strictEqual(opened.length, 1);
+			strictEqual(opened[0]?.state, "open");
+			strictEqual(opened[0]?.reason, "target-transient");
+			strictEqual(opened[0]?.targetId, settings.fleet.default.target);
+			ok((opened[0]?.remainingMs ?? 0) > 0 && (opened[0]?.remainingMs ?? 0) <= 15_000);
 
 			offset += 15_000;
 			const probe = await bundle.contract.dispatch(request);
 			await rejects(bundle.contract.dispatch(request), /cooling down while one probe run tests it/);
+			strictEqual(bundle.contract.routeBreakers?.()[0]?.state, "probing");
 			strictEqual(finishers.length, 2, "only the probe reached a worker");
 			finishers[1]?.({ exitCode: 0, signal: null });
 			strictEqual((await probe.finalPromise).exitCode, 0);
+			deepStrictEqual(bundle.contract.routeBreakers?.(), []);
 
 			const after = await bundle.contract.dispatch(request);
 			finishers[2]?.({ exitCode: 0, signal: null });

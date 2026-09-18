@@ -24,6 +24,21 @@ export type TargetBreakerBlock =
 
 export type TargetBreakerOutcome = "success" | "failure" | "neutral";
 
+/**
+ * One route's breaker state for operator surfaces. "half-open" means the
+ * cooldown expired and the next dispatch will be admitted as the probe;
+ * "probing" means that probe is in flight. A closed route appears only while
+ * it carries consecutive failures below the threshold. remainingMs is read
+ * from the injected monotonic clock and is only meaningful in this process.
+ */
+export interface TargetBreakerRouteSnapshot {
+	key: string;
+	state: "open" | "half-open" | "probing" | "closed";
+	remainingMs: number;
+	reason: string;
+	consecutiveFailures: number;
+}
+
 export interface TargetBreakerOptions {
 	monotonicNow: () => number;
 	/** Base cooldown in ms; zero or less disables tripping. */
@@ -42,10 +57,14 @@ export interface TargetBreaker {
 	release(key: string, owner: string): void;
 	/** Fold one run's outcome into the route. owner is the finished run's id. */
 	record(key: string, owner: string, outcome: TargetBreakerOutcome, reason: string): void;
+	/** Read-only view of every route that is not closed and clean. Never claims a probe. */
+	snapshot(): TargetBreakerRouteSnapshot[];
 }
 
 interface RouteState {
 	failures: number;
+	/** Failure class of the latest breaker-affecting failure. */
+	lastReason: string;
 	/** Present once the route has tripped; absent while closed. */
 	open: { until: number; cooldownMs: number; reason: string; probeOwner: string | null } | null;
 }
@@ -70,6 +89,29 @@ export function createTargetBreaker(options: TargetBreakerOptions): TargetBreake
 	return {
 		blocked: (key) => blockOf(routes.get(key), null),
 		admit: (key, owner) => blockOf(routes.get(key), owner),
+		snapshot() {
+			const now = options.monotonicNow();
+			const rows: TargetBreakerRouteSnapshot[] = [];
+			for (const [key, state] of routes) {
+				const open = state.open;
+				if (open === null) {
+					if (state.failures > 0) {
+						rows.push({
+							key,
+							state: "closed",
+							remainingMs: 0,
+							reason: state.lastReason,
+							consecutiveFailures: state.failures,
+						});
+					}
+					continue;
+				}
+				const remainingMs = Math.max(0, open.until - now);
+				const phase = remainingMs > 0 ? "open" : open.probeOwner === null ? "half-open" : "probing";
+				rows.push({ key, state: phase, remainingMs, reason: open.reason, consecutiveFailures: state.failures });
+			}
+			return rows;
+		},
 		release(key, owner) {
 			const open = routes.get(key)?.open;
 			if (open && open.probeOwner === owner) open.probeOwner = null;
@@ -91,6 +133,9 @@ export function createTargetBreaker(options: TargetBreakerOptions): TargetBreake
 			const baseMs = options.cooldownMs();
 			if (baseMs <= 0) return;
 			const now = options.monotonicNow();
+			// Only the closed path reads the count; an open route keeps counting so
+			// the snapshot reports the whole failure streak.
+			if (state?.open) state.failures += 1;
 			if (probe) {
 				probe.cooldownMs = Math.min(probe.cooldownMs * 2, Math.max(maxCooldownMs, baseMs));
 				probe.until = now + probe.cooldownMs;
@@ -106,8 +151,9 @@ export function createTargetBreaker(options: TargetBreakerOptions): TargetBreake
 				state.open.reason = reason;
 				return;
 			}
-			const next: RouteState = state ?? { failures: 0, open: null };
+			const next: RouteState = state ?? { failures: 0, lastReason: reason, open: null };
 			next.failures += 1;
+			next.lastReason = reason;
 			if (next.failures >= Math.max(1, options.threshold())) {
 				next.open = { until: now + baseMs, cooldownMs: baseMs, reason, probeOwner: null };
 			}

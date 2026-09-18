@@ -1,6 +1,7 @@
 import type { ClioSettings } from "../core/config.js";
 import type { ThinkingLevel } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { RouteBreakerView } from "../domains/dispatch/contract.js";
 import type { InteropProposal } from "../domains/interop/index.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
@@ -33,6 +34,8 @@ export interface OverlayModelSelectorsDeps {
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: ModelScopeChoice) => void;
 	/** Settings → Fleet shows live node placement health when the scheduler exposes it. */
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Settings → Targets shows this process's dispatch breaker state per route. */
+	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Settings → Targets "connect" runs the auth flow over the open settings overlay. */
 	connectTarget?: (targetId: string) => Promise<void> | void;
 	/** Settings → Advanced offers detected agents on the delegation.agents row. */
@@ -121,6 +124,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			...(section ? { section } : {}),
 			...(rowId ? { rowId } : {}),
 			...(deps.getFleetNodes ? { getFleetNodes: deps.getFleetNodes } : {}),
+			...(deps.getRouteBreakers ? { getRouteBreakers: deps.getRouteBreakers } : {}),
 			...(deps.connectTarget ? { connectTarget: deps.connectTarget } : {}),
 			...(deps.getInteropProposals ? { getInteropProposals: deps.getInteropProposals } : {}),
 			writeSettings: (next) => {
