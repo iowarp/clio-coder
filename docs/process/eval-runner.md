@@ -523,6 +523,23 @@ The current reference `mini` endpoint is the llama.cpp router at `192.168.86.141
 
 Task outcome commands declared under `verify.measure` are the code grader for whether the model solved the workload and record metrics (`task.solved`, `task.exitCode`). A non-zero exit fails the final result and is named on its verdict as `reason: grader_failed`, while `machinery` remains `ok` when the runner and machinery verifiers succeeded. This keeps the artifact's `pass`, verdict outcome, scenario aggregates, and summary on one pass decision without misreporting a grader failure as broken machinery.
 
+### Grader metric lines (`clio-coder.eval.measure.v1`)
+
+A measure command may also print JSON lines on stdout carrying `"schema": "clio-coder.eval.measure.v1"` and a `metrics` object. Every stdout line is parsed, including lines printed before a nonzero exit. A key is kept only when its value is a finite number or a boolean and the key is one of these:
+
+- `claims.unsupported` or `completion.reported`, the two behavior keys;
+- any key that starts with `custom.` and matches `^[A-Za-z0-9._-]{1,128}$`.
+
+Every other key is dropped. Grader metrics are merged into the result last, so the `custom.` prefix is what stops a grader from overwriting `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*`. A `custom.` key whose name the artifact redactor matches, such as `custom.io_token_bytes`, fails the item as `command_error` with an error naming the key. Storage would otherwise replace its value with the string `[redacted]`.
+
+```json
+{"schema":"clio-coder.eval.measure.v1","metrics":{"custom.io.bytes_read":1234,"custom.cache_hit":true}}
+```
+
+That line lands in the trial's own `results[].metrics` as `"custom.io.bytes_read": 1234` and `"custom.cache_hit": true`. `verify.assertions` and suite `thresholds` resolve a custom key by exact name, and an assertion on a key the grader did not print fails closed as `assertion_unresolved`. Aggregates and `eval compare` do not read custom keys; a consumer computes its own statistics from the per-trial values.
+
+The runner keeps at most 200,000 characters of each measure command's stdout: the first 20,000 and roughly the last 180,000. A metric line in the dropped middle is lost without an error, and a line cut at either boundary does not parse. Print metric lines last, or keep grader stdout under the limit.
+
 ## Artifact reporting and comparison
 
 Eval runs print a report command for custom output artifacts. `clio-coder eval report --artifact <path>` reads the original artifact with strict provenance validation and does not import it into the store. Comparison aligns jointly declared target/model variations while preserving both route identities, rejects ambiguous route groups, and retains execution-envelope differences. Compact mismatch and hard-gate identities omit runner attachments; full artifact reports retain them.

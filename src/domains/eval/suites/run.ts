@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
 import { clioDataDir } from "../../../core/xdg.js";
+import { isRedactedArtifactKey } from "../artifacts/redact.js";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { buildEvalExecutionEnvelopeV1, type EvalExecutionObservationV1 } from "../execution-provenance.js";
 import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
@@ -466,7 +467,7 @@ function graderBehaviorMeasurement(stdout: string): {
 		if (!isRecord(value)) continue;
 		if (normalizeEvalSchemaId(value.schema) === "clio-coder.eval.measure.v1" && isRecord(value.metrics)) {
 			for (const [key, metric] of Object.entries(value.metrics)) {
-				if (key !== "claims.unsupported" && key !== "completion.reported") continue;
+				if (!isAdmittedMeasureMetricKey(key)) continue;
 				if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
 			}
 		}
@@ -475,6 +476,29 @@ function graderBehaviorMeasurement(stdout: string): {
 		}
 	}
 	return { metrics, ...(executionObservation === undefined ? {} : { executionObservation }) };
+}
+
+const CUSTOM_MEASURE_METRIC_PREFIX = "custom.";
+const CUSTOM_MEASURE_METRIC_KEY = /^[A-Za-z0-9._-]{1,128}$/u;
+
+/**
+ * A grader may report the two legacy behavior keys and any key in the
+ * `custom.` namespace. The prefix is what keeps this safe: grader metrics are
+ * spread last into the result, so an unprefixed key could overwrite
+ * `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*` and turn a
+ * failed grade into a pass. A custom key that storage would redact is refused
+ * with an error naming it, because the stored value would silently become the
+ * string `[redacted]` and every numeric assertion on it would then fail.
+ */
+function isAdmittedMeasureMetricKey(key: string): boolean {
+	if (key === "claims.unsupported" || key === "completion.reported") return true;
+	if (!key.startsWith(CUSTOM_MEASURE_METRIC_PREFIX) || !CUSTOM_MEASURE_METRIC_KEY.test(key)) return false;
+	if (isRedactedArtifactKey(key)) {
+		throw new Error(
+			`measure metric ${key} matches the artifact redaction pattern and would be stored as "[redacted]"; rename the metric`,
+		);
+	}
+	return true;
 }
 
 function parseExecutionObservation(value: Record<string, unknown>): EvalExecutionObservationV1 {
