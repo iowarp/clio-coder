@@ -96,6 +96,7 @@ export const RUNTIME_NOTICE_KINDS = [
 	"co-resident",
 	"stress",
 	"degraded",
+	"route-fallback",
 ] as const;
 
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
@@ -111,7 +112,9 @@ export type RuntimeNoticeKind = (typeof RUNTIME_NOTICE_KINDS)[number];
  * carrying the same content the turn fails with, instead of a bare SDK error.
  * `degraded` reports a live turn whose token rate collapsed (see
  * src/engine/apis/degraded-inference.ts), which is how a silent spill to CPU
- * becomes visible while it is happening.
+ * becomes visible while it is happening. `route-fallback` reports a background
+ * step, such as a memory step, served by the chat target because its own
+ * route was unavailable.
  */
 export interface RuntimeNoticePayload {
 	kind: RuntimeNoticeKind;
@@ -122,6 +125,17 @@ export interface RuntimeNoticePayload {
 	message: string;
 	detail?: Record<string, number | string | boolean>;
 }
+
+declare const declaredRuntimeNotice: unique symbol;
+
+/**
+ * A {@link RuntimeNoticePayload} minted by an emitter from
+ * declareRuntimeNoticeProducer (src/engine/apis/residency.ts). The brand exists
+ * only in the type system and is the payload type of
+ * {@link BusChannels.RuntimeNotice}, so a raw notice emitted on the bus outside
+ * a declared producer fails to typecheck.
+ */
+export type DeclaredRuntimeNotice = RuntimeNoticePayload & { readonly [declaredRuntimeNotice]: true };
 
 /**
  * One completed proactive-memory model step, published on
@@ -864,7 +878,7 @@ export type BusPayloadMap = {
 	[BusChannels.LoopBlocked]: LoopBlockedPayload;
 	[BusChannels.ToolBudgetExceeded]: ToolBudgetExceededPayload;
 	[BusChannels.ProviderHealth]: ProviderHealthPayload;
-	[BusChannels.RuntimeNotice]: RuntimeNoticePayload;
+	[BusChannels.RuntimeNotice]: DeclaredRuntimeNotice;
 	[BusChannels.ResidencyMutation]: ResidencyMutationPayload;
 	[BusChannels.DispatchScopeNotice]: DispatchScopeNoticePayload;
 	[BusChannels.DispatchEnqueued]: DispatchEnqueuedPayload;

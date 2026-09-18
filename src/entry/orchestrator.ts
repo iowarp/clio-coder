@@ -185,7 +185,7 @@ import { createUserTasksStore } from "../domains/user-tasks/store.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
-import { setProtectedModelsProvider } from "../engine/apis/residency.js";
+import { declareRuntimeNoticeProducer, setProtectedModelsProvider } from "../engine/apis/residency.js";
 import {
 	createLoopGuardRegistration,
 	INTERACTIVE_LOOP_BLOCK_BUDGET,
@@ -527,6 +527,8 @@ function prepareBackgroundMemoryRoute(
 	};
 }
 
+const emitRouteFallbackNotice = declareRuntimeNoticeProducer("background-memory-route", ["route-fallback"]);
+
 /** Production callback composition shared with routing/capacity contracts. */
 export function createBackgroundMemoryRouting(
 	providers: ProvidersContract,
@@ -544,18 +546,18 @@ export function createBackgroundMemoryRouting(
 		const message = `Memory: ${route.fallbackReason}; selected chat fallback ${route.targetId}/${route.wireModelId} for this step, subject to available endpoint capacity.`;
 		if (message === lastNotice) return;
 		lastNotice = message;
-		try {
-			bus?.emit(BusChannels.RuntimeNotice, {
-				kind: "degraded",
+		if (!bus) return;
+		emitRouteFallbackNotice(
+			{
+				kind: "route-fallback",
 				level: "info",
 				message,
 				targetId: route.targetId,
 				runtimeId: providers.getTarget(route.targetId)?.runtime ?? "unknown",
 				model: route.wireModelId,
-			});
-		} catch {
-			/* Advisory only. */
-		}
+			},
+			bus,
+		);
 	};
 	return {
 		getModelClient: (): TaskMemoryModelClient | null => {

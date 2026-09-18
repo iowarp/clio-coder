@@ -11,7 +11,7 @@
  */
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { BusChannels } from "../../src/core/bus-events.js";
+import { BusChannels, type DeclaredRuntimeNotice } from "../../src/core/bus-events.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { emptyCostAggregate } from "../../src/domains/observability/cost.js";
 import type { MetricsView } from "../../src/domains/observability/metrics.js";
@@ -54,7 +54,7 @@ describe("observability projection notices", () => {
 			runtimeId: "r1",
 			model: "m1",
 			message: "swapped",
-		});
+		} as DeclaredRuntimeNotice);
 		bus.emit(BusChannels.SafetyBlocked, {
 			tool: "bash",
 			actionClass: "execute",
