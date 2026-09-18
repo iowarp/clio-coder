@@ -27,6 +27,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Report Ollama's HTTP 400 `exceed_context_size_error` with the server's own text instead of `[object Object]`, so a prompt past the serving window is recognised as a context overflow and the session compacts and retries instead of failing the turn.
 - Add an opt-in `targets[].ollama.numCtx` setting that sends `options.num_ctx` on every Ollama chat request and becomes the window Clio plans against. It is unset by default because a changed `num_ctx` makes Ollama reload the model.
 - Restore the `degraded` runtime notice on Ollama, llama.cpp, and LM Studio targets: a turn generating under 2 tokens per second after 30 seconds warns once with its rate and the models resident on the target (#381).
+- Report a memory step served by the chat target as a `route-fallback` runtime notice instead of reusing the `degraded` kind (#381).
 
 ## 0.4.9 - 2026-09-17
 

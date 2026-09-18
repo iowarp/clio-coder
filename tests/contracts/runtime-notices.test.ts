@@ -9,7 +9,8 @@ import type {
 	Model,
 } from "@earendil-works/pi-ai";
 
-import { RUNTIME_NOTICE_KINDS, type RuntimeNoticePayload } from "../../src/core/bus-events.js";
+import { BusChannels, RUNTIME_NOTICE_KINDS, type RuntimeNoticePayload } from "../../src/core/bus-events.js";
+import { createSafeEventBus } from "../../src/core/event-bus.js";
 import {
 	createDegradedInferenceStream,
 	runningDegradedInferenceWatchdogs,
@@ -285,10 +286,33 @@ describe("degraded-inference error propagation", () => {
 });
 
 describe("runtime notice producers", () => {
-	it("every RuntimeNoticeKind has a declared producer in the engine", () => {
+	it("every RuntimeNoticeKind has a declared producer", async () => {
 		registerClioApiProviders();
+		// The background memory route declares its producer in the orchestrator.
+		await import("../../src/entry/orchestrator.js");
 		const produced = new Set([...runtimeNoticeProducers().values()].flatMap((kinds) => [...kinds]));
 		const orphaned = RUNTIME_NOTICE_KINDS.filter((kind) => !produced.has(kind));
 		deepStrictEqual(orphaned, [], `RuntimeNoticeKind members with no producer: ${orphaned.join(", ")}`);
+	});
+
+	it("rejects a notice emitted on the bus outside a declared producer", () => {
+		const bus = createSafeEventBus();
+		const seen: string[] = [];
+		bus.on(BusChannels.RuntimeNotice, (notice) => {
+			seen.push(notice.kind);
+		});
+		// The typecheck gate enforces this: the channel payload is branded, and
+		// only a declared emitter mints the brand. If the brand is removed, this
+		// directive is unused and typecheck fails.
+		// @ts-expect-error a raw payload is not a DeclaredRuntimeNotice
+		bus.emit(BusChannels.RuntimeNotice, {
+			kind: "swap",
+			level: "info",
+			targetId: "t",
+			runtimeId: "r",
+			model: "m",
+			message: "raw",
+		});
+		deepStrictEqual(seen, ["swap"]);
 	});
 });

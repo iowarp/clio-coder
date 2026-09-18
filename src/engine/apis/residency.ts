@@ -37,10 +37,12 @@
 
 import {
 	BusChannels,
+	type DeclaredRuntimeNotice,
 	type ResidencyMutationPayload,
 	type RuntimeNoticeKind,
 	type RuntimeNoticePayload,
 } from "../../core/bus-events.js";
+import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
 import { getSharedBus } from "../../core/shared-bus.js";
 import { withResidencyLock } from "./residency-lock.js";
@@ -54,7 +56,7 @@ export type { RuntimeNoticeKind };
 export type ResidencyNoticeSink = (notice: ResidencyNotice) => void;
 
 function busNoticeSink(notice: ResidencyNotice): void {
-	getSharedBus().emit(BusChannels.RuntimeNotice, notice);
+	getSharedBus().emit(BusChannels.RuntimeNotice, notice as DeclaredRuntimeNotice);
 }
 
 let noticeSink: ResidencyNoticeSink = busNoticeSink;
@@ -69,10 +71,14 @@ export function setResidencyNoticeSink(sink: ResidencyNoticeSink | null): void {
 	noticeSink = sink ?? busNoticeSink;
 }
 
-/** Deliver one notice through the active sink. Never throws into a turn. */
-function deliverNotice(notice: ResidencyNotice): void {
+/**
+ * Deliver one notice through the active sink, or onto `bus` when the producer
+ * was handed one explicitly. Never throws into a turn.
+ */
+function deliverNotice(notice: ResidencyNotice, bus?: Pick<SafeEventBus, "emit">): void {
 	try {
-		noticeSink(notice);
+		if (bus) bus.emit(BusChannels.RuntimeNotice, notice as DeclaredRuntimeNotice);
+		else noticeSink(notice);
 	} catch {
 		// A notice is informational; a sink failure must never escape into a turn.
 	}
@@ -82,8 +88,15 @@ function deliverNotice(notice: ResidencyNotice): void {
 
 const noticeProducers = new Map<string, ReadonlySet<RuntimeNoticeKind>>();
 
-/** Emitter bound to the kinds its producer declared; any other kind is a type error. */
-export type RuntimeNoticeEmitter<K extends RuntimeNoticeKind> = (notice: ResidencyNotice & { kind: K }) => void;
+/**
+ * Emitter bound to the kinds its producer declared; any other kind is a type
+ * error. A producer that owns an injected bus passes it; otherwise the notice
+ * goes to the active sink.
+ */
+export type RuntimeNoticeEmitter<K extends RuntimeNoticeKind> = (
+	notice: ResidencyNotice & { kind: K },
+	bus?: Pick<SafeEventBus, "emit">,
+) => void;
 
 /**
  * Declare a module as the producer of some {@link RuntimeNoticeKind} members
