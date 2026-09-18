@@ -10,7 +10,11 @@ export function renderEvalJunitReportV4(artifact: EvalArtifactV4): string {
 			);
 			if (!result.pass) {
 				failures += 1;
-				return `  <testcase name="${name}"><failure message="${escapeXml(result.failureClass ?? "failed")}" /></testcase>`;
+				const message = escapeXml(result.failureClass ?? "failed");
+				const reason = result.artifacts.failureReason;
+				return typeof reason === "string"
+					? `  <testcase name="${name}"><failure message="${message}">${escapeXml(reason)}</failure></testcase>`
+					: `  <testcase name="${name}"><failure message="${message}" /></testcase>`;
 			}
 			const outcome = result.behavioral?.outcome;
 			if (outcome === "behavioral_failure" || outcome === "infrastructure_failure") {
