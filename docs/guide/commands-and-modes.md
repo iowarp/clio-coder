@@ -45,7 +45,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder auth status [target-or-runtime]` | Inspect auth state. |
 | `clio-coder auth login [target-or-runtime] [--api-key <value>]` | Add credentials through the supported flow. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
-| `clio-coder doctor [--fix] [--json]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, refresh install metadata, and record fleet preflight results. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. |
+| `clio-coder doctor [--fix] [--json] [--deep [--tools-timeout <seconds>]]` | Diagnose state. Plain `doctor` is read-only and leaves even a partially initialized home byte-for-byte untouched. With `--fix`, create missing structure and templates, repair credential permissions, refresh install metadata, and record fleet preflight results. Settings remain strict; lifecycle migrations belong to `upgrade`, not `doctor --fix`. `--deep` adds a live tool-call probe per target and a dry run of the validation contract. See [Doctor](doctor.md). |
 | `clio-coder mcp list\|trust\|untrust` | List configured MCP servers or manage explicit project trust with `trust <id> [--action-class read\|execute\|unknown]` and `untrust <id>`. |
 | `clio-coder tools list [--json]` | List the pinned external tool registry and whether each program resolves from `PATH`, Clio's vendored data directory, or nowhere. |
 | `clio-coder tools status <id> [--json] [--reset-profile]` | Inspect one registered tool. `--reset-profile` applies only to yazi's generated profile. |
@@ -220,6 +220,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | Open the Library on Agents. |
 | `/cost` | `/cost` | Show session token and cost totals |
+| `/doctor` | `/doctor [deep]` | Run doctor in-session; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
 | `/decisions` | `/decisions` | Show settled interview decisions and operator revisions |

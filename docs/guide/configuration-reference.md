@@ -432,9 +432,11 @@ Grouped by command. Global flags appear under `global`.
 
 | Flag | Controls |
 |---|---|
+| `--deep` | Add the live tool-call probe on every configured target and a dry run of the validation contract's validator commands against the policy engine at the configured autonomy. Executes no validator. |
 | `--fix` | Repair structure (missing directories and template files, credential file permissions) and record fleet preflight results instead of the read-only diagnosis. |
 | `--help` | Print the command's usage and exit. |
 | `--json` | Emit JSON instead of the human-readable rendering. |
+| `--tools-timeout` | With `--deep`, the tool probe's generation timeout in seconds (default 120). |
 | `-h` | Short form of --help. |
 
 ### `eval`
