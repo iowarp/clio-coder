@@ -14,6 +14,7 @@ import {
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 } from "../../domains/providers/index.js";
+import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
@@ -98,6 +99,8 @@ export interface FooterDashboardDeps {
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	/** Local node worker limit and its binding input; sampled only while workers are listed. */
+	getLocalCapacity?: () => LocalCapacity | null;
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	getContextActivity?: () => {
 		message: string;
@@ -168,6 +171,7 @@ function renderFooterCompactLines(state: FooterDashboardRenderState, width: numb
 			state.dispatchRows,
 			state.tick,
 			state.now,
+			state.agent.localCapacity ?? null,
 		),
 		compactSecondaryLine(
 			state.context,
@@ -475,6 +479,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				contextActivity: deps.getContextActivity?.() ?? null,
 				lastTurn: deps.getLastTurnSummary?.() ?? null,
 				taskBoard: deps.getTaskBoard?.() ?? null,
+				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
 			notices: deps.getNotifications?.() ?? [],
 			status: status ?? {

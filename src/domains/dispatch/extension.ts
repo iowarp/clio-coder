@@ -116,6 +116,7 @@ import { parseRigorOverride, type Rigor, resolveRigor } from "../safety/rigor.js
 import { createRunEffectsRecorder, type RunEffectsRecorder } from "../safety/run-effects.js";
 import type { ScopeSpec } from "../safety/scope.js";
 import type { SchedulingContract } from "../scheduling/contract.js";
+import { resolveGlobalConcurrency } from "../scheduling/local-capacity.js";
 import {
 	approvedRouteObservation,
 	consumeActiveRouteApproval,
@@ -2614,7 +2615,7 @@ export function createDispatchBundle(
 	const capacityAdmission = createCapacityAdmissionController({
 		limits: () => {
 			const settings = getEffectiveSettings();
-			const nodes: Record<string, number> = { local: configuredGlobalCapacity(settings) };
+			const nodes: Record<string, number> = { local: configuredLocalCapacity(settings) };
 			for (const node of settings?.fleet?.nodes ?? []) nodes[node.id] = node.maxWorkers;
 			return { global: configuredGlobalCapacity(settings), nodes, endpoints: configuredEndpointLimits() };
 		},
@@ -2697,7 +2698,7 @@ export function createDispatchBundle(
 		// Read budget after the capacity lock wait too; concurrent callbacks may spend.
 		const preflight = scheduling.preflight();
 		const nodes: Record<string, { active: number; limit: number }> = {
-			local: { active: usage.nodes.local ?? 0, limit: configuredGlobalCapacity(settings) },
+			local: { active: usage.nodes.local ?? 0, limit: configuredLocalCapacity(settings) },
 		};
 		for (const node of settings?.fleet?.nodes ?? [])
 			nodes[node.id] = { active: usage.nodes[node.id] ?? 0, limit: node.maxWorkers };
@@ -2768,8 +2769,12 @@ export function createDispatchBundle(
 	}
 
 	function configuredGlobalCapacity(settings: EffectiveSettings): number {
-		const configured = settings?.fleet.concurrency;
-		return scheduling.maxWorkers?.() ?? (configured === "auto" || configured === undefined ? 4 : Math.max(1, configured));
+		return scheduling.maxWorkers?.() ?? resolveGlobalConcurrency(settings?.fleet.concurrency);
+	}
+
+	/** The local node alone follows host facts under `auto`; global and SSH limits do not. */
+	function configuredLocalCapacity(settings: EffectiveSettings): number {
+		return scheduling.localCapacity?.().limit ?? configuredGlobalCapacity(settings);
 	}
 
 	function publishCapacityQueued(

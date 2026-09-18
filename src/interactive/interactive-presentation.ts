@@ -14,6 +14,7 @@ import type {
 } from "../domains/observability/index.js";
 import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
+import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
@@ -95,6 +96,7 @@ export interface InteractivePresentationDeps {
 	session?: Pick<SessionContract, "current">;
 	getSessionId?: () => string | null;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
+	getLocalCapacity?: () => LocalCapacity | null;
 	userTasks?: Pick<UserTasksStore, "snapshot">;
 	getTaskMemoryStatus?: () => TaskMemoryOperatorStatus;
 	getTaskMemorySeedOffer?: () => { source: string; count: number } | null;
@@ -402,6 +404,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.getLocalCapacity ? { getLocalCapacity: deps.getLocalCapacity } : {}),
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		getContextActivity: () => contextActivityStore.current(),
 		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),

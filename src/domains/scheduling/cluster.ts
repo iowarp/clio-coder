@@ -19,6 +19,7 @@
  */
 
 import type { FleetNodeSettings } from "../../core/defaults.js";
+import type { LocalCapacity, LocalCapacityBound } from "./local-capacity.js";
 
 export type FleetNodeState = "online" | "offline";
 
@@ -30,6 +31,8 @@ export interface FleetNodeSnapshot {
 	stateReason: string | null;
 	activeWorkers: number;
 	maxWorkers: number;
+	/** What bound `maxWorkers`; null for SSH nodes, which declare their own. */
+	capacityBound: LocalCapacityBound | null;
 	labels: ReadonlyArray<string>;
 	lastSeenAt: string | null;
 }
@@ -56,6 +59,8 @@ export interface FleetRegistry {
 	 * then a snapshot reports zero rather than inventing a process-local count.
 	 */
 	bindActiveWorkers(source: (nodeId: string) => number): void;
+	/** Lease-derived active workers on one node; zero before a source is bound. */
+	activeWorkers(nodeId: string): number;
 }
 
 export const LOCAL_NODE_ID = "local";
@@ -72,8 +77,8 @@ interface NodeRuntimeState {
 
 export interface FleetRegistryOptions {
 	now?: () => number;
-	/** Display-only cap for the implicit local node. */
-	localMaxWorkers?: () => number;
+	/** Display-only limit for the implicit local node and what bound it. */
+	localCapacity?: () => LocalCapacity;
 	/** Durable lease-derived usage; never a process-local counter. */
 	activeWorkers?: (nodeId: string) => number;
 }
@@ -102,6 +107,7 @@ export function createFleetRegistry(
 	function snapshotFor(id: string, config: FleetNodeSettings | null): FleetNodeSnapshot {
 		const state = stateFor(id);
 		if (config === null) {
+			const capacity = options?.localCapacity?.();
 			return {
 				id: LOCAL_NODE_ID,
 				host: "localhost",
@@ -109,7 +115,8 @@ export function createFleetRegistry(
 				state: state.state,
 				stateReason: state.stateReason,
 				activeWorkers: activeWorkers?.(LOCAL_NODE_ID) ?? 0,
-				maxWorkers: options?.localMaxWorkers?.() ?? Number.POSITIVE_INFINITY,
+				maxWorkers: capacity?.limit ?? Number.POSITIVE_INFINITY,
+				capacityBound: capacity?.bound ?? null,
 				labels: [],
 				lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
 			};
@@ -122,6 +129,7 @@ export function createFleetRegistry(
 			stateReason: state.stateReason,
 			activeWorkers: activeWorkers?.(id) ?? 0,
 			maxWorkers: config.maxWorkers,
+			capacityBound: null,
 			labels: [...(config.labels ?? [])],
 			lastSeenAt: state.lastSeenMs !== null ? new Date(state.lastSeenMs).toISOString() : null,
 		};
@@ -160,6 +168,9 @@ export function createFleetRegistry(
 		},
 		bindActiveWorkers(source) {
 			activeWorkers = source;
+		},
+		activeWorkers(nodeId) {
+			return activeWorkers?.(nodeId) ?? 0;
 		},
 		recordChannelSuccess(id) {
 			const state = stateFor(id);

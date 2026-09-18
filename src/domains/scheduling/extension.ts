@@ -11,17 +11,23 @@ import type { DomainBundle, DomainContext, DomainExtension } from "../../core/do
 import type { ConfigContract } from "../config/contract.js";
 import type { ObservabilityContract } from "../observability/contract.js";
 import { createBudgetState } from "./budget.js";
-import { createFleetRegistry } from "./cluster.js";
+import { createFleetRegistry, LOCAL_NODE_ID } from "./cluster.js";
 import type { SchedulingContract } from "./contract.js";
+import {
+	createLocalCapacitySampler,
+	type LocalCapacitySamplerOptions,
+	resolveGlobalConcurrency,
+} from "./local-capacity.js";
 
-const DEFAULT_MAX_WORKERS = 4;
-
-function resolveMaxWorkers(concurrency: "auto" | number): number {
-	if (concurrency === "auto") return DEFAULT_MAX_WORKERS;
-	return Math.max(1, concurrency);
+export interface SchedulingBundleOptions {
+	/** Host sampling seams for `fleet.concurrency: auto`; tests inject facts and a clock. */
+	localCapacity?: Omit<LocalCapacitySamplerOptions, "activeLocalWorkers">;
 }
 
-export function createSchedulingBundle(context: DomainContext): DomainBundle<SchedulingContract> {
+export function createSchedulingBundle(
+	context: DomainContext,
+	options: SchedulingBundleOptions = {},
+): DomainBundle<SchedulingContract> {
 	const maybeConfig = context.getContract<ConfigContract>("config");
 	if (!maybeConfig) throw new Error("scheduling domain requires 'config' contract");
 	const config: ConfigContract = maybeConfig;
@@ -29,8 +35,12 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 
 	const settings = config.get();
 	let budget = createBudgetState(settings.safety.limits.sessionCostUsd);
+	const localCapacity = createLocalCapacitySampler({
+		...options.localCapacity,
+		activeLocalWorkers: () => fleet.activeWorkers(LOCAL_NODE_ID),
+	});
 	const fleet = createFleetRegistry(() => config.get().fleet?.nodes ?? [], {
-		localMaxWorkers: () => resolveMaxWorkers(config.get().fleet.concurrency),
+		localCapacity: () => localCapacity.resolve(config.get().fleet.concurrency),
 	});
 	const unsubscribes: Array<() => void> = [];
 
@@ -83,7 +93,8 @@ export function createSchedulingBundle(context: DomainContext): DomainBundle<Sch
 			const { verdict, currentUsd } = evaluate();
 			return { verdict, currentUsd, ceilingUsd: budget.ceilingUsd };
 		},
-		maxWorkers: () => resolveMaxWorkers(config.get().fleet.concurrency),
+		maxWorkers: () => resolveGlobalConcurrency(config.get().fleet.concurrency),
+		localCapacity: () => localCapacity.resolve(config.get().fleet.concurrency),
 		fleet,
 	};
 

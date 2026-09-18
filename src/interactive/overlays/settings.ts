@@ -39,6 +39,7 @@ import {
 	thinkingLevelFromChoiceLabel,
 } from "../../domains/providers/index.js";
 import type { FleetNodeSnapshot } from "../../domains/scheduling/cluster.js";
+import { describeLocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import {
 	type Component,
 	getKeybindings,
@@ -528,7 +529,7 @@ const SETTINGS_HELP_BY_ID: Partial<Record<EditableSettingId, string>> = {
 	"library.sync":
 		"Off means `clio-coder library sync` and `push` refuse before touching the network, whatever the remote says. Legal values: true, false · default: false.",
 	"budget.concurrency":
-		"auto allows four local workers. A fixed number caps how many workers run at once; the default is one.",
+		"auto sizes local workers from usable CPUs and available memory, up to eight. A fixed number caps how many workers run at once; the default is one.",
 	"skills.trustProjectCompatRoots":
 		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
 	"attribution.gitCommits":
@@ -2292,9 +2293,11 @@ function targetHealthSegment(status: TargetHealth["status"]): SettingsValueSegme
 }
 
 /** Read-only placement rows: where dispatched workers run, from the live scheduler snapshot. */
-function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterItem[] {
+export function fleetNodeRows(nodes: ReadonlyArray<FleetNodeSnapshot>): SettingsCenterItem[] {
 	return nodes.map((node) => {
-		const busy = node.maxWorkers > 0 ? `${node.activeWorkers}/${node.maxWorkers} busy` : `${node.activeWorkers} busy`;
+		const bound =
+			node.capacityBound === null ? null : describeLocalCapacity({ limit: node.maxWorkers, bound: node.capacityBound });
+		const busy = `${node.maxWorkers > 0 ? `${node.activeWorkers}/${node.maxWorkers} busy` : `${node.activeWorkers} busy`}${bound ? ` · ${bound}` : ""}`;
 		return settingItem(`fleet.nodes.${node.id}`, `${node.state} · ${busy}`, {
 			label: `node ${node.id}`,
 			description: `${node.kind} · ${node.host}${node.stateReason ? ` · ${node.stateReason}` : ""}${node.lastSeenAt ? ` · seen ${clockLocal(node.lastSeenAt)}` : ""}`,
