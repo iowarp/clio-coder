@@ -111,6 +111,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--json-events <mode>` | Main-agent JSON stream mode: `full` or `terminal`; implies `--json`. |
 | `--session <id>` | Append this turn to an existing session identified by `<id>`. |
 | `--continue` | Append this turn to the most recent session for the current working directory. |
+| `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its receipt as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
 | `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
@@ -140,6 +141,19 @@ when Clio is already inside a reachable herdr session.
 - A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
 - `--cwd` with no value is a usage error with exit code 2.
 - An orchestrator that runs Clio inside a git worktree can pass the worktree path here instead of changing its own working directory before the spawn.
+
+### Headless No-op Runs
+
+Every headless main-agent receipt carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked`, `permissionRequested`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason. These are the names and shapes a dispatched worker's receipt already uses.
+
+`noop` is true when either condition holds:
+
+- at least one tool call was blocked and no mutating call succeeded, or
+- the run called tools and none of them succeeded.
+
+A mutating call is one the tool registry admitted with action class `write`, the class autonomy `auto-edit` runs without asking: `write`, `edit`, `artifact`, and an outward `web_fetch`. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
+
+Without `--fail-on-noop` the exit code and receipt outcome do not change: a run whose writes were all denied and whose model then answered still exits 0 with outcome `succeeded`, and its receipt says `noop: true`. With `--fail-on-noop` that run exits 1, prints the reason on stderr, and seals outcome `failed` with `outcomeDetail: "noop"`. The flag only turns a run that would have succeeded into a failure. A run that already failed, was interrupted, or timed out keeps that outcome.
 
 ### Headless Session Continuity
 

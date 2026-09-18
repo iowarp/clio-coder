@@ -1,8 +1,8 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
 	HEADLESS_PERMISSION_DENIED_MARKER,
@@ -16,6 +16,14 @@ import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { bashTool } from "../../src/tools/bash.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { inline } from "../harness/headless-denial-fixture.js";
+import { type HeadlessScratch, headlessScratch, runCli, sealedReceipt } from "../harness/headless-run.js";
+import {
+	closeServer,
+	type OpenAICompatFixture,
+	type OpenAICompatToolCallScript,
+	seedOpenAICompatToolOrchestrator,
+	startOpenAICompatFixture,
+} from "../harness/openai-compat-fixture.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const pivot =
@@ -155,5 +163,185 @@ for (const check of ["correlation", "receipt"] as const)
 				{ tool: "legacy", count: 2, ok: 1, errors: 1, blocked: 0 },
 			]);
 			for (const stat of receipt.toolStats) strictEqual(stat.count, stat.ok + stat.errors + stat.blocked);
+			// Both blocked bash calls land in the worker-shaped safety summary with
+			// the rule that blocked them, and no write succeeded, so the run is a
+			// no-op even though it answered and exited 0.
+			const { safety } = tools();
+			deepStrictEqual(
+				receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.ruleId]),
+				[inline, "rm -f sentinel.txt"].map((command) => [
+					"bash",
+					safety.evaluate({ tool: "bash", args: { command } }).policy?.ruleId,
+				]),
+			);
+			// The headless-denied ask counts as a permission request, the hard
+			// block as a block, and the two calls that ran as allowed. The legacy
+			// producer reports no admission decision at all.
+			deepStrictEqual(receipt.safety?.decisions, { allowed: 2, blocked: 1, permissionRequested: 1 });
+			strictEqual(receipt.noop, true);
+			strictEqual(receipt.outcome, "succeeded");
 		}
 	});
+
+/**
+ * Ticket #378 end to end: the built binary, a scripted OpenAI-compatible model,
+ * and the exit code and sealed receipt an external driver would read.
+ */
+describe("headless no-op contract through the built binary", () => {
+	const fixtures: OpenAICompatFixture[] = [];
+	const scratches: HeadlessScratch[] = [];
+	afterEach(async () => {
+		await Promise.all(fixtures.splice(0).map((fixture) => closeServer(fixture.server)));
+		for (const scratch of scratches.splice(0)) scratch.cleanup();
+	});
+
+	const PROOF = "written by the no-op contract test\n";
+	const writeProof: OpenAICompatToolCallScript = {
+		id: "call-write",
+		name: "write",
+		arguments: { path: "c2-proof.txt", content: PROOF },
+	};
+	const deniedInline: OpenAICompatToolCallScript = { id: "call-inline", name: "bash", arguments: { command: inline } };
+
+	/** Tool results already in the conversation, which is how far the script has got. */
+	function toolResults(request: Record<string, unknown>): number {
+		const messages = Array.isArray(request.messages) ? request.messages : [];
+		return messages.filter((message) => (message as { role?: unknown }).role === "tool").length;
+	}
+
+	async function headlessTurn(input: {
+		autonomy: string;
+		steps: ReadonlyArray<OpenAICompatToolCallScript>;
+		failOnNoop: boolean;
+		reply?: string;
+	}) {
+		const scratch = headlessScratch("clio-coder-noop-");
+		scratches.push(scratch);
+		const fixture = await startOpenAICompatFixture(input.reply ?? "I could not apply the change.", {
+			toolCall: (request) => input.steps[toolResults(request)] ?? null,
+		});
+		fixtures.push(fixture);
+		seedOpenAICompatToolOrchestrator(scratch.configDir, fixture.url, input.autonomy);
+		const project = join(scratch.root, "project");
+		mkdirSync(project);
+		writeFileSync(join(project, "sentinel.txt"), "blocked is harmless fixture text\n");
+		const turn = await runCli(
+			[
+				"--no-context-files",
+				"--no-skills",
+				"run",
+				"--autonomy",
+				input.autonomy,
+				...(input.failOnNoop ? ["--fail-on-noop"] : []),
+				"Apply the change.",
+			],
+			{ env: scratch.env, cwd: project },
+		);
+		const { receipt } = sealedReceipt(scratch.stateDir);
+		strictEqual(receipt.exitCode, turn.code, "the receipt and the process must agree on the exit code");
+		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
+		return { turn, receipt, project };
+	}
+
+	for (const failOnNoop of [true, false]) {
+		test(`a run whose write was denied ${failOnNoop ? "fails under --fail-on-noop" : "keeps exit 0 without the flag"}`, async () => {
+			// At suggest a write parks for approval, and a headless run has no
+			// operator, so the ask is denied and the model answers with prose.
+			const { turn, receipt, project } = await headlessTurn({ autonomy: "suggest", steps: [writeProof], failOnNoop });
+			ok(!existsSync(join(project, "c2-proof.txt")), "the denied write must not land");
+			strictEqual(receipt.noop, true);
+			ok((receipt.safety?.blockedAttempts.length ?? 0) > 0);
+			deepStrictEqual(
+				receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.actionClass]),
+				[["write", "write"]],
+			);
+			deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 1 });
+			strictEqual(receipt.toolStats.find((stat) => stat.tool === "write")?.blocked, 1);
+			if (failOnNoop) {
+				strictEqual(turn.code, 1, turn.stderr);
+				strictEqual(receipt.outcome, "failed");
+				strictEqual(receipt.outcomeDetail, "noop");
+				match(turn.stderr, /no-op under --fail-on-noop: 1 tool call was blocked and no write succeeded/);
+				// The model's answer still reaches stdout; stderr says why the run failed.
+				match(turn.stdout, /I could not apply the change\./);
+			} else {
+				strictEqual(turn.code, 0, turn.stderr);
+				strictEqual(receipt.outcome, "succeeded");
+				strictEqual(receipt.outcomeDetail, null);
+				doesNotMatch(turn.stderr, /no-op/);
+			}
+		});
+	}
+
+	test("a run whose write succeeded is not a no-op under --fail-on-noop", async () => {
+		const { turn, receipt, project } = await headlessTurn({
+			autonomy: "auto-edit",
+			steps: [writeProof],
+			failOnNoop: true,
+			reply: "done",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
+		strictEqual(receipt.outcome, "succeeded");
+		strictEqual(receipt.noop, false);
+		deepStrictEqual(receipt.safety?.blockedAttempts, []);
+		strictEqual(receipt.safety?.decisions.allowed, 1);
+	});
+
+	test("one blocked call and one successful write is not a no-op under --fail-on-noop", async () => {
+		const { turn, receipt, project } = await headlessTurn({
+			autonomy: "auto-edit",
+			steps: [deniedInline, writeProof],
+			failOnNoop: true,
+			reply: "done",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(readFileSync(join(project, "c2-proof.txt"), "utf8"), PROOF);
+		strictEqual(receipt.outcome, "succeeded");
+		strictEqual(receipt.noop, false);
+		ok((receipt.safety?.blockedAttempts.length ?? 0) > 0);
+		deepStrictEqual(
+			receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.ruleId]),
+			[["bash", "bash-hidden-content"]],
+		);
+	});
+
+	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {
+		const { turn, receipt } = await headlessTurn({
+			autonomy: "auto-edit",
+			steps: [],
+			failOnNoop: true,
+			reply: "The answer is 42.",
+		});
+		strictEqual(turn.code, 0, turn.stderr);
+		strictEqual(receipt.toolCalls, 0);
+		strictEqual(receipt.noop, false);
+		strictEqual(receipt.outcome, "succeeded");
+	});
+
+	test("tools that all failed without a block are a no-op under --fail-on-noop", async () => {
+		const { turn, receipt } = await headlessTurn({
+			autonomy: "auto-edit",
+			steps: [{ id: "call-read", name: "read", arguments: { path: "missing-input.txt" } }],
+			failOnNoop: true,
+		});
+		strictEqual(turn.code, 1, turn.stderr);
+		deepStrictEqual(receipt.safety?.blockedAttempts, []);
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "read")?.errors, 1);
+		strictEqual(receipt.noop, true);
+		strictEqual(receipt.outcome, "failed");
+		strictEqual(receipt.outcomeDetail, "noop");
+		match(turn.stderr, /no-op under --fail-on-noop: 1 tool call ran and none succeeded/);
+	});
+
+	test("--fail-on-noop is refused on the --agent path", async () => {
+		const scratch = headlessScratch("clio-coder-noop-agent-");
+		scratches.push(scratch);
+		const turn = await runCli(["run", "--fail-on-noop", "--agent", "coder", "Apply the change."], {
+			env: scratch.env,
+			cwd: scratch.root,
+		});
+		strictEqual(turn.code, 2, turn.stderr);
+		match(turn.stderr, /--fail-on-noop applies to the main agent, not --agent dispatch/);
+	});
+});

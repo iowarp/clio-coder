@@ -142,6 +142,9 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	skillActivations: true,
 	autonomyEnforcement: true,
 	safety: true,
+	// Optional and absent on worker receipts and on older main-agent receipts,
+	// so those digest exactly as they did before the field existed.
+	noop: true,
 	reproducibility: true,
 	runtimeResolution: true,
 	delegation: true,

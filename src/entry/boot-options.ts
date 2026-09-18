@@ -45,6 +45,8 @@ export interface BootOptions {
 		skillPaths?: ReadonlyArray<string>;
 		steerChannel?: string;
 		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
+		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
+		failOnNoop?: boolean;
 	};
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;

@@ -616,7 +616,12 @@ export interface RunReceiptSafetySummary {
 		escalationTimedOut?: number;
 	};
 	blockedAttempts: SafetyBlockedAttempt[];
-	requestedActions: ReadonlyArray<string>;
+	/**
+	 * Action classes the dispatch admission granted. Worker receipts always
+	 * carry it; the main agent passes no dispatch admission, so its receipt
+	 * omits it.
+	 */
+	requestedActions?: ReadonlyArray<string>;
 	toolProfile?: ToolProfileName;
 	/**
 	 * Whether Clio observed a complete start/finish stream for this runtime's
@@ -635,7 +640,8 @@ export interface RunReceiptSafetySummary {
 		count: number;
 		stateHash: string;
 	};
-	runtimeLimitations: ReadonlyArray<string>;
+	/** Worker runtime limitations. Worker receipts always carry it; main-agent receipts omit it. */
+	runtimeLimitations?: ReadonlyArray<string>;
 }
 
 export interface RunReceiptReproducibility {
@@ -916,6 +922,17 @@ export interface RunReceipt {
 	/** How this runtime enforced the run's captured autonomy level. */
 	autonomyEnforcement?: RunReceiptAutonomyEnforcement;
 	safety?: RunReceiptSafetySummary;
+	/**
+	 * Whether the run changed nothing it was allowed to change: a tool call was
+	 * blocked and no mutating call succeeded, or tools ran and none succeeded.
+	 * A mutating call is one the tool registry classified as action class
+	 * `write` at admission, the class autonomy `auto-edit` runs without asking.
+	 * A run that called no tool is not a no-op. Headless main-agent receipts
+	 * always carry it; `clio-coder run --fail-on-noop` turns a true value into
+	 * a failed run. Absent on worker receipts and on receipts written before
+	 * the field existed.
+	 */
+	noop?: boolean;
 	reproducibility?: RunReceiptReproducibility;
 	/** Effective target/runtime/model/thinking/capability decision for this run. */
 	runtimeResolution?: RuntimeTargetSnapshot;

@@ -46,7 +46,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -71,6 +71,7 @@ Flags:
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd
+  --fail-on-noop            exit 1 when the main-agent run changed nothing (see below)
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -93,6 +94,13 @@ session id is reported on stderr, and as the "session" event under --json.
 There is no operator in a headless run: permission asks are denied, and the
 ask_user interview tool is not registered. Skills that interview fall back to
 their stated defaults; supply decisions in the task prompt instead.
+
+Every main-agent receipt records blocked calls under safety.blockedAttempts and
+a noop flag. A run is a no-op when a tool call was blocked and no write
+succeeded, or when it ran tools and none succeeded; a run that called no tool
+is not. By default a no-op run that answered still exits 0. With --fail-on-noop
+it exits 1 and its receipt seals outcome "failed" with outcomeDetail "noop".
+The flag applies to the main agent only.
 
 A turn that ends by writing an artifact (plan/review/report) has no assistant
 message after it, because writing the artifact is the answer. Text mode prints
@@ -287,6 +295,14 @@ export async function runClioRun(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			// A worker's receipt is sealed inside the dispatch domain, where a
+			// failed outcome also feeds retry policy, so the no-op verdict stays a
+			// main-agent contract rather than a flag --agent would silently ignore.
+			if (parsed.failOnNoop && parsed.agentId !== undefined) {
+				process.stderr.write("clio-coder run: --fail-on-noop applies to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
 			if (parsed.cwd !== undefined) {
 				const unusable = enterRunCwd(parsed.cwd);
 				if (unusable !== null) {
@@ -354,6 +370,7 @@ export async function runClioRun(
 							...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
 							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
+							...(parsed.failOnNoop ? { failOnNoop: true } : {}),
 							...(parsed.sessionId !== undefined
 								? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
 								: parsed.continueSession
