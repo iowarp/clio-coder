@@ -20,12 +20,17 @@ const REQUEST: DispatchRequest = {
  * A bundle whose workers finish at once: a 503 on any target in `failing`,
  * success elsewhere. `spawned` lists the target each worker ran on.
  */
-async function retryFleet(targetIds: ReadonlyArray<string>, failing: ReadonlySet<string>, vision: ReadonlySet<string>) {
+async function retryFleet(
+	targetIds: ReadonlyArray<string>,
+	failing: ReadonlySet<string>,
+	vision: ReadonlySet<string>,
+	maxRetries = 1,
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = targetIds.map((id) => ({ id, runtime: "openai", defaultModel: "gpt-4o" }));
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
-	settings.fleet.retry.maxRetries = 1;
+	settings.fleet.retry.maxRetries = maxRetries;
 	const context = dispatchStubContext({ settings });
 	const providers = context.getContract<ProvidersContract>("providers");
 	for (const status of providers?.list() ?? []) status.capabilities.vision = vision.has(status.target.id);
@@ -101,6 +106,17 @@ describe("retry target selection", () => {
 			await first.finalPromise;
 			await fleet.waitForSpawns(4);
 			deepStrictEqual(fleet.spawned, ["sick", "sick", "default", "good"]);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("keeps automatic failover for the retry after one that moved the target", async () => {
+		const fleet = await retryFleet(["default", "second", "third"], new Set(["default", "second"]), new Set(), 2);
+		try {
+			const first = await fleet.bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
+			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+			deepStrictEqual(fleet.spawned, ["default", "second", "third"]);
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}
