@@ -12,8 +12,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### safety
 
-- Follow dangling and chained symlinks when canonicalizing a path for admission, so a write or read through a link that points outside the workspace is classified by where it lands. Before this, `data/out.txt -> ../../escape.txt` was admitted as an in-workspace write and published outside the root.
-- Refuse a call that would park for operator approval when no permission listener is registered, instead of leaving it pending forever. Every interactive, worker, and ACP registry registers a listener; library callers and harnesses that build a bare registry no longer hang.
+- Safety admission now follows symlinks at every path component, including dangling links and chains, so a write through a link that points outside the workspace asks for confirmation instead of publishing outside it. A path that cannot be resolved (a link loop or more than 40 links) counts as outside, and a call that needs confirmation with no permission listener registered is refused instead of waiting forever.
+- A `..` after a symlink now resolves from the link's target, as the kernel resolves it, in safety admission and in the read, write, and edit tools, so `echo x > data/link/../f` and a write of `data/link/../f` are judged and published where the file actually lands; `cd` targets must stay inside under both the logical and the physical reading.
 
 ### eval
 
