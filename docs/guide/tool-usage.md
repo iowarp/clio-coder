@@ -144,6 +144,8 @@ Presentation is independent from model context. The operator-facing display rema
 
 A command producing more than 16 MiB of combined stdout/stderr is stopped with an error. The cap result distinguishes raw observed bytes from retained bytes and states where the partial output went: inline, a named offload, or explicitly discarded bytes when retention was cut or failed. Observed bytes count data received through settlement, not hypothetical output from an uninterrupted command. The diagnostic survives summary and metadata-only dispositions. Use `run_script` for disk-streamed output beyond this cap. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole; the operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
 
+Repository test runners run without confirmation at `auto-edit` and `full-auto`: `npm test`, `pytest`, `python -m pytest`, `python -m unittest` (as `python`, `python3`, or `python3.N`), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, and `gradle test` or `./gradlew test`. Arguments must be bare words, so `ctest --output-on-failure` and `python3 -m unittest -q test_solver` run, while a quoted argument, `$(...)`, a redirect, a pipe, or `;` makes the command ask again. An `&&` chain runs when every step is recognized, so `cd build && ctest` runs from inside the workspace, and `make check && curl ...` asks. These commands execute repository code, which is the price of letting a headless run verify its own work. `npm run lint`, `npm run build`, `npm run typecheck`, and `npm run ci` still ask for one-shot confirmation at every level. At `suggest` a test runner asks like every command, and at `read-only` it is denied.
+
 Reach for bash for builds, git, package managers, and anything without a dedicated tool. Prefer the dedicated tools over their shell equivalents: grep/find/read/ls get envelope truncation, exact continuation hints, and the shared ignore policy that `cat`, shell `grep`, and shell `find` do not. Prefer `verify` over bash for declared package scripts and project-catalog entries, since verify produces typed evidence.
 
 ```text
@@ -393,7 +395,7 @@ Arguments:
 
 ### Project verifier catalog
 
-Repository script checks require one-shot operator confirmation or an approved safety command declaration. Committing a verifier catalog defines the available checks; it does not grant execution authority.
+Repository script checks require one-shot operator confirmation or an approved safety command declaration, except a check whose argv is a recognized test runner (see the bash section), which runs at `auto-edit` without asking. Committing a verifier catalog defines the available checks; it does not grant execution authority.
 
 Projects may commit a versioned executable catalog at `.clio-coder/verifiers.yaml`:
 

@@ -42,26 +42,33 @@ test("S1-02 hidden paths require confirmation", () => {
 });
 test("S1-03 repository scripts require approval; inert commands stay recognized", () => {
 	const policy = createSafetyPolicyEngine({ cwd: root });
-	assert.equal(policy.evaluate({ tool: "bash", args: { command: "npm test" } }).kind, "ask");
-	for (const command of ["pwd", "git status"])
+	assert.equal(policy.evaluate({ tool: "bash", args: { command: "npm run build" } }).kind, "ask");
+	for (const command of ["pwd", "git status", "npm test"])
 		assert.equal(policy.evaluate({ tool: "bash", args: { command } }).execRecognition, "recognized");
 });
 
 test("S1-03 trusted declarations recognize scripts but untrusted declarations cannot authorize themselves", () => {
 	writeFileSync(
 		join(root, ".clio-coder/safety.yaml"),
-		"version: 1\ncommands:\n  - id: test\n    command: npm test\n    actionClass: execute\n",
+		"version: 1\ncommands:\n  - id: build\n    command: npm run build\n    actionClass: execute\n",
 	);
 	const approved = engine();
-	assert.equal(approved.evaluate({ tool: "bash", args: { command: "npm test" } }).execRecognition, "recognized");
+	assert.equal(approved.evaluate({ tool: "bash", args: { command: "npm run build" } }).execRecognition, "recognized");
 	assert.equal(
-		createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: "bash", args: { command: "npm test" } }).kind,
+		createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: "bash", args: { command: "npm run build" } }).kind,
 		"ask",
 	);
 });
 test("S1-03 chain and shell wrappers cannot bypass script approval", () => {
 	const policy = createSafetyPolicyEngine({ cwd: root });
-	for (const command of ["pwd && npm test", "sh -c 'npm test'", "npm test | tee output.txt", "npm test && echo done"])
+	for (const command of [
+		"pwd && npm run build",
+		"sh -c 'npm run build'",
+		"npm run build | tee output.txt",
+		"npm run build && echo done",
+		"npm test | tee output.txt",
+		"npm test && echo done",
+	])
 		assert.equal(policy.evaluate({ tool: "bash", args: { command } }).kind, "ask");
 });
 test("S1 trust records and grant CLI remain operator authority", async () => {
