@@ -6,6 +6,7 @@ import {
 	type TokenThroughputSnapshot,
 	type UsageBreakdown,
 } from "../../domains/observability/index.js";
+import { describeLocalCapacity, type LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
@@ -128,6 +129,8 @@ export interface AgentWorkFacts {
 	lastTurn: TurnSummary | null;
 	/** Session task board declared through the tasks tool; null before any plan. */
 	taskBoard?: TaskBoardSnapshot | null;
+	/** Local node worker limit and what bound it; null when unknown. */
+	localCapacity?: LocalCapacity | null;
 }
 
 /** Responsive bands for the expanded footer. */
@@ -261,10 +264,22 @@ export function compactPrimaryLine(
 	dispatchRows: ReadonlyArray<DispatchBoardRow> = [],
 	tick = 0,
 	now = Date.now(),
+	localCapacity: LocalCapacity | null = null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
 	let git = safeWidth >= COMPACT_GIT_MIN_WIDTH ? gitChip(theme, workspace.branch, workspace.dirty) : null;
-	let right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, true);
+	let right = buildHarnessStatePill(
+		theme,
+		status,
+		toolCounts,
+		dispatchRows,
+		tick,
+		now,
+		safeWidth,
+		true,
+		false,
+		localCapacity,
+	);
 	// A long temporary parent must yield before the active worker count.
 	const cwd = fitIdentityLabel(workspace.cwd, Math.max(8, safeWidth - visibleWidth(right) - 1));
 	let left = joinSections(theme, [theme.fg("muted", cwd), git]);
@@ -275,7 +290,18 @@ export function compactPrimaryLine(
 	}
 
 	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
-		right = buildHarnessStatePill(theme, status, toolCounts, dispatchRows, tick, now, safeWidth, false);
+		right = buildHarnessStatePill(
+			theme,
+			status,
+			toolCounts,
+			dispatchRows,
+			tick,
+			now,
+			safeWidth,
+			false,
+			false,
+			localCapacity,
+		);
 	}
 
 	if (visibleWidth(left) + 1 + visibleWidth(right) > safeWidth) {
@@ -881,6 +907,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 				statusWidth,
 				true,
 				fleetSummaryIsAction,
+				facts.localCapacity ?? null,
 			),
 		),
 	];
@@ -1041,10 +1068,18 @@ function activeWorkerRows(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<
 	return rows.filter((row) => row.status === "running" || row.status === "stale" || row.status === "enqueued");
 }
 
-/** Background work stays a count beside the main phase. */
-function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>): string {
-	const count = activeWorkerRows(rows).length;
-	return `${count} worker${count === 1 ? "" : "s"}`;
+/**
+ * Background work stays a count beside the main phase. When a host limit holds
+ * local demand below what is queued, the chip names that limit.
+ */
+function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>, localCapacity: LocalCapacity | null = null): string {
+	const active = activeWorkerRows(rows);
+	const count = active.length;
+	const chip = `${count} worker${count === 1 ? "" : "s"}`;
+	if (localCapacity === null) return chip;
+	const localDemand = active.filter((row) => row.node === undefined || row.node === "local").length;
+	const bound = localDemand > localCapacity.limit ? describeLocalCapacity(localCapacity) : null;
+	return bound === null ? chip : `${chip} · ${bound}`;
 }
 
 function harnessBadge(
@@ -1053,13 +1088,14 @@ function harnessBadge(
 	toolCounts: ToolTallySnapshot,
 	dispatchRows: ReadonlyArray<DispatchBoardRow>,
 	fleetSummaryIsAction = false,
+	localCapacity: LocalCapacity | null = null,
 ): string {
 	const workers = activeWorkerRows(dispatchRows).length;
 	const activeTools = finiteNonNegative(toolCounts.active);
 	// Active fleet work is a Clio-signature state; it gets the action color.
 	if (workers > 0) {
 		const token = status.phase === "dispatching" ? "muted" : fleetSummaryIsAction ? "accent" : "action";
-		return theme.fg(token, activeWorkerChip(dispatchRows));
+		return theme.fg(token, activeWorkerChip(dispatchRows, localCapacity));
 	}
 	const badgeText = activeTools > 0 ? `tools ${activeTools}` : null;
 	return badgeText ? theme.fg("muted", badgeText) : "";
@@ -1079,9 +1115,12 @@ function buildHarnessStatePill(
 	width: number,
 	showBadge = true,
 	fleetSummaryIsAction = false,
+	localCapacity: LocalCapacity | null = null,
 ): string {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const badge = showBadge ? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction) : "";
+	const badge = showBadge
+		? harnessBadge(theme, status, toolCounts, dispatchRows, fleetSummaryIsAction, localCapacity)
+		: "";
 	// Idleness is absence of work, not a phase worth narrating. If a tool or
 	// fleet remains live while the harness settles, keep that activity without
 	// prefixing it with an idle glyph.

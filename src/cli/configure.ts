@@ -43,6 +43,11 @@ import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-htt
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
 import { AUTONOMY_LEVELS } from "../domains/safety/index.js";
+import {
+	describeLocalCapacity,
+	observeHostCapacityFacts,
+	resolveLocalConcurrency,
+} from "../domains/scheduling/local-capacity.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
 import { editSettings } from "./configure-editor.js";
@@ -1190,6 +1195,13 @@ interface SectionSpec {
 
 const NONE = "(none)";
 const onOff = (value: boolean): string => (value ? "enabled" : "disabled");
+/** `auto` shows what this host resolves it to for the local node, as one short phrase. */
+function concurrencyLabel(concurrency: "auto" | number): string {
+	if (concurrency !== "auto") return String(concurrency);
+	const local = resolveLocalConcurrency("auto", observeHostCapacityFacts());
+	return `auto · ${describeLocalCapacity(local) ?? `local ${local.limit}`}`;
+}
+
 const listOr = (values: ReadonlyArray<string>, fallback = NONE): string =>
 	values.length > 0 ? values.join(", ") : fallback;
 
@@ -1552,7 +1564,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 		fields: () => {
 			const settings = readSettings();
 			return [
-				["Concurrency limit", String(settings.fleet.concurrency)],
+				["Concurrency limit", concurrencyLabel(settings.fleet.concurrency)],
 				["Max retries", String(settings.fleet.retry.maxRetries)],
 				["Tool calls per run", String(settings.fleet.limits.toolCallsPerRun)],
 				["Run timeout", `${settings.fleet.limits.internalRunTimeoutMs / 1000}s`],

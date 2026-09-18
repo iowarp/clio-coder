@@ -640,6 +640,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.session ? { session: deps.session } : {}),
 		...(deps.getSessionId ? { getSessionId: deps.getSessionId } : {}),
 		...(deps.getTaskBoard ? { getTaskBoard: deps.getTaskBoard } : {}),
+		...(deps.scheduling?.localCapacity ? { getLocalCapacity: () => deps.scheduling?.localCapacity?.() ?? null } : {}),
 		...(deps.userTasks ? { userTasks: deps.userTasks } : {}),
 		...(deps.getTaskMemoryStatus ? { getTaskMemoryStatus: deps.getTaskMemoryStatus } : {}),
 		...(deps.getTaskMemorySeedOffer ? { getTaskMemorySeedOffer: deps.getTaskMemorySeedOffer } : {}),

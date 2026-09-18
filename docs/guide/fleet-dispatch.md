@@ -152,6 +152,37 @@ Placement and admission are separate, deterministic authorities:
 
 The durable capacity state file (`dispatch-admission.json`) uses schema version 2 and owns global and per-node leases, heartbeats, reservation transfer, retry rebinding, and the TTL-bounded operator drain (`DEFAULT_CAPACITY_DRAIN_TTL_MS` = 3,600,000 ms). A lease acts as durable expiring authority (`DEFAULT_CAPACITY_LEASE_TTL_MS` = 30,000 ms) and is reclaimed only with owner-liveness evidence when a process birth token cannot prove process death. A plan reserves its peak wave, and a retry rebinds the same assignment member to its actual node and cost bound so that an assignment retry belongs to its existing plan slot and cannot queue behind or outspend itself. Full leasing schema and locking protocols are specified in [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md).
 
+### Worker limits and `fleet.concurrency: auto`
+
+`fleet.concurrency` sets the global worker pool and the implicit local node's
+limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
+many workers for both. The default is `1`.
+
+`auto` sizes the local node from the host it runs on. The limit is the smallest
+of four inputs:
+
+| Input | Rule |
+| --- | --- |
+| cpu | usable CPUs from `os.availableParallelism()`, which honors affinity masks such as a Slurm cpuset |
+| memory | (available memory minus a 2 GiB reserve) divided by 1 GiB per worker |
+| cgroup | the same formula over the headroom inside a cgroup memory limit, when one is set |
+| cap | 8 |
+
+The 1 GiB per-worker estimate is about four times the observed worker process
+(160 to 270 MB RSS), because workers run compilers, type checkers, and test
+suites. Under `auto` the global pool is the cap, so a small orchestrator host
+never shrinks work placed on SSH nodes. Host facts are sampled at most every 30
+seconds. A sample taken while no local worker runs is kept while workers run,
+and a sample taken while they run adds back 1 GiB per running worker, so Clio's
+own workers never lower the limit that admitted them. Inference remains bounded
+separately by per-endpoint slot limits.
+
+When a host input binds the limit, the `/settings` fleet row for `local` shows
+it after the busy count (`1/2 busy · memory-bound at 2`), and the footer worker
+chip names it while local demand exceeds the limit (`3 workers · memory-bound
+at 2`). `clio-coder configure` shows what `auto` resolves to on the current
+host.
+
 Use `clio-coder fleet drain [--json]` before maintenance to close that shared
 admission authority. Existing workers continue, but new plans and every new
 execution start—including a retry or a previously reserved member—fail closed.

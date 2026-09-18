@@ -275,7 +275,7 @@ Subagent runs that terminate with retryable outcomes are placed in an in-memory 
 Scheduled retries use an exponential backoff state to calculate subsequent retry delays. Furthermore, targets that fail are subject to a cooldown period. The retry engine ensures that a retried task waits for the maximum of the exponential backoff delay or the remaining target cooldown duration. Retries are brand-new runs that must re-pass all admission checks. If target policies or budgets deny a retry, the task chain terminates as denied.
 
 ### 3. Concurrency Limits
-The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. At this revision, `auto` resolves to the compiled default of four local workers; it does not probe the host dynamically.
+The setting `fleet.concurrency` restricts the number of concurrent subagent tasks. `auto` sizes the local node from usable CPUs, available memory, and any cgroup memory limit, up to eight workers; see [Fleet dispatch](fleet-dispatch.md#worker-limits-and-fleetconcurrency-auto).
 
 ### 4. Heartbeats and Reconciler
 For native subprocess workers, Clio uses a heartbeat mechanism. The reconciler monitors the active heartbeat timestamp. If a worker stops responding and updates no heartbeats, the reconciler terminates the stalled subprocess automatically.
