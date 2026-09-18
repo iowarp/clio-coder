@@ -25,7 +25,7 @@ const DEFAULT_COUNTS = { read: 21, write: 16 } as const;
  * in its suite and reads unsolved. When the gap closes this test fails, and
  * the entry comes out.
  */
-const KNOWN_GAPS = new Set(["write.search.err-symlink-escape"]);
+const KNOWN_GAPS = new Set<string>();
 
 // The 100 MB templates are exercised by the full-profile suites, not here.
 function smallCorpus(tool: (typeof TOOLS)[number], seed: number, split: (typeof SPLITS)[number]): Scenario[] {
@@ -140,22 +140,23 @@ describe("tool-bench read and write driver", () => {
 		}
 	});
 
-	it("records a parked escape as an error and a symlink escape as a write outside the scratch root", async () => {
-		const parked = await runScenario(generateScenario("write", DEFAULT_SEED, "search", "err-escape"), { warmup: 0 });
-		strictEqual(parked.outcome, "error");
-		strictEqual(parked.errorClass, "Error");
-		ok((parked.behavior as { parked?: unknown }).parked !== undefined, "admission parked the call");
-		strictEqual(parked.solved, true);
-
-		const escaped = await runScenario(generateScenario("write", DEFAULT_SEED, "search", "err-symlink-escape"), {
-			warmup: 0,
-		});
-		const outside = (escaped.behavior as { outside?: Array<{ path: string }> }).outside;
-		deepStrictEqual(
-			outside?.map((entry) => entry.path),
-			["escape.txt"],
-		);
-		strictEqual(escaped.solved, false);
+	it("parks a lexical escape and a symlink escape alike and leaves nothing outside the scratch root", async () => {
+		for (const key of ["err-escape", "err-symlink-escape"]) {
+			const parked = await runScenario(generateScenario("write", DEFAULT_SEED, "search", key), { warmup: 0 });
+			strictEqual(parked.outcome, "error", key);
+			strictEqual(parked.errorClass, "Error", key);
+			const behavior = parked.behavior as {
+				parked?: { decision?: { classification?: { actionClass: string; reasons: string[] } } };
+				outside?: unknown;
+			};
+			deepStrictEqual(
+				behavior.parked?.decision?.classification,
+				{ actionClass: "system_modify", reasons: ["write-path-outside-cwd: <outside>/escape.txt"] },
+				key,
+			);
+			strictEqual(behavior.outside, undefined, key);
+			strictEqual(parked.solved, true, key);
+		}
 	});
 
 	it("changes the digest when read drops the last line of its window", async () => {
