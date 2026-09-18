@@ -1,4 +1,5 @@
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
+import { isEngineContextOverflow } from "../../engine/ai.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
@@ -30,6 +31,14 @@ export interface RetryDecision {
 	qualityEscalation: null | { kind: "model-quality"; allowAgentChange: true };
 	reasonCode: string;
 }
+
+/**
+ * Target failures worth another attempt. A bare 500 and a refused, reset, or
+ * failed connection mean the endpoint could not answer this time, not that the
+ * worker runtime is broken, so they fail over to another target.
+ */
+const TRANSIENT_TARGET_TEXT =
+	/timeout|temporar|unavailable|\b50[0234]\b|internal server error|econnrefused|econnreset|fetch failed/;
 
 function resultText(result: SpawnedWorkerResult | null): string {
 	return result?.stderrTail?.toLowerCase() ?? "";
@@ -67,11 +76,18 @@ export function classifyFailure(
 	// error. Ending it here surfaces the contract message the operator has to act
 	// on instead of burying it under two more identical failures.
 	if (/\[worker\] fatal: workerspec/.test(diagnostic)) return "deterministic-task";
+	// A provider that reports the prompt no longer fits the model's context
+	// window has judged the request, not the target. The identical input earns
+	// the identical overflow on every retry, and charging it to the target
+	// breaker would park a healthy endpoint for runs whose prompts do fit. The
+	// engine's detector carries pi-ai's per-provider patterns, including the
+	// llama.cpp and Ollama "exceeds the available context size" wording.
+	if (diagnostic !== "" && isEngineContextOverflow(diagnostic)) return "deterministic-task";
 	if (/\b(?:401|403)\b|unauthorized|forbidden|invalid api key|authentication/.test(diagnostic)) return "target-auth";
 	if (/\b429\b|rate[ -]?limit|too many requests/.test(diagnostic)) return "target-rate-limit";
 	if (/\bvram\b|\bgpu\b|\bcuda\b|\boom\b|out of memory/.test(diagnostic)) return "node-resource";
 	if (/capacity|overloaded|queue full/.test(diagnostic)) return "capacity";
-	if (evidence.timedOut || outcome === "timed_out" || /timeout|temporar|unavailable|\b50[234]\b/.test(diagnostic)) {
+	if (evidence.timedOut || outcome === "timed_out" || TRANSIENT_TARGET_TEXT.test(diagnostic)) {
 		return "target-transient";
 	}
 	if (outcome === "failed") return "worker-runtime";
