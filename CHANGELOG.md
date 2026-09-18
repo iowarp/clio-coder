@@ -53,6 +53,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### doctor
 
 - `doctor` reports HPC toolchains: `cc`/`gcc`, `c++`/`g++`, `clang`, `gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`, `meson`, `python3`, and `sbatch`, each with its resolved path and version line from a bounded, parallel `--version`, in text and `--json`. An absent tool is an `INFO` row; it warns only when the workspace validation contract names it or `runtime.kind: slurm` needs `sbatch`. An installed tool whose `--version` fails, such as an unconfigured Slurm client, warns.
+- Add `doctor --deep`, which runs the normal checks plus the live tool-call probe on every configured target (bounded by `--tools-timeout <seconds>`, default 120) and a dry run of the workspace validation contract that resolves each validator command on PATH and reports whether the policy engine would run it without an approval ask at the configured autonomy. The dry run executes nothing, and `--deep` composes with `--json`.
 
 ## 0.4.9 - 2026-09-17
 
