@@ -4,7 +4,15 @@ import type { AddressInfo } from "node:net";
 import { performance } from "node:perf_hooks";
 import { afterEach, beforeEach, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
+import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
+import { adoptWorkerModelLoad, type WorkerModelLoadRoute } from "../../src/domains/dispatch/worker-model-loads.js";
+import ollamaNativeRuntime from "../../src/domains/providers/runtimes/local-native/ollama-native.js";
 import { ollamaNativeApiProvider, releaseClioLoadedOllamaModels } from "../../src/engine/apis/ollama-native.js";
+import {
+	type ClioModelLoad,
+	releaseClioLoadedModelsOnExit,
+	setModelLoadReportSink,
+} from "../../src/engine/apis/residency.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
@@ -148,4 +156,61 @@ it("bounds the release on exit when the server never answers", async () => {
 	const elapsedMs = performance.now() - startedAt;
 	deepStrictEqual(target.unloads, ["stuck:latest"]);
 	ok(elapsedMs < 1_500, `release took ${elapsedMs}ms against a 200ms bound`);
+});
+
+it("reports a model the worker's request loaded, once, and never one that was already resident", async () => {
+	const target = await fixture();
+	target.resident.add("warm:latest");
+	const reports: ClioModelLoad[] = [];
+	setModelLoadReportSink((load) => reports.push(load));
+	try {
+		strictEqual(await chat(target.url, "cold:latest"), "stop");
+		strictEqual(await chat(target.url, "cold:latest"), "stop");
+		strictEqual(await chat(target.url, "warm:latest"), "stop");
+	} finally {
+		setModelLoadReportSink(null);
+	}
+	deepStrictEqual(reports, [{ runtimeId: "ollama-native", targetId: "ollama", modelId: "cold:latest", aliasIds: [] }]);
+});
+
+function workerRoute(url: string, node: RunNodeIdentity = { id: "local", kind: "local" }): WorkerModelLoadRoute {
+	return {
+		target: { id: "ollama-t", runtime: "ollama-native", url },
+		runtime: ollamaNativeRuntime,
+		wireModelId: "worker:latest",
+		node,
+	};
+}
+
+it("releases at exit a model a worker reported, and only that one", async () => {
+	const target = await fixture();
+	target.resident.add("operator:latest");
+	target.resident.add("worker:latest");
+	ok(adoptWorkerModelLoad({ targetId: "ollama-t", modelId: "worker:latest", aliasIds: [] }, workerRoute(target.url)));
+	await releaseClioLoadedModelsOnExit();
+	deepStrictEqual(target.unloads, ["worker:latest"]);
+	strictEqual(target.resident.has("operator:latest"), true);
+});
+
+it("refuses a worker report for another target, another model, or a remote node's loopback server", async () => {
+	const target = await fixture();
+	target.resident.add("worker:latest");
+	const load = { targetId: "ollama-t", modelId: "worker:latest", aliasIds: [] };
+	strictEqual(adoptWorkerModelLoad({ ...load, targetId: "other" }, workerRoute(target.url)), false);
+	strictEqual(adoptWorkerModelLoad({ ...load, modelId: "operator:latest" }, workerRoute(target.url)), false);
+	strictEqual(adoptWorkerModelLoad(load, workerRoute(target.url, { id: "dragon", kind: "ssh" })), false);
+	await releaseClioLoadedModelsOnExit();
+	deepStrictEqual(target.unloads, []);
+});
+
+it("never evicts a worker-reported model as a Clio straggler mid-session", async () => {
+	const target = await fixture();
+	target.resident.add("worker:latest");
+	ok(adoptWorkerModelLoad({ targetId: "ollama-t", modelId: "worker:latest", aliasIds: [] }, workerRoute(target.url)));
+	strictEqual(await chat(target.url, "chat:latest"), "stop");
+	strictEqual(await chat(target.url, "chat2:latest"), "stop");
+	deepStrictEqual(target.unloads, ["chat:latest"]);
+	strictEqual(target.resident.has("worker:latest"), true);
+	await releaseClioLoadedModelsOnExit();
+	deepStrictEqual([...target.unloads].sort(), ["chat2:latest", "chat:latest", "worker:latest"]);
 });

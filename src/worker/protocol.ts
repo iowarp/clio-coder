@@ -273,11 +273,30 @@ export interface AgentLedgerPort {
 	read(): { open: boolean; watermark: number; entries: ReadonlyArray<AgentLedgerEntry> } | null;
 }
 
+/**
+ * A model the worker's own request loaded and pinned. The orchestrator owns the
+ * release of worker loads (#379), so the worker reports each one and the
+ * orchestrator releases it when it exits. Only ids cross the wire: the
+ * orchestrator resolves the endpoint and any headers from its own settings for
+ * the admitted target, so no credential ever travels on the control lane.
+ */
+export interface WorkerModelLoad {
+	targetId: string;
+	modelId: string;
+	/** Other names the server answered for the same model, such as a `:latest` tag. */
+	aliasIds: ReadonlyArray<string>;
+}
+
+/** Bounds on one model load report. */
+export const WORKER_MODEL_LOAD_ID_MAX_CHARS = 256;
+export const WORKER_MODEL_LOAD_ALIAS_MAX = 8;
+
 export type WorkerControlFrame =
 	| { kind: "announce"; attestation: WorkerAttestation }
 	| { kind: "heartbeat" }
 	| { kind: "cancel_ack"; at: number }
-	| { kind: "ledger_post"; body: AgentLedgerBody };
+	| { kind: "ledger_post"; body: AgentLedgerBody }
+	| { kind: "model_loaded"; load: WorkerModelLoad };
 
 function sha256Hex(input: string): string {
 	return createHash("sha256").update(input, "utf8").digest("hex");
@@ -468,6 +487,24 @@ function parseAttestation(value: unknown): FrameParseResult<WorkerAttestation> {
 	};
 }
 
+function isModelLoadId(value: unknown): value is string {
+	return typeof value === "string" && value.length > 0 && value.length <= WORKER_MODEL_LOAD_ID_MAX_CHARS;
+}
+
+function parseModelLoad(value: unknown): FrameParseResult<WorkerModelLoad> {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return { ok: false, reason: "model_loaded load is not an object" };
+	}
+	const record = value as Record<string, unknown>;
+	if (!isModelLoadId(record.targetId)) return { ok: false, reason: "model_loaded targetId is missing or too long" };
+	if (!isModelLoadId(record.modelId)) return { ok: false, reason: "model_loaded modelId is missing or too long" };
+	const aliases = record.aliasIds ?? [];
+	if (!Array.isArray(aliases) || aliases.length > WORKER_MODEL_LOAD_ALIAS_MAX || !aliases.every(isModelLoadId)) {
+		return { ok: false, reason: "model_loaded aliasIds must be a short list of model ids" };
+	}
+	return { ok: true, value: { targetId: record.targetId, modelId: record.modelId, aliasIds: [...aliases] } };
+}
+
 /**
  * Parse one marked stderr line into a control frame. The caller has already
  * established that the line carries the marker.
@@ -496,6 +533,11 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
 			const body = parseAgentLedgerBody(record.body);
 			if (!body.ok) return { ok: false, reason: `ledger_post frame rejected: ${body.reason}` };
 			return { ok: true, value: { kind: "ledger_post", body: body.body } };
+		}
+		case "model_loaded": {
+			const load = parseModelLoad(record.load);
+			if (!load.ok) return load;
+			return { ok: true, value: { kind: "model_loaded", load: load.value } };
 		}
 		default:
 			return { ok: false, reason: `unknown control frame kind ${String(record.kind)}` };

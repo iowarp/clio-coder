@@ -40,7 +40,11 @@ deleteInjectedCompileCacheFrom(process.env);
 // the worker's own environment.
 process.env.CLIO_CODER_WORKER_RUN = "1";
 
-import { setProtectedModelsProvider, setResidencyNoticeSink } from "../engine/apis/residency.js";
+import {
+	setModelLoadReportSink,
+	setProtectedModelsProvider,
+	setResidencyNoticeSink,
+} from "../engine/apis/residency.js";
 import { startWorkerRun, type WorkerRunInput, workerProviderSupportsTools } from "../engine/worker-runtime.js";
 import { attestedToolSignature } from "../engine/worker-tools.js";
 import { emitControlFrame } from "./control-lane.js";
@@ -124,6 +128,16 @@ async function main(): Promise<number> {
 		if (notice.kind === "will-not-fit") {
 			emitEvent({ type: "clio_coder_run_outcome", payload: { outcomeCode: "vram_capacity_fit_failure" } });
 		}
+	});
+	// The orchestrator owns the release of every model this worker loads
+	// (#379): a worker that released on its own exit would reload the model for
+	// each sequential dispatch and pull it from under a parallel sibling. Only
+	// ids cross the lane; the orchestrator resolves the endpoint itself.
+	setModelLoadReportSink((load) => {
+		emitControlFrame({
+			kind: "model_loaded",
+			load: { targetId: load.targetId, modelId: load.modelId, aliasIds: load.aliasIds },
+		});
 	});
 	const demux = createWorkerStdinDemux();
 	process.stdin.setEncoding("utf8");

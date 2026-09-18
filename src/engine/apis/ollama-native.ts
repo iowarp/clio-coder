@@ -42,6 +42,8 @@ import {
 	type ResidencyAdapter,
 	reconcileResidency,
 	registerExitRelease,
+	registerWorkerLoadAdopter,
+	reportClioModelLoad,
 	residencyManagedFor,
 } from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
@@ -376,6 +378,18 @@ export async function releaseClioLoadedOllamaModels(options: { timeoutMs?: numbe
 
 registerExitRelease(() => releaseClioLoadedOllamaModels());
 
+// A dispatched worker's load becomes this process's to release (#379). The
+// endpoint comes from this process's own settings for the admitted target.
+registerWorkerLoadAdopter("ollama-native", (targetKey, endpoint, modelIds) => {
+	let owned = ownedModelsByTarget.get(targetKey);
+	if (!owned) {
+		owned = new Set<string>();
+		ownedModelsByTarget.set(targetKey, owned);
+	}
+	for (const id of modelIds) owned.add(id);
+	ownedEndpointsByTarget.set(targetKey, { baseUrl: endpoint.baseUrl, headers: endpoint.headers });
+});
+
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
 	if (hadToolCall) return "toolUse";
 	if (reason === "length") return "length";
@@ -565,9 +579,24 @@ function runStream(
 						owned = new Set<string>();
 						ownedModelsByTarget.set(targetKey, owned);
 					}
-					owned.add(response.model || model.id);
+					const loadedId = response.model || model.id;
+					const firstRecord = !owned.has(loadedId);
+					owned.add(loadedId);
 					ownedEndpointsByTarget.set(targetKey, { baseUrl: model.baseUrl, headers });
 					recordedOwnership = true;
+					// In a dispatched worker this hands the load to the orchestrator,
+					// which owns its release (#379). Elsewhere no sink is installed.
+					if (firstRecord) {
+						reportClioModelLoad(
+							{
+								runtimeId: "ollama-native",
+								targetId: ollamaTargetId(model),
+								modelId: model.id,
+								aliasIds: loadedId === model.id ? [] : [loadedId],
+							},
+							targetKey,
+						);
+					}
 				}
 				const msg = response.message;
 				if (msg?.thinking && msg.thinking.length > 0) {

@@ -46,6 +46,7 @@ import {
 	WORKER_STDIN_QUEUE_MAX_BYTES,
 	type WorkerAttestation,
 	WorkerChannelFailure,
+	type WorkerModelLoad,
 } from "./worker-protocol.js";
 
 export type { WorkerSpec } from "../../worker/spec-contract.js";
@@ -127,6 +128,13 @@ export interface WorkerProcessOptions {
 	 * admission record, so this callback only ever receives a validated body.
 	 */
 	onLedgerPost?: (body: AgentLedgerBody) => void;
+	/**
+	 * One model the worker's request loaded and pinned. The orchestrator owns the
+	 * release of worker loads, so dispatch adopts each report into its own
+	 * residency registries. Delivered only after the announce is accepted, so a
+	 * report always belongs to an admitted identity.
+	 */
+	onModelLoaded?: (load: WorkerModelLoad) => void;
 	/**
 	 * Identity the plan approved. Defaults to the identity of the spec actually
 	 * written to stdin, which is what every production caller wants; a caller
@@ -414,6 +422,14 @@ export function spawnWorkerProcess(
 				return;
 			}
 			opts?.onLedgerPost?.(frame.value.body);
+			return;
+		}
+		if (frame.value.kind === "model_loaded") {
+			if (!announceAccepted) {
+				appendStderr("[worker] dropped a model load report that arrived before attestation was accepted\n");
+				return;
+			}
+			opts?.onModelLoaded?.(frame.value.load);
 			return;
 		}
 		opts?.onControl?.({ kind: frame.value.kind });
