@@ -652,6 +652,9 @@ install metadata, and records fleet preflight results. It validates
 `settings.yaml` directly against the current schema but never rewrites removed
 keys or migrates an old settings shape. Any unknown or retired key remains a
 validation error on that doctor run.
+Doctor reports no dispatch breaker state, because the breaker lives in the
+memory of the session that dispatches and a doctor process never dispatches;
+see the targets rows in `/settings` inside the session instead.
 Registered `clio-coder upgrade` migrations are the narrow exception. Upgrade
 moves a version-1 or unversioned settings document into the version-2 areas,
 records the migration, and keeps the byte-exact original as
@@ -1105,6 +1108,8 @@ clio-coder targets convert <id> --runtime <runtimeId>
 clio-coder targets remove <id>
 clio-coder targets rename <old> <new>
 ```
+
+The `clio-coder targets` listing shows no breaker column, because the dispatch breaker lives in the memory of the session that dispatches and the listing process never dispatches. Inside a session, each `/settings` targets row shows its routes' breaker state: an open route takes over the health cell with its remaining cooldown (`○ open 42s`), a route whose probe is in flight shows `◐ probing`, and the row's detail line lists one phrase per route, such as `qwen open 42s after target-transient` or `coder 1 failure (target-overloaded)` for a closed route that has failed below the threshold.
 
 `clio-coder targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
 

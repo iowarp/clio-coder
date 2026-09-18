@@ -19,6 +19,7 @@ import {
 import { getAtPath, isRoutingPath } from "../../core/session-routing.js";
 import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { capacityLeaseUsage } from "../../domains/dispatch/capacity-lease.js";
+import type { RouteBreakerView } from "../../domains/dispatch/contract.js";
 import {
 	delegationEntryForKind,
 	type InteropAgentId,
@@ -753,6 +754,8 @@ interface BuildSettingItemsOptions {
 	requestRefresh?: () => void;
 	/** Live fleet node snapshots (scheduling.fleet.list()); absent hides the node rows. */
 	getFleetNodes?: () => ReadonlyArray<FleetNodeSnapshot>;
+	/** Live in-process dispatch breaker state per route; absent shows no breaker state. */
+	getRouteBreakers?: () => ReadonlyArray<RouteBreakerView>;
 	/** Run the API-key / OAuth connect flow for a target; absent hides the action. */
 	connectTarget?: (targetId: string) => Promise<void> | void;
 	/** The connect/probe operation currently acting on a target, if any. */
@@ -2218,12 +2221,39 @@ function agentBindingRows(settings: Readonly<ClioSettings>, live: () => Readonly
 		});
 }
 
-function targetRows(
+/** One short phrase for a route's breaker, keyed by the model it serves. */
+function routeBreakerPhrase(route: RouteBreakerView): string {
+	switch (route.state) {
+		case "open":
+			return `${route.wireModelId} open ${Math.ceil(route.remainingMs / 1000)}s after ${route.reason}`;
+		case "half-open":
+			return `${route.wireModelId} half-open after ${route.reason}`;
+		case "probing":
+			return `${route.wireModelId} probing after ${route.reason}`;
+		case "closed":
+			return `${route.wireModelId} ${route.consecutiveFailures} failure${route.consecutiveFailures === 1 ? "" : "s"} (${route.reason})`;
+	}
+}
+
+/** The health cell a tripped route takes over: open first, then a probe in flight, then half-open. */
+function routeBreakerSegment(routes: ReadonlyArray<RouteBreakerView>): SettingsValueSegment | null {
+	const open = routes.filter((route) => route.state === "open");
+	if (open.length > 0) {
+		const remainingMs = Math.max(...open.map((route) => route.remainingMs));
+		return { text: `○ open ${Math.ceil(remainingMs / 1000)}s`, tone: "unhealthy" };
+	}
+	if (routes.some((route) => route.state === "probing")) return { text: "◐ probing", tone: "degraded" };
+	if (routes.some((route) => route.state === "half-open")) return { text: "◐ half-open", tone: "degraded" };
+	return null;
+}
+
+export function targetRows(
 	settings: Readonly<ClioSettings>,
 	options: BuildSettingItemsOptions | undefined,
 ): SettingsCenterItem[] {
 	const providers = options?.providers;
 	const statuses = new Map(providers?.list().map((status) => [status.target.id, status] as const) ?? []);
+	const breakers = options?.getRouteBreakers?.() ?? [];
 	return settings.targets.map((target) => {
 		const status = statuses.get(target.id);
 		const roles = [
@@ -2241,7 +2271,9 @@ function targetRows(
 					tone: "activity",
 				}
 			: null;
-		const liveHealth = activitySegment ?? healthSegment;
+		const routes = breakers.filter((route) => route.targetId === target.id);
+		const liveHealth = activitySegment ?? routeBreakerSegment(routes) ?? healthSegment;
+		const breakerText = routes.length > 0 ? ` · Breaker: ${routes.map(routeBreakerPhrase).join("; ")}` : "";
 		const runtime = status?.runtime?.id ?? target.runtime;
 		const latency =
 			status?.health.latencyMs === null || status?.health.latencyMs === undefined ? "—" : `${status.health.latencyMs} ms`;
@@ -2254,11 +2286,11 @@ function targetRows(
 			{ text: `  ${runtime}`, tone: "neutral" as const },
 			{ text: `  ${latency}`, tone: "neutral" as const },
 		];
-		const value = `${health} · ${target.id} · ${roleText} · ${runtime} · ${latency}`;
+		const value = `${health} · ${target.id} · ${roleText} · ${runtime} · ${latency}${breakerText}`;
 		const item = settingItem(`targets.${target.id}`, value, {
 			label: target.id,
 			description: `URL: ${target.url ?? "(none)"} · Default model: ${target.defaultModel ?? "(none)"}`,
-			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}`,
+			help: `Last probe: ${lastProbe} · Failure reason: ${failureReason}${breakerText}`,
 			submenu: targetActionsSubmenu(target.id, options),
 			affordance: options?.connectTarget ? "Enter: use, connect, probe, remove" : "Enter: use, probe, remove",
 			presentationKind: "status",
@@ -4191,6 +4223,7 @@ export interface OpenSettingsOverlayDeps {
 	/** Optional semantic row anchor for command deep links. */
 	rowId?: SettingsCenterRowId;
 	getFleetNodes?: BuildSettingItemsOptions["getFleetNodes"];
+	getRouteBreakers?: BuildSettingItemsOptions["getRouteBreakers"];
 	connectTarget?: BuildSettingItemsOptions["connectTarget"];
 	getInteropProposals?: BuildSettingItemsOptions["getInteropProposals"];
 }
@@ -4232,6 +4265,7 @@ export function openSettingsOverlay(tui: TUI, deps: OpenSettingsOverlayDeps): Se
 	};
 	if (deps.providers) buildOptions.providers = deps.providers;
 	if (deps.getFleetNodes) buildOptions.getFleetNodes = deps.getFleetNodes;
+	if (deps.getRouteBreakers) buildOptions.getRouteBreakers = deps.getRouteBreakers;
 	if (deps.connectTarget) buildOptions.connectTarget = deps.connectTarget;
 	if (deps.getInteropProposals) buildOptions.getInteropProposals = deps.getInteropProposals;
 	const items = buildSettingItems(deps.getSettings(), buildOptions);

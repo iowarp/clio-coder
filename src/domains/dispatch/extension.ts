@@ -7355,6 +7355,19 @@ export function createDispatchBundle(
 			markCollected: markDetachedBatchCollected,
 		},
 		snapshot,
+		routeBreakers: () =>
+			targetBreaker.snapshot().map((route) => {
+				const [targetId = "", runtimeId = "", wireModelId = ""] = route.key.split("\0");
+				return {
+					targetId,
+					runtimeId,
+					wireModelId,
+					state: route.state,
+					remainingMs: route.remainingMs,
+					reason: route.reason,
+					consecutiveFailures: route.consecutiveFailures,
+				};
+			}),
 		drain,
 	};
 
