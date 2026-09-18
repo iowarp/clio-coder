@@ -1,30 +1,25 @@
 import { randomUUID } from "node:crypto";
-import { lstatSync, readlinkSync, realpathSync } from "node:fs";
-import { lstat, mkdir, open, readlink, realpath, rename, stat, unlink } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { lstat, mkdir, open, realpath, rename, stat, unlink } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
+import { canonicalizeRawPath } from "../core/path-canonical.js";
 
 const fileMutationQueues = new Map<string, Promise<void>>();
 
-function mutationQueueKey(filePath: string, depth = 0): string {
-	const resolved = resolve(filePath);
-	if (depth > 40) throw new Error("Too many symbolic links");
-	try {
-		return realpathSync.native(resolved);
-	} catch {
-		try {
-			if (lstatSync(resolved).isSymbolicLink()) {
-				return mutationQueueKey(resolve(dirname(resolved), readlinkSync(resolved)), depth + 1);
-			}
-		} catch {
-			// Missing paths still share a key through the nearest real ancestor.
-		}
-		const parent = dirname(resolved);
-		return parent === resolved ? resolved : join(mutationQueueKey(parent, depth), basename(resolved));
+/**
+ * Where a mutation of filePath lands: the walk safety admission uses, so the
+ * queue key and the published file are the path admission judged. Throws,
+ * before anything is read or written, when that walk cannot finish.
+ */
+function physicalTarget(filePath: string): string {
+	const target = canonicalizeRawPath(filePath, process.cwd());
+	if (target === null) {
+		throw new Error(`Refusing unresolvable target (a symbolic link loop or more than 40 links): ${filePath}`);
 	}
+	return target;
 }
 
 export async function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-	const key = mutationQueueKey(filePath);
+	const key = physicalTarget(filePath);
 	const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve();
 
 	let releaseNext!: () => void;
@@ -62,14 +57,12 @@ export interface AtomicPublishOptions {
 	rename?: (tempPath: string, targetPath: string) => Promise<void>;
 }
 
-async function resolvePublishTarget(filePath: string, depth = 0): Promise<string> {
-	if (depth > 40) throw new Error("Too many symbolic links");
-	const absolute = resolve(filePath);
+async function resolvePublishTarget(filePath: string): Promise<string> {
+	// Every link on the way is already followed, so a link here was swapped in
+	// after resolution and is refused as a non-file rather than followed.
+	const absolute = physicalTarget(filePath);
 	try {
 		const info = await lstat(absolute);
-		if (info.isSymbolicLink()) {
-			return resolvePublishTarget(resolve(dirname(absolute), await readlink(absolute)), depth + 1);
-		}
 		if (!info.isFile()) throw new Error(`Refusing non-file target (including directories): ${filePath}`);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
