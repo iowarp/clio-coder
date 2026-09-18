@@ -1125,6 +1125,12 @@ function formatContextWindow(
 		return `ctx ${serving} (serving; model max ${window})`;
 	}
 	if (status.contextWindowProvenance === "runtime-default") return `ctx ${window} (unverified runtime default)`;
+	// A model that is not resident loads at a window the server picks, so the
+	// runtime's cold cap is planned against and the maximum is named beside it.
+	const cold = status.runtime?.coldContextWindowCap;
+	if (cold !== undefined && status.contextWindowProvenance !== "configured" && window > cold) {
+		return `ctx ${cold} (cold; model max ${window})`;
+	}
 	// A llama.cpp window that is one slot's share of `--ctx-size` names the
 	// split, so `ctx 196608` is not mistaken for the whole server (issue #187).
 	const slots = modelState?.contextSlots;

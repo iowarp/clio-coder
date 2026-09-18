@@ -108,3 +108,27 @@ it("validates targets[].ollama.numCtx as a positive integer", () => {
 		strictEqual(result.issues.length > 0, true, JSON.stringify(bad));
 	}
 });
+
+it("plans a cold model at the 131072 cap, not a larger model maximum", () => {
+	const details = plan({ id: "o", runtime: "ollama-native" }, 262_144, null);
+
+	strictEqual(details.effectiveContextWindow, 131_072);
+	strictEqual(details.contextWindowSource, "probe");
+});
+
+it("plans a cold model whose maximum is below the cap at that maximum", () => {
+	strictEqual(plan({ id: "o", runtime: "ollama-native" }, 32_768, null).effectiveContextWindow, 32_768);
+});
+
+it("plans a loaded model at its loaded window, not the cold cap", () => {
+	const details = plan({ id: "o", runtime: "ollama-native" }, 262_144, 32_768);
+
+	strictEqual(details.effectiveContextWindow, 32_768);
+	strictEqual(details.contextWindowSource, "loaded");
+});
+
+it("plans a cold model at a configured numCtx", () => {
+	const target: TargetDescriptor = { id: "o", runtime: "ollama-native", ollama: { numCtx: 65_536 } };
+
+	strictEqual(plan(target, 262_144, null).effectiveContextWindow, 65_536);
+});

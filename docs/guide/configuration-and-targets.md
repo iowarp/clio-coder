@@ -404,7 +404,7 @@ The tool-prose-loop detector is keyed on the same tier, for the same reason: nar
 
 ### Ollama context window (`ollama.numCtx`)
 
-An `ollama-native` target sends no `num_ctx` by default, so Ollama opens the model at whatever window its server is configured for (`OLLAMA_CONTEXT_LENGTH`, a `num_ctx` in the Modelfile, or the server default). Clio reads that window back from `/api/ps` once the model is resident and plans against it. To ask for a specific window instead, set it on the target:
+An `ollama-native` target sends no `num_ctx` by default, so Ollama opens the model at whatever window its server is configured for (`OLLAMA_CONTEXT_LENGTH`, a `num_ctx` in the Modelfile, or the server default). Clio reads that window back from `/api/ps` once the model is resident and plans against it. Before the model is resident, Clio plans against the smaller of the model maximum and 131,072 tokens. To ask for a specific window instead, set it on the target:
 
 ```yaml
 targets:
@@ -1117,7 +1117,7 @@ When a probed target reports no context window, Clio uses the runtime descriptor
 
 A runtime that reports the window a resident model is loaded at (LM Studio, and Ollama through `/api/ps`) bounds the session by that serving window, because a model open at 32,768 tokens rejects a longer prompt whatever its weights allow. The text output then names both numbers, as in `ctx 32768 (serving; model max 262144)`, so the operator can see which one a run is planned against. In JSON output the serving window is `discoveredModelStates.<model>.contextLength` and the maximum is `capabilities.contextWindow`.
 
-An `ollama-native` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident the maximum is the planning window; Ollama may still load the model below it (`OLLAMA_CONTEXT_LENGTH` or the server default), which the probe cannot see until the model is loaded. Set `ollama.numCtx` to plan against a window Clio requests rather than one it infers.
+An `ollama-native` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident, Clio plans against the smaller of that maximum and 131,072 tokens, because Ollama opens a cold model at `OLLAMA_CONTEXT_LENGTH` or its server default and no API reports that window before load. The text output names both, as in `ctx 131072 (cold; model max 262144)`; a model whose maximum is below the cap shows its maximum alone. Once `/api/ps` reports the model loaded, its serving window replaces the cold figure. Set `ollama.numCtx` to plan against a window Clio requests rather than one it infers; it applies whether or not the model is resident.
 
 ---
 
