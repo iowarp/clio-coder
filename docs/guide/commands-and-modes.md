@@ -142,6 +142,7 @@ when Clio is already inside a reachable herdr session.
 - A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
 - `--cwd` with no value is a usage error with exit code 2.
 - An orchestrator that runs Clio inside a git worktree can pass the worktree path here instead of changing its own working directory before the spawn.
+- `CLIO_CODER_HOME`, `CLIO_CODER_CONFIG_DIR`, `CLIO_CODER_DATA_DIR`, `CLIO_CODER_STATE_DIR`, and `CLIO_CODER_CACHE_DIR` are read as given and are not resolved before the process enters `<dir>`. A relative value therefore points under `<dir>`, not under the directory the driver spawned from. A driver that sets any of them together with `--cwd` must pass absolute paths.
 
 ### Headless No-op Runs
 
