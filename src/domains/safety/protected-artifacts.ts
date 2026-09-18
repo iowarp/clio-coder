@@ -1140,7 +1140,34 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
 	return isSameOrDescendant(commandKey, artifactKey) || isSameOrDescendant(artifactKey, commandKey);
 }
 
-function validationMatch(executable: string, args: ReadonlyArray<string>): string | null {
+/**
+ * Every fixed label `validationMatch` returns. The only other label is the
+ * `npm run <verification script>` family. The policy engine's
+ * `TEST_RUNNER_COMMANDS` must run each of these without an ask at auto-edit;
+ * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
+ */
+export const VALIDATION_COMMAND_LABELS = [
+	"npm test",
+	"pytest",
+	"python -m pytest",
+	"python -m unittest",
+	"cargo test",
+	"go test",
+	"ctest",
+	"make test",
+	"make check",
+	"ninja test",
+	"meson test",
+	"mvn test",
+	"gradle test",
+] as const;
+
+export type ValidationCommandLabel = (typeof VALIDATION_COMMAND_LABELS)[number];
+
+function validationMatch(
+	executable: string,
+	args: ReadonlyArray<string>,
+): ValidationCommandLabel | `npm run ${string}` | null {
 	if (executable === "npm") {
 		if (args[0] === "test") return "npm test";
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;
@@ -1148,11 +1175,14 @@ function validationMatch(executable: string, args: ReadonlyArray<string>): strin
 	}
 	if (executable === "pytest") return "pytest";
 	if (isPythonExecutable(executable) && moduleArg(args) === "pytest") return "python -m pytest";
+	if (isPythonExecutable(executable) && moduleArg(args) === "unittest") return "python -m unittest";
 	if (executable === "cargo" && args[0] === "test") return "cargo test";
 	if (executable === "go" && args[0] === "test") return "go test";
 	if (executable === "ctest") return "ctest";
 	if (executable === "make" && args[0] === "test") return "make test";
+	if (executable === "make" && args[0] === "check") return "make check";
 	if (executable === "ninja" && args[0] === "test") return "ninja test";
+	if (executable === "meson" && args[0] === "test") return "meson test";
 	if (executable === "mvn" && args[0] === "test") return "mvn test";
 	if ((executable === "gradle" || executable === "gradlew") && args[0] === "test") return "gradle test";
 	return null;

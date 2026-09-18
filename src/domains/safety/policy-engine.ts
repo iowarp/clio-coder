@@ -130,18 +130,46 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:git-log", re: /^git\s+log\s+--oneline(?:\s+-n\s+[1-9]\d{0,2})?(?:\s+--\s+[\w./-]+)?$/ },
 ];
 
-const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
+/**
+ * Test runners run without an ask at auto-edit and full-auto (#377). They
+ * execute repository-authored code, which the maintainer accepted so a
+ * headless run can verify its own work by the project's own command. Every id
+ * here maps to a `detectValidationCommand` label, and
+ * `tests/contracts/test-runner-vocabulary.test.ts` fails when the two drift.
+ * Arguments stay bare words: quoting, substitution, and operators fall through
+ * to the rails below.
+ */
+export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:python-unittest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+unittest(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:cargo-test", re: /^cargo\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:go-test", re: /^go\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:ctest", re: /^ctest(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:make-check", re: /^make\s+check(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:ninja-test", re: /^ninja\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:meson-test", re: /^meson\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:mvn-test", re: /^mvn\s+test(?:\s+[\w=./:-]+)*$/ },
+	{ id: "builtin:gradle-test", re: /^(?:gradle|(?:\.\/)?gradlew)\s+test(?:\s+[\w=./:-]+)*$/ },
+];
+
+/**
+ * Repository scripts that are not test runners. They still count as validation
+ * evidence (`npm run <verification script>`) but keep a one-shot confirmation
+ * at every autonomy level.
+ */
+export const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
 	{ id: "builtin:npm-build", re: /^npm\s+run\s+build(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
 	{ id: "builtin:npm-typecheck", re: /^npm\s+run\s+typecheck(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
 	{ id: "builtin:npm-ci-script", re: /^npm\s+run\s+ci(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
-	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:cargo-test", re: /^cargo\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:go-test", re: /^go\s+test(?:\s+[\w=./:-]+)*$/ },
-	{ id: "builtin:make-test", re: /^make\s+test(?:\s+[\w=./:-]+)*$/ },
 ];
+
+function matchesRepositoryCommand(command: string): boolean {
+	return [...TEST_RUNNER_COMMANDS, ...PROJECT_SCRIPT_COMMANDS].some((entry) => entry.re.test(command));
+}
 
 /**
  * What the recognized spelling looks like, carried on every unrecognized-bash
@@ -781,6 +809,17 @@ function evaluateBashPolicy(
 			execRecognition: "unrecognized",
 		};
 	}
+	const testRunner = TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(recognitionCommand));
+	if (testRunner !== undefined) {
+		return {
+			kind: "allow",
+			ruleId: testRunner.id,
+			reasonCode: testRunner.id,
+			reasons: [`matched built-in test runner '${testRunner.id}'`, projectScriptPreview(recognitionCommand, callCwd)],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+		};
+	}
 	if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(recognitionCommand))) {
 		return {
 			kind: posture === "confirmed" ? "allow" : "ask",
@@ -832,7 +871,7 @@ function evaluateBashPolicy(
 		const scriptSegments = recognitionCommand
 			.split(/&&|\|\||[;|\n]/)
 			.map((part) => part.trim())
-			.filter((part) => PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(part)));
+			.filter((part) => matchesRepositoryCommand(part));
 		if (scriptSegments.length > 0 && posture !== "confirmed") {
 			return {
 				kind: "ask",
@@ -1064,6 +1103,11 @@ function recognizeCommandChain(
 		if (projectMatch) {
 			ruleIds.push(projectMatch.id);
 			if (projectMatch.requireConfirmation) requiresConfirmation = true;
+			continue;
+		}
+		const testRunner = TEST_RUNNER_COMMANDS.find((entry) => entry.re.test(rendered));
+		if (testRunner !== undefined) {
+			ruleIds.push(testRunner.id);
 			continue;
 		}
 		if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(rendered))) {

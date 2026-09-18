@@ -13,12 +13,13 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 	try {
 		mkdirSync(join(scratch.dir, ".clio-coder"), { recursive: true });
 		const cases = [
-			{ id: "python", command: ["python3", "-m", "pytest", "-q", "test_index_policy.py"], expected: "ask" },
 			{
 				id: "absolute",
 				command: ["/home/akougkas/iowarp/battletest-v044/python-env/bin/python", "-m", "pytest", "-q"],
 				expected: "ask",
 			},
+			// A PATH-resolved test runner runs unattended at auto-edit (#377).
+			{ id: "python", command: ["python3", "-m", "pytest", "-q", "test_index_policy.py"], expected: "allow" },
 			{ id: "arbitrary", command: ["custom-check", "test.py"], expected: "ask" },
 			{ id: "node-project", command: ["node", "test/add.test.mjs"], expected: "ask" },
 			{ id: "inline", command: ["python3", "-c", "print(1)"], expected: "ask" },
@@ -55,8 +56,8 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 				version: 1,
 				commands: [
 					{
-						id: "confirm-python",
-						command: "python3 -m pytest -q test_index_policy.py",
+						id: "confirm-absolute",
+						command: "/home/akougkas/iowarp/battletest-v044/python-env/bin/python -m pytest -q",
 						actionClass: "execute",
 						requireConfirmation: true,
 					},
@@ -71,22 +72,28 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 		approveSafety();
 		const confirmedPolicy = createSafetyPolicyEngine({ cwd: scratch.dir });
 		strictEqual(confirmedPolicy.metadata().projectPolicyValid, true);
-		strictEqual(confirmedPolicy.evaluate({ tool: "verify", args: { check: "python" } }).kind, "ask");
+		strictEqual(confirmedPolicy.evaluate({ tool: "verify", args: { check: "absolute" } }).kind, "ask");
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),
 			JSON.stringify({
 				version: 1,
-				commands: [{ id: "approved-python", command: "python3 -m pytest -q test_index_policy.py", actionClass: "execute" }],
+				commands: [
+					{
+						id: "approved-absolute",
+						command: "/home/akougkas/iowarp/battletest-v044/python-env/bin/python -m pytest -q",
+						actionClass: "execute",
+					},
+				],
 			}),
 		);
 		strictEqual(
-			createSafetyPolicyEngine({ cwd: scratch.dir }).evaluate({ tool: "verify", args: { check: "python" } }).kind,
+			createSafetyPolicyEngine({ cwd: scratch.dir }).evaluate({ tool: "verify", args: { check: "absolute" } }).kind,
 			"ask",
 			"changed declarations need renewed approval",
 		);
 		approveSafety();
 		const approved = createSafetyPolicyEngine({ cwd: scratch.dir });
-		strictEqual(approved.evaluate({ tool: "verify", args: { check: "python" } }).kind, "allow");
+		strictEqual(approved.evaluate({ tool: "verify", args: { check: "absolute" } }).kind, "allow");
 		for (const row of cases.slice(1))
 			strictEqual(approved.evaluate({ tool: "verify", args: { check: row.id } }).kind, row.expected, row.id);
 	} finally {

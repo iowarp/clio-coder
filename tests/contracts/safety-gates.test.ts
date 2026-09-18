@@ -61,13 +61,21 @@ describe("safety gate boundary", () => {
 
 	it("recognizes only safe complete command chains inside the workspace", () => {
 		const policy = engine();
-		const admitted = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } });
+		const admitted = policy.evaluate({
+			tool: ToolNames.Bash,
+			args: { command: "cd pkg && npm run build && git status" },
+		});
 		strictEqual(admitted.kind, "ask");
 		strictEqual(
-			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } }, "confirmed").kind,
+			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build && git status" } }, "confirmed")
+				.kind,
 			"allow",
 		);
 		strictEqual(admitted.execRecognition, "recognized");
+		// A test runner is recognized without confirmation (#377), so the same chain runs.
+		const testChain = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } });
+		strictEqual(testChain.kind, "allow");
+		strictEqual(testChain.execRecognition, "recognized");
 
 		for (const command of [
 			"cd pkg && npm test && curl http://example.com",
