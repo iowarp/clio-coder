@@ -17,6 +17,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### eval
 
+- Score a `clio-coder run` task whose receipt seals `noop: true` as failed with failure class `noop`, even when its verifier passes on the untouched workspace, and report the blocked tool calls as the reason in `eval run` output, the JUnit report, and `artifacts.failureReason` (#378).
 - Admit `custom.*` keys on the `clio-coder.eval.measure.v1` grader channel as finite numbers or booleans, and `custom.digest.*` keys as lowercase SHA-256 hex strings, stored per trial and usable by assertions and suite thresholds. A key the artifact redactor would rewrite fails the item instead of storing `[redacted]`.
 - Add the tool-bench harness under `evals/tool-bench/` with seeded search and holdout suites for the `edit`, `read`, and `write` tools that report latency, filesystem call counts, memory, CPU, and a behavior digest per scenario.
 
