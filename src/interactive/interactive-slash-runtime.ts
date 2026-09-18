@@ -415,6 +415,17 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		shutdown: () => {
 			void deps.shutdown();
 		},
+		runDoctor: async ({ deep }) => {
+			// Loaded on first use: doctor pulls in every sweep it runs, and a
+			// session that never asks for it should not pay for them at boot.
+			const { collectDoctorFindings, doctorNotice } = await import("../cli/doctor.js");
+			const autonomy = deps.getSettings?.().safety.autonomy;
+			const findings = await collectDoctorFindings({
+				workspaceRoot: cwd(),
+				deep: deep ? { providers: deps.providers, ...(autonomy ? { autonomy } : {}) } : false,
+			});
+			return doctorNotice(findings);
+		},
 		listPrompts: () => deps.resources?.prompts(cwd()) ?? { items: [], diagnostics: [] },
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
