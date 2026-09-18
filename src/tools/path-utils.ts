@@ -1,7 +1,7 @@
 import { accessSync, constants } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve as resolvePath, sep } from "node:path";
-import { canonicalizeExistingPath } from "../core/path-canonical.js";
+import { isAbsolute, sep } from "node:path";
+import { canonicalizeRawPath } from "../core/path-canonical.js";
 
 /**
  * Render a path with forward slashes for a tool's observation.
@@ -53,10 +53,17 @@ export function expandPath(filePath: string): string {
 	return normalized;
 }
 
+/**
+ * Where the kernel lands a path, resolved by the same walk safety admission
+ * uses, so the file a tool touches is the file admission judged: `link/..`
+ * steps up from the link's target, not from the link's own directory. A path
+ * that cannot be canonicalized comes back joined but not normalized, so the
+ * syscall that follows fails on it the way the kernel would and a mutation
+ * refuses it.
+ */
 export function resolveToCwd(filePath: string, cwd: string = process.cwd()): string {
 	const expanded = expandPath(filePath);
-	const resolved = isAbsolute(expanded) ? resolvePath(expanded) : resolvePath(cwd, expanded);
-	return canonicalizeExistingPath(resolved);
+	return canonicalizeRawPath(expanded, cwd) ?? (isAbsolute(expanded) ? expanded : `${cwd}${sep}${expanded}`);
 }
 
 export function resolveReadPath(filePath: string, cwd: string = process.cwd()): string {
