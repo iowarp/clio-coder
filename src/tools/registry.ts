@@ -863,6 +863,19 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				return observeBlockedAttempt(admissionCall, outcome.verdict, options) ?? outcome.verdict;
 			}
 			if (outcome.kind === "execute") return runSpec(outcome.spec, admissionCall, outcome.decision, options);
+			// A park settles only through a listener's answer, so with no listener
+			// the promise would never resolve. Refuse the call instead, fail closed.
+			if (permissionListeners.size === 0) {
+				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
+				recordRegistryDisposition(admissionCall, outcome.decision, "denied", {
+					reasonCode: NO_PARK_LISTENER_REASON_CODE,
+				});
+				const loopReason = observeRejectedAttempt(admissionCall, outcome.decision, options);
+				return (
+					guardOverrideForRejectedAttempt(admissionCall, outcome.decision, loopReason) ??
+					parkAnsweredBlockedVerdict(outcome.decision, admissionCall.tool, loopReason ?? NO_PARK_LISTENER_REASON)
+				);
+			}
 			const abortReason = "run aborted before the operator decided";
 			if (options?.signal?.aborted) {
 				disposeAdmissionArgs(tools.get(admissionCall.tool as ToolName), admissionCall.args ?? {});
@@ -1081,6 +1094,10 @@ function applyRegisteredToolClassification(decision: SafetyDecision, spec: ToolS
 
 /** Final reason code for a before_tool guard block, matching the audit convention (sd-01 §2.5). */
 const GUARD_BLOCK_REASON_CODE = "guard_block";
+
+const NO_PARK_LISTENER_REASON_CODE = "no_park_listener";
+const NO_PARK_LISTENER_REASON =
+	"refused: this call needs operator confirmation and no permission listener is registered to ask for it";
 
 /**
  * Details key under which a tool body hands a refused nested verdict back to
