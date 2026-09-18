@@ -14,6 +14,7 @@
  */
 
 import {
+	type AssistantMessage,
 	type AssistantMessageEvent,
 	type AssistantMessageEventStream,
 	createAssistantMessageEventStream,
@@ -160,23 +161,38 @@ function generatedChars(event: AssistantMessageEvent): number {
 	return 0;
 }
 
+const runningWatchdogs = new Set<DegradedInferenceWatchdog>();
+
+/** How many watchdogs currently hold a poll timer. Every finished turn returns this to zero. */
+export function runningDegradedInferenceWatchdogs(): number {
+	return runningWatchdogs.size;
+}
+
 /**
- * Pass a local runtime's stream through unchanged while watching its token
- * rate. The clock starts at the `start` event, which both local paths push
- * once the server has answered the request, so a model load is never judged as
- * slow generation. Text, reasoning, and tool-call fragments all count. The
- * watch ends at `done`, `error`, or abort, and an abort also suppresses a
+ * The event stream a local runtime pushes into, watched for its token rate as
+ * events go through. The producer keeps its own loop and its own `try/catch`,
+ * so a failure mid-stream reaches the consumer exactly as it did unwatched;
+ * there is no second loop between them that could swallow a throw.
+ *
+ * The clock starts at the `start` event, which both local paths push once the
+ * server has answered the request, so a model load is never judged as slow
+ * generation. Text, reasoning, and tool-call fragments all count. The watch
+ * ends at `done`, `error`, `end()`, or abort, and an abort also suppresses a
  * notice still waiting on its resident listing.
  */
-export function watchDegradedInference(
-	source: AssistantMessageEventStream,
-	options: WatchDegradedInferenceOptions,
-): AssistantMessageEventStream {
+export function createDegradedInferenceStream(options: WatchDegradedInferenceOptions): AssistantMessageEventStream {
 	const stream = createAssistantMessageEventStream();
+	const push = stream.push.bind(stream);
+	const end = stream.end.bind(stream);
 	let watchdog: DegradedInferenceWatchdog | null = null;
 	const aborted = (): boolean => options.signal?.aborted === true;
-	const onAbort = (): void => watchdog?.stop();
-	options.signal?.addEventListener("abort", onAbort, { once: true });
+	const stop = (): void => {
+		options.signal?.removeEventListener("abort", stop);
+		if (watchdog === null) return;
+		watchdog.stop();
+		runningWatchdogs.delete(watchdog);
+	};
+	options.signal?.addEventListener("abort", stop, { once: true });
 	const onDegraded = (report: DegradedInferenceReport): void => {
 		void residentSummary(options).then((residents) => {
 			if (aborted()) return;
@@ -202,22 +218,19 @@ export function watchDegradedInference(
 			});
 		});
 	};
-	(async () => {
-		try {
-			for await (const event of source) {
-				if (event.type === "start" && watchdog === null && !aborted()) {
-					watchdog = startDegradedInferenceWatchdog({ ...options.timing, onDegraded });
-				}
-				const chars = generatedChars(event);
-				if (chars > 0) watchdog?.addTokens(ceilChars(chars));
-				if (event.type === "done" || event.type === "error") watchdog?.stop();
-				stream.push(event);
-			}
-			stream.end();
-		} finally {
-			watchdog?.stop();
-			options.signal?.removeEventListener("abort", onAbort);
+	stream.push = (event: AssistantMessageEvent): void => {
+		if (event.type === "start" && watchdog === null && !aborted()) {
+			watchdog = startDegradedInferenceWatchdog({ ...options.timing, onDegraded });
+			runningWatchdogs.add(watchdog);
 		}
-	})();
+		const chars = generatedChars(event);
+		if (chars > 0) watchdog?.addTokens(ceilChars(chars));
+		if (event.type === "done" || event.type === "error") stop();
+		push(event);
+	};
+	stream.end = (result?: AssistantMessage): void => {
+		stop();
+		end(result);
+	};
 	return stream;
 }

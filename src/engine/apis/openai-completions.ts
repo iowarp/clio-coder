@@ -37,7 +37,7 @@ import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-chan
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
-import { type WatchDegradedInferenceOptions, watchDegradedInference } from "./degraded-inference.js";
+import { createDegradedInferenceStream, type WatchDegradedInferenceOptions } from "./degraded-inference.js";
 import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
 import { ensureLmStudioResidency, listLmStudioResidentModels } from "./lmstudio.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
@@ -1062,19 +1062,20 @@ function degradedWatchOptions(
 }
 
 // Local servers answer a CPU spill with a crawl rather than an error, so the
-// streams reaching them run under the degraded-inference watchdog.
-function withLocalResidency(
+// streams reaching them run under the degraded-inference watchdog. The source
+// is iterated here, inside this catch, so a throw mid-stream still ends the
+// turn with an error event. Exported for the error-propagation contract.
+export function withLocalResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal },
 	sourceFactory: (requestModel: Model<"openai-completions">) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory(model);
-	const stream = createAssistantMessageEventStream();
+	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	(async () => {
 		try {
 			const requestModel = await ensureLocalResidency(model, options);
-			const source = watchDegradedInference(sourceFactory(requestModel), degradedWatchOptions(model, options));
-			for await (const event of source) {
+			for await (const event of sourceFactory(requestModel)) {
 				stream.push(event as AssistantMessageEvent);
 			}
 			stream.end();
