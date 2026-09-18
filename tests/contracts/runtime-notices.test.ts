@@ -34,7 +34,7 @@ const flush = (): Promise<void> => new Promise((resolve) => setImmediate(resolve
 
 // A fixture turn under the watchdog with a manual clock and a manual poll, so
 // the 30 second grace passes without waiting on the wall clock.
-function fixtureTurn(signal?: AbortSignal) {
+function fixtureTurn(signal?: AbortSignal, options: { defaultClock?: boolean } = {}) {
 	let clock = 0;
 	let poll: (() => void) | null = null;
 	const notices: RuntimeNoticePayload[] = [];
@@ -51,7 +51,7 @@ function fixtureTurn(signal?: AbortSignal) {
 			{ modelId: "nomic-embed-text" },
 		],
 		timing: {
-			now: () => clock,
+			...(options.defaultClock ? {} : { monotonicNow: () => clock }),
 			setTimer: (fn) => {
 				poll = fn;
 				return { cancel: () => (poll = null) };
@@ -139,6 +139,17 @@ describe("degraded-inference notice", () => {
 		await turn.tick();
 		await turn.finish();
 		strictEqual(turn.notices.length, 0);
+	});
+
+	it("judges elapsed time on a monotonic clock that a wall-clock step cannot move", async (t) => {
+		let wall = 1_700_000_000_000;
+		t.mock.method(Date, "now", () => wall);
+		const turn = fixtureTurn(undefined, { defaultClock: true });
+		await turn.start();
+		wall += 60_000;
+		await turn.tick();
+		await turn.finish();
+		strictEqual(turn.notices.length, 0, "a forward wall-clock step is not elapsed generation time");
 	});
 });
 

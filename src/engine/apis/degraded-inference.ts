@@ -18,11 +18,12 @@ import {
 	type AssistantMessageEventStream,
 	createAssistantMessageEventStream,
 } from "@earendil-works/pi-ai";
+import { rawDurationMs } from "../../core/timers.js";
 import { ceilChars } from "../../domains/session/context-accounting.js";
 import { declareRuntimeNoticeProducer } from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
 
-/** Wall-clock a prediction gets before its rate is judged. */
+/** Time a prediction gets before its rate is judged. */
 export const DEGRADED_GRACE_MS = 30_000;
 /** Sustained output tokens per second below which inference is reported as degraded. */
 export const DEGRADED_FLOOR_TOKENS_PER_SECOND = 2;
@@ -40,7 +41,12 @@ export interface DegradedInferenceTiming {
 	floorTokensPerSecond?: number;
 	/** Sampling interval; the watchdog checks the rate this often. */
 	pollMs?: number;
-	now?: () => number;
+	/**
+	 * Monotonic clock for the turn's span, defaulting to `performance.now`. A
+	 * stepped wall clock would fake a collapse on a forward step and hide one on
+	 * a backward step.
+	 */
+	monotonicNow?: () => number;
 	setTimer?: (fn: () => void, ms: number) => { cancel: () => void };
 }
 
@@ -67,18 +73,18 @@ function defaultTimer(fn: () => void, ms: number): { cancel: () => void } {
  * turn ends, in a `finally`, so a failed turn never leaves a timer behind.
  */
 function startDegradedInferenceWatchdog(options: DegradedInferenceOptions): DegradedInferenceWatchdog {
-	const now = options.now ?? Date.now;
+	const monotonicNow = options.monotonicNow ?? (() => performance.now());
 	const graceMs = options.graceMs ?? DEGRADED_GRACE_MS;
 	const floor = options.floorTokensPerSecond ?? DEGRADED_FLOOR_TOKENS_PER_SECOND;
 	const pollMs = options.pollMs ?? 5_000;
-	const startedAt = now();
+	const startedAt = monotonicNow();
 	let tokens = 0;
 	let reported = false;
 	let stopped = false;
 
 	const check = (): void => {
 		if (reported || stopped) return;
-		const elapsedMs = now() - startedAt;
+		const elapsedMs = rawDurationMs(startedAt, monotonicNow());
 		if (elapsedMs < graceMs) return;
 		const tokensPerSecond = tokens / (elapsedMs / 1000);
 		if (tokensPerSecond >= floor) return;
