@@ -4,8 +4,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
-### Fixed
+### providers
 - Read the context window a resident Ollama model is actually served at from `/api/ps`, so an `ollama-native` target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
+- Read an Ollama model's maximum context window from `/api/show` (and from `/api/tags` where the server reports it there), so a model that is not resident is planned against its real maximum instead of the assumed default, and `clio-coder targets --probe` shows the serving window beside the maximum.
 
 ## 0.4.9 - 2026-09-17
 

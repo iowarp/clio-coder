@@ -1097,6 +1097,10 @@ Target status resolution tracks provenance explicitly in `TargetStatus.contextWi
 
 When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio-coder targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio-coder configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
 
+A runtime that reports the window a resident model is loaded at (LM Studio, and Ollama through `/api/ps`) bounds the session by that serving window, because a model open at 32,768 tokens rejects a longer prompt whatever its weights allow. The text output then names both numbers, as in `ctx 32768 (serving; model max 262144)`, so the operator can see which one a run is planned against. In JSON output the serving window is `discoveredModelStates.<model>.contextLength` and the maximum is `capabilities.contextWindow`.
+
+An `ollama-native` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident the maximum is the planning window; Ollama may still load the model below it (`OLLAMA_CONTEXT_LENGTH` or the server default), which the probe cannot see until the model is loaded.
+
 ---
 
 ## Local Model Quirks
