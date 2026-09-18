@@ -1,9 +1,11 @@
-import { match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { pathToFileURL } from "node:url";
+import { runStatusForOutcome } from "../../src/domains/dispatch/outcome.js";
 import { type HeadlessScratch, headlessScratch, runCli, sealedReceipt } from "../harness/headless-run.js";
 import { closeServer, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
 
@@ -113,7 +115,10 @@ describe("clio-coder run --timeout", () => {
 		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
 		strictEqual(receipt.outcome, "timed_out");
 		strictEqual(receipt.exitCode, 124);
-		strictEqual(envelope.status, "interrupted");
+		// The status a dispatched worker's timed_out receipt seals with, which
+		// orphan recovery re-derives from the outcome when it re-verifies.
+		strictEqual(envelope.status, "failed");
+		strictEqual(envelope.status, runStatusForOutcome(receipt.outcome));
 		match(receipt.outcomeDetail ?? "", /timed out after 2s \(--timeout\)/);
 	});
 
@@ -140,6 +145,28 @@ describe("clio-coder run --timeout", () => {
 		notStrictEqual(receipt.outcomeDetail, "noop");
 		strictEqual(receipt.noop, true);
 		ok((receipt.safety?.blockedAttempts.length ?? 0) > 0);
+	});
+
+	it("disarms the deadline on an early usage-error return while the process is held open", async () => {
+		// The CLI sets process.exitCode and lets the event loop drain. A preloaded
+		// module holds the loop open past the deadline, standing in for any
+		// lingering handle, so an armed timer would fire and exit 124 over the 2.
+		const scratch = headlessScratch("clio-coder-run-timeout-early-");
+		scratches.push(scratch);
+		const hold = join(scratch.root, "hold-open.mjs");
+		writeFileSync(hold, "setTimeout(() => {}, 2500);\n");
+		const env = {
+			...scratch.env,
+			NODE_OPTIONS: `${scratch.env.NODE_OPTIONS ?? ""} --import=${pathToFileURL(hold).href}`.trim(),
+		};
+		const turn = await runCli(["run", "--timeout", "1", "--cwd", join(scratch.root, "nonexistent"), "task"], {
+			env,
+			cwd: scratch.root,
+		});
+		strictEqual(turn.code, 2, turn.stderr);
+		match(turn.stderr, /--cwd is not a directory this process can enter/);
+		doesNotMatch(turn.stderr, /--timeout 1s elapsed/);
+		ok(turn.elapsedMs >= 2000, `the hold must keep the process alive past the deadline (${turn.elapsedMs}ms)`);
 	});
 
 	it("treats a missing, non-positive, or non-numeric value as a usage error", async () => {
