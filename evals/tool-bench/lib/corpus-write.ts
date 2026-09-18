@@ -35,7 +35,7 @@ export interface WriteScenario extends ScenarioBase {
 	args: WriteCall;
 }
 
-type WriteError = "directory" | "escape" | "symlink-escape" | "readonly-parent";
+type WriteError = "directory" | "escape" | "symlink-escape" | "dotdot-link-escape" | "readonly-parent";
 
 export interface WriteTemplate {
 	key: string;
@@ -123,6 +123,7 @@ export const WRITE_TEMPLATES: readonly WriteTemplate[] = [
 	{ key: "err-directory", profile: "default", bytes: 1 * KB, ...TEXT, error: "directory" },
 	{ key: "err-escape", profile: "default", bytes: 1 * KB, ...TEXT, error: "escape" },
 	{ key: "err-symlink-escape", profile: "default", bytes: 1 * KB, ...TEXT, error: "symlink-escape" },
+	{ key: "err-dotdot-link-escape", profile: "default", bytes: 1 * KB, ...TEXT, error: "dotdot-link-escape" },
 	{ key: "err-readonly-parent", profile: "default", bytes: 1 * KB, ...TEXT, error: "readonly-parent" },
 ];
 
@@ -176,6 +177,12 @@ export function generateWriteScenario(seed: number, split: Split, key: string): 
 	if (template.error === "symlink-escape") {
 		keep({ kind: "symlink", path: "data/out.txt", target: "../../escape.txt" });
 		callPath = "data/out.txt";
+	}
+	if (template.error === "dotdot-link-escape") {
+		// The link stays inside, but `..` from its target, the scratch root, is
+		// outside. path.resolve would read the call as data/escape.txt.
+		keep({ kind: "symlink", path: "data/up", target: ".." });
+		callPath = "data/up/../escape.txt";
 	}
 	if (template.error === "readonly-parent") {
 		keep({ kind: "dir", path: "ro", mode: 0o555 });

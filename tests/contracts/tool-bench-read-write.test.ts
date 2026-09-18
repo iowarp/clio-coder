@@ -7,6 +7,7 @@ import {
 	DEFAULT_SEED,
 	generateCorpus,
 	generateScenario,
+	parseScenarioId,
 	type Scenario,
 	SPLITS,
 	scenarioContentHash,
@@ -18,7 +19,7 @@ import { isRedactedArtifactKey } from "../../src/domains/eval/artifacts/redact.j
 import type { ToolSpec } from "../../src/tools/registry.js";
 
 const TOOLS = ["read", "write"] as const;
-const DEFAULT_COUNTS = { read: 21, write: 16 } as const;
+const DEFAULT_COUNTS = { read: 22, write: 17 } as const;
 
 /**
  * Scenarios that expect a refusal the tool path does not give yet. Each stays
@@ -26,6 +27,18 @@ const DEFAULT_COUNTS = { read: 21, write: 16 } as const;
  * the entry comes out.
  */
 const KNOWN_GAPS = new Set<string>();
+
+/**
+ * `..` through a symlink resolves physically, as the kernel resolves it. The
+ * write parks as out of the root and the read names the file outside it, so
+ * a lexical `link/..` anywhere on either path moves these.
+ */
+const DOTDOT_LINK_ESCAPE_DIGESTS: Readonly<Record<string, string>> = {
+	"write.search.err-dotdot-link-escape": "331303e090a1dbf10f98424e7c5d1bdbba3d9694077b547e2faa2bb95d1bc3df",
+	"write.holdout.err-dotdot-link-escape": "331303e090a1dbf10f98424e7c5d1bdbba3d9694077b547e2faa2bb95d1bc3df",
+	"read.search.err-dotdot-link-escape": "9771c18c8b3674c3c7a7033e0b3ed0418bad2c0e6c0daccab89986d3d2587dfe",
+	"read.holdout.err-dotdot-link-escape": "7cabc22231642b456f8c6a9f359fdeffce846df97c86060ab09cadd07126d0ad",
+};
 
 // The 100 MB templates are exercised by the full-profile suites, not here.
 function smallCorpus(tool: (typeof TOOLS)[number], seed: number, split: (typeof SPLITS)[number]): Scenario[] {
@@ -140,8 +153,8 @@ describe("tool-bench read and write driver", () => {
 		}
 	});
 
-	it("parks a lexical escape and a symlink escape alike and leaves nothing outside the scratch root", async () => {
-		for (const key of ["err-escape", "err-symlink-escape"]) {
+	it("parks a lexical escape, a symlink escape, and a `link/..` escape alike and leaves nothing outside the scratch root", async () => {
+		for (const key of ["err-escape", "err-symlink-escape", "err-dotdot-link-escape"]) {
 			const parked = await runScenario(generateScenario("write", DEFAULT_SEED, "search", key), { warmup: 0 });
 			strictEqual(parked.outcome, "error", key);
 			strictEqual(parked.errorClass, "Error", key);
@@ -156,6 +169,15 @@ describe("tool-bench read and write driver", () => {
 			);
 			strictEqual(behavior.outside, undefined, key);
 			strictEqual(parked.solved, true, key);
+		}
+	});
+
+	it("keeps the digests of the `link/..` escapes", async () => {
+		for (const [id, digest] of Object.entries(DOTDOT_LINK_ESCAPE_DIGESTS)) {
+			const { tool, split, key } = parseScenarioId(id);
+			const measured = await runScenario(generateScenario(tool, DEFAULT_SEED, split, key), { warmup: 0 });
+			strictEqual(measured.solved, true, id);
+			strictEqual(measured.digest, digest, id);
 		}
 	});
 

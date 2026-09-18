@@ -147,6 +147,15 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario write.search.err-symlink-escape --seed 1 --split search
     metrics: *metrics
     timeoutMs: 60000
+  - id: write.search.err-dotdot-link-escape
+    tags: [tool-bench, write, search]
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/tool-bench/lib/driver.ts --scenario write.search.err-dotdot-link-escape --seed 1 --split search
+    metrics: *metrics
+    timeoutMs: 60000
   - id: write.search.err-readonly-parent
     tags: [tool-bench, write, search]
     workspace: *workspace
