@@ -11,7 +11,7 @@ import {
 	stripBom,
 } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 const DIFF_LIMIT = 1024 * 1024;
@@ -166,50 +166,54 @@ export const editTool: ToolSpec = {
 		if (!edits || edits.length === 0) {
 			return { kind: "error", message: 'edit: provide edits as [{"oldText":"...","newText":"..."}, ...]' };
 		}
-		const filePath = resolveToCwd(pathArg);
+		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 
 		try {
-			return await withFileMutationQueue(filePath, async () => {
-				const info = await stat(filePath);
-				if (!info.isFile()) throw new Error("Refusing directory or non-file target");
-				const bytes = await readFile(filePath);
-				const originalEnding = await classifyEndings(bytes);
-				let rawContent: string;
-				try {
-					rawContent = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
-				} catch {
-					throw new Error(`Invalid UTF-8 at byte offset ${await invalidUtf8Offset(bytes)}`);
-				}
-				const { bom, text: content } = stripBom(rawContent);
-				let finalContent: string;
-				let diff: ReturnType<typeof generateDiffString> | undefined;
-				if (bytes.length > DIFF_LIMIT) {
-					finalContent = bom + applyLargeExactEdits(content, edits, originalEnding);
-				} else {
-					const applied = applyEditsToNormalizedContent(normalizeToLF(content), edits, pathArg);
-					finalContent = bom + restoreLineEndings(applied.newContent, originalEnding);
-					if (Buffer.byteLength(finalContent, "utf8") <= DIFF_LIMIT) {
-						diff = generateDiffString(applied.baseContent, applied.newContent);
+			return await withFileMutationQueue(
+				filePath,
+				async () => {
+					const info = await stat(filePath);
+					if (!info.isFile()) throw new Error("Refusing directory or non-file target");
+					const bytes = await readFile(filePath);
+					const originalEnding = await classifyEndings(bytes);
+					let rawContent: string;
+					try {
+						rawContent = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
+					} catch {
+						throw new Error(`Invalid UTF-8 at byte offset ${await invalidUtf8Offset(bytes)}`);
 					}
-				}
-				const file = await publishFileAtomically(filePath, finalContent);
-				// The validation nudge is point-of-failure conditioning: measured on
-				// a live 35B coder worker, the model edited correctly and then spent
-				// its remaining calls "validating" with navigation tools (code_nav
-				// deps) until the loop guard aborted the run. Naming the real
-				// validation path on the mutation result is the deterministic channel
-				// every agent sees at exactly the moment it matters.
-				return {
-					kind: "ok",
-					output: `edited ${pathArg}: ${edits.length} replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits.${!diff ? "\nnote: diff skipped because the previous or new file exceeds 1 MiB" : ""}${file.durabilityWarning ? `\n${file.durabilityWarning}` : ""}`,
-					details: {
-						file: { before: file.before, after: file.after },
-						diff: diff?.diff,
-						firstChangedLine: diff?.firstChangedLine,
-						paths: [filePath],
-					},
-				};
-			});
+					const { bom, text: content } = stripBom(rawContent);
+					let finalContent: string;
+					let diff: ReturnType<typeof generateDiffString> | undefined;
+					if (bytes.length > DIFF_LIMIT) {
+						finalContent = bom + applyLargeExactEdits(content, edits, originalEnding);
+					} else {
+						const applied = applyEditsToNormalizedContent(normalizeToLF(content), edits, pathArg);
+						finalContent = bom + restoreLineEndings(applied.newContent, originalEnding);
+						if (Buffer.byteLength(finalContent, "utf8") <= DIFF_LIMIT) {
+							diff = generateDiffString(applied.baseContent, applied.newContent);
+						}
+					}
+					const file = await publishFileAtomically(filePath, finalContent);
+					// The validation nudge is point-of-failure conditioning: measured on
+					// a live 35B coder worker, the model edited correctly and then spent
+					// its remaining calls "validating" with navigation tools (code_nav
+					// deps) until the loop guard aborted the run. Naming the real
+					// validation path on the mutation result is the deterministic channel
+					// every agent sees at exactly the moment it matters.
+					return {
+						kind: "ok",
+						output: `edited ${pathArg}: ${edits.length} replacement(s). Validate now: rerun the failing test or verify; navigation tools do not validate edits.${!diff ? "\nnote: diff skipped because the previous or new file exceeds 1 MiB" : ""}${file.durabilityWarning ? `\n${file.durabilityWarning}` : ""}`,
+						details: {
+							file: { before: file.before, after: file.after },
+							diff: diff?.diff,
+							firstChangedLine: diff?.firstChangedLine,
+							paths: [filePath],
+						},
+					};
+				},
+				physical,
+			);
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			const code = (err as NodeJS.ErrnoException | undefined)?.code;

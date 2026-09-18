@@ -3,7 +3,7 @@ import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
 import { generateDiffString } from "./edit-diff.js";
 import { publishFileAtomically, withFileMutationQueue } from "./file-mutation-queue.js";
-import { resolveToCwd } from "./path-utils.js";
+import { resolveMutationTarget } from "./path-utils.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
 export const writeTool: ToolSpec = {
@@ -22,39 +22,43 @@ export const writeTool: ToolSpec = {
 		const content =
 			typeof args.content === "string" ? args.content : args.content === undefined ? null : String(args.content);
 		if (content === null) return { kind: "error", message: "write: missing content argument" };
-		const filePath = resolveToCwd(pathArg);
+		const { path: filePath, physical } = resolveMutationTarget(pathArg);
 		try {
 			const bytes = Buffer.byteLength(content, "utf8");
-			const { file, diff, previousEndedWithNewline, skipDiff } = await withFileMutationQueue(filePath, async () => {
-				const previous = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
-					if (error.code === "ENOENT") return null;
-					throw error;
-				});
-				if (previous && !previous.isFile()) throw new Error("Refusing directory or non-file target");
-				let skipDiff = Math.max(previous?.size ?? 0, bytes) > 1024 * 1024;
-				let previousContent = "";
-				if (previous && !skipDiff) {
-					const handle = await open(filePath, "r");
-					try {
-						// The sentinel bounds the actual read even if an external writer
-						// grows or replaces the file after the earlier metadata check.
-						const buffer = Buffer.allocUnsafe(1024 * 1024 + 1);
-						let total = 0;
-						while (total < buffer.length) {
-							const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
-							if (bytesRead === 0) break;
-							total += bytesRead;
+			const { file, diff, previousEndedWithNewline, skipDiff } = await withFileMutationQueue(
+				filePath,
+				async () => {
+					const previous = await stat(filePath).catch((error: NodeJS.ErrnoException) => {
+						if (error.code === "ENOENT") return null;
+						throw error;
+					});
+					if (previous && !previous.isFile()) throw new Error("Refusing directory or non-file target");
+					let skipDiff = Math.max(previous?.size ?? 0, bytes) > 1024 * 1024;
+					let previousContent = "";
+					if (previous && !skipDiff) {
+						const handle = await open(filePath, "r");
+						try {
+							// The sentinel bounds the actual read even if an external writer
+							// grows or replaces the file after the earlier metadata check.
+							const buffer = Buffer.allocUnsafe(1024 * 1024 + 1);
+							let total = 0;
+							while (total < buffer.length) {
+								const { bytesRead } = await handle.read(buffer, total, buffer.length - total, total);
+								if (bytesRead === 0) break;
+								total += bytesRead;
+							}
+							skipDiff = total > 1024 * 1024;
+							if (!skipDiff) previousContent = buffer.toString("utf8", 0, total);
+						} finally {
+							await handle.close();
 						}
-						skipDiff = total > 1024 * 1024;
-						if (!skipDiff) previousContent = buffer.toString("utf8", 0, total);
-					} finally {
-						await handle.close();
 					}
-				}
-				const diff = skipDiff ? undefined : generateDiffString(previousContent, content).diff;
-				const file = await publishFileAtomically(filePath, content);
-				return { file, diff, previousEndedWithNewline: previousContent.endsWith("\n"), skipDiff };
-			});
+					const diff = skipDiff ? undefined : generateDiffString(previousContent, content).diff;
+					const file = await publishFileAtomically(filePath, content);
+					return { file, diff, previousEndedWithNewline: previousContent.endsWith("\n"), skipDiff };
+				},
+				physical,
+			);
 			let output = `wrote ${bytes}B to ${pathArg}`;
 			if (skipDiff) output += "\nnote: diff skipped because the previous or new file exceeds 1 MiB";
 			if (file.durabilityWarning) output += `\n${file.durabilityWarning}`;

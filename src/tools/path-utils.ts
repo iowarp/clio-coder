@@ -62,8 +62,22 @@ export function expandPath(filePath: string): string {
  * refuses it.
  */
 export function resolveToCwd(filePath: string, cwd: string = process.cwd()): string {
+	return resolveMutationTarget(filePath, cwd).path;
+}
+
+/**
+ * resolveToCwd, plus the physical target when the walk finished. A mutation
+ * passes physical to withFileMutationQueue in the same synchronous step, so
+ * the queue keys the path this walk found instead of walking it again.
+ */
+export function resolveMutationTarget(
+	filePath: string,
+	cwd: string = process.cwd(),
+): { path: string; physical: string | undefined } {
 	const expanded = expandPath(filePath);
-	return canonicalizeRawPath(expanded, cwd) ?? (isAbsolute(expanded) ? expanded : `${cwd}${sep}${expanded}`);
+	const physical = canonicalizeRawPath(expanded, cwd);
+	if (physical !== null) return { path: physical, physical };
+	return { path: isAbsolute(expanded) ? expanded : `${cwd}${sep}${expanded}`, physical: undefined };
 }
 
 export function resolveReadPath(filePath: string, cwd: string = process.cwd()): string {
