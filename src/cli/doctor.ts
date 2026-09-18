@@ -168,6 +168,21 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	];
 }
 
+/**
+ * The in-session rendering of a doctor run: the same report the CLI prints,
+ * headed by a tally, at the level of its worst row.
+ */
+export function doctorNotice(findings: ReadonlyArray<DoctorFinding>): {
+	level: "success" | "warn" | "error";
+	text: string;
+} {
+	const errors = findings.filter((f) => !f.ok).length;
+	const warnings = findings.filter((f) => f.ok && f.level === "warn").length;
+	const level = errors > 0 ? "error" : warnings > 0 ? "warn" : "success";
+	const head = `doctor: ${findings.length} checks, ${errors} error(s), ${warnings} warning(s)`;
+	return { level, text: `${head}\n${formatDoctorReport([...findings])}` };
+}
+
 interface DoctorArgs {
 	fix: boolean;
 	json: boolean;

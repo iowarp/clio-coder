@@ -137,6 +137,7 @@ export interface LibraryBrowseRequest {
 
 type SlashCommandVariant =
 	| { kind: "mcp"; argv: string[] }
+	| { kind: "doctor"; deep: boolean }
 	| { kind: "quit" }
 	| { kind: "help"; query?: string }
 	| { kind: "init"; options: InitCommandOptions }
@@ -708,6 +709,13 @@ export interface SlashCommandContext {
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openCost: () => void;
 	/**
+	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
+	 * `deep` adds the live tool probe on the session's targets and the
+	 * validation-contract dry run at the session's autonomy. Absent on a host
+	 * with no providers, in which case the command says so.
+	 */
+	runDoctor?: (options: { deep: boolean }) => Promise<{ level: NoticeLevel; text: string }>;
+	/**
 	 * `/btw <question>`: one model round beside the session, answered in an
 	 * overlay. Nothing about it enters the transcript, the ledger, or the task
 	 * board, so the workers a fleet run briefs never see the question or its
@@ -1250,6 +1258,42 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			if (command.kind !== "mcp") return;
 			const result = mcpCommandOutput(command.argv);
 			ctx.notice(result.code ? "error" : "info", result.text);
+		},
+	},
+	{
+		name: "doctor",
+		description: "Diagnose this install in-session; /doctor deep adds live tool probes and a contract dry run",
+		group: "Inspect",
+		kinds: ["doctor"],
+		args: { positionals: [{ name: "deep", required: false, values: ["deep"] }] },
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "usage-error", command: "doctor", reason: parsed.error };
+			if (parsed.positionals[0] && parsed.positionals[0] !== "deep")
+				return { kind: "usage-error", command: "doctor", reason: "doctor accepts only deep" };
+			return { kind: "doctor", deep: parsed.positionals[0] === "deep" };
+		},
+		handle(command, ctx) {
+			if (command.kind !== "doctor") return;
+			const runDoctor = ctx.runDoctor;
+			if (!runDoctor) {
+				ctx.notice("error", "doctor is not wired in this session; run clio-coder doctor from a shell");
+				return;
+			}
+			ctx.notice(
+				"info",
+				command.deep
+					? "doctor: running deep checks; the tool probe can load a cold local model and releases only that one"
+					: "doctor: running checks",
+			);
+			void (async () => {
+				try {
+					const report = await runDoctor({ deep: command.deep });
+					ctx.notice(report.level, report.text);
+				} catch (error) {
+					ctx.notice("error", `doctor failed: ${error instanceof Error ? error.message : String(error)}`);
+				}
+				ctx.render();
+			})();
 		},
 	},
 	{
@@ -2595,6 +2639,7 @@ const COMMAND_ORDER = [
 	"view",
 	"panes",
 	"cost",
+	"doctor",
 	"decisions",
 	"library",
 	"skills",
