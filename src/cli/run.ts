@@ -88,6 +88,10 @@ layers, context files, skills, @file references, the session ledger, and every
 tool path. A run started with --cwd <dir> behaves as if it had been started in
 <dir>, so relative paths in other arguments resolve there too. A directory the
 process cannot enter is a usage error (exit 2) and no model is called.
+CLIO_CODER_HOME, CLIO_CODER_CONFIG_DIR, CLIO_CODER_DATA_DIR,
+CLIO_CODER_STATE_DIR, and CLIO_CODER_CACHE_DIR are not resolved before the
+chdir, so a relative value lands under <dir>. Pass absolute paths in them
+when using --cwd.
 
 A headless turn starts a fresh session unless --session or --continue names one
 to append to. A named session that cannot be resumed fails the run: an answer
@@ -101,9 +105,11 @@ their stated defaults; supply decisions in the task prompt instead.
 Every main-agent receipt records blocked calls under safety.blockedAttempts and
 a noop flag. A run is a no-op when a tool call was blocked and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
-is not. By default a no-op run that answered still exits 0. With --fail-on-noop
-it exits 1 and its receipt seals outcome "failed" with outcomeDetail "noop".
-The flag applies to the main agent only.
+is not. Only the main agent's own write-class calls count as writes: an
+artifact report, bash, and dispatch work do not. By default a no-op run that
+answered still exits 0. With --fail-on-noop it exits 1 and its receipt seals
+outcome "failed" with outcomeDetail "noop". The flag applies to the main agent
+only.
 
 --timeout <seconds> bounds the whole run, boot included. On expiry the run
 starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a
