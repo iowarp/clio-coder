@@ -42,6 +42,8 @@ export interface RunCliArgs {
 	sessionId?: string;
 	/** Resume the most recent session for this workspace. */
 	continueSession: boolean;
+	/** Directory the run enters before it resolves anything against the working directory. */
+	cwd?: string;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -222,6 +224,11 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			if (value !== null) {
 				parsed.steerChannel = value;
 			}
+			continue;
+		}
+		if (arg === "--cwd") {
+			const value = need(arg);
+			if (value !== null) parsed.cwd = value;
 			continue;
 		}
 		if (arg?.startsWith("-")) {

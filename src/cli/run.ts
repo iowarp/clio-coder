@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import path from "node:path";
 import { type ClioSettings, readSettings } from "../core/config.js";
 import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
@@ -44,13 +46,14 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio-coder run [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
 Run one headless main-agent turn. Fleet dispatch is explicit with --agent.
 
 Flags:
+  --cwd <dir>               run as if started in <dir>; applies to --agent too
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
@@ -76,6 +79,12 @@ Flags:
   --skill <path>            load one explicit skill for this run, repeatable
   --no-skills               disable skill discovery while still honoring --skill
 
+--cwd enters <dir> before anything reads the working directory: settings
+layers, context files, skills, @file references, the session ledger, and every
+tool path. A run started with --cwd <dir> behaves as if it had been started in
+<dir>, so relative paths in other arguments resolve there too. A directory the
+process cannot enter is a usage error (exit 2) and no model is called.
+
 A headless turn starts a fresh session unless --session or --continue names one
 to append to. A named session that cannot be resumed fails the run: an answer
 written without the history the caller asked for is worse than no answer. The
@@ -90,6 +99,25 @@ message after it, because writing the artifact is the answer. Text mode prints
 that tool's result line, naming what was written and where; --json carries the
 artifact content itself in the event stream.
 `;
+
+/**
+ * Enter the directory `--cwd` names, the way `acp --cwd` does. Everything a run
+ * resolves against the working directory reads `process.cwd()`: layered
+ * settings, context files, skill discovery, `@file` references, the session
+ * ledger, and every tool path (`src/tools/path-utils.ts`). So the chdir happens
+ * before any of that, and the path is canonicalized first so the receipt and
+ * every later comparison name the same physical directory. Returns null on
+ * success, or the resolved path that could not be entered.
+ */
+function enterRunCwd(value: string): string | null {
+	const resolved = path.resolve(value);
+	try {
+		process.chdir(realpathSync(resolved));
+		return null;
+	} catch {
+		return resolved;
+	}
+}
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
 	return (
@@ -258,6 +286,13 @@ export async function runClioRun(
 				process.stderr.write("clio-coder run: --session and --continue apply to the main agent, not --agent dispatch\n");
 				process.stderr.write(USAGE);
 				return 2;
+			}
+			if (parsed.cwd !== undefined) {
+				const unusable = enterRunCwd(parsed.cwd);
+				if (unusable !== null) {
+					process.stderr.write(`clio-coder run: --cwd is not a directory this process can enter: ${unusable}\n`);
+					return 2;
+				}
 			}
 
 			const noSkills = options.noSkills === true || parsed.noSkills === true;
