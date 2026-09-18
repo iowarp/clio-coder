@@ -435,7 +435,7 @@ async function measureTaskOutcome(
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	cwd: string,
 	env?: NodeJS.ProcessEnv,
-): Promise<{ metrics: Record<string, number | boolean>; executionObservation?: EvalExecutionObservationV1 }> {
+): Promise<{ metrics: Record<string, number | string | boolean>; executionObservation?: EvalExecutionObservationV1 }> {
 	const commands = task.verify.measure ?? [];
 	if (commands.length === 0) return { metrics: {} };
 	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs, env);
@@ -451,10 +451,10 @@ async function measureTaskOutcome(
 }
 
 function graderBehaviorMeasurement(stdout: string): {
-	metrics: Record<string, number | boolean>;
+	metrics: Record<string, number | string | boolean>;
 	executionObservation?: EvalExecutionObservationV1;
 } {
-	const metrics: Record<string, number | boolean> = {};
+	const metrics: Record<string, number | string | boolean> = {};
 	let executionObservation: EvalExecutionObservationV1 | undefined;
 	for (const line of stdout.split(/\r?\n/u)) {
 		if (line.trim().length === 0) continue;
@@ -468,7 +468,7 @@ function graderBehaviorMeasurement(stdout: string): {
 		if (normalizeEvalSchemaId(value.schema) === "clio-coder.eval.measure.v1" && isRecord(value.metrics)) {
 			for (const [key, metric] of Object.entries(value.metrics)) {
 				if (!isAdmittedMeasureMetricKey(key)) continue;
-				if (typeof metric === "boolean" || (typeof metric === "number" && Number.isFinite(metric))) metrics[key] = metric;
+				if (isAdmittedMeasureMetricValue(key, metric)) metrics[key] = metric;
 			}
 		}
 		if (normalizeEvalSchemaId(value.schema) === "clio-coder.eval.execution-observation.v1") {
@@ -479,7 +479,9 @@ function graderBehaviorMeasurement(stdout: string): {
 }
 
 const CUSTOM_MEASURE_METRIC_PREFIX = "custom.";
+const CUSTOM_DIGEST_METRIC_PREFIX = "custom.digest.";
 const CUSTOM_MEASURE_METRIC_KEY = /^[A-Za-z0-9._-]{1,128}$/u;
+const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
 /**
  * A grader may report the two legacy behavior keys and any key in the
@@ -488,17 +490,30 @@ const CUSTOM_MEASURE_METRIC_KEY = /^[A-Za-z0-9._-]{1,128}$/u;
  * `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*` and turn a
  * failed grade into a pass. A custom key that storage would redact is refused
  * with an error naming it, because the stored value would silently become the
- * string `[redacted]` and every numeric assertion on it would then fail.
+ * string `[redacted]` and every numeric assertion on it would then fail. A bare
+ * `custom.` or `custom.digest.` names nothing and is dropped.
  */
 function isAdmittedMeasureMetricKey(key: string): boolean {
 	if (key === "claims.unsupported" || key === "completion.reported") return true;
 	if (!key.startsWith(CUSTOM_MEASURE_METRIC_PREFIX) || !CUSTOM_MEASURE_METRIC_KEY.test(key)) return false;
+	if (key === CUSTOM_MEASURE_METRIC_PREFIX || key === CUSTOM_DIGEST_METRIC_PREFIX) return false;
 	if (isRedactedArtifactKey(key)) {
 		throw new Error(
 			`measure metric ${key} matches the artifact redaction pattern and would be stored as "[redacted]"; rename the metric`,
 		);
 	}
 	return true;
+}
+
+/**
+ * Measure values are finite numbers or booleans. The one exception is a key
+ * under `custom.digest.`, which carries only a lowercase hex SHA-256 string; that
+ * is how a behavior digest reaches the sealed artifact. A value of any other
+ * type or shape is dropped.
+ */
+function isAdmittedMeasureMetricValue(key: string, value: unknown): value is number | string | boolean {
+	if (key.startsWith(CUSTOM_DIGEST_METRIC_PREFIX)) return typeof value === "string" && SHA256_HEX.test(value);
+	return typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
 }
 
 function parseExecutionObservation(value: Record<string, unknown>): EvalExecutionObservationV1 {
