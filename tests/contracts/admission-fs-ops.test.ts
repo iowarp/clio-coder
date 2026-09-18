@@ -19,8 +19,8 @@ const { generateScenario } = await import("../../evals/tool-bench/lib/corpus.js"
  * a walk repeated inside the same call raises these and fails here.
  */
 const PINNED_FS_OPS = {
-	"edit.search.size-1k-head": 42,
-	"write.search.create-1k": 52,
+	"edit.search.size-1k-head": 41,
+	"write.search.create-1k": 51,
 } as const;
 
 describe("admission fs calls", () => {
