@@ -655,6 +655,11 @@
         These effort levels come from that server diagnostic, not from
         Qwen or Qwopus name similarity. Other capabilities remain supplied
         by the route probe; no sampler, hardware, or context size is inherited.
+        Since 2026-09-18 the mini/qwopus3.8-27b-dense route is mini's default
+        and serves Qwopus3.8-27B-Flash-MTP IQ4_XS, four slots sharing one
+        262144-token pool with q8_0 KV (dotfiles 1cc3773). Its preset sets
+        reasoning-effort high. The effort levels below were measured on the
+        -q6 route only and have not been re-measured on this deployment.
     thinking:
       mechanism: effort-levels
       effortByLevel:
