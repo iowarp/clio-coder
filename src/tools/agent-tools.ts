@@ -88,6 +88,12 @@ export interface ToolFinishEvent {
 	reason?: string;
 	actionClass?: string;
 	decision?: "allowed" | "blocked" | "permission_requested";
+	/**
+	 * The blocked call had parked for approval and the park was answered without
+	 * one (`RegistryVerdict.deniedPark`). `decision` still says `blocked` for it,
+	 * as it always has; this says the block was a refused ask.
+	 */
+	deniedPark?: true;
 	ruleId?: string;
 	reasonCode?: string;
 	policySource?: string;
@@ -197,6 +203,7 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			...withCallId,
 			reason: verdict.reason,
 			...(verdict.kind === "blocked" ? { decision: verdict.decision } : {}),
+			...(verdict.kind === "blocked" && verdict.deniedPark === true ? { deniedPark: true } : {}),
 		});
 		// The model sees only this thrown message. The short verdict reason
 		// starves the next turn of the policy's why and how-to-recover, so
@@ -251,6 +258,7 @@ function emitFinish(
 		reason?: string;
 		terminate?: boolean;
 		decision?: SafetyDecision;
+		deniedPark?: true;
 		skillActivation?: SkillActivation;
 		toolCallId?: string;
 	},
@@ -265,6 +273,7 @@ function emitFinish(
 	if (extra?.toolCallId !== undefined) event.toolCallId = extra.toolCallId;
 	if (extra?.reason !== undefined) event.reason = extra.reason;
 	if (extra?.terminate === true) event.terminate = true;
+	if (extra?.deniedPark === true) event.deniedPark = true;
 	if (extra?.decision !== undefined) {
 		event.actionClass = extra.decision.classification.actionClass;
 		const permissionWasRequired =

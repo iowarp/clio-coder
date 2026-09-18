@@ -145,14 +145,18 @@ when Clio is already inside a reachable herdr session.
 
 ### Headless No-op Runs
 
-Every headless main-agent receipt carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked`, `permissionRequested`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason. These are the names and shapes a dispatched worker's receipt already uses.
+Every headless main-agent receipt carries a `safety` summary and a `noop` flag, whatever the flags. `safety.decisions` counts how admission decided each call (`allowed`, `blocked`, `permissionRequested`) and `safety.blockedAttempts` lists every call whose outcome was blocked, with its tool, action class, rule, and reason. These are the names and shapes a dispatched worker's receipt already uses. A call that parked for approval and was denied, because a headless run has no operator to approve it, counts under `permissionRequested` every time, including a repeat whose reason the loop guard replaced with its own guidance.
+
+`safety.blockedAttempts` keeps the first 50 blocked calls, and clips each reason to 500 characters. When more calls than that were blocked, `safety.blockedAttemptsTruncated` counts the ones left out; the field is absent otherwise. The per-tool `blocked` counts in `toolStats` stay exact either way.
 
 `noop` is true when either condition holds:
 
 - at least one tool call was blocked and no mutating call succeeded, or
 - the run called tools and none of them succeeded.
 
-A mutating call is one the tool registry admitted with action class `write`, the class autonomy `auto-edit` runs without asking: `write`, `edit`, `artifact`, and an outward `web_fetch`. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
+A mutating call is one the tool registry admitted with action class `write`, the class autonomy `auto-edit` runs without asking: `write`, `edit`, and an outward `web_fetch`. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
+
+`noop` considers only the main agent's own write-class calls. Work done through `bash` or through a successful `dispatch` is not counted, even when a dispatched worker's own receipt reports that it wrote. A run that was blocked once and then did its real work through `dispatch` therefore seals `noop: true`. A driver that relies on dispatch should read the worker receipts rather than this flag.
 
 Without `--fail-on-noop` the exit code and receipt outcome do not change: a run whose writes were all denied and whose model then answered still exits 0 with outcome `succeeded`, and its receipt says `noop: true`. With `--fail-on-noop` that run exits 1, prints the reason on stderr, and seals outcome `failed` with `outcomeDetail: "noop"`. The flag only turns a run that would have succeeded into a failure. A run that already failed, was interrupted, or timed out keeps that outcome.
 

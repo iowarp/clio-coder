@@ -617,6 +617,14 @@ export interface RunReceiptSafetySummary {
 	};
 	blockedAttempts: SafetyBlockedAttempt[];
 	/**
+	 * Blocked attempts left out of `blockedAttempts` by the main agent's receipt
+	 * bound (50 entries, each reason clipped to 500 characters; see
+	 * `BLOCKED_ATTEMPTS_LIMIT` in cli/modes/print.ts). Present only when the
+	 * bound dropped an entry, so a receipt under it keeps its exact shape.
+	 * Worker receipts never set it.
+	 */
+	blockedAttemptsTruncated?: number;
+	/**
 	 * Action classes the dispatch admission granted. Worker receipts always
 	 * carry it; the main agent passes no dispatch admission, so its receipt
 	 * omits it.
