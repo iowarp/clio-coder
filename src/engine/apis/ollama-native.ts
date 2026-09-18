@@ -34,6 +34,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
+import { watchDegradedInference } from "./degraded-inference.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
@@ -533,7 +534,14 @@ function runStream(
 			if (signal) signal.removeEventListener("abort", onAbort);
 		}
 	})();
-	return stream;
+	const baseUrl = model.baseUrl;
+	return watchDegradedInference(stream, {
+		targetId: ollamaTargetId(model),
+		runtimeId: "ollama-native",
+		model: model.id,
+		...(signal ? { signal } : {}),
+		...(baseUrl ? { listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)) } : {}),
+	});
 }
 
 /**

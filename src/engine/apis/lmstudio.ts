@@ -12,8 +12,14 @@ import {
 } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { TargetDescriptor } from "../../domains/providers/types/target-descriptor.js";
 import { coResidentContextCeiling, fitLoadContextLength } from "./lmstudio-residency.js";
-import { emitResidencyMutation, emitResidencyNotice, reconcileResidency, residencyManagedFor } from "./residency.js";
+import {
+	declareRuntimeNoticeProducer,
+	emitResidencyMutation,
+	reconcileResidency,
+	residencyManagedFor,
+} from "./residency.js";
 import { withResidencyLock } from "./residency-lock.js";
+import type { ResidentModelInfo } from "./resident-models.js";
 
 interface LmStudioModelMetadata {
 	clioCoder?: {
@@ -138,6 +144,8 @@ async function loadOwnedInstance(
  * a new fact.
  */
 const announcedResidencyFacts = new Set<string>();
+
+const emitResidencyNotice = declareRuntimeNoticeProducer("lmstudio-residency", ["co-resident", "stress"]);
 
 function emitResidencyNoticeOnce(key: string, notice: Parameters<typeof emitResidencyNotice>[0]): void {
 	if (announcedResidencyFacts.has(key)) return;
@@ -276,4 +284,24 @@ export async function ensureLmStudioResidency(
 			return loadAndReport();
 		});
 	}
+}
+
+/**
+ * Model keys with at least one loaded instance on the model's LM Studio target,
+ * as the REST listing reports them now. The degraded-inference watchdog calls
+ * this when a turn slows down, so the notice names what shares the server.
+ */
+export async function listLmStudioResidentModels(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string } = {},
+): Promise<ResidentModelInfo[]> {
+	const target = targetForModel(model);
+	if (!target) throw new Error("no LM Studio target for model");
+	const catalog = await listLmStudioModels(target, {
+		credentialsPresent: new Set<string>(),
+		httpTimeoutMs: 1_500,
+		...(options.apiKey ? { authToken: options.apiKey } : {}),
+	});
+	if (!catalog.ok) throw new Error(catalog.error ?? "LM Studio model listing failed");
+	return catalog.models.filter((entry) => entry.loadedInstances.length > 0).map((entry) => ({ modelId: entry.key }));
 }
