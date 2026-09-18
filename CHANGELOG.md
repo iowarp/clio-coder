@@ -50,6 +50,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A worker's context overflow is retried once onto an eligible route whose context window is strictly larger, including another model on the same target, and the assignment lineage records `context-overflow: <from> -> <to> on <target>/<model>`. Without such a route, under `none` failover, or after an overflow retry, the assignment fails with a detail naming why.
 - The `/settings` targets rows show each route's dispatch breaker in the running session: an open route replaces the health cell with its remaining cooldown, a probe in flight shows `probing`, and the detail line names each route's state and last failure. `clio-coder targets` and `doctor` show none, since they never dispatch.
 
+### doctor
+
+- `doctor` reports HPC toolchains: `cc`/`gcc`, `c++`/`g++`, `clang`, `gfortran`, `mpicc`, `mpicxx`, `mpirun`, `nvcc`, `cmake`, `make`, `ninja`, `meson`, `python3`, and `sbatch`, each with its resolved path and version line from a bounded, parallel `--version`, in text and `--json`. An absent tool is an `INFO` row; it warns only when the workspace validation contract names it or `runtime.kind: slurm` needs `sbatch`. An installed tool whose `--version` fails, such as an unconfigured Slurm client, warns.
+
 ## 0.4.9 - 2026-09-17
 
 ### read
