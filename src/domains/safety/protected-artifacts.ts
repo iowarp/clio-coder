@@ -376,8 +376,17 @@ function cdTarget(segment: ReadonlyArray<string>): string | null {
 export type CommandPathEvent =
 	| { kind: "cd"; target: string; unmodeled: boolean }
 	| { kind: "write"; target: string }
-	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[] }
+	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[]; origin: LinkOrigin }
 	| { kind: "subshell"; open: boolean };
+
+/**
+ * How a link event knows its sources. `text` is a link made from the words
+ * the command names. `copied` is `mv`, or a `cp` that keeps links, whose
+ * sources are existing paths: a source that is itself a link is recreated with
+ * the same text. `input` is `xargs` or `find -exec`, whose real operands come
+ * from input the scanner never sees.
+ */
+export type LinkOrigin = "text" | "copied" | "input";
 
 interface CommandPathWalkState {
 	events: CommandPathEvent[];
@@ -389,6 +398,14 @@ interface CommandPathWalkState {
 	cdpath: boolean;
 	/** A `case` pattern ends in a bare `)`, so no parenthesis can be trusted as a subshell. */
 	caseSeen: boolean;
+	/**
+	 * A here-document opened before this point that the walk reads with its
+	 * body. The scanner reads body lines as commands, so a later cd or
+	 * parenthesis may be body text.
+	 */
+	heredocSeen: boolean;
+	/** Whether a top-level here-document counts, or only one inside a substitution or `sh -c`. */
+	topLevelHeredocs: boolean;
 }
 
 /** Words that open a loop whose condition and body may run more than once; `done` closes it. */
@@ -414,16 +431,91 @@ function leadingShellWords(argv: ReadonlyArray<string>): string[] {
  * earlier cd can leave the shell in. A segment's substitutions and redirects
  * are opened before its command runs, so they come before its cd.
  */
-export function extractCommandPathWalk(command: string): CommandPathEvent[] {
+function extractCommandPathWalk(command: string, topLevelHeredocs = true): CommandPathEvent[] {
 	const walk: CommandPathWalkState = {
 		events: [],
 		loopDepth: 0,
 		functionSeen: false,
 		cdpath: /\bCDPATH\b/u.test(command),
 		caseSeen: false,
+		heredocSeen: false,
+		topLevelHeredocs,
 	};
 	collectPathWalk(command, 0, walk);
 	return walk.caseSeen ? walk.events.filter((event) => event.kind !== "subshell") : walk.events;
+}
+
+/**
+ * The path walks a caller has to judge a command by. The scanner cannot tell a
+ * here-document body line from a command: a body `(` and `)` around a real cd
+ * made the walk forget it, and a lone quote in a body swallowed every later
+ * command. So a command with a here-document is also read with its bodies
+ * removed, and a write escalates when either walk escalates it. A
+ * here-document that cannot be removed, because it sits inside a substitution
+ * or an `sh -c` script or has no word, leaves every later cd unmodeled.
+ */
+export function extractCommandPathWalks(command: string): CommandPathEvent[][] {
+	const withoutBodies = withoutHeredocBodies(command);
+	if (withoutBodies === command) return [extractCommandPathWalk(command)];
+	const removedAll = !scanShellLike(withoutBodies).some((token) => token.operator && token.value === "<<");
+	return [extractCommandPathWalk(command, !removedAll), extractCommandPathWalk(withoutBodies)];
+}
+
+/** More here-documents than this in one command are left in place. */
+const MAX_HEREDOCS = 64;
+
+/**
+ * The command with each top-level here-document body removed and its `<<WORD`
+ * blanked, so what is left reads as the commands bash runs. A body starts on
+ * the line after its operator and ends at the line that is exactly its word
+ * (tabs stripped first for `<<-`), or at the end of the command, as in bash.
+ * Several here-documents on one line take their bodies in order.
+ */
+function withoutHeredocBodies(command: string): string {
+	let text = command;
+	for (let pass = 0; pass < MAX_HEREDOCS; pass += 1) {
+		const tokens = scanShellLike(text);
+		const first = tokens.findIndex((token) => token.operator && token.value === "<<");
+		if (first === -1) return text;
+		const lineEnd = tokens.findIndex(
+			(token, index) => index > first && token.operator && token.value === ";" && text[token.start] === "\n",
+		);
+		const docs: Array<{ start: number; end: number; word: string; stripTabs: boolean }> = [];
+		for (let index = first; index < (lineEnd === -1 ? tokens.length : lineEnd); index += 1) {
+			const operator = tokens[index];
+			if (operator === undefined || !operator.operator || operator.value !== "<<") continue;
+			let word = tokens[index + 1];
+			let stripTabs = false;
+			if (word !== undefined && !word.operator && word.start === operator.end && text[word.start] === "-") {
+				stripTabs = true;
+				if (word.value === "-") word = tokens[index + 2];
+			}
+			// `<<` with no word is a syntax error: bash runs nothing, so leave it as written.
+			if (word === undefined || word.operator) return text;
+			const delimiter = stripTabs && text[word.start] === "-" ? word.value.slice(1) : word.value;
+			docs.push({ start: operator.start, end: word.end, word: delimiter, stripTabs });
+		}
+		let head = text;
+		for (const doc of [...docs].reverse()) {
+			head = `${head.slice(0, doc.start)}${" ".repeat(doc.end - doc.start)}${head.slice(doc.end)}`;
+		}
+		if (lineEnd === -1) {
+			text = head;
+			continue;
+		}
+		const bodyStart = (tokens[lineEnd]?.start ?? text.length) + 1;
+		let cursor = bodyStart;
+		for (const doc of docs) {
+			while (cursor < text.length) {
+				const newline = text.indexOf("\n", cursor);
+				const line = text.slice(cursor, newline === -1 ? text.length : newline);
+				cursor = newline === -1 ? text.length : newline + 1;
+				if ((doc.stripTabs ? line.replace(/^\t+/u, "") : line) === doc.word) break;
+			}
+		}
+		text = `${head.slice(0, bodyStart)}${text.slice(cursor)}`;
+	}
+	return text;
 }
 
 function collectPathWalk(command: string, depth: number, walk: CommandPathWalkState): void {
@@ -436,7 +528,10 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 			// `name()` defines a function whose body may run any number of times.
 			const next = tokens[index + 1];
 			if (token.value === "(" && next?.operator === true && next.value === ")") walk.functionSeen = true;
-			if (token.value === "(" || token.value === ")") walk.events.push({ kind: "subshell", open: token.value === "(" });
+			// After a here-document a parenthesis may be body text, and a false `)`
+			// would restore bases from before a real cd, so none are trusted.
+			if ((token.value === "(" || token.value === ")") && !walk.heredocSeen)
+				walk.events.push({ kind: "subshell", open: token.value === "(" });
 			continue;
 		}
 		segment.push(token);
@@ -448,7 +543,12 @@ function collectChildScript(script: string, depth: number, walk: CommandPathWalk
 	if (depth >= INNER_SHELL_MAX_DEPTH) return;
 	walk.events.push({ kind: "subshell", open: true });
 	collectPathWalk(script, depth + 1, walk);
-	walk.events.push({ kind: "subshell", open: false });
+	// A body line can hide a later command from the walk above, as a lone quote does.
+	const withoutBodies = withoutHeredocBodies(script);
+	if (withoutBodies !== script) collectPathWalk(withoutBodies, depth + 1, walk);
+	// A here-document body can move where the scanner thinks a substitution
+	// ends, so the script may hold commands of the parent: keep its cds.
+	if (!walk.heredocSeen) walk.events.push({ kind: "subshell", open: false });
 }
 
 function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: number, walk: CommandPathWalkState): void {
@@ -471,31 +571,91 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	collectLinkEvents(argv, walk.events);
 	const cd = cdTarget(argv);
 	if (cd !== null) {
-		walk.events.push({ kind: "cd", target: cd, unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath });
+		walk.events.push({
+			kind: "cd",
+			target: cd,
+			unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath || walk.heredocSeen,
+		});
 	}
 	const script = segmentShellScript(argv);
 	if (script !== null) collectChildScript(script, depth, walk);
+	// The body starts on the next line, so this segment's own cd is real.
+	if ((depth > 0 || walk.topLevelHeredocs) && segment.some((token) => token.operator && token.value === "<<"))
+		walk.heredocSeen = true;
+}
+
+/** Commands that run the command after them, possibly with options and arguments of their own. */
+const LINK_WRAPPERS: ReadonlySet<string> = new Set([
+	"nice",
+	"nohup",
+	"timeout",
+	"stdbuf",
+	"ionice",
+	"chrt",
+	"xargs",
+	"busybox",
+	"setsid",
+	"taskset",
+	"flock",
+	"exec",
+	"find",
+]);
+
+/** Commands that can make a link, or recreate one they move or copy. */
+const LINK_COMMANDS: ReadonlySet<string> = new Set(["ln", "link", "cp", "mv"]);
+
+/**
+ * The index of the link command a wrapper runs, and whether its operands come
+ * from input. A wrapper's own options and arguments are skipped by looking for
+ * the next word that names a link command or another wrapper; `find` runs
+ * what follows `-exec`, `-execdir`, `-ok`, or `-okdir`.
+ */
+function linkCommandIndex(argv: ReadonlyArray<string>): { index: number; fromInput: boolean } | null {
+	let index = commandTokenIndex(argv);
+	let fromInput = false;
+	while (index !== null && LINK_WRAPPERS.has(basenameToken(argv[index]))) {
+		const wrapper = basenameToken(argv[index]);
+		if (wrapper === "xargs" || wrapper === "find") fromInput = true;
+		const from = index;
+		const next =
+			wrapper === "find"
+				? argv.findIndex((word, at) => at > from && /^-(?:exec|execdir|ok|okdir)$/u.test(word)) + 1
+				: argv.findIndex(
+						(word, at) => at > from && (LINK_COMMANDS.has(basenameToken(word)) || LINK_WRAPPERS.has(basenameToken(word))),
+					);
+		index = next > from ? next : null;
+	}
+	return index === null ? null : { index, fromInput };
 }
 
 /**
- * `ln` (hard unless `-s`), `cp -s`, and `cp -l`. With `-t DIR` every link goes in
- * DIR; with one operand it goes in the current directory; otherwise the last
- * operand is either the link or, when it is a directory, where the links go,
- * unless `-T` says it is never a directory.
+ * Links a command makes. `ln` (hard unless `-s`), `link` (always hard), `cp -s`,
+ * and `cp -l` make one from the words they name. `mv` and a `cp` that keeps
+ * links (`-a`, `-P`, `-d`, `--no-dereference`, or a recursive copy without
+ * `-L` or `-H`) recreate any source that is itself a link. Behind `xargs` or
+ * `find -exec` the operands are unknown. With `-t DIR` every link goes in DIR;
+ * with one operand it goes in the current directory; otherwise the last operand
+ * is either the link or, when it is a directory, where the links go, unless
+ * `-T` says it is never a directory.
  */
 function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[]): void {
-	const cmdIndex = commandTokenIndex(argv);
-	if (cmdIndex === null) return;
+	const found = linkCommandIndex(argv);
+	if (found === null) return;
+	const cmdIndex = found.index;
 	const executable = basenameToken(argv[cmdIndex]);
-	if (executable !== "ln" && executable !== "cp") return;
+	if (!LINK_COMMANDS.has(executable)) return;
 	let symbolic = false;
-	let hard = executable === "ln";
+	let hard = executable === "ln" || executable === "link";
+	let keepsLinks = executable === "mv";
+	let dereferences = false;
 	let targetDirectory: string | null = null;
 	let noTargetDirectory = false;
 	let endOfOptions = false;
 	const operands: string[] = [];
 	for (let index = cmdIndex + 1; index < argv.length; index += 1) {
 		const token = argv[index] ?? "";
+		// `find -exec` ends its command at a lone `;` or `+`.
+		if (found.fromInput && (token === ";" || token === "+")) break;
 		if (endOfOptions || !token.startsWith("-") || token === "-") {
 			operands.push(token);
 			continue;
@@ -508,8 +668,18 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 			const eq = token.indexOf("=");
 			const name = eq === -1 ? token : token.slice(0, eq);
 			const value = eq === -1 ? undefined : token.slice(eq + 1);
+			if (executable === "mv") {
+				if (name === "--target-directory") {
+					targetDirectory = value ?? argv[index + 1] ?? null;
+					if (value === undefined) index += 1;
+				} else if (name === "--no-target-directory") noTargetDirectory = true;
+				else if (name === "--suffix" && value === undefined) index += 1;
+				continue;
+			}
 			if (name === "--symbolic" || name === "--symbolic-link") symbolic = true;
 			else if (name === "--link") hard = true;
+			else if (name === "--archive" || name === "--no-dereference" || name === "--recursive") keepsLinks = true;
+			else if (name === "--dereference") dereferences = true;
 			else if (name === "--no-target-directory") noTargetDirectory = true;
 			else if (name === "--target-directory") {
 				targetDirectory = value ?? argv[index + 1] ?? null;
@@ -519,8 +689,10 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 		}
 		for (let at = 1; at < token.length; at += 1) {
 			const flag = token[at];
-			if (flag === "s") symbolic = true;
+			if (flag === "s" && executable !== "mv") symbolic = true;
 			else if (flag === "l" && executable === "cp") hard = true;
+			else if (executable === "cp" && flag !== undefined && "aPdrR".includes(flag)) keepsLinks = true;
+			else if (executable === "cp" && (flag === "L" || flag === "H")) dereferences = true;
 			else if (flag === "T") noTargetDirectory = true;
 			else if (flag === "t" || flag === "S") {
 				// The rest of the cluster, or the next word, is the option's argument.
@@ -532,7 +704,8 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 			}
 		}
 	}
-	if (!symbolic && !hard) return;
+	const copied = !symbolic && !hard && keepsLinks && !dereferences;
+	if (!symbolic && !hard && !copied) return;
 	let sources = operands;
 	let linkDirs = ["."];
 	if (targetDirectory !== null) {
@@ -544,7 +717,18 @@ function collectLinkEvents(argv: ReadonlyArray<string>, out: CommandPathEvent[])
 		const parent = path.posix.dirname(destination);
 		linkDirs = noTargetDirectory ? [parent] : [parent, destination];
 	}
-	if (sources.length > 0) out.push({ kind: "link", symbolic, sources, linkDirs });
+	const origin: LinkOrigin = found.fromInput ? "input" : copied ? "copied" : "text";
+	if (origin === "input") {
+		out.push({
+			kind: "link",
+			symbolic: symbolic || copied,
+			sources: operands.length > 0 ? operands : ["<input>"],
+			linkDirs,
+			origin,
+		});
+		return;
+	}
+	if (sources.length > 0) out.push({ kind: "link", symbolic: symbolic || copied, sources, linkDirs, origin });
 }
 
 /**

@@ -1,9 +1,10 @@
+import { globSync, lstatSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
-import { extractCommandPathWalk } from "./protected-artifacts.js";
+import { type CommandPathEvent, extractCommandPathWalks } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -244,9 +245,12 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
 /** More directories than this after a run of cds is treated as an unknown base. */
 const MAX_SHELL_BASES = 32;
 
-/** A word the shell expands at run time: a variable, a substitution, or a glob. */
+/**
+ * A word the shell expands at run time: a variable, a substitution, a glob, or
+ * a brace expansion (`{a,b}`, `{1..3}`). A lone `{}` is literal to the shell.
+ */
 function isDynamicShellPath(p: string): boolean {
-	return /[$`*?[]/u.test(p);
+	return /[$`*?[]/u.test(p) || /\{[^{}]*(?:,|\.\.)[^{}]*\}/u.test(p);
 }
 
 function expandShellHome(p: string): string | null {
@@ -278,11 +282,19 @@ function mergeBases(left: ShellBases, right: ShellBases): ShellBases {
  * cannot be placed.
  */
 function bashPathReasons(command: string, argCwd: string | undefined): string[] {
+	const reasons = new Set<string>();
+	for (const walk of extractCommandPathWalks(command)) {
+		for (const reason of walkPathReasons(walk, argCwd)) reasons.add(reason);
+	}
+	return [...reasons];
+}
+
+function walkPathReasons(walk: ReadonlyArray<CommandPathEvent>, argCwd: string | undefined): string[] {
 	const writeReasons = new Set<string>();
 	const cdReasons = new Set<string>();
 	let bases: ShellBases = [candidateBase(argCwd)];
 	const subshells: ShellBases[] = [];
-	for (const event of extractCommandPathWalk(command)) {
+	for (const event of walk) {
 		if (event.kind === "subshell") {
 			if (event.open) subshells.push(bases);
 			else if (subshells.length > 0) bases = subshells.pop() as ShellBases;
@@ -290,7 +302,10 @@ function bashPathReasons(command: string, argCwd: string | undefined): string[] 
 		}
 		if (event.kind === "write") {
 			const target = event.target;
-			if (target.startsWith("~") || path.isAbsolute(target)) {
+			// `> $HOME/x`, `> ${OUT}`, and `tee {a,b}` land where the shell says.
+			if (isDynamicShellPath(target) && !target.startsWith("/dev/")) {
+				writeReasons.add(`write-path-unknown-base: ${target}`);
+			} else if (target.startsWith("~") || path.isAbsolute(target)) {
 				const decision = writePathClass(target);
 				if (decision.cls === "system_modify") writeReasons.add(decision.reason ?? `bash-write-target: ${target}`);
 			} else if (bases === null) {
@@ -337,11 +352,23 @@ function bashPathReasons(command: string, argCwd: string | undefined): string[] 
  * link's directory, leaves the workspace escalates the command, and so does a
  * hard link to a file outside it, since a write through the link changes that
  * file. A link whose target or directory the shell expands at run time counts
- * as outside.
+ * as outside. `mv` and a link-keeping `cp` escalate when a source is an
+ * existing link that resolves outside, and a link made from `xargs` or `find
+ * -exec` input always escalates.
  */
-function linkReasons(event: { symbolic: boolean; sources: string[]; linkDirs: string[] }, bases: ShellBases): string[] {
+function linkReasons(event: Extract<CommandPathEvent, { kind: "link" }>, bases: ShellBases): string[] {
 	const reasons: string[] = [];
 	const label = event.symbolic ? "bash-symlink-outside-workspace" : "bash-hardlink-outside-workspace";
+	if (event.origin === "input") return event.sources.map((source) => `${label}: ${source}`);
+	if (event.origin === "copied") {
+		for (const base of bases ?? [null]) {
+			for (const source of event.sources) {
+				const landing = copiedLinkOutside(source, base);
+				if (landing !== null) reasons.push(`${label}: ${landing}`);
+			}
+		}
+		return [...new Set(reasons)];
+	}
 	const outside = (source: string, from: string | null): string | null => {
 		const expanded = expandShellHome(source);
 		if (expanded === null || isDynamicShellPath(source)) return source;
@@ -367,6 +394,47 @@ function linkReasons(event: { symbolic: boolean; sources: string[]; linkDirs: st
 		}
 	}
 	return [...new Set(reasons)];
+}
+
+/** More matches than this for a moved or copied glob count as outside. */
+const MAX_COPIED_LINK_MATCHES = 256;
+
+/**
+ * Where an existing link a command moves or copies points, when that is
+ * outside the workspace; null when the source is not a link or points inside.
+ * A glob or brace source is matched now, from the base; a variable or a
+ * substitution cannot be, so it counts as outside.
+ */
+function copiedLinkOutside(source: string, base: string | null): string | null {
+	const expanded = expandShellHome(source);
+	if (expanded === null || /[$`]/u.test(source)) return source;
+	if (!path.isAbsolute(expanded) && base === null) return source;
+	const from = base ?? process.cwd();
+	let matches = [expanded];
+	if (isDynamicShellPath(source)) {
+		try {
+			matches = globSync(expanded, { cwd: from });
+		} catch {
+			return source;
+		}
+		if (matches.length > MAX_COPIED_LINK_MATCHES) return source;
+	}
+	for (const match of matches) {
+		// The kernel follows every component but the last, which is the link itself.
+		const parent = canonicalizeRawPath(path.dirname(match), from);
+		if (parent === null) return source;
+		const entry = path.join(parent, path.basename(match));
+		let isLink = false;
+		try {
+			isLink = lstatSync(entry).isSymbolicLink();
+		} catch {
+			continue;
+		}
+		if (!isLink) continue;
+		const landing = canonicalizeRawPath(entry, "/");
+		if (landing === null || !isInsideCwd(landing)) return landing ?? source;
+	}
+	return null;
 }
 
 /**
