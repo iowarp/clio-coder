@@ -306,12 +306,14 @@ import {
 	validateJobSpec,
 } from "./validation.js";
 import { describeUngroundedValidations, groundClaimedValidations, invalidatesQuality } from "./validation-grounding.js";
+import { adoptWorkerModelLoad } from "./worker-model-loads.js";
 import { prepareWorkerModelMetadata } from "./worker-model-metadata.js";
 import {
 	type AgentLedgerBody,
 	computeSettingsFingerprint,
 	endpointIdentityHash,
 	receiptAttestationFields,
+	type WorkerModelLoad,
 } from "./worker-protocol.js";
 import {
 	type SpawnedWorker,
@@ -5027,6 +5029,19 @@ export function createDispatchBundle(
 			}
 			appendLedgerPost(attribution, body);
 		};
+		// A model this worker loaded is this process's to release at exit, and
+		// stays out of mid-session eviction until then (#379). The report is
+		// checked against the admitted route, and the endpoint comes from this
+		// process's own target, so a worker can neither redirect the release nor
+		// claim a model it was not dispatched to.
+		const onModelLoaded = (load: WorkerModelLoad): void => {
+			adoptWorkerModelLoad(load, {
+				target: lifecycle.target.target,
+				runtime: lifecycle.target.runtime,
+				wireModelId: lifecycle.target.wireModelId,
+				node: placed,
+			});
+		};
 		let worker: SpawnedWorker;
 		try {
 			preparation?.signal?.throwIfAborted();
@@ -5034,6 +5049,7 @@ export function createDispatchBundle(
 				cwd: lifecycle.cwd,
 				now,
 				monotonicNow,
+				onModelLoaded,
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
 			});
 		} catch (error) {

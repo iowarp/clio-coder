@@ -31,6 +31,7 @@ export type {
 	AgentLedgerPort,
 	WorkerAttestation,
 	WorkerControlFrame,
+	WorkerModelLoad,
 	WorkerResourceFacts,
 	WorkerResourceValue,
 } from "../../worker/protocol.js";

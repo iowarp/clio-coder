@@ -44,6 +44,7 @@ import {
 } from "../../core/bus-events.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
 import type { ProtectedModelRef, ResidencyRole } from "../../core/residency-protection.js";
+import { residencyTargetKey } from "../../core/residency-target-key.js";
 import { getSharedBus } from "../../core/shared-bus.js";
 import { withResidencyLock } from "./residency-lock.js";
 import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.js";
@@ -201,6 +202,7 @@ function forgetClioLoaded(targetKey: string, modelId: string): void {
  */
 export function forgetReleasedModel(targetKey: string, modelId: string): void {
 	forgetClioLoaded(targetKey, modelId);
+	workerLoaded.get(targetKey)?.delete(modelId);
 	reconcileCache.delete(targetKey);
 }
 
@@ -209,6 +211,96 @@ export function isClioLoaded(targetKey: string, entry: ResidentModelInfo): boole
 	if (!set) return false;
 	if (set.has(entry.modelId)) return true;
 	return (entry.aliasIds ?? []).some((id) => set.has(id));
+}
+
+// --- worker-loaded models --------------------------------------------------
+
+// Models a dispatched worker loaded, adopted by the orchestrator so its release
+// on exit covers them (#379). Kept apart from clioLoaded because they carry
+// eviction protection: another dispatch may still be using one.
+const workerLoaded = new Map<string, Set<string>>();
+
+function isWorkerLoaded(targetKey: string, entry: ResidentModelInfo): boolean {
+	const set = workerLoaded.get(targetKey);
+	if (!set) return false;
+	return [entry.modelId, ...(entry.aliasIds ?? [])].some((id) => set.has(id));
+}
+
+/** One model a request loaded and pinned, as a runtime reports it. */
+export interface ClioModelLoad {
+	runtimeId: string;
+	targetId: string;
+	modelId: string;
+	aliasIds: string[];
+}
+
+let loadReportSink: ((load: ClioModelLoad) => void) | null = null;
+
+/**
+ * Where a runtime's load reports go. The worker entry installs a sink that
+ * forwards each report to the orchestrator over the control lane; the
+ * orchestrator installs none, because its own loads are already in its
+ * registries. Passing null removes the sink.
+ */
+export function setModelLoadReportSink(sink: ((load: ClioModelLoad) => void) | null): void {
+	loadReportSink = sink;
+}
+
+/**
+ * Report a model this process loaded and pinned, when both residency
+ * registries attribute it to this process: the reconciler saw it absent before
+ * Clio's request, and the runtime then recorded ownership. A model that was
+ * resident before this process touched it is never reported. Never throws.
+ */
+export function reportClioModelLoad(load: ClioModelLoad, targetKey: string): void {
+	if (!loadReportSink || !isClioLoaded(targetKey, { modelId: load.modelId, aliasIds: load.aliasIds })) return;
+	try {
+		loadReportSink(load);
+	} catch {
+		// A report is best-effort; losing one leaves the model pinned, never a turn failed.
+	}
+}
+
+/** How to reach the server a worker loaded a model on, from the orchestrator's own settings. */
+export interface WorkerModelLoadEndpoint {
+	runtimeId: string;
+	baseUrl: string;
+	headers: Record<string, string>;
+}
+
+type WorkerLoadAdopter = (targetKey: string, endpoint: WorkerModelLoadEndpoint, modelIds: string[]) => void;
+
+const workerLoadAdopters = new Map<string, WorkerLoadAdopter>();
+
+/** Register how a runtime takes ownership of a model a worker loaded. */
+export function registerWorkerLoadAdopter(runtimeId: string, adopter: WorkerLoadAdopter): void {
+	workerLoadAdopters.set(runtimeId, adopter);
+}
+
+/**
+ * Adopt a model a dispatched worker loaded, so this process releases it on
+ * exit and no stream here evicts it first. Returns false when the runtime has
+ * no adopter or the endpoint has no residency key.
+ */
+export function adoptWorkerLoadedModel(
+	endpoint: WorkerModelLoadEndpoint,
+	load: Pick<ClioModelLoad, "modelId" | "aliasIds">,
+): boolean {
+	const adopter = workerLoadAdopters.get(endpoint.runtimeId);
+	const targetKey = residencyTargetKey(endpoint.runtimeId, endpoint.baseUrl);
+	if (!adopter || targetKey === null) return false;
+	const ids = [load.modelId, ...load.aliasIds];
+	let set = workerLoaded.get(targetKey);
+	if (!set) {
+		set = new Set();
+		workerLoaded.set(targetKey, set);
+	}
+	for (const id of ids) {
+		set.add(id);
+		markClioLoaded(targetKey, id);
+	}
+	adopter(targetKey, endpoint, ids);
+	return true;
 }
 
 // --- release on exit ------------------------------------------------------
@@ -267,8 +359,13 @@ const reconcileCache = new Map<string, { modelId: string; decision: "reconcile" 
  */
 export type ResidencyStrategy = "router" | "jit" | "scheduler";
 
-/** Why a resident model may not be evicted, when it may not. */
-export type ResidencyProtection = "tag" | "config";
+/**
+ * Why a resident model may not be evicted, when it may not. `worker` marks a
+ * model a dispatched worker loaded and the orchestrator adopted: a later
+ * dispatch may still use it, so no Clio stream evicts it mid-session and the
+ * release on exit reclaims it instead.
+ */
+export type ResidencyProtection = "tag" | "config" | "worker";
 
 export interface ResidentClassified extends ResidentModelInfo {
 	/** True when this process's Clio-loaded registry attributes the model to Clio. */
@@ -747,7 +844,9 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 			? "tag"
 			: configId !== undefined
 				? "config"
-				: undefined;
+				: isWorkerLoaded(adapter.targetKey, entry)
+					? "worker"
+					: undefined;
 		const role = configId === undefined ? undefined : protectedRoles.get(configId);
 		return {
 			...entry,
