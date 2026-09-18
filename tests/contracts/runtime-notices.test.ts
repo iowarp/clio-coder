@@ -1,11 +1,22 @@
 import { deepStrictEqual, match, strictEqual } from "node:assert/strict";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterEach, describe, it } from "node:test";
-
-import { type AssistantMessage, createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type {
+	AssistantMessage,
+	AssistantMessageEvent,
+	AssistantMessageEventStream,
+	Model,
+} from "@earendil-works/pi-ai";
 
 import { RUNTIME_NOTICE_KINDS, type RuntimeNoticePayload } from "../../src/core/bus-events.js";
-import { watchDegradedInference } from "../../src/engine/apis/degraded-inference.js";
+import {
+	createDegradedInferenceStream,
+	runningDegradedInferenceWatchdogs,
+} from "../../src/engine/apis/degraded-inference.js";
 import { registerClioApiProviders } from "../../src/engine/apis/index.js";
+import { ollamaNativeApiProvider } from "../../src/engine/apis/ollama-native.js";
+import { withLocalResidency } from "../../src/engine/apis/openai-completions.js";
 import { runtimeNoticeProducers, setResidencyNoticeSink } from "../../src/engine/apis/residency.js";
 
 afterEach(() => setResidencyNoticeSink(null));
@@ -39,9 +50,8 @@ function fixtureTurn(signal?: AbortSignal, options: { defaultClock?: boolean } =
 	let poll: (() => void) | null = null;
 	const notices: RuntimeNoticePayload[] = [];
 	setResidencyNoticeSink((notice) => notices.push(notice));
-	const source = createAssistantMessageEventStream();
 	const output = partial();
-	const watched = watchDegradedInference(source, {
+	const source = createDegradedInferenceStream({
 		targetId: "mini",
 		runtimeId: "ollama-native",
 		model: "qwen3:32b",
@@ -52,14 +62,14 @@ function fixtureTurn(signal?: AbortSignal, options: { defaultClock?: boolean } =
 		],
 		timing: {
 			...(options.defaultClock ? {} : { monotonicNow: () => clock }),
-			setTimer: (fn) => {
+			setTimer: (fn: () => void) => {
 				poll = fn;
 				return { cancel: () => (poll = null) };
 			},
 		},
 	});
 	const drained = (async () => {
-		for await (const _ of watched) {
+		for await (const _ of source) {
 			// Drain so the watched stream keeps flowing.
 		}
 	})();
@@ -150,6 +160,127 @@ describe("degraded-inference notice", () => {
 		await turn.tick();
 		await turn.finish();
 		strictEqual(turn.notices.length, 0, "a forward wall-clock step is not elapsed generation time");
+	});
+});
+
+async function withServer(
+	handler: Parameters<typeof createServer>[1],
+	run: (baseUrl: string) => Promise<void>,
+): Promise<void> {
+	const server: Server = createServer(handler);
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	try {
+		await run(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
+	} finally {
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	}
+}
+
+// Drain a stream with a bound, so a stream that never ends fails the test
+// instead of hanging it. Collects any rejection nobody handled meanwhile.
+async function drainBounded(stream: AssistantMessageEventStream) {
+	const unhandled: unknown[] = [];
+	const onUnhandled = (reason: unknown) => unhandled.push(reason);
+	process.on("unhandledRejection", onUnhandled);
+	const events: AssistantMessageEvent[] = [];
+	let timeout: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const drained = (async () => {
+			for await (const event of stream) events.push(event);
+			return stream.result();
+		})();
+		const result = await Promise.race([
+			drained,
+			new Promise<"hung">((resolve) => {
+				timeout = setTimeout(() => resolve("hung"), 5_000);
+			}),
+		]);
+		await flush();
+		return { events, result, unhandled };
+	} finally {
+		if (timeout !== undefined) clearTimeout(timeout);
+		process.off("unhandledRejection", onUnhandled);
+	}
+}
+
+describe("degraded-inference error propagation", () => {
+	it("ends an OpenAI-compatible local turn with an error event when the source throws mid-stream", async () => {
+		// A 404 on every route leaves residency observe-only without loading anything.
+		await withServer(
+			(_req, res) => res.writeHead(404).end(),
+			async (baseUrl) => {
+				const model = {
+					id: "qwen3-32b",
+					name: "qwen3-32b",
+					api: "openai-completions",
+					provider: "llamacpp",
+					baseUrl,
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 8192,
+					maxTokens: 1024,
+					clioCoder: { runtimeId: "llamacpp", targetId: "dragon" },
+				} as unknown as Model<"openai-completions">;
+				const output = partial();
+				const throwing = {
+					async *[Symbol.asyncIterator]() {
+						yield { type: "start", partial: output } as AssistantMessageEvent;
+						yield { type: "text_delta", contentIndex: 0, delta: "ab", partial: output } as AssistantMessageEvent;
+						throw new Error("socket reset mid-stream");
+					},
+				} as unknown as AssistantMessageEventStream;
+				const { events, result, unhandled } = await drainBounded(withLocalResidency(model, {}, () => throwing));
+				strictEqual(result === "hung" ? "hung" : "ended", "ended", "the stream ends");
+				deepStrictEqual(
+					events.map((event) => event.type),
+					["start", "text_delta", "error"],
+				);
+				strictEqual(result !== "hung" && result.stopReason, "error");
+				strictEqual(result !== "hung" && result.errorMessage, "socket reset mid-stream");
+				deepStrictEqual(unhandled, []);
+				strictEqual(runningDegradedInferenceWatchdogs(), 0, "the watchdog timer is stopped");
+			},
+		);
+	});
+
+	it("ends an Ollama turn with an error event when the chat stream breaks mid-stream", async () => {
+		await withServer(
+			(req, res) => {
+				if (req.url === "/api/chat") {
+					res.writeHead(200, { "content-type": "application/x-ndjson" });
+					res.write(
+						`${JSON.stringify({ model: "qwen3:32b", message: { role: "assistant", content: "ab" }, done: false })}\n`,
+					);
+					setImmediate(() => res.destroy());
+					return;
+				}
+				res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [] }));
+			},
+			async (baseUrl) => {
+				const model = {
+					id: "qwen3:32b",
+					name: "qwen3:32b",
+					api: "ollama-native",
+					provider: "ollama",
+					baseUrl,
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 8192,
+					maxTokens: 1024,
+				} as unknown as Model<"ollama-native">;
+				const stream = ollamaNativeApiProvider.stream(model, { messages: [{ role: "user", content: "hi", timestamp: 0 }] });
+				const { events, result, unhandled } = await drainBounded(stream);
+				strictEqual(result === "hung" ? "hung" : "ended", "ended", "the stream ends");
+				strictEqual(events.at(0)?.type, "start");
+				strictEqual(events.at(-1)?.type, "error");
+				strictEqual(result !== "hung" && result.stopReason, "error");
+				deepStrictEqual(unhandled, []);
+				strictEqual(runningDegradedInferenceWatchdogs(), 0, "the watchdog timer is stopped");
+			},
+		);
 	});
 });
 

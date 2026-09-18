@@ -14,7 +14,6 @@ import type {
 	ToolCall,
 	Usage,
 } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import {
 	type ChatRequest,
 	type ChatResponse,
@@ -34,7 +33,7 @@ import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/
 import { calculateEngineCost } from "../ai.js";
 import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
-import { watchDegradedInference } from "./degraded-inference.js";
+import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
@@ -349,7 +348,6 @@ function runStream(
 	options: StreamOptions | undefined,
 	thinkingLevel: ThinkingLevel,
 ): AssistantMessageEventStream {
-	const stream: AssistantMessageEventStream = createAssistantMessageEventStream();
 	const output: AssistantMessage = {
 		role: "assistant",
 		content: [],
@@ -373,6 +371,16 @@ function runStream(
 	if (options?.headers) Object.assign(headers, options.headers);
 	const client = new Ollama({ host: model.baseUrl, headers });
 	const signal = options?.signal;
+	const baseUrl = model.baseUrl;
+	// Events go straight into the watched stream, so this function's own catch
+	// still decides how a failed turn ends.
+	const stream = createDegradedInferenceStream({
+		targetId: ollamaTargetId(model),
+		runtimeId: "ollama-native",
+		model: model.id,
+		...(signal ? { signal } : {}),
+		...(baseUrl ? { listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)) } : {}),
+	});
 	let aborted = signal?.aborted === true;
 	const onAbort = () => {
 		aborted = true;
@@ -534,14 +542,7 @@ function runStream(
 			if (signal) signal.removeEventListener("abort", onAbort);
 		}
 	})();
-	const baseUrl = model.baseUrl;
-	return watchDegradedInference(stream, {
-		targetId: ollamaTargetId(model),
-		runtimeId: "ollama-native",
-		model: model.id,
-		...(signal ? { signal } : {}),
-		...(baseUrl ? { listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)) } : {}),
-	});
+	return stream;
 }
 
 /**
