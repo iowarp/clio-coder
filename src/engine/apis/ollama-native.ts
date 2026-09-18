@@ -35,13 +35,23 @@ import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-chan
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
-import { type ResidencyAdapter, reconcileResidency, residencyManagedFor } from "./residency.js";
+import {
+	EXIT_RELEASE_MS,
+	forgetReleasedModel,
+	isClioLoaded,
+	type ResidencyAdapter,
+	reconcileResidency,
+	registerExitRelease,
+	residencyManagedFor,
+} from "./residency.js";
 import type { ResidentModelInfo } from "./resident-models.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
 const ownedModelsByTarget = new Map<string, Set<string>>();
+/** How to reach each target that holds an owned model, for the release on exit. */
+const ownedEndpointsByTarget = new Map<string, { baseUrl: string; headers: Record<string, string> }>();
 
 interface ClioRuntimeMetadata {
 	clioCoder?: {
@@ -269,8 +279,17 @@ export interface OllamaEvictClient {
 	generate(req: EvictGenerateRequest): Promise<unknown>;
 }
 
-function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>): OllamaEvictClient {
-	return new Ollama({ host: baseUrl, ...(headers ? { headers } : {}) });
+function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>, signal?: AbortSignal): OllamaEvictClient {
+	// The client's own abort() reaches streamed requests only, so a bounded
+	// caller threads its signal through fetch to cover ps and generate too.
+	const boundedFetch = signal
+		? (input: Parameters<typeof fetch>[0], init?: RequestInit) => fetch(input, { ...init, signal })
+		: undefined;
+	return new Ollama({
+		host: baseUrl,
+		...(headers ? { headers } : {}),
+		...(boundedFetch ? { fetch: boundedFetch } : {}),
+	});
 }
 
 /**
@@ -305,6 +324,57 @@ async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Rec
 	await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
 	owned.delete(modelId);
 }
+
+/**
+ * Release on process exit every Ollama model this process loaded and pinned
+ * with `keep_alive: -1`, so a finished run does not hold its weights forever
+ * (#379). A model counts as this process's own only when both registries agree:
+ * the residency reconciler saw it absent from the server before Clio's request
+ * and marked it Clio-loaded, and a chat for it then streamed, which is what
+ * pinned it. A model that was already resident when Clio first touched it, or
+ * one whose load never produced a response, is left alone, so an operator's
+ * model is never unloaded (#313). The resident list is read first, and only
+ * models still resident are released, so a model Ollama already dropped is
+ * not loaded again just to be unloaded.
+ *
+ * Best-effort and bounded: every request shares one deadline, and a failure
+ * or timeout leaves the model pinned and never throws. A crashed process
+ * releases nothing.
+ */
+export async function releaseClioLoadedOllamaModels(options: { timeoutMs?: number } = {}): Promise<void> {
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? EXIT_RELEASE_MS);
+	timer.unref();
+	const releaseTarget = async (targetKey: string, owned: Set<string>): Promise<void> => {
+		const endpoint = ownedEndpointsByTarget.get(targetKey);
+		if (!endpoint || owned.size === 0) return;
+		const client = ollamaEvictClient(endpoint.baseUrl, endpoint.headers, controller.signal);
+		const resident = await listResidentOllamaModels(client);
+		for (const entry of resident) {
+			const ids = [entry.modelId, ...(entry.aliasIds ?? [])];
+			if (!ids.some((id) => owned.has(id)) || !isClioLoaded(targetKey, entry)) continue;
+			await client.generate({ model: entry.modelId, prompt: "", keep_alive: 0, stream: false });
+			for (const id of ids) owned.delete(id);
+			forgetReleasedModel(targetKey, entry.modelId);
+		}
+	};
+	const releases = [...ownedModelsByTarget].map(([targetKey, owned]) =>
+		releaseTarget(targetKey, owned).catch(() => {
+			// Best-effort: an unreachable server keeps the model pinned.
+		}),
+	);
+	try {
+		await Promise.race([
+			Promise.all(releases),
+			new Promise<void>((resolve) => controller.signal.addEventListener("abort", () => resolve(), { once: true })),
+		]);
+	} finally {
+		clearTimeout(timer);
+		controller.abort();
+	}
+}
+
+registerExitRelease(() => releaseClioLoadedOllamaModels());
 
 function mapStopReason(reason: string | undefined, hadToolCall: boolean): AssistantMessage["stopReason"] {
 	if (hadToolCall) return "toolUse";
@@ -496,6 +566,7 @@ function runStream(
 						ownedModelsByTarget.set(targetKey, owned);
 					}
 					owned.add(response.model || model.id);
+					ownedEndpointsByTarget.set(targetKey, { baseUrl: model.baseUrl, headers });
 					recordedOwnership = true;
 				}
 				const msg = response.message;
