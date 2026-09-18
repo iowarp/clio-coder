@@ -85,6 +85,8 @@ export interface ShellToken {
 	quoted: boolean;
 	start: number;
 	end: number;
+	/** Scripts of the `$(...)`, `<(...)`, and `>(...)` substitutions this word carries. */
+	substitutions?: string[];
 }
 
 /**
@@ -159,7 +161,11 @@ function classifyDestructiveCommand(
 	const artifacts = normalizedArtifacts(protectedArtifacts);
 	if (artifacts.length === 0) return { kind: "benign", matches: [] };
 
-	for (const tokens of splitSegments(scanShellLike(command))) {
+	const segments = splitSegments(scanShellLike(command)).flatMap((tokens) => [
+		tokens,
+		...substitutionSegments(tokens, 0),
+	]);
+	for (const tokens of segments) {
 		const segment = shellCommandArguments(tokens);
 		const redirect = classifyRedirect(tokens, artifacts);
 		if (redirect.kind === "destructive") return redirect;
@@ -311,7 +317,7 @@ function expandedShellSegments(command: string, depth = 0): ShellToken[][] {
 	if (depth >= INNER_SHELL_MAX_DEPTH) return segments;
 	const out: ShellToken[][] = [];
 	for (const segment of segments) {
-		out.push(segment);
+		out.push(segment, ...substitutionSegments(segment, depth));
 		const script = segmentShellScript(shellCommandArguments(segment));
 		if (script !== null) out.push(...expandedShellSegments(script, depth + 1));
 	}
@@ -362,23 +368,16 @@ function cdTarget(segment: ReadonlyArray<string>): string | null {
  * `link` is a link the command creates: `sources` are what it points at (a
  * symbolic link's text, or the file a hard link shares), and `linkDirs` are the
  * directories it may be created in, relative to where the shell is. A
- * `separator` is the operator between two commands, `(` and `)` included; the
- * script of an `sh -c` runs in a child shell, so it comes wrapped in a pair. A
- * `group` opens or closes a compound command (`if`, a loop, `case`, `{`), whose
- * inner `;` does not end the command around it. A cd is `unmodeled` when it can
- * run more times than it is written, or resolve somewhere its text does not
- * say: inside a loop, after a function definition, or with CDPATH named. It
- * `mayFail` when what follows can run although it failed: under `!`, or in a
- * command with `case`, whose pattern `)` makes the parentheses unreliable.
+ * `subshell` opens or closes a child shell: `( ... )`, a substitution, or the
+ * script of an `sh -c`. A cd is `unmodeled` when it can run more times than it
+ * is written, or resolve somewhere its text does not say: inside a loop, after
+ * a function definition, or with CDPATH named.
  */
 export type CommandPathEvent =
-	| { kind: "cd"; target: string; mayFail: boolean; unmodeled: boolean }
-	| { kind: "group"; open: boolean }
-	| { kind: "popd" }
-	| { kind: "exit" }
+	| { kind: "cd"; target: string; unmodeled: boolean }
 	| { kind: "write"; target: string }
 	| { kind: "link"; symbolic: boolean; sources: string[]; linkDirs: string[] }
-	| { kind: "separator"; value: string };
+	| { kind: "subshell"; open: boolean };
 
 interface CommandPathWalkState {
 	events: CommandPathEvent[];
@@ -388,14 +387,12 @@ interface CommandPathWalkState {
 	functionSeen: boolean;
 	/** CDPATH is named, so a relative cd may resolve against it instead. */
 	cdpath: boolean;
-	/** A `case` pattern ends in a bare `)`, so no parenthesis can be trusted as structure. */
+	/** A `case` pattern ends in a bare `)`, so no parenthesis can be trusted as a subshell. */
 	caseSeen: boolean;
 }
 
 /** Words that open a loop whose condition and body may run more than once; `done` closes it. */
 const LOOP_WORDS: ReadonlySet<string> = new Set(["for", "while", "until", "select"]);
-const GROUP_OPENERS: ReadonlySet<string> = new Set(["{", "if", "for", "while", "until", "select", "case"]);
-const GROUP_CLOSERS: ReadonlySet<string> = new Set(["}", "fi", "done", "esac"]);
 
 /** The reserved words a segment starts with, and a leading for, case, or select. */
 function leadingShellWords(argv: ReadonlyArray<string>): string[] {
@@ -412,10 +409,10 @@ function leadingShellWords(argv: ReadonlyArray<string>): string[] {
 }
 
 /**
- * The cd, write, and link steps of a command in order, with the operators
- * between them, so a caller can resolve each write against every directory an
- * earlier cd can leave the shell in. A segment's redirects open before its
- * command runs, so its writes come before its cd.
+ * The cd, write, and link steps of a command in order, with the child shells
+ * around them, so a caller can resolve each write against every directory an
+ * earlier cd can leave the shell in. A segment's substitutions and redirects
+ * are opened before its command runs, so they come before its cd.
  */
 export function extractCommandPathWalk(command: string): CommandPathEvent[] {
 	const walk: CommandPathWalkState = {
@@ -426,10 +423,7 @@ export function extractCommandPathWalk(command: string): CommandPathEvent[] {
 		caseSeen: false,
 	};
 	collectPathWalk(command, 0, walk);
-	if (!walk.caseSeen) return walk.events;
-	return walk.events
-		.filter((event) => event.kind !== "separator" || (event.value !== "(" && event.value !== ")"))
-		.map((event) => (event.kind === "cd" ? { ...event, mayFail: true } : event));
+	return walk.caseSeen ? walk.events.filter((event) => event.kind !== "subshell") : walk.events;
 }
 
 function collectPathWalk(command: string, depth: number, walk: CommandPathWalkState): void {
@@ -442,7 +436,7 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 			// `name()` defines a function whose body may run any number of times.
 			const next = tokens[index + 1];
 			if (token.value === "(" && next?.operator === true && next.value === ")") walk.functionSeen = true;
-			walk.events.push({ kind: "separator", value: token.value });
+			if (token.value === "(" || token.value === ")") walk.events.push({ kind: "subshell", open: token.value === "(" });
 			continue;
 		}
 		segment.push(token);
@@ -450,15 +444,22 @@ function collectPathWalk(command: string, depth: number, walk: CommandPathWalkSt
 	collectSegmentPathEvents(segment, depth, walk);
 }
 
+function collectChildScript(script: string, depth: number, walk: CommandPathWalkState): void {
+	if (depth >= INNER_SHELL_MAX_DEPTH) return;
+	walk.events.push({ kind: "subshell", open: true });
+	collectPathWalk(script, depth + 1, walk);
+	walk.events.push({ kind: "subshell", open: false });
+}
+
 function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: number, walk: CommandPathWalkState): void {
 	if (segment.length === 0) return;
+	for (const token of segment) {
+		for (const script of token.substitutions ?? []) collectChildScript(script, depth, walk);
+	}
 	const argv = shellCommandArguments(segment);
-	const head = argv[0] ?? "";
-	if (GROUP_CLOSERS.has(head)) walk.events.push({ kind: "group", open: false });
-	if (head === "done" && walk.loopDepth > 0) walk.loopDepth -= 1;
-	if (head === "function") walk.functionSeen = true;
+	if (argv[0] === "done" && walk.loopDepth > 0) walk.loopDepth -= 1;
+	if (argv[0] === "function") walk.functionSeen = true;
 	for (const word of leadingShellWords(argv)) {
-		if (GROUP_OPENERS.has(word)) walk.events.push({ kind: "group", open: true });
 		if (LOOP_WORDS.has(word)) walk.loopDepth += 1;
 		if (word === "case") walk.caseSeen = true;
 	}
@@ -468,26 +469,12 @@ function collectSegmentPathEvents(segment: ReadonlyArray<ShellToken>, depth: num
 	collectInPlaceEditTargets(argv, writes);
 	for (const target of writes.filter(isInterestingWriteTarget)) walk.events.push({ kind: "write", target });
 	collectLinkEvents(argv, walk.events);
-	const commandIndex = commandTokenIndex(argv);
 	const cd = cdTarget(argv);
 	if (cd !== null) {
-		walk.events.push({
-			kind: "cd",
-			target: cd,
-			mayFail: argv.slice(0, commandIndex ?? 0).includes("!"),
-			unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath,
-		});
-	} else if (commandIndex !== null) {
-		const executable = basenameToken(argv[commandIndex]);
-		if (executable === "popd") walk.events.push({ kind: "popd" });
-		if (executable === "exit" || executable === "return") walk.events.push({ kind: "exit" });
+		walk.events.push({ kind: "cd", target: cd, unmodeled: walk.loopDepth > 0 || walk.functionSeen || walk.cdpath });
 	}
 	const script = segmentShellScript(argv);
-	if (script !== null && depth < INNER_SHELL_MAX_DEPTH) {
-		walk.events.push({ kind: "separator", value: "(" });
-		collectPathWalk(script, depth + 1, walk);
-		walk.events.push({ kind: "separator", value: ")" });
-	}
+	if (script !== null) collectChildScript(script, depth, walk);
 }
 
 /**
@@ -1097,12 +1084,16 @@ export function scanShellLike(command: string): ShellToken[] {
 	let quoted = false;
 	let quote: "'" | '"' | null = null;
 
+	let substitutions: string[] = [];
 	const pushCurrent = (end: number): void => {
 		if (wordStart === null) return;
-		tokens.push({ value: current, operator: false, quoted, start: wordStart, end });
+		const token: ShellToken = { value: current, operator: false, quoted, start: wordStart, end };
+		if (substitutions.length > 0) token.substitutions = substitutions;
+		tokens.push(token);
 		current = "";
 		wordStart = null;
 		quoted = false;
+		substitutions = [];
 	};
 
 	for (let index = 0; index < command.length; index += 1) {
@@ -1152,6 +1143,30 @@ export function scanShellLike(command: string): ShellToken[] {
 			if (char === "\n") tokens.push({ value: ";", operator: true, quoted: false, start: index, end: index + 1 });
 			continue;
 		}
+		if (char === "(") {
+			// `$(`, `<(`, and `>(` open a substitution that belongs to the word it
+			// sits in, so `$(echo)/../x` stays one path; its script is kept for
+			// the scanners that read it as a child command.
+			const previous = tokens.at(-1);
+			const dollar = wordStart !== null && command[index - 1] === "$" && current.endsWith("$");
+			const processSubstitution =
+				wordStart === null &&
+				previous?.operator === true &&
+				previous.end === index &&
+				(previous.value === "<" || previous.value === ">");
+			if (dollar || processSubstitution) {
+				const close = matchingParen(command, index);
+				if (processSubstitution) {
+					tokens.pop();
+					wordStart = index - 1;
+					current = previous.value;
+				}
+				current += command.slice(index, close + 1);
+				substitutions.push(command.slice(index + 1, close));
+				index = close;
+				continue;
+			}
+		}
 		if (";&|><()".includes(char)) {
 			pushCurrent(index);
 			const three = command.slice(index, index + 3);
@@ -1171,6 +1186,55 @@ export function scanShellLike(command: string): ShellToken[] {
 	}
 	pushCurrent(command.length);
 	return tokens;
+}
+
+/**
+ * The index of the `)` that closes the `(` at `open`, skipping quoted text and
+ * escapes, or the last index when the substitution is never closed.
+ */
+function matchingParen(command: string, open: number): number {
+	let depth = 0;
+	let quote: "'" | '"' | null = null;
+	for (let index = open; index < command.length; index += 1) {
+		const char = command[index];
+		if (quote !== null) {
+			if (char === "\\" && quote === '"') index += 1;
+			else if (char === quote) quote = null;
+			continue;
+		}
+		if (char === "\\") index += 1;
+		else if (char === "'" || char === '"') quote = char;
+		else if (char === "(") depth += 1;
+		else if (char === ")") {
+			depth -= 1;
+			if (depth === 0) return index;
+		}
+	}
+	return command.length - 1;
+}
+
+/**
+ * The segments of the substitutions a segment's words carry, read as child
+ * commands; they run before the segment's own command does.
+ */
+function substitutionSegments(tokens: ReadonlyArray<ShellToken>, depth: number): ShellToken[][] {
+	if (depth >= INNER_SHELL_MAX_DEPTH) return [];
+	return tokens.flatMap((token) =>
+		(token.substitutions ?? []).flatMap((script) => expandedShellSegments(script, depth + 1)),
+	);
+}
+
+/** scanShellLike with each substitution's tokens appended after a `;`, for scans that read every word. */
+export function scanShellLikeDeep(command: string, depth = 0): ShellToken[] {
+	const tokens = scanShellLike(command);
+	if (depth >= INNER_SHELL_MAX_DEPTH) return tokens;
+	const inner = tokens.flatMap((token) =>
+		(token.substitutions ?? []).flatMap((script) => [
+			{ value: ";", operator: true, quoted: false, start: token.start, end: token.start },
+			...scanShellLikeDeep(script, depth + 1),
+		]),
+	);
+	return [...tokens, ...inner];
 }
 
 function splitSegments(tokens: ReadonlyArray<ShellToken>): ShellToken[][] {

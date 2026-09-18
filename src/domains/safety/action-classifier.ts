@@ -3,7 +3,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
-import { type CommandPathEvent, extractCommandPathWalk } from "./protected-artifacts.js";
+import { extractCommandPathWalk } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -267,81 +267,46 @@ function mergeBases(left: ShellBases, right: ShellBases): ShellBases {
 /**
  * Reasons a bash command reaches outside the workspace through the paths it
  * names. The walk keeps every directory the shell can be in and resolves each
- * relative write, cd, and link from all of them.
- *
- * A cd adds where it lands under both readings and keeps where the shell was,
- * because the cd may fail. Two forms say it did not: after `cd X && ...` the
- * rest of the chain runs only if the cd succeeded, so the old directories wait
- * in `pending` and come back when the chain breaks at `;`, a newline, `||`, or
- * `&` (a compound command's inner `;` does not break it); after
- * `cd X || exit` they are gone. A cd reached through `||` or `|`, or negated
- * with `!`, keeps them. A subshell's cds end at its `)`, and `popd` can return
- * to any directory the shell was in. A cd the shell expands at run time, or one a loop, a
- * function, or CDPATH can repeat or redirect, leaves the base unknown, and a
- * relative write after it cannot be placed.
+ * relative write, cd, and link from all of them. A cd adds where it lands under
+ * both readings and never removes a directory, because the cd may fail, run in
+ * a pipeline, or be something the scanner misreads as a cd (a heredoc line, a
+ * backtick script), and a later command then runs where the shell already
+ * was. So the call's cwd is always a base, and nothing is judged from fewer
+ * directories than before cds were followed. A subshell's cds end at its `)`.
+ * A cd the shell expands at run time, or one a loop, a function, or CDPATH can
+ * repeat or redirect, leaves the base unknown, and a relative write after it
+ * cannot be placed.
  */
 function bashPathReasons(command: string, argCwd: string | undefined): string[] {
 	const writeReasons = new Set<string>();
 	const cdReasons = new Set<string>();
-	const events = extractCommandPathWalk(command);
 	let bases: ShellBases = [candidateBase(argCwd)];
-	let pending: ShellBases = [];
-	let visited: ShellBases = bases;
-	const subshells: Array<{ bases: ShellBases; pending: ShellBases }> = [];
-	const groups: ShellBases[] = [];
-	let previous = ";";
-	const fromEachBase = (target: string, check: (base: string | undefined) => void): boolean => {
-		if (target.startsWith("~") || path.isAbsolute(target)) {
-			check(undefined);
-			return true;
-		}
-		if (bases === null) return false;
-		for (const base of bases) check(base);
-		return true;
-	};
-	for (const [index, event] of events.entries()) {
-		if (event.kind === "separator") {
-			if (event.value === "(") {
-				subshells.push({ bases, pending });
-				pending = [];
-			} else if (event.value === ")") {
-				const outer = subshells.pop();
-				if (outer !== undefined) ({ bases, pending } = outer);
-			} else if (event.value !== "&&" && event.value !== "|") {
-				// A pipeline binds tighter than `&&`, so `|` does not break a chain.
-				bases = mergeBases(bases, pending);
-				pending = [];
-			}
-			previous = event.value;
+	const subshells: ShellBases[] = [];
+	for (const event of extractCommandPathWalk(command)) {
+		if (event.kind === "subshell") {
+			if (event.open) subshells.push(bases);
+			else if (subshells.length > 0) bases = subshells.pop() as ShellBases;
 			continue;
 		}
 		if (event.kind === "write") {
-			const placed = fromEachBase(event.target, (base) => {
-				const decision = writePathClass(event.target, base);
-				if (decision.cls === "system_modify") writeReasons.add(decision.reason ?? `bash-write-target: ${event.target}`);
-			});
-			if (!placed) writeReasons.add(`write-path-unknown-base: ${event.target}`);
+			const target = event.target;
+			if (target.startsWith("~") || path.isAbsolute(target)) {
+				const decision = writePathClass(target);
+				if (decision.cls === "system_modify") writeReasons.add(decision.reason ?? `bash-write-target: ${target}`);
+			} else if (bases === null) {
+				writeReasons.add(`write-path-unknown-base: ${target}`);
+			} else {
+				for (const base of bases) {
+					const decision = writePathClass(target, base);
+					if (decision.cls === "system_modify") writeReasons.add(decision.reason ?? `bash-write-target: ${target}`);
+				}
+			}
 			continue;
 		}
 		if (event.kind === "link") {
 			for (const reason of linkReasons(event, bases)) writeReasons.add(reason);
 			continue;
 		}
-		if (event.kind === "group") {
-			// A compound command's inner `;` does not break the chain around it.
-			if (event.open) {
-				groups.push(pending);
-				pending = [];
-			} else {
-				pending = mergeBases(groups.pop() ?? [], pending);
-			}
-			continue;
-		}
-		if (event.kind === "popd") {
-			bases = mergeBases(bases, visited);
-			continue;
-		}
-		if (event.kind === "exit") continue;
 		const target = event.target;
 		if (target.startsWith("~")) {
 			cdReasons.add(`bash-cd-home-escape: ${target}`);
@@ -361,35 +326,9 @@ function bashPathReasons(command: string, argCwd: string | undefined): string[] 
 			}
 		}
 		// A relative cd from an unknown base lands somewhere unknown too.
-		if (event.unmodeled || bases === null) {
-			bases = null;
-			continue;
-		}
-		const outcome = event.mayFail || previous === "||" || previous === "|" ? "may-fail" : cdOutcome(events, index);
-		if (outcome === "chained") pending = mergeBases(pending, bases);
-		bases = outcome === "may-fail" ? mergeBases(bases, landed) : mergeBases([], landed);
-		visited = mergeBases(visited, landed);
+		bases = event.unmodeled || bases === null ? null : mergeBases(bases, landed);
 	}
 	return [...writeReasons, ...cdReasons];
-}
-
-/**
- * What the commands after a cd assume about it. `cd X && ...` runs the rest
- * only if the cd succeeded (`chained`); `cd X || exit` ends the shell if it
- * failed (`required`); anything else runs either way.
- */
-function cdOutcome(events: ReadonlyArray<CommandPathEvent>, index: number): "chained" | "required" | "may-fail" {
-	const separators = events
-		.map((event, at) => ({ event, at }))
-		.filter(({ event, at }) => at > index && event.kind === "separator");
-	const next = separators[0];
-	if (next?.event.kind !== "separator") return "may-fail";
-	if (next.event.value === "&&") return "chained";
-	if (next.event.value !== "||") return "may-fail";
-	const after = separators[1];
-	const branch = events.slice(next.at + 1, after?.at ?? events.length);
-	const ends = after?.event.kind !== "separator" || !["&&", "||", "|"].includes(after.event.value);
-	return ends && branch.some((event) => event.kind === "exit") ? "required" : "may-fail";
 }
 
 /**
