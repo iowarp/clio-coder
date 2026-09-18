@@ -182,4 +182,60 @@ describe("smoke/process lifecycle", { concurrency: false, skip: process.platform
 			rmSync(root, { recursive: true, force: true });
 		}
 	});
+
+	it("ends a run --timeout through the same shutdown, stops the tool child, and seals timed_out", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-process-timeout-"));
+		const env = environment(root);
+		const project = join(root, "project");
+		const pidFile = join(project, ".tool-child.pid");
+		const stoppedFile = join(project, ".tool-child.stopped");
+		const command =
+			"trap 'printf stopped > .tool-child.stopped; exit 0' TERM INT HUP; " +
+			"printf '%s' \"$$\" > .tool-child.pid; while :; do sleep 1; done";
+		const fixture = await provider(command);
+		let child: ReturnType<typeof spawn> | undefined;
+		let toolPid = 0;
+		try {
+			mkdirSync(project);
+			execFileSync(process.execPath, [CLI, "doctor", "--fix"], { cwd: ROOT, env, stdio: "pipe" });
+			seedTarget(root, fixture.url);
+			child = spawn(
+				process.execPath,
+				[CLI, "--no-context-files", "--no-skills", "run", "--autonomy", "full-auto", "--timeout", "4", "start child"],
+				{ cwd: project, env, stdio: ["ignore", "pipe", "pipe"] },
+			);
+			let stderr = "";
+			child.stderr?.setEncoding("utf8");
+			child.stderr?.on("data", (text: string) => {
+				stderr += text;
+			});
+			const exit = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+				child?.once("close", (code, signal) => resolve({ code, signal })),
+			);
+			ok(await waitFor(() => existsSync(pidFile), 20_000), `tool child did not start; stderr=${stderr}`);
+			toolPid = Number.parseInt(readFileSync(pidFile, "utf8"), 10);
+			ok(Number.isSafeInteger(toolPid) && toolPid > 1 && processExists(toolPid));
+
+			const result = await exit;
+			strictEqual(result.code, 124, `signal=${result.signal ?? "none"}; stderr=${stderr}`);
+			ok(await waitFor(() => existsSync(stoppedFile), 5_000), "tool child did not observe coordinated termination");
+			ok(await waitFor(() => !processExists(toolPid), 5_000), `orphaned tool pid ${toolPid}`);
+
+			const receiptDir = join(root, "state", "receipts");
+			const receipts = readdirSync(receiptDir).filter((name) => name.endsWith(".json"));
+			strictEqual(receipts.length, 1);
+			const receipt = JSON.parse(readFileSync(join(receiptDir, receipts[0] ?? ""), "utf8")) as {
+				outcome: string;
+				exitCode: number;
+			};
+			strictEqual(receipt.outcome, "timed_out");
+			strictEqual(receipt.exitCode, 124);
+		} finally {
+			if (child?.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+			if (toolPid > 1 && processExists(toolPid)) process.kill(toolPid, "SIGKILL");
+			fixture.server.closeAllConnections();
+			await new Promise<void>((resolve) => fixture.server.close(() => resolve()));
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
 });
