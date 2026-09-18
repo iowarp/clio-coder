@@ -2322,6 +2322,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			await chat.whenSettled();
 			chat.dispose();
 			await dispatch.drain();
+			// A client that closes the session ends ACP here, outside the
+			// termination coordinator, so its terminate hook never runs. Release
+			// the Ollama models this process and its workers loaded on this path
+			// too (#379); SIGINT and SIGTERM still reach the hook. The release
+			// bounds itself by EXIT_RELEASE_MS and never throws.
+			await releaseClioLoadedModelsOnExit();
 			await result.stop();
 			return { exitCode: code, bootTimeMs: timer.snapshot().totalMs };
 		} finally {

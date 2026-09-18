@@ -1,9 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 import { type HeadlessScratch, headlessScratch, runCli } from "../harness/headless-run.js";
 import { closeServer, readRequestBody } from "../harness/openai-compat-fixture.js";
 
@@ -157,6 +159,100 @@ describe("clio-coder run releases the Ollama models it loaded on exit (#379)", (
 		const fixture = await ollamaFixture({ hangRelease: true });
 		const turn = await headlessRun(fixture);
 		strictEqual(turn.code, 0, turn.stderr);
+		deepStrictEqual(fixture.releases, [{ model: MODEL, keep_alive: 0 }]);
+	});
+});
+
+const CLI = join(fileURLToPath(new URL("../..", import.meta.url)), "dist", "cli", "index.js");
+
+/** Minimal ACP stdio client: requests in order, updates ignored. */
+function acpClient(child: ChildProcessWithoutNullStreams) {
+	let buffer = "";
+	let stderr = "";
+	let nextId = 1;
+	const pending = new Map<number, (frame: Record<string, unknown>) => void>();
+	child.stdout.setEncoding("utf8");
+	child.stderr.setEncoding("utf8");
+	child.stderr.on("data", (text: string) => {
+		stderr += text;
+	});
+	child.stdout.on("data", (text: string) => {
+		buffer += text;
+		for (let newline = buffer.indexOf("\n"); newline !== -1; newline = buffer.indexOf("\n")) {
+			const line = buffer.slice(0, newline).trim();
+			buffer = buffer.slice(newline + 1);
+			if (!line) continue;
+			const frame = JSON.parse(line) as Record<string, unknown>;
+			if (typeof frame.id === "number" && ("result" in frame || "error" in frame)) pending.get(frame.id)?.(frame);
+		}
+	});
+	const exit = new Promise<number | null>((resolve) => child.once("close", (code) => resolve(code)));
+	return {
+		exit,
+		stderr: () => stderr,
+		request<T>(method: string, params: unknown): Promise<T> {
+			const id = nextId++;
+			child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+			return new Promise<T>((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(`${method} timed out; stderr=${stderr}`)), 30_000);
+				pending.set(id, (frame) => {
+					clearTimeout(timer);
+					if (frame.error) reject(new Error(`${method} failed: ${JSON.stringify(frame.error)}`));
+					else resolve(frame.result as T);
+				});
+			});
+		},
+	};
+}
+
+describe("clio-coder acp releases the Ollama models it loaded on exit (#379)", () => {
+	const servers: Server[] = [];
+	const scratches: HeadlessScratch[] = [];
+	const children: ChildProcessWithoutNullStreams[] = [];
+	afterEach(async () => {
+		for (const child of children.splice(0)) if (child.exitCode === null) child.kill("SIGKILL");
+		await Promise.all(servers.splice(0).map((server) => closeServer(server)));
+		for (const scratch of scratches.splice(0)) scratch.cleanup();
+	});
+
+	async function promptedSession(fixture: OllamaFixture) {
+		servers.push(fixture.server);
+		const scratch = headlessScratch("clio-coder-ollama-acp-release-");
+		scratches.push(scratch);
+		seedOllamaOrchestrator(scratch.configDir, fixture.url);
+		const project = join(scratch.root, "project");
+		mkdirSync(project);
+		const child = spawn(process.execPath, [CLI, "--no-context-files", "--no-skills", "acp", "--cwd", project], {
+			cwd: scratch.root,
+			env: scratch.env,
+			stdio: ["pipe", "pipe", "pipe"],
+		});
+		children.push(child);
+		const client = acpClient(child);
+		await client.request("initialize", { protocolVersion: 1, clientInfo: { name: "release-test", version: "1" } });
+		const session = await client.request<{ sessionId: string }>("session/new", { cwd: project, mcpServers: [] });
+		const turn = await client.request<{ stopReason: string }>("session/prompt", {
+			sessionId: session.sessionId,
+			prompt: [{ type: "text", text: "say hello" }],
+		});
+		strictEqual(turn.stopReason, "end_turn", client.stderr());
+		ok(fixture.chats >= 1, "the session must have reached the model");
+		return { child, client };
+	}
+
+	it("releases a model the session loaded when the client closes stdin", async () => {
+		const fixture = await ollamaFixture();
+		const { child, client } = await promptedSession(fixture);
+		child.stdin.end();
+		strictEqual(await client.exit, 0, client.stderr());
+		deepStrictEqual(fixture.releases, [{ model: MODEL, keep_alive: 0 }]);
+	});
+
+	it("releases a model the session loaded on SIGTERM", async () => {
+		const fixture = await ollamaFixture();
+		const { child, client } = await promptedSession(fixture);
+		child.kill("SIGTERM");
+		await client.exit;
 		deepStrictEqual(fixture.releases, [{ model: MODEL, keep_alive: 0 }]);
 	});
 });
