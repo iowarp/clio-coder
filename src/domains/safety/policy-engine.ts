@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
-import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizePath } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
@@ -1087,11 +1087,12 @@ function hasShellOperators(command: string): boolean {
 	return hasSequencingOperators(command) || hasCommandSubstitution(command);
 }
 
+/** A path that cannot be canonicalized is under nothing. */
 function isUnderOrSame(child: string, parent: string): boolean {
-	const rel = path.relative(
-		canonicalizeExistingPath(path.resolve(parent)),
-		canonicalizeExistingPath(path.resolve(child)),
-	);
+	const canonicalParent = canonicalizePath(path.resolve(parent));
+	const canonicalChild = canonicalizePath(path.resolve(child));
+	if (canonicalParent === null || canonicalChild === null) return false;
+	const rel = path.relative(canonicalParent, canonicalChild);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
 

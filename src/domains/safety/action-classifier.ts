@@ -1,6 +1,6 @@
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { canonicalizeExistingPath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizePath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 
@@ -184,9 +184,12 @@ function resolveCandidate(p: string, baseCwd?: string): string {
 	return canonicalizeExistingPath(resolved);
 }
 
+// A path that cannot be canonicalized (a link loop, too many links) is
+// outside, never inside: nothing proves where a write through it lands.
 function isInsideCwd(abs: string): boolean {
-	const cwd = canonicalizeExistingPath(path.resolve(process.cwd()));
-	const candidate = canonicalizeExistingPath(abs);
+	const cwd = canonicalizePath(path.resolve(process.cwd()));
+	const candidate = canonicalizePath(abs);
+	if (cwd === null || candidate === null) return false;
 	const rel = path.relative(cwd, candidate);
 	return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
 }
