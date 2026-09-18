@@ -1,6 +1,6 @@
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
-import { canonicalizeExistingPath, canonicalizePath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
 import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
 
@@ -174,14 +174,39 @@ function matchFirst(patterns: ReadonlyArray<NamedPattern>, haystack: string): Na
 	return null;
 }
 
-function resolveCandidate(p: string, baseCwd?: string): string {
+/**
+ * The directory a bash call runs in. The bash tool resolves its cwd argument
+ * lexically (resolveSafeCwd) and the kernel follows links on chdir, so this
+ * reads it the same way.
+ */
+function candidateBase(baseCwd?: string): string {
+	return canonicalizeExistingPath(path.resolve(baseCwd ?? process.cwd()));
+}
+
+/**
+ * Where a write through a model-supplied path lands. The kernel resolves an
+ * open or a redirect one component at a time, so `data/link/../x` lands beside
+ * the link's target, not in `data`. Null when the path cannot be canonicalized.
+ */
+function resolveCandidate(p: string, baseCwd?: string): string | null {
 	// ~ expansion is not performed here; any ~-prefixed path is treated as an
 	// absolute user-home reference. We keep it as-is so the caller-visible
 	// string drives the escape check, and classify conservatively as modify.
 	if (p.startsWith("~")) return p;
-	const base = canonicalizeExistingPath(path.resolve(baseCwd ?? process.cwd()));
-	const resolved = path.isAbsolute(p) ? path.resolve(p) : path.resolve(base, p);
-	return canonicalizeExistingPath(resolved);
+	return canonicalizeRawPath(p, candidateBase(baseCwd));
+}
+
+/**
+ * Where a shell `cd` lands, under both readings. A shell `cd` is logical by
+ * default: it collapses `link/..` against the path it names and then follows
+ * links. `cd -P` and `set -P` walk physically instead. Null for a reading that
+ * cannot be canonicalized.
+ */
+function resolveCdCandidates(target: string, baseCwd?: string): Array<string | null> {
+	const base = candidateBase(baseCwd);
+	const logical = canonicalizePath(path.resolve(base, target));
+	const physical = canonicalizeRawPath(target, base);
+	return logical === physical ? [logical] : [logical, physical];
 }
 
 // A path that cannot be canonicalized (a link loop, too many links) is
@@ -199,6 +224,8 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
 		return { cls: "system_modify", reason: `write-path-home-escape: ${pathArg}` };
 	}
 	const abs = resolveCandidate(pathArg, baseCwd);
+	// Nothing proves where a write through an unresolvable path lands.
+	if (abs === null) return { cls: "system_modify", reason: `write-path-outside-cwd: ${pathArg}` };
 	const exempt = SYSTEM_WRITE_EXEMPT_PREFIXES.some((prefix) => isUnderPrefix(abs, prefix));
 	if (!exempt) {
 		for (const prefix of SYSTEM_WRITE_ROOT_PREFIXES) {
@@ -284,9 +311,10 @@ export function classify(call: ClassifierCall): Classification {
 					targetReasons.push(`bash-cd-home-escape: ${target}`);
 					continue;
 				}
-				const abs = resolveCandidate(target, argCwd);
-				if (!isInsideCwd(abs)) {
-					targetReasons.push(`bash-cd-outside-workspace: ${abs}`);
+				// Inside means inside under the logical and the physical reading.
+				const outside = resolveCdCandidates(target, argCwd).find((abs) => abs === null || !isInsideCwd(abs));
+				if (outside !== undefined) {
+					targetReasons.push(`bash-cd-outside-workspace: ${outside ?? target}`);
 				}
 			}
 			if (targetReasons.length > 0) {
