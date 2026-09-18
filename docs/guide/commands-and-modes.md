@@ -99,6 +99,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 
 | Flag | Meaning |
 | --- | --- |
+| `--cwd <dir>` | Enter `<dir>` before the run resolves anything against the working directory, the way `acp --cwd` does. Applies to the main agent and to `--agent`. See [Headless Working Directory](#headless-working-directory). |
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
@@ -131,6 +132,14 @@ the pane host and a second terminal can use the same journal surface directly.
 unimplemented rung that resolves to no panes, prints a refusal during boot, and
 is labelled `NOT IMPLEMENTED` in Settings. Use `auto` or `--with-panes` only
 when Clio is already inside a reachable herdr session.
+
+### Headless Working Directory
+
+`clio-coder run --cwd <dir> "<task>"` behaves the same as `cd <dir> && clio-coder run "<task>"`. The process enters `<dir>` before it reads layered project settings, context files, skills, `@file` references, or the session ledger, and every tool path resolves against it. Relative paths in other arguments, such as `--skill`, `--steer-channel`, and `@file`, resolve against `<dir>` as well. The path is canonicalized first, so the run ledger records the physical directory as the run's `cwd`.
+
+- A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
+- `--cwd` with no value is a usage error with exit code 2.
+- An orchestrator that runs Clio inside a git worktree can pass the worktree path here instead of changing its own working directory before the spawn.
 
 ### Headless Session Continuity
 
