@@ -167,7 +167,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		string,
 		Pick<
 			ToolFinishEvent,
-			"outcome" | "reason" | "durationMs" | "actionClass" | "decision" | "ruleId" | "reasonCode" | "policySource"
+			| "outcome"
+			| "reason"
+			| "durationMs"
+			| "actionClass"
+			| "decision"
+			| "deniedPark"
+			| "ruleId"
+			| "reasonCode"
+			| "policySource"
 		>
 	>();
 	const toolTelemetry: ToolTelemetry = {
@@ -179,6 +187,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				durationMs: event.durationMs,
 				...(event.actionClass === undefined ? {} : { actionClass: event.actionClass }),
 				...(event.decision === undefined ? {} : { decision: event.decision }),
+				...(event.deniedPark === true ? { deniedPark: true } : {}),
 				...(event.ruleId === undefined ? {} : { ruleId: event.ruleId }),
 				...(event.reasonCode === undefined ? {} : { reasonCode: event.reasonCode }),
 				...(event.policySource === undefined ? {} : { policySource: event.policySource }),
@@ -690,6 +699,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								// these, the same facts a worker's receipt is built from.
 								...(admission.actionClass === undefined ? {} : { actionClass: admission.actionClass }),
 								...(admission.decision === undefined ? {} : { decision: admission.decision }),
+								...(admission.deniedPark === true ? { deniedPark: true } : {}),
 								...(admission.ruleId === undefined ? {} : { ruleId: admission.ruleId }),
 								...(admission.reasonCode === undefined ? {} : { reasonCode: admission.reasonCode }),
 								...(admission.policySource === undefined ? {} : { policySource: admission.policySource }),

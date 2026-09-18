@@ -5,10 +5,16 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	BLOCKED_ATTEMPT_REASON_MAX_CHARS,
+	BLOCKED_ATTEMPTS_LIMIT,
+	recordBlockedAttempt,
+} from "../../src/cli/modes/print.js";
+import {
 	HEADLESS_PERMISSION_DENIED_MARKER,
 	HEADLESS_PERMISSION_DENIED_REASON,
 } from "../../src/core/headless-permission.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
+import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
 import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
@@ -183,6 +189,20 @@ for (const check of ["correlation", "receipt"] as const)
 		}
 	});
 
+test("the headless blockedAttempts list is bounded and counts what it leaves out", () => {
+	const stats = { blockedAttempts: [] as SafetyBlockedAttempt[], blockedAttemptsTruncated: 0 };
+	const reason = "x".repeat(BLOCKED_ATTEMPT_REASON_MAX_CHARS + 100);
+	for (let index = 0; index < BLOCKED_ATTEMPTS_LIMIT + 10; index += 1) {
+		recordBlockedAttempt(stats, { tool: "write", actionClass: "write", reason });
+	}
+	strictEqual(stats.blockedAttempts.length, BLOCKED_ATTEMPTS_LIMIT);
+	strictEqual(stats.blockedAttemptsTruncated, 10);
+	strictEqual(stats.blockedAttempts[0]?.reason, `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…`);
+	stats.blockedAttempts = [];
+	recordBlockedAttempt(stats, { tool: "edit", reason: "short" });
+	deepStrictEqual(stats.blockedAttempts, [{ tool: "edit", reason: "short" }]);
+});
+
 /**
  * Ticket #378 end to end: the built binary, a scripted OpenAI-compatible model,
  * and the exit code and sealed receipt an external driver would read.
@@ -237,10 +257,10 @@ describe("headless no-op contract through the built binary", () => {
 			],
 			{ env: scratch.env, cwd: project },
 		);
-		const { receipt } = sealedReceipt(scratch.stateDir);
+		const { receipt, envelope } = sealedReceipt(scratch.stateDir);
 		strictEqual(receipt.exitCode, turn.code, "the receipt and the process must agree on the exit code");
 		strictEqual(readFileSync(join(project, "sentinel.txt"), "utf8"), "blocked is harmless fixture text\n");
-		return { turn, receipt, project };
+		return { turn, receipt, envelope, project };
 	}
 
 	for (const failOnNoop of [true, false]) {
@@ -304,6 +324,60 @@ describe("headless no-op contract through the built binary", () => {
 			receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.ruleId]),
 			[["bash", "bash-hidden-content"]],
 		);
+	});
+
+	test("a report artifact after a blocked edit is still a no-op under --fail-on-noop", async () => {
+		// The edit is a hard block on a zero-access path, so the only successful
+		// write-class call is the artifact explaining the failure. That artifact
+		// is the turn's answer, not a change to the workspace.
+		const { turn, receipt, project } = await headlessTurn({
+			autonomy: "auto-edit",
+			steps: [
+				{ id: "call-edit", name: "edit", arguments: { path: ".env", edits: [{ oldText: "A=1", newText: "A=2" }] } },
+				{
+					id: "call-artifact",
+					name: "gateway",
+					arguments: {
+						op: "call",
+						capability: "artifact",
+						args: { kind: "report", content: "# Blocked\n\nThe edit was refused by policy.\n" },
+					},
+				},
+			],
+			failOnNoop: true,
+		});
+		ok(existsSync(join(project, ".clio-coder", "artifacts", "REPORT.md")), "the artifact itself must land");
+		strictEqual(turn.code, 1, turn.stderr);
+		strictEqual(receipt.noop, true);
+		strictEqual(receipt.outcome, "failed");
+		strictEqual(receipt.outcomeDetail, "noop");
+		deepStrictEqual(
+			receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.actionClass]),
+			[["edit", "write"]],
+		);
+		strictEqual(receipt.toolStats.find((stat) => stat.tool === "gateway")?.ok, 1);
+	});
+
+	test("three identical denied writes all count as permission requests", async () => {
+		// The loop guard rewrites the third denial's reason with its own
+		// guidance, so a reason-prefix check would count that one as a hard block.
+		const { receipt } = await headlessTurn({
+			autonomy: "suggest",
+			steps: [writeProof, { ...writeProof, id: "call-write-2" }, { ...writeProof, id: "call-write-3" }],
+			failOnNoop: false,
+		});
+		strictEqual(receipt.safety?.blockedAttempts.length, 3);
+		deepStrictEqual(receipt.safety?.decisions, { allowed: 0, blocked: 0, permissionRequested: 3 });
+		strictEqual(receipt.noop, true);
+	});
+
+	test("the sealed noop bit is covered by the receipt integrity digest", async () => {
+		const { receipt, envelope } = await headlessTurn({ autonomy: "suggest", steps: [writeProof], failOnNoop: false });
+		strictEqual(receipt.noop, true);
+		ok(verifyReceiptIntegrity(receipt, envelope).ok, "the sealed receipt must verify as written");
+		strictEqual(verifyReceiptIntegrity({ ...receipt, noop: false }, envelope).ok, false, "a flipped noop must fail");
+		const { noop: _noop, ...withoutNoop } = receipt;
+		strictEqual(verifyReceiptIntegrity(withoutNoop, envelope).ok, false, "a removed noop must fail");
 	});
 
 	test("a prose answer with no tool call is not a no-op under --fail-on-noop", async () => {

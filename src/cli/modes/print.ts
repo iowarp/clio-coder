@@ -1,4 +1,3 @@
-import { HEADLESS_PERMISSION_DENIED_MARKER } from "../../core/headless-permission.js";
 import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
@@ -118,8 +117,10 @@ interface HeadlessMainAgentReceiptStats {
 	usage: RunUsageSummary | null;
 	/** The decision axis, counted the way a worker receipt counts it. */
 	decisions: RunReceiptSafetySummary["decisions"];
-	/** Every call whose outcome was blocked, in the worker receipt's shape. */
+	/** Every call whose outcome was blocked, in the worker receipt's shape, up to `BLOCKED_ATTEMPTS_LIMIT`. */
 	blockedAttempts: SafetyBlockedAttempt[];
+	/** Blocked attempts past `BLOCKED_ATTEMPTS_LIMIT`, counted but not listed. */
+	blockedAttemptsTruncated: number;
 	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
 	mutatingSucceeded: number;
 }
@@ -128,14 +129,41 @@ interface HeadlessMainAgentReceiptStats {
  * The registry action class a successful call must carry to count as a
  * mutation for the no-op rule. It is the class autonomy `auto-edit` runs
  * without asking (`mapAutonomy` in domains/safety/autonomy.ts): write, edit,
- * artifact, and an outward web_fetch. The class comes from the registry's own
- * admission of each call, so an extension tool that declares a write base
- * class counts too. `execute` is left out on purpose: a shell command's class
- * says that it ran, not that it wrote, and counting it would let one
- * successful `git status` after a denied write hide the no-op this rule
- * exists to catch.
+ * and an outward web_fetch. The class comes from the registry's own admission
+ * of each call, so an extension tool that declares a write base class counts
+ * too. `execute` is left out on purpose: a shell command's class says that it
+ * ran, not that it wrote, and counting it would let one successful
+ * `git status` after a denied write hide the no-op this rule exists to catch.
+ * A terminating result is left out too (see `recordToolEnd`).
  */
 const MUTATING_ACTION_CLASS: ActionClass = "write";
+
+/**
+ * Bounds on `safety.blockedAttempts`. A model retrying a denied call appends
+ * an entry per attempt, each carrying the full rejection text, so the list is
+ * capped and each reason clipped. Attempts past the cap are counted in
+ * `safety.blockedAttemptsTruncated`; the per-tool blocked counts in
+ * `toolStats` stay exact either way.
+ */
+export const BLOCKED_ATTEMPTS_LIMIT = 50;
+export const BLOCKED_ATTEMPT_REASON_MAX_CHARS = 500;
+
+/** Append one blocked attempt within the receipt bounds above. */
+export function recordBlockedAttempt(
+	stats: { blockedAttempts: SafetyBlockedAttempt[]; blockedAttemptsTruncated: number },
+	attempt: SafetyBlockedAttempt,
+): void {
+	if (stats.blockedAttempts.length >= BLOCKED_ATTEMPTS_LIMIT) {
+		stats.blockedAttemptsTruncated += 1;
+		return;
+	}
+	const reason = attempt.reason;
+	stats.blockedAttempts.push(
+		reason !== undefined && reason.length > BLOCKED_ATTEMPT_REASON_MAX_CHARS
+			? { ...attempt, reason: `${reason.slice(0, BLOCKED_ATTEMPT_REASON_MAX_CHARS)}…` }
+			: attempt,
+	);
+}
 
 function assistantText(message: AgentMessage | undefined): string {
 	if (!message || typeof message !== "object" || message.role !== "assistant") return "";
@@ -238,18 +266,23 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	// Safety bookkeeping mirrors the worker receipt's fold of its own tool
 	// finish events (domains/dispatch/extension.ts), so the two receipts carry
 	// the same facts under the same names.
-	const detail = event as { ruleId?: unknown; reasonCode?: unknown; policySource?: unknown; blockReason?: unknown };
+	const detail = event as {
+		ruleId?: unknown;
+		reasonCode?: unknown;
+		policySource?: unknown;
+		blockReason?: unknown;
+		deniedPark?: unknown;
+	};
 	const decision = (event as { decision?: unknown }).decision;
 	// A call that parked for approval and was denied because a headless run has
 	// no operator arrives as a registry block: parkAnsweredBlockedVerdict
 	// rewrites the ask. The summary's contract counts that call as a permission
 	// request, which is where a worker's non-interactive denial lands, so the
-	// registry's own headless denial marker routes it there. `decisions.blocked`
-	// keeps meaning a hard block by a rule or a guard.
-	const deniedAsk =
-		decision === "blocked" &&
-		typeof detail.blockReason === "string" &&
-		detail.blockReason.startsWith(HEADLESS_PERMISSION_DENIED_MARKER);
+	// registry's `deniedPark` flag routes it there. The flag, not the reason
+	// text, is the signal: the loop guard replaces the reason of a repeated
+	// denied call with its own guidance. `decisions.blocked` keeps meaning a
+	// hard block by a rule or a guard.
+	const deniedAsk = decision === "blocked" && detail.deniedPark === true;
 	if (decision === "allowed") stats.decisions.allowed += 1;
 	else if (decision === "permission_requested" || deniedAsk) stats.decisions.permissionRequested += 1;
 	else if (decision === "blocked") stats.decisions.blocked += 1;
@@ -261,9 +294,16 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 		if (typeof detail.reasonCode === "string") attempt.reasonCode = detail.reasonCode;
 		if (typeof detail.policySource === "string") attempt.policySource = detail.policySource;
 		if (typeof detail.blockReason === "string") attempt.reason = detail.blockReason;
-		stats.blockedAttempts.push(attempt);
+		recordBlockedAttempt(stats, attempt);
 	}
-	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS) stats.mutatingSucceeded += 1;
+	// A terminating result (the artifact tool's plan, review, or report) is the
+	// turn's answer written to a file, not the workspace change the task asked
+	// for. Counting it let a run whose every edit was blocked seal as a success
+	// by writing a report about the failure. `terminate` is the registry's own
+	// marker for that kind of result and survives the gateway hop, where the
+	// call's tool name is `gateway` rather than `artifact`.
+	const terminating = (event.result as { terminate?: unknown } | undefined)?.terminate === true;
+	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
 		const turnId = typeof rawTurnId === "string" ? rawTurnId : undefined;
@@ -496,7 +536,13 @@ async function recordHeadlessMainAgentReceipt(input: {
 		autonomyEnforcement: { grade: "mediated", autonomy: snapshot.autonomy },
 		// Sealed on every main-agent receipt, flag or no flag, so a driver can
 		// apply its own no-op rule to a run that exited 0.
-		safety: { decisions: { ...input.stats.decisions }, blockedAttempts: [...input.stats.blockedAttempts] },
+		safety: {
+			decisions: { ...input.stats.decisions },
+			blockedAttempts: [...input.stats.blockedAttempts],
+			...(input.stats.blockedAttemptsTruncated > 0
+				? { blockedAttemptsTruncated: input.stats.blockedAttemptsTruncated }
+				: {}),
+		},
 		noop: headlessNoop(input.stats),
 		...(snapshot.runtimeResolution ? { runtimeResolution: snapshot.runtimeResolution } : {}),
 		sessionId: snapshot.sessionId ?? input.chat.getSessionId(),
@@ -536,6 +582,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		usage: null,
 		decisions: { allowed: 0, blocked: 0, permissionRequested: 0 },
 		blockedAttempts: [],
+		blockedAttemptsTruncated: 0,
 		mutatingSucceeded: 0,
 	};
 	// The receipt is this run's accounting, so it has to exist on the costly

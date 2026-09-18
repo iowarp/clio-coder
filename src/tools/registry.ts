@@ -446,7 +446,19 @@ export interface ToolRegistry {
 
 export type RegistryVerdict =
 	| { kind: "ok"; result: ToolResult; decision: SafetyDecision }
-	| { kind: "blocked"; reason: string; decision: SafetyDecision }
+	| {
+			kind: "blocked";
+			reason: string;
+			decision: SafetyDecision;
+			/**
+			 * The call parked for approval and the park was answered without one:
+			 * denied (by an operator, or by a headless run that has none) or
+			 * cancelled. Set by `parkAnsweredBlockedVerdict` only. Consumers key on
+			 * this instead of the reason text, which the loop guard replaces on a
+			 * repeated denied call.
+			 */
+			deniedPark?: true;
+	  }
 	| { kind: "not_visible"; reason: string };
 
 interface ParkedCall {
@@ -1088,6 +1100,7 @@ const NESTED_BLOCKED_DETAIL = "nestedBlockedVerdict";
 interface NestedBlockedMarker {
 	reason: string;
 	decision: SafetyDecision;
+	deniedPark?: true;
 }
 
 /**
@@ -1097,7 +1110,11 @@ interface NestedBlockedMarker {
  * call identically instead of dressing the refusal as a tool error.
  */
 export function nestedBlockedResult(verdict: Extract<RegistryVerdict, { kind: "blocked" }>): ToolResult {
-	const marker: NestedBlockedMarker = { reason: verdict.reason, decision: verdict.decision };
+	const marker: NestedBlockedMarker = {
+		reason: verdict.reason,
+		decision: verdict.decision,
+		...(verdict.deniedPark === true ? { deniedPark: true } : {}),
+	};
 	return { kind: "error", message: verdict.reason, details: { [NESTED_BLOCKED_DETAIL]: marker } };
 }
 
@@ -1105,7 +1122,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	if (result.kind !== "error") return null;
 	const marker = result.details?.[NESTED_BLOCKED_DETAIL];
 	if (typeof marker !== "object" || marker === null) return null;
-	const { reason, decision } = marker as Partial<NestedBlockedMarker>;
+	const { reason, decision, deniedPark } = marker as Partial<NestedBlockedMarker>;
 	if (
 		typeof reason !== "string" ||
 		typeof decision !== "object" ||
@@ -1115,7 +1132,7 @@ function nestedBlockedVerdict(result: ToolResult): Extract<RegistryVerdict, { ki
 	) {
 		return null;
 	}
-	return { kind: "blocked", reason, decision };
+	return { kind: "blocked", reason, decision, ...(deniedPark === true ? { deniedPark: true } : {}) };
 }
 
 /**
@@ -1220,7 +1237,7 @@ function parkAnsweredBlockedVerdict(
 		},
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
-	return { kind: "blocked", reason, decision: blocked };
+	return { kind: "blocked", reason, decision: blocked, deniedPark: true };
 }
 
 /**
