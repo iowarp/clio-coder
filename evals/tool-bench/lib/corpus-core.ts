@@ -12,7 +12,7 @@ export type Split = (typeof SPLITS)[number];
 export const PROFILES = ["default", "full"] as const;
 export type Profile = (typeof PROFILES)[number];
 export const DEFAULT_SEED = 1;
-export const TOOLS = ["edit", "read", "write"] as const;
+export const TOOLS = ["edit", "read", "write", "grep"] as const;
 export type BenchTool = (typeof TOOLS)[number];
 
 export type CorpusEntry =
@@ -165,4 +165,48 @@ export function joinLines(lines: readonly Buffer[], eol: string, finalNewline: b
 		if (finalNewline || index < lines.length - 1) parts.push(terminator);
 	}
 	return Buffer.concat(parts);
+}
+
+/** The scratch root as a non-mutating tool must leave it: every file and symlink as written, sorted by path. */
+export function unchangedFiles(files: readonly CorpusEntry[]): ExpectedEntry[] {
+	return files
+		.filter((entry) => entry.kind !== "dir")
+		.map((entry) => (entry.kind === "file" ? expectedFile(entry.path, entry.bytes, entry.mode) : entry))
+		.sort((left, right) => (left.path < right.path ? -1 : left.path > right.path ? 1 : 0));
+}
+
+export interface TreeFile {
+	path: string;
+	lines: string[];
+}
+
+/**
+ * A tree of count text files under data/, at most 100 per directory:
+ * data/g<dir>/f<index>.<ext>. Lines come from one pool per tree, so a
+ * 50 000 file tree stays cheap to generate while every byte still comes from
+ * the scenario's stream. ext picks each file's extension.
+ */
+export function buildTree(rng: Rng, count: number, ext: (index: number) => string = () => "txt"): TreeFile[] {
+	const pool: string[] = [];
+	for (let i = 0; i < POOL_SIZE; i += 1) pool.push(fillerLine(rng, rng.int(20, 80), "ascii"));
+	const out: TreeFile[] = [];
+	for (let index = 0; index < count; index += 1) {
+		const lines: string[] = [];
+		const length = rng.int(4, 16);
+		for (let line = 0; line < length; line += 1) lines.push(pool[rng.int(0, POOL_SIZE - 1)] as string);
+		const dir = String(Math.floor(index / 100)).padStart(3, "0");
+		out.push({ path: `data/g${dir}/f${String(index).padStart(5, "0")}.${ext(index)}`, lines });
+	}
+	return out;
+}
+
+/** count distinct integers in [0, size), in ascending order. */
+export function pickDistinct(rng: Rng, count: number, size: number): number[] {
+	const picked = new Set<number>();
+	while (picked.size < Math.min(count, size)) picked.add(rng.int(0, size - 1));
+	return [...picked].sort((left, right) => left - right);
+}
+
+export function treeEntry(file: TreeFile): CorpusEntry {
+	return { kind: "file", path: file.path, bytes: Buffer.from(`${file.lines.join("\n")}\n`, "utf8"), mode: 0o644 };
 }

@@ -11,7 +11,7 @@
  * environment, or Math.random.
  *
  * CLI: node --import tsx evals/tool-bench/lib/corpus.ts --seed <int> --split search|holdout
- *        [--tool edit|read|write] [--profile default|full] [--out <dir>]
+ *        [--tool edit|read|write|grep] [--profile default|full] [--out <dir>]
  * Prints one JSON line per scenario (id, content hash, file bytes) and, with
  * --out, writes each scenario's files under <dir>/<scenario id>/. Without
  * --tool it lists every tool.
@@ -22,15 +22,17 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type BenchTool, DEFAULT_SEED, PROFILES, type Profile, SPLITS, type Split, TOOLS } from "./corpus-core.js";
 import { EDIT_TEMPLATES, type EditScenario, generateEditScenario } from "./corpus-edit.js";
+import { GREP_TEMPLATES, type GrepScenario, generateGrepScenario } from "./corpus-grep.js";
 import { generateReadScenario, READ_TEMPLATES, type ReadScenario } from "./corpus-read.js";
 import { generateWriteScenario, WRITE_TEMPLATES, type WriteScenario } from "./corpus-write.js";
 
 export * from "./corpus-core.js";
 export { EDIT_TEMPLATES, type EditCall, type EditScenario } from "./corpus-edit.js";
+export { GREP_TEMPLATES, type GrepCall, type GrepScenario } from "./corpus-grep.js";
 export { READ_TEMPLATES, type ReadCall, type ReadScenario } from "./corpus-read.js";
 export { WRITE_TEMPLATES, type WriteCall, type WriteScenario } from "./corpus-write.js";
 
-export type Scenario = EditScenario | ReadScenario | WriteScenario;
+export type Scenario = EditScenario | ReadScenario | WriteScenario | GrepScenario;
 
 interface ToolCorpus {
 	templates: ReadonlyArray<{ key: string; profile: Profile }>;
@@ -47,6 +49,7 @@ export const CORPORA: Readonly<Record<BenchTool, ToolCorpus>> = {
 	edit: { templates: EDIT_TEMPLATES, generate: generateEditScenario },
 	read: { templates: READ_TEMPLATES, generate: generateReadScenario },
 	write: { templates: WRITE_TEMPLATES, generate: generateWriteScenario },
+	grep: { templates: GREP_TEMPLATES, generate: generateGrepScenario },
 };
 
 const SCENARIO_ID = new RegExp(`^(${TOOLS.join("|")})\\.(${SPLITS.join("|")})\\.([a-z0-9-]+)$`, "u");

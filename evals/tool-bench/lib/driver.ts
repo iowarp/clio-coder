@@ -44,6 +44,14 @@ export const MEASURE_SCHEMA = "clio-coder.eval.measure.v1";
 export const BEHAVIOR_SCHEMA = "clio-coder.tool-bench.behavior.v1";
 export const DEFAULT_WARMUP = 3;
 
+// Truncated grep results offload their full rendering under Clio's
+// state directory. A private one per process keeps the bench out of the
+// operator's state and gives the offload path a token in the digest. It is
+// set before any tool module loads, because the state directory is cached.
+const STATE_DIR = mkdtempSync(join(tmpdir(), "clio-coder-tool-bench-state-"));
+process.env.CLIO_CODER_STATE_DIR = STATE_DIR;
+process.on("exit", () => rmSync(STATE_DIR, { recursive: true, force: true }));
+
 // The counters go in before any tool module loads, so every module the call
 // can reach binds to the wrapped functions.
 export const COUNTED_FS_FUNCTIONS = await installFsCounters();
@@ -51,10 +59,18 @@ const { ToolNames } = await import("../../../src/core/tool-names.js");
 const { createWorkerSafety, createWorkerToolRegistry } = await import("../../../src/engine/worker-tools.js");
 const { invokeRegisteredTool } = await import("../../../src/tools/agent-tools.js");
 
-const TOOL_NAMES = { edit: ToolNames.Edit, read: ToolNames.Read, write: ToolNames.Write } as const satisfies Record<
-	BenchTool,
-	string
->;
+const TOOL_NAMES = {
+	edit: ToolNames.Edit,
+	read: ToolNames.Read,
+	write: ToolNames.Write,
+	grep: ToolNames.Grep,
+} as const satisfies Record<BenchTool, string>;
+
+/**
+ * Tools whose output order is not guaranteed: rg walks a tree on several
+ * threads, so the digest sorts the lines of its text result.
+ */
+const UNORDERED_TOOLS: ReadonlySet<BenchTool> = new Set(["grep"]);
 
 /** The reason the driver gives when it denies a parked call. */
 const PARK_DENIED = "tool bench: no operator attends this call, so the parked confirmation is denied";
@@ -121,6 +137,20 @@ function normalize(value: unknown, roots: ReadonlyArray<readonly [string, string
 	return value;
 }
 
+/** Sorts the lines of every text item and the skipped-path samples of a shaped result. */
+function sortResultLines(value: unknown): unknown {
+	if (value === null || typeof value !== "object") return value;
+	const result = value as { content?: unknown; details?: { search?: { skipped?: { samples?: unknown } } } };
+	if (Array.isArray(result.content)) {
+		for (const item of result.content as Array<{ type?: unknown; text?: unknown }>) {
+			if (item.type === "text" && typeof item.text === "string") item.text = item.text.split("\n").sort().join("\n");
+		}
+	}
+	const samples = result.details?.search?.skipped?.samples;
+	if (Array.isArray(samples)) samples.sort();
+	return value;
+}
+
 /** JSON with sorted object keys and undefined members dropped. */
 export function canonicalJson(value: unknown): string {
 	if (value === undefined) return "null";
@@ -172,8 +202,9 @@ export function snapshotTree(root: string, skip: ReadonlySet<string> = new Set()
 function postStateHolds(expected: readonly ExpectedEntry[], actual: readonly StateEntry[]): boolean {
 	const nonDirs = actual.filter((entry) => entry.kind !== "dir");
 	if (nonDirs.length !== expected.filter((entry) => entry.kind !== "dir").length) return false;
+	const byPath = new Map(actual.map((entry) => [entry.path, entry]));
 	return expected.every((want) => {
-		const got = actual.find((entry) => entry.path === want.path);
+		const got = byPath.get(want.path);
 		return got !== undefined && canonicalJson(got) === canonicalJson(want);
 	});
 }
@@ -261,6 +292,8 @@ async function invokeOnce(
 			[root, "<scratch>"],
 			[realBase, "<outside>"],
 			[base, "<outside>"],
+			[realpathSync(STATE_DIR), "<state>"],
+			[STATE_DIR, "<state>"],
 		];
 		roots.sort(([left], [right]) => right.length - left.length);
 		const files = snapshotTree(realRoot);
@@ -274,7 +307,7 @@ async function invokeOnce(
 			schema: BEHAVIOR_SCHEMA,
 			tool: scenario.tool,
 			outcome,
-			result: normalize(result, roots),
+			result: UNORDERED_TOOLS.has(scenario.tool) ? sortResultLines(normalize(result, roots)) : normalize(result, roots),
 			error: error === null ? null : { class: errorClass, message: errorMessage },
 			files,
 			// Both absent unless a call parked or escaped, so digests of calls
