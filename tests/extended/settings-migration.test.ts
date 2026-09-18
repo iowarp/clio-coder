@@ -30,6 +30,9 @@ import {
 } from "../../src/domains/lifecycle/naming-tool-markers.js";
 import { regenerateYaziNamingProfile } from "../../src/domains/lifecycle/naming-yazi.js";
 import { parseYaziEventLine, renderYaziKeymap } from "../../src/domains/mux/index.js";
+import { createRuntimeRegistry } from "../../src/domains/providers/registry.js";
+import { findBuiltinRuntimeBootMetadata } from "../../src/domains/providers/runtimes/boot-manifest.js";
+import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import { parseSessionEntries } from "../../src/domains/session/archive-readers.js";
 import { createShareArchive, planShareImport } from "../../src/domains/share/archive.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
@@ -507,6 +510,25 @@ integrations:
 		ok(first.applied.includes(SETTINGS_V2_MIGRATION_ID));
 		ok(first.applied.includes(retiredPanes));
 		deepStrictEqual((await runPending(stateDir)).applied, []);
+	});
+
+	it("boots a settings file naming the released ollama-native runtime and migrates it to ollama", async () => {
+		writeFileSync(
+			settingsFile,
+			"version: 2\ntargets:\n  - id: local-ollama\n    runtime: ollama-native\n    url: http://127.0.0.1:11434\n    defaultModel: qwen3:8b\nchat:\n  target: local-ollama\n  model: qwen3:8b\n",
+			"utf8",
+		);
+		const before = readSettings();
+		strictEqual(before.targets[0]?.runtime, "ollama-native", "reading never rewrites");
+		const registry = createRuntimeRegistry();
+		registerBuiltinRuntimes(registry);
+		strictEqual(registry.get("ollama-native")?.id, "ollama");
+		strictEqual(findBuiltinRuntimeBootMetadata("ollama-native")?.id, "ollama");
+
+		const result = await runPending(stateDir);
+		ok(result.applied.includes("2026-09-18-ollama-runtime-id"));
+		strictEqual(readSettings().targets[0]?.runtime, "ollama");
+		strictEqual(readSettings().chat.target, "local-ollama");
 	});
 
 	it("merges independent settings updates against the latest durable state", () => {

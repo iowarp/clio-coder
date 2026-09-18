@@ -22,12 +22,14 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### providers
 - Flag llama.cpp idle-slot eviction in `targets --probe` and `doctor` when a router runs with `--kv-unified`, more than one slot, the host-RAM prompt cache, and idle-slot caching together, and name `--no-cache-idle-slots` as the fix.
-- Read the context window a resident Ollama model is actually served at from `/api/ps`, so an `ollama-native` target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
+- Read the context window a resident Ollama model is actually served at from `/api/ps`, so an Ollama target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
 - Read an Ollama model's maximum context window from `/api/show` (and from `/api/tags` where the server reports it there), so a model that is not resident is planned against the smaller of that maximum and 131072 tokens (Ollama opens a cold model at a window no API reports before load), and `clio-coder targets --probe` shows the serving window beside the maximum.
 - Report Ollama's HTTP 400 `exceed_context_size_error` with the server's own text instead of `[object Object]`, so a prompt past the serving window is recognised as a context overflow and the session compacts and retries instead of failing the turn.
 - Add an opt-in `targets[].ollama.numCtx` setting that sends `options.num_ctx` on every Ollama chat request and becomes the window Clio plans against. It is unset by default because a changed `num_ctx` makes Ollama reload the model.
 - Restore the `degraded` runtime notice on Ollama, llama.cpp, and LM Studio targets: a turn generating under 2 tokens per second after 30 seconds warns once with its rate and the models resident on the target (#381).
 - Release the Ollama models a Clio process loaded when it exits, including models its dispatched workers loaded and models an `acp` session loaded, so a finished run or session no longer leaves them pinned with `keep_alive: -1`. Models that were already resident stay loaded, and a worker-loaded model stays warm for later dispatches until the orchestrator exits (#379).
+- Rename the Ollama runtime id to `ollama`, so `configure --runtime ollama` works like every other local runtime. `ollama-native` stays accepted with one deprecation warning until v0.7.0, a `settings.yaml` that names it keeps loading, and `clio-coder upgrade` rewrites it to `ollama` (#376).
+- Name the closest registered runtime when `configure --runtime` or `targets convert --runtime` is given an unknown id, as in `unknown runtime id: olama (did you mean 'ollama'?)` (#376).
 - Report a memory step served by the chat target as a `route-fallback` runtime notice instead of reusing the `degraded` kind (#381).
 
 ### fleet

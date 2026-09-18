@@ -215,7 +215,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			const env = home.env;
 			const first = await run(["upgrade"], env);
 			strictEqual(first.code, 0, first.output);
-			match(first.output, /4 migrations applied/u);
+			match(first.output, /5 migrations applied/u);
 			strictEqual(readFileSync(join(home.root, "config", "settings.yaml.v1.bak"), "utf8"), V1_SETTINGS);
 			const manifest = JSON.parse(readFileSync(join(home.root, "state", "migrations.json"), "utf8"));
 			deepStrictEqual(manifest.applied, [
@@ -223,6 +223,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 				"2026-09-01-clio-coder-naming",
 				"2026-09-01-retire-panes-knobs",
 				"2026-08-18-lmstudio-runtime-id",
+				"2026-09-18-ollama-runtime-id",
 			]);
 			const migrated = readFileSync(join(home.root, "config", "settings.yaml"), "utf8");
 			match(migrated, /^version: 2$/mu);

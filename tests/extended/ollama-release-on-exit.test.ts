@@ -94,13 +94,9 @@ function seedOllamaOrchestrator(configDir: string, url: string): void {
 	const patched = readFileSync(p, "utf8")
 		.replace(
 			/^targets:.*$/m,
-			[
-				"targets:",
-				"  - id: local-ollama",
-				"    runtime: ollama-native",
-				`    url: ${url}`,
-				`    defaultModel: ${MODEL}`,
-			].join("\n"),
+			["targets:", "  - id: local-ollama", "    runtime: ollama", `    url: ${url}`, `    defaultModel: ${MODEL}`].join(
+				"\n",
+			),
 		)
 		.replace(/^ {2}target: null$/m, "  target: local-ollama")
 		.replace(/^ {2}model: null$/m, `  model: ${MODEL}`);

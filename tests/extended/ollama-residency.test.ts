@@ -6,7 +6,7 @@ import { afterEach, beforeEach, it } from "node:test";
 import type { Model } from "@earendil-works/pi-ai";
 import type { RunNodeIdentity } from "../../src/domains/dispatch/types.js";
 import { adoptWorkerModelLoad, type WorkerModelLoadRoute } from "../../src/domains/dispatch/worker-model-loads.js";
-import ollamaNativeRuntime from "../../src/domains/providers/runtimes/local-native/ollama-native.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
 import { ollamaNativeApiProvider, releaseClioLoadedOllamaModels } from "../../src/engine/apis/ollama-native.js";
 import {
 	type ClioModelLoad,
@@ -170,13 +170,13 @@ it("reports a model the worker's request loaded, once, and never one that was al
 	} finally {
 		setModelLoadReportSink(null);
 	}
-	deepStrictEqual(reports, [{ runtimeId: "ollama-native", targetId: "ollama", modelId: "cold:latest", aliasIds: [] }]);
+	deepStrictEqual(reports, [{ runtimeId: "ollama", targetId: "ollama", modelId: "cold:latest", aliasIds: [] }]);
 });
 
 function workerRoute(url: string, node: RunNodeIdentity = { id: "local", kind: "local" }): WorkerModelLoadRoute {
 	return {
-		target: { id: "ollama-t", runtime: "ollama-native", url },
-		runtime: ollamaNativeRuntime,
+		target: { id: "ollama-t", runtime: "ollama", url },
+		runtime: ollamaRuntime,
 		wireModelId: "worker:latest",
 		node,
 	};

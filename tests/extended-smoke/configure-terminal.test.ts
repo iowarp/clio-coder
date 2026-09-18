@@ -135,7 +135,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.finish();
 			const saved = parse(readFileSync(join(home.dir, "config/settings.yaml"), "utf8")) as ClioSettings;
 			strictEqual(saved.targets.length, 1);
-			strictEqual(saved.targets[0]?.runtime, "ollama-native");
+			strictEqual(saved.targets[0]?.runtime, "ollama");
 			strictEqual(saved.chat.model, "solo");
 			deepStrictEqual(
 				{ target: saved.fleet.default.target, model: saved.fleet.default.model },

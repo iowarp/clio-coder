@@ -9,7 +9,7 @@ import {
 	parseControlFrame,
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { type SpawnedWorker, spawnWorkerProcess } from "../../src/domains/dispatch/worker-spawn.js";
-import ollamaNativeRuntime from "../../src/domains/providers/runtimes/local-native/ollama-native.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
 import { releaseClioLoadedModelsOnExit } from "../../src/engine/apis/residency.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -85,11 +85,11 @@ readline.createInterface({ input: process.stdin }).once("line", () => {
 async function dispatchReportingWorker(url: string, load: Record<string, unknown>): Promise<void> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
-	settings.targets = [{ id: "ollama-t", runtime: "ollama-native", url, defaultModel: MODEL }];
+	settings.targets = [{ id: "ollama-t", runtime: "ollama", url, defaultModel: MODEL }];
 	settings.fleet.default.target = "ollama-t";
 	settings.fleet.default.model = MODEL;
 	let worker: SpawnedWorker | undefined;
-	const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: ollamaNativeRuntime }), {
+	const bundle = makeDispatchBundle(dispatchStubContext({ settings, runtime: ollamaRuntime }), {
 		spawnWorker: (spec, options) => {
 			worker = spawnWorkerProcess(
 				process.execPath,

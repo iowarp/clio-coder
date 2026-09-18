@@ -123,8 +123,9 @@ async function probeModelContextWindow(
 	return bakedWindow !== undefined ? Math.min(maximum, bakedWindow) : maximum;
 }
 
-const ollamaNativeRuntime: RuntimeDescriptor = {
-	id: "ollama-native",
+const ollamaRuntime: RuntimeDescriptor = {
+	id: "ollama",
+	aliases: ["ollama-native"],
 	displayName: "Ollama (native)",
 	kind: "http",
 	tier: "local-native",
@@ -181,8 +182,9 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 			.filter((name): name is string => name !== null);
 	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
+		const canonicalTarget = target.runtime === "ollama" ? target : { ...target, runtime: "ollama" };
 		return synthLocalModel({
-			target,
+			target: canonicalTarget,
 			wireModelId,
 			kb,
 			defaultCapabilities,
@@ -193,4 +195,4 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	},
 };
 
-export default ollamaNativeRuntime;
+export default ollamaRuntime;

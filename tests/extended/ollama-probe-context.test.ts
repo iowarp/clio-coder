@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { promisify } from "node:util";
-import ollamaNativeRuntime from "../../src/domains/providers/runtimes/local-native/ollama-native.js";
+import ollamaRuntime from "../../src/domains/providers/runtimes/local-native/ollama.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
 import { closeServer } from "../harness/openai-compat-fixture.js";
@@ -22,7 +22,7 @@ afterEach(async () => {
 	await Promise.all(servers.splice(0).map(closeServer));
 });
 
-/** Serves the two bodies the ollama-native probe reads. `ps` is sent verbatim. */
+/** Serves the two bodies the ollama probe reads. `ps` is sent verbatim. */
 async function fixture(ps: unknown): Promise<string> {
 	const server = createServer((req, res) => {
 		res.setHeader("content-type", "application/json");
@@ -55,7 +55,7 @@ it("reports the window a resident Ollama model is actually served at", async () 
 		],
 	});
 
-	const result = await ollamaNativeRuntime.probe?.({ url } as TargetDescriptor, context());
+	const result = await ollamaRuntime.probe?.({ url } as TargetDescriptor, context());
 
 	strictEqual(result?.ok, true);
 	const status = result?.modelStates?.["qwen3:30b-a3b-instruct"];
@@ -74,7 +74,7 @@ it("omits the context window when Ollama does not report a usable one", async ()
 		],
 	});
 
-	const result = await ollamaNativeRuntime.probe?.({ url } as TargetDescriptor, context());
+	const result = await ollamaRuntime.probe?.({ url } as TargetDescriptor, context());
 
 	strictEqual(result?.ok, true);
 	for (const id of ["a", "b", "c"]) {
@@ -128,8 +128,8 @@ const SHOW_QWEN = {
 it("reads the default model's maximum window from /api/show", async () => {
 	const { url, shown } = await ollama({ tags: TAGS_0_18, show: SHOW_QWEN });
 
-	const result = await ollamaNativeRuntime.probe?.(
-		{ id: "o", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct" },
+	const result = await ollamaRuntime.probe?.(
+		{ id: "o", runtime: "ollama", url, defaultModel: "qwen3:30b-a3b-instruct" },
 		context(),
 	);
 
@@ -144,8 +144,8 @@ it("caps the maximum at a num_ctx baked into the Modelfile", async () => {
 		show: { ...SHOW_QWEN, parameters: 'num_ctx                        40960\nstop "<|im_end|>"' },
 	});
 
-	const result = await ollamaNativeRuntime.probe?.(
-		{ id: "o", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct" },
+	const result = await ollamaRuntime.probe?.(
+		{ id: "o", runtime: "ollama", url, defaultModel: "qwen3:30b-a3b-instruct" },
 		context(),
 	);
 
@@ -162,7 +162,7 @@ it("takes per-model maxima from /api/tags when the server reports them there", a
 		},
 	});
 
-	const result = await ollamaNativeRuntime.probe?.({ id: "o", runtime: "ollama-native", url }, context());
+	const result = await ollamaRuntime.probe?.({ id: "o", runtime: "ollama", url }, context());
 
 	strictEqual(result?.ok, true);
 	deepStrictEqual(result?.modelCapabilities, { a: { contextWindow: 262_144 } });
@@ -171,10 +171,7 @@ it("takes per-model maxima from /api/tags when the server reports them there", a
 it("keeps the probe healthy when /api/show fails", async () => {
 	const { url } = await ollama({ tags: TAGS_0_18 });
 
-	const result = await ollamaNativeRuntime.probe?.(
-		{ id: "o", runtime: "ollama-native", url, defaultModel: "missing" },
-		context(),
-	);
+	const result = await ollamaRuntime.probe?.({ id: "o", runtime: "ollama", url, defaultModel: "missing" }, context());
 
 	strictEqual(result?.ok, true);
 	strictEqual(result?.modelCapabilities, undefined);
@@ -201,7 +198,7 @@ async function probeTable(
 	writeFileSync(
 		join(root, "config", "settings.yaml"),
 		JSON.stringify({
-			targets: [{ id: "local-ollama", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct", ...extra }],
+			targets: [{ id: "local-ollama", runtime: "ollama", url, defaultModel: "qwen3:30b-a3b-instruct", ...extra }],
 		}),
 	);
 	const run = async (args: string[]): Promise<string> => {
@@ -273,8 +270,8 @@ it("ignores a Modelfile num_ctx when the target sends its own", async () => {
 		show: { ...SHOW_QWEN, parameters: "num_ctx 40960" },
 	});
 
-	const result = await ollamaNativeRuntime.probe?.(
-		{ id: "o", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct", ollama: { numCtx: 65_536 } },
+	const result = await ollamaRuntime.probe?.(
+		{ id: "o", runtime: "ollama", url, defaultModel: "qwen3:30b-a3b-instruct", ollama: { numCtx: 65_536 } },
 		context(),
 	);
 

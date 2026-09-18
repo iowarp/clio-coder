@@ -227,6 +227,24 @@ async function modelServer(): Promise<{ url: string; close: () => Promise<void> 
 	};
 }
 
+/** An Ollama server as far as configure reads one: `/api/tags`, and 404 for the rest. */
+async function ollamaServer(): Promise<{ url: string; close: () => Promise<void> }> {
+	const server: Server = createServer((req, res) => {
+		if (req.url === "/api/tags") {
+			res.writeHead(200, { "content-type": "application/json" });
+			res.end(JSON.stringify({ models: [{ name: "qwen3:8b" }] }));
+			return;
+		}
+		res.writeHead(404).end();
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as AddressInfo;
+	return {
+		url: `http://127.0.0.1:${port}`,
+		close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+	};
+}
+
 /**
  * A LiteLLM gateway: alive on the unauthenticated liveness check, but its
  * catalog endpoints (`/v1/model/info`, then the `/v1/models` fallback) answer
@@ -896,6 +914,74 @@ describe("contracts/configure-sections", () => {
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /must be one of/u);
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: low/u);
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
+	it("configures Ollama under its canonical runtime id and advertises it in --list", async () => {
+		const testEnv = isolatedEnv();
+		const server = await ollamaServer();
+		try {
+			const res = await captureConfigure(
+				["--id", "local-ollama", "--runtime", "ollama", "--url", server.url, "--model", "qwen3:8b"],
+				testEnv.env,
+			);
+			strictEqual(res.code, 0, res.stderr);
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: local-ollama\n\s+runtime: ollama\n/u);
+
+			// `--list` prints these entries, one per canonical runtime.
+			const listed = listProviderSupportEntries(getRuntimeRegistry().list()).map((entry) => entry.runtimeId);
+			ok(listed.includes("ollama"), listed.join(", "));
+			ok(!listed.includes("ollama-native"), "the alias is not advertised");
+		} finally {
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("accepts the released ollama-native id, persists the canonical id, and warns once", async () => {
+		const testEnv = isolatedEnv();
+		const server = await ollamaServer();
+		const warnings: Error[] = [];
+		const onWarning = (warning: Error) => {
+			if ((warning as Error & { code?: string }).code === "CLIO_CODER_LEGACY_NAMING") warnings.push(warning);
+		};
+		process.on("warning", onWarning);
+		try {
+			for (const id of ["legacy-a", "legacy-b"]) {
+				const res = await captureConfigure(
+					["--id", id, "--runtime", "ollama-native", "--url", server.url, "--model", "qwen3:8b"],
+					testEnv.env,
+				);
+				strictEqual(res.code, 0, res.stderr);
+			}
+			await new Promise((resolve) => setImmediate(resolve));
+			const settings = readFileSync(testEnv.settingsFile, "utf8");
+			match(settings, /id: legacy-a\n\s+runtime: ollama\n/u);
+			match(settings, /id: legacy-b\n\s+runtime: ollama\n/u);
+			strictEqual(warnings.length, 1);
+			strictEqual(warnings[0]?.name, "DeprecationWarning");
+			match(warnings[0]?.message ?? "", /'ollama-native' is a deprecated Clio Coder identifier; use 'ollama'/u);
+		} finally {
+			process.off("warning", onWarning);
+			await server.close();
+			testEnv.cleanup();
+		}
+	});
+
+	it("suggests the closest registered runtime for an unknown id", async () => {
+		const testEnv = isolatedEnv();
+		try {
+			const res = await captureConfigure(["--runtime", "olama"], testEnv.env, []);
+			strictEqual(res.code, 2);
+			match(res.stderr, /unknown runtime id: olama \(did you mean 'ollama'\?\)/u);
+
+			const unrelated = await captureConfigure(["--runtime", "zzzzzzzz"], testEnv.env, []);
+			strictEqual(unrelated.code, 2);
+			match(unrelated.stderr, /unknown runtime id: zzzzzzzz/u);
+			ok(!unrelated.stderr.includes("did you mean"), unrelated.stderr);
 		} finally {
 			testEnv.cleanup();
 		}

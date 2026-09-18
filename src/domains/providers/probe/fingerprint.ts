@@ -1,5 +1,5 @@
 export interface NativeRuntimeFingerprint {
-	runtimeId: "lmstudio" | "ollama-native";
+	runtimeId: "lmstudio" | "ollama";
 	displayName: string;
 }
 
@@ -60,7 +60,7 @@ export async function fingerprintNativeRuntime(
 		try {
 			const data = (await ollama.json()) as { version?: unknown };
 			if (typeof data.version === "string") {
-				return { runtimeId: "ollama-native", displayName: "Ollama" };
+				return { runtimeId: "ollama", displayName: "Ollama" };
 			}
 		} catch {
 			// A reachable endpoint with a non-JSON version reply fingerprints as

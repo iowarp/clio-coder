@@ -111,6 +111,43 @@ export function getRuntimeRegistry(): RuntimeRegistry {
 	return singleton;
 }
 
+function normalizeRuntimeId(id: string): string {
+	return id.toLowerCase().replace(/[^a-z0-9]/gu, "");
+}
+
+function editDistance(a: string, b: string): number {
+	let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+	for (let i = 1; i <= a.length; i += 1) {
+		const current = [i];
+		for (let j = 1; j <= b.length; j += 1) {
+			const substitution = (previous[j - 1] ?? 0) + (a[i - 1] === b[j - 1] ? 0 : 1);
+			current.push(Math.min((previous[j] ?? 0) + 1, (current[j - 1] ?? 0) + 1, substitution));
+		}
+		previous = current;
+	}
+	return previous[b.length] ?? 0;
+}
+
+/**
+ * The canonical id of the registered runtime closest to an unknown one, or
+ * null when nothing is near enough to be a plausible typo. Ids compare
+ * lowercased with separators dropped, so `lm-studio` and `llama.cpp` find their
+ * runtime, and a near miss of an alias suggests the canonical id it names.
+ */
+export function closestRuntimeId(registry: RuntimeRegistry, input: string): string | null {
+	const wanted = normalizeRuntimeId(input);
+	if (wanted.length === 0) return null;
+	const limit = Math.max(1, Math.floor(wanted.length / 3));
+	let best: { id: string; distance: number } | null = null;
+	for (const runtime of registry.list()) {
+		for (const id of [runtime.id, ...(runtime.aliases ?? [])]) {
+			const distance = editDistance(wanted, normalizeRuntimeId(id));
+			if (distance <= limit && (best === null || distance < best.distance)) best = { id: runtime.id, distance };
+		}
+	}
+	return best?.id ?? null;
+}
+
 async function importDescriptor(
 	file: string,
 	href: string,

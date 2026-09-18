@@ -50,19 +50,17 @@ export function adoptWorkerModelLoad(load: WorkerModelLoad, route: WorkerModelLo
 	if (load.targetId !== route.target.id || load.modelId !== route.wireModelId) return false;
 	let baseUrl: string | undefined;
 	let headers: Record<string, string> = {};
-	let api: string;
 	try {
 		const model = route.runtime.synthesizeModel(route.target, route.wireModelId, null);
 		baseUrl = model.baseUrl;
 		headers = { ...(model.headers ?? {}) };
-		api = model.api;
 	} catch {
 		return false;
 	}
 	if (!baseUrl) return false;
 	if (route.node.kind !== "local" && isLoopbackUrl(baseUrl)) return false;
 	return adoptWorkerLoadedModel(
-		{ runtimeId: api, baseUrl, headers },
+		{ runtimeId: route.runtime.id, baseUrl, headers },
 		{ modelId: load.modelId, aliasIds: [...load.aliasIds] },
 	);
 }

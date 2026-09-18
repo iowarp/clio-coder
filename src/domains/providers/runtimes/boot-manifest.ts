@@ -40,7 +40,7 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "llamacpp-embed", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "llamacpp-rerank", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "lmstudio", aliases: ["lmstudio-native"], kind: "http", tier: "local-native", auth: "api-key" },
-	{ id: "ollama-native", kind: "http", tier: "local-native", auth: "none" },
+	{ id: "ollama", aliases: ["ollama-native"], kind: "http", tier: "local-native", auth: "none" },
 	{ id: "anthropic-compat", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "litellm", kind: "http", tier: "protocol", auth: "api-key" },
 	{ id: "openai-compat", kind: "http", tier: "protocol", auth: "api-key" },
