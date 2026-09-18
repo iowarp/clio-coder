@@ -4,7 +4,7 @@
  *
  * node --import tsx evals/tool-bench/lib/driver.ts --scenario <id> --seed <int> --split search|holdout [--warmup <n>]
  *
- * The call goes through createWorkerToolRegistry at autonomy auto-edit and
+ * The scenario id names the tool. The call goes through createWorkerToolRegistry at autonomy auto-edit and
  * invokeRegisteredTool, so validation, safety admission, hooks, the tool body,
  * and result shaping all run. The source imports below are relative, so the
  * driver always measures the checkout it sits in. Exit 0 means the scenario's
@@ -12,19 +12,31 @@
  * task.solved.
  */
 import { createHash } from "node:crypto";
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, realpathSync, rmSync } from "node:fs";
+import {
+	chmodSync,
+	lstatSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	realpathSync,
+	rmSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setImmediate as yieldImmediate } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import type { ToolSpec } from "../../../src/tools/registry.js";
 import {
-	type EditScenario,
+	type BenchTool,
 	type ExpectedEntry,
 	generateScenario,
 	materializeScenario,
 	parseCorpusArgs,
 	parseScenarioId,
+	type Scenario,
+	type ScenarioExpect,
 } from "./corpus.js";
 import { installFsCounters, startCounting, stopCounting } from "./fs-counter.js";
 
@@ -38,6 +50,17 @@ export const COUNTED_FS_FUNCTIONS = await installFsCounters();
 const { ToolNames } = await import("../../../src/core/tool-names.js");
 const { createWorkerSafety, createWorkerToolRegistry } = await import("../../../src/engine/worker-tools.js");
 const { invokeRegisteredTool } = await import("../../../src/tools/agent-tools.js");
+
+const TOOL_NAMES = { edit: ToolNames.Edit, read: ToolNames.Read, write: ToolNames.Write } as const satisfies Record<
+	BenchTool,
+	string
+>;
+
+/** The reason the driver gives when it denies a parked call. */
+const PARK_DENIED = "tool bench: no operator attends this call, so the parked confirmation is denied";
+
+/** Pinned around every call, so the modes of files and directories a tool creates never depend on the caller. */
+const BENCH_UMASK = 0o022;
 
 export type StateEntry =
 	| { kind: "dir"; path: string; mode: number }
@@ -64,22 +87,29 @@ export interface ScenarioMeasurement {
 export interface RunScenarioOptions {
 	warmup?: number;
 	/**
-	 * Test-only seam: replaces the registered edit spec before each call, so a
+	 * Test-only seam: replaces the scenario tool's registered spec before each call, so a
 	 * test can prove a faulty tool changes the digest without editing src/tools.
 	 * The CLI never sets it.
 	 */
 	replaceTool?: (original: ToolSpec) => ToolSpec;
 }
 
+// Random names, such as the write path's publish temp file, which an error can quote.
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/giu;
+
 const VOLATILE_KEY =
 	/^(?:mtimeMs|atimeMs|ctimeMs|birthtimeMs|mtime|atime|ctime|birthtime|durationMs|elapsedMs|executedMs|timestamp|startedAt|finishedAt|at)$/u;
 
-/** Replaces scratch-root paths in strings and blanks keys that carry time. */
-function normalize(value: unknown, roots: readonly string[]): unknown {
+/**
+ * Replaces temp paths and UUIDs in strings and blanks keys that carry time. Each pair is
+ * (path, token); the longest path goes first, so the scratch root wins over
+ * the temp directory that holds it.
+ */
+function normalize(value: unknown, roots: ReadonlyArray<readonly [string, string]>): unknown {
 	if (typeof value === "string") {
 		let out = value;
-		for (const root of roots) out = out.split(root).join("<scratch>");
-		return out;
+		for (const [root, token] of roots) out = out.split(root).join(token);
+		return out.replace(UUID, "<uuid>");
 	}
 	if (Array.isArray(value)) return value.map((item) => normalize(item, roots));
 	if (value !== null && typeof value === "object") {
@@ -102,12 +132,24 @@ export function canonicalJson(value: unknown): string {
 	return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
 }
 
+/** Reads a file even when its mode denies the owner read, then puts the mode back. */
+function readAnyFile(path: string, mode: number): Buffer {
+	if ((mode & 0o400) !== 0) return readFileSync(path);
+	chmodSync(path, mode | 0o400);
+	try {
+		return readFileSync(path);
+	} finally {
+		chmodSync(path, mode);
+	}
+}
+
 /** Sorted relative paths with size, content hash, and mode, or the link target. */
-export function snapshotTree(root: string): StateEntry[] {
+export function snapshotTree(root: string, skip: ReadonlySet<string> = new Set()): StateEntry[] {
 	const out: StateEntry[] = [];
 	const walk = (relative: string): void => {
 		const names = readdirSync(join(root, relative)).sort();
 		for (const name of names) {
+			if (relative === "" && skip.has(name)) continue;
 			const path = relative === "" ? name : `${relative}/${name}`;
 			const absolute = join(root, path);
 			const info = lstatSync(absolute);
@@ -116,7 +158,7 @@ export function snapshotTree(root: string): StateEntry[] {
 				out.push({ kind: "dir", path, mode: info.mode & 0o7777 });
 				walk(path);
 			} else {
-				const bytes = readFileSync(absolute);
+				const bytes = readAnyFile(absolute, info.mode & 0o7777);
 				const sha256 = createHash("sha256").update(bytes).digest("hex");
 				out.push({ kind: "file", path, size: bytes.length, sha256, mode: info.mode & 0o7777 });
 			}
@@ -126,25 +168,50 @@ export function snapshotTree(root: string): StateEntry[] {
 	return out;
 }
 
+/** Every file and symlink must match the expectation; a directory only when it is listed. */
 function postStateHolds(expected: readonly ExpectedEntry[], actual: readonly StateEntry[]): boolean {
 	const nonDirs = actual.filter((entry) => entry.kind !== "dir");
-	if (nonDirs.length !== expected.length) return false;
+	if (nonDirs.length !== expected.filter((entry) => entry.kind !== "dir").length) return false;
 	return expected.every((want) => {
-		const got = nonDirs.find((entry) => entry.path === want.path);
+		const got = actual.find((entry) => entry.path === want.path);
 		return got !== undefined && canonicalJson(got) === canonicalJson(want);
 	});
 }
 
+function outputHolds(expected: ScenarioExpect["output"], shown: string): boolean {
+	if (expected === undefined) return true;
+	return (
+		expected.includes.every((text) => shown.includes(text)) && expected.excludes.every((text) => !shown.includes(text))
+	);
+}
+
+/** Gives the owner write and search on every directory, so a read-only one can be removed. */
+function makeRemovable(root: string): void {
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		if (!entry.isDirectory()) continue;
+		const path = join(root, entry.name);
+		chmodSync(path, 0o755);
+		makeRemovable(path);
+	}
+}
+
 async function invokeOnce(
-	scenario: EditScenario,
+	scenario: Scenario,
 	options: RunScenarioOptions,
 	measure: boolean,
 ): Promise<ScenarioMeasurement | null> {
-	const root = mkdtempSync(join(tmpdir(), "clio-coder-tool-bench-"));
+	// The scratch root sits one level inside its own temp directory, so a call
+	// that escapes the root lands in that directory, where it is recorded and
+	// removed with the rest.
+	const base = mkdtempSync(join(tmpdir(), "clio-coder-tool-bench-"));
+	const root = join(base, "root");
 	const previousCwd = process.cwd();
+	const previousUmask = process.umask(BENCH_UMASK);
 	try {
+		mkdirSync(root, { mode: 0o755 });
 		materializeScenario(scenario, root);
-		const realRoot = realpathSync(root);
+		const realBase = realpathSync(base);
+		const realRoot = join(realBase, "root");
 		process.chdir(realRoot);
 		// A fresh safety contract and registry per call. The worker loop guard
 		// keys repeated identical calls, and warmups repeat the measured call.
@@ -155,11 +222,20 @@ async function invokeOnce(
 			[],
 			"auto-edit",
 		);
+		const toolName = TOOL_NAMES[scenario.tool];
 		if (options.replaceTool !== undefined) {
-			const original = registry.get(ToolNames.Edit);
-			if (original === undefined) throw new Error("edit tool is not registered");
+			const original = registry.get(toolName);
+			if (original === undefined) throw new Error(`${scenario.tool} tool is not registered`);
 			registry.register(options.replaceTool(original));
 		}
+		// No operator attends a bench call, so a call that admission parks for
+		// confirmation is denied on the next turn of the event loop, the way an
+		// unattended worker ends it. The safety decision goes into the digest.
+		let parked: { tool: string; decision: unknown } | undefined;
+		registry.onPermissionRequired((call, decision, meta) => {
+			parked = { tool: call.tool, decision };
+			setImmediate(() => registry.cancelParkedCall(meta.requestId, PARK_DENIED));
+		});
 		const args = structuredClone(scenario.args);
 		// Let setup I/O drain so it cannot land inside the counted window.
 		await yieldImmediate();
@@ -171,7 +247,7 @@ async function invokeOnce(
 		startCounting();
 		const started = process.hrtime.bigint();
 		try {
-			result = await invokeRegisteredTool(registry, ToolNames.Edit, args);
+			result = await invokeRegisteredTool(registry, toolName, args);
 		} catch (caught) {
 			error = caught;
 		}
@@ -180,8 +256,16 @@ async function invokeOnce(
 		const usageAfter = process.resourceUsage();
 		if (!measure) return null;
 
-		const roots = [realRoot, root].sort((left, right) => right.length - left.length);
+		const roots: Array<readonly [string, string]> = [
+			[realRoot, "<scratch>"],
+			[root, "<scratch>"],
+			[realBase, "<outside>"],
+			[base, "<outside>"],
+		];
+		roots.sort(([left], [right]) => right.length - left.length);
 		const files = snapshotTree(realRoot);
+		// Anything next to the scratch root was written outside it.
+		const outside = snapshotTree(realBase, new Set(["root"]));
 		const errorClass = error === null ? null : error instanceof Error ? error.constructor.name : typeof error;
 		const errorMessage =
 			error === null ? null : (normalize(error instanceof Error ? error.message : String(error), roots) as string);
@@ -193,10 +277,19 @@ async function invokeOnce(
 			result: normalize(result, roots),
 			error: error === null ? null : { class: errorClass, message: errorMessage },
 			files,
+			// Both absent unless a call parked or escaped, so digests of calls
+			// that did neither keep their value.
+			parked: normalize(parked, roots),
+			outside: outside.length > 0 ? outside : undefined,
 		};
+		const shown = canonicalJson({ result: behavior.result, error: errorMessage });
 		return {
 			scenarioId: scenario.id,
-			solved: outcome === scenario.expect.outcome && postStateHolds(scenario.expect.files, files),
+			solved:
+				outcome === scenario.expect.outcome &&
+				outside.length === 0 &&
+				postStateHolds(scenario.expect.files, files) &&
+				outputHolds(scenario.expect.output, shown),
 			outcome,
 			errorClass,
 			errorMessage,
@@ -211,15 +304,14 @@ async function invokeOnce(
 		};
 	} finally {
 		process.chdir(previousCwd);
-		rmSync(root, { recursive: true, force: true });
+		process.umask(previousUmask);
+		makeRemovable(base);
+		rmSync(base, { recursive: true, force: true });
 	}
 }
 
 /** Warmups first, each on a fresh copy of the scenario files, then the measured call. */
-export async function runScenario(
-	scenario: EditScenario,
-	options: RunScenarioOptions = {},
-): Promise<ScenarioMeasurement> {
+export async function runScenario(scenario: Scenario, options: RunScenarioOptions = {}): Promise<ScenarioMeasurement> {
 	const warmup = options.warmup ?? DEFAULT_WARMUP;
 	for (let i = 0; i < warmup; i += 1) await invokeOnce(scenario, options, false);
 	const measured = await invokeOnce(scenario, options, true);
@@ -227,7 +319,7 @@ export async function runScenario(
 	return measured;
 }
 
-export function measureLine(measurement: ScenarioMeasurement, scenario: EditScenario, warmup: number): string {
+export function measureLine(measurement: ScenarioMeasurement, scenario: Scenario, warmup: number): string {
 	return JSON.stringify({
 		schema: MEASURE_SCHEMA,
 		metrics: {
@@ -255,7 +347,7 @@ if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.
 	if (rest.size > 0) throw new Error(`unknown flags: ${[...rest.keys()].join(", ")}`);
 	const parsed = parseScenarioId(id);
 	if (parsed.split !== split) throw new Error(`scenario ${id} belongs to split ${parsed.split}, not ${split}`);
-	const scenario = generateScenario(seed, split, parsed.key);
+	const scenario = generateScenario(parsed.tool, seed, split, parsed.key);
 	const warmup = Number(warmupText);
 	const measurement = await runScenario(scenario, { warmup });
 	process.stderr.write(
