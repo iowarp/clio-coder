@@ -76,6 +76,8 @@ The eight causes and what stamps each one are in [context-engine.md](../architec
 
 One case is expected on hybrid architectures and looks like a bug. Qwen3.8 keeps recurrent state that llama.cpp cannot roll back to an arbitrary token, so a change anywhere inside a cached prefix re-prefills from the last context checkpoint rather than from the changed byte. A small edit to old history can therefore cost thousands of tokens of prefill with the prompt hash otherwise stable. The server's checkpoint count and its `--checkpoint-min-step` are the levers; see the `qwen3.8-27b` family's `serving` and `measuredUnder` notes in `src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml` for the measured figures and the exact argv they were taken under.
 
+The opposite case is a turn the server calls hot that still waits seconds for its first token. On a multi-slot llama.cpp server with `--kv-unified`, idle-slot caching is on by default: whenever a request starts, the server moves every idle slot to host RAM, and a returning prompt is restored from there before its slot launches. The prefill line then shows a handful of uncached tokens and the rest cached in a few hundred milliseconds, while the turn's TTFT runs to ten seconds, and a concurrent worker on the same server stalls for the same time. `clio-coder doctor` reports this configuration as a `cache <target>` warning and `clio-coder targets --probe` as a note, for a router target. Start the server with `--no-cache-idle-slots`, or set `cache-idle-slots = false` in its preset. The mechanism is in [context-engine.md](../architecture/context-engine.md#self-hosted-prefix-cache-contract).
+
 ---
 
 ## A TUI that stops answering the keyboard
