@@ -180,7 +180,10 @@ it("keeps the probe healthy when /api/show fails", async () => {
 	strictEqual(result?.modelCapabilities, undefined);
 });
 
-async function probeTable(url: string): Promise<{ table: string; json: Array<Record<string, unknown>> }> {
+async function probeTable(
+	url: string,
+	extra: Record<string, unknown> = {},
+): Promise<{ table: string; json: Array<Record<string, unknown>> }> {
 	const root = mkdtempSync(join(tmpdir(), "clio-ollama-ctx-"));
 	const env: NodeJS.ProcessEnv = {
 		...process.env,
@@ -198,7 +201,7 @@ async function probeTable(url: string): Promise<{ table: string; json: Array<Rec
 	writeFileSync(
 		join(root, "config", "settings.yaml"),
 		JSON.stringify({
-			targets: [{ id: "local-ollama", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct" }],
+			targets: [{ id: "local-ollama", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct", ...extra }],
 		}),
 	);
 	const run = async (args: string[]): Promise<string> => {
@@ -241,4 +244,30 @@ it("shows the model maximum, not the assumed default, when nothing is resident",
 
 	match(table, /ctx 262144(?! \()/);
 	strictEqual(table.includes("unverified runtime default"), false);
+});
+
+it("ignores a Modelfile num_ctx when the target sends its own", async () => {
+	const { url } = await ollama({
+		tags: TAGS_0_18,
+		show: { ...SHOW_QWEN, parameters: "num_ctx 40960" },
+	});
+
+	const result = await ollamaNativeRuntime.probe?.(
+		{ id: "o", runtime: "ollama-native", url, defaultModel: "qwen3:30b-a3b-instruct", ollama: { numCtx: 65_536 } },
+		context(),
+	);
+
+	strictEqual(result?.modelCapabilities?.["qwen3:30b-a3b-instruct"]?.contextWindow, 262_144);
+});
+
+it("shows a configured num_ctx as the planning window in targets --probe", async () => {
+	const { url } = await ollama({
+		tags: TAGS_0_18,
+		show: SHOW_QWEN,
+		ps: { models: [{ name: "qwen3:30b-a3b-instruct", model: "qwen3:30b-a3b-instruct", context_length: 32_768 }] },
+	});
+
+	const { table } = await probeTable(url, { ollama: { numCtx: 65_536 } });
+
+	match(table, /ctx 65536 \(num_ctx; serving 32768; model max 262144\)/);
 });

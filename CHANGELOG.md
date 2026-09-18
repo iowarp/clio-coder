@@ -8,6 +8,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Read the context window a resident Ollama model is actually served at from `/api/ps`, so an `ollama-native` target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
 - Read an Ollama model's maximum context window from `/api/show` (and from `/api/tags` where the server reports it there), so a model that is not resident is planned against its real maximum instead of the assumed default, and `clio-coder targets --probe` shows the serving window beside the maximum.
 - Report Ollama's HTTP 400 `exceed_context_size_error` with the server's own text instead of `[object Object]`, so a prompt past the serving window is recognised as a context overflow and the session compacts and retries instead of failing the turn.
+- Add an opt-in `targets[].ollama.numCtx` setting that sends `options.num_ctx` on every Ollama chat request and becomes the window Clio plans against. It is unset by default because a changed `num_ctx` makes Ollama reload the model.
 
 ## 0.4.9 - 2026-09-17
 

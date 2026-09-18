@@ -73,6 +73,16 @@ export interface LiteLLMTargetSettings {
 	request?: LiteLLMRequestSettings;
 }
 
+/** Ollama request options Clio sends only when the operator sets them. */
+export interface OllamaTargetSettings {
+	/**
+	 * Context window requested as `options.num_ctx` on every chat request, and
+	 * the window Clio plans against. Ollama reloads a model whose `num_ctx`
+	 * changes, so on a server other clients share this evicts their load.
+	 */
+	numCtx?: number;
+}
+
 /**
  * Persisted target specification from settings.yaml (`targets:`). It binds a
  * user-facing target id to a RuntimeDescriptor id, target URL/auth metadata,
@@ -93,6 +103,7 @@ export interface TargetDescriptor {
 	cache?: TargetCacheSettings;
 	lmstudio?: LmStudioTargetSettings;
 	litellm?: LiteLLMTargetSettings;
+	ollama?: OllamaTargetSettings;
 	/** Explicit request-slot limit for this inference endpoint. It overrides live discovery. */
 	maxConcurrentRequests?: number;
 }

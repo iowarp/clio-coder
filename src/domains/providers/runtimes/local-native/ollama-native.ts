@@ -89,9 +89,16 @@ async function probeResidentModelStates(
  * the trained maximum as `<architecture>.context_length`; a `num_ctx` baked
  * into the Modelfile `parameters` caps what Ollama loads it at when a request
  * does not ask for more, so the smaller of the two is the model's window.
- * Undefined when the server does not report the maximum.
+ * A target that sends its own `num_ctx` replaces the baked one, so `baked`
+ * is false there and only the trained maximum bounds it. Undefined when the
+ * server does not report the maximum.
  */
-async function probeModelContextWindow(base: string, model: string, ctx: ProbeContext): Promise<number | undefined> {
+async function probeModelContextWindow(
+	base: string,
+	model: string,
+	ctx: ProbeContext,
+	baked: boolean,
+): Promise<number | undefined> {
 	const opts = {
 		url: `${base}/api/show`,
 		method: "POST",
@@ -109,10 +116,10 @@ async function probeModelContextWindow(base: string, model: string, ctx: ProbeCo
 		typeof arch === "string"
 			? positiveNumber(info[`${arch}.context_length`])
 			: positiveNumber(Object.entries(info).find(([key]) => key.endsWith(".context_length"))?.[1]);
-	if (maximum === undefined) return undefined;
+	if (maximum === undefined || !baked) return maximum;
 	const params = result.data?.parameters;
-	const baked = typeof params === "string" ? /^num_ctx\s+(\d+)\s*$/m.exec(params)?.[1] : undefined;
-	const bakedWindow = baked !== undefined ? positiveNumber(Number(baked)) : undefined;
+	const bakedNumCtx = typeof params === "string" ? /^num_ctx\s+(\d+)\s*$/m.exec(params)?.[1] : undefined;
+	const bakedWindow = bakedNumCtx !== undefined ? positiveNumber(Number(bakedNumCtx)) : undefined;
 	return bakedWindow !== undefined ? Math.min(maximum, bakedWindow) : maximum;
 }
 
@@ -124,6 +131,9 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 	apiFamily: "ollama-native",
 	auth: "none",
 	defaultCapabilities,
+	requestedContextWindow(target: TargetDescriptor): number | undefined {
+		return target.ollama?.numCtx;
+	},
 	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
 		const base = targetBaseUrl(target);
 		if (!base) return { ok: false, error: "target has no url" };
@@ -149,7 +159,7 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 		}
 		const defaultModel = target.defaultModel?.trim();
 		if (defaultModel) {
-			const window = await probeModelContextWindow(base, defaultModel, ctx);
+			const window = await probeModelContextWindow(base, defaultModel, ctx, target.ollama?.numCtx === undefined);
 			if (window !== undefined) modelCapabilities[defaultModel] = { contextWindow: window };
 		}
 		if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
