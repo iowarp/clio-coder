@@ -1,8 +1,9 @@
+import { homedir } from "node:os";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
-import { extractCommandCdTargets, extractCommandWriteTargets } from "./protected-artifacts.js";
+import { type CommandPathEvent, extractCommandPathWalk } from "./protected-artifacts.js";
 
 /**
  * Deterministic action classifier for tool calls. Pure function, no I/O, no
@@ -240,6 +241,195 @@ function writePathClass(pathArg: string, baseCwd?: string): { cls: "system_modif
 	return { cls: "write" };
 }
 
+/** More directories than this after a run of cds is treated as an unknown base. */
+const MAX_SHELL_BASES = 32;
+
+/** A word the shell expands at run time: a variable, a substitution, or a glob. */
+function isDynamicShellPath(p: string): boolean {
+	return /[$`*?[]/u.test(p);
+}
+
+function expandShellHome(p: string): string | null {
+	if (p === "~") return homedir();
+	if (p.startsWith("~/")) return path.join(homedir(), p.slice(2));
+	return p.startsWith("~") ? null : p;
+}
+
+/** Where the shell can be; null once a cd leaves it unknown. */
+type ShellBases = string[] | null;
+
+function mergeBases(left: ShellBases, right: ShellBases): ShellBases {
+	if (left === null || right === null) return null;
+	const merged = [...new Set([...left, ...right])];
+	return merged.length > MAX_SHELL_BASES ? null : merged;
+}
+
+/**
+ * Reasons a bash command reaches outside the workspace through the paths it
+ * names. The walk keeps every directory the shell can be in and resolves each
+ * relative write, cd, and link from all of them.
+ *
+ * A cd adds where it lands under both readings and keeps where the shell was,
+ * because the cd may fail. Two forms say it did not: after `cd X && ...` the
+ * rest of the chain runs only if the cd succeeded, so the old directories wait
+ * in `pending` and come back when the chain breaks at `;`, a newline, `||`, or
+ * `&` (a compound command's inner `;` does not break it); after
+ * `cd X || exit` they are gone. A cd reached through `||` or `|`, or negated
+ * with `!`, keeps them. A subshell's cds end at its `)`, and `popd` can return
+ * to any directory the shell was in. A cd the shell expands at run time, or one a loop, a
+ * function, or CDPATH can repeat or redirect, leaves the base unknown, and a
+ * relative write after it cannot be placed.
+ */
+function bashPathReasons(command: string, argCwd: string | undefined): string[] {
+	const writeReasons = new Set<string>();
+	const cdReasons = new Set<string>();
+	const events = extractCommandPathWalk(command);
+	let bases: ShellBases = [candidateBase(argCwd)];
+	let pending: ShellBases = [];
+	let visited: ShellBases = bases;
+	const subshells: Array<{ bases: ShellBases; pending: ShellBases }> = [];
+	const groups: ShellBases[] = [];
+	let previous = ";";
+	const fromEachBase = (target: string, check: (base: string | undefined) => void): boolean => {
+		if (target.startsWith("~") || path.isAbsolute(target)) {
+			check(undefined);
+			return true;
+		}
+		if (bases === null) return false;
+		for (const base of bases) check(base);
+		return true;
+	};
+	for (const [index, event] of events.entries()) {
+		if (event.kind === "separator") {
+			if (event.value === "(") {
+				subshells.push({ bases, pending });
+				pending = [];
+			} else if (event.value === ")") {
+				const outer = subshells.pop();
+				if (outer !== undefined) ({ bases, pending } = outer);
+			} else if (event.value !== "&&" && event.value !== "|") {
+				// A pipeline binds tighter than `&&`, so `|` does not break a chain.
+				bases = mergeBases(bases, pending);
+				pending = [];
+			}
+			previous = event.value;
+			continue;
+		}
+		if (event.kind === "write") {
+			const placed = fromEachBase(event.target, (base) => {
+				const decision = writePathClass(event.target, base);
+				if (decision.cls === "system_modify") writeReasons.add(decision.reason ?? `bash-write-target: ${event.target}`);
+			});
+			if (!placed) writeReasons.add(`write-path-unknown-base: ${event.target}`);
+			continue;
+		}
+		if (event.kind === "link") {
+			for (const reason of linkReasons(event, bases)) writeReasons.add(reason);
+			continue;
+		}
+		if (event.kind === "group") {
+			// A compound command's inner `;` does not break the chain around it.
+			if (event.open) {
+				groups.push(pending);
+				pending = [];
+			} else {
+				pending = mergeBases(groups.pop() ?? [], pending);
+			}
+			continue;
+		}
+		if (event.kind === "popd") {
+			bases = mergeBases(bases, visited);
+			continue;
+		}
+		if (event.kind === "exit") continue;
+		const target = event.target;
+		if (target.startsWith("~")) {
+			cdReasons.add(`bash-cd-home-escape: ${target}`);
+			continue;
+		}
+		if (isDynamicShellPath(target)) {
+			bases = null;
+			continue;
+		}
+		const from = path.isAbsolute(target) ? [undefined] : (bases ?? []);
+		const landed: string[] = [];
+		for (const base of from) {
+			for (const landing of resolveCdCandidates(target, base)) {
+				// Inside means inside under the logical and the physical reading.
+				if (landing === null || !isInsideCwd(landing)) cdReasons.add(`bash-cd-outside-workspace: ${landing ?? target}`);
+				else landed.push(landing);
+			}
+		}
+		// A relative cd from an unknown base lands somewhere unknown too.
+		if (event.unmodeled || bases === null) {
+			bases = null;
+			continue;
+		}
+		const outcome = event.mayFail || previous === "||" || previous === "|" ? "may-fail" : cdOutcome(events, index);
+		if (outcome === "chained") pending = mergeBases(pending, bases);
+		bases = outcome === "may-fail" ? mergeBases(bases, landed) : mergeBases([], landed);
+		visited = mergeBases(visited, landed);
+	}
+	return [...writeReasons, ...cdReasons];
+}
+
+/**
+ * What the commands after a cd assume about it. `cd X && ...` runs the rest
+ * only if the cd succeeded (`chained`); `cd X || exit` ends the shell if it
+ * failed (`required`); anything else runs either way.
+ */
+function cdOutcome(events: ReadonlyArray<CommandPathEvent>, index: number): "chained" | "required" | "may-fail" {
+	const separators = events
+		.map((event, at) => ({ event, at }))
+		.filter(({ event, at }) => at > index && event.kind === "separator");
+	const next = separators[0];
+	if (next?.event.kind !== "separator") return "may-fail";
+	if (next.event.value === "&&") return "chained";
+	if (next.event.value !== "||") return "may-fail";
+	const after = separators[1];
+	const branch = events.slice(next.at + 1, after?.at ?? events.length);
+	const ends = after?.event.kind !== "separator" || !["&&", "||", "|"].includes(after.event.value);
+	return ends && branch.some((event) => event.kind === "exit") ? "required" : "may-fail";
+}
+
+/**
+ * A link a command creates is followed by every later path through it, which
+ * static admission cannot model. A symbolic link whose text, resolved from the
+ * link's directory, leaves the workspace escalates the command, and so does a
+ * hard link to a file outside it, since a write through the link changes that
+ * file. A link whose target or directory the shell expands at run time counts
+ * as outside.
+ */
+function linkReasons(event: { symbolic: boolean; sources: string[]; linkDirs: string[] }, bases: ShellBases): string[] {
+	const reasons: string[] = [];
+	const label = event.symbolic ? "bash-symlink-outside-workspace" : "bash-hardlink-outside-workspace";
+	const outside = (source: string, from: string | null): string | null => {
+		const expanded = expandShellHome(source);
+		if (expanded === null || isDynamicShellPath(source)) return source;
+		if (!path.isAbsolute(expanded) && from === null) return source;
+		const landing = canonicalizeRawPath(expanded, from ?? process.cwd());
+		return landing !== null && isInsideCwd(landing) ? null : (landing ?? source);
+	};
+	const dirsFrom = (base: string | null): Array<string | null> => {
+		if (!event.symbolic) return [base];
+		return event.linkDirs.map((dir) => {
+			const expanded = expandShellHome(dir);
+			if (expanded === null || isDynamicShellPath(dir)) return null;
+			if (!path.isAbsolute(expanded) && base === null) return null;
+			return canonicalizeRawPath(expanded, base ?? process.cwd());
+		});
+	};
+	for (const base of bases ?? [null]) {
+		for (const from of dirsFrom(base)) {
+			for (const source of event.sources) {
+				const landing = outside(source, from);
+				if (landing !== null) reasons.push(`${label}: ${landing}`);
+			}
+		}
+	}
+	return [...new Set(reasons)];
+}
+
 /**
  * The artifact tool writes a default file name when the call names no path, so
  * a classifier that only reads the path argument saw no target at all and
@@ -294,29 +484,7 @@ export function classify(call: ClassifierCall): Classification {
 		const command = typeof call.args?.command === "string" ? call.args.command : null;
 		const argCwd = typeof call.args?.cwd === "string" && call.args.cwd.length > 0 ? call.args.cwd : undefined;
 		if (command !== null) {
-			const targetReasons: string[] = [];
-			for (const target of extractCommandWriteTargets(command)) {
-				const decision = writePathClass(target, argCwd);
-				if (decision.cls === "system_modify") {
-					targetReasons.push(decision.reason ?? `bash-write-target: ${target}`);
-				}
-			}
-			// A `cd` outside the workspace re-bases every relative path after it,
-			// so static write-target extraction stops describing what the command
-			// touches. Escalate through the same system_modify confirm gate as an
-			// out-of-workspace write target; inside-workspace `cd` stays plain
-			// execute.
-			for (const target of extractCommandCdTargets(command)) {
-				if (target.startsWith("~")) {
-					targetReasons.push(`bash-cd-home-escape: ${target}`);
-					continue;
-				}
-				// Inside means inside under the logical and the physical reading.
-				const outside = resolveCdCandidates(target, argCwd).find((abs) => abs === null || !isInsideCwd(abs));
-				if (outside !== undefined) {
-					targetReasons.push(`bash-cd-outside-workspace: ${outside ?? target}`);
-				}
-			}
+			const targetReasons = bashPathReasons(command, argCwd);
 			if (targetReasons.length > 0) {
 				return { actionClass: "system_modify", reasons: targetReasons };
 			}
