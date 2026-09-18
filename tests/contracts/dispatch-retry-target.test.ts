@@ -1,4 +1,4 @@
-import { deepStrictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
@@ -16,31 +16,40 @@ const REQUEST: DispatchRequest = {
 	resultContractOverride: { kind: "provenance-report" },
 };
 
+const HTTP_503 = "HTTP 503 Service Unavailable";
+const OVERFLOW =
+	"[worker] provider error: exceed_context_size_error: request (9000 tokens) exceeds the available context size (8192 tokens), try increasing it";
+
 /**
- * A bundle whose workers finish at once: a 503 on any target in `failing`,
- * success elsewhere. `spawned` lists the target each worker ran on.
+ * A bundle whose workers finish at once: `failure` (a 503 by default) on any
+ * target in `failing`, success elsewhere. `spawned` lists the target each
+ * worker ran on. `windows` sets each target's context window.
  */
 async function retryFleet(
 	targetIds: ReadonlyArray<string>,
 	failing: ReadonlySet<string>,
 	vision: ReadonlySet<string>,
-	maxRetries = 1,
+	options: { failure?: string; windows?: Readonly<Record<string, number>>; maxRetries?: number } = {},
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.targets = targetIds.map((id) => ({ id, runtime: "openai", defaultModel: "gpt-4o" }));
 	settings.fleet.default.target = "default";
 	settings.fleet.default.model = "gpt-4o";
-	settings.fleet.retry.maxRetries = maxRetries;
+	settings.fleet.retry.maxRetries = options.maxRetries ?? 1;
 	const context = dispatchStubContext({ settings });
 	const providers = context.getContract<ProvidersContract>("providers");
-	for (const status of providers?.list() ?? []) status.capabilities.vision = vision.has(status.target.id);
+	for (const status of providers?.list() ?? []) {
+		status.capabilities.vision = vision.has(status.target.id);
+		const window = options.windows?.[status.target.id];
+		if (window !== undefined) status.capabilities.contextWindow = window;
+	}
 	const spawned: string[] = [];
 	const bundle = makeDispatchBundle(context, {
 		heartbeatIntervalMs: 3_600_000,
 		spawnWorker: (spec) => {
 			spawned.push(spec.target.id);
 			const result: SpawnedWorkerResult = failing.has(spec.target.id)
-				? { exitCode: 1, signal: null, stderrTail: "HTTP 503 Service Unavailable" }
+				? { exitCode: 1, signal: null, stderrTail: options.failure ?? HTTP_503 }
 				: { exitCode: 0, signal: null };
 			const worker: SpawnedWorker = {
 				pid: null,
@@ -112,11 +121,100 @@ describe("retry target selection", () => {
 	});
 
 	it("keeps automatic failover for the retry after one that moved the target", async () => {
-		const fleet = await retryFleet(["default", "second", "third"], new Set(["default", "second"]), new Set(), 2);
+		const fleet = await retryFleet(["default", "second", "third"], new Set(["default", "second"]), new Set(), {
+			maxRetries: 2,
+		});
 		try {
 			const first = await fleet.bundle.contract.dispatch({ ...REQUEST, cwd: scratch.dir });
 			await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
 			deepStrictEqual(fleet.spawned, ["default", "second", "third"]);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+});
+
+describe("context overflow retry", () => {
+	let scratch: IsolatedClioEnv;
+	beforeEach(async () => {
+		scratch = await isolateClioEnv("clio-coder-overflow-retry-");
+	});
+	afterEach(() => scratch.restore());
+
+	async function settle(fleet: Awaited<ReturnType<typeof retryFleet>>, request: DispatchRequest) {
+		const first = await fleet.bundle.contract.dispatch({ ...request, cwd: scratch.dir });
+		await fleet.bundle.contract.assignments?.get(first.runId)?.terminal;
+		return fleet.bundle.contract.assignments?.get(first.runId) ?? null;
+	}
+
+	it("retries once onto the first eligible route with a strictly larger window", async () => {
+		const fleet = await retryFleet(["default", "small", "same", "big"], new Set(["default"]), new Set(), {
+			failure: OVERFLOW,
+			windows: { default: 8192, small: 4096, same: 8192, big: 32768 },
+		});
+		try {
+			const assignment = await settle(fleet, REQUEST);
+			deepStrictEqual(fleet.spawned, ["default", "big"]);
+			strictEqual(assignment?.status, "succeeded");
+			deepStrictEqual(
+				assignment?.attempts.map((attempt) => attempt.retryReason),
+				[null, "context-overflow: 8192 -> 32768 on big/gpt-4o"],
+			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("stays terminal with a detail when no route has a larger window", async () => {
+		const fleet = await retryFleet(["default", "small"], new Set(["default"]), new Set(), {
+			failure: OVERFLOW,
+			windows: { default: 8192, small: 8192 },
+		});
+		try {
+			const assignment = await settle(fleet, REQUEST);
+			deepStrictEqual(fleet.spawned, ["default"]);
+			strictEqual(assignment?.status, "failed");
+			strictEqual(
+				assignment?.outcomeDetail,
+				"context overflow not retried because no eligible route has a context window larger than 8192 on default/gpt-4o",
+			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry an overflow retry that overflows again", async () => {
+		const fleet = await retryFleet(["default", "mid", "big"], new Set(["default", "mid"]), new Set(), {
+			failure: OVERFLOW,
+			windows: { default: 8192, mid: 16384, big: 32768 },
+			maxRetries: 3,
+		});
+		try {
+			const assignment = await settle(fleet, REQUEST);
+			deepStrictEqual(fleet.spawned, ["default", "mid"]);
+			strictEqual(assignment?.status, "failed");
+			strictEqual(
+				assignment?.outcomeDetail,
+				"context overflow not retried again because this attempt was already an overflow retry",
+			);
+		} finally {
+			await fleet.bundle.extension.stop?.();
+		}
+	});
+
+	it("does not retry under failover none", async () => {
+		const fleet = await retryFleet(["default", "big"], new Set(["default"]), new Set(), {
+			failure: OVERFLOW,
+			windows: { default: 8192, big: 32768 },
+		});
+		try {
+			const assignment = await settle(fleet, { ...REQUEST, target: "default" });
+			deepStrictEqual(fleet.spawned, ["default"]);
+			strictEqual(assignment?.status, "failed");
+			strictEqual(
+				assignment?.outcomeDetail,
+				"context overflow not retried because failover is none, which pins the route",
+			);
 		} finally {
 			await fleet.bundle.extension.stop?.();
 		}

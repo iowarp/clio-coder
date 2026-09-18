@@ -179,6 +179,7 @@ import {
 	classifyFailure,
 	decideRetry,
 	type FailureClass,
+	isContextOverflowFailure,
 	isInfrastructureFailure,
 	type RetryDecision,
 } from "./failure-classification.js";
@@ -3066,6 +3067,8 @@ export function createDispatchBundle(
 		detail: string | null,
 		receipt: RunReceipt,
 		failureClass: FailureClass,
+		contextOverflow = false,
+		currentRetryReason: string | null = null,
 	): RetryScheduleResult {
 		if (draining) return { scheduled: false };
 		const rootRunId = run.lineage.rootRunId;
@@ -3085,7 +3088,19 @@ export function createDispatchBundle(
 		const maxRetries = assignments.get(rootRunId)?.policy.maxRetries ?? assignmentPolicyFor(run.req).maxRetries;
 		const baseDecision = decideRetry(failureClass, run.lineage.attempt, maxRetries);
 		// An exact manual route may be retried, but no route component may drift.
-		const decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
+		let decision = recovery.retryDecisionWithinFailover(baseDecision, failoverModeFor(run.req));
+		let overflowRoute: DispatchFailoverCandidate | null = null;
+		let overflowReason: string | null = null;
+		if (contextOverflow && !decision.retry) {
+			const plan = planOverflowRetry(run, currentRetryReason, maxRetries);
+			if ("settlementDetail" in plan) {
+				retryBackoff.delete(rootRunId);
+				return { scheduled: false, settlementDetail: plan.settlementDetail };
+			}
+			overflowRoute = plan.route;
+			overflowReason = plan.reason;
+			decision = { retry: true, excludedRouteParts: [], qualityEscalation: null, reasonCode: "retry-context-overflow" };
+		}
 		if (!decision.retry) {
 			retryBackoff.delete(rootRunId);
 			// Deterministic outcomes are intentionally not retried. This is a normal
@@ -3129,7 +3144,7 @@ export function createDispatchBundle(
 		// target cooldown it just created protects new work, not this chain.
 		const delayMs = Math.max(backoffDelayMs, decision.retryAfterMs ?? 0);
 		const attempt = run.lineage.attempt + 1;
-		const reason = detail !== null ? `${outcome}: ${detail}` : outcome;
+		const reason = overflowReason ?? (detail !== null ? `${outcome}: ${detail}` : outcome);
 		const dueAt = now() + delayMs;
 		let settleCanceled!: () => void;
 		let rejectContinuation!: (error: unknown) => void;
@@ -3142,7 +3157,7 @@ export function createDispatchBundle(
 			retryQueue.delete(run.runId);
 			// Ownership starts at scheduling, covering admission before a handle
 			// exists and terminal receipt work after the handle arrives.
-			executeRetry(run, attempt, reason, decision).then(settleCanceled, rejectContinuation);
+			executeRetry(run, attempt, reason, decision, overflowRoute).then(settleCanceled, rejectContinuation);
 		}, delayMs);
 		retryQueue.set(run.runId, {
 			runId: run.runId,
@@ -3172,6 +3187,8 @@ export function createDispatchBundle(
 		return { scheduled: true };
 	}
 
+	const CONTEXT_OVERFLOW_RETRY = "context-overflow";
+
 	function retryReasonKey(rootRunId: string, attempt: number): string {
 		return `${rootRunId}:${attempt}`;
 	}
@@ -3182,6 +3199,7 @@ export function createDispatchBundle(
 		outcome: RunOutcome,
 		detail: string | null,
 		failureClass: FailureClass,
+		contextOverflow = false,
 	): void {
 		const assignment = assignments.open(run.lineage.rootRunId, assignmentPolicyFor(run.req));
 		persistAssignment(registerAssignment(assignment.id), `${assignment.id}:open`);
@@ -3197,7 +3215,7 @@ export function createDispatchBundle(
 			retryReason,
 		});
 		persistAssignment(recordAssignmentAttempt(assignment.id, run.runId), `${assignment.id}:attempt:${run.runId}`);
-		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass);
+		const retry = maybeScheduleRetry(run, outcome, detail, receipt, failureClass, contextOverflow, retryReason);
 		if (retry.scheduled) return;
 		const currentStatus = assignments.get(assignment.id)?.status;
 		const terminalStatus =
@@ -3233,6 +3251,7 @@ export function createDispatchBundle(
 		attempt: number,
 		reason = "retry",
 		decision: RetryDecision = decideRetry("internal", run.lineage.attempt, assignmentPolicyFor(run.req).maxRetries),
+		overflowRoute: DispatchFailoverCandidate | null = null,
 	): Promise<void> {
 		if (draining || !retryChainIsLive(run)) return;
 		const excludesNode = decision.excludedRouteParts.includes("node");
@@ -3264,7 +3283,7 @@ export function createDispatchBundle(
 		retryReasons.set(reasonKey, reason);
 		try {
 			if (failoverModeFor(run.req) === "approved") {
-				const candidates = approvedRetryCandidates(run, decision);
+				const candidates = overflowRoute !== null ? [overflowRoute] : approvedRetryCandidates(run, decision);
 				if (run.req.routeApproval === undefined) {
 					const candidate = candidates[0] as DispatchFailoverCandidate;
 					retryReq.agentId = candidate.agentId;
@@ -3310,6 +3329,10 @@ export function createDispatchBundle(
 					retryReq.target = run.targetId;
 					retryReq.model = run.wireModelId;
 					retryReq.node = run.node?.id ?? "local";
+				}
+				if (overflowRoute !== null) {
+					retryReq.target = overflowRoute.target;
+					retryReq.model = overflowRoute.model;
 				}
 				// Automatic placement re-selects only the failed route component.
 				if (excludesNode) {
@@ -3652,9 +3675,17 @@ export function createDispatchBundle(
 	/**
 	 * First configured route on another target that can serve a retry: it
 	 * resolves to that target, carries every required capability, and its
-	 * breaker is neither open nor probing.
+	 * breaker is neither open nor probing. With minContextWindow the route may
+	 * also be another model on the failed target, and its effective context
+	 * window must be strictly larger than minContextWindow. allowed narrows the
+	 * routes further, as an approved envelope does.
 	 */
-	function eligibleAlternateRoute(run: ActiveRun, req: DispatchRequest): DispatchFailoverCandidate | null {
+	function eligibleAlternateRoute(
+		run: ActiveRun,
+		req: DispatchRequest,
+		minContextWindow?: number,
+		allowed?: (candidate: DispatchFailoverCandidate) => boolean,
+	): (DispatchFailoverCandidate & { contextWindow: number }) | null {
 		const settings = getEffectiveSettings();
 		const failed = {
 			targetId: run.targetId,
@@ -3662,20 +3693,36 @@ export function createDispatchBundle(
 			runtimeId: run.runtimeId,
 			endpointIdentityHash: "",
 		};
-		const routes = configuredJointTargets(settings?.targets ?? [], failed, endpointIdentityHash).filter(
-			(route) => route.targetId !== run.targetId,
+		const routes = configuredJointTargets(settings?.targets ?? [], failed, endpointIdentityHash).filter((route) =>
+			minContextWindow === undefined
+				? route.targetId !== run.targetId
+				: route.targetId !== run.targetId || route.modelId !== run.wireModelId,
 		);
+		const windows = new Map<string, number>();
 		const probes: RouteAvailability[] = routes.map((route) => {
 			const candidate = { agentId: req.agentId, target: route.targetId, model: route.modelId, node: req.node ?? "local" };
+			if (allowed !== undefined && !allowed(candidate)) {
+				return { candidate, unavailable: "route is outside the approved failover envelope" };
+			}
 			try {
 				const identity = resolveTargetIdentity({ ...req, target: route.targetId, model: route.modelId }, settings);
 				if (identity.targetId !== route.targetId) {
 					return { candidate, unavailable: `route resolved to target '${identity.targetId}'` };
 				}
+				if (identity.targetId === run.targetId && identity.wireModelId === run.wireModelId) {
+					return { candidate, unavailable: "route resolved to the failed route" };
+				}
 				const capabilities = capabilityInfoForModel(providers, identity.targetId, identity.wireModelId);
+				const contextWindow = capabilities?.contextWindow ?? 0;
+				windows.set(`${route.targetId}\0${route.modelId}`, contextWindow);
+				const tooSmall =
+					minContextWindow !== undefined && contextWindow <= minContextWindow
+						? `context window ${contextWindow} is not larger than ${minContextWindow}`
+						: null;
 				return {
 					candidate,
 					unavailable:
+						tooSmall ??
 						requiredCapabilityFailureDetail(identity.targetId, capabilities, req.requiredCapabilities) ??
 						targetCooldownReason(identity.targetId, identity.runtimeId, identity.wireModelId),
 				};
@@ -3683,7 +3730,57 @@ export function createDispatchBundle(
 				return { candidate, unavailable: error instanceof Error ? error.message : String(error) };
 			}
 		});
-		return firstAvailableRouteCandidate(probes);
+		const chosen = firstAvailableRouteCandidate(probes);
+		return chosen === null ? null : { ...chosen, contextWindow: windows.get(`${chosen.target}\0${chosen.model}`) ?? 0 };
+	}
+
+	/**
+	 * A context overflow is a verdict on the prompt against one window, so it
+	 * earns one retry, and only onto a route whose window is strictly larger.
+	 * Exact failover never moves, an approved plan moves only inside its
+	 * envelope, and an overflow retry that overflows again is final.
+	 */
+	function planOverflowRetry(
+		run: ActiveRun,
+		currentRetryReason: string | null,
+		maxRetries: number,
+	): { route: DispatchFailoverCandidate; reason: string } | { settlementDetail: string } {
+		const mode = failoverModeFor(run.req);
+		if (mode === "none") {
+			return { settlementDetail: "context overflow not retried because failover is none, which pins the route" };
+		}
+		if (currentRetryReason?.startsWith(`${CONTEXT_OVERFLOW_RETRY}:`) === true) {
+			return { settlementDetail: "context overflow not retried again because this attempt was already an overflow retry" };
+		}
+		if (maxRetries <= 0 || run.lineage.attempt >= maxRetries) {
+			return { settlementDetail: "context overflow not retried because the retry budget is spent" };
+		}
+		const failedWindow = capabilityInfoForModel(providers, run.targetId, run.wireModelId)?.contextWindow ?? 0;
+		const failedRoute = `${run.targetId}/${run.wireModelId}`;
+		if (failedWindow <= 0) {
+			return {
+				settlementDetail: `context overflow not retried because the context window of ${failedRoute} is unknown`,
+			};
+		}
+		const node = run.node?.id ?? "local";
+		const envelope = run.req.allowedCandidates ?? [];
+		const route = eligibleAlternateRoute(
+			run,
+			run.req,
+			failedWindow,
+			mode === "approved"
+				? (candidate) => envelope.some((entry) => recovery.sameFailoverCandidate(entry, { ...candidate, node }))
+				: undefined,
+		);
+		if (route === null) {
+			return {
+				settlementDetail: `context overflow not retried because no eligible route has a context window larger than ${failedWindow} on ${failedRoute}`,
+			};
+		}
+		return {
+			route: { agentId: route.agentId, target: route.target, model: route.model, node },
+			reason: `${CONTEXT_OVERFLOW_RETRY}: ${failedWindow} -> ${route.contextWindow} on ${route.target}/${route.model}`,
+		};
 	}
 
 	function recordTargetOutcome(
@@ -4713,12 +4810,13 @@ export function createDispatchBundle(
 					failureMessage = finalDetail;
 				}
 				const status = runStatusForOutcome(finalOutcome);
-				const failureClass = classifyFailure(
-					evidence,
-					{ exitCode: result.exitCode, signal: null, ...(failureMessage ? { stderrTail: failureMessage } : {}) },
-					finalOutcome,
-					outcomeCode,
-				);
+				const classifiedResult: SpawnedWorkerResult = {
+					exitCode: result.exitCode,
+					signal: null,
+					...(failureMessage ? { stderrTail: failureMessage } : {}),
+				};
+				const failureClass = classifyFailure(evidence, classifiedResult, finalOutcome, outcomeCode);
+				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
 				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
@@ -4751,7 +4849,14 @@ export function createDispatchBundle(
 				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				completeAssignmentAttempt(activeRun, receipt, finalOutcome, receipt.outcomeDetail ?? finalDetail, failureClass);
+				completeAssignmentAttempt(
+					activeRun,
+					receipt,
+					finalOutcome,
+					receipt.outcomeDetail ?? finalDetail,
+					failureClass,
+					contextOverflow,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (ACP promise rejection, ledger or
@@ -6091,6 +6196,7 @@ export function createDispatchBundle(
 				}
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode);
+				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode);
 				const receiptDraft = buildReceiptDraft(
 					result,
 					endedAt,
@@ -6195,7 +6301,14 @@ export function createDispatchBundle(
 				recordNodeChannelOutcome(activeRun, finalOutcome, failureClass, finalDetail);
 				accumulateFinalizedTotals(receipt);
 				emitTerminalDispatchEvent(receipt, finalOutcome);
-				completeAssignmentAttempt(activeRun, receipt, finalOutcome, receipt.outcomeDetail ?? finalDetail, failureClass);
+				completeAssignmentAttempt(
+					activeRun,
+					receipt,
+					finalOutcome,
+					receipt.outcomeDetail ?? finalDetail,
+					failureClass,
+					contextOverflow,
+				);
 				return receipt;
 			} catch (error) {
 				// Finalization itself failed (worker promise rejection, ledger or

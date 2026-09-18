@@ -40,8 +40,27 @@ export interface RetryDecision {
 const TRANSIENT_TARGET_TEXT =
 	/timeout|temporar|unavailable|\b50[0234]\b|internal server error|econnrefused|econnreset|fetch failed/;
 
+const WORKERSPEC_REJECTION = /\[worker\] fatal: workerspec/;
+
 function resultText(result: SpawnedWorkerResult | null): string {
 	return result?.stderrTail?.toLowerCase() ?? "";
+}
+
+/**
+ * Whether a deterministic-task class came from the provider's context-overflow
+ * verdict rather than an outcome code, a rejected schema, or a rejected worker
+ * spec. Only this cause can succeed elsewhere: the same prompt fits a route
+ * whose window is larger.
+ */
+export function isContextOverflowFailure(
+	failureClass: FailureClass,
+	result: SpawnedWorkerResult | null,
+	code: RunOutcomeCode | null | undefined,
+): boolean {
+	if (failureClass !== "deterministic-task" || isDeterministicOutcomeCode(code)) return false;
+	const diagnostic = resultText(result);
+	if (diagnostic === "" || isResponseSchemaRejection(diagnostic) || WORKERSPEC_REJECTION.test(diagnostic)) return false;
+	return isEngineContextOverflow(diagnostic);
 }
 
 /** Classify coordinator-owned termination evidence without mutating routing state. */
@@ -75,7 +94,7 @@ export function classifyFailure(
 	// rejection, so three attempts only tripled the cost of one configuration
 	// error. Ending it here surfaces the contract message the operator has to act
 	// on instead of burying it under two more identical failures.
-	if (/\[worker\] fatal: workerspec/.test(diagnostic)) return "deterministic-task";
+	if (WORKERSPEC_REJECTION.test(diagnostic)) return "deterministic-task";
 	// A provider that reports the prompt no longer fits the model's context
 	// window has judged the request, not the target. The identical input earns
 	// the identical overflow on every retry, and charging it to the target
