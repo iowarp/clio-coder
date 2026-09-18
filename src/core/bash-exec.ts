@@ -202,6 +202,9 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 	for (const key of Object.keys(env))
 		if (isSecretArgKey(key) || key.startsWith("BASH_FUNC_")) Reflect.deleteProperty(env, key);
 	env.AI_AGENT = AI_AGENT_NAME;
+	// An inherited CDPATH sends a relative cd somewhere the command does not
+	// name, and bash admission resolves cds from the command's text alone.
+	Reflect.deleteProperty(env, "CDPATH");
 	for (const key of CLIO_CONTROL_ENV_KEYS) {
 		Reflect.deleteProperty(env, key);
 	}
