@@ -147,6 +147,15 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario write.holdout.err-symlink-escape --seed 1 --split holdout
     metrics: *metrics
     timeoutMs: 60000
+  - id: write.holdout.err-dotdot-link-escape
+    tags: [tool-bench, write, holdout]
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/tool-bench/lib/driver.ts --scenario write.holdout.err-dotdot-link-escape --seed 1 --split holdout
+    metrics: *metrics
+    timeoutMs: 60000
   - id: write.holdout.err-readonly-parent
     tags: [tool-bench, write, holdout]
     workspace: *workspace

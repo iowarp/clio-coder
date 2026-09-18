@@ -16,10 +16,10 @@ holds the `edit`, `read`, and `write` suites; `grep` and `find` come next.
 | `lib/link-deps.sh` | Runner step that links `src` and `node_modules` into the task workspace |
 | `edit.yaml`, `edit.holdout.yaml` | Default profile, 22 scenarios, search and holdout splits |
 | `edit.full.yaml`, `edit.full.holdout.yaml` | Full profile, 29 scenarios, adds the 100 MB case |
-| `read.yaml`, `read.holdout.yaml` | Default profile, 21 scenarios |
-| `read.full.yaml`, `read.full.holdout.yaml` | Full profile, 27 scenarios, adds two 100 MB cases |
-| `write.yaml`, `write.holdout.yaml` | Default profile, 16 scenarios |
-| `write.full.yaml`, `write.full.holdout.yaml` | Full profile, 21 scenarios, adds the 100 MB case |
+| `read.yaml`, `read.holdout.yaml` | Default profile, 22 scenarios |
+| `read.full.yaml`, `read.full.holdout.yaml` | Full profile, 28 scenarios, adds two 100 MB cases |
+| `write.yaml`, `write.holdout.yaml` | Default profile, 17 scenarios |
+| `write.full.yaml`, `write.full.holdout.yaml` | Full profile, 22 scenarios, adds the 100 MB case |
 
 Scenario ids are `<tool>.<split>.<template>`, and the driver takes the tool
 from the id.
@@ -120,8 +120,10 @@ offset and limit of zero, a limit and a tail larger than the file), one
 256 KB line with no terminator, 2 to 6 KB lines that hit the 50 KB byte cap,
 0 to 6 character lines that hit the 2000 line cap, multibyte UTF-8, a UTF-8
 BOM, CRLF, an empty file, a symlinked target, and the error paths: missing
-file, a directory, invalid UTF-8, a NUL byte, and a mode 0000 file. The full
-profile adds `line_numbers`.
+file, a directory, invalid UTF-8, a NUL byte, a mode 0000 file, and
+`data/up/../<target>` with `data/up` linked to the scratch root, whose
+physical target outside the root does not exist. The full profile adds
+`line_numbers`.
 
 Read never mutates, so every scenario expects the scratch root unchanged. An
 ok scenario also expects its window. The corpus puts sentinels at the start
@@ -140,7 +142,8 @@ three directories that do not exist yet, overwrite with the same size, with
 multibyte UTF-8, CRLF, content with no final newline, empty content, a write
 through a symlink, a mode 0755 target (0600 in full), and the error paths: a
 directory, `../escape.txt`, a dangling symlink that points outside the
-scratch root, and a mode 0555 parent.
+scratch root, `..` through a symlink to the scratch root, and a mode 0555
+parent.
 
 An ok scenario expects the written file to hold exactly the call's bytes and
 every other entry untouched. What the tool does with modes is in the digest
@@ -149,12 +152,14 @@ gets 0644 and a created directory 0755 under the pinned umask. The 64 KB to
 900 KB overwrite sits in full because the tool diffs both sides below 1 MiB,
 which costs about 6 s per call there.
 
-`write.*.err-symlink-escape` is unsolved on purpose. Admission lets a write
-through `data/out.txt`, a dangling symlink to `../../escape.txt`, and the
-tool publishes through the link to a file outside the scratch root. The
-scenario expects a refusal, so it reads unsolved until safety closes the gap.
-`tests/contracts/tool-bench-read-write.test.ts` lists it as a known gap and
-fails once the gap closes.
+`write.*.err-symlink-escape` writes through `data/out.txt`, a dangling
+symlink to `../../escape.txt`, and `write.*.err-dotdot-link-escape` writes
+`data/up/../escape.txt` with `data/up` linked to the scratch root. Both land
+outside the root once links are followed the way the kernel follows them,
+so admission parks each as `system_modify` and the driver denies the park.
+Both are solved. A scenario that expects a refusal the tool path does not
+give yet goes in `KNOWN_GAPS` in `tests/contracts/tool-bench-read-write.test.ts`,
+which is empty, and the test fails once such a gap closes.
 
 ## Measurement
 

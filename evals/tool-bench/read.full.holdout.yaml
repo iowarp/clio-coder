@@ -255,3 +255,12 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario read.holdout.err-unreadable --seed 1 --split holdout
     metrics: *metrics
     timeoutMs: 60000
+  - id: read.holdout.err-dotdot-link-escape
+    tags: [tool-bench, read, holdout]
+    workspace: *workspace
+    runner: *runner
+    verify:
+      measure:
+        - node --import tsx evals/tool-bench/lib/driver.ts --scenario read.holdout.err-dotdot-link-escape --seed 1 --split holdout
+    metrics: *metrics
+    timeoutMs: 60000

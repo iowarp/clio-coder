@@ -38,7 +38,7 @@ export interface ReadScenario extends ScenarioBase {
 	args: ReadCall;
 }
 
-type ReadError = "missing-file" | "directory" | "invalid-utf8" | "nul-byte" | "unreadable";
+type ReadError = "missing-file" | "directory" | "invalid-utf8" | "nul-byte" | "unreadable" | "dotdot-link-escape";
 
 export interface ReadTemplate {
 	key: string;
@@ -156,6 +156,14 @@ export const READ_TEMPLATES: readonly ReadTemplate[] = [
 	{ key: "err-invalid-utf8", profile: "default", bytes: 16 * KB, line: [20, 100], ...TEXT, error: "invalid-utf8" },
 	{ key: "err-nul-byte", profile: "default", bytes: 16 * KB, line: [20, 100], ...TEXT, error: "nul-byte" },
 	{ key: "err-unreadable", profile: "default", bytes: 16 * KB, line: [20, 100], ...TEXT, error: "unreadable" },
+	{
+		key: "err-dotdot-link-escape",
+		profile: "default",
+		bytes: 16 * KB,
+		line: [20, 100],
+		...TEXT,
+		error: "dotdot-link-escape",
+	},
 ];
 
 /** The 0-based lines the call should show, clamped the way the tool's caps clamp them. */
@@ -230,14 +238,19 @@ export function generateReadScenario(seed: number, split: Split, key: string): R
 	const targetPath = template.symlink === true ? `data/real-${tag}.txt` : `data/target-${tag}.txt`;
 	const files: CorpusEntry[] = [{ kind: "file", path: targetPath, bytes: content, mode }];
 	if (template.symlink === true) files.push({ kind: "symlink", path: "data/link.txt", target: `real-${tag}.txt` });
+	// `..` from data/up's target, the scratch root, is outside it, where the
+	// target does not exist. path.resolve would read the call as the target.
+	if (template.error === "dotdot-link-escape") files.push({ kind: "symlink", path: "data/up", target: ".." });
 	const callPath =
 		template.error === "missing-file"
 			? "data/absent.txt"
 			: template.error === "directory"
 				? "data"
-				: template.symlink === true
-					? "data/link.txt"
-					: targetPath;
+				: template.error === "dotdot-link-escape"
+					? `data/up/../${targetPath.slice("data/".length)}`
+					: template.symlink === true
+						? "data/link.txt"
+						: targetPath;
 
 	const args: ReadCall = { path: callPath };
 	if (template.offset !== undefined)
@@ -248,6 +261,7 @@ export function generateReadScenario(seed: number, split: Split, key: string): R
 
 	const expected: ExpectedEntry[] = [expectedFile(targetPath, content, mode)];
 	if (template.symlink === true) expected.push({ kind: "symlink", path: "data/link.txt", target: `real-${tag}.txt` });
+	if (template.error === "dotdot-link-escape") expected.push({ kind: "symlink", path: "data/up", target: ".." });
 	// The tool refuses an offset past the last line rather than showing nothing.
 	const outcome = template.error === undefined && template.offset !== "past-eof" ? "ok" : "error";
 	return {
