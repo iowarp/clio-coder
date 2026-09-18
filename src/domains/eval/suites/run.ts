@@ -19,6 +19,7 @@ import {
 	writeBoundaryInvariantMetrics,
 } from "../metrics/invariants.js";
 import { wallTimeMetric } from "../metrics/latency.js";
+import { mainAgentReceiptForRun, noopFailureReason } from "../metrics/noop.js";
 import { tokenAccountingFrom } from "../metrics/tokens.js";
 import { zeroToolCallMetrics } from "../metrics/tool-calls.js";
 import {
@@ -194,7 +195,12 @@ async function runMatrixItem(
 		// Read after the runner returned and before the journal is removed: what
 		// Clio sealed for this item, judged against its own ledger, and whether
 		// the workers it attested are still running.
-		const journalMetrics = invariantMetrics(stateDir, receiptExitCode);
+		const journal = readRunJournal(stateDir);
+		const journalMetrics = invariantMetrics(stateDir, journal, receiptExitCode);
+		// Read for the no-op decision only. The main agent seals `noop` into
+		// its journal receipt and prints none, so this never feeds the
+		// receipt-backed evidence the runner reports.
+		const noopReceipt = mainAgentReceiptForRun(journal, runner.stdout);
 		await checkGraderIntegrity();
 		const measurement = await measureTaskOutcome(task, workspace.dir, {
 			...namingCompatibilityEnvironment(
@@ -225,18 +231,24 @@ async function runMatrixItem(
 			"result.failureClass": runner.exitCode === 0 ? null : "runner_failed",
 			...measurement.metrics,
 		};
+		if (typeof noopReceipt?.noop === "boolean") metrics["result.noop"] = noopReceipt.noop;
 		await checkGraderIntegrity();
 		const verifier = await runVerifiers(task, workspace.dir, metrics);
 		await checkGraderIntegrity();
 		const graderFailed = metrics["task.solved"] === false;
-		const pass = runner.exitCode === 0 && verifier.pass && !graderFailed;
+		// A run that changed nothing it was allowed to change did not solve the
+		// task, even when the untouched workspace already satisfies the verifier.
+		const noop = noopReceipt?.noop === true;
+		const pass = runner.exitCode === 0 && !noop && verifier.pass && !graderFailed;
 		const failureClass = pass
 			? null
 			: runner.exitCode !== 0
 				? "runner_failed"
-				: !verifier.pass
-					? verifier.failureClass
-					: "grader_failed";
+				: noop
+					? "noop"
+					: !verifier.pass
+						? verifier.failureClass
+						: "grader_failed";
 		metrics["verifier.exitCode"] = verifier.exitCode;
 		metrics["result.pass"] = pass;
 		metrics["result.failureClass"] = failureClass;
@@ -254,6 +266,7 @@ async function runMatrixItem(
 				workspace: workspace.dir,
 				...(verifier.stdout.length > 0 ? { verifierStdout: verifier.stdout } : {}),
 				...(verifier.stderr.length > 0 ? { verifierStderr: verifier.stderr } : {}),
+				...(failureClass === "noop" && noopReceipt !== null ? { failureReason: noopFailureReason(noopReceipt) } : {}),
 			},
 		};
 		retention ??= retainSessionLedgers(stateDir, transcriptDir, runnerEvidence?.stdout);
@@ -386,8 +399,11 @@ function emptyLedgerSnapshot(): Awaited<ReturnType<typeof readEvalLedgerSnapshot
 }
 
 /** Journal-derived invariants for one finished item, read from its isolated state directory. */
-function invariantMetrics(stateDir: string, runnerExitCode: number): Record<string, number | boolean> {
-	const journal = readRunJournal(stateDir);
+function invariantMetrics(
+	stateDir: string,
+	journal: ReturnType<typeof readRunJournal>,
+	runnerExitCode: number,
+): Record<string, number | boolean> {
 	return {
 		...receiptInvariantMetrics(journal, runnerExitCode),
 		...receiptUsageMetrics(journal),

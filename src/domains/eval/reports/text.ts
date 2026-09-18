@@ -30,6 +30,13 @@ export function renderEvalTextReportV4(artifact: EvalArtifactV4): string {
 				: `tokens total: ${tokens.total} (measured in ${tokens.measuredRuns} of ${tokens.runs} runs)`,
 		`wall time ms: ${artifact.summary.wallTimeMs}`,
 		...behavioralSummary,
+		...artifact.results.flatMap((result) => {
+			const reason = result.artifacts.failureReason;
+			if (result.pass || typeof reason !== "string") return [];
+			return [
+				`failure: ${result.taskId}[${result.target.id}:${result.target.model ?? "default"}:${result.repeatIndex}] ${result.failureClass ?? "failed"}: ${reason}`,
+			];
+		}),
 		"",
 	].join("\n");
 }

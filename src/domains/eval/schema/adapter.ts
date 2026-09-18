@@ -27,8 +27,12 @@ export function adaptSuiteV2ResultToVerdictV1(
 ): EvalVerdictEnvelopeV1 {
 	// The suite runner owns the one final pass decision. In particular, a
 	// declared grader failure changes `pass` without pretending the runner or
-	// its invariants broke; every other failed result is a machinery failure.
-	const machinery = result.pass || result.failureClass === "grader_failed" ? "ok" : "infrastructure_failure";
+	// its invariants broke, and so does a no-op run: the machinery worked and
+	// the agent changed nothing. Every other failed result is a machinery failure.
+	const machinery =
+		result.pass || result.failureClass === "grader_failed" || result.failureClass === "noop"
+			? "ok"
+			: "infrastructure_failure";
 	const outcome = result.pass ? "pass" : "fail";
 	const graderExitCode = result.metrics["task.exitCode"];
 	return parseEvalVerdictEnvelopeV1({
