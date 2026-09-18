@@ -156,7 +156,8 @@ The durable capacity state file (`dispatch-admission.json`) uses schema version 
 
 `fleet.concurrency` sets the global worker pool and the implicit local node's
 limit. SSH nodes always use their own `maxWorkers`. A number means exactly that
-many workers for both. The default is `1`.
+many workers for both. The default is `auto`. An explicit value in
+`settings.yaml`, a number or `auto`, is kept as written.
 
 `auto` sizes the local node from the host it runs on. The limit is the smallest
 of four inputs:

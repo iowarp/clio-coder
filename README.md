@@ -63,7 +63,7 @@ In the configuration launcher, choose **Quick Connect**:
 3. **Review and Connect.** You're ready to start a session.
 
 Clio uses [recommended defaults](docs/guide/configuration-and-targets.md#recommended-defaults):
-workspace edits with command approval, one worker at a time, a $5 tracked session
+workspace edits with command approval, workers sized to the host, a $5 tracked session
 budget, and a regular terminal interface. Other settings can wait. Escape goes
 back during setup; `clio-coder configure --settings` opens the full menu.
 

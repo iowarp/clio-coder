@@ -141,7 +141,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 				{ target: saved.fleet.default.target, model: saved.fleet.default.model },
 				{ target: saved.chat.target, model: "solo" },
 			);
-			strictEqual(saved.fleet.concurrency, 1);
+			strictEqual(saved.fleet.concurrency, "auto");
 			strictEqual(saved.safety.autonomy, "auto-edit");
 			strictEqual(saved.safety.limits.sessionCostUsd, 5);
 			strictEqual(saved.chat.prewarm, false);

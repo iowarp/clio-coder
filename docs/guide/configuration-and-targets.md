@@ -96,7 +96,7 @@ These aim to make one coding session useful on a laptop or a shared endpoint:
 | --- | --- |
 | Connection | One endpoint and model for chat and the fleet default on first setup. No separate model assignments to learn. |
 | Autonomy | `auto-edit`: workspace edits are allowed; unrecognized commands need approval. The safety policy still applies. |
-| Parallel work | One worker at a time, so a single local model or shared endpoint is not flooded by default. Explicit `auto` still allows four workers. |
+| Parallel work | `auto`: local workers are sized from usable CPUs, available memory, and any cgroup memory limit, up to eight. Per-endpoint slot limits still keep a single local model or shared endpoint from being flooded. Set a number for an exact limit. |
 | Worker permissions | Deny worker tool requests that need approval (`deny`), returning a structured denial so the worker can continue. This works across native and external runtimes. Interactive operator escalation is available for mediated runtimes in Settings. |
 | Cost | $5 tracked session budget. This depends on reported usage and known pricing; it is not a provider billing cap. |
 | Thinking | Low for chat, off for workers; actual support depends on the chosen model. |
@@ -109,8 +109,8 @@ These aim to make one coding session useful on a laptop or a shared endpoint:
 
 Newly initialized settings contain these values. Existing explicit values are
 preserved; omitted keys inherit the current shipped defaults. For this release,
-the changed defaults are worker concurrency `1`, prewarm `false`, and smooth
-streaming `auto`. See the
+the changed default is worker concurrency `auto`; an explicit
+`fleet.concurrency` already in `settings.yaml` is kept. See the
 [full settings reference](configuration-reference.md) for every key.
 
 ## Advanced settings
@@ -279,7 +279,7 @@ fleet:
   rosters: {}
   agentProfiles: {}
   nodes: []
-  concurrency: 1
+  concurrency: auto
 
 context:
   workingSet:
@@ -779,7 +779,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.permissions.mode` | `deny` | `deny`, `fail`, `escalate` | next dispatch |
 | `fleet.permissions.escalation.timeoutMs` | `120000` | integer ≥ 1 | next dispatch |
 | `fleet.permissions.escalation.fallback` | `deny` | `deny` or `fail` | next dispatch |
-| `fleet.concurrency` | `1` | `auto` or integer ≥ 1 | restart |
+| `fleet.concurrency` | `auto` | `auto` or integer ≥ 1 | restart |
 | `fleet.retry.maxRetries` | `2` | integer ≥ 0 | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | integer ≥ 1 | next dispatch |
