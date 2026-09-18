@@ -168,6 +168,8 @@ test("registry parks outward HTTP requests and executes GET at every autonomy le
 					audit: { recordCount: () => 0 },
 				},
 			});
+			// A park needs a listener; without one the registry refuses the call.
+			registry.onPermissionRequired(() => {});
 			let ran = false;
 			registry.register({
 				...webFetchTool,

@@ -171,3 +171,82 @@ describe("symlink escape admission", () => {
 		ok(writeClass("data/new/deeper/file.txt").actionClass === "write");
 	});
 });
+
+/**
+ * The out-of-root write at auto-edit is the known call the policy engine
+ * parks for operator confirmation. A park settles only through a listener's
+ * answer, so a registry with no listener must refuse it rather than hang.
+ */
+describe("park without a permission listener", () => {
+	let originalCwd: string;
+	let base: string;
+	let root: string;
+
+	beforeEach(() => {
+		originalCwd = process.cwd();
+		base = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-headless-park-")));
+		root = join(base, "root");
+		mkdirSync(join(root, "data"), { recursive: true });
+		symlinkSync("../../escape.txt", join(root, "data", "out.txt"));
+		process.chdir(root);
+	});
+
+	afterEach(() => {
+		process.chdir(originalCwd);
+		rmSync(base, { recursive: true, force: true });
+	});
+
+	function autoEditRegistry() {
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		registry.register(writeTool);
+		return registry;
+	}
+
+	async function settledWithin<T>(promise: Promise<T>, ms: number): Promise<T | "pending"> {
+		let timer: NodeJS.Timeout | undefined;
+		const pending = new Promise<"pending">((resolve) => {
+			timer = setTimeout(() => resolve("pending"), ms);
+		});
+		try {
+			return await Promise.race([promise, pending]);
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	it("refuses the call fail closed and says why", async () => {
+		const registry = autoEditRegistry();
+		const verdict = await settledWithin(
+			registry.invoke({ tool: ToolNames.Write, args: { path: "data/out.txt", content: "x" } }),
+			2000,
+		);
+		ok(verdict !== "pending", "the call settles instead of waiting on a park nobody can answer");
+		strictEqual(verdict.kind, "blocked");
+		if (verdict.kind !== "blocked") return;
+		match(verdict.reason, /no permission listener is registered/u);
+		strictEqual(verdict.deniedPark, true);
+		strictEqual(verdict.decision.classification.actionClass, "system_modify");
+		strictEqual(registry.hasParkedCalls(), false);
+		strictEqual(existsSync(join(base, "escape.txt")), false);
+	});
+
+	it("parks as before when a listener is registered, and runs the call once approved", async () => {
+		const registry = autoEditRegistry();
+		const asked: Array<{ actionClass: string; requestId: string }> = [];
+		registry.onPermissionRequired((_call, decision, meta) => {
+			asked.push({ actionClass: decision.classification.actionClass, requestId: meta.requestId });
+		});
+		const verdict = registry.invoke({ tool: ToolNames.Write, args: { path: "data/out.txt", content: "x" } });
+		strictEqual(await settledWithin(verdict, 50), "pending");
+		strictEqual(registry.parkedCount(), 1);
+		strictEqual(asked.length, 1);
+		strictEqual(asked[0]?.actionClass, "system_modify");
+		await registry.resumeParkedCalls({
+			actionClass: "system_modify",
+			requestId: asked[0]?.requestId as string,
+			requestedBy: "contract-operator",
+		});
+		strictEqual((await verdict).kind, "ok");
+		strictEqual(existsSync(join(base, "escape.txt")), true);
+	});
+});
