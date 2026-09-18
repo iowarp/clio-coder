@@ -3314,9 +3314,16 @@ export function createDispatchBundle(
 					delete retryReq.plannedNode;
 				}
 				if (decision.excludedRouteParts.includes("target")) {
-					const alternateTarget = getEffectiveSettings()?.targets.find((target) => target.id !== run.targetId);
-					if (alternateTarget) retryReq.target = alternateTarget.id;
-					else delete retryReq.target;
+					const alternate = eligibleAlternateRoute(run, retryReq);
+					if (alternate !== null) {
+						retryReq.target = alternate.target;
+						retryReq.model = alternate.model;
+					} else {
+						// No other route can serve the request, so placement picks again.
+						// That is usually the failed route itself, which the chain may
+						// retry after backoff because the breaker guards new work only.
+						delete retryReq.target;
+					}
 				}
 				if (decision.excludedRouteParts.includes("model")) delete retryReq.model;
 				if (decision.excludedRouteParts.includes("runtime")) delete retryReq.workerRuntime;
@@ -3637,6 +3644,43 @@ export function createDispatchBundle(
 		};
 		if (rerouted.plannedNode !== undefined && rerouted.plannedNode.id !== next.node) delete rerouted.plannedNode;
 		return rerouted;
+	}
+
+	/**
+	 * First configured route on another target that can serve a retry: it
+	 * resolves to that target, carries every required capability, and its
+	 * breaker is neither open nor probing.
+	 */
+	function eligibleAlternateRoute(run: ActiveRun, req: DispatchRequest): DispatchFailoverCandidate | null {
+		const settings = getEffectiveSettings();
+		const failed = {
+			targetId: run.targetId,
+			modelId: run.wireModelId,
+			runtimeId: run.runtimeId,
+			endpointIdentityHash: "",
+		};
+		const routes = configuredJointTargets(settings?.targets ?? [], failed, endpointIdentityHash).filter(
+			(route) => route.targetId !== run.targetId,
+		);
+		const probes: RouteAvailability[] = routes.map((route) => {
+			const candidate = { agentId: req.agentId, target: route.targetId, model: route.modelId, node: req.node ?? "local" };
+			try {
+				const identity = resolveTargetIdentity({ ...req, target: route.targetId, model: route.modelId }, settings);
+				if (identity.targetId !== route.targetId) {
+					return { candidate, unavailable: `route resolved to target '${identity.targetId}'` };
+				}
+				const capabilities = capabilityInfoForModel(providers, identity.targetId, identity.wireModelId);
+				return {
+					candidate,
+					unavailable:
+						requiredCapabilityFailureDetail(identity.targetId, capabilities, req.requiredCapabilities) ??
+						targetCooldownReason(identity.targetId, identity.runtimeId, identity.wireModelId),
+				};
+			} catch (error) {
+				return { candidate, unavailable: error instanceof Error ? error.message : String(error) };
+			}
+		});
+		return firstAvailableRouteCandidate(probes);
 	}
 
 	function recordTargetOutcome(

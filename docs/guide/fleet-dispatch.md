@@ -759,6 +759,14 @@ the correct and sufficient bound. A retry denied at admission settles the
 assignment failed, reports the reason on stderr, and records it in the
 assignment's `outcomeDetail`.
 
+A retry that excludes the target, which a target-attributed failure does under
+`automatic` failover, moves to the first configured route on another target
+that can serve the request. The route must resolve to that target, carry every
+capability in the request's `requiredCapabilities`, and have a breaker that is
+neither open nor probing. When no other route qualifies, placement chooses
+again, which usually lands on the failed route after backoff; the admission
+capability gate still applies to whatever it picks.
+
 The cooldown is a per-route circuit breaker, keyed by target, runtime, and
 wire model, held in memory by the running process. A route starts closed.
 Each run that ends in a target-attributed failure (`target-auth`,
