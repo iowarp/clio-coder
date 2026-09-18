@@ -43,6 +43,8 @@ export interface OpenAICompatToolCallScript {
 	arguments: Record<string, unknown>;
 	/** Wire id for the call. Defaults to `call-clio-tool-1`. */
 	id?: string;
+	/** Sent as the `function.arguments` string instead of `arguments`, so a test can send malformed JSON. */
+	rawArguments?: string;
 }
 
 export interface OpenAICompatFixtureOptions {
@@ -174,7 +176,7 @@ export async function startOpenAICompatFixture(
 										index: 0,
 										id: script.id ?? "call-clio-tool-1",
 										type: "function",
-										function: { name: script.name, arguments: JSON.stringify(script.arguments) },
+										function: { name: script.name, arguments: script.rawArguments ?? JSON.stringify(script.arguments) },
 									},
 								],
 							},

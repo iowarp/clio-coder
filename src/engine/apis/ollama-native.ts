@@ -453,7 +453,8 @@ function runStream(
 	const headers: Record<string, string> = {};
 	if (model.headers) Object.assign(headers, model.headers);
 	if (options?.headers) Object.assign(headers, options.headers);
-	const client = new Ollama({ host: model.baseUrl, headers });
+	// A caller-supplied fetch (the live tool probe) observes the chat response.
+	const client = new Ollama({ host: model.baseUrl, headers, ...(options?.fetch ? { fetch: options.fetch } : {}) });
 	const signal = options?.signal;
 	const baseUrl = model.baseUrl;
 	// Events go straight into the watched stream, so this function's own catch

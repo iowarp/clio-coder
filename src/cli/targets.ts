@@ -39,7 +39,7 @@ const HELP = `clio-coder targets
 List and manage configured model targets.
 
 Usage:
-  clio-coder targets [--json] [--probe] [--target <id>]
+  clio-coder targets [--json] [--probe [--tools]] [--target <id>]
   clio-coder targets add [configure flags]
   clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                        [--fleet-target <id>] [--fleet-model <id>]
@@ -80,6 +80,7 @@ function printUsage(usage: string): number {
 interface ListArgs {
 	json: boolean;
 	probe: boolean;
+	tools: boolean;
 	target?: string;
 	help: boolean;
 }
@@ -122,7 +123,7 @@ interface ProfileBindArgs {
 const PROFILE_SUBCOMMANDS = new Set(["list", "set", "remove", "rename", "bind", "unbind", "bindings"]);
 
 function parseListArgs(args: ReadonlyArray<string>): ListArgs {
-	const parsed: ListArgs = { json: false, probe: false, help: false };
+	const parsed: ListArgs = { json: false, probe: false, tools: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === "--help" || arg === "-h") {
@@ -137,6 +138,10 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 			parsed.probe = true;
 			continue;
 		}
+		if (arg === "--tools") {
+			parsed.tools = true;
+			continue;
+		}
 		if (arg === "--target") {
 			const value = args[i + 1];
 			if (!value) throw new Error("--target requires a value");
@@ -147,6 +152,7 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 		throw new Error(`unknown targets argument: ${arg}`);
 	}
+	if (parsed.tools && !parsed.probe) throw new Error("--tools requires --probe");
 	return parsed;
 }
 
@@ -187,7 +193,10 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	}
 	if (parsed.probe) {
 		try {
-			await providers.probeAllLive();
+			// The tool probe generates tokens, so `--target` narrows it to the one
+			// target the operator named instead of every configured target.
+			if (parsed.tools && parsed.target !== undefined) await providers.probeTarget(parsed.target, { tools: true });
+			else await providers.probeAllLive(parsed.tools ? { tools: true } : undefined);
 		} catch (err) {
 			process.stderr.write(`targets: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
@@ -1163,7 +1172,16 @@ function formatNotes(status: TargetStatus): string {
 	const residency = residentModelsSummary(status.discoveredModelStates);
 	if (residency) parts.push(residency);
 	if (status.probeNotes && status.probeNotes.length > 0) parts.push(`note: ${status.probeNotes.join("; ")}`);
+	const tools = formatToolProbe(status.toolProbe);
+	if (tools) parts.push(tools);
 	return parts.join(" ");
+}
+
+function formatToolProbe(probe: TargetStatus["toolProbe"]): string | null {
+	if (!probe) return null;
+	const model = probe.modelId ?? "no model";
+	if (probe.status === "verified") return `tools verified (${model}, ${probe.latencyMs}ms)`;
+	return `tools ${probe.status} (${model}): ${probe.error ?? "unknown error"}`;
 }
 
 function degradedHealthDiagnostic(status: TargetStatus): string | null {
@@ -1224,6 +1242,7 @@ interface SerializedStatus {
 	probeModelId?: TargetStatus["probeModelId"];
 	probeNotes?: TargetStatus["probeNotes"];
 	probeSurfaces?: TargetStatus["probeSurfaces"];
+	toolProbe?: TargetStatus["toolProbe"];
 	discoveredModels: TargetStatus["discoveredModels"];
 	discoveredModelLabels?: TargetStatus["discoveredModelLabels"];
 	discoveredModelsSource?: TargetStatus["discoveredModelsSource"];
@@ -1276,6 +1295,9 @@ function serializeStatus(
 	}
 	if (status.probeSurfaces !== undefined) {
 		out.probeSurfaces = status.probeSurfaces;
+	}
+	if (status.toolProbe !== undefined) {
+		out.toolProbe = status.toolProbe;
 	}
 	return out;
 }

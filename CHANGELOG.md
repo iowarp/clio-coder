@@ -21,6 +21,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add the tool-bench harness under `evals/tool-bench/` with seeded search and holdout suites for the `edit`, `read`, and `write` tools that report latency, filesystem call counts, memory, CPU, and a behavior digest per scenario.
 
 ### providers
+- Add `targets --probe --tools`, a live check that the chat or default model streams a schema-valid tool call through the engine path a turn uses. The result shows in the targets table and `--json`, and a failure warns at runtime resolution. Plain `--probe` is unchanged.
 - Flag llama.cpp idle-slot eviction in `targets --probe` and `doctor` when a router runs with `--kv-unified`, more than one slot, the host-RAM prompt cache, and idle-slot caching together, and name `--no-cache-idle-slots` as the fix.
 - Read the context window a resident Ollama model is actually served at from `/api/ps`, so an Ollama target is planned and compacted against the serving window instead of the assumed runtime default. Ollama commonly serves a model far below its own maximum, and the smaller number is the one a run has to respect.
 - Read an Ollama model's maximum context window from `/api/show` (and from `/api/tags` where the server reports it there), so a model that is not resident is planned against the smaller of that maximum and 131072 tokens (Ollama opens a cold model at a window no API reports before load), and `clio-coder targets --probe` shows the serving window beside the maximum.

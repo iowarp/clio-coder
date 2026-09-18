@@ -105,6 +105,19 @@ export interface ResolvedRuntimeTarget {
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
 	contextWindowDetails: ContextWindowDetails;
+	/**
+	 * Provenance of the `tools` decision when a live tool-call probe ran against
+	 * this exact model. Absent when `tools` is a declared or default capability.
+	 */
+	toolsVerification?: ToolsVerification;
+}
+
+export interface ToolsVerification {
+	source: "probe";
+	status: "verified" | "failed";
+	/** Epoch ms when the probe finished. */
+	checkedAt: number;
+	error?: string;
 }
 
 export interface RuntimeTargetSnapshot {
@@ -132,6 +145,7 @@ export interface RuntimeTargetSnapshot {
 	response: ResolvedModelRuntimeCapabilities["response"];
 	diagnostics: RuntimeResolutionDiagnostic[];
 	runtimeTier?: RuntimeTier;
+	toolsVerification?: ToolsVerification;
 }
 
 export type RuntimeTargetResolution =
@@ -476,6 +490,16 @@ export function resolveRuntimeTarget(
 	appendCapabilityDiagnostics(diagnostics, input, capabilities, decisions, targetId);
 	appendThinkingDiagnostics(diagnostics, modelRuntime, requestedThinkingLevel);
 	appendChatTemplateKwargsDiagnostics(diagnostics, modelRuntime);
+	const toolsVerification = toolsVerificationFor(status, wireModelId);
+	if (toolsVerification?.status === "failed") {
+		diagnostics.push(
+			diagnostic(
+				"warning",
+				"tools-probe-failed",
+				`target '${targetId}' model '${wireModelId}' failed the live tool-call probe: ${toolsVerification.error ?? "unknown error"}`,
+			),
+		);
+	}
 
 	if (hasError(diagnostics)) return { ok: false, diagnostics };
 
@@ -500,7 +524,17 @@ export function resolveRuntimeTarget(
 		contextWindowDetails,
 	};
 	if (runtime.tier !== undefined) resolved.runtimeTier = runtime.tier;
+	if (toolsVerification) resolved.toolsVerification = toolsVerification;
 	return { ok: true, target: resolved, diagnostics };
+}
+
+/** The live tool-call probe's answer for this exact model, when one ran and was not skipped. */
+function toolsVerificationFor(status: TargetStatus, wireModelId: string): ToolsVerification | null {
+	const probe = status.toolProbe;
+	if (!probe || probe.modelId !== wireModelId || probe.status === "skipped") return null;
+	const out: ToolsVerification = { source: "probe", status: probe.status, checkedAt: probe.checkedAt };
+	if (probe.error !== undefined) out.error = probe.error;
+	return out;
 }
 
 function modelHintPatch(target: ResolvedRuntimeTarget, model: unknown): Partial<CapabilityFlags> {
@@ -613,6 +647,7 @@ export function runtimeTargetSnapshot(target: ResolvedRuntimeTarget): RuntimeTar
 		diagnostics: target.diagnostics.map((entry) => ({ ...entry })),
 	};
 	if (target.runtimeTier !== undefined) snapshot.runtimeTier = target.runtimeTier;
+	if (target.toolsVerification !== undefined) snapshot.toolsVerification = { ...target.toolsVerification };
 	return snapshot;
 }
 
