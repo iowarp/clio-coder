@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
@@ -155,7 +155,11 @@ describe("live tool-call probe", () => {
 });
 
 describe("targets --probe --tools", () => {
-	async function runTargets(url: string, args: string[]): Promise<string> {
+	async function runTargets(
+		url: string,
+		args: string[],
+		target: Record<string, unknown> = { id: "compat", runtime: "openai-compat", url, defaultModel: MODEL },
+	): Promise<string> {
 		const root = mkdtempSync(join(tmpdir(), "clio-tool-probe-"));
 		cleanups.push(async () => rmSync(root, { recursive: true, force: true }));
 		const env: NodeJS.ProcessEnv = {
@@ -171,10 +175,7 @@ describe("targets --probe --tools", () => {
 			CLIO_CODER_REQUIRE_HOME_PREFIX: "1",
 		};
 		mkdirSync(join(root, "config"), { recursive: true });
-		writeFileSync(
-			join(root, "config", "settings.yaml"),
-			JSON.stringify({ targets: [{ id: "compat", runtime: "openai-compat", url, defaultModel: MODEL }] }),
-		);
+		writeFileSync(join(root, "config", "settings.yaml"), JSON.stringify({ targets: [target] }));
 		const { stdout } = await execFileAsync(process.execPath, ["--import", "tsx", CLI, "targets", ...args], {
 			cwd: ROOT,
 			env,
@@ -222,6 +223,104 @@ describe("targets --probe --tools", () => {
 
 		const table = await runTargets(server.url, ["--probe", "--tools"]);
 		match(table, /tools verified \(mock-model, \d+ms\)/);
+	});
+
+	const OLLAMA_MODEL = "fixture:latest";
+
+	/**
+	 * An Ollama server that loads a model on chat, streams one tool call after
+	 * `chatDelayMs`, and records every `/api/generate`, which is how Clio
+	 * releases a pinned model.
+	 */
+	async function ollamaServer(options: { resident?: boolean; chatDelayMs?: number } = {}) {
+		const resident = new Set<string>(options.resident ? [OLLAMA_MODEL] : []);
+		const releases: Array<{ model: string; keep_alive: unknown }> = [];
+		const server = createServer(async (req, res) => {
+			const raw = req.method === "POST" ? await readRequestBody(req) : "";
+			res.setHeader("content-type", "application/json");
+			if (req.url === "/api/ps") {
+				res.end(JSON.stringify({ models: [...resident].map((model) => ({ model, name: model })) }));
+				return;
+			}
+			if (req.url === "/api/tags") {
+				res.end(JSON.stringify({ models: [{ model: OLLAMA_MODEL, name: OLLAMA_MODEL }] }));
+				return;
+			}
+			if (req.url === "/api/version") {
+				res.end(JSON.stringify({ version: "0.34.0" }));
+				return;
+			}
+			if (req.url === "/api/show") {
+				res.end(
+					JSON.stringify({
+						capabilities: ["completion", "tools"],
+						model_info: { "general.architecture": "fixture", "fixture.context_length": 32768 },
+					}),
+				);
+				return;
+			}
+			if (req.url === "/api/generate") {
+				const body = JSON.parse(raw) as { model: string; keep_alive: unknown };
+				releases.push({ model: body.model, keep_alive: body.keep_alive });
+				if (body.keep_alive === 0) resident.delete(body.model);
+				res.end(JSON.stringify({ done: true }));
+				return;
+			}
+			if (req.url === "/api/chat") {
+				const body = JSON.parse(raw) as { model: string; tools?: unknown[]; stream?: boolean };
+				if (options.chatDelayMs) await new Promise((resolve) => setTimeout(resolve, options.chatDelayMs));
+				if (res.destroyed) return;
+				resident.add(body.model);
+				const base = { model: body.model, created_at: "2026-09-18T00:00:00Z" };
+				const call = { function: { name: TOOL_PROBE_TOOL_NAME, arguments: { a: 2, b: 3 } } };
+				const message = Array.isArray(body.tools)
+					? { role: "assistant", content: "", tool_calls: [call] }
+					: { role: "assistant", content: "4" };
+				if (body.stream === false) {
+					res.end(JSON.stringify({ ...base, message, done: true, done_reason: "stop" }));
+					return;
+				}
+				res.setHeader("content-type", "application/x-ndjson");
+				res.write(`${JSON.stringify({ ...base, message, done: false })}\n`);
+				res.end(
+					`${JSON.stringify({ ...base, message: { role: "assistant", content: "" }, done: true, done_reason: "stop" })}\n`,
+				);
+				return;
+			}
+			res.statusCode = 404;
+			res.end(JSON.stringify({ error: "not found" }));
+		});
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		cleanups.push(() => closeServer(server));
+		const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		const target = { id: "local-ollama", runtime: "ollama", url, defaultModel: OLLAMA_MODEL };
+		return { url, target, resident, releases };
+	}
+
+	type ToolProbeJson = { targets: Array<{ toolProbe?: ToolCallVerification }> };
+
+	it("releases a cold Ollama model the probe loaded before the command returns (#379)", async () => {
+		const ollama = await ollamaServer();
+
+		const out = JSON.parse(
+			await runTargets(ollama.url, ["--probe", "--tools", "--json"], ollama.target),
+		) as ToolProbeJson;
+
+		strictEqual(out.targets[0]?.toolProbe?.status, "verified");
+		deepStrictEqual(ollama.releases, [{ model: OLLAMA_MODEL, keep_alive: 0 }]);
+		strictEqual(ollama.resident.size, 0);
+	});
+
+	it("leaves an Ollama model that was resident before the probe loaded (#313)", async () => {
+		const ollama = await ollamaServer({ resident: true });
+
+		const out = JSON.parse(
+			await runTargets(ollama.url, ["--probe", "--tools", "--json"], ollama.target),
+		) as ToolProbeJson;
+
+		strictEqual(out.targets[0]?.toolProbe?.status, "verified");
+		deepStrictEqual(ollama.releases, []);
+		ok(ollama.resident.has(OLLAMA_MODEL));
 	});
 });
 

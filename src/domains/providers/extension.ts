@@ -3,6 +3,7 @@ import { type ClioSettings, readSettings } from "../../core/config.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
+import { releaseModelsLoadedDuring } from "../../engine/apis/residency.js";
 import { registerClioOAuthProviders } from "../../engine/oauth.js";
 import type { ConfigContract } from "../config/contract.js";
 
@@ -473,7 +474,10 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		let toolProbe: ToolCallVerification | null = null;
 		if (probeResult.ok && options?.tools === true) {
-			toolProbe = await runToolProbe(target, desc, probeCtx);
+			// The probe can load and pin a cold model, and `targets` never runs the
+			// orchestrator's release on exit, so the release happens here for every
+			// caller, on success, failure, and abort.
+			toolProbe = await releaseModelsLoadedDuring(() => runToolProbe(target, desc, probeCtx));
 			options.signal?.throwIfAborted();
 			if (!currentProbeTarget(target)) return null;
 			const modelId = toolProbe.modelId;
