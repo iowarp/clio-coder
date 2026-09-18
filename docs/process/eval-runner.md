@@ -525,18 +525,19 @@ Task outcome commands declared under `verify.measure` are the code grader for wh
 
 ### Grader metric lines (`clio-coder.eval.measure.v1`)
 
-A measure command may also print JSON lines on stdout carrying `"schema": "clio-coder.eval.measure.v1"` and a `metrics` object. Every stdout line is parsed, including lines printed before a nonzero exit. A key is kept only when its value is a finite number or a boolean and the key is one of these:
+A measure command may also print JSON lines on stdout carrying `"schema": "clio-coder.eval.measure.v1"` and a `metrics` object. Every stdout line is parsed, including lines printed before a nonzero exit. A key is kept only when it is one of these and its value has the listed shape:
 
-- `claims.unsupported` or `completion.reported`, the two behavior keys;
-- any key that starts with `custom.` and matches `^[A-Za-z0-9._-]{1,128}$`.
+- `claims.unsupported` or `completion.reported`, the two behavior keys, with a finite number or a boolean;
+- a key that starts with `custom.digest.`, has at least one character after that prefix, and matches `^[A-Za-z0-9._-]{1,128}$`, with a lowercase hex SHA-256 string matching `^[0-9a-f]{64}$`;
+- any other key that starts with `custom.`, has at least one character after that prefix, and matches `^[A-Za-z0-9._-]{1,128}$`, with a finite number or a boolean.
 
-Every other key is dropped. Grader metrics are merged into the result last, so the `custom.` prefix is what stops a grader from overwriting `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*`. A `custom.` key whose name the artifact redactor matches, such as `custom.io_token_bytes`, fails the item as `command_error` with an error naming the key. Storage would otherwise replace its value with the string `[redacted]`.
+Every other key or value is dropped, including a number under `custom.digest.` and a string anywhere else. The digest form is how a behavior digest reaches the sealed artifact. Grader metrics are merged into the result last, so the `custom.` prefix is what stops a grader from overwriting `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*`. A `custom.` key whose name the artifact redactor matches, such as `custom.io_token_bytes`, fails the item as `command_error` with an error naming the key. Storage would otherwise replace its value with the string `[redacted]`.
 
 ```json
-{"schema":"clio-coder.eval.measure.v1","metrics":{"custom.io.bytes_read":1234,"custom.cache_hit":true}}
+{"schema":"clio-coder.eval.measure.v1","metrics":{"custom.io.bytes_read":1234,"custom.cache_hit":true,"custom.digest.behavior":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}}
 ```
 
-That line lands in the trial's own `results[].metrics` as `"custom.io.bytes_read": 1234` and `"custom.cache_hit": true`. `verify.assertions` and suite `thresholds` resolve a custom key by exact name, and an assertion on a key the grader did not print fails closed as `assertion_unresolved`. Aggregates and `eval compare` do not read custom keys; a consumer computes its own statistics from the per-trial values.
+That line lands in the trial's own `results[].metrics` with the three values unchanged. Within one trial the last measure line wins for each key, so a suite that needs one value per scenario uses one eval task per scenario. `verify.assertions` and suite `thresholds` resolve a custom key by exact name, and an `eq` or `neq` assertion compares a digest against a string literal. An assertion on a key the grader did not print fails closed as `assertion_unresolved`. Aggregates and `eval compare` do not read custom keys; a consumer computes its own statistics from the per-trial values.
 
 The runner keeps at most 200,000 characters of each measure command's stdout: the first 20,000 and roughly the last 180,000. A metric line in the dropped middle is lost without an error, and a line cut at either boundary does not parse. Print metric lines last, or keep grader stdout under the limit.
 
