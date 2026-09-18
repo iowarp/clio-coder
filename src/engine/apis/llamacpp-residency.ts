@@ -7,6 +7,7 @@ import {
 	reconcileResidency,
 	residentTagProtected,
 } from "./residency.js";
+import type { ResidentModelInfo } from "./resident-models.js";
 
 /**
  * llama.cpp router adapter for the shared residency reconciler
@@ -141,7 +142,7 @@ async function fetchRouterProps(input: LlamaCppResidencyInput, fetchImpl: typeof
 }
 
 async function fetchRouterModels(
-	input: LlamaCppResidencyInput,
+	input: Pick<LlamaCppResidencyInput, "baseUrl" | "timeoutMs">,
 	fetchImpl: typeof fetch,
 ): Promise<LlamaCppRouterModel[]> {
 	const response = await fetchImpl(modelsUrl(input.baseUrl), {
@@ -275,6 +276,23 @@ async function restoreDisplacedPinned(
 }
 
 /** Ensure the selected llama.cpp router model is resident before inference. */
+/**
+ * Models resident on a llama.cpp server now. A router reports per-model load
+ * states and only the resident ones are returned; a single-model server
+ * reports no states, so every model it lists is the one it serves. The
+ * degraded-inference watchdog calls this when a turn slows down.
+ */
+export async function listLlamaCppResidentModels(
+	baseUrl: string,
+	fetchImpl: typeof fetch = fetch,
+): Promise<ResidentModelInfo[]> {
+	const models = await fetchRouterModels({ baseUrl }, fetchImpl);
+	const router = models.some((entry) => entry.state !== "unknown");
+	return models
+		.filter((entry) => !router || residentModel(entry))
+		.map((entry) => ({ modelId: entry.id, tags: entry.tags }));
+}
+
 export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Promise<void> {
 	const fetchImpl = input.fetchImpl ?? fetch;
 	let snapshot: LlamaCppRouterModel[] = [];

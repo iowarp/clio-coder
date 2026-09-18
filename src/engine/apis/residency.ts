@@ -69,14 +69,52 @@ export function setResidencyNoticeSink(sink: ResidencyNoticeSink | null): void {
 	noticeSink = sink ?? busNoticeSink;
 }
 
-/** Emit one notice through the active sink. Never throws into a turn. */
-export function emitResidencyNotice(notice: ResidencyNotice): void {
+/** Deliver one notice through the active sink. Never throws into a turn. */
+function deliverNotice(notice: ResidencyNotice): void {
 	try {
 		noticeSink(notice);
 	} catch {
 		// A notice is informational; a sink failure must never escape into a turn.
 	}
 }
+
+// --- notice producers ----------------------------------------------------------
+
+const noticeProducers = new Map<string, ReadonlySet<RuntimeNoticeKind>>();
+
+/** Emitter bound to the kinds its producer declared; any other kind is a type error. */
+export type RuntimeNoticeEmitter<K extends RuntimeNoticeKind> = (notice: ResidencyNotice & { kind: K }) => void;
+
+/**
+ * Declare a module as the producer of some {@link RuntimeNoticeKind} members
+ * and get back the only way to emit them. Emission goes exclusively through
+ * these emitters, so a registered kind always has code that emits it, and a
+ * contract test checks that every member of the union is registered by some
+ * producer. Call once at module scope.
+ */
+export function declareRuntimeNoticeProducer<const K extends RuntimeNoticeKind>(
+	producer: string,
+	kinds: ReadonlyArray<K>,
+): RuntimeNoticeEmitter<K> {
+	noticeProducers.set(producer, new Set(kinds));
+	return deliverNotice;
+}
+
+/** Every declared producer with the kinds it emits. */
+export function runtimeNoticeProducers(): ReadonlyMap<string, ReadonlySet<RuntimeNoticeKind>> {
+	return noticeProducers;
+}
+
+type ReconcilerNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co-resident" | "stress";
+type ReconcilerNotice = ResidencyNotice & { kind: ReconcilerNoticeKind };
+
+const emitReconcilerNotice = declareRuntimeNoticeProducer<ReconcilerNoticeKind>("residency-reconciler", [
+	"will-not-fit",
+	"about-to-evict",
+	"swap",
+	"co-resident",
+	"stress",
+]);
 
 /** Publish one successful residency mutation to in-process cache telemetry. */
 export function emitResidencyMutation(mutation: Omit<ResidencyMutationPayload, "at">): void {
@@ -218,7 +256,7 @@ export interface ResidencyPlan {
 	fallbackEvict: ResidentModelInfo[];
 	/** True when the keep model is already resident on the target. */
 	keepResident: boolean;
-	notices: ResidencyNotice[];
+	notices: ReconcilerNotice[];
 }
 
 function gib(bytes: number): string {
@@ -227,12 +265,12 @@ function gib(bytes: number): string {
 
 function makeNotice(
 	facts: ResidencyFacts,
-	kind: RuntimeNoticeKind,
+	kind: ReconcilerNoticeKind,
 	level: ResidencyNotice["level"],
 	message: string,
 	detail?: ResidencyNotice["detail"],
-): ResidencyNotice {
-	const notice: ResidencyNotice = {
+): ReconcilerNotice {
+	const notice: ReconcilerNotice = {
 		kind,
 		level,
 		targetId: facts.targetId,
@@ -257,7 +295,7 @@ function describeRole(role: ResidencyRole | undefined): string {
 	return "a configured model";
 }
 
-function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): ResidencyNotice {
+function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): ReconcilerNotice {
 	if (entry.protection === "config") {
 		return makeNotice(
 			facts,
@@ -296,7 +334,7 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Resid
  * server.
  */
 function decideResidency(facts: ResidencyFacts): ResidencyPlan {
-	const notices: ResidencyNotice[] = [];
+	const notices: ReconcilerNotice[] = [];
 	const keepResident = facts.resident.some((entry) => residentMatchesKeep(entry, facts.keepModelId));
 	const others = facts.resident.filter((entry) => !residentMatchesKeep(entry, facts.keepModelId));
 
@@ -559,7 +597,7 @@ async function restoreEvictedModels(
 		}
 	}
 	if (restored.length > 0) {
-		emitResidencyNotice({
+		emitReconcilerNotice({
 			kind: "swap",
 			level: "warning",
 			targetId: adapter.targetId,
@@ -570,7 +608,7 @@ async function restoreEvictedModels(
 		});
 	}
 	if (failed.length > 0) {
-		emitResidencyNotice({
+		emitReconcilerNotice({
 			kind: "will-not-fit",
 			level: "error",
 			targetId: adapter.targetId,
@@ -691,7 +729,7 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 			await adapter.assertLoadable();
 		} catch (error) {
 			if (!(error instanceof ResidencyPreconditionError)) throw error;
-			const notice: ResidencyNotice = {
+			const notice: ReconcilerNotice = {
 				kind: "will-not-fit",
 				level: "error",
 				targetId: adapter.targetId,
@@ -699,14 +737,14 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 				model: adapter.keepModelId,
 				message: error.message,
 			};
-			emitResidencyNotice(notice);
+			emitReconcilerNotice(notice);
 			return { decision: "decline", evict: [], fallbackEvict: [], keepResident: false, notices: [notice] };
 		}
 	}
 
 	// Emitted after the loadability gate so the operator never reads an eviction
 	// notice for a swap that the gate then refuses.
-	for (const notice of plan.notices) emitResidencyNotice(notice);
+	for (const notice of plan.notices) emitReconcilerNotice(notice);
 
 	if (plan.decision === "reconcile") {
 		const mutate = async (): Promise<void> => {

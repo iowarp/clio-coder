@@ -37,8 +37,9 @@ import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-chan
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
-import { ensureLlamaCppResidency } from "./llamacpp-residency.js";
-import { ensureLmStudioResidency } from "./lmstudio.js";
+import { type WatchDegradedInferenceOptions, watchDegradedInference } from "./degraded-inference.js";
+import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
+import { ensureLmStudioResidency, listLmStudioResidentModels } from "./lmstudio.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { mergeSamplingOverride } from "./sampling-overrides.js";
@@ -1042,6 +1043,26 @@ async function ensureLocalResidency(
 	return model;
 }
 
+function degradedWatchOptions(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal },
+): WatchDegradedInferenceOptions {
+	const metadata = runtimeMetadata(model);
+	const baseUrl = model.baseUrl;
+	const listResident = isLmStudioModel(model)
+		? () => listLmStudioResidentModels(model, options.apiKey !== undefined ? { apiKey: options.apiKey } : {})
+		: () => listLlamaCppResidentModels(baseUrl);
+	return {
+		targetId: metadata?.targetId ?? model.provider,
+		runtimeId: metadata?.runtimeId ?? model.provider,
+		model: model.id,
+		...(options.signal !== undefined ? { signal: options.signal } : {}),
+		listResident,
+	};
+}
+
+// Local servers answer a CPU spill with a crawl rather than an error, so the
+// streams reaching them run under the degraded-inference watchdog.
 function withLocalResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal },
@@ -1052,7 +1073,8 @@ function withLocalResidency(
 	(async () => {
 		try {
 			const requestModel = await ensureLocalResidency(model, options);
-			for await (const event of sourceFactory(requestModel)) {
+			const source = watchDegradedInference(sourceFactory(requestModel), degradedWatchOptions(model, options));
+			for await (const event of source) {
 				stream.push(event as AssistantMessageEvent);
 			}
 			stream.end();

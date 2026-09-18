@@ -609,11 +609,16 @@ at CPU speed instead of failing.
   role and describe co-residency without claiming that an operator-owned model
   can be evicted.
 
-A turn whose token rate collapses below 2 tokens per second for 30 seconds
-surfaces a `degraded` notice listing what is resident on the target. That is
-what a spill to CPU looks like from outside, and it is reported while the turn
-is still running rather than left as an indefinite spinner. The notice never
-cancels the turn.
+On Ollama, llama.cpp, and LM Studio targets, a turn whose output plus
+reasoning token rate is still below 2 tokens per second 30 seconds after the
+server starts answering surfaces one `degraded` warning for that turn. It names
+the elapsed time, the token count, the rate, and the models resident on the
+target at that moment, with the GPU share of each model when Ollama reports it.
+That is what a spill to CPU looks like from outside, and it is reported while
+the turn is still running rather than left as an indefinite spinner. The notice
+never cancels the turn, and a turn aborted before the check emits none.
+Interactive sessions show it as a notice, and headless runs and workers write
+it to stderr.
 
 
 ---

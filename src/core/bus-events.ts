@@ -83,8 +83,23 @@ export const BusChannels = {
 
 export type BusChannel = (typeof BusChannels)[keyof typeof BusChannels];
 
+/**
+ * Every collision, capacity, or stress category a {@link RuntimeNoticePayload}
+ * can carry. Each member must have a declared producer (see
+ * declareRuntimeNoticeProducer in src/engine/apis/residency.ts), which a
+ * contract test enforces so no kind outlives the code that emits it.
+ */
+export const RUNTIME_NOTICE_KINDS = [
+	"will-not-fit",
+	"about-to-evict",
+	"swap",
+	"co-resident",
+	"stress",
+	"degraded",
+] as const;
+
 /** Collision, capacity, or stress category for a {@link RuntimeNoticePayload}. */
-export type RuntimeNoticeKind = "will-not-fit" | "about-to-evict" | "swap" | "co-resident" | "stress" | "degraded";
+export type RuntimeNoticeKind = (typeof RUNTIME_NOTICE_KINDS)[number];
 
 /**
  * Model-residency notice published on {@link BusChannels.RuntimeNotice} by the
