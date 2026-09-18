@@ -1126,8 +1126,11 @@ probe's five-second timeout. The result appears in the notes column as
 runtime resolution then reports the provenance as `toolsVerification`, and a
 failed probe adds a `tools-probe-failed` warning to the next turn or dispatch
 on that model. The result lives only in the running process. The tool probe
-generates tokens and can load a cold model, so it runs only when asked. With
-`--target <id>` it probes just that target. SDK and subprocess runtimes are
+generates tokens and can load a cold model, so it runs only when asked. A model
+the probe loaded and pinned on a local server such as Ollama is released before
+the command returns, whether the probe passed, failed, or was cancelled. A model
+that was already resident before the probe is left loaded. With `--target <id>`
+it probes just that target. SDK and subprocess runtimes are
 reported as skipped because they do not stream through the engine.
 
 `clio-coder targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.

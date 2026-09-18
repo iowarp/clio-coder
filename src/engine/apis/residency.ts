@@ -308,14 +308,20 @@ export function adoptWorkerLoadedModel(
 /** Total time the release on exit may take before shutdown moves on without it. */
 export const EXIT_RELEASE_MS = 2_000;
 
-const exitReleasers = new Set<() => Promise<void>>();
+/**
+ * Narrows a release to some models. Called with the target key and every id
+ * the resident entry answers to; true releases the model.
+ */
+export type ReleaseScope = (targetKey: string, modelIds: ReadonlyArray<string>) => boolean;
+
+const exitReleasers = new Set<(scope?: ReleaseScope) => Promise<void>>();
 
 /**
  * Register a runtime's release of the models this process loaded and pinned.
  * A runtime registers when its module loads, so a process that never reached
  * the runtime has nothing to release and pays nothing at exit.
  */
-export function registerExitRelease(release: () => Promise<void>): void {
+export function registerExitRelease(release: (scope?: ReleaseScope) => Promise<void>): void {
 	exitReleasers.add(release);
 }
 
@@ -324,14 +330,33 @@ export function registerExitRelease(release: () => Promise<void>): void {
  * {@link EXIT_RELEASE_MS}; a failure is swallowed so the exit code never
  * depends on a server that is gone.
  */
-export async function releaseClioLoadedModelsOnExit(): Promise<void> {
+export async function releaseClioLoadedModelsOnExit(scope?: ReleaseScope): Promise<void> {
 	await Promise.all(
 		[...exitReleasers].map((release) =>
-			release().catch(() => {
+			release(scope).catch(() => {
 				// Best-effort: the model stays pinned.
 			}),
 		),
 	);
+}
+
+/**
+ * Run `task`, then release every model that became Clio-loaded while it ran,
+ * whether it settled or threw. A one-shot inference probe uses this so it never
+ * leaves a pinned model behind in a process that has no release on exit (#379).
+ * A model Clio had already loaded before the task stays pinned for the turn
+ * that loaded it, and a model resident before Clio touched it is never
+ * Clio-loaded in the first place (#313). The release is bounded by
+ * {@link EXIT_RELEASE_MS}.
+ */
+export async function releaseModelsLoadedDuring<T>(task: () => Promise<T>): Promise<T> {
+	const before = new Set<string>();
+	for (const [targetKey, ids] of clioLoaded) for (const id of ids) before.add(`${targetKey}\n${id}`);
+	try {
+		return await task();
+	} finally {
+		await releaseClioLoadedModelsOnExit((targetKey, ids) => !ids.some((id) => before.has(`${targetKey}\n${id}`)));
+	}
 }
 
 // --- TTL fast path ---------------------------------------------------------

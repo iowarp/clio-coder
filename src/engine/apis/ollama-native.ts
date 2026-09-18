@@ -39,6 +39,7 @@ import {
 	EXIT_RELEASE_MS,
 	forgetReleasedModel,
 	isClioLoaded,
+	type ReleaseScope,
 	type ResidencyAdapter,
 	reconcileResidency,
 	registerExitRelease,
@@ -337,13 +338,16 @@ async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Rec
  * one whose load never produced a response, is left alone, so an operator's
  * model is never unloaded (#313). The resident list is read first, and only
  * models still resident are released, so a model Ollama already dropped is
- * not loaded again just to be unloaded.
+ * not loaded again just to be unloaded. A `scope` narrows the release further,
+ * which is how a one-shot probe releases only what it loaded.
  *
  * Best-effort and bounded: every request shares one deadline, and a failure
  * or timeout leaves the model pinned and never throws. A crashed process
  * releases nothing.
  */
-export async function releaseClioLoadedOllamaModels(options: { timeoutMs?: number } = {}): Promise<void> {
+export async function releaseClioLoadedOllamaModels(
+	options: { timeoutMs?: number; scope?: ReleaseScope } = {},
+): Promise<void> {
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? EXIT_RELEASE_MS);
 	timer.unref();
@@ -355,6 +359,7 @@ export async function releaseClioLoadedOllamaModels(options: { timeoutMs?: numbe
 		for (const entry of resident) {
 			const ids = [entry.modelId, ...(entry.aliasIds ?? [])];
 			if (!ids.some((id) => owned.has(id)) || !isClioLoaded(targetKey, entry)) continue;
+			if (options.scope && !options.scope(targetKey, ids)) continue;
 			await client.generate({ model: entry.modelId, prompt: "", keep_alive: 0, stream: false });
 			for (const id of ids) owned.delete(id);
 			forgetReleasedModel(targetKey, entry.modelId);
@@ -376,7 +381,7 @@ export async function releaseClioLoadedOllamaModels(options: { timeoutMs?: numbe
 	}
 }
 
-registerExitRelease(() => releaseClioLoadedOllamaModels());
+registerExitRelease((scope) => releaseClioLoadedOllamaModels(scope ? { scope } : {}));
 
 // A dispatched worker's load becomes this process's to release (#379). The
 // endpoint comes from this process's own settings for the admitted target.
