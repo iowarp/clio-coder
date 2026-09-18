@@ -22,7 +22,12 @@ const defaultCapabilities: CapabilityFlags = {
 };
 
 interface OllamaTagsResponse {
-	models?: Array<{ name?: unknown }>;
+	models?: Array<{ name?: unknown; details?: { context_length?: unknown } }>;
+}
+
+interface OllamaShowResponse {
+	model_info?: Record<string, unknown>;
+	parameters?: unknown;
 }
 
 interface OllamaPsResponse {
@@ -79,6 +84,38 @@ async function probeResidentModelStates(
 	return Object.keys(states).length > 0 ? states : undefined;
 }
 
+/**
+ * The window a model can be opened at, from `/api/show`. `model_info` carries
+ * the trained maximum as `<architecture>.context_length`; a `num_ctx` baked
+ * into the Modelfile `parameters` caps what Ollama loads it at when a request
+ * does not ask for more, so the smaller of the two is the model's window.
+ * Undefined when the server does not report the maximum.
+ */
+async function probeModelContextWindow(base: string, model: string, ctx: ProbeContext): Promise<number | undefined> {
+	const opts = {
+		url: `${base}/api/show`,
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ model }),
+		timeoutMs: ctx.httpTimeoutMs,
+	} as const;
+	const result = await (ctx.signal
+		? probeJson<OllamaShowResponse>({ ...opts, signal: ctx.signal })
+		: probeJson<OllamaShowResponse>(opts));
+	const info = result.ok ? result.data?.model_info : undefined;
+	if (!info || typeof info !== "object") return undefined;
+	const arch = info["general.architecture"];
+	const maximum =
+		typeof arch === "string"
+			? positiveNumber(info[`${arch}.context_length`])
+			: positiveNumber(Object.entries(info).find(([key]) => key.endsWith(".context_length"))?.[1]);
+	if (maximum === undefined) return undefined;
+	const params = result.data?.parameters;
+	const baked = typeof params === "string" ? /^num_ctx\s+(\d+)\s*$/m.exec(params)?.[1] : undefined;
+	const bakedWindow = baked !== undefined ? positiveNumber(Number(baked)) : undefined;
+	return bakedWindow !== undefined ? Math.min(maximum, bakedWindow) : maximum;
+}
+
 const ollamaNativeRuntime: RuntimeDescriptor = {
 	id: "ollama-native",
 	displayName: "Ollama (native)",
@@ -102,6 +139,20 @@ const ollamaNativeRuntime: RuntimeDescriptor = {
 		}
 		const out: ProbeResult = { ok: true, discoveredCapabilities: { parallelSlots: ollamaParallelSlots() } };
 		if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
+		// The model maximum, which bounds planning when the model is not
+		// resident. Newer servers put it on every `/api/tags` row; older ones
+		// (0.18.x) do not, so the default model is asked `/api/show` directly.
+		const modelCapabilities: Record<string, Partial<CapabilityFlags>> = {};
+		for (const row of result.data?.models ?? []) {
+			const window = positiveNumber(row?.details?.context_length);
+			if (typeof row?.name === "string" && window !== undefined) modelCapabilities[row.name] = { contextWindow: window };
+		}
+		const defaultModel = target.defaultModel?.trim();
+		if (defaultModel) {
+			const window = await probeModelContextWindow(base, defaultModel, ctx);
+			if (window !== undefined) modelCapabilities[defaultModel] = { contextWindow: window };
+		}
+		if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
 		const modelStates = await probeResidentModelStates(base, ctx);
 		if (modelStates) out.modelStates = modelStates;
 		return out;

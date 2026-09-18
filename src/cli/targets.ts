@@ -1102,12 +1102,22 @@ function formatContextWindow(
 		Partial<Pick<TargetStatus, "target" | "discoveredModelStates">>,
 ): string {
 	const window = status.capabilities.contextWindow;
+	const modelState = status.target?.defaultModel
+		? status.discoveredModelStates?.[status.target.defaultModel]
+		: undefined;
+	// A resident model's serving window bounds the session below whatever the
+	// model allows, so both are named: the operator sees which one a run is
+	// planned against and how far the model could be raised (issue #375).
+	const serving = modelState?.contextLength;
+	if (serving !== undefined && serving > 0) {
+		if (status.contextWindowProvenance === "configured" && window < serving) return `ctx ${window} (serving ${serving})`;
+		if (status.contextWindowProvenance === "runtime-default" || window === serving) return `ctx ${serving} (serving)`;
+		return `ctx ${serving} (serving; model max ${window})`;
+	}
 	if (status.contextWindowProvenance === "runtime-default") return `ctx ${window} (unverified runtime default)`;
 	// A llama.cpp window that is one slot's share of `--ctx-size` names the
 	// split, so `ctx 196608` is not mistaken for the whole server (issue #187).
-	const slots = status.target?.defaultModel
-		? status.discoveredModelStates?.[status.target.defaultModel]?.contextSlots
-		: undefined;
+	const slots = modelState?.contextSlots;
 	return slots && Math.floor(slots.totalContextSize / slots.slots) === window
 		? `ctx ${window} (${slots.totalContextSize} / ${slots.slots} slots)`
 		: `ctx ${window}`;
