@@ -36,6 +36,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A worker's provider context-overflow error ends the attempt without a retry and no longer trips the target's cooldown, since the same prompt overflows on every route.
 - A bare HTTP 500, "internal server error", `ECONNREFUSED`, `ECONNRESET`, or "fetch failed" from a worker is classified `target-transient` and retried on another target instead of being charged to the worker runtime.
 - The per-route target cooldown is now a half-open circuit breaker: `fleet.retry.breakerThreshold` (default 1) sets how many consecutive target failures open a route, one probe run tests it when the cooldown expires while other dispatches still see it cooling, and each failed probe doubles the cooldown up to five minutes.
+- A retry that leaves a failed target now moves to the first configured route on another target that carries the request's required capabilities and whose breaker is closed, instead of the first other target in settings.
 
 ## 0.4.9 - 2026-09-17
 
