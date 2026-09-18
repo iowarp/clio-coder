@@ -25,6 +25,7 @@ import type {
 } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
+import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
@@ -71,6 +72,12 @@ export interface HeadlessMainAgentOptions {
 	 * and outcome of every existing caller stay as they were.
 	 */
 	failOnNoop?: boolean;
+	/**
+	 * `clio-coder run --timeout`. When it expired, the shutdown it started seals
+	 * outcome `timed_out` instead of `canceled`, so a driver can tell its own
+	 * wall-clock limit from an external signal.
+	 */
+	deadline?: HeadlessRunDeadline;
 }
 
 interface HeadlessMainAgentResult {
@@ -562,12 +569,20 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	// completion path and this hook race. Interruption is a fact both read from
 	// the coordinator rather than a winner of that race: whichever seals first
 	// seals the same canceled outcome.
-	const interruptedTerminal = (): HeadlessTerminalOutcome => ({
-		exitCode: termination.getExitCode(),
-		outcome: "canceled",
-		status: "interrupted",
-		failureMessage: result.abortReason ?? "clio-coder run: interrupted before the turn completed",
-	});
+	const interruptedTerminal = (): HeadlessTerminalOutcome =>
+		options.deadline?.expired() === true
+			? {
+					exitCode: termination.getExitCode(),
+					outcome: "timed_out",
+					status: "interrupted",
+					failureMessage: `clio-coder run: timed out after ${options.deadline.seconds}s (--timeout)`,
+				}
+			: {
+					exitCode: termination.getExitCode(),
+					outcome: "canceled",
+					status: "interrupted",
+					failureMessage: result.abortReason ?? "clio-coder run: interrupted before the turn completed",
+				};
 	// Registered after the composition root's chat drain hook, which disposes
 	// the loop and awaits settlement, so the stats folded below are final by
 	// the time this runs.
@@ -671,6 +686,11 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		}
 		unsubscribe();
 	}
+	// The turn has settled. Nothing between here and the seal yields to a
+	// timer, so a deadline that has not fired by now never will, and one that
+	// did has already put the coordinator into shutdown, which the first branch
+	// below reads.
+	options.deadline?.settle();
 
 	const endedAt = new Date().toISOString();
 	let terminal: HeadlessTerminalOutcome = {

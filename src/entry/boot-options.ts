@@ -17,6 +17,21 @@ export interface HeadlessSamplingOverrides {
 	repeatPenalty?: number;
 }
 
+/**
+ * The wall-clock limit `clio-coder run --timeout` arms before boot. The CLI owns
+ * the timer; on expiry it starts the same coordinated shutdown a SIGTERM does,
+ * with exit code 124. The headless turn reads it to seal a timed-out receipt
+ * rather than a canceled one, and settles it once the turn has settled so a
+ * late expiry cannot contradict a receipt already sealed.
+ */
+export interface HeadlessRunDeadline {
+	readonly seconds: number;
+	/** True once the limit elapsed and the deadline started the shutdown. */
+	expired(): boolean;
+	/** Disarm the timer; a run that settled on its own is no longer bounded. */
+	settle(): void;
+}
+
 export interface BootOptions {
 	apiKey?: string;
 	noContextFiles?: boolean;
@@ -47,6 +62,8 @@ export interface BootOptions {
 		resumeSession?: { kind: "id"; id: string } | { kind: "latest" };
 		/** `clio-coder run --fail-on-noop`: a no-op run exits 1 with outcome failed. */
 		failOnNoop?: boolean;
+		/** `clio-coder run --timeout`: the armed wall-clock limit for the whole run. */
+		deadline?: HeadlessRunDeadline;
 	};
 	acp?: {
 		transport?: AcpJsonRpcPeerTransport;

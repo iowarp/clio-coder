@@ -5,6 +5,7 @@ import { loadDomains } from "../core/domain-loader.js";
 import { readFileArgsAsync } from "../core/file-references.js";
 import { withRunOverrides } from "../core/run-overrides.js";
 import { readStrictLayeredSettings } from "../core/settings-layers.js";
+import { getTerminationCoordinator } from "../core/termination.js";
 import { clioDataDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
@@ -32,6 +33,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
 import type { ImageContent } from "../engine/types.js";
+import type { HeadlessRunDeadline } from "../entry/boot-options.js";
 import {
 	assistantTextFromEvent,
 	receiptGatewayRoutingLabel,
@@ -46,7 +48,7 @@ import { flushRawStdout, restoreStdout, takeOverStdout } from "./output-guard.js
 import { setupSteerChannel } from "./steer-channel.js";
 
 const USAGE =
-	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--agent <recipe-id>] "<task>"\n';
+	'usage: clio-coder run [--cwd <dir>] [--target <id>] [--model <wireId>] [--thinking <level>] [--autonomy <level>] [--json] [--json-events full|terminal] [--session <id>|--continue] [--fail-on-noop] [--timeout <seconds>] [--agent <recipe-id>] "<task>"\n';
 
 const HELP = `clio-coder run [flags] "<task>"
 
@@ -72,6 +74,7 @@ Flags:
   --session <id>            append this turn to an existing session
   --continue                append this turn to the most recent session for this cwd
   --fail-on-noop            exit 1 when the main-agent run changed nothing (see below)
+  --timeout <seconds>       wall-clock limit for the whole main-agent run; exit 124 on expiry
   --agent <recipe-id>       dispatch a fleet agent instead of the main agent
   --agent-profile <name>    named fleet profile for dispatch
   --agent-runtime <id>      pick the first fleet profile whose target uses this runtime
@@ -102,6 +105,13 @@ is not. By default a no-op run that answered still exits 0. With --fail-on-noop
 it exits 1 and its receipt seals outcome "failed" with outcomeDetail "noop".
 The flag applies to the main agent only.
 
+--timeout <seconds> bounds the whole run, boot included. On expiry the run
+starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a
+running bash tool's process group is signalled, and the receipt is sealed with
+outcome "timed_out" before the process exits 124, the code timeout(1) uses. An
+external SIGTERM still seals "canceled" with exit 143. A timeout during boot,
+before the turn starts, exits 124 with no receipt. Main agent only.
+
 A turn that ends by writing an artifact (plan/review/report) has no assistant
 message after it, because writing the artifact is the answer. Text mode prints
 that tool's result line, naming what was written and where; --json carries the
@@ -125,6 +135,33 @@ function enterRunCwd(value: string): string | null {
 	} catch {
 		return resolved;
 	}
+}
+
+/** timeout(1)'s status, and the one code-step and the eval runners already use for a timeout. */
+const RUN_TIMEOUT_EXIT_CODE = 124;
+
+/**
+ * Arm `--timeout`. On expiry the timer starts the process's coordinated
+ * shutdown, the path a SIGTERM takes, so the headless drain hook aborts the
+ * turn, bash-exec signals any running tool's process group, and the receipt is
+ * sealed before exit. A shutdown that is already under way (a signal, or the
+ * run settling on its own) owns the exit code, so the timer then does nothing.
+ * The timer is unref'd: it bounds the run and never keeps the process alive.
+ */
+function armRunTimeout(seconds: number): HeadlessRunDeadline {
+	const coordinator = getTerminationCoordinator();
+	let expired = false;
+	const timer = setTimeout(
+		() => {
+			if (coordinator.getPhase() !== "idle") return;
+			expired = true;
+			process.stderr.write(`clio-coder run: --timeout ${seconds}s elapsed; shutting down\n`);
+			void coordinator.shutdown(RUN_TIMEOUT_EXIT_CODE);
+		},
+		Math.ceil(seconds * 1000),
+	);
+	timer.unref();
+	return { seconds, expired: () => expired, settle: () => clearTimeout(timer) };
 }
 
 function hasDispatchOnlyOptions(parsed: RunCliArgs): boolean {
@@ -303,6 +340,17 @@ export async function runClioRun(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			// A worker's receipt is sealed inside the dispatch domain, where a
+			// timeout abort seals "canceled" by design (DispatchContract.abort), so
+			// --timeout is a main-agent contract for now.
+			if (parsed.timeoutSeconds !== undefined && parsed.agentId !== undefined) {
+				process.stderr.write("clio-coder run: --timeout applies to the main agent, not --agent dispatch\n");
+				process.stderr.write(USAGE);
+				return 2;
+			}
+			// Armed before anything that can block (piped stdin, boot, the
+			// provider), so the limit covers the whole run.
+			const deadline = parsed.timeoutSeconds === undefined ? undefined : armRunTimeout(parsed.timeoutSeconds);
 			if (parsed.cwd !== undefined) {
 				const unusable = enterRunCwd(parsed.cwd);
 				if (unusable !== null) {
@@ -371,6 +419,7 @@ export async function runClioRun(
 							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
 							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
 							...(parsed.failOnNoop ? { failOnNoop: true } : {}),
+							...(deadline !== undefined ? { deadline } : {}),
 							...(parsed.sessionId !== undefined
 								? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
 								: parsed.continueSession
@@ -381,6 +430,7 @@ export async function runClioRun(
 					await flushRawStdout();
 					return code;
 				} finally {
+					deadline?.settle();
 					restoreStdout();
 				}
 			}

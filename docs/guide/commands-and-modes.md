@@ -112,6 +112,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--session <id>` | Append this turn to an existing session identified by `<id>`. |
 | `--continue` | Append this turn to the most recent session for the current working directory. |
 | `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its receipt as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
+| `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its receipt with outcome `timed_out`, and exits 124. A positive number of seconds; anything else is a usage error. Main agent only; with `--agent` it is a usage error. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
 | `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |

@@ -1,4 +1,5 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
+import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
@@ -46,6 +47,8 @@ export interface RunCliArgs {
 	cwd?: string;
 	/** Fail a main-agent run whose receipt records a no-op. */
 	failOnNoop: boolean;
+	/** Wall-clock limit for the whole run, in seconds. */
+	timeoutSeconds?: number;
 	fileArgs: string[];
 	messages: string[];
 	diagnostics: CliArgDiagnostic[];
@@ -226,6 +229,21 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 			const value = need(arg);
 			if (value !== null) {
 				parsed.steerChannel = value;
+			}
+			continue;
+		}
+		if (arg === "--timeout") {
+			const value = need(arg);
+			if (value !== null) {
+				const seconds = Number(value);
+				if (Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= MAX_TIMER_DELAY_MS) {
+					parsed.timeoutSeconds = seconds;
+				} else {
+					parsed.diagnostics.push({
+						type: "error",
+						message: `--timeout must be a positive number of seconds no greater than ${Math.floor(MAX_TIMER_DELAY_MS / 1000)}`,
+					});
+				}
 			}
 			continue;
 		}
