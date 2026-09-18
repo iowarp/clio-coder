@@ -350,6 +350,10 @@ export interface LlamaCppServerFlags {
 	parallel?: number;
 	/** `--kv-unified` / `-kvu` true, `--no-kv-unified` false, absent when neither was given. */
 	kvUnified?: boolean;
+	/** `--cache-ram` / `-cram` in MiB; `0` disables the host-RAM prompt cache, `-1` lifts its limit. */
+	cacheRamMib?: number;
+	/** `--cache-idle-slots` true, `--no-cache-idle-slots` false, absent when neither was given. */
+	cacheIdleSlots?: boolean;
 	mmproj?: string;
 	chatTemplateKwargs?: string;
 }
@@ -385,11 +389,36 @@ function llamaCppRequestContextWindow(flags: LlamaCppServerFlags): LlamaCppReque
 	};
 }
 
+/**
+ * The server configuration that keeps parallel slots from holding their own
+ * prefix cache, or undefined when the argv does not show it.
+ *
+ * llama-server defaults to a host-RAM prompt cache (`--cache-ram 8192`) and to
+ * `--cache-idle-slots`. With `--kv-unified`, every task launch saves each idle
+ * slot to host RAM and clears it from the KV pool, so similarity-based slot
+ * selection never finds a resident prefix and the next request restores its
+ * prompt from RAM. At commit c841aee that restore runs on the server's single
+ * task thread, and when the cells it lands on are not contiguous it copies one
+ * row per cell per layer. On mini (Qwen3.8-27B hybrid, four slots, 12k-token
+ * prompts) it stalled every slot for 9 to 10 s while the prompt itself
+ * reported a 4-token, 270 ms re-evaluation. Only the router's argv shows these
+ * flags; a fixed-model server's `/props` reports neither, and an environment
+ * variable such as `LLAMA_ARG_CACHE_IDLE_SLOTS` is invisible here.
+ */
+function llamaCppIdleSlotEvictionNote(id: string, flags: LlamaCppServerFlags): string | undefined {
+	const parallel = positiveNumber(flags.parallel);
+	if (parallel === undefined || !Number.isInteger(parallel) || parallel <= 1) return undefined;
+	if (flags.kvUnified !== true || flags.cacheRamMib === 0 || flags.cacheIdleSlots === false) return undefined;
+	return `${id} clears idle slots from its unified KV cache on every new request (--kv-unified, --parallel ${parallel}, idle-slot caching on): a returning prompt is restored from host RAM and can stall every slot for seconds; start it with --no-cache-idle-slots (preset: cache-idle-slots = false)`;
+}
+
 export interface LlamaCppStatusEnrichment {
 	discoveredCapabilities?: Partial<CapabilityFlags>;
 	modelId?: string;
 	serverFlags?: LlamaCppServerFlags;
 	notes?: string[];
+	/** Server settings that defeat prefix-cache reuse; each is also one of `notes`. */
+	cacheAdvisories?: string[];
 	/** The router's own load state for the selected model, when it reports one. */
 	loadState?: ProbeModelStatus["state"];
 }
@@ -471,6 +500,12 @@ function parseLlamaCppServerFlags(args: ReadonlyArray<string>): LlamaCppServerFl
 	const noKvUnifiedAt = args.lastIndexOf("--no-kv-unified");
 	if (noKvUnifiedAt > kvUnifiedAt) flags.kvUnified = false;
 	else if (kvUnifiedAt >= 0) flags.kvUnified = booleanFlag(args, "--kv-unified", "-kvu") ?? true;
+	const cacheRamMib = numberFlag(args, "--cache-ram", "-cram");
+	if (cacheRamMib !== undefined) flags.cacheRamMib = cacheRamMib;
+	const cacheIdleSlotsAt = args.lastIndexOf("--cache-idle-slots");
+	const noCacheIdleSlotsAt = args.lastIndexOf("--no-cache-idle-slots");
+	if (noCacheIdleSlotsAt > cacheIdleSlotsAt) flags.cacheIdleSlots = false;
+	else if (cacheIdleSlotsAt >= 0) flags.cacheIdleSlots = booleanFlag(args, "--cache-idle-slots") ?? true;
 	const cacheTypeK = valueAfter(args, "--cache-type-k");
 	if (cacheTypeK) flags.cacheTypeK = cacheTypeK;
 	const cacheTypeV = valueAfter(args, "--cache-type-v");
@@ -531,6 +566,11 @@ export async function probeLlamaCppModelStatus(
 		notes.push(
 			`${selected.id} context window ${formatContextWindowSlots(window.contextWindow, window.slots)}: --ctx-size is split across --parallel slots without --kv-unified`,
 		);
+	}
+	const idleSlotEviction = llamaCppIdleSlotEvictionNote(selected.id, flags);
+	if (idleSlotEviction) {
+		notes.push(idleSlotEviction);
+		enrichment.cacheAdvisories = [idleSlotEviction];
 	}
 	if (notes.length > 0) enrichment.notes = notes;
 	return withState(enrichment);

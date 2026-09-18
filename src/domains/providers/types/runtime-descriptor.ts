@@ -116,6 +116,12 @@ export interface ProbeResult {
 	 */
 	notes?: ReadonlyArray<string>;
 	/**
+	 * Server settings the probe could see that defeat prefix-cache reuse, each
+	 * naming the setting that fixes it. Every entry is also one of `notes`;
+	 * `clio-coder doctor` reports these without surfacing the other notes.
+	 */
+	cacheAdvisories?: ReadonlyArray<string>;
+	/**
 	 * Composite descriptors set this to the api family they will use for chat.
 	 * `synthesizeModel` reads it back out of the cached probe state to choose
 	 * which provider implementation pi-ai routes to. Absent when the descriptor

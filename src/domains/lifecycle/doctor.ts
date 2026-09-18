@@ -675,7 +675,7 @@ async function doctorProbeContext(target: TargetDescriptor, runtime: RuntimeDesc
 async function probeAdvertisedModels(
 	target: TargetDescriptor,
 	runtime: RuntimeDescriptor,
-): Promise<{ advertised: string[]; resident: string[] } | null> {
+): Promise<{ advertised: string[]; resident: string[]; cacheAdvisories: ReadonlyArray<string> } | null> {
 	if (runtime.kind !== "http" || typeof runtime.probe !== "function" || !target.url) return null;
 	let probe: ProbeResult;
 	try {
@@ -690,7 +690,7 @@ async function probeAdvertisedModels(
 		if (!advertised.includes(id)) advertised.push(id);
 		if (status.state === "loaded" || status.state === "loading") resident.push(id);
 	}
-	return { advertised, resident };
+	return { advertised, resident, cacheAdvisories: probe.cacheAdvisories ?? [] };
 }
 
 /**
@@ -701,6 +701,10 @@ async function probeAdvertisedModels(
  * placeholder id it was saved with called out. A target with neither list is
  * a WARN, not a pass, because nothing was verified. Network-bound like the
  * runtime sweep, so it is not part of the synchronous `runDoctor()` core.
+ *
+ * The same probe reports server settings that defeat prefix-cache reuse. Each
+ * becomes a WARN row of its own, since the models can check out while every
+ * returning prompt still pays for a restore the operator can switch off.
  */
 export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 	let settings: ReturnType<typeof readSettings>;
@@ -724,40 +728,51 @@ export async function runDoctorModelChecks(): Promise<DoctorFinding[]> {
 	// unless another command in this process filled it.
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
 	const results = await Promise.all(
-		settings.targets.map(async (target): Promise<DoctorFinding | null> => {
+		settings.targets.map(async (target): Promise<DoctorFinding[]> => {
 			const runtime = registry.get(target.runtime);
-			if (!runtime) return null;
+			if (!runtime) return [];
 			// Cloud runtimes are validated against their catalog at configure time.
-			if (listKnownModelsForRuntime(runtime.id).length > 0) return null;
+			if (listKnownModelsForRuntime(runtime.id).length > 0) return [];
 			const roles = configuredModelRoles(settings, target);
-			if (roles.length === 0) return null;
+			if (roles.length === 0) return [];
 			const live = await probeAdvertisedModels(target, runtime);
+			const cache = (live?.cacheAdvisories ?? []).map(
+				(detail): DoctorFinding => ({ ok: true, level: "warn", name: `cache ${target.id}`, detail }),
+			);
 			const recorded = target.wireModels ?? [];
 			if (live === null && recorded.length === 0) {
-				return {
-					ok: true,
-					level: "warn",
-					name: `model ${target.id}`,
-					detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} could not be verified: the target did not answer and configure recorded no model list; run \`clio-coder targets --probe\` once it is up`,
-				};
+				return [
+					{
+						ok: true,
+						level: "warn",
+						name: `model ${target.id}`,
+						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} could not be verified: the target did not answer and configure recorded no model list; run \`clio-coder targets --probe\` once it is up`,
+					},
+				];
 			}
 			const advertised = live ? live.advertised : recorded;
 			const source = live ? `advertised by ${target.url ?? target.id} now` : "recorded by configure at last save";
 			const missing = roles.filter((entry) => !advertised.includes(entry.model));
 			if (missing.length === 0) {
-				return {
-					ok: true,
-					name: `model ${target.id}`,
-					detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} ${source}`,
-				};
+				return [
+					{
+						ok: true,
+						name: `model ${target.id}`,
+						detail: `${roles.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} ${source}`,
+					},
+					...cache,
+				];
 			}
 			const resident = live && live.resident.length > 0 ? live.resident.join(", ") : live ? "none" : "unknown";
-			return {
-				ok: false,
-				name: `model ${target.id}`,
-				detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not ${source} (${advertised.length} ids). Resident instances: ${resident}. Re-run \`clio-coder configure --id ${target.id} --model <advertised id>\`; \`clio-coder targets --probe\` lists them`,
-			};
+			return [
+				{
+					ok: false,
+					name: `model ${target.id}`,
+					detail: `${missing.map((entry) => `${entry.role} '${entry.model}'`).join(", ")} not ${source} (${advertised.length} ids). Resident instances: ${resident}. Re-run \`clio-coder configure --id ${target.id} --model <advertised id>\`; \`clio-coder targets --probe\` lists them`,
+				},
+				...cache,
+			];
 		}),
 	);
-	return results.filter((finding): finding is DoctorFinding => finding !== null);
+	return results.flat();
 }
