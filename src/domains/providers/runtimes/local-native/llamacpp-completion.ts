@@ -172,6 +172,7 @@ const llamacppCompletionRuntime: RuntimeDescriptor = {
 		const note = await detectModelMismatch(base, target, ctx);
 		const notes = [...(status.notes ?? []), ...(note ? [note] : [])];
 		if (notes.length > 0) enriched.notes = notes;
+		if (status.cacheAdvisories && status.cacheAdvisories.length > 0) enriched.cacheAdvisories = status.cacheAdvisories;
 		return enriched;
 	},
 	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {

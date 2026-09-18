@@ -86,6 +86,7 @@ const llamacppRuntime: RuntimeDescriptor = {
 		const note = await detectModelMismatch(base, target, ctx);
 		const notes = [...(status.notes ?? []), ...(note ? [note] : [])];
 		if (notes.length > 0) result.notes = notes;
+		if (status.cacheAdvisories && status.cacheAdvisories.length > 0) result.cacheAdvisories = status.cacheAdvisories;
 		return result;
 	},
 	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
