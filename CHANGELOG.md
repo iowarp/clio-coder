@@ -39,6 +39,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A bare HTTP 500, "internal server error", `ECONNREFUSED`, `ECONNRESET`, or "fetch failed" from a worker is classified `target-transient` and retried on another target instead of being charged to the worker runtime.
 - The per-route target cooldown is now a half-open circuit breaker: `fleet.retry.breakerThreshold` (default 1) sets how many consecutive target failures open a route, one probe run tests it when the cooldown expires while other dispatches still see it cooling, and each failed probe doubles the cooldown up to five minutes.
 - A retry that leaves a failed target now moves to the first configured route on another target that carries the request's required capabilities and whose breaker is closed, instead of the first other target in settings.
+- A retry that moved to another target keeps the assignment's failover mode, so a later retry in the same chain can still leave a failing target instead of being pinned to it.
 - The `/settings` targets rows show each route's dispatch breaker in the running session: an open route replaces the health cell with its remaining cooldown, a probe in flight shows `probing`, and the detail line names each route's state and last failure. `clio-coder targets` and `doctor` show none, since they never dispatch.
 
 ## 0.4.9 - 2026-09-17

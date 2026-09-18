@@ -3244,6 +3244,9 @@ export function createDispatchBundle(
 		const retryReq: DispatchRequest = {
 			...run.req,
 			...(rerouteHops !== undefined ? { reroutes: rerouteHops } : {}),
+			// A retry that moves the target names one, which would otherwise read
+			// as an operator pin and freeze every later retry in the chain.
+			failover: failoverModeFor(run.req),
 			requestOrigin: "internal",
 			lineage: {
 				parentRunId: run.runId,
