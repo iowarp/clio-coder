@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { pathBoundaryCovers, resolvePathBoundary } from "../../core/path-boundary.js";
-import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
+import {
+	canonicalizeExistingPath,
+	canonicalizePath,
+	canonicalizeRawPath,
+	createPathWalkMemo,
+} from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
@@ -36,7 +41,7 @@ import {
 } from "./protected-artifacts.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
-import { activeClioSkillRoots, skillMutationReason } from "./skill-authority.js";
+import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
 
 import { gateProjectSafetyPolicy, workspaceTrustDirectory } from "./workspace-trust.js";
 
@@ -339,12 +344,20 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			}
 			// Reuse the canonical authority boundary scan for parent deletions,
 			// shell cwd changes and aliases that a literal path-policy lookup misses.
+			// Both authority checks below judge the same targets, so they share one
+			// resolution and one walk memo, both dropped when this call is decided.
+			const walkMemo = createPathWalkMemo();
+			const candidates = mutationCandidates(
+				pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
+				callCwd,
+				mutationCommand,
+				walkMemo,
+			);
 			if (
 				skillMutationReason(
 					[path.join(clioConfigDir(), "settings.yaml"), workspaceTrustDirectory()],
-					pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
-					callCwd,
-					mutationCommand,
+					candidates,
+					walkMemo,
 				) !== null
 			) {
 				return blockDecision(base, {
@@ -357,12 +370,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const skillReason =
 				mutationCommand !== null && invokesClioSkillMutation(mutationCommand)
 					? "resource installation and lifecycle changes require the operator CLI or an explicit operator install choice; draft outside installed resource roots"
-					: skillMutationReason(
-							skillRoots,
-							pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
-							callCwd,
-							mutationCommand,
-						);
+					: skillMutationReason(skillRoots, candidates, walkMemo);
 			if (skillReason !== null) {
 				return blockDecision(base, {
 					ruleId: "skill-authority",

@@ -18,8 +18,14 @@ function physicalTarget(filePath: string): string {
 	return target;
 }
 
-export async function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-	const key = physicalTarget(filePath);
+/**
+ * Serializes in-process mutations of one physical file. A caller that walked
+ * filePath in the same synchronous step passes the result as physical, and the
+ * key reuses it: nothing can run between that walk and this one. publish still
+ * walks again, because the queue wait and the tool's own reads come between.
+ */
+export async function withFileMutationQueue<T>(filePath: string, fn: () => Promise<T>, physical?: string): Promise<T> {
+	const key = physical ?? physicalTarget(filePath);
 	const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve();
 
 	let releaseNext!: () => void;
