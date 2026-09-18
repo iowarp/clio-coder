@@ -11,6 +11,7 @@ import {
 } from "../../core/skill-activation.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { ToolNames } from "../../core/tool-names.js";
+import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
 import type {
@@ -621,7 +622,10 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 			? {
 					exitCode: termination.getExitCode(),
 					outcome: "timed_out",
-					status: "interrupted",
+					// The status a dispatched worker's timed_out receipt seals with.
+					// Orphan recovery re-derives the status from the outcome with
+					// this same mapping when it re-verifies a receipt.
+					status: runStatusForOutcome("timed_out"),
 					failureMessage: `clio-coder run: timed out after ${options.deadline.seconds}s (--timeout)`,
 				}
 			: {

@@ -349,97 +349,103 @@ export async function runClioRun(
 				return 2;
 			}
 			// Armed before anything that can block (piped stdin, boot, the
-			// provider), so the limit covers the whole run.
+			// provider), so the limit covers the whole run. Every return below
+			// settles it: the CLI sets process.exitCode and lets the event loop
+			// drain, so a timer left armed behind a usage error and any lingering
+			// handle would fire shutdown(124) over that error's exit 2.
 			const deadline = parsed.timeoutSeconds === undefined ? undefined : armRunTimeout(parsed.timeoutSeconds);
-			if (parsed.cwd !== undefined) {
-				const unusable = enterRunCwd(parsed.cwd);
-				if (unusable !== null) {
-					process.stderr.write(`clio-coder run: --cwd is not a directory this process can enter: ${unusable}\n`);
+			try {
+				if (parsed.cwd !== undefined) {
+					const unusable = enterRunCwd(parsed.cwd);
+					if (unusable !== null) {
+						process.stderr.write(`clio-coder run: --cwd is not a directory this process can enter: ${unusable}\n`);
+						return 2;
+					}
+				}
+
+				const noSkills = options.noSkills === true || parsed.noSkills === true;
+				const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
+				// An explicit --skill path is a contract: a path that is missing or loads
+				// no valid skill fails the run before any model invocation instead of
+				// silently degrading to whatever skills discovery finds.
+				const skillPathErrors = explicitSkillPathErrors(skillPaths);
+				if (skillPathErrors.length > 0) {
+					for (const message of skillPathErrors) {
+						process.stderr.write(`clio-coder run: --skill ${message}\n`);
+					}
 					return 2;
 				}
-			}
 
-			const noSkills = options.noSkills === true || parsed.noSkills === true;
-			const skillPaths = Array.from(new Set([...(options.skillPaths ?? []), ...parsed.skillPaths]));
-			// An explicit --skill path is a contract: a path that is missing or loads
-			// no valid skill fails the run before any model invocation instead of
-			// silently degrading to whatever skills discovery finds.
-			const skillPathErrors = explicitSkillPathErrors(skillPaths);
-			if (skillPathErrors.length > 0) {
-				for (const message of skillPathErrors) {
-					process.stderr.write(`clio-coder run: --skill ${message}\n`);
-				}
-				return 2;
-			}
+				const assembled = await assemblePrompt(parsed);
+				if (!assembled) return 2;
 
-			const assembled = await assemblePrompt(parsed);
-			if (!assembled) return 2;
-
-			if (parsed.agentId === undefined) {
-				// Reject unknown and unsupported interactive commands before boot;
-				// neither has a headless handler that could honor the request.
-				const preflight = await headlessSlashPreflight(assembled.prompt);
-				if (preflight !== null && "refusal" in preflight) {
-					process.stderr.write(`clio-coder run: ${preflight.refusal}\n`);
-					return 2;
-				}
-				if (preflight !== null) {
-					process.stdout.write(`${preflight.display}\n`);
-					return 0;
-				}
-				// An explicit --target override is a one-run target; a missing id is an
-				// operator config error, not an assistant response. Reject it before the
-				// headless turn so the resolver diagnostic never streams to stdout as a
-				// message_end/agent_end assistant turn.
-				if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
-					process.stderr.write(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
-					return 2;
-				}
-				takeOverStdout();
-				try {
-					const code = await runClioCommand({
-						...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
-						...(options.noContextFiles ? { noContextFiles: true } : {}),
-						...(noSkills ? { noSkills: true } : {}),
-						...(skillPaths.length > 0 ? { skillPaths } : {}),
-						headless: {
-							prompt: assembled.prompt,
-							mode: parsed.json ? "json" : "text",
-							jsonEvents: parsed.jsonEvents,
+				if (parsed.agentId === undefined) {
+					// Reject unknown and unsupported interactive commands before boot;
+					// neither has a headless handler that could honor the request.
+					const preflight = await headlessSlashPreflight(assembled.prompt);
+					if (preflight !== null && "refusal" in preflight) {
+						process.stderr.write(`clio-coder run: ${preflight.refusal}\n`);
+						return 2;
+					}
+					if (preflight !== null) {
+						process.stdout.write(`${preflight.display}\n`);
+						return 0;
+					}
+					// An explicit --target override is a one-run target; a missing id is an
+					// operator config error, not an assistant response. Reject it before the
+					// headless turn so the resolver diagnostic never streams to stdout as a
+					// message_end/agent_end assistant turn.
+					if (parsed.target !== undefined && explicitTargetMissing(parsed.target)) {
+						process.stderr.write(`clio-coder run: target '${parsed.target}' not found in settings.targets\n`);
+						return 2;
+					}
+					takeOverStdout();
+					try {
+						const code = await runClioCommand({
+							...(options.apiKey === undefined ? {} : { apiKey: options.apiKey }),
+							...(options.noContextFiles ? { noContextFiles: true } : {}),
 							...(noSkills ? { noSkills: true } : {}),
 							...(skillPaths.length > 0 ? { skillPaths } : {}),
-							...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
-							...(assembled.workingContextPaths && assembled.workingContextPaths.length > 0
-								? { workingContextPaths: assembled.workingContextPaths }
-								: {}),
-							...(parsed.target !== undefined ? { target: parsed.target } : {}),
-							...(parsed.model !== undefined ? { model: parsed.model } : {}),
-							...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
-							...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
-							...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
-							...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
-							...(parsed.failOnNoop ? { failOnNoop: true } : {}),
-							...(deadline !== undefined ? { deadline } : {}),
-							...(parsed.sessionId !== undefined
-								? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
-								: parsed.continueSession
-									? { resumeSession: { kind: "latest" as const } }
+							headless: {
+								prompt: assembled.prompt,
+								mode: parsed.json ? "json" : "text",
+								jsonEvents: parsed.jsonEvents,
+								...(noSkills ? { noSkills: true } : {}),
+								...(skillPaths.length > 0 ? { skillPaths } : {}),
+								...(assembled.images && assembled.images.length > 0 ? { images: assembled.images } : {}),
+								...(assembled.workingContextPaths && assembled.workingContextPaths.length > 0
+									? { workingContextPaths: assembled.workingContextPaths }
 									: {}),
-						},
-					});
-					await flushRawStdout();
-					return code;
-				} finally {
-					deadline?.settle();
-					restoreStdout();
+								...(parsed.target !== undefined ? { target: parsed.target } : {}),
+								...(parsed.model !== undefined ? { model: parsed.model } : {}),
+								...(parsed.thinking !== undefined ? { thinking: parsed.thinking } : {}),
+								...(parsed.autonomy !== undefined ? { autonomy: parsed.autonomy } : {}),
+								...(parsed.sampling !== undefined ? { sampling: parsed.sampling } : {}),
+								...(parsed.steerChannel !== undefined ? { steerChannel: parsed.steerChannel } : {}),
+								...(parsed.failOnNoop ? { failOnNoop: true } : {}),
+								...(deadline !== undefined ? { deadline } : {}),
+								...(parsed.sessionId !== undefined
+									? { resumeSession: { kind: "id" as const, id: parsed.sessionId } }
+									: parsed.continueSession
+										? { resumeSession: { kind: "latest" as const } }
+										: {}),
+							},
+						});
+						await flushRawStdout();
+						return code;
+					} finally {
+						restoreStdout();
+					}
 				}
-			}
 
-			return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
-				...options,
-				noSkills,
-				skillPaths,
-			});
+				return await runDispatch(parsed as RunCliArgs & { agentId: string }, assembled.prompt, {
+					...options,
+					noSkills,
+					skillPaths,
+				});
+			} finally {
+				deadline?.settle();
+			}
 		},
 	);
 }
