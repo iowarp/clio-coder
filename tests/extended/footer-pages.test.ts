@@ -115,16 +115,16 @@ test("dashboard pages devote space to agents, context composition and complete s
 			match(plain(rows), /Alt\+U/);
 		}
 	}
-	const activity = plain(renderDashboardPage(state(), "Activity", 172, 40, "Alt+U"));
+	const activity = plain(renderDashboardPage(state(), "Activity", 172, 120, "Alt+U"));
 	match(activity, /Scout/);
 	match(activity, /internal agent/);
 	match(activity, /Explore the dispatch/);
 	match(activity, /context 17k/);
 	match(activity, /blade\/mini\/qwopus/);
-	const context = plain(renderDashboardPage(state(), "Context", 172, 40, "Alt+U"));
+	const context = plain(renderDashboardPage(state(), "Context", 172, 120, "Alt+U"));
 	match(context, /CONTEXT COMPOSITION/);
 	match(context, /Estimated usage/);
-	const status = plain(renderDashboardPage(state(), "Status", 172, 40, "Alt+U"));
+	const status = plain(renderDashboardPage(state(), "Status", 172, 120, "Alt+U"));
 	match(status, /dynamo\/qwopus3.8-27b-flash@q4_k_m/);
 	match(status, /PROJECT & RESOURCES/);
 });
@@ -187,12 +187,11 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 		{ ...row, taskSummary: task },
 		{ ...row, runId: "second-scout", taskSummary: "Inspect the dashboard telemetry." },
 	]);
-	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 60, "alt+u"));
-	match(text, /Include the final state transition\./);
+	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
+	match(text, /Read the interview implementation/);
 	match(text, /Inspect the dashboard telemetry\./);
 	match(text, /Tokens.*68k input.*2k output/);
 	match(text, /Work.*context 17k \/ 262\.1k/);
-	doesNotMatch(text, /│/);
 });
 
 test("Activity retains fast tool actions between calls and shows live worker output", () => {
@@ -200,7 +199,7 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	const progress = createWorkerProgressFold();
 	const render = () => {
 		snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({ ...row, progress: progress.snapshot() }));
-		return plain(renderDashboardPage(snapshot, "Activity", 160, 60, "alt+u"));
+		return plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
 	};
 	progress.observe({
 		type: "clio_coder_tool_start",
@@ -229,18 +228,20 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes activity, headroom and workspace in three bounded rows", () => {
+test("compact footer exposes activity, headroom and workspace in five aligned bounded rows", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
-		strictEqual(rows.length, 3);
+		strictEqual(rows.length, 5);
 		ok(rows.every((row) => visibleWidth(row) <= width));
 	}
 	const text = plain(renderCompactDashboard(state(), 160));
-	match(text, /exploring.*1 agent active/);
-	match(text, /Context.*262.1k.*tokens/);
+	match(text, /exploring/);
+	match(text, /1 agent active/);
+	match(text, /CONTEXT/);
+	match(text, /262.1k/);
 	match(text, /dashboard/);
 	match(text, /v050.*dashboard/);
-	doesNotMatch(text, /auto-edit|70k processed|tool calls|standard/);
+	doesNotMatch(text, /auto-edit|70k processed|standard/);
 });
 
 test("Status renders live configured harness limits without exposing arbitrary settings", () => {
@@ -260,7 +261,7 @@ test("Status renders live configured harness limits without exposing arbitrary s
 		match(text, /EXECUTION & CONTEXT POLICY/);
 		match(text, /Fleet concurrency/);
 		match(text, /Working set/);
-		match(text, /Stream deadlines/);
+		match(text, /Compaction/);
 	} finally {
 		footer.dispose();
 	}
@@ -305,4 +306,21 @@ test("finished agents collapse into bounded history while retries retain live ca
 	match(settled, /Scout · failed/);
 	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
 	doesNotMatch(settled, /AGENT ACTIVITY|Task |Recent |Worker output|Budget /);
+});
+
+test("expanded pages have identical viewport-relative height across widths and lifecycle changes", () => {
+	for (const width of [40, 86, 160])
+		for (const height of [24, 40, 75, 93]) {
+			const snapshot = state();
+			for (const page of DASHBOARD_PAGES) {
+				const rows = renderDashboardPage(snapshot, page, width, height, "alt+u");
+				strictEqual(rows.length, Math.max(8, Math.floor(height / 3)));
+				ok(rows.every((row) => visibleWidth(row) <= width));
+			}
+			snapshot.dispatchRows = [];
+			strictEqual(
+				renderDashboardPage(snapshot, "Activity", width, height, "alt+u").length,
+				Math.max(8, Math.floor(height / 3)),
+			);
+		}
 });

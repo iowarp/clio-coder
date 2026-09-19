@@ -16,7 +16,7 @@ export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 const ACTIVE_AGENT_STATUSES = new Set(["running", "enqueued", "cancelling", "retrying", "stale"]);
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
-function agentCard(row: DispatchBoardRow, width: number): string[] {
+function agentCard(row: DispatchBoardRow, width: number, compact = false): string[] {
 	const theme = clioTheme();
 	const presentation = dispatchStatusPresentation(row.status, { compact: false });
 	const name = clean(row.agentId).replace(
@@ -32,8 +32,10 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 	const field = (label: string, value: string) =>
 		wrapTextWithAnsi(`${theme.fg("dim", `${label}  `)}${clean(value)}`, width);
 	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
-	if (row.taskSummary) lines.push(...field("Task", row.taskSummary));
-	lines.push(...renderDispatchActivity(row, width));
+	if (row.taskSummary)
+		lines.push(...(compact ? previewRows(field("Task", row.taskSummary), 2, width) : field("Task", row.taskSummary)));
+	const activity = renderDispatchActivity(row, width);
+	lines.push(...(compact ? activity.slice(0, 2) : activity));
 	const usage: string[] = [];
 	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0)
 		usage.push(`↑ ${formatFooterTokens(row.inputTokens)} input`, `↓ ${formatFooterTokens(row.outputTokens)} output`);
@@ -51,8 +53,8 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 	if (row.ttftMs !== null) timing.push(`first token ${formatCompactMs(row.ttftMs)}`);
 	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
 	if (cost) timing.push(cost);
-	if (timing.length) lines.push(...field("Timing", timing.join(" · ")));
-	if (row.budget)
+	if (!compact && timing.length) lines.push(...field("Timing", timing.join(" · ")));
+	if (!compact && row.budget)
 		lines.push(
 			...field(
 				"Budget",
@@ -96,12 +98,30 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 	if (active.length) cards.push(rule(theme, width, { left: "AGENT ACTIVITY", leftToken: "agent" }));
 	else cards.push(theme.fg("muted", "No agents running."));
 	let shown = 0;
-	for (const row of active) {
-		const card = agentCard(row, width);
-		if (cards.length + card.length + 2 > cardBudget && shown > 0) break;
-		cards.push(...card, "");
-		shown++;
-	}
+	if (width >= 120 && active.length >= 2) {
+		const col = Math.floor((width - 5) / 2);
+		const first = active[0];
+		const second = active[1];
+		if (first && second) {
+			cards.push(
+				...zipColumns(
+					agentCard(first, col, true),
+					agentCard(second, width - col - 5, true),
+					col,
+					width - col - 5,
+					`  ${theme.fg("frame", "│")}  `,
+				),
+				"",
+			);
+			shown = 2;
+		}
+	} else
+		for (const row of active) {
+			const card = agentCard(row, width, active.length > 1 || cardBudget < 18);
+			if (cards.length + card.length + 2 > cardBudget && shown > 0) break;
+			cards.push(...card, "");
+			shown++;
+		}
 	if (shown < active.length)
 		cards.push(theme.fg("dim", `${active.length - shown} more active agents · ${inspectAll} for all`));
 	if (history.length) {
@@ -161,10 +181,10 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			width,
 		),
 	];
-	const gridWidth = Math.max(12, Math.min(64, width >= 100 ? Math.floor(width * 0.43) : width));
-	const gridHeight = width >= 100 ? 10 : 5;
+	const gridWidth = Math.max(12, Math.min(64, width >= 76 ? Math.floor(width * 0.38) : width));
+	const gridHeight = width >= 76 ? 10 : 4;
 	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
-	const legendWidth = width >= 100 ? width - gridWidth - 4 : width;
+	const legendWidth = width >= 76 ? width - gridWidth - 4 : width;
 	const legend = ledger.meter
 		.filter((group) => group.tokens > 0)
 		.flatMap((group) =>
@@ -174,7 +194,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			),
 		);
 	out.push("", rule(theme, width, { left: "CONTEXT COMPOSITION", leftToken: "accent" }));
-	out.push(...(width >= 100 ? zipColumns(grid, legend, gridWidth, legendWidth, "    ") : [...grid, "", ...legend]));
+	out.push(...(width >= 76 ? zipColumns(grid, legend, gridWidth, legendWidth, "    ") : [...grid, "", ...legend]));
 	out.push(
 		...wrapTextWithAnsi(
 			theme.fg(
@@ -229,45 +249,63 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	return out;
 }
 
-/** Three deliberately different lines: current work, context headroom, and session footing. */
+/** Fixed-height instrument strip: aligned work/context lanes, then workspace footing. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const w = Math.max(1, width);
 	const fit = (value: string) => truncateToWidth(value, w, "…", true);
 	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
-	const phase = state.agent.statusText ?? "Ready";
-	const work = [
-		theme.style("accent", phase, { bold: true }),
-		workers.length ? theme.fg("agent", `${workers.length} ${workers.length === 1 ? "agent" : "agents"} active`) : null,
-		state.toolCounts.errors
-			? theme.fg("error", `${state.toolCounts.errors} ${state.toolCounts.errors === 1 ? "error" : "errors"}`)
-			: null,
-	]
-		.filter(Boolean)
-		.join(" · ");
 	const ledger = state.context.ledger;
 	const used = ledger?.usedTokens ?? state.context.used;
 	const window = ledger?.contextWindow ?? state.context.contextWindow;
-	const meter = ledger ? renderContextMeterBar(ledger, w >= 100 ? 24 : 12, theme) : "";
-	const usage = `${used === null || used === undefined ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
+	const usage = `${used == null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
 	const key = getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard";
-	const contextLine = `${theme.fg("muted", "Context")} ${meter} ${usage} tokens`;
-	const urgent = state.session.shutdownArmed
-		? "Ctrl+C again to quit · "
-		: state.session.leaderArmed
-			? "Ctrl+G → choose key · "
-			: "";
+	const calls = Object.values(state.toolCounts.tools).reduce((sum, count) => sum + count, 0);
+	const work = theme.style("accent", state.agent.statusText ?? "Ready", { bold: true });
+	const activity = [
+		workers.length
+			? theme.fg("agent", `${workers.length} ${workers.length === 1 ? "agent" : "agents"} active`)
+			: theme.fg("muted", "No active agents"),
+		`${calls} tools`,
+		state.toolCounts.errors ? theme.fg("error", `${state.toolCounts.errors} failed`) : null,
+	]
+		.filter(Boolean)
+		.join("  ·  ");
+	const meter = ledger ? renderContextMeterBar(ledger, w >= 100 ? 20 : 12, theme) : "";
+	const context = `${meter}  ${usage}`;
+	const metrics = [
+		state.session.throughput,
+		ledger?.percent == null ? null : `${ledger.percent.toFixed(1)}% occupied`,
+		state.session.cost,
+	]
+		.filter(Boolean)
+		.join("  ·  ");
 	const branch = state.workspace.branch
-		? `${state.workspace.branch}${state.workspace.dirty === true ? " *" : state.workspace.dirty === false ? " ✓" : ""}`
+		? `${clean(state.workspace.branch)}${state.workspace.dirty === true ? " *" : state.workspace.dirty === false ? " ✓" : ""}`
 		: "no Git branch";
-	const footing = `${urgent}${clean(state.workspace.cwd)} · ${clean(branch)}`;
-	const hint = `${key} dashboard`;
-	const gap = w - visibleWidth(footing) - visibleWidth(hint);
-	const workspaceLine =
-		gap >= 2
-			? `${theme.fg("muted", footing)}${" ".repeat(gap)}${theme.fg("dim", hint)}`
-			: `${theme.fg("muted", truncateToWidth(footing, Math.max(1, w - visibleWidth(hint) - 3), "…", true))} · ${theme.fg("dim", hint)}`;
-	return [fit(work), fit(contextLine), fit(workspaceLine)];
+	const urgent = state.session.shutdownArmed
+		? "Ctrl+C again to quit"
+		: state.session.leaderArmed
+			? "Ctrl+G → choose key"
+			: null;
+	const location = urgent
+		? theme.fg("warning", urgent)
+		: theme.fg("muted", `${clean(state.workspace.cwd)}  ·  ${branch}`);
+	const hint = theme.fg("agent", `${key} dashboard`);
+	const lane = Math.floor((w - 5) / 2);
+	const pair = (left: string, right: string) =>
+		`${truncateToWidth(left, lane, "…", false)}${" ".repeat(Math.max(0, lane - Math.min(lane, visibleWidth(left))))}  ${theme.fg("frame", "│")}  ${truncateToWidth(right, w - lane - 5, "…", true)}`;
+	if (w >= 76)
+		return [
+			fit(pair(theme.style("accent", "ACTIVITY", { bold: true }), theme.style("accent", "CONTEXT", { bold: true }))),
+			fit(pair(work, context)),
+			fit(pair(activity, metrics || theme.fg("muted", "Measurements pending"))),
+			rule(theme, w),
+			fit(
+				`${truncateToWidth(location, Math.max(1, w - visibleWidth(hint) - 3), "…", false)}${" ".repeat(Math.max(2, w - Math.min(visibleWidth(location), Math.max(1, w - visibleWidth(hint) - 3)) - visibleWidth(hint)))}${hint}`,
+			),
+		];
+	return [fit(work), fit(activity), fit(context), fit(location), fit(hint)];
 }
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
@@ -282,14 +320,14 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 			title: "SESSION & INFERENCE",
 			entries: [
 				["Session", session.name ? `${session.name} · ${session.id ?? "unsaved"}` : (session.id ?? "not assigned")],
-				["Clio Coder", session.version],
+
 				["Model route", session.target ?? "not selected"],
 				["Thinking", session.thinking ?? "unknown"],
 				["Capabilities", session.capabilities?.join(" · ") || "not yet known"],
-				["Turns", session.turns === null ? "unreported" : String(session.turns)],
+
 				["Processed usage", session.tokens ?? "not yet reported"],
 				["Tracked cost", session.cost ?? "not yet priced"],
-				["Output style", session.outputStyle ?? "standard"],
+				["Mode", `${session.safety ?? "unknown"} · ${session.outputStyle ?? "standard"}`],
 			],
 		},
 		{
@@ -301,14 +339,14 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 					`${workspace.branch ?? "no branch"} · ${workspace.dirty === null ? "state unknown" : workspace.dirty ? "uncommitted changes" : "clean"}`,
 				],
 				["Project type", workspace.projectType ?? "not detected"],
-				["Remote", workspace.remote ?? "none reported"],
+
 				[
 					"Instructions",
 					ledger?.projectHandbookFiles?.length
 						? ledger.projectHandbookFiles.join(" · ")
 						: (state.context.clioMd ?? "not yet resolved"),
 				],
-				["Project preload", ledger?.projectPreload ?? "not reported"],
+
 				["Tool surface", ledger ? `${ledger.toolCount} definitions in prompt` : "not yet compiled"],
 				[
 					"Extensions",
@@ -322,38 +360,46 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 						? `${memory.enabled ? "on" : "off"} · ${memory.tier} · ${memory.size} entries${memory.stepInFlight ? " · updating" : ""}`
 						: (state.context.memory ?? "not reported"),
 				],
-				["Last memory decision", memory?.lastDecision ?? "none reported"],
 			],
 		},
 		...(state.harness ?? [
 			{ title: "HARNESS SETTINGS", entries: [["Settings", "not available in this snapshot"]] as const },
 		]),
 	];
-	const render = (section: Section, columns: number) => [
-		rule(theme, columns, { left: section.title, leftToken: "accent" }),
-		...section.entries.flatMap(([label, value]) => {
-			const prefix = `${theme.fg("muted", label)}  `;
-			const available = Math.max(1, columns - visibleWidth(prefix));
-			if (available < 18)
-				return [prefix.trimEnd(), ...wrapTextWithAnsi(clean(value), Math.max(1, columns - 2)).map((line) => `  ${line}`)];
-			return wrapTextWithAnsi(clean(value), available).map(
-				(line, index) => `${index ? " ".repeat(visibleWidth(prefix)) : prefix}${line}`,
-			);
-		}),
-		"",
-	];
-	if (width < 110) return sections.flatMap((section) => render(section, width));
-	const col = Math.floor((width - 4) / 2);
-	return zipColumns(
-		[...(sections[0] ? render(sections[0], col) : []), ...(sections[2] ? render(sections[2], col) : [])],
-		[
-			...(sections[1] ? render(sections[1], width - col - 4) : []),
-			...(sections[3] ? render(sections[3], width - col - 4) : []),
+	const priority: Record<string, string[]> = {
+		"PERMISSIONS & LIMITS": [
+			"Autonomy",
+			"Worker approvals",
+			"Safety review",
+			"Configured cost ceiling",
+			"Worker tool-call limit",
 		],
-		col,
-		width - col - 4,
-		"    ",
-	);
+		"EXECUTION & CONTEXT POLICY": ["Fleet concurrency", "Worker default", "Retries", "Working set", "Compaction"],
+	};
+	const render = (section: Section, columns: number) => {
+		const entries = priority[section.title]
+			? section.entries.filter(([label]) => priority[section.title]?.includes(label))
+			: section.entries;
+		const labelWidth = Math.min(23, Math.floor(columns * 0.4));
+		return [
+			theme.style("accent", section.title, { bold: true }),
+			"",
+			...entries.flatMap(([label, value]) => {
+				const prefix = theme.fg("muted", truncateToWidth(label, labelWidth, "…", true).padEnd(labelWidth));
+				const values = wrapTextWithAnsi(clean(value), Math.max(1, columns - labelWidth - 2));
+				return values.map((line, index) => `${index ? " ".repeat(labelWidth) : prefix}  ${line}`);
+			}),
+			"",
+		];
+	};
+	if (width < 76) return sections.flatMap((section) => render(section, width));
+	const col = Math.floor((width - 5) / 2);
+	const left = [...(sections[0] ? render(sections[0], col) : []), ...(sections[2] ? render(sections[2], col) : [])];
+	const right = [
+		...(sections[1] ? render(sections[1], width - col - 5) : []),
+		...(sections[3] ? render(sections[3], width - col - 5) : []),
+	];
+	return zipColumns(left, right, col, width - col - 5, `  ${theme.fg("frame", "│")}  `);
 }
 
 export function renderDashboardPage(
@@ -365,32 +411,43 @@ export function renderDashboardPage(
 ): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
-	const budget = Math.max(6, terminalRows - 7);
+	const budget = Math.max(8, Math.floor(terminalRows / 3));
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
 			? theme.style("agent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
 			: theme.fg("dim", ` ${index + 1} ${name} `),
 	);
-	const heading = wrapTextWithAnsi(`${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`, safeWidth);
+	const heading = [
+		truncateToWidth(`${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`, safeWidth, "…", true),
+	];
+	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
+	const hint = truncateToWidth(
+		theme.fg(
+			"muted",
+			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/settings · /context for details" : "composer stays active"}`,
+		),
+		safeWidth,
+		"…",
+		true,
+	);
+	const available = budget - 4;
 	let content: string[];
-	if (page === "Activity") content = activityPage(state, safeWidth, budget - heading.length - 3);
+	if (page === "Activity") content = activityPage(state, safeWidth, available);
 	else if (page === "Context") content = contextPage(state, safeWidth);
 	else content = statusPage(state, safeWidth);
-	const next = page === "Status" ? "close dashboard" : `${DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1]} page`;
-	const hint = wrapTextWithAnsi(
-		theme.fg("dim", `${cycleKey || "Dashboard shortcut"} → ${next} · composer stays active`),
-		safeWidth,
-	);
-	const available = Math.max(1, budget - heading.length - hint.length - 2);
-	if (content.length > available)
+	content = content.flatMap((line) => (visibleWidth(line) > safeWidth ? wrapTextWithAnsi(line, safeWidth) : [line]));
+	if (content.length > available) {
+		const detail =
+			page === "Activity"
+				? `${getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Fleet Runs"} · /view`
+				: page === "Context"
+					? "/context"
+					: "/settings · /context";
 		content = [
-			...content.slice(0, Math.max(0, available - 1)),
-			theme.fg(
-				"dim",
-				`… ${content.length - available + 1} more rows · ${page === "Activity" ? getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Workers shortcut" : page === "Context" ? "/context" : "enlarge the terminal"} for full details`,
-			),
+			...content.slice(0, available - 1),
+			truncateToWidth(theme.fg("dim", `More detail: ${detail}`), safeWidth, "…", true),
 		];
-	return [...heading, rule(theme, safeWidth), ...content, rule(theme, safeWidth), ...hint].flatMap((line) =>
-		visibleWidth(line) > safeWidth ? wrapTextWithAnsi(line, safeWidth) : [line],
-	);
+	}
+	while (content.length < available) content.push("");
+	return [...heading, rule(theme, safeWidth), ...content, rule(theme, safeWidth), hint];
 }
