@@ -19,7 +19,7 @@ import type { ContextUsageSnapshot } from "../../domains/session/context-account
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
 import type { TaskBoardSnapshot } from "../../domains/session/task-board.js";
 import type { WorkspaceSnapshot } from "../../domains/session/workspace/index.js";
-import { Text, visibleWidth } from "../../engine/tui.js";
+import { getKeybindings, Text, visibleWidth } from "../../engine/tui.js";
 import { getCurrentBranch } from "../../utils/git.js";
 import type { DispatchBoardRow } from "../dispatch-board.js";
 import {
@@ -47,6 +47,7 @@ import {
 	type Notification,
 	type NotificationCenter,
 } from "./notifications.js";
+import { DASHBOARD_PAGES, type DashboardPage, renderDashboardPage } from "./pages.js";
 
 function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
@@ -92,6 +93,7 @@ export interface FooterDashboardDeps {
 	getSettings?: () => Readonly<ClioSettings>;
 	getAgentStatus?: () => AgentStatus;
 	getTerminalColumns?: () => number;
+	getTerminalRows?: () => number;
 	getSessionTokens?: () => UsageBreakdown;
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
 	getSessionCost?: () => CostAggregate;
@@ -381,6 +383,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	let branchSlot: string | null = null;
 	let frame = 0;
 	let dashboardMode: FooterDashboardMode = "compact";
+	let page: DashboardPage = "Activity";
 	let disposed = false;
 	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
@@ -504,15 +507,25 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
 		const current = state(width);
 		if (current.agent.statusText) frame = (frame + 1) % 10;
-		const grid = renderFooterDashboardLines(current, width, dashboardMode);
 		const notices = renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
 		const contributed = deps.getExtensionStatus?.() ?? [];
 		const extensionLine = contributed.length ? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)] : [];
+		const grid =
+			dashboardMode === "expanded"
+				? renderDashboardPage(
+						current,
+						page,
+						width,
+						(deps.getTerminalRows?.() ?? process.stdout.rows ?? 40) - notices.length - extensionLine.length,
+						getKeybindings().getKeys("clio-coder.status.toggle").join(" / "),
+					)
+				: renderFooterDashboardLines(current, width, dashboardMode);
 		view.setText([...grid, ...extensionLine, ...notices].join("\n"));
 		view.invalidate();
 	};
 	const setExpanded = (expanded: boolean): void => {
 		dashboardMode = expanded ? "expanded" : "compact";
+		page = "Activity";
 		refresh();
 	};
 	refresh();
@@ -537,7 +550,12 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		},
 		setExpanded,
 		toggleExpanded() {
-			setExpanded(dashboardMode !== "expanded");
+			if (dashboardMode === "compact") setExpanded(true);
+			else if (page === "Status") setExpanded(false);
+			else {
+				page = DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1] ?? "Activity";
+				refresh();
+			}
 			return dashboardMode;
 		},
 		dispose() {

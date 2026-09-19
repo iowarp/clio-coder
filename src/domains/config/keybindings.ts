@@ -89,9 +89,9 @@ export const CLIO_APP_KEYBINDINGS = {
 	},
 	"clio-coder.status.toggle": {
 		defaultKeys: "alt+u",
-		description: "Dashboard",
+		description: "Dashboard pages: Activity → Context → Status → closed",
 		scope: "composer",
-		kind: "toggle",
+		kind: "cycle",
 		repeat: false,
 		leader: "u",
 	},

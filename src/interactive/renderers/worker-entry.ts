@@ -343,7 +343,7 @@ function helperCard(
 	const elapsedMs =
 		pending && entry.startedAtMs !== undefined ? Math.max(0, nowMs - entry.startedAtMs) : entry.receipt?.durationMs;
 	const elapsed = elapsedMs === undefined ? "" : ` · ${formatCompactMs(elapsedMs)}`;
-	const header = `${theme.fg("action", `↳ Clio-Coder → ${clean(entry.agentId).replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
+	const header = `${theme.fg("agent", `↳ Clio-Coder → ${clean(entry.agentId).replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
 	const body = railLines(clean(entry.task ?? "Assisting the main agent"), "muted", width);
 	const metrics = workerMetrics(entry);
 	return [

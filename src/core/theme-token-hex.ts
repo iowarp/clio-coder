@@ -3,6 +3,8 @@ export type ClioToken =
 	| "accent"
 	| "accentDeep"
 	| "action"
+	| "tool"
+	| "agent"
 	| "success"
 	| "warning"
 	| "error"
@@ -25,6 +27,8 @@ const TOKEN_HEX: Readonly<Record<ClioToken, `#${string}`>> = {
 	accent: "#46e5d0",
 	accentDeep: "#1fb7a6",
 	action: "#ff7e29",
+	tool: "#57d6ad",
+	agent: "#ff8b38",
 	success: "#57e389",
 	warning: "#ffb454",
 	error: "#ff5c66",
