@@ -30,14 +30,15 @@ const KNOWN_GAPS = new Set<string>();
 
 /**
  * `..` through a symlink resolves physically, as the kernel resolves it. The
- * write parks as out of the root and the read names the file outside it, so
- * a lexical `link/..` anywhere on either path moves these.
+ * write parks as out of the root and the read parks as outside the workspace,
+ * each naming the file outside it, so a lexical `link/..` anywhere on either
+ * path moves these.
  */
 const DOTDOT_LINK_ESCAPE_DIGESTS: Readonly<Record<string, string>> = {
 	"write.search.err-dotdot-link-escape": "331303e090a1dbf10f98424e7c5d1bdbba3d9694077b547e2faa2bb95d1bc3df",
 	"write.holdout.err-dotdot-link-escape": "331303e090a1dbf10f98424e7c5d1bdbba3d9694077b547e2faa2bb95d1bc3df",
-	"read.search.err-dotdot-link-escape": "9771c18c8b3674c3c7a7033e0b3ed0418bad2c0e6c0daccab89986d3d2587dfe",
-	"read.holdout.err-dotdot-link-escape": "7cabc22231642b456f8c6a9f359fdeffce846df97c86060ab09cadd07126d0ad",
+	"read.search.err-dotdot-link-escape": "f60858f352159847fa36e2c4b2d1f15a4f8b4748fe7eef1881a5b60539d391f2",
+	"read.holdout.err-dotdot-link-escape": "c491f21a2ae42c8455da67f48e3345f5f860595cab0cc84531903326c931b8e9",
 };
 
 // The 100 MB templates are exercised by the full-profile suites, not here.

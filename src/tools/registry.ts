@@ -677,13 +677,15 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 				: call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)
 					? "outward"
 					: DEFAULT_AUTONOMY_EXPOSURE;
+		const readOutside = decision.policy?.readScope === "outside-workspace";
 		const disposition = mapAutonomy(level, actionClass, {
 			executeRecognized: decision.policy?.execRecognition !== "unrecognized",
+			...(readOutside ? { readOutsideWorkspace: true } : {}),
 			...(planScale ? { dispatchPlanScale: true } : {}),
 			...(exposure === "outward" ? { exposure } : {}),
 		});
 		if (disposition === "deny") {
-			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass);
+			const verdict = autonomyDenyVerdict(decision, level, call.tool, actionClass, readOutside);
 			recordRegistryDisposition(call, verdict.decision, "denied", { reasonCode: `autonomy:${level}` });
 			notifyAutonomyDenied(call, verdict.decision, level);
 			return { kind: "terminal", verdict };
@@ -692,7 +694,7 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 			const askDecision =
 				planScale && dispatchPlan !== null
 					? toDispatchPlanAskDecision(decision, level, dispatchPlan)
-					: toAutonomyAskDecision(decision, level, call.tool, actionClass, exposure);
+					: toAutonomyAskDecision(decision, level, call.tool, actionClass, exposure, readOutside);
 			return { kind: "park", decision: askDecision, axis: approvalAxisId(askDecision, level) };
 		}
 		recordRegistryDisposition(call, decision, "allowed");
@@ -1298,8 +1300,9 @@ function autonomyDenyVerdict(
 	level: AutonomyLevel,
 	tool: string,
 	actionClass: ActionClass,
+	readOutsideWorkspace = false,
 ): Extract<RegistryVerdict, { kind: "blocked" }> {
-	const rejection = autonomyDenyRejection(level, tool, actionClass);
+	const rejection = autonomyDenyRejection(level, tool, actionClass, readOutsideWorkspace);
 	const blocked: SafetyDecision = {
 		kind: "block",
 		classification: decision.classification,
@@ -1321,11 +1324,12 @@ function toAutonomyAskDecision(
 	tool: string,
 	actionClass: ActionClass,
 	exposure: AutonomyExposure = DEFAULT_AUTONOMY_EXPOSURE,
+	readOutsideWorkspace = false,
 ): SafetyDecision {
 	return {
 		kind: "ask",
 		classification: decision.classification,
-		rejection: autonomyAskRejection(level, tool, actionClass, exposure),
+		rejection: autonomyAskRejection(level, tool, actionClass, exposure, readOutsideWorkspace),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }

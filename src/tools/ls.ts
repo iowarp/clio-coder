@@ -113,10 +113,7 @@ export const lsTool: ToolSpec = {
 		commitObservationReservation(reservation);
 		try {
 			const policy = options?.allowsObservationPath ? undefined : createSafetyPolicyEngine({ cwd: process.cwd() });
-			const allows =
-				options?.allowsObservationPath ??
-				((entryPath: string) =>
-					policy?.evaluate({ tool: "read", args: { path: entryPath } }).reasonCode !== "path-policy:zeroAccessPaths");
+			const allows = options?.allowsObservationPath ?? ((entryPath: string) => policy?.readablePath(entryPath) !== false);
 			let withheldPaths = 0;
 			let visibleCount = 0;
 			let scanned = 0;

@@ -494,9 +494,7 @@ export function createObservationPathFilter(
 	readonly withheldPaths: number;
 } {
 	const policy = allowsPath ? undefined : createSafetyPolicyEngine({ cwd });
-	const allows =
-		allowsPath ??
-		((path: string) => policy?.evaluate({ tool: "read", args: { path } }).reasonCode !== "path-policy:zeroAccessPaths");
+	const allows = allowsPath ?? ((path: string) => policy?.readablePath(path) !== false);
 	const withheld = new Set<string>();
 	return {
 		allows(path) {

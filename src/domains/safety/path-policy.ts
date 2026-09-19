@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
-import { canonicalizeExistingPath, canonicalizeRawPath } from "../../core/path-canonical.js";
+import { canonicalizeExistingPath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
 
 export type PathPolicyKind = "zeroAccessPaths" | "readOnlyPaths" | "noWritePaths" | "noDeletePaths";
 export type PathPolicyOperation = "read" | "write" | "delete";
@@ -91,13 +91,14 @@ export function evaluatePathPolicy(
 	operation: PathPolicyOperation,
 	targetPath: string,
 	cwd = policy.root,
+	memo?: PathWalkMemo,
 ): PathPolicyDecision {
 	const expanded = expandTilde(targetPath);
 	// Physical, the way the kernel resolves the path: `data/link/../x` lands
 	// beside the link's target. An unresolvable path matches its lexical form;
 	// path policy only adds blocks, and the syscall fails on it anyway.
 	const lexicalTarget = path.isAbsolute(expanded) ? path.resolve(expanded) : path.resolve(cwd, expanded);
-	const resolvedTarget = canonicalizeRawPath(expanded, cwd) ?? canonicalizeExistingPath(lexicalTarget);
+	const resolvedTarget = canonicalizeRawPath(expanded, cwd, memo) ?? canonicalizeExistingPath(lexicalTarget, memo);
 	const normalizedResolvedTarget = normalizeSeparators(resolvedTarget);
 	const normalizedRelativeTarget = normalizeSeparators(path.relative(policy.root, resolvedTarget));
 	const normalizedRawTarget = normalizeSeparators(targetPath);

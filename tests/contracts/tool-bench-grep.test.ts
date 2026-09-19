@@ -20,10 +20,9 @@ import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
  * Scenarios that expect behavior the tool path does not give yet. Each stays
  * in its suite and reads unsolved. When a gap closes this test fails, and the
  * entry comes out. invalid-utf8: rg reports a line that is not UTF-8 as bytes,
- * and grep drops the match. err-symlink-outside-path: an explicit path through
- * a symlink to outside the scratch root is admitted and searched.
+ * and grep drops the match.
  */
-const KNOWN_GAPS = new Set(["grep.search.invalid-utf8", "grep.search.err-symlink-outside-path"]);
+const KNOWN_GAPS = new Set(["grep.search.invalid-utf8"]);
 
 // The 100 MB and 50 000 file templates are exercised by the full-profile suites, not here.
 function smallCorpus(seed: number, split: (typeof SPLITS)[number]): Scenario[] {

@@ -4,6 +4,7 @@ import path from "node:path";
 import { artifactDefaultPath } from "../../core/artifact-paths.js";
 import { canonicalizeExistingPath, canonicalizePath, canonicalizeRawPath } from "../../core/path-canonical.js";
 import { isHarnessExtensionToolName, ToolNames } from "../../core/tool-names.js";
+import { normalizeToolPath } from "../../tools/path-utils.js";
 import { type CommandPathEvent, extractCommandPathWalks } from "./protected-artifacts.js";
 
 /**
@@ -459,7 +460,51 @@ export function webFetchIsOutward(args: Record<string, unknown> | undefined): bo
 	return (method !== "GET" && method !== "HEAD") || args?.body !== undefined;
 }
 
-export function classify(call: ClassifierCall): Classification {
+/** Tools that resolve their path through path-utils, against the process cwd. */
+const PATH_UTILS_TOOLS: ReadonlySet<string> = new Set([
+	ToolNames.Read,
+	ToolNames.Ls,
+	ToolNames.Grep,
+	ToolNames.Find,
+	ToolNames.Write,
+	ToolNames.Edit,
+	ToolNames.Artifact,
+]);
+
+/**
+ * The call as its tool reads it. The file tools drop a leading `@` and fold
+ * Unicode spaces before they resolve a path, and they resolve it against the
+ * process cwd whatever `cwd` the call carries; bash does the same spelling
+ * change to its `cwd`. Judging the raw arguments judged a different path:
+ * `@../x` read as a directory named `@..` inside the workspace, and a `cwd`
+ * padded with missing levels pulled `../../x` back inside it. Idempotent, so
+ * the policy engine normalizes once and classify can do it again.
+ */
+export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
+	const args = call.args;
+	if (!args) return call;
+	if (call.tool === ToolNames.Bash) {
+		if (typeof args.cwd !== "string") return call;
+		const cwd = normalizeToolPath(args.cwd);
+		return cwd === args.cwd ? call : { ...call, args: { ...args, cwd } };
+	}
+	if (!PATH_UTILS_TOOLS.has(call.tool)) return call;
+	let next: Record<string, unknown> | null = null;
+	for (const key of ["path", "file_path", "filePath"]) {
+		const value = args[key];
+		if (typeof value !== "string") continue;
+		const normalized = normalizeToolPath(value);
+		if (normalized !== value) next = { ...(next ?? args), [key]: normalized };
+	}
+	if ("cwd" in args) {
+		next = { ...(next ?? args) };
+		delete next.cwd;
+	}
+	return next === null ? call : { ...call, args: next };
+}
+
+export function classify(rawCall: ClassifierCall): Classification {
+	const call = normalizeCallPaths(rawCall);
 	if (call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)) {
 		return { actionClass: "write", reasons: ["web-fetch:outward"] };
 	}

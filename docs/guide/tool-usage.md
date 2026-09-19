@@ -54,6 +54,10 @@ JSON-format results (including code_nav, context workspace, clio_docs, data, and
 
 Turn budget: all envelope-backed tools draw from one shared pool of 192KB per turn (`safety.limits.observationBytesPerTurn`, keyed on `sessionId:turnId`). When the remaining pool shrinks a call below its self cap, a note is appended naming the bytes already used. When the pool is exhausted, the call short-circuits with `[observation budget exhausted for this turn before <tool> ...]` instead of paying for a search whose output cannot be returned. Use narrower arguments or continue in a follow-up turn.
 
+## Search scope: read, ls, grep, and find outside the workspace
+
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace, at every autonomy level. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval at `suggest` and `auto-edit`, runs at `full-auto`, and is denied at `read-only`. Headless runs deny the ask, so give a headless run `--autonomy full-auto` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused at every level. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#autonomy-levels).
+
 ## read: page through a file with offset, limit, and tail
 
 Reads one UTF-8 text file. Source: `src/tools/read.ts`.

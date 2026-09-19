@@ -1,3 +1,4 @@
+import nodePath from "node:path";
 import { performance } from "node:perf_hooks";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
@@ -90,6 +91,25 @@ function pathArgs(input: Record<string, unknown>): Record<string, unknown> {
 	return path ? { ...input, path } : { ...input };
 }
 
+/**
+ * Arguments for the SDK's search tools. They search `path`, so that key wins
+ * over the file keys a model may add. Their glob can also leave the search
+ * directory, by an absolute pattern or a `..` segment, and then the literal
+ * directory prefix of the glob is where the search reaches and the path the
+ * policy judges.
+ */
+function searchArgs(input: Record<string, unknown>, globKey: "pattern" | "glob" | null): Record<string, unknown> {
+	const base = stringField(input, "path", "file_path", "filePath");
+	const glob = globKey === null ? undefined : stringField(input, globKey);
+	if (glob !== undefined && (nodePath.isAbsolute(glob) || glob.split("/").includes(".."))) {
+		const literal = glob.split("/");
+		const firstMagic = literal.findIndex((segment) => /[*?[\]{}]/u.test(segment));
+		const prefix = (firstMagic === -1 ? literal.slice(0, -1) : literal.slice(0, firstMagic)).join("/") || "/";
+		return { ...input, path: base === undefined || nodePath.isAbsolute(prefix) ? prefix : nodePath.join(base, prefix) };
+	}
+	return base === undefined ? { ...input } : { ...input, path: base };
+}
+
 function commandArgs(input: Record<string, unknown>, cwd: string): Record<string, unknown> {
 	const command = stringField(input, "command", "cmd", "shell", "input", "description") ?? JSON.stringify(input);
 	return { ...input, command, cwd: stringField(input, "cwd") ?? cwd };
@@ -157,12 +177,12 @@ function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd
 		case "Write":
 			return { claudeToolName: toolName, clioToolName: ToolNames.Write, args: pathArgs(input), known: true };
 		case "Grep":
-			return { claudeToolName: toolName, clioToolName: ToolNames.Grep, args: pathArgs(input), known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Grep, args: searchArgs(input, "glob"), known: true };
 		case "Glob":
-			return { claudeToolName: toolName, clioToolName: ToolNames.Find, args: pathArgs(input), known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Find, args: searchArgs(input, "pattern"), known: true };
 		case "LS":
 		case "Ls":
-			return { claudeToolName: toolName, clioToolName: ToolNames.Ls, args: pathArgs(input), known: true };
+			return { claudeToolName: toolName, clioToolName: ToolNames.Ls, args: searchArgs(input, null), known: true };
 		case "WebFetch":
 		case "WebSearch":
 			return { claudeToolName: toolName, clioToolName: ToolNames.WebFetch, args: { ...input }, known: true };
@@ -175,12 +195,16 @@ function mapClaudeToolCall(toolName: string, input: Record<string, unknown>, cwd
 	}
 }
 
+function readsOutsideWorkspace(decision: SafetyDecision): boolean {
+	return decision.policy?.readScope === "outside-workspace";
+}
+
 function toAutonomyBlock(decision: SafetyDecision, level: AutonomyLevel, call: ClassifierCall): SafetyDecision {
 	const actionClass = decision.classification.actionClass;
 	return {
 		kind: "block",
 		classification: decision.classification,
-		rejection: autonomyDenyRejection(level, call.tool, actionClass),
+		rejection: autonomyDenyRejection(level, call.tool, actionClass, readsOutsideWorkspace(decision)),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }
@@ -190,7 +214,7 @@ function toAutonomyAsk(decision: SafetyDecision, level: AutonomyLevel, call: Cla
 	return {
 		kind: "ask",
 		classification: decision.classification,
-		rejection: autonomyAskRejection(level, call.tool, actionClass),
+		rejection: autonomyAskRejection(level, call.tool, actionClass, undefined, readsOutsideWorkspace(decision)),
 		...(decision.policy !== undefined ? { policy: decision.policy } : {}),
 	};
 }
@@ -285,6 +309,7 @@ function evaluateClaudeToolPermission(input: EvaluateClaudeToolPermissionInput):
 	const actionClass = decision.classification.actionClass;
 	const disposition = mapAutonomy(level, actionClass, {
 		executeRecognized: decision.policy?.execRecognition !== "unrecognized",
+		...(readsOutsideWorkspace(decision) ? { readOutsideWorkspace: true } : {}),
 	});
 	if (disposition === "allow") {
 		const admission = input.budgetGate?.admit(mapped.clioToolName);

@@ -150,7 +150,8 @@ describe("physical `..` through a symlink", () => {
 		strictEqual(evaluatePathPolicy(secret, "read", path).kind, "block");
 		const lexical = compilePathPolicy({ zeroAccessPaths: [join(root, "data", "notes.txt")] }, root);
 		strictEqual(evaluatePathPolicy(lexical, "read", path).kind, "allow");
-		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "auto-edit" });
+		// Outside the workspace, so the read runs unattended only at full-auto.
+		const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }), autonomy: () => "full-auto" });
 		registry.register(readTool);
 		const verdict = await registry.invoke({ tool: ToolNames.Read, args: { path } });
 		strictEqual(verdict.kind, "ok");
