@@ -134,6 +134,7 @@ export function openHelpOverlay(
 			group: "Topics",
 			detail: () => [
 				"# Fleet runs & steering",
+				"**Internal helpers**: Scout and other shadow agents appear as Clio → agent cards. Compact shows identity/status, standard adds task/progress, and detailed shows the fuller worker report. `/view` opens the complete report. Helpers remain inspectable and steerable/cancellable through this board using the same supported actions, without floating fleet cards.",
 				`**Fleet Runs board**: ${manager.actionLabel("clio-coder.dispatchBoard.toggle")}. Use Up/Down or j/k to select a live or recent run.`,
 				"**Enter**: on a live run in a `--with-panes` session, Enter opens (or retargets) the watch pane beside Clio, rendering that run's stream; the arrow keys then move it between runs. On a finished run, or without panes, Enter toggles the inline worker-progress detail instead.",
 				"**Steer**: press `s` on a live native run to close the board and prefill `@<runId> `. Add guidance and submit it normally. The first notice means queued; a received notice confirms worker delivery.",

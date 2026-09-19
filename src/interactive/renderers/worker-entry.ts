@@ -1,3 +1,4 @@
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import type { TranscriptDetailPolicy } from "../transcript-detail.js";
 import { transcriptDetail } from "../transcript-detail.js";
@@ -52,7 +53,14 @@ function identityUnits(entry: WorkerEntryState): string[] {
 	const route =
 		targetId !== undefined && wireModelId !== undefined ? `${targetId}/${wireModelId}` : (targetId ?? wireModelId);
 	return [
-		theme.fg("muted", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId),
+		theme.fg(
+			"muted",
+			entry.helper
+				? `Clio → ${entry.agentId} · internal agent`
+				: kind === "acp"
+					? `${entry.agentId} (acp)`
+					: entry.agentId,
+		),
 		...(kind !== "acp" && route !== undefined ? [dim(route)] : []),
 		dim(`run ${entry.runId}`),
 	];
@@ -293,12 +301,64 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 	return truncateToWidth(header, width, GLYPH.ellipsis, false);
 }
 
+/** A helper is an agent invocation, but its report belongs to the coordinator. */
+function helperCard(
+	entry: WorkerEntryState,
+	width: number,
+	detail: TranscriptDetailPolicy,
+	terminalRows?: number,
+): string[] {
+	const pending = isPending(entry);
+	const failed = !pending && (entry.receipt?.outcome !== "succeeded" || entry.receipt?.contract === "fail");
+	const status = pending
+		? "working"
+		: entry.receipt?.outcome === "canceled"
+			? "canceled"
+			: failed
+				? "failed"
+				: "completed";
+	const action = entry.progress?.currentAction;
+	const activity = pending
+		? action
+			? `${action.descriptor?.verb ?? action.tool} ${action.descriptor?.object ?? ""}`
+			: "Gathering findings for Clio"
+		: failed
+			? (entry.receipt?.failureMessage ?? entry.receipt?.outcomeCode ?? "Open details for the failure")
+			: "Findings returned to Clio";
+	const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
+	const elapsed = entry.receipt?.durationMs === undefined ? "" : ` · ${formatCompactMs(entry.receipt.durationMs)}`;
+	const header = `${theme.fg("action", `↳ Clio → ${clean(entry.agentId)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
+	const body =
+		detail.workerRows > 0
+			? [
+					`${dim(RAIL)}${theme.fg("muted", clean(entry.task ?? "Assisting the main agent"))}`,
+					`${dim(FOOTER)}${dim(clean(activity))}${dim(` · /view dispatch:${entry.runId}`)}`,
+				]
+			: [];
+	return [
+		truncateToWidth(header, width),
+		...previewRows(
+			body.map((line) => truncateToWidth(line, width)),
+			previewBudget(detail.workerRows, terminalRows),
+			width,
+			pending,
+		),
+		...previewRows(failureLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
+		...previewRows(attemptLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
+		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", width) : []),
+		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", width) : []),
+	].map(redactSecretString);
+}
+
 export function renderWorkerEntryLines(
 	entry: WorkerEntryState,
 	width: number,
 	options: WorkerEntryRenderOptions,
 ): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
+	const detail = options.detail ?? transcriptDetail();
+	if (entry.helper && !options.unbounded && detail.style !== "detailed" && !workerNeedsInput(entry))
+		return helperCard(entry, safeWidth, detail, options.terminalRows);
 	const integrity = entry.receipt?.trust;
 	const provenance =
 		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
@@ -315,11 +375,11 @@ export function renderWorkerEntryLines(
 				"muted",
 				safeWidth,
 			);
-	const detail = options.detail ?? transcriptDetail();
 	if (options.unbounded) {
 		const tools = toolLine(entry, safeWidth);
 		return [
 			headerLine(entry, safeWidth),
+			...(entry.helper && entry.task ? railLines(entry.task, "muted", safeWidth) : []),
 			...bodyLines(entry, safeWidth, true),
 			...attemptLines(entry, safeWidth),
 			...(tools ? [tools] : []),
@@ -356,6 +416,7 @@ export function renderWorkerEntryLines(
 	const presented = presentedContractAnswer(entry)?.footer;
 	return [
 		actionLine(entry, safeWidth),
+		...(entry.helper && entry.task ? previewRows(railLines(entry.task, "muted", safeWidth), budget(2), safeWidth) : []),
 		...(detail.workerRows > 0 || needsInput ? previewRows(summary, summaryRows, safeWidth, entry.pending) : []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
 		...(tools ? [tools] : []),

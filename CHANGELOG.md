@@ -19,7 +19,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### agent behavior
 
-- Present shadow/internal helpers through compact footer counts and lifecycle notices; omit their worker transcript blocks and floating fleet cards while keeping detailed runs inspectable in the dispatch board.
+- Present shadow/internal helpers as inline agent-to-agent cards, with compact footer counts and lifecycle notices instead of floating fleet cards. Respect compact, standard, and detailed output styles, preserve full inspection and replay, and label single-task dispatches with the agent name.
 
 - Include the current local OS account and hostname in the main session’s workspace prompt, reusing receipt identity detection. Treat them as execution facts rather than personal identity; keep them out of persistent project configuration.
 - Recognize “Find where” and “Look at” as evidence of an investigation when checking a read-only Scout assignment, so configuration topic words do not alone reject reconnaissance. Tool authority and declared-write checks remain unchanged.
