@@ -3,13 +3,13 @@
 Per-tool performance and behavior suites for Clio Coder tools. Each scenario
 calls one tool through the same path the agent loop uses and reports latency,
 filesystem call count, memory, CPU, and a behavior digest. This directory
-holds the `edit`, `read`, `write`, and `grep` suites; `find` comes next.
+holds the `edit`, `read`, `write`, `grep`, and `find` suites.
 
 | Path | Role |
 | --- | --- |
 | `lib/corpus.ts` | The one scenario table, keyed by tool, and the shared corpus entry points |
 | `lib/corpus-core.ts` | Splits, profiles, entry shapes, the sfc32 stream, and filler text |
-| `lib/corpus-edit.ts`, `lib/corpus-read.ts`, `lib/corpus-write.ts`, `lib/corpus-grep.ts` | Each tool's template table and scenario builder |
+| `lib/corpus-edit.ts`, `lib/corpus-read.ts`, `lib/corpus-write.ts`, `lib/corpus-grep.ts`, `lib/corpus-find.ts` | Each tool's template table and scenario builder |
 | `lib/driver.ts` | Runs one scenario and prints one `clio-coder.eval.measure.v1` line |
 | `lib/fs-counter.ts` | Wraps the counted `node:fs` functions |
 | `lib/suite-gen.ts` | Writes the suite YAML files from the scenario table |
@@ -22,6 +22,8 @@ holds the `edit`, `read`, `write`, and `grep` suites; `find` comes next.
 | `write.full.yaml`, `write.full.holdout.yaml` | Full profile, 22 scenarios, adds the 100 MB case |
 | `grep.yaml`, `grep.holdout.yaml` | Default profile, 17 scenarios |
 | `grep.full.yaml`, `grep.full.holdout.yaml` | Full profile, 20 scenarios, adds a 100 MB file, a 50 000 file tree, and context lines |
+| `find.yaml`, `find.holdout.yaml` | Default profile, 14 scenarios |
+| `find.full.yaml`, `find.full.holdout.yaml` | Full profile, 15 scenarios, adds a 50 000 file tree |
 
 Scenario ids are `<tool>.<split>.<template>`, and the driver takes the tool
 from the id.
@@ -180,13 +182,10 @@ What the tool does, and the scenarios expect: the walk honors `.gitignore`
 not follow symlinked directories, stops at the limit and offers `limit=200`,
 cuts a shown line at 500 characters, and past the byte cap offloads the full
 rendering and offers the next limit. An invalid regex and a missing path are
-errors of class `Error`. Two scenarios expect behavior the tool lacks and
-read unsolved, listed in `KNOWN_GAPS` in `tests/contracts/tool-bench-grep.test.ts`:
-`invalid-utf8`, because rg reports a line that is not UTF-8 as bytes and the
-tool drops that match, and `err-symlink-outside-path`, because an explicit path
-outside the scratch root is admitted and searched. A plain `..` path is
-admitted the same way, so the second gap is the read-class admission policy,
-not symlink resolution.
+errors of class `Error`. A match on a line that is not UTF-8 shows with
+U+FFFD in place of each invalid sequence, and an explicit path through the
+outside link resolves outside the workspace, so admission parks it at
+`auto-edit` and the driver denies the park. Every scenario is solved.
 
 rg walks on several threads, so the driver sorts the lines of a grep result
 before hashing. No scenario lets the limit or the byte cap cut across files,
@@ -194,6 +193,28 @@ since which files survive a cut would depend on that order. The digests assume
 rg on `PATH`; without it the tool's fallback searcher runs and every digest
 changes. Truncated results offload under Clio's state directory, which the
 driver points at a private temp directory per process (`<state>` in the digest).
+
+### find
+
+Default profile: trees of 10, 100, 200, 1000, and 10 000 files (50 000 in
+full), a name glob, an extension glob, a tree nested 12 levels deep, a glob
+with no match, hidden files, `.gitignore`d and generated directories
+(`node_modules`, `dist`), a glob that matches directories and files, a symlink
+loop, a symlinked directory pointing outside the scratch root, a 200 entry
+listing whose order the driver normalizes, and the error paths: an explicit
+path through that outside link and a missing root.
+
+What the tool does, and the scenarios expect: fd lists a directory with a
+trailing slash, honors `.gitignore`, hides generated directories, lists hidden
+files, lists a symlink loop once without following it, and never follows a
+symlinked directory. A missing root is an error of class `Error`, and the
+explicit outside path parks at `auto-edit` like grep's. Every scenario is
+solved.
+
+fd walks on several threads, so the driver sorts the lines of a find result
+before hashing, and no scenario lets the result limit or the byte cap cut the
+listing. The digests assume fd on `PATH`; without it the tool's fallback walker
+runs and every digest changes.
 
 ## Measurement
 
@@ -268,8 +289,9 @@ not counted, because those properties keep the original functions.
   digest, the parked escape, and the symlink escape as a known gap.
 - `tests/contracts/tool-bench-grep.test.ts`: the same corpus and suite checks,
   two in-process runs of every default grep scenario with identical digests
-  and `fs_ops`, a grep that drops its last match changing the digest, and
-  the two known gaps.
+  and `fs_ops`, and a grep that drops its last match changing the digest.
+- `tests/contracts/tool-bench-find.test.ts`: the same for find, with a find
+  that drops its last entry changing the digest.
 - `tests/extended/tool-bench-edit.test.ts`: two separate driver processes per
   default scenario with identical digests and `fs_ops`, and one task through
   `clio-coder eval run` whose sealed artifact carries the driver's digest.

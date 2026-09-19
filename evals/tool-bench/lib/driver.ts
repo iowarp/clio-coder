@@ -64,13 +64,14 @@ const TOOL_NAMES = {
 	read: ToolNames.Read,
 	write: ToolNames.Write,
 	grep: ToolNames.Grep,
+	find: ToolNames.Find,
 } as const satisfies Record<BenchTool, string>;
 
 /**
- * Tools whose output order is not guaranteed: rg walks a tree on several
- * threads, so the digest sorts the lines of its text result.
+ * Tools whose output order is not guaranteed: rg and fd walk a tree on
+ * several threads, so the digest sorts the lines of their text result.
  */
-const UNORDERED_TOOLS: ReadonlySet<BenchTool> = new Set(["grep"]);
+const UNORDERED_TOOLS: ReadonlySet<BenchTool> = new Set(["grep", "find"]);
 
 /** The reason the driver gives when it denies a parked call. */
 const PARK_DENIED = "tool bench: no operator attends this call, so the parked confirmation is denied";
