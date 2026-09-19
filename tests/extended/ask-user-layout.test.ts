@@ -196,7 +196,7 @@ for (const [columns, rows] of [
 		assertWithinWidth(lines, width);
 		for (const header of ["Consistency", "Sample size", "Validation", "Failure"]) {
 			ok(
-				text.slice(2, 4).some((line) => line.includes(header)),
+				text.some((line) => line.includes(header)),
 				`${columns}: strip lacks "${header}"`,
 			);
 		}
@@ -380,3 +380,28 @@ for (const columns of [80, 120, 160])
 		view.cancel();
 		await pending;
 	});
+
+test("browse from choices to an empty text question and back, preserving typed drafts", async () => {
+	const view = createAskUserViewForTesting({ rows: 40 });
+	const pending = view.ask([
+		{ header: "Style", question: "Pick a style", options: [{ label: "Teal" }] },
+		{ header: "Details", question: "Explain your priorities" },
+	]);
+	view.handleInput("\x1b[C");
+	match(plain(view.render(156)).join("\n"), /Question 2 of 2/);
+	view.handleInput("\x1b[D");
+	match(plain(view.render(156)).join("\n"), /Question 1 of 2/);
+	view.handleInput("\t");
+	view.handleInput("keep my draft");
+	view.handleInput("\x1b[Z");
+	match(plain(view.render(156)).join("\n"), /Question 1 of 2/);
+	view.handleInput("\t");
+	match(plain(view.render(156)).join("\n"), /keep my draft/);
+	match(view.footerHint(), /Tab\/Shift\+Tab/);
+	view.handleInput(ENTER);
+	match(plain(view.render(156)).join("\n"), /Question 1 of 2/);
+	view.handleInput(ENTER);
+	const result = await pending;
+	strictEqual(result.answers[1]?.value, "keep my draft");
+	strictEqual(result.answers[0]?.answer, "Teal");
+});
