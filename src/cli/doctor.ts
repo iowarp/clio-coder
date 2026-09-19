@@ -14,6 +14,7 @@ import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../domains/safety/au
 import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { namingFootprintFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
+import { slurmMcpFindings } from "./doctor-slurm.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
 import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
@@ -144,6 +145,9 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// and runs a bounded `--version` in a scratch directory, so it creates
 	// nothing and runs on an untouched home too.
 	const hpcChecks = await hpcToolchainFindings({ workspaceRoot });
+	// Slurm through the clio-kit MCP server. PATH lookups and two bounded
+	// clio-kit spawns; the mcp.yaml lookup is skipped on an untouched home.
+	const slurmChecks = await slurmMcpFindings({ workspaceRoot, untouched });
 	// The pane sweep pings a socket and reads PATH; it creates nothing except the
 	// journal directory it is asked about, which is inside the state root doctor
 	// has already agreed not to build on an untouched home.
@@ -165,6 +169,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		...fleetChecks,
 		...toolChecks,
 		...hpcChecks,
+		...slurmChecks,
 		...paneChecks,
 		...namingChecks,
 		...contractChecks,
