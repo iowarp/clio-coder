@@ -10,6 +10,7 @@ import {
 } from "../../src/domains/observability/worker-progress.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
 import {
+	InstrumentedTuiAltScreen,
 	ScrollView,
 	stripTerminalSequences,
 	type Terminal,
@@ -441,11 +442,17 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
-	it("reports the ask-user frame while shown and no bounds after close", async () => {
+	it("keeps the interview full-screen across background updates and restores mouse tracking on close", async () => {
 		const terminal = new RenderingTerminal();
-		const tui = new TuiAltScreen(terminal);
-		const session = openAskUserOverlay(tui, { onCancel() {} });
+		const tui = new InstrumentedTuiAltScreen(terminal, {
+			beginFrame() {},
+			endFrame() {},
+			beginPhase() {},
+			endPhase() {},
+		});
 		tui.start();
+		const session = openAskUserOverlay(tui, { onCancel() {} });
+		ok(terminal.writes.at(-1)?.includes("?1006l"), "native text selection is enabled");
 		try {
 			tui.renderNow(true);
 			const initial = session.getBounds();
@@ -455,13 +462,25 @@ describe("Pi TUI compatibility", () => {
 			tui.renderNow(true);
 			const compact = session.getBounds();
 			ok(compact);
-			strictEqual(compact.width, terminal.columns - 4);
+			strictEqual(compact.width, terminal.columns);
+			strictEqual(compact.height, terminal.rows);
+			strictEqual(compact.row, 0);
+			tui.addChild(new Text("background agent update", 0, 0));
+			tui.renderNow();
+			deepStrictEqual(session.getBounds(), compact, "background work cannot move the interview");
+			terminal.columns = 120;
+			tui.renderNow(true);
+			strictEqual(session.getBounds()?.width, 120);
+			terminal.columns = compact.width;
+			tui.renderNow(true);
 			session.setHidden(true);
+			ok(terminal.writes.at(-1)?.includes("?1006h"));
 			strictEqual(session.getBounds(), undefined);
 			session.setHidden(false);
 			tui.renderNow(true);
 			deepStrictEqual(session.getBounds(), compact);
 			session.close();
+			ok(terminal.writes.at(-1)?.includes("?1006h"), "mouse tracking restored");
 			strictEqual(session.getBounds(), undefined);
 			await answer;
 		} finally {

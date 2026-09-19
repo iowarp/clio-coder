@@ -40,37 +40,16 @@ export const ASK_USER_DECISION_TONE: ClioToken = DEFAULT_ASK_USER_PRESENTATION.s
 export const ASK_USER_DECISION_TITLE = DEFAULT_ASK_USER_PRESENTATION.title;
 export const ASK_USER_WAITING_TITLE = "Ask User";
 
-/**
- * One box for every request shape.
- *
- * Three surfaces used to answer three request shapes: a fixed 68-column bar for
- * a short question, a fixed 88-column panel for a longer option list, and a
- * full-screen workspace for an interview. The bar cut Daisy's four-part research
- * question to two parts at every terminal width, and the workspace put twelve
- * empty rows between the question and its options. The box now sizes itself to
- * what it has to say, sits above the composer where the operator was typing,
- * and takes a readable measure from the terminal rather than a constant.
- */
-export const ASK_USER_MAX_BOX_WIDTH = 100;
-export const ASK_USER_MIN_BOX_WIDTH = 40;
-const ASK_USER_MARGIN = { top: 1, right: 2, bottom: 1, left: 2 };
-/** Two border rows plus the one-row margin above and below. */
+/** An interview owns the viewport for every round, including one-question rounds. */
 const ASK_USER_FRAME_AND_MARGIN_ROWS = 4;
 const MIN_INNER_ROWS = 6;
 /** The question region keeps at least this many rows before the options window shrinks. */
 const MIN_QUESTION_ROWS = 3;
-/** Below this width an option's description goes under its label instead of beside it. */
-const STACKED_OPTION_WIDTH = 56;
 const MAX_LABEL_COLUMN = 30;
 const MIN_LABEL_COLUMN = 12;
 const ELLIPSIS = "…";
 const CONTINUATION_INDENT = "    ";
 const TEXT_ASKING_DESCRIPTION = "opens a text field for your answer";
-
-export function askUserBoxWidth(columns: number): number {
-	if (!Number.isFinite(columns) || columns <= 0) return ASK_USER_MAX_BOX_WIDTH;
-	return Math.max(ASK_USER_MIN_BOX_WIDTH, Math.min(ASK_USER_MAX_BOX_WIDTH, Math.floor(columns) - 4));
-}
 
 export interface OpenAskUserOverlayDeps {
 	onCancel: () => void;
@@ -366,62 +345,25 @@ interface OptionRowLayout {
 	rows: string[][];
 }
 
-/**
- * Every option, with its whole description.
- *
- * A description is what the operator is choosing between: "+Latency,
- * +Simplicity. Good for: Financial, Auth" is the trade-off, and the old table
- * cut it to its first clause on every row the cursor was not on. Every row now
- * wraps its description beside the label, or under it when the box is too
- * narrow for two columns, and the row carries no key: the footer does.
- */
+/** Full-width labels and explanations; selection never hides another option's explanation. */
 function layoutOptionRows(items: ReadonlyArray<SelectItem>, focusedIndex: number, width: number): OptionRowLayout {
 	const theme = clioTheme();
 	const safeWidth = Math.max(8, width);
-	const stacked = safeWidth < STACKED_OPTION_WIDTH;
-	const widestLabel = items.reduce((max, item) => Math.max(max, visibleWidth(item.label)), 0);
-	const labelColumn = Math.max(
-		MIN_LABEL_COLUMN,
-		Math.min(MAX_LABEL_COLUMN, Math.floor(safeWidth * 0.42), widestLabel + 2),
-	);
-	const rows: string[][] = [];
-	for (let index = 0; index < items.length; index += 1) {
-		const item = items[index];
-		if (!item) continue;
-		const focused = index === focusedIndex;
-		const prefix = focused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-		const description = item.description?.replace(/[\r\n]+/g, " ").trim() ?? "";
-		const paint = (text: string): string => (focused ? theme.style("accent", text, { bold: true }) : text);
-		const describe = (text: string): string => (focused ? text : theme.fg("muted", text));
-		if (description.length === 0) {
-			rows.push(
-				wrapTextWithAnsi(paint(item.label), Math.max(4, safeWidth - 2)).map(
-					(line, at) => `${at === 0 ? prefix : "  "}${line}`,
-				),
-			);
-			continue;
-		}
-		if (stacked || visibleWidth(item.label) > labelColumn - 1) {
-			const labelRows = wrapTextWithAnsi(paint(item.label), Math.max(4, safeWidth - 2)).map(
-				(line, at) => `${at === 0 ? prefix : "  "}${line}`,
-			);
-			const descriptionRows = wrapTextWithAnsi(
-				describe(description),
-				Math.max(4, safeWidth - CONTINUATION_INDENT.length),
-			).map((line) => `${CONTINUATION_INDENT}${line}`);
-			rows.push([...labelRows, ...descriptionRows]);
-			continue;
-		}
-		const spacing = " ".repeat(Math.max(1, labelColumn - visibleWidth(item.label)));
-		const descriptionWidth = Math.max(4, safeWidth - 2 - labelColumn);
-		const wrapped = wrapTextWithAnsi(describe(description), descriptionWidth);
-		const indent = " ".repeat(2 + labelColumn);
-		rows.push([
-			`${prefix}${paint(item.label)}${spacing}${wrapped[0] ?? ""}`,
-			...wrapped.slice(1).map((line) => `${indent}${line}`),
-		]);
-	}
-	return { rows };
+	return {
+		rows: items.map((item, index) => {
+			const focused = index === focusedIndex;
+			const label = theme.paint(item.label, { bold: true, ...(focused ? { fg: "accent" as const } : {}) });
+			const prefix = focused ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
+			const labels = wrapTextWithAnsi(label, safeWidth - 2).map((line, at) => `${at === 0 ? prefix : "  "}${line}`);
+			const description = item.description?.trim();
+			const explanation = description
+				? formatAskUserQuestion(description, Math.max(4, safeWidth - CONTINUATION_INDENT.length)).map(
+						(line) => `${CONTINUATION_INDENT}${line}`,
+					)
+				: [];
+			return [...labels, ...explanation];
+		}),
+	};
 }
 
 /**
@@ -549,7 +491,10 @@ class AskUserOverlayView implements Component {
 		return true;
 	}
 	handleInput(data: string): void {
-		if (this.phase !== "asking") return;
+		if (this.phase !== "asking") {
+			if (matchesKey(data, "escape")) this.deps.onCancel();
+			return;
+		}
 		const question = this.currentQuestion();
 		const state = this.currentState();
 		if (!question || !state) return;
@@ -614,7 +559,17 @@ class AskUserOverlayView implements Component {
 		const question = this.currentQuestion();
 		if (!question) return [clioTheme().fg("muted", "No questions.")];
 
-		const strip = this.renderQuestionStrip(safeWidth);
+		const theme = clioTheme();
+		const strip = [
+			fitLine(
+				theme.style("accent", `Question ${this.index + 1} of ${this.questions.length} · Round ${this.roundsAnswered + 1}`, {
+					bold: true,
+				}),
+				safeWidth,
+			),
+			"",
+			...this.renderQuestionStrip(safeWidth),
+		];
 		const header = this.renderQuestionHeader(question, safeWidth);
 		const details = this.renderDecisionContext(safeWidth);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(clioTheme().fg("dim", this.status), safeWidth) : [];
@@ -1303,13 +1258,7 @@ export function createAskUserViewForTesting(deps: {
 	};
 }
 
-/**
- * Show the ask_user overlay.
- *
- * One frame for the whole interview: it sits above the composer, takes its
- * width from the terminal, and its height from what the round has to say. A
- * shape change between rounds is just the next render; nothing is remounted.
- */
+/** Keep one full-screen interview mounted across questions and background work. */
 export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskUserOverlaySession {
 	let closed = false;
 
@@ -1321,25 +1270,37 @@ export function openAskUserOverlay(tui: TUI, deps: OpenAskUserOverlayDeps): AskU
 	});
 
 	const handle = showClioOverlayFrame(tui, view, {
-		anchor: "bottom-center",
-		width: askUserBoxWidth(tui.terminal?.columns ?? 0),
-		margin: ASK_USER_MARGIN,
+		anchor: "top-left",
+		width: "100%",
+		margin: 0,
+		fullscreen: true,
 		// Not derived from the title: this modal swaps between a waiting title
 		// and a classified decision title without ever changing hands.
 		markerId: "ask-user",
-		title: () => (view.isDecisionPending() ? view.decisionTitle() : ASK_USER_WAITING_TITLE),
+		title: () => (view.isDecisionPending() ? `Clio-Coder interview · ${view.decisionTitle()}` : "Clio-Coder interview"),
 		tone: () => (view.isDecisionPending() ? view.decisionTone() : undefined),
-		footerHint: () => view.footerHint(),
+		footerHint: () => `${view.footerHint()} · drag to select/copy`,
 	});
+	const selectionTui = tui as TUI & { useTerminalSelection?: () => () => void };
+	let releaseSelection = selectionTui.useTerminalSelection?.();
 
 	const close = (): void => {
 		if (closed) return;
 		closed = true;
 		view.close();
+		releaseSelection?.();
+		releaseSelection = undefined;
 		handle.hide();
 	};
 	return {
-		setHidden: (hidden) => handle.setHidden(hidden),
+		setHidden: (hidden) => {
+			if (closed) return;
+			if (hidden) {
+				releaseSelection?.();
+				releaseSelection = undefined;
+			} else releaseSelection ??= selectionTui.useTerminalSelection?.();
+			handle.setHidden(hidden);
+		},
 		isHidden: () => (closed ? true : handle.isHidden()),
 		focus: () => handle.focus(),
 		unfocus: (options) => (options ? handle.unfocus(options) : handle.unfocus()),

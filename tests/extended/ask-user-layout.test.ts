@@ -2,7 +2,6 @@ import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:asse
 import { test } from "node:test";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import {
-	askUserBoxWidth,
 	createAskUserViewForTesting,
 	formatAskUserQuestion,
 	optionAsksForText,
@@ -95,7 +94,7 @@ const CANDIDATES: AskUserQuestion = {
 
 /** The inner width the frame hands the body at a terminal width: box minus two borders and two pads. */
 function innerWidth(columns: number): number {
-	return askUserBoxWidth(columns) - 4;
+	return columns - 4;
 }
 
 function plain(lines: ReadonlyArray<string>): string[] {
@@ -118,14 +117,6 @@ function assertWordsInOrder(rows: ReadonlyArray<string>, source: string, label: 
 		cursor = at + word.length;
 	}
 }
-
-test("the box takes its measure from the terminal, not a constant", () => {
-	strictEqual(askUserBoxWidth(80), 76);
-	strictEqual(askUserBoxWidth(120), 100);
-	strictEqual(askUserBoxWidth(160), 100);
-	strictEqual(askUserBoxWidth(30), 40);
-	strictEqual(askUserBoxWidth(0), 100);
-});
 
 test("a question renders bold spans and hanging list items instead of raw markdown", () => {
 	const rows = formatAskUserQuestion(DAISY_ROUND.question, 60);
@@ -181,12 +172,12 @@ for (const [columns, rows] of [
 				`${columns}: missing option "${option.label}"`,
 			);
 		}
-		ok(text.some((row) => row.includes("Provided details") && row.includes("opens a text field")));
+		assertWordsInOrder(text, "Provided details opens a text field for your answer", "option explanation");
 		ok(!text.some((row) => row.includes("Conversational answer")), "tier boilerplate is folded away");
 		ok(!text.some((row) => row.includes("[Enter]")), "rows carry no key affordance");
 		ok(!text.some((row) => row.includes("…")), "nothing is elided");
 		strictEqual(
-			text[0],
+			text[2],
 			"Clio-Coder asks you · Research Exploration; Material Science",
 			"the speaker and question header lead the dialog",
 		);
@@ -204,7 +195,10 @@ for (const [columns, rows] of [
 		const text = plain(lines);
 		assertWithinWidth(lines, width);
 		for (const header of ["Consistency", "Sample size", "Validation", "Failure"]) {
-			ok(text[0]?.includes(header) || text[1]?.includes(header), `${columns}: strip lacks "${header}"`);
+			ok(
+				text.slice(2, 4).some((line) => line.includes(header)),
+				`${columns}: strip lacks "${header}"`,
+			);
 		}
 		for (const option of CONDUCTOR_ROUND[0]?.options ?? []) {
 			assertWordsInOrder(text, `${option.label} ${option.description ?? ""}`, `${columns} option ${option.label}`);
@@ -294,7 +288,7 @@ test("later rounds fold earlier answers to one row until asked, and count rounds
 	ok(waiting[0]?.includes("waiting for the next question"), waiting.join("\n"));
 	const second = view.ask([{ header: "Researcher Context", question: "Career stage?", options: [{ label: "PI" }] }]);
 	const folded = plain(view.render(76));
-	ok(folded[0]?.includes("Researcher Context") && folded[0]?.includes("Round 2"), folded[0]);
+	ok(folded[0]?.includes("Round 2") && folded.some((line) => line.includes("Researcher Context")), folded.join("\n"));
 	ok(folded.some((row) => row.includes("1 earlier answer · a to review")));
 	ok(!folded.some((row) => row.includes("help me explore")), "the ledger is folded");
 	const question = folded.findIndex((row) => row.includes("Career stage?"));
