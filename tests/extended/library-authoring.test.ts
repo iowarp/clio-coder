@@ -414,7 +414,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 		}
 	});
 
-	it("all 34 curated library packages pass validation, including Materio", () => {
+	it("all 35 curated library packages pass validation, including Materio", () => {
 		const isDir = (p: string) => statSync(p).isDirectory();
 		const libraryDir = join(REPO_ROOT, "library");
 
@@ -441,7 +441,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 				),
 		];
 
-		equal(packagePaths.length, 34, `expected 34 curated library packages, found ${packagePaths.length}`);
+		equal(packagePaths.length, 35, `expected 35 curated library packages, found ${packagePaths.length}`);
 
 		// Ensure Materio is explicitly included and verified
 		const materioPath = join(libraryDir, "plugins", "materio");
@@ -472,7 +472,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			entries: Array<{ name: string; sourceUrl: string }>;
 		};
 
-		equal(libraryRegistry.entries.length, 34, "library registry must contain exactly 34 packages");
+		equal(libraryRegistry.entries.length, 35, "library registry must contain exactly 35 packages");
 
 		// None of the entries should reference _authoring or templates
 		for (const entry of libraryRegistry.entries) {
@@ -501,7 +501,7 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			skills: Array<{ name: string; path: string }>;
 		};
 
-		equal(skillsRegistry.skills.length, 33, "skills registry must contain exactly 33 skills");
+		equal(skillsRegistry.skills.length, 34, "skills registry must contain exactly 34 skills");
 
 		for (const skill of skillsRegistry.skills) {
 			ok(

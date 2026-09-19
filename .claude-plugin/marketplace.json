@@ -240,6 +240,14 @@
 			"license": "Apache-2.0"
 		},
 		{
+			"name": "slurm-jobs",
+			"source": "./library/skills/research/slurm-jobs",
+			"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
+			"version": "0.1.0",
+			"category": "research",
+			"license": "Apache-2.0"
+		},
+		{
 			"name": "tdd",
 			"source": "./library/skills/coding/tdd",
 			"description": "Builds a feature or fix test-first, red to green at pre-agreed public seams, one vertical slice at a time. Not for designing benchmark criteria; use experiment-protocol.",

@@ -125,6 +125,10 @@ skills:
     path: research/scientific-modernization
     version: 0.4.1
     sha256: eb31099d764cba913c19726f6ba85d7081c5e01c81a3b2cd45eb136a4e47b858
+  - name: slurm-jobs
+    path: research/slurm-jobs
+    version: 0.1.0
+    sha256: 7692e523512f56e65f881ff87c2e997b8baf4d487e5b29f831e62dc97dc0e1c3
   # ── workflow ──
   - name: cut-it
     path: workflow/cut-it

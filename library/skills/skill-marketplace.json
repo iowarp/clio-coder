@@ -444,6 +444,22 @@
 			"category": "research"
 		},
 		{
+			"name": "slurm-jobs",
+			"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
+			"triggers": [
+				"submit this job to slurm",
+				"run this on the cluster",
+				"sbatch this script",
+				"check my slurm job",
+				"cancel my slurm job",
+				"is the queue busy"
+			],
+			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/research/slurm-jobs",
+			"version": "0.1.0",
+			"audit": "pass",
+			"category": "research"
+		},
+		{
 			"name": "cut-it",
 			"description": "Slices an existing plan, PRD, or milestone into an executable sprint of dependency-ordered vertical slices sized for one agent run each, with done-when verification per slice; never fabricates a plan. Not for deciding the approach; use architecture.",
 			"triggers": [
