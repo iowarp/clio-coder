@@ -47,10 +47,10 @@ async function embed(url: string, context = ctx()) {
 }
 
 for (const [runtime, path] of [
-	[embedRuntime, "/embedding"],
-	[rerankRuntime, "/reranking"],
+	[embedRuntime, "/health"],
+	[rerankRuntime, "/health"],
 ] as const) {
-	it(`${runtime.id} capability POST honors the deadline before headers`, async (t) => {
+	it(`${runtime.id} passive health GET honors the deadline before headers`, async (t) => {
 		const url = await server(t, (req, res) => {
 			if (req.url === path) later(res, () => res.end("[]"));
 			else res.end("{}");
@@ -76,7 +76,7 @@ for (const [runtime, path] of [
 		assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 	});
 	for (const status of [200, 202, 204, 401, 503]) {
-		it(`${runtime.id} preserves HTTP ${status} capability semantics and releases unread bodies`, async (t) => {
+		it(`${runtime.id} preserves HTTP ${status} health semantics and releases unread bodies`, async (t) => {
 			let closed = false;
 			let method: string | undefined;
 			let body = "";
@@ -100,14 +100,11 @@ for (const [runtime, path] of [
 			});
 			assert.ok(runtime.probe, `${runtime.id} must expose its capability probe`);
 			const result = await runtime.probe(target(url, runtime.id), ctx());
-			const expected = status === 200 || status === 202 || (runtime === embedRuntime && status === 204);
+			const expected = status >= 200 && status < 300;
 			assert.equal(result.ok, expected);
 			if (!expected) assert.match(result.error ?? "", new RegExp(`HTTP ${status}`));
-			assert.equal(method, "POST");
-			assert.deepEqual(
-				JSON.parse(body),
-				runtime === embedRuntime ? { content: "probe" } : { query: "probe", documents: ["a"], model: "fixture-model" },
-			);
+			assert.equal(method, "GET");
+			assert.equal(body, "");
 			await closes(() => closed);
 		});
 	}
@@ -269,7 +266,7 @@ it("reasoning HTTP errors cancel unread bodies while retaining status", async (t
 		timeoutMs: 120,
 		signal: caller.signal,
 	});
-	assert.equal(result.reasoning, false);
+	assert.equal(result.reasoning, null);
 	assert.match(result.error ?? "", /^HTTP 401:/);
 	assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 	await closes(() => closed);
@@ -285,8 +282,8 @@ it("healthy reasoning still requires a nonempty reasoning field", async (t) => {
 });
 
 for (const [runtime, path] of [
-	[embedRuntime, "/embedding"],
-	[rerankRuntime, "/reranking"],
+	[embedRuntime, "/health"],
+	[rerankRuntime, "/health"],
 ] as const) {
 	it(`${runtime.id} preserves actionable capability transport evidence`, async (t) => {
 		const url = await server(t, (req, res) => {
@@ -378,7 +375,7 @@ for (const cause of ["timeout", "caller"] as const) {
 			timeoutMs: 120,
 			signal: caller.signal,
 		});
-		assert.equal(result.reasoning, false);
+		assert.equal(result.reasoning, null);
 		assert.equal(result.error, cause === "caller" ? "aborted by caller" : "timeout after 120ms");
 		assert.equal(getEventListeners(caller.signal, "abort").length, 0);
 	});

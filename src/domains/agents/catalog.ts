@@ -114,7 +114,11 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 	}
 	if (shadowSpecs.length > 0) {
 		// Dispatchable, but never a `/run` suggestion: they are plumbing.
-		lines.push("", "Internal specialists, dispatch-only:", ...shadowSpecs.map(fleetPromptLine));
+		lines.push(
+			"",
+			"Shadow helpers for your internal work (dispatch-only; use detach:true for independent background work):",
+			...shadowSpecs.map(fleetPromptLine),
+		);
 	}
 	return lines.join("\n");
 }

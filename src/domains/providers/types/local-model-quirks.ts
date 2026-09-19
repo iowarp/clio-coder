@@ -7,9 +7,8 @@
  *
  * Field naming follows the Hugging Face / model-card terminology so the YAML
  * can be authored against the source-of-truth card. The OpenAI adapter
- * translates these into pi-ai sampling parameters at consumption:
- *   - OpenAI-compatible surfaces accept `top_p`, `top_k`, `min_p`,
- *     `repeat_penalty`.
+ * maps these to endpoint-specific parameters; OpenAI compatibility alone
+ * does not establish support for extensions such as top_k or repetition penalties.
  */
 
 import type { ThinkingBudgetByLevel, ThinkingEffortByLevel } from "../thinking-control-policy.js";

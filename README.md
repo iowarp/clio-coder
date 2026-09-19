@@ -63,9 +63,13 @@ In the configuration launcher, choose **Quick Connect**:
 3. **Review and Connect.** You're ready to start a session.
 
 Clio uses [recommended defaults](docs/guide/configuration-and-targets.md#recommended-defaults):
-workspace edits with command approval, workers sized to the host, a $5 tracked session
-budget, and a regular terminal interface. Other settings can wait. Escape goes
+workspace edits and recognized checks without repeated approval, workers sized to
+the host, a $5 tracked session budget, and a regular terminal interface. Unfamiliar
+commands ask; workers deny calls that need approval and can continue permitted work.
+Usage without known pricing cannot be bounded by the dollar ceiling. Other settings can wait. Escape goes
 back during setup; `clio-coder configure --settings` opens the full menu.
+Configure and `/settings` use the same categories and control catalog. Ask Clio
+“What can you do without asking me?” to get an explanation of her current settings.
 
 `clio-coder` opens the **terminal interface (TUI)**: an interactive chat that
 shows tool calls and diffs as they happen. The same command is the **CLI** for
@@ -79,7 +83,12 @@ run-time expansions. Dispatch sizes its worker pool from the host, opens and
 probes route breakers, and recovers crashed task worktrees. `doctor` gains HPC
 toolchain rows, `--deep`, a live tool-call probe, and an in-session `/doctor`.
 Slurm arrives through the clio-kit MCP server, and headless runs seal no-op
-results. See the [changelog](CHANGELOG.md) for release details and
+results. Configure and `/settings` share a searchable control catalog, and Clio
+can explain effective settings without exposing credentials. Local-provider
+requests gain cancellation and residency fixes; LiteLLM discovery respects the
+key’s inference catalog. Routine diagnostics use the TUI notice area. Plain
+`targets --probe` reads metadata; `--reasoning` and `--tools` explicitly opt into
+generating checks. See the [changelog](CHANGELOG.md) for release details and
 [Install](#install) for source builds and other package managers.
 
 ## Built for scientific software
@@ -145,7 +154,7 @@ services such as **LiteLLM gateways and Argonne ALCF inference**; and cloud
 providers including **OpenAI, Anthropic, Google, and OpenRouter**.
 
 Quick Connect handles discoverable HTTP endpoints. For subscription sign-in,
-AWS credentials, or manual model setup, use **Settings → Targets & Auth**.
+AWS credentials, or manual model setup, use **Settings → Connections**.
 The [connection guide](docs/guide/configuration-and-targets.md) covers each route.
 
 <details>
@@ -233,6 +242,12 @@ In a new session, start with `/materio:help` or
 supplied-paper literature review, lab feasibility, research tasks, verified
 execution, and a text handoff to WTF-P for paper planning. Researchers retain
 control of assumptions and scientific decisions.
+
+Clio uses shadow helpers for repository reconnaissance, provenance, and research.
+Eligible native helpers return validated typed results directly to the main agent;
+independent work can run in the background while the conversation continues.
+The terminal notice area shows helper activity, and full run receipts remain
+available when you need to inspect the evidence.
 
 The [Library](library/README.md) bundles skills, agent recipes, prompts, fleets,
 and plugins with Clio-Coder. It verifies complete package pins and supports

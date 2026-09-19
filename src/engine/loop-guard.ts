@@ -35,6 +35,7 @@ import type { MiddlewareHookRegistration } from "../domains/middleware/runtime.j
 import type { MiddlewareEffect, MiddlewareHookInput } from "../domains/middleware/types.js";
 import type { SafetyContract } from "../domains/safety/contract.js";
 import { hashToolCall } from "../domains/safety/loop-detector.js";
+import { resolveReadPath } from "../tools/path-utils.js";
 import type { AgentMessage } from "./types.js";
 
 export const LOOP_GUARD_REGISTRATION_ID = "guard.loop";
@@ -200,6 +201,16 @@ export function isLockedSynthesisFallbackOnly(message: AgentMessage | undefined)
 
 export const LOCKED_SYNTHESIS_REPROMPT_TOOL = "clio_synthesis_reprompt";
 
+/** Preserve the task and safety contract while retiring the earlier tool-use phase. */
+export function lockedSynthesisSystemPrompt(systemPrompt: string, requiredResult?: string): string {
+	return [
+		systemPrompt,
+		"# Current execution phase: final synthesis",
+		"Tools are disabled for the rest of this run. Earlier instructions to use tools apply only to the completed tool phase. Do not emit tool calls or tool-call markup. Return the final result now using the evidence already observed; preserve all safety rules and the required result format. Do not invent missing evidence.",
+		...(requiredResult ? [`Required terminal result: ${requiredResult}`] : []),
+	].join("\n\n");
+}
+
 /**
  * One bounded re-prompt after a locked round came back as tool-call markup
  * only. Delivered as a paired synthetic tool exchange, never a user turn, for
@@ -210,6 +221,7 @@ export const LOCKED_SYNTHESIS_REPROMPT_TOOL = "clio_synthesis_reprompt";
 export function lockedSynthesisRepromptMessages(
 	attempt: number,
 	origin: { provider: string; api: string; model: string },
+	requiredResult?: string,
 ): ReadonlyArray<AgentMessage> {
 	const id = `clio-synthesis-reprompt-${attempt}`;
 	const timestamp = Date.now();
@@ -239,8 +251,9 @@ export function lockedSynthesisRepromptMessages(
 					text:
 						"Your previous reply contained only tool-call markup, which cannot run: tool calls are disabled for " +
 						"the rest of this run. Everything you gathered is already in the conversation above. Write the " +
-						"final answer now as plain prose (or the exact result format the task asked for), with no tool-call " +
-						"markup of any kind.",
+						"final answer now in the required result format (JSON when a result contract requires it; otherwise prose), with no tool-call " +
+						"markup of any kind." +
+						(requiredResult ? `\nRequired terminal result: ${requiredResult}` : ""),
 				},
 			],
 			isError: true,
@@ -259,7 +272,7 @@ function synthesisLockoutDirective(): string {
 	return (
 		"loop guard: this turn reached its tool-call limit after repeated identical calls, so tool calls are now " +
 		"disabled for the rest of this turn. Everything you retrieved is already in the conversation above. Answer " +
-		"the operator now, in plain prose, from what you have gathered. Do not write tool-call markup such as " +
+		"now from what you have gathered, preserving the required result format (JSON for a JSON result contract; otherwise prose). Do not write tool-call markup such as " +
 		"<tool_call> blocks; tool calls are disabled and will not run."
 	);
 }
@@ -276,7 +289,7 @@ function synthesisBackstopReason(tool: string): string {
 function workerExplorationSynthesisDirective(limit: number): string {
 	return (
 		`worker exploration budget reached (${limit}); exploration tools are now disabled for this run. ` +
-		"Answer in plain prose from the evidence already gathered, with live path:line citations. Do not retry or " +
+		"Return the required result format from the evidence already gathered: keep JSON when the result contract requires JSON, and keep citations grounded in actual reads. Do not retry or " +
 		"substitute another tool call."
 	);
 }
@@ -431,6 +444,8 @@ export function readOrchTurnToolCallBudget(): OrchTurnToolCallBudget {
 
 export interface CreateLoopGuardRegistrationOptions {
 	safety: SafetyContract;
+	/** Enables returned-read coverage only when the caller supplies its result-shaping cap. */
+	readResultMaxBytes?: number;
 	/** Orchestrator only: LoopBlocked events for the interactive layer. */
 	bus?: SafeEventBus;
 	/** Loop blocks tolerated per turn before the block reason announces a stop. */
@@ -626,6 +641,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * differently answered call resets it.
 	 */
 	const stagnationByTurn = new Map<string, { reducedFingerprint: string; resultFingerprint: string; streak: number }>();
+	// Actual returned line coverage, not requested limits. File stamps retire old
+	// coverage after external changes; successful writes/edits clear it as well.
+	const readCoverage = new Map<string, { bytes: number; mtimeMs: number; ranges: Array<[number, number]> }>();
+	const redundantReadsByTurn = new Map<string, number>();
 	const crossArgumentResultsByTurn = new Map<
 		string,
 		{ tool: string; resultFingerprint: string; argumentFingerprints: Set<string>; warned: boolean }
@@ -670,6 +689,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		if (input.metadata?.resultKind !== "ok") return;
 		if (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit) {
 			bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
+			readCoverage.clear();
+			redundantReadsByTurn.clear();
 		}
 		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
@@ -878,7 +899,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 					reason:
 						`tool-call budget: you have made ${callsThisTurn} tool calls in this turn (soft budget ${turnBudget.soft}). ` +
 						`Every further tool call this turn will be blocked, so do not retry this call and do not substitute ` +
-						`another one. Summarize what you have found so far in plain text, state the single next step you ` +
+						`another one. Summarize what you have found so far in the required result format, state the single next step you ` +
 						`propose, and wait for the operator.`,
 					severity: "hard-block",
 				},
@@ -920,6 +941,100 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return [{ kind: "block_tool", reason, severity: "hard-block" }];
 	};
 
+	const readCoverageEffects = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const reset = () => {
+			redundantReadsByTurn.delete(turnKey);
+			return [];
+		};
+		const details = input.toolResultDetails;
+		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
+		const observation = details?.observation as
+			| { tool?: unknown; unit?: unknown; format?: unknown; shownCount?: unknown; truncated?: unknown }
+			| undefined;
+		const path = input.toolArgs?.path;
+		const offset = input.toolArgs?.offset ?? 1;
+		const resultBytes = input.metadata?.resultBytes;
+		// after_tool precedes the registry's final shaping pass. If that pass
+		// could shorten the source, its pre-shaping line count is not evidence.
+		const deliveredCap = Math.min(options.readResultMaxBytes ?? 0, resolveGuardrail("readMaxBytes"));
+		if (
+			!Number.isFinite(deliveredCap) ||
+			deliveredCap <= 0 ||
+			typeof resultBytes !== "number" ||
+			!Number.isFinite(resultBytes) ||
+			resultBytes > deliveredCap ||
+			input.toolName !== ToolNames.Read ||
+			input.metadata?.resultKind !== "ok" ||
+			typeof path !== "string" ||
+			input.toolArgs?.tail !== undefined ||
+			typeof offset !== "number" ||
+			!Number.isSafeInteger(offset) ||
+			offset < 1 ||
+			typeof file?.bytes !== "number" ||
+			!Number.isFinite(file.bytes) ||
+			typeof file.mtimeMs !== "number" ||
+			!Number.isFinite(file.mtimeMs) ||
+			details?.fileChange !== undefined ||
+			observation?.tool !== ToolNames.Read ||
+			observation.unit !== "lines" ||
+			observation.format !== "text" ||
+			typeof observation.shownCount !== "number" ||
+			!Number.isSafeInteger(observation.shownCount) ||
+			observation.shownCount <= 0
+		)
+			return reset();
+		// A byte-truncated final line may only be a prefix. Conservatively exclude
+		// the last line of any truncated window from previously observed coverage.
+		const end = offset + observation.shownCount - 1;
+		const coveredEnd = end - (observation.truncated === true ? 1 : 0);
+		if (!Number.isSafeInteger(end)) return reset();
+		// Use the same path resolution as read (including symlinks and aliases).
+		// Numbered output is separate evidence: the first citation reread is useful.
+		let canonicalPath: string;
+		try {
+			canonicalPath = resolveReadPath(path);
+		} catch {
+			return reset();
+		}
+		const key = `${turnKey}\0${canonicalPath}\0${input.toolArgs?.line_numbers === true}`;
+		let entry = readCoverage.get(key);
+		if (!entry || entry.bytes !== file.bytes || entry.mtimeMs !== file.mtimeMs) {
+			entry = { bytes: file.bytes, mtimeMs: file.mtimeMs, ranges: [] };
+		}
+		const redundant = entry.ranges.some(([start, stop]) => start <= offset && stop >= end);
+		// Even a possibly partial one-line result is redundant when an earlier
+		// complete read already covered that line. It need not add new coverage.
+		const ranges: Array<[number, number]> = [...entry.ranges];
+		if (coveredEnd >= offset) ranges.push([offset, coveredEnd]);
+		ranges.sort((a, b) => a[0] - b[0]);
+		entry.ranges = [];
+		for (const range of ranges) {
+			const last = entry.ranges.at(-1);
+			if (last && range[0] <= last[1] + 1) last[1] = Math.max(last[1], range[1]);
+			else entry.ranges.push(range);
+		}
+		// Forget excess evidence conservatively instead of retaining unbounded state.
+		entry.ranges = entry.ranges.slice(-SUCCEEDED_FINGERPRINT_LIMIT);
+		readCoverage.delete(key);
+		if (readCoverage.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
+			const oldest = readCoverage.keys().next().value;
+			if (oldest !== undefined) readCoverage.delete(oldest);
+		}
+		readCoverage.set(key, entry);
+		if (!redundant) return reset();
+		const streak = bumpBoundedCounter(redundantReadsByTurn, turnKey);
+		if (streak < RESULT_STAGNATION_THRESHOLD || lockoutByTurn.has(turnKey)) return [];
+		const reason = `loop detected: ${streak} consecutive read calls returned only source lines already observed from unchanged files. Reuse the evidence above and return the required result format; do not page through it again.`;
+		// The read already ran and remains successful. Reuse the existing loop
+		// budget/lock transition, delivering its reason as a result annotation.
+		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
+			effect.kind === "block_tool"
+				? { kind: "annotate_tool_result" as const, message: effect.reason, severity: "warn" as const }
+				: effect,
+		);
+	};
+
 	return {
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
@@ -927,7 +1042,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		hooks: ["before_tool", "after_tool"],
 		callCount: () => count,
 		extendWorkerToolCallPhase(phase): boolean {
+			// A repair may extend a soft work phase, never a sealed loop or hard-cap lock.
 			if (
+				lockoutByTurn.size > 0 ||
+				capLockout !== null ||
 				softLimit === undefined ||
 				!Number.isSafeInteger(phase.toolCalls) ||
 				!Number.isSafeInteger(phase.readReserve) ||
@@ -959,7 +1077,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
-				const effects = [...crossArgumentResultEffects(input)];
+				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input)];
 				if (
 					options.toolBudgetAdvisory &&
 					!advisoryEmitted &&

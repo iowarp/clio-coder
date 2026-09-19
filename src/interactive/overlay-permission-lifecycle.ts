@@ -58,7 +58,7 @@ export interface OverlayPermissionLifecycleDeps {
 	/** End the in-flight run, carrying the text the operator will see. */
 	stopActiveTurn(reason: string): void;
 	/**
-	 * A worker permission request parked waiting for the operator. Fired once per
+	 * A permission request parked waiting for the operator. Fired once per
 	 * request, on the same dedup the operator-facing surfaces use, so a
 	 * re-presented dialog does not notify twice.
 	 */
@@ -292,6 +292,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 			// could not mount, when it is the operator's only additional signal.
 			const announceParked = (): void => {
 				if (!markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) return;
+				deps.onOperatorParked?.();
 				const notice = approvalParkedNotice(call.tool, decision, autonomy);
 				deps.appendNotice(notice.level, notice.text);
 			};
@@ -307,7 +308,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 				announceParked();
 				return;
 			}
-			markPermissionRequestSurfaced(announcedRequestIds, meta.requestId);
+			if (markPermissionRequestSurfaced(announcedRequestIds, meta.requestId)) deps.onOperatorParked?.();
 			pendingPermission = { call, decision, meta };
 			pendingWorker = null;
 			confirmed = false;

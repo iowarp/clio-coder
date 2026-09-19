@@ -37,6 +37,9 @@ import { type AgentLedgerPort, toolSignatureOf } from "../worker/protocol.js";
 
 export { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "./worker-runtime-capabilities.js";
 
+/** Host-owned terminal protocol, never an additional workspace capability. */
+export const INTERNAL_HELPER_RESULT_TOOL = "clio_submit_result";
+
 /**
  * Build a worker-local SafetyContract that owns its own loop-detector state.
  * The state is per-worker-run (one subprocess per run) so two concurrent
@@ -192,6 +195,7 @@ export function createWorkerToolRegistry(
  */
 export interface AttestedToolIdentityInput {
 	allowedTools: ReadonlyArray<ToolName>;
+	helperResult?: true;
 	/** False when the resolved runtime mediates no tool calls at all. */
 	toolsSupported: boolean;
 	toolProfile?: ToolProfileName;
@@ -206,8 +210,8 @@ export interface AttestedToolIdentityInput {
  */
 export function attestedToolSignature(input: AttestedToolIdentityInput): string {
 	const registry = createWorkerToolRegistry();
-	return toolSignatureOf(
-		effectiveToolNames({
+	return toolSignatureOf([
+		...effectiveToolNames({
 			registry,
 			allowedTools: input.toolsSupported ? input.allowedTools : [],
 			includeInteractiveTools: false,
@@ -215,5 +219,6 @@ export function attestedToolSignature(input: AttestedToolIdentityInput): string 
 			...(input.agentId !== undefined ? { agentId: input.agentId } : {}),
 			...(input.task !== undefined ? { task: input.task } : {}),
 		}),
-	);
+		...(input.helperResult === true && input.toolsSupported ? [INTERNAL_HELPER_RESULT_TOOL] : []),
+	]);
 }

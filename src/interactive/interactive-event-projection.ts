@@ -349,13 +349,17 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 	remainingUnsubscribers.push(
 		deps.bus.on(BusChannels.ExtensionsLoadIssue, (payload) => {
 			if (typeof payload?.message !== "string" || payload.message.trim().length === 0) return;
-			deps.appendTranscriptNotice("warn", payload.message);
+			deps.notify("warning", payload.message, `extension:${payload.message}`);
 			deps.requestRender();
 		}),
 		deps.bus.on(BusChannels.MiddlewareHookFailed, (payload) => {
 			const notice = middlewareHookFailedSessionNotice(payload, seenMiddlewareBudgetWarnings);
 			if (notice === null) return;
-			deps.appendTranscriptNotice(notice.level, notice.text);
+			deps.notify(
+				notice.level === "warn" ? "warning" : "error",
+				notice.text,
+				`middleware:${payload.registrationId}:${payload.hook}:${payload.kind}`,
+			);
 			deps.requestRender();
 		}),
 	);

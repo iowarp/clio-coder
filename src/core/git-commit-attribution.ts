@@ -18,6 +18,7 @@ import {
 	type CommitAttributionEvidence,
 	decisionTrailerRefs,
 } from "./commit-attribution.js";
+import { writeDiagnostic } from "./diagnostics.js";
 import { clioStateDir } from "./xdg.js";
 
 /** Effective `attribution.gitCommits` for child-process seams. Internal state, not an operator override. */
@@ -96,7 +97,7 @@ export interface ManagedCommitAttributionEnvironment {
 export function reportCommitAttributionDiagnostic(diagnostic: string | null): void {
 	if (diagnostic === null || reportedDiagnostics.has(diagnostic)) return;
 	reportedDiagnostics.add(diagnostic);
-	process.stderr.write(`[clio-coder:attribution] ${diagnostic}\n`);
+	writeDiagnostic(`[clio-coder:attribution] ${diagnostic}\n`);
 }
 
 export function setGitCommitAttributionEnabled(enabled: boolean): void {

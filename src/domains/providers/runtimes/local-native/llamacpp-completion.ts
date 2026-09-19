@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../../../core/diagnostics.js";
 import type { Api, Model } from "../../../../engine/types.js";
 
 import { probeHttp } from "../../probe/http.js";
@@ -100,7 +101,7 @@ async function* streamSse(body: ReadableStream<Uint8Array>): AsyncGenerator<Comp
 		}
 	} finally {
 		if (droppedFrames > 0) {
-			process.stderr.write(`[clio-coder:llamacpp] dropped ${droppedFrames} malformed stream frame(s)\n`);
+			writeDiagnostic(`[clio-coder:llamacpp] dropped ${droppedFrames} malformed stream frame(s)\n`);
 		}
 		reader.releaseLock();
 	}

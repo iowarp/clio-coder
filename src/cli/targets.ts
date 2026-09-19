@@ -37,9 +37,10 @@ type ProviderOutputTier = RuntimeTier | "unknown";
 const HELP = `clio-coder targets
 
 List and manage configured model targets.
+--reasoning and --tools opt into generating qualification and can load models.
 
 Usage:
-  clio-coder targets [--json] [--probe [--tools [--tools-timeout <seconds>]]] [--target <id>]
+  clio-coder targets [--json] [--probe [--reasoning] [--tools [--tools-timeout <seconds>]]] [--target <id>]
   clio-coder targets add [configure flags]
   clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                        [--fleet-target <id>] [--fleet-model <id>]
@@ -80,6 +81,7 @@ function printUsage(usage: string): number {
 interface ListArgs {
 	json: boolean;
 	probe: boolean;
+	reasoning: boolean;
 	tools: boolean;
 	toolsTimeoutMs?: number;
 	target?: string;
@@ -124,7 +126,7 @@ interface ProfileBindArgs {
 const PROFILE_SUBCOMMANDS = new Set(["list", "set", "remove", "rename", "bind", "unbind", "bindings"]);
 
 function parseListArgs(args: ReadonlyArray<string>): ListArgs {
-	const parsed: ListArgs = { json: false, probe: false, tools: false, help: false };
+	const parsed: ListArgs = { json: false, probe: false, reasoning: false, tools: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === "--help" || arg === "-h") {
@@ -137,6 +139,10 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 		}
 		if (arg === "--probe") {
 			parsed.probe = true;
+			continue;
+		}
+		if (arg === "--reasoning") {
+			parsed.reasoning = true;
 			continue;
 		}
 		if (arg === "--tools") {
@@ -162,6 +168,7 @@ function parseListArgs(args: ReadonlyArray<string>): ListArgs {
 		if (arg?.startsWith("-")) throw new Error(`unknown flag: ${arg}`);
 		throw new Error(`unknown targets argument: ${arg}`);
 	}
+	if (parsed.reasoning && !parsed.probe) throw new Error("--reasoning requires --probe");
 	if (parsed.tools && !parsed.probe) throw new Error("--tools requires --probe");
 	if (parsed.toolsTimeoutMs !== undefined && !parsed.tools) throw new Error("--tools-timeout requires --tools");
 	return parsed;
@@ -204,13 +211,14 @@ export async function runTargetsCommand(args: ReadonlyArray<string>): Promise<nu
 	}
 	if (parsed.probe) {
 		try {
-			// The tool probe generates tokens, so `--target` narrows it to the one
-			// target the operator named instead of every configured target.
-			const toolOptions = parsed.tools
-				? { tools: true, ...(parsed.toolsTimeoutMs !== undefined ? { toolsTimeoutMs: parsed.toolsTimeoutMs } : {}) }
-				: undefined;
-			if (toolOptions && parsed.target !== undefined) await providers.probeTarget(parsed.target, toolOptions);
-			else await providers.probeAllLive(toolOptions);
+			// Explicit generation is scoped to the named target when supplied.
+			const probeOptions = {
+				reasoning: parsed.reasoning,
+				tools: parsed.tools,
+				...(parsed.toolsTimeoutMs !== undefined ? { toolsTimeoutMs: parsed.toolsTimeoutMs } : {}),
+			};
+			if (parsed.target !== undefined) await providers.probeTarget(parsed.target, probeOptions);
+			else await providers.probeAllLive(probeOptions);
 		} catch (err) {
 			process.stderr.write(`targets: live probe failed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}

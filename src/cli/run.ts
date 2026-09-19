@@ -67,7 +67,7 @@ Flags:
   --presence-penalty <N>    one-run presence penalty override
   --frequency-penalty <N>   one-run frequency penalty override
   --repeat-penalty <N>      one-run repeat penalty override
-  --max-context-tokens <N>  one-run context-window override for supported local runtimes
+  --max-context-tokens <N>  cap this run's context budget without enlarging the server window
   --json                    stream JSONL events for the main-agent path; dispatch streams events and receipt JSON
   --json-events <mode>      main-agent JSON stream mode: full|terminal; implies --json
   --steer-channel <path>    read live steering lines from a FIFO or appended regular file
@@ -103,13 +103,16 @@ ask_user interview tool is not registered. Skills that interview fall back to
 their stated defaults; supply decisions in the task prompt instead.
 
 Every main-agent receipt records blocked calls under safety.blockedAttempts and
-a noop flag. A run is a no-op when a tool call was blocked and no write
+a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
 is not. Only the main agent's own write-class calls count as writes: an
-artifact report, bash, and dispatch work do not. By default a no-op run that
-answered still exits 0. With --fail-on-noop it exits 1 and its receipt seals
-outcome "failed" with outcomeDetail "noop". The flag applies to the main agent
-only.
+artifact report, bash, and dispatch work do not. A later successful read or
+command can recover a block of the same action class; bookkeeping and reports
+cannot. An unresolved blocked run with no successful write exits 1 with outcome
+"failed" and outcomeDetail "noop".
+A successful limitation call also fails, with outcomeDetail "limitation".
+--fail-on-noop additionally fails runs whose tools all failed without a block.
+The flag applies to the main agent only.
 
 --timeout <seconds> bounds the whole run, boot included. On expiry the run
 starts the same coordinated shutdown a SIGTERM does: the turn is aborted, a

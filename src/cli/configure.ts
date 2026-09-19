@@ -21,6 +21,7 @@ import {
 } from "../core/defaults.js";
 import { initializeClioHome } from "../core/init.js";
 import { warnLegacyNaming } from "../core/naming-compat.js";
+import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { resolveClioDirs } from "../core/xdg.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import { openAuthStorage, targetRequiresAuth } from "../domains/providers/auth/index.js";
@@ -50,6 +51,7 @@ import {
 } from "../domains/scheduling/local-capacity.js";
 import { registerClioOAuthProviders } from "../engine/oauth.js";
 import { ask, askYesNo } from "./ask.js";
+import { runSectionControls, saveControl } from "./configure-controls.js";
 import { editSettings } from "./configure-editor.js";
 import { runInteropReview } from "./configure-interop.js";
 import {
@@ -102,8 +104,9 @@ Usage:
   clio-coder configure --quick           connect an endpoint with recommended defaults
   clio-coder configure --settings        open the complete settings menu
   clio-coder configure --section <name>  open one section directly:
-                                         targets, models, chat, fleet,
-                                         permissions, panes, skills, diagnostics, advanced
+                                         targets, chat, fleet, context, safety,
+                                         interface, integrations, advanced
+                                         (older section names remain accepted)
                                          Without a terminal this prints the
                                          section's values and exits.
   clio-coder configure --json            emit the effective settings as JSON
@@ -1261,32 +1264,60 @@ async function runTargetWizard(io: SectionIo, options: Parameters<typeof runOnbo
 	if (changed) io.ok(`Target ${changed.id} saved`);
 }
 
-const SECTIONS: ReadonlyArray<SectionSpec> = [
-	{
-		id: "targets",
-		title: "Targets & Auth",
-		summary: "providers, endpoints, credentials, models",
-		aliases: ["auth", "target", "providers"],
+const DIAGNOSTICS_SECTION: SectionSpec = {
+	id: "diagnostics",
+	title: "Diagnostics",
+	summary: "version, directories, doctor, raw settings",
+	aliases: ["doctor", "diag"],
+	fields: () => {
+		const dirs = resolveClioDirs();
+		const info = getVersionInfo();
+		return [
+			["Clio Coder", info.clio],
+			["Node.js", info.node],
+			["Platform", info.platform],
+			["Config dir", shortenPath(dirs.config)],
+			["Data dir", shortenPath(dirs.data)],
+			["State dir", shortenPath(dirs.state)],
+			["Cache dir", shortenPath(dirs.cache)],
+		];
+	},
+	actions: [
+		{
+			label: "Run doctor",
+			hint: "read-only health check",
+			run: async (io) => {
+				const { runDoctorCommand } = await import("./doctor.js");
+				await runDoctorCommand([]);
+				await io.rl.text("Press Enter to return");
+			},
+		},
+		{
+			label: "Show raw settings.yaml",
+			run: async (io) => {
+				const file = settingsPath();
+				if (!existsSync(file)) {
+					io.out.write("  settings.yaml does not exist yet.\n");
+					return;
+				}
+				io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
+				await io.rl.text("Press Enter to return");
+			},
+		},
+	],
+};
+
+const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "actions">> = {
+	targets: {
 		fields: () => {
 			const settings = readSettings();
-			const rows: Array<readonly [string, string]> = [
-				["Chat target", `${settings.chat.target ?? NONE} (model: ${settings.chat.model ?? "target default"})`],
-				[
-					"Fleet target",
-					`${settings.fleet.default.target ?? NONE} (model: ${settings.fleet.default.model ?? "target default"})`,
-				],
-			];
-			if (settings.targets.length === 0) rows.push(["Registered", "(no targets registered)"]);
-			else
-				for (const target of settings.targets) {
-					rows.push([
-						`  ${target.id}`,
-						`${target.runtime}, model ${target.defaultModel ?? "unset"}${
-							settings.chat.target === target.id ? " [chat]" : ""
-						}${settings.fleet.default.target === target.id ? " [fleet]" : ""}`,
-					]);
-				}
-			return rows;
+			const rows: Array<readonly [string, string]> = [];
+			for (const target of settings.targets)
+				rows.push([
+					target.id,
+					`${target.runtime} · ${target.url ?? "provider default"} · ${target.defaultModel ?? "no default model"}`,
+				]);
+			return rows.length ? rows : [["Connections", "No connections yet. Choose Add a target to connect a provider."]];
 		},
 		actions: [
 			{
@@ -1299,38 +1330,6 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					}
 					const runtime = await pickRuntimeViaCategory(io.rl);
 					if (runtime) await runTargetSetupInteractive(io.rl, runtime, emptyArgs());
-				},
-			},
-			{
-				label: "Set the chat target",
-				hint: "which target answers in chat",
-				run: async (io) => {
-					await assignTarget(io, "chat");
-				},
-			},
-			{
-				label: "Set the fleet default target",
-				hint: "which target dispatched workers use",
-				run: async (io) => {
-					await assignTarget(io, "fleet");
-				},
-			},
-			{
-				label: "Remove a target",
-				run: async (io) => {
-					const settings = readSettings();
-					const ids = settings.targets.map((target) => target.id);
-					if (ids.length === 0) {
-						io.warn("No targets to remove.");
-						return;
-					}
-					io.out.write(`  Registered: ${ids.join(", ")}\n`);
-					const chosen = await io.rl.choose("Target to remove", ids, ids[0] ?? "");
-					if (chosen === null || !ids.includes(chosen)) return;
-					if (await askYesNo(io.rl, `Remove target '${chosen}'?`, false)) {
-						if (runTargetRemove(chosen) === 0) io.ok(`Removed target ${chosen}`);
-						else io.warn(`Could not remove target ${chosen}`);
-					}
 				},
 			},
 			{
@@ -1371,24 +1370,38 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				},
 			},
 			{
-				label: "Set the background memory target",
-				run: async (io) => assignTarget(io, "memory"),
+				label: "Remove a target",
+				run: async (io) => {
+					const settings = readSettings();
+					const ids = settings.targets.map((target) => target.id);
+					if (ids.length === 0) {
+						io.warn("No targets to remove.");
+						return;
+					}
+					io.out.write(`  Registered: ${ids.join(", ")}\n`);
+					const chosen = await io.rl.choose("Target to remove", ids, ids[0] ?? "");
+					if (chosen === null || !ids.includes(chosen)) return;
+					if (await askYesNo(io.rl, `Remove target '${chosen}'?`, false)) {
+						if (runTargetRemove(chosen) === 0) io.ok(`Removed target ${chosen}`);
+						else io.warn(`Could not remove target ${chosen}`);
+					}
+				},
 			},
 		],
 	},
-	{
-		id: "models",
-		title: "Models & Thinking",
-		summary: "default model, thinking level, favorites",
-		aliases: ["model", "thinking"],
+	chat: {
 		fields: () => {
 			const settings = readSettings();
 			return [
+				["Chat target", settings.chat.target ?? NONE],
 				["Chat model", settings.chat.model ?? "(target default)"],
 				["Chat thinking", settings.chat.thinkingLevel],
-				["Fleet thinking", settings.fleet.default.thinkingLevel],
 				["Favorites", listOr(settings.chat.modelPicker.favorites)],
 				["Model cycle set", listOr(settings.chat.modelPicker.cycleSet)],
+				["Max output tokens", String(settings.chat.maxOutputTokens)],
+				["Prompt prewarm", onOff(settings.chat.prewarm)],
+				["Retry transient errors", onOff(settings.chat.retry.enabled)],
+				["Max retries", String(settings.chat.retry.maxRetries)],
 			];
 		},
 		actions: [
@@ -1404,20 +1417,10 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				},
 			},
 			{
-				label: "Fleet thinking level",
-				hint: THINKING_LEVELS.join(" | "),
+				label: "Set the chat target",
+				hint: "which target answers in chat",
 				run: async (io) => {
-					await askChoice(
-						io,
-						"Fleet thinking level",
-						THINKING_LEVELS,
-						readSettings().fleet.default.thinkingLevel,
-						(value) => {
-							updateSettings((draft) => {
-								draft.fleet.default.thinkingLevel = value as ThinkingLevel;
-							});
-						},
-					);
+					await assignTarget(io, "chat");
 				},
 			},
 			{
@@ -1445,9 +1448,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				hint: "comma-separated",
 				run: async (io) => {
 					await askList(io, "Model favorites", readSettings().chat.modelPicker.favorites, (values) => {
-						updateSettings((draft) => {
-							draft.chat.modelPicker.favorites = values;
-						});
+						saveControl("chat.modelPicker.favorites", values.join(", "));
 					});
 				},
 			},
@@ -1460,64 +1461,6 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 							draft.chat.modelPicker.cycleSet = values;
 						});
 					});
-				},
-			},
-		],
-	},
-	{
-		id: "chat",
-		title: "Chat Defaults",
-		summary: "streaming, progress, compaction",
-		fields: () => {
-			const settings = readSettings();
-			return [
-				["Smooth streaming", settings.interface.smoothStreaming],
-				["Terminal progress", onOff(settings.interface.terminalProgress)],
-				[
-					"Max output tokens",
-					settings.chat.maxOutputTokens > 0 ? String(settings.chat.maxOutputTokens) : "(runtime default)",
-				],
-				["Prompt prewarm", onOff(settings.chat.prewarm)],
-				[
-					"Auto-compaction",
-					settings.context.compaction.auto
-						? `enabled at ${Math.round(settings.context.compaction.threshold * 100)}%`
-						: "disabled",
-				],
-				[
-					"Working-set eviction",
-					settings.context.workingSet.enabled ? `enabled (${settings.context.workingSet.policy})` : "disabled",
-				],
-			];
-		},
-		actions: [
-			{
-				label: "Smooth streaming",
-				hint: "off | auto | on",
-				run: async (io) => {
-					await askChoice(
-						io,
-						"Smooth streaming",
-						["off", "auto", "on"],
-						readSettings().interface.smoothStreaming,
-						(value) => {
-							updateSettings((draft) => {
-								draft.interface.smoothStreaming = value as SmoothStreaming;
-							});
-						},
-					);
-				},
-			},
-			{
-				label: "Terminal progress indicator",
-				hint: "toggle",
-				run: async (io) => {
-					let next = false;
-					updateSettings((draft) => {
-						draft.interface.terminalProgress = !draft.interface.terminalProgress;
-						next = draft.interface.terminalProgress;
-					});
-					io.ok(`Terminal progress ${onOff(next)}`);
 				},
 			},
 			{
@@ -1543,27 +1486,15 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					io.ok(`Prompt prewarm ${onOff(next)}`);
 				},
 			},
-			{
-				label: "Auto-compaction",
-				hint: "toggle",
-				run: async (io) => {
-					let next = false;
-					updateSettings((draft) => {
-						draft.context.compaction.auto = !draft.context.compaction.auto;
-						next = draft.context.compaction.auto;
-					});
-					io.ok(`Auto-compaction ${onOff(next)}`);
-				},
-			},
 		],
 	},
-	{
-		id: "fleet",
-		title: "Fleet",
-		summary: "concurrency, retries, worker timeouts",
+	fleet: {
 		fields: () => {
 			const settings = readSettings();
 			return [
+				["Fleet target", settings.fleet.default.target ?? NONE],
+				["Fleet model", settings.fleet.default.model ?? "(target default)"],
+				["Fleet thinking", settings.fleet.default.thinkingLevel],
 				["Concurrency limit", concurrencyLabel(settings.fleet.concurrency)],
 				["Max retries", String(settings.fleet.retry.maxRetries)],
 				["Task worktree root", settings.fleet.worktrees.root],
@@ -1571,13 +1502,37 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				["Run timeout", `${settings.fleet.limits.internalRunTimeoutMs / 1000}s`],
 				["Worker profiles", listOr(Object.keys(settings.fleet.profiles))],
 				[
-					"Subagent pins",
+					"Agent routes",
 					listOr(Object.entries(settings.fleet.agentProfiles).map(([agent, profile]) => `${agent} -> ${profile}`)),
 				],
 				["Remote nodes", listOr(settings.fleet.nodes.map((node) => node.id))],
 			];
 		},
 		actions: [
+			{
+				label: "Set the fleet default target",
+				hint: "which target dispatched workers use",
+				run: async (io) => {
+					await assignTarget(io, "fleet");
+				},
+			},
+			{
+				label: "Fleet thinking level",
+				hint: THINKING_LEVELS.join(" | "),
+				run: async (io) => {
+					await askChoice(
+						io,
+						"Fleet thinking level",
+						THINKING_LEVELS,
+						readSettings().fleet.default.thinkingLevel,
+						(value) => {
+							updateSettings((draft) => {
+								draft.fleet.default.thinkingLevel = value as ThinkingLevel;
+							});
+						},
+					);
+				},
+			},
 			{
 				label: "Concurrency limit",
 				hint: "auto, or a positive integer",
@@ -1649,11 +1604,40 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			},
 		],
 	},
-	{
-		id: "permissions",
-		title: "Permissions & Autonomy",
-		summary: "autonomy level, worker permissions, cost limits",
-		aliases: ["autonomy", "safety"],
+	context: {
+		fields: () => {
+			const settings = readSettings();
+			return [
+				["Auto-compaction", onOff(settings.context.compaction.auto)],
+				["Compaction threshold", String(settings.context.compaction.threshold)],
+				["Compaction model", settings.context.compaction.model ?? "(chat model)"],
+				["Working-set eviction", onOff(settings.context.workingSet.enabled)],
+				["Tool result cap (bytes)", String(settings.context.toolResultMaxBytes)],
+				["Memory target", settings.context.memory.target ?? "(rules only)"],
+				["Memory model", settings.context.memory.model ?? "(target default)"],
+				["Proactive memory", onOff(settings.context.memory.enabled)],
+			];
+		},
+		actions: [
+			{
+				label: "Set the background memory target",
+				run: async (io) => assignTarget(io, "memory"),
+			},
+			{
+				label: "Auto-compaction",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.context.compaction.auto = !draft.context.compaction.auto;
+						next = draft.context.compaction.auto;
+					});
+					io.ok(`Auto-compaction ${onOff(next)}`);
+				},
+			},
+		],
+	},
+	safety: {
 		fields: () => {
 			const settings = readSettings();
 			return [
@@ -1662,6 +1646,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				["Session cost limit", `$${settings.safety.limits.sessionCostUsd} USD`],
 				["Turn tool budget", String(settings.safety.limits.chatToolCallsPerTurn)],
 				["Review watchdog", onOff(settings.safety.review.enabled)],
+				["External agent governance", settings.integrations.externalAgents.defaults.toolGovernance],
 			];
 		},
 		actions: [
@@ -1670,7 +1655,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 				hint: AUTONOMY_LEVELS.join(" | "),
 				run: async (io) => {
 					io.out.write(
-						"  read-only inspects; suggest asks before changes; auto-edit permits workspace\n  edits; full-auto skips autonomy prompts. Safety rules still apply at every level.\n",
+						"  read-only inspects; suggest asks before edits, execution, and delegation.\n  auto-edit allows workspace edits, recognized checks, and routine delegation;\n  unfamiliar commands and larger dispatch plans ask. Declared outward actions ask.\n  full-auto skips autonomy prompts. Safety rules still apply at every level.\n",
 					);
 					await askChoice(io, "Autonomy level", AUTONOMY_LEVELS, readSettings().safety.autonomy, (value) => {
 						updateSettings((draft) => {
@@ -1744,38 +1729,58 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			},
 		],
 	},
-	{
-		id: "panes",
-		title: "Panes & Layout",
-		summary: "terminal panes, startup layout, display mode",
-		aliases: ["layout", "interface", "pane"],
+	interface: {
 		fields: () => {
 			const settings = readSettings();
 			return [
-				["Panes capability", settings.interface.panes.enabled],
-				["Startup layout", settings.interface.panes.layout],
 				["TUI mode", settings.interface.mode],
 				["Output style", settings.interface.outputDetail],
+				["Smooth streaming", settings.interface.smoothStreaming],
+				["Terminal progress", onOff(settings.interface.terminalProgress)],
 				["Desktop notifications", onOff(settings.interface.desktopNotifications)],
-				["Git commit attribution", onOff(settings.integrations.git.commitAttribution)],
+				["Panes capability", settings.interface.panes.enabled],
+				["Startup layout", settings.interface.panes.layout],
 			];
 		},
 		actions: [
 			{
-				label: "Panes capability",
-				hint: "off | auto | embedded",
+				label: "Smooth streaming",
+				hint: "off | auto | on",
 				run: async (io) => {
 					await askChoice(
 						io,
-						"Panes capability",
-						["off", "auto", "embedded"],
-						readSettings().interface.panes.enabled,
+						"Smooth streaming",
+						["off", "auto", "on"],
+						readSettings().interface.smoothStreaming,
 						(value) => {
 							updateSettings((draft) => {
-								draft.interface.panes.enabled = value as PanesSettings["enabled"];
+								draft.interface.smoothStreaming = value as SmoothStreaming;
 							});
 						},
 					);
+				},
+			},
+			{
+				label: "Terminal progress indicator",
+				hint: "toggle",
+				run: async (io) => {
+					let next = false;
+					updateSettings((draft) => {
+						draft.interface.terminalProgress = !draft.interface.terminalProgress;
+						next = draft.interface.terminalProgress;
+					});
+					io.ok(`Terminal progress ${onOff(next)}`);
+				},
+			},
+			{
+				label: "Panes capability",
+				hint: "off | auto (join an existing pane host)",
+				run: async (io) => {
+					await askChoice(io, "Panes capability", ["off", "auto"], readSettings().interface.panes.enabled, (value) => {
+						updateSettings((draft) => {
+							draft.interface.panes.enabled = value as PanesSettings["enabled"];
+						});
+					});
 				},
 			},
 			{
@@ -1835,6 +1840,23 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					io.ok(`Desktop notifications ${onOff(next)}`);
 				},
 			},
+		],
+	},
+	integrations: {
+		fields: () => {
+			const settings = readSettings();
+			const rows: Array<readonly [string, string]> = [
+				["Trust project imports", settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"],
+				["External ACP agents", String(settings.integrations.externalAgents.entries.length)],
+				["Runtime plugins", listOr(settings.integrations.runtimePlugins)],
+				["Library remote sync", onOff(settings.integrations.library.sync)],
+				["Git commit attribution", onOff(settings.integrations.git.commitAttribution)],
+			];
+			for (const agent of settings.integrations.externalAgents.entries)
+				rows.push([agent.id, `${agent.command} (governance: ${agent.toolGovernance ?? "default"})`]);
+			return rows;
+		},
+		actions: [
 			{
 				label: "Git commit attribution",
 				hint: "toggle",
@@ -1847,29 +1869,6 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 					io.ok(`Git commit attribution ${onOff(next)}`);
 				},
 			},
-		],
-	},
-	{
-		id: "skills",
-		title: "Skills & Extensions",
-		summary: "project imports, ACP peers, plugins",
-		aliases: ["extensions", "skill", "interop"],
-		fields: () => {
-			const settings = readSettings();
-			const rows: Array<readonly [string, string]> = [
-				["Trust project imports", settings.integrations.projectResources.trustProjectImports ? "trusted" : "untrusted"],
-				["External ACP agents", String(settings.integrations.externalAgents.entries.length)],
-			];
-			for (const agent of settings.integrations.externalAgents.entries) {
-				rows.push([`  ${agent.id}`, `${agent.command} (governance: ${agent.toolGovernance ?? "default"})`]);
-			}
-			rows.push(
-				["Runtime plugins", listOr(settings.integrations.runtimePlugins)],
-				["Library remote sync", onOff(settings.integrations.library.sync)],
-			);
-			return rows;
-		},
-		actions: [
 			{
 				label: "Trust project imports",
 				hint: "toggle",
@@ -1904,58 +1903,16 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			},
 		],
 	},
-	{
-		id: "diagnostics",
-		title: "Diagnostics",
-		summary: "version, directories, doctor, raw settings",
-		aliases: ["doctor", "diag"],
+	advanced: {
 		fields: () => {
-			const dirs = resolveClioDirs();
-			const info = getVersionInfo();
 			return [
-				["Clio Coder", info.clio],
-				["Node.js", info.node],
-				["Platform", info.platform],
-				["Config dir", shortenPath(dirs.config)],
-				["Data dir", shortenPath(dirs.data)],
-				["State dir", shortenPath(dirs.state)],
-				["Cache dir", shortenPath(dirs.cache)],
+				...DIAGNOSTICS_SECTION.fields(),
+				["Settings file", shortenPath(settingsPath())],
+				["Reference", "clio-coder docs configuration-reference"],
 			];
 		},
 		actions: [
-			{
-				label: "Run doctor",
-				hint: "read-only health check",
-				run: async (io) => {
-					const { runDoctorCommand } = await import("./doctor.js");
-					await runDoctorCommand([]);
-					await io.rl.text("Press Enter to return");
-				},
-			},
-			{
-				label: "Show raw settings.yaml",
-				run: async (io) => {
-					const file = settingsPath();
-					if (!existsSync(file)) {
-						io.out.write("  settings.yaml does not exist yet.\n");
-						return;
-					}
-					io.out.write(`\n--- ${shortenPath(file)} ---\n${readFileSync(file, "utf8")}--- end ---\n`);
-					await io.rl.text("Press Enter to return");
-				},
-			},
-		],
-	},
-	{
-		id: "advanced",
-		title: "All Settings",
-		summary: "validated editor for every setting",
-		aliases: ["all", "settings"],
-		fields: () => [
-			["Settings file", shortenPath(settingsPath())],
-			["Reference", "clio-coder docs configuration-reference"],
-		],
-		actions: [
+			...DIAGNOSTICS_SECTION.actions,
 			{
 				label: "Edit all settings",
 				hint: "VISUAL / EDITOR; validate before saving",
@@ -1965,7 +1922,27 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			},
 		],
 	},
-];
+};
+
+const SECTIONS: ReadonlyArray<SectionSpec> = SETTINGS_SECTIONS.map((section) => ({
+	id: section.id,
+	title: section.label,
+	summary: section.description,
+	aliases: section.aliases,
+	...SECTION_CONTENT[section.id],
+	actions: [
+		...SECTION_CONTENT[section.id].actions,
+		...(section.id === "targets" || section.id === "advanced"
+			? []
+			: [
+					{
+						label: "All controls in this section",
+						hint: "searchable groups, help, defaults, and validated edits",
+						run: async (io: SectionIo) => runSectionControls(io.rl, section.id),
+					},
+				]),
+	],
+}));
 
 /** A `ParsedArgs` with nothing set, for the target wizard called from a section. */
 function emptyArgs(): ParsedArgs {
@@ -2107,7 +2084,8 @@ async function pickEntry(
 function renderSection(spec: SectionSpec, out: NodeJS.WritableStream): LifecyclePresenter {
 	const presenter = createLifecyclePresenter({ stream: out });
 	presenter.header(spec.title, "configure");
-	presenter.note(`Source: ${shortenPath(settingsPath())}`);
+	presenter.note(spec.summary);
+	presenter.note(`Source: ${shortenPath(settingsPath())}${spec.id === "diagnostics" ? "" : " · saves globally"}`);
 	presenter.fields(spec.fields());
 	return presenter;
 }
@@ -2168,6 +2146,7 @@ async function runConfigSectionsMenu(
 		const presenter = createLifecyclePresenter({ stream: streams.out });
 		presenter.header("Clio Coder Settings", "configure");
 		presenter.note(`Source: ${shortenPath(settingsPath())}`);
+		presenter.note("Same sections as /settings. Changes here become your saved defaults.");
 		presenter.blank();
 		const choice = await pickEntry(
 			rl,
@@ -2224,7 +2203,8 @@ async function runConfigLauncher(rl: ConfigurePrompts, streams: ConfigureStreams
 /** Resolve a `--section` value to exactly one screen, by id or listed alias. */
 function findSection(name: string): SectionSpec | undefined {
 	const wanted = name.trim().toLowerCase();
-	return SECTIONS.find((section) => section.id === wanted || (section.aliases ?? []).includes(wanted));
+	if (["diagnostics", "doctor", "diag"].includes(wanted)) return DIAGNOSTICS_SECTION;
+	return SECTIONS.find((section) => section.id === resolveSettingsSection(wanted));
 }
 
 const SECTION_IDS: ReadonlyArray<string> = SECTIONS.map((section) => section.id);

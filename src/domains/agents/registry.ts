@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { readSettings } from "../../core/config.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { enabledPluginResourceRoots } from "../plugins/index.js";
@@ -123,7 +124,7 @@ export function loadRecipesFromDir(
 			if (source.source === "builtin") throw error;
 			const message = error instanceof Error ? error.message : String(error);
 			recordDiagnostic(diagnostics, { kind: "quarantine", source: source.source, filepath, message });
-			process.stderr.write(`[clio-coder:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
+			writeDiagnostic(`[clio-coder:agents] quarantine path=${filepath} source=${source.source} reason=${message}\n`);
 		}
 	}
 
@@ -136,7 +137,7 @@ function mergeRecipes(
 	...sources: ReadonlyArray<ReadonlyArray<AgentRecipe>>
 ): ReadonlyArray<AgentRecipe> {
 	const ignored = (recipe: AgentRecipe, reason: string): void => {
-		process.stderr.write(`[clio-coder:agents] ignore id=${recipe.id} by=${recipe.source} reason=${reason}\n`);
+		writeDiagnostic(`[clio-coder:agents] ignore id=${recipe.id} by=${recipe.source} reason=${reason}\n`);
 		recordDiagnostic(diagnostics, {
 			kind: "ignored",
 			id: recipe.id,
@@ -174,7 +175,7 @@ function mergeRecipes(
 			}
 			const previous = byId.get(recipe.id);
 			if (previous) {
-				process.stderr.write(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
+				writeDiagnostic(`[clio-coder:agents] override id=${recipe.id} by=${recipe.source}\n`);
 				recordDiagnostic(diagnostics, {
 					kind: "overridden",
 					id: previous.id,

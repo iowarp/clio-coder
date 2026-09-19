@@ -11,6 +11,9 @@
  */
 
 import { createHash } from "node:crypto";
+import type { ToolName } from "../../core/tool-names.js";
+import { attestedToolSignature } from "../../engine/worker-tools.js";
+import type { ToolProfileName } from "../../tools/profiles.js";
 import {
 	canonicalJson,
 	endpointIdentityHash,
@@ -134,6 +137,11 @@ export function approvedIdentityForSpec(spec: {
 	wireModelId: string;
 	target: { id: string; url?: string };
 	allowedTools: ReadonlyArray<string>;
+	helperResult?: true;
+	toolProfile?: ToolProfileName;
+	agentId?: string;
+	task?: string;
+	runtimeResolution?: { capabilities: { tools: boolean | null } };
 }): ApprovedWorkerIdentity {
 	return {
 		specVersion: spec.specVersion,
@@ -146,7 +154,17 @@ export function approvedIdentityForSpec(spec: {
 		// The spec carries the final runtime-narrowed admission surface. The
 		// worker fingerprints its independently resolved registry intersection,
 		// so a missing, added, or differently filtered tool fails admission.
-		toolSignature: toolSignatureOf(spec.allowedTools),
+		toolSignature:
+			spec.helperResult === true
+				? attestedToolSignature({
+						allowedTools: spec.allowedTools as ReadonlyArray<ToolName>,
+						toolsSupported: spec.runtimeResolution?.capabilities.tools === true,
+						helperResult: true,
+						...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
+						...(spec.agentId !== undefined ? { agentId: spec.agentId } : {}),
+						...(spec.task !== undefined ? { task: spec.task } : {}),
+					})
+				: toolSignatureOf(spec.allowedTools),
 	};
 }
 

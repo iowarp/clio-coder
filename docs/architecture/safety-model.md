@@ -6,6 +6,16 @@ Source of truth: `src/domains/safety/**`, `src/tools/registry.ts`, `src/tools/bo
 
 ---
 
+## Process isolation boundary
+
+The policies described here classify and admit tool calls; they are not an OS
+sandbox. Child tools and external agents currently run with the host user's
+filesystem and process access. Environment filtering is a denylist and does not
+guarantee isolation of arbitrary credentials, login-shell exports, or other
+process environments. Use a separately isolated account/container or machine when
+untrusted execution must not access host secrets. Approval and read-only policy
+must not be described as filesystem, PID, or credential isolation.
+
 ## Two axes: autonomy and the safety net
 
 The `safety.autonomy` setting (`read-only` | `suggest` | `auto-edit` | `full-auto`) is an enforced dial. It controls exactly one thing: which action classes run immediately, which park for operator approval, and which are auto-denied. The safety net (damage-control rules, path policy, protected artifacts, loop guard, dispatch scope admission) is independent of the dial and identical at every level. When a `[safety-net]` notice appears at full-auto, that is the always-on net working as designed, not a contradiction of the level.
@@ -38,7 +48,7 @@ The search-scope row is the other one keyed by the call. `read`, `ls`, `grep`, a
 
 The `system_modify` confirm is level-invariant, so it is enforced and attributed as a safety-net confirm rail: the overlay, notices, and audit ledger name the net (reason code `system-modify-confirm`, policy source `builtin-classifier`), not the autonomy level. The matrix row above is unchanged in outcome at every level; only `read-only` converts the ask to a denial. `unknown` remains in the autonomy mapping because the registry substitutes a registered tool's base action class after the net evaluates.
 
-The level is persisted as `safety.autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Autonomy & Safety section.
+The level is persisted as `safety.autonomy` in `settings.yaml`, hot-reloads, and is edited in the `/settings` Permissions & Limits section.
 
 ### Consequence tier is presentation, not authority
 

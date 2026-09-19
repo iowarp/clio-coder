@@ -69,19 +69,13 @@ const llamacppEmbedRuntime: RuntimeDescriptor = {
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const probeResponse = await probeHttp({
-			url: `${base}/embedding`,
-			method: "POST",
-			timeoutMs: ctx.httpTimeoutMs,
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ content: "probe" }),
-			...(ctx.signal ? { signal: ctx.signal } : {}),
-		});
-		if (!probeResponse.ok) {
-			return { ok: false, error: `/embedding not available: ${probeResponse.error}` };
-		}
-		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
-		const result: ProbeResult = { ok: true };
+		// Inference POSTs can load a model. Even /props?model=<id> can load a
+		// router worker, so ordinary discovery reads only the root metadata.
+		const props = await probeLlamaCppProps(base, ctx);
+		const result: ProbeResult = {
+			ok: true,
+			notes: ["Embedding inference not qualified: discovery read health and metadata only."],
+		};
 		if (health.latencyMs !== undefined) result.latencyMs = health.latencyMs;
 		if (props.discoveredCapabilities) result.discoveredCapabilities = props.discoveredCapabilities;
 		if (props.serverVersion) result.serverVersion = props.serverVersion;

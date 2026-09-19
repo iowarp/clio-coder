@@ -1,4 +1,5 @@
 import { BusChannels } from "../../core/bus-events.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
 import type { ConfigContract } from "../config/contract.js";
@@ -76,7 +77,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 						},
 					].slice(-100);
 					revision += 1;
-					process.stderr.write(
+					writeDiagnostic(
 						`[clio-coder:agents] rediscovery after resource reload failed: ${error instanceof Error ? error.message : String(error)}\n`,
 					);
 				}

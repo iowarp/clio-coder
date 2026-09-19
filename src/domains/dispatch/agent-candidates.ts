@@ -59,7 +59,7 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 		/\b(?:open[- ]world|ecosystem landscape|industry landscape|state of (?:the )?art|current alternatives|latest alternatives|advisory second opinion)\b/i,
 	],
 	["research", /\b(research|investigate|explore|survey|compare|find out)\b/i],
-	["code_read", /\b(read|explain|understand|summarize|describe|walk through|map|locate|trace)\b/i],
+	["code_read", /\b(read|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i],
 	["code_write", /\b(write|implement|add|create|build|develop|introduce)\b/i],
 ];
 const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [

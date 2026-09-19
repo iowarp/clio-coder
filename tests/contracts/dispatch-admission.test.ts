@@ -174,6 +174,35 @@ describe("dispatch admission boundary", () => {
 		);
 	});
 
+	it("admits Scout investigation wording without authorizing configuration writes", () => {
+		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
+		const assess = (task: string) =>
+			assessCapabilityMismatch({
+				agentId: "scout",
+				capabilityClass: "read-only",
+				task,
+				autoSelected: false,
+				resultContractKind: "scout-report",
+				specs,
+			});
+		for (const task of [
+			'Find where clio-coder captures or could capture environment awareness (machine name, user name) during init/configure/context bootstrap. Look at: src/domains/context/bootstrap.ts, src/cli/configure.ts, src/cli/context.ts, and any settings/state files that store environment info. Report the relevant code paths, existing patterns for storing config, and where a new "environment" field would fit naturally.',
+			"Find where to add environment awareness",
+			"Find where the config loader stores settings",
+			"Look at the config loader and identify extension points",
+		]) {
+			const mismatch = assess(task);
+			ok(mismatch === null || mismatch.verdict === "flag", task);
+		}
+		for (const task of [
+			"Add environment awareness to the config loader",
+			"Write the report to disk",
+			"Find and fix the bug",
+		]) {
+			strictEqual(assess(task)?.verdict, "refuse", task);
+		}
+	});
+
 	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
 		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
 		const task =

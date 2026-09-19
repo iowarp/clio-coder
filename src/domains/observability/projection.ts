@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Reactive observability projection. Folds the dispatch, provider, and
  * diagnostic bus channels plus the session cost/telemetry trackers into a
@@ -338,7 +339,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 				listener(snapshot);
 			} catch (error) {
 				const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-				console.error(`[clio-coder:observability] projection listener crashed: ${message}`);
+				writeDiagnostic(`[clio-coder:observability] projection listener crashed: ${message}`, "error");
 			}
 		}
 	}

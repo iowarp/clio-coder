@@ -82,6 +82,7 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const input = { ...spec, runtime: litellm, cwd: env.dir };
 			// Test the production context path independently of the recipe's report schema.
 			delete input.resultContract;
+			delete input.helperResult;
 			const events: unknown[] = [];
 			const result = await startWorkerRun(input, (event) => events.push(event)).promise;
 			equal(result.exitCode, 0);

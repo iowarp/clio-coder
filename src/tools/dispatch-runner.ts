@@ -90,7 +90,9 @@ import type {
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
 import {
+	compactHelperResultLines,
 	receiptEvidenceLabels,
+	receiptHelperResult,
 	SPOT_CHECK_GUIDANCE,
 	workerTextLabel,
 	workerTextNonEvidenceNotices,
@@ -474,6 +476,7 @@ function formatDispatchOutput(
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
 	const needsSpotCheck = runs.some((run) => {
+		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
 		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
 		return state === "absent" || state === "unknown" || state === "ungrounded";
 	});
@@ -485,6 +488,8 @@ function formatDispatchOutput(
 		"",
 		...runs.flatMap((run, index) => {
 			const { receipt, receiptPath } = run;
+			const helperLines = compactHelperResultLines(receipt, run.integrity, perRunOutputBytes);
+			if (helperLines !== null) return helperLines;
 			const note = successNote(receipt);
 			const noteSuffix = note !== null ? ` note=${note}` : "";
 			// A non-success outcome is load-bearing evidence (a timeout has no
@@ -579,7 +584,9 @@ function dispatchDetails(
 			// field so a run entry without them keeps its exact shape.
 			const provenance = extractRunProvenance(receipt);
 			const trustStatus = adaptRunReceiptTrustStatus(receipt, { integrity });
+			const helperResult = receiptHelperResult(receipt, integrity);
 			return {
+				...(helperResult !== null ? { helperResult } : {}),
 				runId: receipt.runId,
 				agentId: receipt.agentId,
 				exitCode: receipt.exitCode,

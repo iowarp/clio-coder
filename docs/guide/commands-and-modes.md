@@ -24,14 +24,14 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
 | `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
 | `clio-coder --autonomy <level>` | Start this interactive session at `read-only`, `suggest`, `auto-edit`, or `full-auto` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
-| `clio-coder --no-skills` | Disable skill discovery for one invocation while still honoring explicit `--skill` paths. |
+| `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
 | `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
 | `clio-coder configure --list --all` | List every registered runtime, including aliases. |
 | `clio-coder config [inspect] [--json]` | Print the effective customization graph across settings, context files, rules, skills, prompts, agents, extensions, safety, memory, hooks, and operator profile. |
-| `clio-coder targets [--json] [--probe] [--target <id>]` | List configured targets, health, auth, runtime, model, and capabilities. |
+| `clio-coder targets [--json] [--probe [--reasoning] [--tools]] [--target <id>]` | List targets and metadata; `--reasoning` and `--tools` explicitly generate qualification requests. |
 | `clio-coder targets add` | Add a target interactively or through configure flags. |
 | `clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>] [--fleet-target <id>] [--fleet-model <id>]` | Select the named roles only when any role flag is present. `--background-model` selects memory; `--orchestrator-model` selects chat; `--fleet-model` or `--fleet-target` selects fleet. Other roles and thinking levels are preserved. Without role flags, chat and fleet use the target default (or shared `--model`), while memory is preserved. Confirmation names only roles whose settings changed. Model IDs must match a nonempty discovered or cached inventory exactly; unavailable discovery is reported explicitly. |
 | `clio-coder targets fleet [--json]` | List the configured fleet profiles with their target, runtime, model, and thinking level. `targets workers` is an accepted alias. |
@@ -115,7 +115,7 @@ For process exit codes, stdout deliverable guarantees, and machine-readable JSON
 | `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its receipt with outcome `timed_out`, and exits 124. A positive number of seconds; anything else is a usage error. Main agent only; with `--agent` it is a usage error. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
 | `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
-| `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
+| `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `--agent-profile <name>` | Use a named fleet profile for dispatch. |
 | `--agent-runtime <id>` | Pick the first fleet profile whose target uses this runtime. |
 | `--tool-profile <name>` | Restrict dispatched-agent tools: `minimal-local`, `science-local`, or `full-agent`. |
@@ -152,14 +152,22 @@ Every headless main-agent receipt carries a `safety` summary and a `noop` flag, 
 
 `noop` is true when either condition holds:
 
-- at least one tool call was blocked and no mutating call succeeded, or
+- at least one block remains unresolved and no mutating call succeeded, or
 - the run called tools and none of them succeeded.
 
 A mutating call is one the tool registry admitted with action class `write`, the class autonomy `auto-edit` runs without asking: `write`, `edit`, and an outward `web_fetch`. A terminating result does not count. The `artifact` tool's plan, review, or report is the turn's answer written to a file, so a run whose every edit was blocked and that then wrote a report about it is still a no-op. A successful `bash` call does not count, because its `execute` class says that a command ran, not that it wrote. A run that called no tool and answered in prose is not a no-op.
 
-`noop` considers only the main agent's own write-class calls. Work done through `bash` or through a successful `dispatch` is not counted, even when a dispatched worker's own receipt reports that it wrote. A run that was blocked once and then did its real work through `dispatch` therefore seals `noop: true`. A driver that relies on dispatch should read the worker receipts rather than this flag.
+A later successful substantive read or command can recover a block of the same
+action class. Bookkeeping, discovery, and terminal reports do not count as that
+recovery. A successful dispatch is not counted as the main agent's write; inspect
+worker receipts when assessing delegated changes.
 
-Without `--fail-on-noop` the exit code and receipt outcome do not change: a run whose writes were all denied and whose model then answered still exits 0 with outcome `succeeded`, and its receipt says `noop: true`. With `--fail-on-noop` that run exits 1, prints the reason on stderr, and seals outcome `failed` with `outcomeDetail: "noop"`. The flag only turns a run that would have succeeded into a failure. A run that already failed, was interrupted, or timed out keeps that outcome.
+An unresolved block with no successful write exits 1 and seals `failed` with
+`outcomeDetail: "noop"`, even without `--fail-on-noop`. A successful `limitation`
+call likewise records failure with detail `limitation`. The flag additionally
+fails runs whose attempted tools all failed without a block. Existing errors,
+interruptions, and timeouts retain their outcomes. The model's final prose is
+still available; a normal provider stop alone does not prove task completion.
 
 ### Headless Session Continuity
 
@@ -671,7 +679,7 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-Clio Coder operates with a single, unified tool surface. There are no separate tool-visibility modes; what varies is the `autonomy` level (`read-only` | `suggest` | `auto-edit` | `full-auto`), edited in the `/settings` Autonomy & Safety section.
+Clio Coder operates with a single, unified tool surface. There are no separate tool-visibility modes; what varies is the `autonomy` level (`read-only` | `suggest` | `auto-edit` | `full-auto`), edited in the `/settings` Permissions & Limits section.
 
 Tool and command execution is governed by:
 - **Target Capabilities:** What the selected model target actually supports (such as tools, streaming, and vision).

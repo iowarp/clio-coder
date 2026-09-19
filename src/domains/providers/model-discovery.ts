@@ -76,14 +76,14 @@ export function modelResidencyForStatus(status: DiscoveryStatus | null | undefin
 }
 
 export function hasLiveModelCatalog(status: TargetStatus): boolean {
-	return status.discoveredModelsSource === "probe" || status.discoveredModelsSource === "cache";
+	return status.discoveredModelsSource === "probe";
 }
 
 /**
  * Enumerate selectable wire model ids for a target. Before a live catalog is
  * known, Clio keeps useful configured/default/catalog hints. Once the target
- * returns a live catalog, that catalog is authoritative: configured and default
- * model ids that the provider no longer returns stop resolving.
+ * returns a live catalog, it supplies the current selectable candidates. Cached
+ * catalogs remain useful hints alongside configured/default ids, never live proof.
  */
 export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCandidate[] {
 	const configured = uniqueModels(status.target.wireModels ?? []);
@@ -95,7 +95,7 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 		const trimmed = id.trim();
 		if (trimmed.length === 0 || seen.has(trimmed)) return;
 		seen.add(trimmed);
-		const state = status.discoveredModelStates?.[trimmed];
+		const state = hasLiveModelCatalog(status) ? status.discoveredModelStates?.[trimmed] : undefined;
 		out.push({
 			id: trimmed,
 			...(status.discoveredModelLabels?.[trimmed] ? { label: status.discoveredModelLabels[trimmed] } : {}),
@@ -105,9 +105,18 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 		});
 	};
 
-	if (hasLiveModelCatalog(status)) {
+	if (hasLiveModelCatalog(status) && discovered.length > 0) {
 		for (const id of discovered) add(id, "live");
 		return out;
+	}
+
+	// A cached catalog is still useful for selection, but it cannot exclude an
+	// explicitly configured model or claim that an instance is currently loaded.
+	if (status.discoveredModelsSource === "cache") {
+		for (const id of configured) add(id, "configured");
+		if (defaultModel) add(defaultModel, "default");
+		for (const id of discovered) add(id, "catalog");
+		if (out.length > 0) return out;
 	}
 
 	if (configured.length > 0) {
@@ -136,10 +145,15 @@ export function modelIdsForStatus(status: TargetStatus): string[] {
 export function canonicalizeWireModelId(status: TargetStatus, requested: string): string {
 	const trimmedRequested = requested.trim();
 	if (trimmedRequested.length === 0) return requested;
-	// Canonicalize against the authoritative wire ids: the live catalog when one
-	// exists, otherwise the configured wire models.
+	// Prefer live wire ids; otherwise retain configured ids and cached hints.
 	const candidates = uniqueModels(
-		hasLiveModelCatalog(status) ? status.discoveredModels : (status.target.wireModels ?? []),
+		hasLiveModelCatalog(status)
+			? status.discoveredModels
+			: [
+					...(status.target.wireModels ?? []),
+					status.target.defaultModel ?? "",
+					...(status.discoveredModelsSource === "cache" ? status.discoveredModels : []),
+				],
 	);
 	if (candidates.includes(trimmedRequested)) return trimmedRequested;
 

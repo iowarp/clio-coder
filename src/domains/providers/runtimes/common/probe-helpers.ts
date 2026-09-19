@@ -257,6 +257,7 @@ function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial
 			"context_length",
 			"contextLength",
 			"max_context_length",
+			"max_context_window",
 			"maxContextLength",
 			"n_ctx",
 		]) ??
@@ -296,6 +297,18 @@ function capabilitiesFromOpenAIModelEntry(row: Record<string, unknown>): Partial
 	if (modalities) {
 		caps.vision = modalities.some((entry) => entry === "image" || entry === "vision");
 		if (modalities.some((entry) => entry === "audio")) caps.audio = true;
+	}
+	// Lemonade's catalog declares task and modality support as labels. Without
+	// these, embedding models inherit the runtime's chat/tool defaults and
+	// vision models lose their image input when no family catalog entry exists.
+	if (row.owned_by === "lemonade" && Array.isArray(row.labels)) {
+		const labels = new Set(row.labels.filter((label): label is string => typeof label === "string"));
+		caps.chat = labels.has("chat");
+		caps.tools = labels.has("tool-calling");
+		caps.reasoning = labels.has("reasoning");
+		caps.vision = labels.has("vision");
+		caps.embeddings = labels.has("embeddings");
+		caps.rerank = labels.has("reranking");
 	}
 	return caps;
 }

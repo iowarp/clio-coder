@@ -5,6 +5,7 @@
  * events without disturbing pi-agent-core consumers.
  */
 
+import type { StructuredHelperResult } from "../domains/agents/result-contract.js";
 import type { RunOutcomeCode } from "../domains/dispatch/types.js";
 import type { ToolFinishEvent, ToolStartEvent } from "../tools/agent-tools.js";
 
@@ -92,10 +93,17 @@ export interface ClioRunOutcomeEvent {
 	payload: { outcomeCode: RunOutcomeCode };
 }
 
+/** Emitted only after the host validates an internal helper's terminal object. */
+export interface ClioHelperResultEvent {
+	type: "clio_coder_helper_result";
+	payload: StructuredHelperResult;
+}
+
 export type ClioWorkerEvent =
 	| ClioToolStartEvent
 	| ClioToolFinishEvent
 	| ClioPermissionResolvedEvent
 	| ClioPermissionEscalatedEvent
 	| ClioSteerReceivedEvent
-	| ClioRunOutcomeEvent;
+	| ClioRunOutcomeEvent
+	| ClioHelperResultEvent;

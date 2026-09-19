@@ -31,7 +31,7 @@ graph TD
 
 The conventional final `/v1` mount and a trailing slash normalize to the same endpoint. Host aliases are not collapsed because Clio cannot prove they address the same server. For example, `http://localhost:8080/` and `http://127.0.0.1:8080/v1` remain distinct, while two target descriptors that use the same normalized URL share one endpoint limit.
 
-llama.cpp discovery reads `total_slots` from cached probe results. A router can expose the selected worker's value from `/props?model=<id>` even when router `/props` has no slot count. The selected model's `/v1/models` argv supplies a `--parallel` fallback. LM Studio defaults to one slot when its REST response supplies no concurrency fact. Ollama defaults to one unless `OLLAMA_NUM_PARALLEL` is visible to the local process.
+llama.cpp discovery reads `total_slots` from cached probe results. A router can expose the selected worker's value from `/props?model=<id>` even when router `/props` has no slot count. The selected model's `/v1/models` argv supplies a `--parallel` fallback. LM Studio defaults to one slot when its REST response supplies no concurrency fact. Ollama reports one because its native API exposes no slot count; use `maxConcurrentRequests` for a known daemon limit. The client’s environment is not server configuration.
 
 The endpoint set is resolved from the configured targets as well as the probed statuses, so it is the same set a second after boot as it is a minute later. An endpoint that resolves to no limit is not checked at all, and "not checked" is not a conservative answer.
 
@@ -105,11 +105,10 @@ dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (1/1 slot
 
 Direct lease acquisition in `src/domains/dispatch/capacity-lease.ts` reports saturation as `capacity reached`. The normal admission controller in `src/domains/dispatch/admission.ts` treats that signal as transient and leaves the assignment in its bounded shared queue, retrying until capacity opens or the request's deadline or 60-second queue ceiling wins. Capacity marked `unavailable`, drain mode, corrupt state, and other errors still fail immediately. Reservation preflight in `src/domains/dispatch/reservation-store.ts` refuses an over-capacity plan instead of queuing a partial reservation. The `1/1` example represents a generic llama.cpp server started with `--parallel 1`: a singular dispatch raised while the orchestrator is streaming waits for that slot, and a council reservation is refused before any worker starts.
 
-The reference `mini` target is not a one-slot example. It is a llama.cpp router
-at `192.168.86.141:8080` serving `ornith1.5-35b-moe` with four parallel slots
-and 262,144 context tokens per slot. One foreground stream on that endpoint
-leaves three slots for worker admission. The reference chat target, `dynamo`,
-is LM Studio at `192.168.86.143:1234` serving `qwen3.8-27b-dynamo`.
+A four-slot llama.cpp endpoint leaves three admission slots while one foreground
+stream is active. This says nothing about four independent full context windows:
+with unified KV, requests can share a single pool. Slot admission does not reserve
+VRAM or prove that the aggregate prompts will fit or meet a latency target.
 
 ### What `/council` Needs on a Single-GPU Setup
 

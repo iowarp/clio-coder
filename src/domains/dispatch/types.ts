@@ -697,6 +697,8 @@ export interface RunReceiptOutput {
 	text: string;
 	bytes: number;
 	truncated: boolean;
+	/** Host-validated internal handoff; text retains the same payload as canonical JSON. */
+	structured?: import("../agents/result-contract.js").StructuredHelperResult;
 }
 
 export type RunAutonomyEnforcementGrade = "mediated" | "approximated" | "bypassed";

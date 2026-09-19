@@ -7,7 +7,14 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 
 ## Settings keys
 
-`settings.yaml` (user, project, and project-local) and the `/settings` overlay. Defaults come from `src/core/defaults.ts`.
+`settings.yaml` (user, project, and project-local) and the `/settings` overlay. Defaults come from `src/core/defaults.ts`. Configure and `/settings` share the
+same section and control catalog: Connections, Chat, Fleet, Context & Memory,
+Permissions & Limits, Appearance, Integrations, and Advanced. Configure's
+**All controls in this section** includes less common fields with typed validation;
+structured collections accept JSON. Connection inventory and trust confirmation
+use their dedicated flows. The model can read an allowlisted view of effective
+session settings with `context(scope="settings")`; it guides the operator to
+these controls and cannot write configuration through that tool.
 
 
 | Name | Default | Controls | Precedence |
@@ -57,7 +64,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `fleet.history.journal` | `true` | Whether each dispatched run writes an `events.ndjson` journal under the state `runs/` directory (boolean); applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `fleet.history.maxRuns` | `1000` | Retention cap on the durable dispatch run ledger (integer >= 1); applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `fleet.limits.internalRunTimeoutMs` | `900000` | Wall-clock cap in ms for one internal generator dispatch such as the wiki documenter or the bootstrap scout (integer >= 1); applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
-| `fleet.limits.toolCallsPerRun` | `150` | Lifetime cap on admitted tool calls for one dispatched worker (integer >= 1); a recipe budget can only narrow it; read from effective settings at dispatch, so applies next dispatch. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
+| `fleet.limits.toolCallsPerRun` | `150` | Worker tool-call baseline (integer >= 1), captured at dispatch. Ordinary dispatch currently uses advisory budgets: this value and recipe estimates do not enforce a tool-call cutoff. Legacy enforced envelopes use it as a lifetime cap. Use an explicit deadline for a wall-clock bound. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `fleet.nodes` | `[]` | SSH-reachable worker nodes (the implicit `local` node is never listed); a node becomes dispatch-eligible only after `clio-coder doctor --fix` records a passing fleet preflight for the project root (plain `doctor` probes and reports without recording); applies next dispatch. |  |
 | `fleet.nodes[].clioCoderEntry` | `clio-coder worker` | Remote worker-entry invocation run after `cd <projectRoot>`; also version-probed by the fleet preflight; defaults to `clio-coder worker` on the remote PATH. |  |
 | `fleet.nodes[].host` |  | SSH destination host (name or address); required. |  |
@@ -116,7 +123,7 @@ Precedence, where several surfaces set the same value: a one-run CLI flag beats 
 | `interface.keybindings.<key>` |  | One rebinding: the key is a binding id such as `clio-coder.notifications.dismiss`, the value a key string or a list of alternatives; applies immediately. |  |
 | `interface.mode` | `regular` | Renderer: `regular` keeps scrollback, `fullscreen` uses the alternate screen with a sticky layout; applies at restart. |  |
 | `interface.outputDetail` | `standard` | Output style: `compact`, `standard`, `detailed`; applies immediately. Legacy `minimal`/`default`/`verbose` values are accepted. | session override (Alt+O, `/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
-| `interface.panes.enabled` | `off` | Pane-host rung: `auto` detects a guest pane host, `embedded` asks Clio to own a session (behaves as `auto` until implemented), `off` skips detection; applies at restart. | `--no-panes` / `--with-panes` (`--with-panes` keeps a saved `embedded`, otherwise `auto`) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
+| `interface.panes.enabled` | `off` | Pane-host rung: `auto` detects a guest pane host, `embedded` is a reserved value that behaves as `auto` and is not offered by the editors, `off` skips detection; applies at restart. | `--no-panes` / `--with-panes` (`--with-panes` keeps a saved `embedded`, otherwise `auto`) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `interface.panes.files.enabled` | `false` | Whether the files pane (yazi) may open (boolean); applies on the next files-pane open. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `interface.panes.files.followCwd` | `true` | Whether the files pane follows the conversation's working directory (boolean); applies on the next files-pane open. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `interface.panes.files.mode` | `companion` | Files pane mode: `companion` (picks flow back to the prompt) or `chooser`; applies on the next files-pane open. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
@@ -278,7 +285,6 @@ Read from the process environment at boot unless the row says otherwise.
 | `NODE_COMPILE_CACHE` | `unset (Clio uses `<cache>/v8-compile-cache` once the cache root exists)` | Presence (even empty) means the operator owns the V8 compile cache: Clio calls `enableCompileCache()` with no directory and never injects its own cache into workers. |  |
 | `NODE_DISABLE_COMPILE_CACHE` | `unset` | Presence disables Clio's compile cache for this process and stops the worker spawn from injecting one. |  |
 | `NODE_OPTIONS` | `unset` | Scanned for `--trace-warnings`; when present, the trace store stops suppressing Node's `node:sqlite` ExperimentalWarning. |  |
-| `OLLAMA_NUM_PARALLEL` | `1` | Positive integer parallel slot count assumed for a local Ollama server during discovery; anything else counts as 1. |  |
 | `PATH` | `unset` | Searched for executables by interop CLI detection, toolchain resolution, the uninstall shadow check, and editor probing; the bash tool's login-env capture is discarded without it. |  |
 | `PBS_JOBID` | `unset` | Non-empty value records a PBS job in the run identity (`scheduler: pbs`), checked after the SLURM id and before LSF. |  |
 | `PBS_JOBNAME` | `unset` | Job name recorded beside `PBS_JOBID` in the PBS run identity; ignored without it. |  |
@@ -370,7 +376,7 @@ Grouped by command. Global flags appear under `global`.
 | `--settings` | Open the full settings menu directly. |
 | `--edit` | Open all user settings in VISUAL/EDITOR as a draft; validate and confirm before saving, retain settings.yaml.bak, and allow repair of malformed YAML. Requires a terminal. |
 | `--json` | Print effective user settings as JSON without initializing the installation. |
-| `--section` | Open targets, models, chat, fleet, permissions, panes, skills, diagnostics, or advanced (All Settings); without a terminal, print the section values and exit. |
+| `--section` | Open targets (Connections), chat, fleet, context, safety, interface (Appearance), integrations, or advanced. Previous section names remain accepted aliases; diagnostics opens the standalone diagnostics screen. Without a terminal, print the section values and exit. |
 | `--fleet-model` | Model id stored as the fleet default model when this target becomes the fleet default target (mutually exclusive with `--agent-profile`). |
 | `--force` | Save a model outside the runtime catalog, or one the target does not advertise, without refusing. |
 | `--gateway` | Mark the registered target as a gateway. |
@@ -669,7 +675,7 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--max-context-tokens` | One-run context-window override (positive integer tokens) for supported local runtimes. |
 | `--min-p` | One-run min-p override (0 to 1) when the selected runtime supports it. |
 | `--model` | Wire model id for this run's main agent or dispatched worker instead of the target's default. |
-| `--no-skills` | Disable skill discovery for this run while still honoring explicit `--skill` paths. |
+| `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `--presence-penalty` | One-run presence-penalty override (number) when the selected runtime supports it. |
 | `--repeat-penalty` | One-run repeat-penalty override (number) when the selected runtime supports it. |
 | `--require` | Require a target capability for dispatch. Repeatable. |
@@ -1053,12 +1059,12 @@ Arguments the model can send on `dispatch`, `bash`, `context`, and `verify`, gro
 | Argument | Class | Controls |
 |---|---|---|
 | `context.include_tree` | policy | scope=skills: list files under the skill base_dir. |
-| `context.limit` | policy | scope=recall discovery: max refs (default 8, max 12). |
+| `context.limit` | policy | scope=settings: max controls (default/max 12); scope=recall discovery: max refs (default 8, max 12). |
 | `context.name` | task | scope=skills: skill name to load; omit to list. |
-| `context.query` | task | scope=recall discovery: path, tool, or ref terms; omit to list. |
+| `context.query` | task | scope=settings: path, section alias, or search terms; scope=recall discovery: path, tool, or ref terms; omit to list. |
 | `context.ref` | task | scope=recall: ref of the evicted item, as named in its marker. |
-| `context.scope` | policy | workspace, skills, or recall. |
-| `context.offset` | policy | Zero-based recall discovery offset; follow nextOffset. |
+| `context.scope` | policy | workspace, settings, skills, or recall. |
+| `context.offset` | policy | Zero-based settings or recall discovery offset; follow nextOffset. |
 
 ### `gateway`
 

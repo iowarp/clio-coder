@@ -529,7 +529,17 @@ gateway(op="call", capability="git", args={op: "log", limit: 10})
 
 Direct OBSERVE retrieval of the working environment. Source: `src/tools/context/index.ts`.
 
-Arguments are `scope` (`workspace`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills; read-only and suggest activation require an explicit operator request, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace and skills use a 50KB cap.
+Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills; read-only and suggest activation require an explicit operator request, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
+
+`context(scope="settings")` reads an allowlisted view of the running session's
+effective configuration. It explains autonomy, worker approvals, and configured
+ceilings, and names the exact configure and `/settings` destinations. `query`
+filters by section alias, settings path, or terms; `limit` is 1–12 (default 12),
+and `offset` follows `nextOffset`. Credentials, endpoint URLs, arbitrary strings,
+and structured command configuration are omitted. Configured ceilings are not
+remaining budgets. The tool never writes settings; it guides the operator to
+changes. A worker without an authoritative snapshot receives an unavailable
+error rather than guessed defaults.
 
 ```text
 context(scope="workspace")

@@ -49,12 +49,10 @@ campaign artifacts, credentials, and non-reference private endpoint details
 belong outside this repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
 the resulting execution envelope when comparing models or serving settings.
 
-The current reference deployment has two local targets. `mini` is a llama.cpp
-router at `http://192.168.86.141:8080` serving `ornith1.5-35b-moe` with four
-slots and 262144 tokens of context per slot. `dynamo` is LM Studio at
-`http://192.168.86.143:1234`, serving `qwen3.8-27b-dynamo` for chat. These are
-operator-managed deployment facts, not compiled defaults; use a live probe to
-confirm availability before a run.
+Record deployment facts with each evaluation rather than treating a particular
+host/model pairing as a product default. Use a live probe and server configuration
+to establish context and slots; a shared KV pool is not one full independent
+context allocation per slot.
 
 ## What "sanctioned" means
 
@@ -184,11 +182,13 @@ fleet worker default remains `fleet.default.thinkingLevel: off`; an explicit
 target, profile, roster member, command option, or in-session selection can
 override the applicable setting.
 
-- **Ollama (`ollama`, native API):** Ollama utilizes the native `thinking` field in the request and response payloads. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
+- **Ollama (`ollama`, native API):** Ollama uses native `think` request controls and the response’s `message.thinking` field. The engine handles Ollama-specific effort levels and streams reasoning increments cleanly through the native thinking channel.
 - **LM Studio (`lmstudio`):** Chat uses the OpenAI-compatible `/v1/chat/completions` surface, including its `reasoning` stream field. Clio controls thinking only with `reasoning_effort` and never sends `chat_template_kwargs` to LM Studio. See <https://lmstudio.ai/docs/developer/openai-compat/chat-completions>.
 - **LiteLLM (`litellm`):** This is a gateway runtime, not an `openai-compat`
-  alias. Discovery checks `/health/liveliness`, reads routed names and capability
-  metadata from `/v1/model/info`, and records the physical deployment reported
+  alias. Authenticated `/v1/models` controls selectable aliases; `/v1/model/info`
+  (or `/model/info`) enriches exact matches. Restricted detail or public liveness
+  access does not invalidate a successful listing. An explicitly empty listing
+  stays empty, and detail-only aliases are unverified hints. Clio records the physical deployment reported
   by `x-litellm-*` response headers. Deterministic gateways should publish one
   `node/model` name per deployment; genuine multi-deployment aliases expose only
   the capabilities guaranteed by every route and use the smallest unanimously
@@ -246,7 +246,9 @@ LM Studio lists downloadable model keys alongside loaded model instances. When u
 - Bare keys that already have a resident instance are never sent as raw keys (avoiding duplicate GPU allocations).
 - Resolution prefers the target's `defaultModel`, then instances unique to that host.
 - Keys reported as loaded by multiple hosts are identified as LM Link peer projections and are excluded from auto-selection.
-- Unloaded keys trigger just-in-time loading as expected.
+- Unloaded keys can trigger the server’s just-in-time load policy. Explicit REST loading requires managed lifecycle and configured load options; `user-managed` never grants Clio explicit load/unload authority.
+- Without explicit loading, a temporary catalog failure does not gate the chat request. With explicit loading, metadata must be available to resolve the intended instance.
+- Only recognized resource-capacity errors permit fallback eviction of Clio-owned instances. Invalid options and authentication errors do not; a failed replacement triggers a bounded restoration attempt.
 
 ### llama.cpp Residency and Sleep Handling
 
@@ -254,6 +256,11 @@ To maintain router availability during model switches and idle states (#127, #13
 - The residency reconciler refuses eviction if the requested replacement model is not present in the router catalog.
 - If a model load is rejected, the reconciler reloads the previously evicted model to keep the slot occupied.
 - When the llama.cpp router reports an idle model as `sleeping`, Clio recognizes it as resident rather than requesting another load (preventing `400 model is already running` errors).
+
+Router metadata, load, unload, and polling requests carry the target’s configured
+headers and credentials and honor cancellation. User-managed targets remain
+observe-only. Recovery of a model displaced during reconciliation has a separate
+bounded deadline so cancellation does not abandon restoration immediately.
 
 ### Probed Context Window Precedence
 

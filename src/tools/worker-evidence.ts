@@ -1,5 +1,9 @@
 import { mentionsWorkerToolCallCap } from "../core/guardrails.js";
-import { RESULT_SUMMARY_MAX_BYTES_CEILING, resultContractAuthorship } from "../domains/agents/result-contract.js";
+import {
+	RESULT_SUMMARY_MAX_BYTES_CEILING,
+	resultContractAuthorship,
+	type StructuredHelperResult,
+} from "../domains/agents/result-contract.js";
 import {
 	formatBudgetPolicy,
 	formatBudgetReasons,
@@ -11,6 +15,47 @@ import type { RunReceipt, RunReceiptVerification } from "../domains/dispatch/typ
 import { formatTrustAxes, formatTrustSummary } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus, type CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import { receiptGatewayRoutingLabel, receiptResponseModelIdObservationLabel } from "./dispatch-event-text.js";
+import { truncateUtf8 } from "./truncate-utf8.js";
+
+/** Expose only a completed, sealed handoff. Conformance does not imply evidence quality. */
+export function receiptHelperResult(
+	receipt: RunReceipt,
+	integrity: ReceiptIntegrityResult,
+): StructuredHelperResult | null {
+	const output = receipt.output;
+	if (
+		!integrity.ok ||
+		receipt.exitCode !== 0 ||
+		receipt.outcome !== "succeeded" ||
+		output?.state !== "final" ||
+		output.truncated ||
+		receipt.quality?.resultContract?.conformance !== "pass"
+	)
+		return null;
+	return output.structured ?? null;
+}
+
+export function compactHelperResultLines(
+	receipt: RunReceipt,
+	integrity: ReceiptIntegrityResult,
+	maxBytes: number,
+): string[] | null {
+	const result = receiptHelperResult(receipt, integrity);
+	if (result === null) return null;
+	const quality = receipt.quality?.resultContract?.quality ?? "unmeasured";
+	return [
+		`- ${receipt.agentId} · run ${receipt.runId} · ${result.kind} · quality=${quality}`,
+		...(quality !== "pass"
+			? [
+					result.kind === "scout-report"
+						? "  Findings without path and line are ungrounded leads; do not present them as verified facts."
+						: "  Content is contract-valid; its factual accuracy is unmeasured.",
+				]
+			: []),
+		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the receipt for the full result]")}`,
+		`  Receipt available on demand: monitor(mode="receipt", run_id=${JSON.stringify(receipt.runId)}).`,
+	];
+}
 
 /** Matches a source citation the parent can independently spot-check. */
 const SOURCE_CITATION_PATTERN = /([\w./~-]+):(\d+)/g;

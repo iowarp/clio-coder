@@ -16,6 +16,7 @@ import { estimateInputTokensFromContext, resolveReservedOutputTokens } from "./a
  */
 
 import path from "node:path";
+import { Type } from "typebox";
 import {
 	configureGuardrails,
 	guardrailValuesFromSettings,
@@ -27,13 +28,17 @@ import { readLayeredSettings } from "../core/settings-layers.js";
 import { agentSkillToolPolicy } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
 import {
+	internalHelperResultSchema,
 	type ObservedReadRanges,
 	type ObservedRunEffects,
 	parseWorkerResultContract,
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	type ResultContract,
 	resultContractRepairMessages,
+	resultContractShape,
+	type StructuredHelperResult,
 	validateResultContract,
+	validateStructuredHelperResult,
 } from "../domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../domains/agents/result-contract-filesystem.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
@@ -83,14 +88,15 @@ import {
 	isLoopGuardSynthesisBackstopReason,
 	lockedSynthesisFallbackText,
 	lockedSynthesisRepromptMessages,
+	lockedSynthesisSystemPrompt,
 	resolveDeliveryTools,
 	sanitizeLockedSynthesisMessage,
 	workerLoopBlockBudget,
 } from "./loop-guard.js";
-import { patchWorkerRequestPayload } from "./provider-payload.js";
+import { patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
-import { createWorkerSafety, createWorkerToolRegistry } from "./worker-tools.js";
+import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -116,6 +122,8 @@ export interface WorkerRunInput {
 	 * orchestrator for a recoverable shape mistake it was never told about.
 	 */
 	resultContract?: ResultContract;
+	/** Host-declared internal helper protocol; never inferred from agent names. */
+	helperResult?: true;
 	/** What this run delivers; decides which delivery tools the reserve keeps live. */
 	product?: AgentProduct;
 	/**
@@ -255,7 +263,7 @@ function terminalContractViolation(
 	// through 45 tool calls and lost its answer to the lockout was reported as
 	// "result must be valid JSON".
 	if (text.trim() === lockedSynthesisFallbackText()) {
-		return "the reply after the tool-call lockout held only tool-call markup and was removed; tools are off, so state the final result as plain text";
+		return "the reply after the tool-call lockout held only tool-call markup and was removed; tools are off, so emit the required terminal result format";
 	}
 	const stopReason = message.stopReason;
 	if (
@@ -376,6 +384,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// with a kind the coordinator authors, and the recipe parser refusing those
 	// killed every council vote member with a fatal spec error.
 	if (input.resultContract !== undefined) parseWorkerResultContract(input.resultContract, "WorkerSpec.resultContract");
+	const helperSchema =
+		input.helperResult === true && input.resultContract ? internalHelperResultSchema(input.resultContract) : null;
+	if (input.helperResult === true && (helperSchema === null || input.runtime.kind !== "http")) {
+		throw new Error("helperResult requires a supported internal JSON contract and native HTTP worker");
+	}
 	if (input.runtime.id === "claude-sdk") {
 		return startClaudeSdkWorkerRun(input, emit);
 	}
@@ -458,6 +471,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	let workerModelRound = 0;
 	const loopGuardRegistration = createLoopGuardRegistration({
 		safety,
+		readResultMaxBytes: workerSettings.context.toolResultMaxBytes,
 		toolCallCap: workerBudget.hardCap,
 		toolBudgetAdvisory: workerBudget.mode === "advisory",
 		toolCallSoftLimit: workerBudget.toolCalls,
@@ -527,12 +541,31 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const contractCwd = input.cwd ?? process.cwd();
 	let resultContractRepairsQueued = 0;
 	let resultContractRevisionActive = false;
+	let acceptedHelperResult: StructuredHelperResult | null = null;
+	let helperTerminalPhase = false;
+	let helperTurnFailure: string | null = null;
 	/** Read tool call id -> what was asked for, pending that call's result. */
 	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
 	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed.
 	const runEffects = createRunEffectsRecorder(contractCwd);
+	const acceptHelperResult = (data: unknown): string | null => {
+		if (!input.resultContract) return "missing helper result contract";
+		const checked = validateStructuredHelperResult({
+			contract: input.resultContract,
+			data,
+			cwd: contractCwd,
+			observedReadRanges,
+			observedRunEffects: runEffects.snapshot(),
+			networkAllowed: true,
+			filesystem: nodeResultContractFilesystem(),
+		});
+		if (checked.structured === null) return checked.validation.reason ?? "invalid helper result";
+		acceptedHelperResult = checked.structured;
+		emit({ type: "clio_coder_helper_result", payload: checked.structured });
+		return null;
+	};
 
 	/**
 	 * Fold one successful read into the observed spans. The request says where
@@ -627,6 +660,33 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(agentSkillPolicy ? { pendingSkillPolicy: agentSkillPolicy } : {}),
 		}),
 	});
+	const helperToolAvailable = helperSchema !== null && workerProviderSupportsTools(input);
+	const helperForcedChoiceAvailable = helperToolAvailable && supportsNamedToolChoice(model.api);
+	if (helperToolAvailable) {
+		tools.push({
+			name: INTERNAL_HELPER_RESULT_TOOL,
+			label: "Submit helper result",
+			description:
+				"Submit the final internal result as this tool's arguments. Call alone, after gathering evidence. A validated submission finishes the run; no prose response follows.",
+			parameters: Type.Unsafe<Record<string, unknown>>(helperSchema),
+			async execute(_id, args) {
+				if (acceptedHelperResult !== null || workerBoundFailure !== null) {
+					return {
+						content: [{ type: "text", text: "The terminal result is already sealed." }],
+						details: { kind: "error" },
+						terminate: true,
+					};
+				}
+				helperTerminalPhase = true;
+				synthesisToolLock = true;
+				helperTurnFailure = acceptHelperResult(args);
+				if (helperTurnFailure !== null) {
+					return { content: [{ type: "text", text: helperTurnFailure }], details: { kind: "error" } };
+				}
+				return { content: [{ type: "text", text: "Internal result accepted." }], details: { kind: "ok" }, terminate: true };
+			},
+		});
+	}
 	if (tools.length === 0 && activeWorkerTools.length > 0) {
 		process.stderr.write(`[worker] warning: no tools resolved for allowed=[${activeWorkerTools.join(",")}]\n`);
 	}
@@ -639,13 +699,47 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const inheritedCount = inheritedMessages.length;
 	const contextGuard = createWorkerContextGuard(observations.archive);
 	const options: EngineAgentOptions = {
+		beforeToolCall: async ({ assistantMessage, toolCall }) => {
+			if (helperSchema === null) return undefined;
+			if (acceptedHelperResult !== null || workerBoundFailure !== null)
+				return { block: true, reason: "The helper result is sealed.", terminate: true };
+			const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
+			if (calls.some((call) => call.name === INTERNAL_HELPER_RESULT_TOOL) && calls.length !== 1) {
+				helperTurnFailure =
+					"Submit exactly one terminal handoff, alone; mixed or duplicate handoff batches are rejected without executing work.";
+				return { block: true, reason: helperTurnFailure };
+			}
+			if ((helperTerminalPhase || synthesisToolLock) && toolCall.name !== INTERNAL_HELPER_RESULT_TOOL) {
+				helperTurnFailure = "Work tools are disabled. Submit only the internal terminal result.";
+				return { block: true, reason: helperTurnFailure };
+			}
+			return undefined;
+		},
+		afterToolCall: async ({ toolCall, result }) =>
+			toolCall.name === INTERNAL_HELPER_RESULT_TOOL && (result.details as { kind?: string } | undefined)?.kind === "error"
+				? { isError: true }
+				: undefined,
+		shouldStopAfterTurn: () => helperSchema !== null && (acceptedHelperResult !== null || workerBoundFailure !== null),
 		streamFn: (currentModel, currentContext, streamOptions) => {
+			const helperPrompt =
+				helperToolAvailable && (!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable)
+					? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${synthesisToolLock || helperTerminalPhase ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
+					: currentContext.systemPrompt;
+			const systemPrompt =
+				helperToolAvailable && (!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable)
+					? helperPrompt
+					: synthesisToolLock
+						? lockedSynthesisSystemPrompt(
+								currentContext.systemPrompt ?? "",
+								input.resultContract ? resultContractShape(input.resultContract) : undefined,
+							)
+						: currentContext.systemPrompt;
 			const window = input.runtimeResolution?.capabilities.contextWindow ?? currentModel.contextWindow;
 			let messages: AgentMessage[];
 			try {
 				messages = contextGuard({
 					messages: currentContext.messages,
-					systemPrompt: currentContext.systemPrompt ?? "",
+					systemPrompt: systemPrompt ?? "",
 					tools: currentContext.tools ?? [],
 					contextWindow: window,
 					threshold: workerSettings.context.compaction.threshold,
@@ -665,7 +759,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			}
 			return engineStreamSimple(
 				currentModel,
-				{ ...currentContext, messages: messages as typeof currentContext.messages },
+				{
+					...currentContext,
+					...(systemPrompt !== undefined ? { systemPrompt } : {}),
+					messages: messages as typeof currentContext.messages,
+				},
 				streamOptions,
 			);
 		},
@@ -683,6 +781,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				thinkingLevel: effectiveThinkingLevel,
 				...(input.responseSchema !== undefined ? { responseSchema: input.responseSchema } : {}),
 				toolSurfaceLocked: synthesisToolLock,
+				...(helperToolAvailable && (synthesisToolLock || helperTerminalPhase) && supportsNamedToolChoice(currentModel.api)
+					? { terminalToolName: INTERNAL_HELPER_RESULT_TOOL }
+					: {}),
 				toolChoiceNone: middlewareChoice.kind === "none",
 				...(middlewareChoice.kind === "required" ? { toolChoiceName: middlewareChoice.toolName } : {}),
 			});
@@ -696,8 +797,59 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	// one drain, or the provider sees a lone assistant tool call.
 	agent.followUpMode = "all";
 	abortWorkerForBound = () => agent.abort();
+	const repairHelperResult = (reason: string): void => {
+		if (!input.resultContract || acceptedHelperResult !== null || workerBoundFailure !== null) return;
+		helperTerminalPhase = true;
+		synthesisToolLock = true;
+		if (resultContractRepairsQueued >= RESULT_CONTRACT_REPAIR_LIMIT) {
+			workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${reason}`;
+			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
+			return;
+		}
+		resultContractRepairsQueued += 1;
+		const instruction = helperForcedChoiceAvailable
+			? `${reason} Work tools remain disabled. Repair the result by calling ${INTERNAL_HELPER_RESULT_TOOL} exactly once, alone, with the complete result object. Do not emit prose.`
+			: reason;
+		for (const message of resultContractRepairMessages(
+			{
+				contract: input.resultContract,
+				reason: instruction,
+				attempt: resultContractRepairsQueued,
+				anchors: observedReadAnchors(),
+			},
+			{ provider: model.provider, api: model.api, model: model.id },
+		)) {
+			const repairMessage =
+				helperForcedChoiceAvailable && message.role === "toolResult"
+					? {
+							...message,
+							content: [
+								{
+									type: "text" as const,
+									text: `${instruction}\nRequired arguments schema: ${JSON.stringify(helperSchema)}\nObserved read ranges: ${observedReadAnchors().join(", ") || "none"}`,
+								},
+							],
+						}
+					: message;
+			agent.followUp(repairMessage as unknown as AgentMessage);
+		}
+	};
 	const unsubscribe = agent.subscribe(async (event) => {
-		if (event.type === "turn_start") workerModelRound += 1;
+		if (event.type === "turn_start") {
+			workerModelRound += 1;
+			helperTurnFailure = null;
+		}
+		// Detect the whole terminal batch before any call is prepared/executed.
+		// beforeToolCall rejects every sibling, regardless of ordering or parallelism.
+		if (helperSchema !== null && event.type === "message_end" && isAssistantMessage(event.message)) {
+			const calls = event.message.content.filter((block) => block.type === "toolCall");
+			if (calls.some((call) => call.name === INTERNAL_HELPER_RESULT_TOOL)) {
+				helperTerminalPhase = true;
+				synthesisToolLock = true;
+				if (calls.length !== 1)
+					helperTurnFailure = "Submit exactly one terminal handoff, alone; mixed or duplicate batches cannot execute work.";
+			}
+		}
 		if (event.type === "tool_execution_start") middlewareToolChoice.toolStarted(event.toolName);
 		// Read spans this run actually observed. They ground the terminal result
 		// (a cited line has to fall inside one) and they are handed back verbatim
@@ -734,23 +886,25 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// the same message and the run then ran out of repairs on a later
 		// grounding violation).
 		let repromptedThisMessage = false;
-		if (synthesisToolLock && event.type === "message_end") {
+		if (synthesisToolLock && !helperToolAvailable && event.type === "message_end") {
 			const stripped = sanitizeLockedSynthesisMessage(event.message);
 			// A model that calls a tool anyway hands its markup back as text and
 			// the sanitizer leaves only the fallback notice: the training habit
 			// survives the strip (Qwen3.8 did it in 1 of 5 stripped runs). One
 			// re-prompt, delivered as a tool exchange like the result-contract
-			// repair, asks for the answer in prose; a second markup-only reply
+			// repair, asks for the required result format; a second markup-only reply
 			// keeps the notice.
 			if (stripped && lockedSynthesisReprompts < 1 && isLockedSynthesisFallbackOnly(event.message)) {
 				lockedSynthesisReprompts += 1;
 				repromptedThisMessage = true;
-				process.stderr.write("[worker] synthesis lock: reply was tool-call markup only; re-prompting once for prose\n");
-				for (const message of lockedSynthesisRepromptMessages(lockedSynthesisReprompts, {
-					provider: model.provider,
-					api: model.api,
-					model: model.id,
-				})) {
+				process.stderr.write(
+					"[worker] synthesis lock: reply was tool-call markup only; re-prompting once for the required final format\n",
+				);
+				for (const message of lockedSynthesisRepromptMessages(
+					lockedSynthesisReprompts,
+					{ provider: model.provider, api: model.api, model: model.id },
+					input.resultContract ? resultContractShape(input.resultContract) : undefined,
+				)) {
 					agent.followUp(message as unknown as AgentMessage);
 				}
 			}
@@ -762,7 +916,46 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		// same contract against the sealed receipt; this is the only point at
 		// which the model can still act on the validator's reason.
 		const contract = input.resultContract;
-		if (contract && !repromptedThisMessage && event.type === "message_end" && isTerminalAssistantMessage(event.message)) {
+		if (
+			helperSchema !== null &&
+			contract &&
+			!repromptedThisMessage &&
+			event.type === "message_end" &&
+			isTerminalAssistantMessage(event.message)
+		) {
+			const text = assistantMessageText(event.message);
+			let reason: string | null;
+			try {
+				reason = acceptHelperResult(JSON.parse(text ?? ""));
+			} catch {
+				reason = "The internal result must be a JSON object conforming to the declared contract.";
+			}
+			if (reason !== null) repairHelperResult(reason);
+		}
+		if (
+			helperSchema !== null &&
+			event.type === "turn_end" &&
+			acceptedHelperResult === null &&
+			event.toolResults.length > 0 &&
+			(helperTerminalPhase || synthesisToolLock)
+		) {
+			const error = event.toolResults.find((result) => result.isError);
+			const reason =
+				helperTurnFailure ??
+				error?.content
+					.filter((block) => block.type === "text")
+					.map((block) => block.text)
+					.join("\n") ??
+				"The terminal handoff was not accepted.";
+			repairHelperResult(reason);
+		}
+		if (
+			helperSchema === null &&
+			contract &&
+			!repromptedThisMessage &&
+			event.type === "message_end" &&
+			isTerminalAssistantMessage(event.message)
+		) {
 			const violation = terminalContractViolation(
 				contract,
 				event.message,
@@ -1056,6 +1249,9 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				return { messages: agent.state.messages.slice(inheritedCount), exitCode: WORKER_EXIT_PERMISSION_REQUIRED };
 			}
 			const messages = agent.state.messages.slice(inheritedCount);
+			if (helperSchema !== null && acceptedHelperResult === null) {
+				return { messages, exitCode: 1 };
+			}
 			const errorMessage = getTerminalAgentError(messages);
 			if (errorMessage !== null) {
 				if (errorMessage.length > 0) {

@@ -1,14 +1,7 @@
 /**
- * Reasoning-capability probe for OpenAI-compatible HTTP endpoints.
- *
- * Local servers (LM Studio, llama.cpp, sglang, vllm, ...) advertise themselves
- * through an OpenAI-compatible surface regardless of whether the loaded model supports thinking.
- * Defaulting `caps.reasoning = false` means `/thinking` only ever surfaces
- * `["off"]` for these targets. Probing with a one-shot priming request reveals
- * the truth: a thinking-capable model emits a non-empty `reasoning_content`
- * (llama.cpp), `reasoning` (LM Studio + chat-templates), or `reasoning_text`
- * field in the streamed response. Caching the result per (target, model)
- * keeps the cost to a single round-trip per session.
+ * Explicit, generating reasoning qualification for OpenAI-compatible endpoints.
+ * Observing reasoning is positive evidence; an ordinary answer, error or timeout
+ * cannot establish that the model does not support reasoning.
  */
 import { performance } from "node:perf_hooks";
 
@@ -24,7 +17,7 @@ export interface ProbeReasoningOptions {
 }
 
 export interface ProbeReasoningResult {
-	reasoning: boolean;
+	reasoning: true | null;
 	field?: "reasoning_content" | "reasoning" | "reasoning_text";
 	latencyMs: number;
 	error?: string;
@@ -97,17 +90,17 @@ export async function probeOpenAICompatReasoning(opts: ProbeReasoningOptions): P
 		if (!response.ok) {
 			await response.body?.cancel();
 			controller.signal.throwIfAborted();
-			return { reasoning: false, latencyMs, error: `HTTP ${response.status}: ${response.statusText}` };
+			return { reasoning: null, latencyMs, error: `HTTP ${response.status}: ${response.statusText}` };
 		}
 		const data = (await response.json()) as ChatCompletionResponse;
 		const field = detectReasoningField(data);
 		if (field) return { reasoning: true, field, latencyMs };
-		return { reasoning: false, latencyMs };
+		return { reasoning: null, latencyMs };
 	} catch (err) {
 		const latencyMs = Math.round(performance.now() - started);
-		if (timedOut) return { reasoning: false, latencyMs, error: `timeout after ${opts.timeoutMs}ms` };
-		if (opts.signal?.aborted) return { reasoning: false, latencyMs, error: "aborted by caller" };
-		return { reasoning: false, latencyMs, error: err instanceof Error ? err.message : String(err) };
+		if (timedOut) return { reasoning: null, latencyMs, error: `timeout after ${opts.timeoutMs}ms` };
+		if (opts.signal?.aborted) return { reasoning: null, latencyMs, error: "aborted by caller" };
+		return { reasoning: null, latencyMs, error: err instanceof Error ? err.message : String(err) };
 	} finally {
 		clearTimeout(timer);
 		if (opts.signal) opts.signal.removeEventListener("abort", onExternalAbort);

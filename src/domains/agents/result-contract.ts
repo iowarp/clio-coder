@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
 import { AGENT_AUTOMATION_AUTHORITIES, type AgentAutomationAuthority } from "./spec.js";
 
 export type ResultContract =
@@ -89,6 +90,115 @@ export type ResultContract =
 	| { kind: "code-report" };
 
 export type ResultContractQuality = "pass" | "fail" | "unmeasured";
+
+export { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
+export type InternalHelperResultKind = (typeof INTERNAL_HELPER_RESULT_KINDS)[number];
+export interface StructuredHelperResult {
+	version: 1;
+	kind: InternalHelperResultKind;
+	/** Validated task content, never an authority grant or a host verification claim. */
+	data: Record<string, unknown>;
+}
+
+/** Generation schemas guide serialization; the semantic validators below remain authoritative. */
+export function internalHelperResultSchema(contract: ResultContract): Record<string, unknown> | null {
+	const text = { type: "string", minLength: 1 };
+	const list = (items: Record<string, unknown>) => ({ type: "array", items });
+	const object = (properties: Record<string, unknown>) => ({
+		type: "object",
+		properties,
+		required: Object.keys(properties),
+		additionalProperties: false,
+	});
+	const strings = list(text);
+	switch (contract.kind) {
+		case "scout-report":
+			return object({
+				findings: list({
+					anyOf: [object({ claim: text, path: text, line: { type: "integer", minimum: 1 } }), object({ claim: text })],
+				}),
+				needsSplit: { type: "boolean" },
+				proposedSubtasks: {
+					...list(
+						object({
+							id: text,
+							task: { ...text, maxLength: 4096 },
+							dependencies: { ...strings, maxItems: 4, uniqueItems: true },
+							expectedResultContract: { type: "string", enum: [...RESULT_CONTRACT_KINDS] },
+							requestedAuthority: { type: "string", enum: [...AGENT_AUTOMATION_AUTHORITIES] },
+						}),
+					),
+					maxItems: 4,
+				},
+			});
+		case "research-report":
+			return object({
+				source: { type: "string", enum: ["local", "external"] },
+				findings: list(object({ claim: text, evidence: text })),
+			});
+		case "world-knowledge-report":
+			return object({
+				discovery: { type: "string", enum: ["performed", "caller-supplied-only", "unavailable"] },
+				facts: list(object({ claim: text, evidence: text, sources: strings })),
+				synthesis: strings,
+				uncertainties: strings,
+				followUpVerification: strings,
+			});
+		case "provenance-report":
+			return object({ confirmedFacts: strings, missingEvidence: strings, nextInspections: strings });
+		case "oracle-report":
+			return object({ verdict: text, challenge: text, changesMyMind: text, citedDecisions: strings });
+		case "context-handbook":
+			return object({
+				projectName: text,
+				identity: text,
+				conventions: strings,
+				invariants: strings,
+				sections: list(object({ title: text, body: text })),
+			});
+		default:
+			return null;
+	}
+}
+
+/** Decode a helper value through exactly the ordinary contract and grounding checks. */
+export function validateStructuredHelperResult(
+	input: Omit<ResultContractValidationInput, "output"> & { data: unknown },
+): { validation: ResultContractValidation; structured: StructuredHelperResult | null } {
+	const reject = (reason: string) => ({ validation: failure(input.contract, "unmeasured", reason), structured: null });
+	if (!(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(input.contract.kind))
+		return reject("unsupported internal helper contract");
+	if (input.data === null || typeof input.data !== "object" || Array.isArray(input.data))
+		return reject("helper result must be a JSON object");
+	let output: string;
+	try {
+		output = JSON.stringify(input.data, (_key, value) => {
+			if (
+				value === undefined ||
+				typeof value === "function" ||
+				typeof value === "symbol" ||
+				(typeof value === "number" && !Number.isFinite(value))
+			)
+				throw new Error("non-JSON value");
+			return value;
+		});
+	} catch {
+		return reject("helper result must contain only JSON values");
+	}
+	const validation = validateResultContract({ ...input, output });
+	if (validation.conformance !== "pass") return { validation, structured: null };
+	let data = JSON.parse(output) as Record<string, unknown>;
+	// Salvage is data-only: discard unknown fields and any split/control claims.
+	// Preserve ungrounded observations without accidentally promoting their citations.
+	if (validation.scout?.degradedReason !== undefined) {
+		data = {
+			findings: [...validation.scout.findings, ...(validation.scout.ungroundedClaims ?? []).map((claim) => ({ claim }))],
+			needsSplit: false,
+			proposedSubtasks: [],
+		};
+	}
+	return { validation, structured: { version: 1, kind: input.contract.kind as InternalHelperResultKind, data } };
+}
 
 export interface ResultContractValidation {
 	/** Whether the declared postcondition itself was met. */

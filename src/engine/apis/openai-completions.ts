@@ -29,9 +29,12 @@ import {
 	reasoningClassForMechanism,
 	resolveModelRuntimeCapabilitiesForModel,
 } from "../../domains/providers/model-runtime-capabilities.js";
-import { lmStudioReasoningEffort } from "../../domains/providers/runtimes/common/lmstudio-http.js";
+import {
+	invalidateLmStudioCatalog,
+	lmStudioReasoningEffort,
+} from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
-import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
+import type { LocalModelQuirks } from "../../domains/providers/types/local-model-quirks.js";
 import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
@@ -42,7 +45,7 @@ import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-
 import { ensureLmStudioResidency, listLmStudioResidentModels } from "./lmstudio.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
-import { mergeSamplingOverride } from "./sampling-overrides.js";
+import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
 declare module "@earendil-works/pi-ai" {
@@ -90,15 +93,6 @@ function chatTemplateKwargsUnsupported(model: Model<Api>): boolean {
 
 function clioQuirks(model: Model<"openai-completions">): LocalModelQuirks | undefined {
 	return (model as Model<"openai-completions"> & ClioRuntimeMetadata).clioCoder?.quirks;
-}
-
-function pickSamplingProfile(
-	quirks: LocalModelQuirks | undefined,
-	thinkingActive: boolean,
-): SamplingProfile | undefined {
-	const sampling = quirks?.sampling;
-	const profile = sampling ? (thinkingActive ? (sampling.thinking ?? sampling.instruct) : sampling.instruct) : undefined;
-	return mergeSamplingOverride(profile);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -288,8 +282,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 			}
 			annotated.end();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			throw new Error(message);
+			failStream(annotated, model, err);
 		}
 	})();
 	return annotated;
@@ -313,34 +306,17 @@ function withLiteLLMRouteFailureAdvice(
 			}
 			advised.end();
 		} catch (err) {
-			if (err instanceof Error && err.name === "AbortError") throw err;
 			const message = err instanceof Error ? err.message : String(err);
-			throw new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id));
+			failStream(
+				advised,
+				model,
+				err instanceof Error && err.name === "AbortError"
+					? err
+					: new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id)),
+			);
 		}
 	})();
 	return advised;
-}
-
-function samplingParamsFromProfile(profile: SamplingProfile): Record<string, unknown> {
-	return {
-		...(profile.topP !== undefined ? { top_p: profile.topP } : {}),
-		...(profile.topK !== undefined ? { top_k: profile.topK } : {}),
-		...(profile.minP !== undefined ? { min_p: profile.minP } : {}),
-		...(profile.repeatPenalty !== undefined ? { repeat_penalty: profile.repeatPenalty } : {}),
-		...(profile.presencePenalty !== undefined ? { presence_penalty: profile.presencePenalty } : {}),
-		...(profile.frequencyPenalty !== undefined ? { frequency_penalty: profile.frequencyPenalty } : {}),
-	};
-}
-
-function piThinkingBudgets(quirks: LocalModelQuirks | undefined): ThinkingBudgets | undefined {
-	const budgets = quirks?.thinking?.budgetByLevel;
-	if (!budgets) return undefined;
-	return {
-		...(budgets.minimal !== undefined ? { minimal: budgets.minimal } : {}),
-		...(budgets.low !== undefined ? { low: budgets.low } : {}),
-		...(budgets.medium !== undefined ? { medium: budgets.medium } : {}),
-		...(budgets.high !== undefined ? { high: budgets.high } : {}),
-	};
 }
 
 type AnyOnPayload = (payload: unknown, model: Model<Api>) => unknown | undefined | Promise<unknown | undefined>;
@@ -461,22 +437,13 @@ function applyThinkingPayload(
 	resolved: ResolvedModelRuntimeCapabilities,
 	model: Model<Api>,
 ): Record<string, unknown> {
-	if (applied.mechanism === "none") {
-		const next = stripThinkingRequestFields(payload);
+	if (applied.mechanism === "none" || applied.mechanism === "always-on") {
+		const next = applied.mechanism === "none" ? stripThinkingRequestFields(payload) : { ...payload };
 		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
 			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
 			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
 		}
 		return next;
-	}
-	if (applied.mechanism === "always-on") {
-		if (resolved.request.chatTemplateKwargs && !chatTemplateKwargsUnsupported(model)) {
-			const next: Record<string, unknown> = { ...payload };
-			const existing = isPlainRecord(next.chat_template_kwargs) ? next.chat_template_kwargs : {};
-			next.chat_template_kwargs = { ...existing, ...resolved.request.chatTemplateKwargs };
-			return next;
-		}
-		return payload;
 	}
 	const next: Record<string, unknown> = { ...payload };
 	if (
@@ -581,11 +548,8 @@ function composeThinkingOnPayload(
 		if (!isPlainRecord(payload)) {
 			return base ? await base(payload, model) : undefined;
 		}
-		const next = applyLmStudioPayload(
-			applyThinkingPayload(applyLlamaCppPromptCachePayload(payload, model, retention), resolved.thinking, resolved, model),
-			model,
-			resolved,
-		);
+		const cached = applyLlamaCppPromptCachePayload(payload, model, retention);
+		const next = applyLmStudioPayload(applyThinkingPayload(cached, resolved.thinking, resolved, model), model, resolved);
 		if (base) {
 			const fromBase = await base(next, model);
 			if (fromBase !== undefined) return fromBase;
@@ -604,24 +568,16 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 	const profile = pickSamplingProfile(quirks, applied.thinkingActive);
 	const promptCache = shouldApplyLlamaCppPromptCache(model);
 	const lmstudio = isLmStudioModel(model);
-	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? piThinkingBudgets(quirks) : undefined;
-	if (
-		!promptCache &&
-		!lmstudio &&
-		!profile &&
-		!vllmThinkingBudgets &&
-		applied.mechanism !== "effort-levels" &&
-		applied.mechanism !== "budget-tokens" &&
-		applied.mechanism !== "on-off" &&
-		applied.mechanism !== "none"
-	) {
+	const vllmThinkingBudgets = resolved.runtimeId === "vllm" ? quirks?.thinking?.budgetByLevel : undefined;
+	const needsPayloadControls = promptCache || lmstudio || applied.mechanism !== "always-on";
+	if (!profile && !vllmThinkingBudgets && !needsPayloadControls) {
 		return options;
 	}
 	const merged: Record<string, unknown> = { ...(options ?? {}) };
 	if (profile?.temperature !== undefined && merged.temperature === undefined) merged.temperature = profile.temperature;
 	if (profile) {
 		merged.samplingParams = {
-			...samplingParamsFromProfile(profile),
+			...samplingParamsFromProfile(profile, resolved.runtimeId),
 			...options?.samplingParams,
 		};
 	}
@@ -631,14 +587,7 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 			...(options as StreamOptionsWithThinkingBudgets | undefined)?.thinkingBudgets,
 		};
 	}
-	if (
-		promptCache ||
-		lmstudio ||
-		applied.mechanism === "effort-levels" ||
-		applied.mechanism === "budget-tokens" ||
-		applied.mechanism === "on-off" ||
-		applied.mechanism === "none"
-	) {
+	if (needsPayloadControls) {
 		merged.onPayload = composeThinkingOnPayload(resolved, options?.onPayload, options?.cacheRetention);
 	}
 	return merged as TOptions;
@@ -646,6 +595,7 @@ function withSamplingOverrides<TOptions extends StreamOptions>(
 
 function stripNeverReasoningFromStream(
 	source: AssistantMessageEventStream,
+	model: Model<Api>,
 	resolved: ResolvedModelRuntimeCapabilities,
 ): AssistantMessageEventStream {
 	if (!stripsThinking(resolved)) return source;
@@ -666,8 +616,7 @@ function stripNeverReasoningFromStream(
 			}
 			stripped.end();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			throw new Error(message);
+			failStream(stripped, model, err);
 		}
 	})();
 	return stripped;
@@ -750,7 +699,7 @@ function runtimeMetadata(model: Model<Api>): NonNullable<ClioRuntimeMetadata["cl
 	return (model as Model<Api> & ClioRuntimeMetadata).clioCoder;
 }
 
-function emptyErrorMessage(model: Model<"openai-completions">, message: string): AssistantMessage {
+function emptyErrorMessage(model: Model<Api>, message: string): AssistantMessage {
 	return {
 		role: "assistant",
 		content: [],
@@ -769,6 +718,13 @@ function emptyErrorMessage(model: Model<"openai-completions">, message: string):
 		errorMessage: message,
 		timestamp: Date.now(),
 	};
+}
+
+function failStream(stream: AssistantMessageEventStream, model: Model<Api>, cause: unknown): void {
+	const error = emptyErrorMessage(model, cause instanceof Error ? cause.message : String(cause));
+	error.stopReason = cause instanceof Error && cause.name === "AbortError" ? "aborted" : "error";
+	stream.push({ type: "error", reason: error.stopReason, error });
+	stream.end(error);
 }
 
 function malformedToolArgsMessage(
@@ -845,7 +801,10 @@ function applyOpenAICompatReasoningEstimate(message: AssistantMessage): void {
 	}
 }
 
-function withReasoningTokenEstimate(source: AssistantMessageEventStream): AssistantMessageEventStream {
+function withReasoningTokenEstimate(
+	source: AssistantMessageEventStream,
+	model: Model<Api>,
+): AssistantMessageEventStream {
 	const annotated = createAssistantMessageEventStream();
 	(async () => {
 		try {
@@ -859,8 +818,7 @@ function withReasoningTokenEstimate(source: AssistantMessageEventStream): Assist
 			}
 			annotated.end();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			throw new Error(message);
+			failStream(annotated, model, err);
 		}
 	})();
 	return annotated;
@@ -876,6 +834,7 @@ function withReasoningTokenEstimate(source: AssistantMessageEventStream): Assist
  */
 function stripSentinelsFromStream(
 	source: AssistantMessageEventStream,
+	model: Model<Api>,
 	resolved: ResolvedModelRuntimeCapabilities,
 ): AssistantMessageEventStream {
 	const sanitized = createAssistantMessageEventStream();
@@ -955,8 +914,7 @@ function stripSentinelsFromStream(
 			}
 			sanitized.end();
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			throw new Error(message);
+			failStream(sanitized, model, err);
 		}
 	})();
 	return sanitized;
@@ -1018,7 +976,22 @@ function isManagedLlamaCppModel(model: Model<"openai-completions">): boolean {
 	return model.provider === "llamacpp" && metadata?.runtimeId === "llamacpp" && typeof model.baseUrl === "string";
 }
 
-async function ensureResidencyForModel(model: Model<"openai-completions">): Promise<void> {
+type LocalRequestOptions = Pick<StreamOptions, "apiKey" | "headers" | "signal">;
+
+function localRequestHeaders(model: Model<Api>, options: LocalRequestOptions): Record<string, string> {
+	const headers = new Headers(model.headers);
+	for (const [name, value] of Object.entries(options.headers ?? {})) {
+		if (value === null) headers.delete(name);
+		else if (value !== undefined) headers.set(name, value);
+	}
+	if (options.apiKey && !headers.has("authorization")) headers.set("authorization", `Bearer ${options.apiKey}`);
+	return Object.fromEntries(headers);
+}
+
+async function ensureResidencyForModel(
+	model: Model<"openai-completions">,
+	options: LocalRequestOptions,
+): Promise<void> {
 	const metadata = runtimeMetadata(model);
 	if (model.provider !== "llamacpp" || metadata?.runtimeId !== "llamacpp") return;
 	if (typeof model.baseUrl !== "string" || model.baseUrl.length === 0) return;
@@ -1028,30 +1001,41 @@ async function ensureResidencyForModel(model: Model<"openai-completions">): Prom
 		runtimeId: metadata.runtimeId,
 		keepModelId: model.id,
 		managed: residencyManagedFor(metadata.lifecycle),
+		headers: localRequestHeaders(model, options),
+		...(options.signal ? { signal: options.signal } : {}),
 	});
 }
 
 async function ensureLocalResidency(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal },
+	options: LocalRequestOptions,
 ): Promise<Model<"openai-completions">> {
 	if (isLmStudioModel(model)) {
-		const wireModelId = await ensureLmStudioResidency(model, options);
+		const requestModel = { ...model, headers: localRequestHeaders(model, options) };
+		const wireModelId = await ensureLmStudioResidency(requestModel, options);
+		// Residency may discover a smaller loaded window after turn preflight.
+		if (model.contextWindow <= 0 || requestModel.contextWindow < model.contextWindow) {
+			model.contextWindow = requestModel.contextWindow;
+		}
 		return wireModelId === model.id ? model : { ...model, id: wireModelId };
 	}
-	await ensureResidencyForModel(model);
+	await ensureResidencyForModel(model, options);
 	return model;
 }
 
 function degradedWatchOptions(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal },
+	options: LocalRequestOptions,
 ): WatchDegradedInferenceOptions {
 	const metadata = runtimeMetadata(model);
 	const baseUrl = model.baseUrl;
 	const listResident = isLmStudioModel(model)
-		? () => listLmStudioResidentModels(model, options.apiKey !== undefined ? { apiKey: options.apiKey } : {})
-		: () => listLlamaCppResidentModels(baseUrl);
+		? () => listLmStudioResidentModels({ ...model, headers: localRequestHeaders(model, options) }, options)
+		: () =>
+				listLlamaCppResidentModels(baseUrl, fetch, {
+					headers: localRequestHeaders(model, options),
+					...(options.signal ? { signal: options.signal } : {}),
+				});
 	return {
 		targetId: metadata?.targetId ?? model.provider,
 		runtimeId: metadata?.runtimeId ?? model.provider,
@@ -1067,116 +1051,89 @@ function degradedWatchOptions(
 // turn with an error event. Exported for the error-propagation contract.
 export function withLocalResidency(
 	model: Model<"openai-completions">,
-	options: { apiKey?: string; signal?: AbortSignal },
+	options: LocalRequestOptions,
 	sourceFactory: (requestModel: Model<"openai-completions">) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory(model);
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	(async () => {
 		try {
+			options.signal?.throwIfAborted();
 			const requestModel = await ensureLocalResidency(model, options);
+			options.signal?.throwIfAborted();
 			for await (const event of sourceFactory(requestModel)) {
+				if (event.type === "error" && isLmStudioModel(model)) {
+					invalidateLmStudioCatalog({
+						id: runtimeMetadata(model)?.targetId ?? model.provider,
+						runtime: "lmstudio",
+						url: model.baseUrl,
+					});
+				}
 				stream.push(event as AssistantMessageEvent);
 			}
 			stream.end();
 		} catch (err) {
 			const message = err instanceof Error ? err.message : String(err);
 			const error = emptyErrorMessage(model, message);
-			stream.push({ type: "error", reason: "error", error });
+			error.stopReason = options.signal?.aborted ? "aborted" : "error";
+			stream.push({ type: "error", reason: error.stopReason, error });
 			stream.end(error);
 		}
 	})();
 	return stream;
 }
 
+function streamCompletions<TOptions extends StreamOptions>(
+	model: Model<"openai-completions">,
+	context: Context,
+	options: TOptions | undefined,
+	level: ThinkingLevel,
+	start: (model: Model<"openai-completions">, context: Context, options: TOptions) => AssistantMessageEventStream,
+): AssistantMessageEventStream {
+	const resolved = resolvedCapabilitiesForModel(model, level);
+	const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
+	// Pi's credential check reads request headers, while its HTTP client also
+	// reads model headers. Forward both so header-authenticated targets pass both.
+	const transportOptions = model.headers
+		? ({
+				...options,
+				headers: Object.fromEntries(
+					[...Object.entries(model.headers), ...Object.entries(options?.headers ?? {})].map(([name, value]) => [
+						name.toLowerCase(),
+						value,
+					]),
+				),
+			} as TOptions)
+		: options;
+	const requestOptions = withLiteLLMRequestOptions(model, transportOptions ?? ({} as TOptions));
+	const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
+		withLocalResidency(model, options ?? {}, (requestModel) => {
+			return start(
+				requestModel,
+				preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
+				withRemainingContextBudget(
+					requestModel,
+					effectiveContext,
+					withSamplingOverrides(requestModel, capturedOptions, resolved),
+				),
+			);
+		}),
+	);
+	const advised = withLiteLLMRouteFailureAdvice(model, source);
+	const channels = filterGemmaChannelStream(advised, usesGemmaChannelMarkers(resolved.modelId), (stream, error) =>
+		failStream(stream, model, error),
+	);
+	const thinking = stripNeverReasoningFromStream(channels, model, resolved);
+	const sanitized = stripSentinelsFromStream(thinking, model, resolved);
+	return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, context);
+}
+
 export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions", OpenAICompletionsOptions> = {
 	api: "openai-completions",
 	stream: (model, context, options) => {
-		// Bare `stream` callers don't communicate thinking state; fall back to
-		// the model's reasoning capability so the catalog still applies. LM Studio
-		// is the exception because its HTTP server defaults to thinking off.
-		const defaultLevel = isLmStudioModel(model) ? "off" : model.reasoning === true ? "medium" : "off";
-		const resolved = resolvedCapabilitiesForModel(model, defaultLevel);
-		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
-		const withSamplers = withSamplingOverrides(model, options, resolved);
-		const withGatewayOptions = withLiteLLMRequestOptions(
-			model,
-			withRemainingContextBudget(model, effectiveContext, withSamplers),
-		);
-		return guardMalformedToolCalls(
-			withReasoningTokenEstimate(
-				stripSentinelsFromStream(
-					stripNeverReasoningFromStream(
-						filterGemmaChannelStream(
-							withLiteLLMRouteFailureAdvice(
-								model,
-								withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
-									withLocalResidency(
-										model,
-										{
-											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-											...(options?.signal !== undefined ? { signal: options.signal } : {}),
-										},
-										(requestModel) =>
-											piOpenAICompletions.stream(
-												requestModel,
-												preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
-												capturedOptions,
-											),
-									),
-								),
-							),
-							usesGemmaChannelMarkers(resolved.modelId),
-						),
-						resolved,
-					),
-					resolved,
-				),
-			),
-			model,
-			context,
-		);
+		const level = isLmStudioModel(model) ? "off" : model.reasoning ? "medium" : "off";
+		return streamCompletions(model, context, options, level, piOpenAICompletions.stream);
 	},
-	streamSimple: (model, context, options?: SimpleStreamOptions) => {
-		const resolved = resolvedCapabilitiesForModel(model, thinkingLevelFromSimple(options));
-		const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
-		const withSamplers = withSamplingOverrides(model, options, resolved);
-		const withGatewayOptions = withLiteLLMRequestOptions(
-			model,
-			withRemainingContextBudget(model, effectiveContext, withSamplers),
-		);
-		return guardMalformedToolCalls(
-			withReasoningTokenEstimate(
-				stripSentinelsFromStream(
-					stripNeverReasoningFromStream(
-						filterGemmaChannelStream(
-							withLiteLLMRouteFailureAdvice(
-								model,
-								withResponseModelIdCapture(model, withGatewayOptions, (capturedOptions) =>
-									withLocalResidency(
-										model,
-										{
-											...(options?.apiKey !== undefined ? { apiKey: options.apiKey } : {}),
-											...(options?.signal !== undefined ? { signal: options.signal } : {}),
-										},
-										(requestModel) =>
-											piOpenAICompletions.streamSimple(
-												requestModel,
-												preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
-												capturedOptions,
-											),
-									),
-								),
-							),
-							usesGemmaChannelMarkers(resolved.modelId),
-						),
-						resolved,
-					),
-					resolved,
-				),
-			),
-			model,
-			context,
-		);
-	},
+	streamSimple: (model, context, options?: SimpleStreamOptions) =>
+		streamCompletions(model, context, options, thinkingLevelFromSimple(options), piOpenAICompletions.streamSimple),
 };

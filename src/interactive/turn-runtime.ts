@@ -430,6 +430,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.runtime.agent.state.model,
 				deps.providers.knowledgeBase,
 			);
+			// The wire adapter reads the existing model, including route controls
+			// that fresh metadata may have changed or removed for this same alias.
+			applyModelCapabilityPatch(state.runtime.agent.state.model, runtimeResolution.capabilities);
 			const desiredLevel = runtimeResolution.effectiveThinkingLevel;
 			if (state.runtime.agent.state.thinkingLevel !== desiredLevel) {
 				state.runtime.agent.state.thinkingLevel = desiredLevel;

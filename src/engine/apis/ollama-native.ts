@@ -14,14 +14,12 @@ import type {
 	ToolCall,
 	Usage,
 } from "@earendil-works/pi-ai";
-import {
-	type ChatRequest,
-	type ChatResponse,
-	Ollama,
-	type Message as OllamaMessage,
-	type Options as OllamaOptions,
-	type Tool as OllamaTool,
-	type ToolCall as OllamaToolCall,
+import type {
+	ChatRequest,
+	Message as OllamaMessage,
+	Options as OllamaOptions,
+	Tool as OllamaTool,
+	ToolCall as OllamaToolCall,
 } from "ollama";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
 import {
@@ -29,16 +27,19 @@ import {
 	resolveModelRuntimeCapabilitiesForModel,
 	type ThinkingLevel,
 } from "../../domains/providers/index.js";
+import { ollamaModelIds } from "../../domains/providers/runtimes/common/ollama-model-ids.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
 import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
+import { ollamaJson, streamOllamaChat } from "./ollama-http.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import {
 	EXIT_RELEASE_MS,
 	forgetReleasedModel,
 	isClioLoaded,
+	markClioLoaded,
 	type ReleaseScope,
 	type ResidencyAdapter,
 	reconcileResidency,
@@ -47,8 +48,8 @@ import {
 	reportClioModelLoad,
 	residencyManagedFor,
 } from "./residency.js";
-import type { ResidentModelInfo } from "./resident-models.js";
-import { mergeSamplingOverride } from "./sampling-overrides.js";
+import { type ResidentModelInfo, residentMatchesKeep } from "./resident-models.js";
+import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
 import type { EngineApiProvider } from "./types.js";
 
 const REASONING_CHARS_PER_TOKEN = 4;
@@ -86,46 +87,45 @@ function ollamaTargetId(model: Model<"ollama-native">): string {
  * and nothing else ever reclaims. Best-effort: a failure never blocks the
  * turn.
  */
-async function reconcileOllamaResidency(model: Model<"ollama-native">, headers: Record<string, string>): Promise<void> {
+async function reconcileOllamaResidency(
+	model: Model<"ollama-native">,
+	headers: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<boolean> {
 	const baseUrl = model.baseUrl;
-	if (!baseUrl) return;
+	if (!baseUrl) return false;
 	const metadata = (model as Model<"ollama-native"> & ClioRuntimeMetadata).clioCoder;
+	if (!residencyManagedFor(metadata?.lifecycle)) return false;
+	let resident: ResidentModelInfo[] = [];
 	const adapter: ResidencyAdapter = {
 		targetKey: residencyTargetKey("ollama", baseUrl),
 		targetId: ollamaTargetId(model),
 		runtimeId: "ollama",
 		keepModelId: model.id,
-		managed: residencyManagedFor(metadata?.lifecycle),
+		managed: true,
 		strategy: "scheduler",
-		listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)),
-		unload: (id) => unloadOllamaModel(baseUrl, id, headers),
+		...(signal ? { signal } : {}),
+		listResident: async () => (resident = await listResidentOllamaModels(baseUrl, headers, signal)),
+		unload: (id) =>
+			unloadOllamaModel(baseUrl, resident.find((entry) => entry.modelId === id) ?? { modelId: id }, headers, signal),
 	};
 	try {
-		await reconcileResidency(adapter);
+		const plan = await reconcileResidency(adapter);
+		const keep = resident.find((entry) => residentMatchesKeep(entry, model.id));
+		const ids = ollamaModelIds(model.id, ...(keep ? [keep.modelId, ...(keep.aliasIds ?? [])] : []));
+		return (
+			plan.decision === "reconcile" &&
+			(!plan.keepResident || ids.some((id) => ownedModelsByTarget.get(adapter.targetKey)?.has(id)))
+		);
 	} catch {
-		// Reconciliation is best-effort; a failure must never block the turn.
+		signal?.throwIfAborted();
+		return false;
 	}
-}
-
-function pickSamplingProfile(
-	quirks: LocalModelQuirks | undefined,
-	thinkingActive: boolean,
-): SamplingProfile | undefined {
-	const sampling = quirks?.sampling;
-	const profile = sampling ? (thinkingActive ? (sampling.thinking ?? sampling.instruct) : sampling.instruct) : undefined;
-	return mergeSamplingOverride(profile);
 }
 
 function applyOllamaSamplingProfile(opts: Partial<OllamaOptions>, profile: SamplingProfile): void {
 	if (profile.temperature !== undefined && opts.temperature === undefined) opts.temperature = profile.temperature;
-	if (profile.topP !== undefined && opts.top_p === undefined) opts.top_p = profile.topP;
-	if (profile.topK !== undefined && opts.top_k === undefined) opts.top_k = profile.topK;
-	if (profile.repeatPenalty !== undefined && opts.repeat_penalty === undefined)
-		opts.repeat_penalty = profile.repeatPenalty;
-	if (profile.presencePenalty !== undefined && opts.presence_penalty === undefined)
-		opts.presence_penalty = profile.presencePenalty;
-	if (profile.frequencyPenalty !== undefined && opts.frequency_penalty === undefined)
-		opts.frequency_penalty = profile.frequencyPenalty;
+	Object.assign(opts, { ...samplingParamsFromProfile(profile, "ollama"), ...opts });
 }
 
 function isOllamaEffort(value: string | undefined): value is "low" | "medium" | "high" {
@@ -228,15 +228,14 @@ function buildRequest(
 	context: Context,
 	options: StreamOptions | undefined,
 	thinkingLevel: ThinkingLevel,
+	pin: boolean,
 ): ChatRequest & { stream: true } {
 	const req: ChatRequest & { stream: true } = {
 		model: model.id,
 		messages: buildMessages(context),
 		stream: true,
-		// Pin the active model resident. The pre-turn reconciler releases
-		// Clio-pinned stragglers this leaves behind after a model switch;
-		// operator-loaded and configured models stay resident.
-		keep_alive: -1,
+		// Only pin loads we can own and release. Otherwise use the server's policy.
+		...(pin ? { keep_alive: -1 } : {}),
 	};
 	if (context.tools && context.tools.length > 0) req.tools = context.tools.map(toolToOllama);
 	const opts: Partial<OllamaOptions> = {};
@@ -270,44 +269,24 @@ export interface EvictResidentResponse {
 	readonly models: ReadonlyArray<EvictResidentEntry>;
 }
 
-export interface EvictGenerateRequest {
-	readonly model: string;
-	readonly prompt: string;
-	readonly keep_alive: number;
-	readonly stream: false;
-}
-
-export interface OllamaEvictClient {
-	ps(): Promise<EvictResidentResponse>;
-	generate(req: EvictGenerateRequest): Promise<unknown>;
-}
-
-function ollamaEvictClient(baseUrl: string, headers?: Record<string, string>, signal?: AbortSignal): OllamaEvictClient {
-	// The client's own abort() reaches streamed requests only, so a bounded
-	// caller threads its signal through fetch to cover ps and generate too.
-	const boundedFetch = signal
-		? (input: Parameters<typeof fetch>[0], init?: RequestInit) => fetch(input, { ...init, signal })
-		: undefined;
-	return new Ollama({
-		host: baseUrl,
-		...(headers ? { headers } : {}),
-		...(boundedFetch ? { fetch: boundedFetch } : {}),
-	});
-}
-
 /**
  * Map an Ollama `/api/ps` response to the runtime-agnostic resident shape,
  * preserving the GPU/total footprint when the server reports it.
  */
-async function listResidentOllamaModels(client: OllamaEvictClient): Promise<ResidentModelInfo[]> {
-	const resident = await client.ps();
+async function listResidentOllamaModels(
+	baseUrl: string,
+	headers?: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<ResidentModelInfo[]> {
+	const resident = await ollamaJson<EvictResidentResponse>(baseUrl, "ps", undefined, { headers, signal });
 	return resident.models.map((entry) => {
 		const primary = entry.model || entry.name;
+		if (typeof primary !== "string" || !primary.trim()) throw new Error("Ollama returned an invalid resident model");
 		// Ollama reports both `model` and `name`; keep the other one as an alias so
 		// a keep target that matches either field is never evicted.
-		const aliases = [entry.model, entry.name].filter(
-			(id): id is string => typeof id === "string" && id.length > 0 && id !== primary,
-		);
+		const aliases = ollamaModelIds(
+			...[entry.model, entry.name].filter((id): id is string => typeof id === "string" && id.length > 0),
+		).filter((id) => id !== primary);
 		const info: ResidentModelInfo = { modelId: primary };
 		if (aliases.length > 0) info.aliasIds = aliases;
 		if (typeof entry.size_vram === "number") info.sizeVramBytes = entry.size_vram;
@@ -321,11 +300,26 @@ async function listResidentOllamaModels(client: OllamaEvictClient): Promise<Resi
  * `keep_alive: -1`, so eviction fires `keep_alive: 0` against it to let its
  * weights release.
  */
-async function unloadOllamaModel(baseUrl: string, modelId: string, headers?: Record<string, string>): Promise<void> {
-	const owned = ownedModelsByTarget.get(residencyTargetKey("ollama", baseUrl));
-	if (!owned?.has(modelId)) return;
-	await ollamaEvictClient(baseUrl, headers).generate({ model: modelId, prompt: "", keep_alive: 0, stream: false });
-	owned.delete(modelId);
+async function unloadOllamaModel(
+	baseUrl: string,
+	entry: ResidentModelInfo,
+	headers?: Record<string, string>,
+	signal?: AbortSignal,
+): Promise<void> {
+	const targetKey = residencyTargetKey("ollama", baseUrl);
+	const owned = ownedModelsByTarget.get(targetKey);
+	const ids = [entry.modelId, ...(entry.aliasIds ?? [])];
+	if (!ids.some((id) => owned?.has(id))) throw new Error("Ollama model ownership is unknown");
+	await ollamaJson(
+		baseUrl,
+		"generate",
+		{ model: entry.modelId, prompt: "", keep_alive: 0, stream: false },
+		{ headers, signal },
+	);
+	for (const id of ids) {
+		owned?.delete(id);
+		forgetReleasedModel(targetKey, id);
+	}
 }
 
 /**
@@ -354,15 +348,12 @@ export async function releaseClioLoadedOllamaModels(
 	const releaseTarget = async (targetKey: string, owned: Set<string>): Promise<void> => {
 		const endpoint = ownedEndpointsByTarget.get(targetKey);
 		if (!endpoint || owned.size === 0) return;
-		const client = ollamaEvictClient(endpoint.baseUrl, endpoint.headers, controller.signal);
-		const resident = await listResidentOllamaModels(client);
+		const resident = await listResidentOllamaModels(endpoint.baseUrl, endpoint.headers, controller.signal);
 		for (const entry of resident) {
 			const ids = [entry.modelId, ...(entry.aliasIds ?? [])];
 			if (!ids.some((id) => owned.has(id)) || !isClioLoaded(targetKey, entry)) continue;
 			if (options.scope && !options.scope(targetKey, ids)) continue;
-			await client.generate({ model: entry.modelId, prompt: "", keep_alive: 0, stream: false });
-			for (const id of ids) owned.delete(id);
-			forgetReleasedModel(targetKey, entry.modelId);
+			await unloadOllamaModel(endpoint.baseUrl, entry, endpoint.headers, controller.signal);
 		}
 	};
 	const releases = [...ownedModelsByTarget].map(([targetKey, owned]) =>
@@ -454,12 +445,15 @@ function runStream(
 		stopReason: "stop",
 		timestamp: Date.now(),
 	};
-	// Fresh instance per call so instance-level abort() scopes to this stream only.
-	const headers: Record<string, string> = {};
-	if (model.headers) Object.assign(headers, model.headers);
-	if (options?.headers) Object.assign(headers, options.headers);
-	// A caller-supplied fetch (the live tool probe) observes the chat response.
-	const client = new Ollama({ host: model.baseUrl, headers, ...(options?.fetch ? { fetch: options.fetch } : {}) });
+	const requestHeaders = new Headers(model.headers);
+	for (const [name, value] of Object.entries(options?.headers ?? {})) {
+		if (value === null) requestHeaders.delete(name);
+		else if (value !== undefined) requestHeaders.set(name, value);
+	}
+	if (options?.apiKey && !requestHeaders.has("authorization")) {
+		requestHeaders.set("authorization", `Bearer ${options.apiKey}`);
+	}
+	const headers = Object.fromEntries(requestHeaders);
 	const signal = options?.signal;
 	const baseUrl = model.baseUrl;
 	// Events go straight into the watched stream, so this function's own catch
@@ -469,21 +463,18 @@ function runStream(
 		runtimeId: "ollama",
 		model: model.id,
 		...(signal ? { signal } : {}),
-		...(baseUrl ? { listResident: () => listResidentOllamaModels(ollamaEvictClient(baseUrl, headers)) } : {}),
+		...(baseUrl ? { listResident: () => listResidentOllamaModels(baseUrl, headers, signal) } : {}),
 	});
-	let aborted = signal?.aborted === true;
-	const onAbort = () => {
-		aborted = true;
-		client.abort();
-	};
-	if (signal && !signal.aborted) signal.addEventListener("abort", onAbort, { once: true });
 	(async () => {
 		try {
-			if (aborted) throw new Error("Request was aborted");
-			await reconcileOllamaResidency(model, headers);
-			if (aborted) throw new Error("Request was aborted");
-			const iterator = await client.chat(buildRequest(model, context, options, thinkingLevel));
-			stream.push({ type: "start", partial: output });
+			signal?.throwIfAborted();
+			const pin = await reconcileOllamaResidency(model, headers, signal);
+			signal?.throwIfAborted();
+			const iterator = streamOllamaChat(model.baseUrl, buildRequest(model, context, options, thinkingLevel, pin), {
+				headers,
+				signal,
+				fetch: options?.fetch,
+			});
 			let active: TextContent | null = null;
 			let activeIdx = -1;
 			let activeThinking: ThinkingContent | null = null;
@@ -576,9 +567,13 @@ function runStream(
 				}
 			};
 			let recordedOwnership = false;
-			for await (const chunk of iterator) {
-				const response = chunk as ChatResponse;
-				if (!recordedOwnership && model.baseUrl) {
+			let started = false;
+			for await (const response of iterator) {
+				if (!started) {
+					stream.push({ type: "start", partial: output });
+					started = true;
+				}
+				if (pin && !recordedOwnership && model.baseUrl) {
 					const targetKey = residencyTargetKey("ollama", model.baseUrl);
 					let owned = ownedModelsByTarget.get(targetKey);
 					if (!owned) {
@@ -587,7 +582,10 @@ function runStream(
 					}
 					const loadedId = response.model || model.id;
 					const firstRecord = !owned.has(loadedId);
-					owned.add(loadedId);
+					for (const id of ollamaModelIds(model.id, loadedId)) {
+						owned.add(id);
+						markClioLoaded(targetKey, id);
+					}
 					ownedEndpointsByTarget.set(targetKey, { baseUrl: model.baseUrl, headers });
 					recordedOwnership = true;
 					// In a dispatched worker this hands the load to the orchestrator,
@@ -635,38 +633,18 @@ function runStream(
 					doneReason = response.done_reason;
 				}
 			}
-			if (aborted) throw new Error("Request was aborted");
+			signal?.throwIfAborted();
 			output.stopReason = mapStopReason(doneReason, hadToolCall);
 			stream.push({ type: "done", reason: asDoneReason(output.stopReason), message: output });
 			stream.end();
 		} catch (err) {
-			output.stopReason = aborted ? "aborted" : "error";
-			output.errorMessage = ollamaErrorMessage(err);
+			output.stopReason = signal?.aborted ? "aborted" : "error";
+			output.errorMessage = err instanceof Error ? err.message : String(err);
 			stream.push({ type: "error", reason: output.stopReason, error: output });
 			stream.end();
-		} finally {
-			if (signal) signal.removeEventListener("abort", onAbort);
 		}
 	})();
 	return stream;
-}
-
-/**
- * The text of a failed Ollama request. The SDK builds its `ResponseError` from
- * the body's `error` field and assumes it is a string, so an object-shaped body
- * such as `{"error":{"type":"exceed_context_size_error","message":"request
- * (8009 tokens) exceeds the available context size (2048 tokens), ..."}}`
- * reaches here as the message "[object Object]" with the object kept on
- * `error`. Reading the object back keeps the server's wording, which is what
- * the context-overflow classifier matches on (issue #375).
- */
-function ollamaErrorMessage(err: unknown): string {
-	if (!(err instanceof Error)) return String(err);
-	const detail = (err as { error?: unknown }).error;
-	if (!detail || typeof detail !== "object") return err.message;
-	const { message, type } = detail as { message?: unknown; type?: unknown };
-	const text = typeof message === "string" ? message : JSON.stringify(detail);
-	return typeof type === "string" ? `${type}: ${text}` : text;
 }
 
 function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions | undefined {

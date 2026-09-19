@@ -17,7 +17,11 @@
  */
 
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
-import { type ResultContract, resultContractOutputBytes } from "../agents/result-contract.js";
+import {
+	type ResultContract,
+	resultContractOutputBytes,
+	type StructuredHelperResult,
+} from "../agents/result-contract.js";
 import type { RunReceiptOutput } from "./types.js";
 
 /** Bounded replay capacity for the external consumer tee. */
@@ -163,6 +167,11 @@ export interface WorkerOutputCapture {
 export interface WorkerOutputCaptureOptions {
 	/** Byte bound for the sealed text; defaults to WORKER_OUTPUT_MAX_BYTES. */
 	maxBytes?: number;
+	/** Only enabled for an admitted helper on a runtime with host-owned terminal events. */
+	helperResult?: {
+		contract: ResultContract;
+		validate(data: unknown): StructuredHelperResult | null;
+	};
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -227,10 +236,31 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 	let partialText = "";
 	let partialBytes = 0;
 	let partialStored = 0;
+	let structuredOutput: RunReceiptOutput | undefined;
 
 	return {
 		observe(event: unknown): void {
 			if (!isRecord(event)) return;
+			// A validated submission is terminal; subsequent provider narration or
+			// tool acknowledgements cannot replace the host-owned result.
+			if (structuredOutput !== undefined) return;
+			if (event.type === "clio_coder_helper_result") {
+				const payload = event.payload;
+				if (
+					!options.helperResult ||
+					!isRecord(payload) ||
+					payload.version !== 1 ||
+					payload.kind !== options.helperResult.contract.kind
+				)
+					return;
+				const structured = options.helperResult.validate(payload.data);
+				if (structured === null || structured.kind !== payload.kind) return;
+				const text = JSON.stringify(structured.data);
+				// Never seal an intact structured payload beside clipped compatibility JSON.
+				if (Buffer.byteLength(text, "utf8") > maxBytes) return;
+				structuredOutput = { ...boundedOutput("final", text, maxBytes), structured: structuredClone(structured) };
+				return;
+			}
 			if (event.type === "message_end") {
 				// Any message boundary flushes the in-flight stream: its deltas
 				// belong to the message that just completed.
@@ -256,6 +286,7 @@ export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = 
 			}
 		},
 		snapshot(): RunReceiptOutput | undefined {
+			if (structuredOutput !== undefined) return structuredClone(structuredOutput);
 			if (partialBytes > 0 && partialText.trim().length > 0) {
 				const bounded = truncateUtf8(partialText.trim(), maxBytes, WORKER_OUTPUT_TRUNCATION_MARKER);
 				return {

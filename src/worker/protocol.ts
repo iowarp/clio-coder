@@ -24,6 +24,16 @@
 import { createHash } from "node:crypto";
 import { normalizeClioCoderEventRecord } from "../core/naming-events.js";
 
+/** Internal JSON handoffs; artifact and mutation contracts keep their existing delivery paths. */
+export const INTERNAL_HELPER_RESULT_KINDS = [
+	"scout-report",
+	"research-report",
+	"world-knowledge-report",
+	"provenance-report",
+	"oracle-report",
+	"context-handbook",
+] as const;
+
 /** Current wire protocol. A peer announcing anything else is not executed. */
 export const WORKER_PROTOCOL_VERSION = 1;
 
@@ -550,6 +560,7 @@ export function parseControlFrame(line: string): FrameParseResult<WorkerControlF
  * pressure.
  */
 const RECEIPT_BEARING_BULK_TYPES = new Set([
+	"clio_coder_helper_result",
 	"message_end",
 	"clio_coder_run_outcome",
 	"clio_coder_permission_escalated",

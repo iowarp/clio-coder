@@ -3,6 +3,7 @@ import { acceptanceFromTaskFlags } from "../cli/tasks.js";
 import { BusChannels } from "../core/bus-events.js";
 import { THINKING_LEVELS } from "../core/defaults.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
 import type { ContextInitOptions } from "../domains/context/init-options.js";
@@ -106,16 +107,8 @@ type ArchiveCommandVariant =
 	| { kind: "archive-import"; path: string; dryRun: boolean; force: boolean }
 	| { kind: "archive-usage"; subcommand?: "export" | "import"; error?: string };
 
-export const SETTINGS_AREA_IDS = [
-	"chat",
-	"fleet",
-	"targets",
-	"context",
-	"safety",
-	"interface",
-	"integrations",
-] as const;
-export type SettingsAreaId = (typeof SETTINGS_AREA_IDS)[number];
+export const SETTINGS_AREA_IDS = SETTINGS_SECTIONS.map((section) => section.id);
+export type SettingsAreaId = SettingsSectionId;
 
 /** What `/library <verb> <ref>` asks the browser to review once it is open. */
 export type LibraryBrowseIntent = "install" | "update" | "enable" | "disable" | "remove";
@@ -889,10 +882,6 @@ const RUN_THINKING_LEVELS: ReadonlyArray<JobThinkingLevel> = THINKING_LEVELS;
 
 function isRunThinkingLevel(value: string): value is JobThinkingLevel {
 	return RUN_THINKING_LEVELS.some((level) => level === value);
-}
-
-function isSettingsAreaId(value: string): value is SettingsAreaId {
-	return SETTINGS_AREA_IDS.some((area) => area === value);
 }
 
 /** `/context compact` alone keeps a free-form optional instruction tail. */
@@ -2296,13 +2285,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 		fromArgs(parsed) {
 			if (parsed.error) return { kind: "usage-error", command: "settings", reason: parsed.error };
-			const area = parsed.positionals[0];
-			if (area === undefined) return { kind: "settings" };
-			if (!isSettingsAreaId(area)) {
+			const name = parsed.positionals[0];
+			if (name === undefined) return { kind: "settings" };
+			const area = resolveSettingsSection(name);
+			if (!area) {
 				return {
 					kind: "usage-error",
 					command: "settings",
-					reason: `Unknown area: ${area} (one of ${SETTINGS_AREA_IDS.join(", ")})`,
+					reason: `Unknown area: ${name} (one of ${SETTINGS_AREA_IDS.join(", ")})`,
 				};
 			}
 			return { kind: "settings", area, ...(parsed.positionals[1] ? { group: parsed.positionals[1] } : {}) };

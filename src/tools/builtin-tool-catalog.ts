@@ -101,7 +101,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki (workspace only).",
 	},
 	[ToolNames.Context]: {
-		objective: "Return workspace, skill, or recall context.",
+		objective: "Return workspace, effective configuration, skill, or recall context.",
 		uiLabel: "Context",
 		retrySafety: "idempotent",
 		resultSizePolicy: observePolicy(
@@ -111,7 +111,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 		promptHint: {
 			session:
-				'On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+				'For questions about your settings or limits, call context(scope="settings") for the live values and UI guidance; never guess from defaults or change permission rules to bypass a denial. On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			worker:
 				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			boundWorker:

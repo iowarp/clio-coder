@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { createHookBudgetTracker, type HookBudgetStats, type HookBudgetTracker } from "./budget.js";
 import type { MiddlewareRegistrationConflictTier, MiddlewareRegistrationOwner } from "./registrations.js";
 import { listMiddlewareRuleDefinitions } from "./rules.js";
@@ -111,7 +112,7 @@ export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => voi
 
 /**
  * Default diagnostic sink, and the one the domain loader constructs the
- * bundle with. It writes to stderr only. The composition root
+ * bundle with. It uses the active terminal diagnostic sink, or stderr headlessly. The composition root
  * (src/entry/orchestrator.ts) replaces it through setDiagnosticSink with a
  * sink that publishes every diagnostic on the typed bus as
  * `middleware.hookFailed`, which the interactive warn notice consumes, and
@@ -120,13 +121,13 @@ export type MiddlewareDiagnosticSink = (diagnostic: MiddlewareDiagnostic) => voi
  */
 export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnostic): void {
 	if (diagnostic.kind === "hook_failed") {
-		process.stderr.write(
+		writeDiagnostic(
 			`[clio-coder:middleware] registration '${diagnostic.registrationId}' failed on '${diagnostic.hook}': ${diagnostic.message}\n`,
 		);
 		return;
 	}
 	if (diagnostic.kind === "registration_conflict") {
-		process.stderr.write(`[clio-coder:middleware] ${formatRegistrationConflict(diagnostic)}\n`);
+		writeDiagnostic(`[clio-coder:middleware] ${formatRegistrationConflict(diagnostic)}\n`);
 		return;
 	}
 	// A single post-warmup spike is telemetry, not operator-facing noise: only
@@ -137,7 +138,7 @@ export function writeMiddlewareDiagnosticToStderr(diagnostic: MiddlewareDiagnost
 		stats.window > 0
 			? ` (slow on ${stats.overCount}/${stats.window} recent ${diagnostic.hook} calls, p95 ${stats.p95Ms.toFixed(1)}ms)`
 			: "";
-	process.stderr.write(
+	writeDiagnostic(
 		`[clio-coder:middleware] registration '${diagnostic.registrationId}' exceeded budget on '${diagnostic.hook}': ` +
 			`${diagnostic.elapsedMs.toFixed(1)}ms > ${diagnostic.budgetMs}ms${trend}\n`,
 	);

@@ -75,7 +75,7 @@ async function connect(url: string, key: string | undefined): Promise<Connection
 		}
 		runtime = registry.get(id);
 	}
-	if (!runtime) throw new Error("No compatible runtime is available. Open Settings → Targets & Auth.");
+	if (!runtime) throw new Error("No compatible runtime is available. Open Settings → Connections.");
 	const target: TargetDescriptor = existing
 		? structuredClone(existing)
 		: {
@@ -185,7 +185,7 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				}
 				if (connection.models.length === 0) {
 					notice =
-						"The endpoint offered no chat models. Load a model and retry. Servers without model discovery can use Settings → Targets & Auth.";
+						"The endpoint offered no chat models. Load a model and retry. Servers without model discovery can use Settings → Connections.";
 					step = "url";
 					continue;
 				}
@@ -214,11 +214,33 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 				["Model", model],
 				["Connection", "live model discovery passed"],
 			]);
-			presenter.note(
-				first
-					? "Ready with recommended defaults: workspace edits, approval for unrecognized commands, one worker, $5 tracked session budget."
-					: "Use this model for chat. Your other settings and role assignments stay in place.",
-			);
+			if (first) {
+				const settings = readSettings();
+				const autonomy = {
+					"read-only": "inspect and answer; no edits or commands",
+					suggest: "ask before edits, commands, and delegation",
+					"auto-edit": "edit and run recognized checks; unfamiliar commands ask",
+					"full-auto": "skip autonomy approvals; safety rules still apply",
+				}[settings.safety.autonomy];
+				presenter.fields([
+					["Autonomy", `${settings.safety.autonomy} · ${autonomy}`],
+					[
+						"Worker approvals",
+						settings.fleet.permissions.mode === "deny"
+							? "deny requests needing approval; continue allowed work"
+							: settings.fleet.permissions.mode === "fail"
+								? "stop a worker when approval is needed"
+								: "ask you; unanswered requests follow the configured fallback",
+					],
+					[
+						"Tracked spending",
+						settings.safety.limits.sessionCostUsd === 0
+							? "no session ceiling"
+							: `$${settings.safety.limits.sessionCostUsd} per session; unpriced usage is not covered`,
+					],
+				]);
+				presenter.note("Safety rules still apply. You can adjust these in /settings → Permissions & Limits.");
+			} else presenter.note("Use this model for chat. Your other settings and role assignments stay in place.");
 			const choice = await prompts.choose("Ready to connect", ["Connect", "Back"], "Connect");
 			if (choice !== "Connect") throw new ConfigureNavigation("back");
 			const descriptor = structuredClone(connection.target);
@@ -250,6 +272,9 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 			updateSettings(apply);
 			presenter.done(`Connected: ${descriptor.id} / ${model}`);
 			presenter.commandAdvice("Start Clio:", "clio-coder");
+			presenter.note(
+				'You can start working immediately. Ask Clio "What can you do without asking me?" or open /settings whenever you want to adjust the defaults.',
+			);
 			return "connected";
 		} catch (error) {
 			if (!(error instanceof ConfigureNavigation)) {

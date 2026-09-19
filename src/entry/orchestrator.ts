@@ -9,6 +9,7 @@ import { BusChannels } from "../core/bus-events.js";
 import { installBusTracer } from "../core/bus-trace.js";
 import { type ClioSettings, readSettings, type SettingsMutator, updateSettings } from "../core/config.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../core/defaults.js";
+import { writeDiagnostic } from "../core/diagnostics.js";
 import { loadDomains } from "../core/domain-loader.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
@@ -1204,6 +1205,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			SafetyDomainModule,
 			createPromptsDomainModule({
 				noContextFiles: options.noContextFiles === true,
+				noSkills: options.noSkills === true || options.headless?.noSkills === true,
 			}),
 			AgentsDomainModule,
 			MiddlewareDomainModule,
@@ -1523,11 +1525,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		})
 			.then((result) => {
 				for (const error of result.errors) {
-					process.stderr.write(`[clio-coder:memory] proposed record not written for ${error}\n`);
+					writeDiagnostic(`[clio-coder:memory] proposed record not written for ${error}\n`);
 				}
 			})
 			.catch((error: unknown) => {
-				process.stderr.write(
+				writeDiagnostic(
 					`[clio-coder:memory] proposed records not written: ${error instanceof Error ? error.message : String(error)}\n`,
 				);
 			});
@@ -1614,11 +1616,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		(config?.get() ?? readSettings()).safety.autonomy ??
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
+	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
 	// First-turn skills reminder: user-message-visible text is the one channel
 	// the battery-tested local models act on. Which protocol it teaches follows
 	// the effective autonomy level, resolved one line up: suggest-and-wait at
 	// read-only and suggest, load-it-yourself at auto-edit and full-auto.
-	if (resources) {
+	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
 				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
@@ -1626,6 +1629,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// heading, minus what is already installed, so the count the
 				// reminder quotes is the count the listing will show.
 				countInstallableSkills: () => {
+					if (!skillDiscoveryEnabled) return 0;
 					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
 					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
 						.length;
@@ -1637,7 +1641,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// Marketplace self-promotion: coordinator-only by this wiring (never a
 	// dispatch worker), local matcher and operator-consented installs at every autonomy level. The
 	// registration also checks the own-marketplace source gate before installing.
-	if (resources) {
+	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
@@ -1769,6 +1773,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				})
 			: null;
 	registerAllTools(toolRegistry, {
+		getSettings: () => getCurrentSettings(),
 		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,
 		...(session

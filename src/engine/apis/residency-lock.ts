@@ -23,9 +23,10 @@ function lockTargetFor(targetKey: string): string {
 }
 
 /** Run `fn` while holding the per-target residency lock. */
-export async function withResidencyLock<T>(targetKey: string, fn: () => Promise<T>): Promise<T> {
+export async function withResidencyLock<T>(targetKey: string, fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
 	return withStateFileLock(lockTargetFor(targetKey), fn, {
 		timeoutMs: LOCK_WAIT_MS,
 		onAcquireFailure: "run-unlocked",
+		...(signal ? { signal } : {}),
 	});
 }

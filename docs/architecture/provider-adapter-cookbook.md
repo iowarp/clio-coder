@@ -73,7 +73,7 @@ Probes discover the current state of a target inference server when Clio starts
 or when `/settings targets` or `/model` is refreshed.
 
 ### 2.1 Endpoint Probing (`probe`)
-The `probe` method validates endpoint reachability and collects loaded models:
+The `probe` method passively validates endpoint reachability and collects metadata. It must not submit inference or use a model-specific endpoint that can start a worker. Keep generating qualification explicit:
 
 * **Inputs:** `TargetDescriptor` (which holds target `url`, optional `auth` metadata, and connection metadata) and `ProbeContext` (which provides timeout signals, credential-presence keys, and an optional resolved `authToken`). Request paths that resolve OAuth through `providers.auth.resolveForTarget` must pass `{ signal }`; Pi 0.84's `AuthOperationOptions` keeps cancellation attached while Clio waits for or mutates its credential store.
 * **Return Value:** A `ProbeResult` indicating:
@@ -83,7 +83,7 @@ The `probe` method validates endpoint reachability and collects loaded models:
   * `modelStates` (optional): Footprint mappings detailing VRAM/RAM loading stats.
 
 ### 2.2 Reasoning Probing (`probeReasoning`)
-For local endpoints where models are loaded dynamically, the runtime can supply a `probeReasoning` method. It sends a short mock completion request to inspect whether the model outputs reasoning/thinking tags (such as `reasoning_content` in OpenAI completions or `<think>` tags in raw text streams).
+A runtime can supply a `probeReasoning` method, invoked only for explicit reasoning qualification (`targets --probe --reasoning`). The OpenAI-compatible helper sends a short completion with `reasoning_effort: low` and recognizes nonempty `reasoning_content`, `reasoning`, or `reasoning_text` response fields. Observed reasoning is positive evidence; an ordinary answer, error, or timeout is inconclusive (`null`), not proof that reasoning is unsupported.
 
 Clio caches this result in the providers domain by exact target and model id for
 the current process. Provider reinitialization, configuration reload, and target
