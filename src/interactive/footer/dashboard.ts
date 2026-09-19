@@ -47,7 +47,7 @@ import {
 	type Notification,
 	type NotificationCenter,
 } from "./notifications.js";
-import { DASHBOARD_PAGES, type DashboardPage, renderDashboardPage } from "./pages.js";
+import { DASHBOARD_PAGES, type DashboardPage, renderCompactDashboard, renderDashboardPage } from "./pages.js";
 
 function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
@@ -66,8 +66,6 @@ import {
 	type AgentWorkFacts,
 	activityQuadrant,
 	type ContextEngineFacts,
-	compactPrimaryLine,
-	compactSecondaryLine,
 	contextQuadrant,
 	EXPANDED_MID,
 	EXPANDED_ULTRAWIDE,
@@ -126,6 +124,9 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	/** Explicit display allowlist; never include credentials or arbitrary settings. */
+	harness?: ReadonlyArray<{ title: string; entries: ReadonlyArray<readonly [string, string]> }>;
+
 	workspace: WorkspaceFacts;
 	session: SessionFacts;
 	context: ContextEngineFacts;
@@ -159,36 +160,9 @@ function costSegment(value: CostAggregate | undefined): string | null {
 	return cost === null ? null : `cost ${cost}`;
 }
 
-/** Compact footer: two always-on lines, deliberately free of model/mode/thinking (the editor rail owns those). */
+/** The compact and expanded dashboard share the same live facts. */
 function renderFooterCompactLines(state: FooterDashboardRenderState, width: number): string[] {
-	const safeWidth = Math.max(1, Math.floor(width));
-	return [
-		compactPrimaryLine(
-			state.workspace,
-			state.session,
-			safeWidth,
-			undefined, // theme
-			state.status,
-			state.toolCounts,
-			state.dispatchRows,
-			state.tick,
-			state.now,
-			state.agent.localCapacity ?? null,
-		),
-		compactSecondaryLine(
-			state.context,
-			state.agent,
-			safeWidth,
-			undefined, // theme
-			state.status,
-			state.throughput,
-			state.sessionTokens,
-			state.sessionCost,
-			state.session.outputStyle,
-			state.session.leaderArmed ?? false,
-			state.session.shutdownArmed ?? false,
-		),
-	].map((line) => fitDashboardLine(line, safeWidth));
+	return renderCompactDashboard(state, width);
 }
 
 /** Notice surface, composed by the view below the grid: compact badge or expanded panel. */
@@ -432,6 +406,59 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 
 		return {
+			...(settings
+				? {
+						harness: [
+							{
+								title: "PERMISSIONS & LIMITS",
+								entries: [
+									["Autonomy", safety],
+									["Worker approvals", settings.fleet.permissions.mode],
+									["Safety review", settings.safety.review.enabled ? "enabled" : "disabled"],
+									["External tool governance", toolProfile],
+									["Configured cost ceiling", `$${settings.safety.limits.sessionCostUsd} · tracked pricing only`],
+									["Chat tool-call budget", String(settings.safety.limits.chatToolCallsPerTurn)],
+									["Worker tool-call limit", String(settings.fleet.limits.toolCallsPerRun)],
+									["Observation limit", `${Math.round(settings.safety.limits.observationBytesPerTurn / 1024)} KiB / turn`],
+								],
+							},
+							{
+								title: "EXECUTION & CONTEXT POLICY",
+								entries: [
+									["Fleet concurrency", `${settings.fleet.concurrency} (configured)`],
+									["Fleet nodes", `${settings.fleet.nodes.length} configured`],
+									[
+										"Worker default",
+										`${settings.fleet.default.target ?? "inherit target"} / ${settings.fleet.default.model ?? "inherit model"}`,
+									],
+									[
+										"Retries",
+										`chat ${settings.chat.retry.enabled ? settings.chat.retry.maxRetries : "off"} · workers ${settings.fleet.retry.maxRetries}`,
+									],
+									["Worker timeout", `${Math.round(settings.fleet.limits.internalRunTimeoutMs / 1000)}s`],
+									[
+										"Stream deadlines",
+										`first token ${Math.round(settings.chat.retry.firstTokenStallMs / 1000)}s · stalled stream ${Math.round(settings.chat.retry.streamStallMs / 1000)}s`,
+									],
+									["Output limit", settings.chat.maxOutputTokens > 0 ? `${settings.chat.maxOutputTokens} tokens` : "automatic"],
+									[
+										"Working set",
+										settings.context.workingSet.enabled
+											? `${settings.context.workingSet.policy} · target ${Math.round(settings.context.workingSet.target * 100)}% · protect ${settings.context.workingSet.protectLastTurns} turns`
+											: "disabled",
+									],
+									[
+										"Compaction",
+										settings.context.compaction.auto
+											? `automatic at ${Math.round(settings.context.compaction.threshold * 100)}%`
+											: "manual",
+									],
+									["Prompt prewarm", settings.chat.prewarm ? "enabled (eligible runtimes)" : "disabled"],
+								],
+							},
+						] satisfies NonNullable<FooterDashboardRenderState["harness"]>,
+					}
+				: {}),
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
 				name: sessionInfo.name,

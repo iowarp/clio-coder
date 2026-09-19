@@ -10,6 +10,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Redesign the compact footer and paged dashboard: live agent activity, a shared `/context` multicolor occupancy grid, and detailed session/project/harness status. Keep measured usage separate from configured limits and retain responsive width and height bounds.
+
 - Default LiteLLM onboarding to credential entry and return authentication failures to the credential step instead of presenting an empty catalog and requesting a manual model ID.
 
 - Reorganize `configure` and `/settings` around shared Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced sections. Guided connection setup skips unnecessary key/model questions, previews effective defaults, and preserves existing preferences when reconnecting. The complete control catalog supports search, custom numeric values, and validated collection editing. Version-2 settings remain compatible; no reset or new migration is required.

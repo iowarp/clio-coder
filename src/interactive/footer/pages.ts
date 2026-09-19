@@ -2,14 +2,14 @@ import { costAggregateForAmount, formatCostAggregate } from "../../domains/obser
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
-import { getKeybindings, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { CONTEXT_CATEGORY_TOKEN, renderContextMeterBar } from "../context-meter.js";
+import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { contextCategorySwatch, renderContextMeterBar, renderContextMeterGrid } from "../context-meter.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { previewRows } from "../renderers/preview.js";
 import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
-import { activityQuadrant, contextQuadrant, sessionQuadrant, workspaceQuadrant, zipColumns } from "./widgets.js";
+import { activityQuadrant, contextQuadrant, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -127,28 +127,35 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			),
 			width,
 		),
-		renderContextMeterBar(ledger, Math.max(1, Math.min(100, width)), theme),
 		...wrapTextWithAnsi(
 			`Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${ledger.compactionAuto ? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}` : "manual"}`,
 			width,
 		),
 	];
-	out.push("", rule(theme, width, { left: "CONTEXT COMPOSITION", leftToken: "tool" }));
-	const barWidth = Math.max(4, Math.min(40, width - 38));
-	for (const group of ledger.meter) {
-		if (group.tokens <= 0) continue;
-		const cells = Math.round(
-			(ledger.contextWindow > 0 ? Math.min(1, group.tokens / ledger.contextWindow) : 0) * barWidth,
-		);
-		const tone = CONTEXT_CATEGORY_TOKEN[group.category];
-		const bar = theme.fg(tone, "━".repeat(cells)) + theme.fg("frame", "─".repeat(barWidth - cells));
-		out.push(
-			...wrapTextWithAnsi(
-				`${group.label.padEnd(19)} ${bar} ${theme.fg("accent", formatFooterTokens(group.tokens).padStart(7))} ${theme.fg("dim", group.percent === null ? "" : `${group.percent.toFixed(1)}%`)}`,
-				width,
+	const gridWidth = Math.max(12, Math.min(64, width >= 100 ? Math.floor(width * 0.43) : width));
+	const gridHeight = width >= 100 ? 10 : 5;
+	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
+	const legendWidth = width >= 100 ? width - gridWidth - 4 : width;
+	const legend = ledger.meter
+		.filter((group) => group.tokens > 0)
+		.flatMap((group) =>
+			wrapTextWithAnsi(
+				`${contextCategorySwatch(group.category, theme)} ${group.label.padEnd(20)} ${formatFooterTokens(group.tokens).padStart(7)}  ${group.percent === null ? "unknown" : `${group.percent.toFixed(1)}%`}`,
+				legendWidth,
 			),
 		);
-	}
+	out.push("", rule(theme, width, { left: "CONTEXT COMPOSITION", leftToken: "accent" }));
+	out.push(...(width >= 100 ? zipColumns(grid, legend, gridWidth, legendWidth, "    ") : [...grid, "", ...legend]));
+	out.push(
+		...wrapTextWithAnsi(
+			theme.fg(
+				"muted",
+				"Filled = context · empty = available · shaded = reserve. Small buckets get at least one cell; counts are authoritative.",
+			),
+			width,
+		),
+	);
+
 	out.push(
 		"",
 		...wrapTextWithAnsi(
@@ -193,6 +200,136 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	return out;
 }
 
+/** Three deliberately different lines: current work, context headroom, and session footing. */
+export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
+	const theme = clioTheme();
+	const w = Math.max(1, width);
+	const fit = (value: string) => truncateToWidth(value, w, "…", true);
+	const workers = state.dispatchRows.filter((row) =>
+		["running", "enqueued", "cancelling", "stale"].includes(row.status),
+	);
+	const calls = Object.values(state.toolCounts.tools).reduce((sum, count) => sum + count, 0);
+	const phase = state.agent.statusText ?? "Ready";
+	const work = [
+		theme.style("accent", phase, { bold: true }),
+		workers.length ? theme.fg("agent", `${workers.length} ${workers.length === 1 ? "agent" : "agents"} active`) : null,
+		`${calls} tool calls`,
+		state.toolCounts.errors ? theme.fg("error", `${state.toolCounts.errors} errors`) : null,
+		state.session.throughput,
+		state.session.throughputDetail,
+	]
+		.filter(Boolean)
+		.join(" · ");
+	const ledger = state.context.ledger;
+	const used = ledger?.usedTokens ?? state.context.used;
+	const window = ledger?.contextWindow ?? state.context.contextWindow;
+	const meter = ledger ? renderContextMeterBar(ledger, w >= 100 ? 24 : 12, theme) : "";
+	const usage = `${used === null || used === undefined ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
+	const headroom = ledger && ledger.contextWindow > 0 ? ` · ${formatFooterTokens(ledger.freeTokens)} available` : "";
+	const key = getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard";
+	const context = `${theme.style("accent", "CONTEXT", { bold: true })} ${meter} ${usage}${headroom}`;
+	const footerHint = `${state.session.outputStyle ?? "standard"} · ${key} dashboard`;
+	const gap = w - visibleWidth(context) - footerHint.length;
+	const contextLine =
+		gap >= 2 ? `${context}${" ".repeat(gap)}${theme.fg("muted", footerHint)}` : `${context} · ${footerHint}`;
+	const urgent = state.session.shutdownArmed
+		? "Ctrl+C again to quit · "
+		: state.session.leaderArmed
+			? "Ctrl+G → choose key · "
+			: "";
+	const branch = state.workspace.branch
+		? `${state.workspace.branch}${state.workspace.dirty === true ? " *" : state.workspace.dirty === false ? " ✓" : ""}`
+		: "no Git branch";
+	const footing = `${urgent}${clean(state.workspace.cwd)} · ${clean(branch)} · ${state.session.safety ?? "autonomy unknown"}${state.session.tokens ? ` · ${state.session.tokens} processed` : ""}`;
+	return [fit(work), fit(contextLine), fit(theme.fg("muted", footing))];
+}
+
+function statusPage(state: FooterDashboardRenderState, width: number): string[] {
+	const theme = clioTheme();
+	const session = state.session;
+	const workspace = state.workspace;
+	const memory = session.memoryIntervention;
+	const ledger = state.context.ledger;
+	type Section = { title: string; entries: ReadonlyArray<readonly [string, string]> };
+	const sections: Section[] = [
+		{
+			title: "SESSION & INFERENCE",
+			entries: [
+				["Session", session.name ? `${session.name} · ${session.id ?? "unsaved"}` : (session.id ?? "not assigned")],
+				["Clio Coder", session.version],
+				["Model route", session.target ?? "not selected"],
+				["Thinking", session.thinking ?? "unknown"],
+				["Capabilities", session.capabilities?.join(" · ") || "not yet known"],
+				["Turns", session.turns === null ? "unreported" : String(session.turns)],
+				["Processed usage", session.tokens ?? "not yet reported"],
+				["Tracked cost", session.cost ?? "not yet priced"],
+				["Output style", session.outputStyle ?? "standard"],
+			],
+		},
+		{
+			title: "PROJECT & RESOURCES",
+			entries: [
+				["Directory", workspace.cwd],
+				[
+					"Git",
+					`${workspace.branch ?? "no branch"} · ${workspace.dirty === null ? "state unknown" : workspace.dirty ? "uncommitted changes" : "clean"}`,
+				],
+				["Project type", workspace.projectType ?? "not detected"],
+				["Remote", workspace.remote ?? "none reported"],
+				[
+					"Instructions",
+					ledger?.projectHandbookFiles?.length
+						? ledger.projectHandbookFiles.join(" · ")
+						: (state.context.clioMd ?? "not yet resolved"),
+				],
+				["Project preload", ledger?.projectPreload ?? "not reported"],
+				["Tool surface", ledger ? `${ledger.toolCount} definitions in prompt` : "not yet compiled"],
+				[
+					"Extensions",
+					state.context.extensions
+						? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
+						: "not reported",
+				],
+				[
+					"Memory",
+					memory
+						? `${memory.enabled ? "on" : "off"} · ${memory.tier} · ${memory.size} entries${memory.stepInFlight ? " · updating" : ""}`
+						: (state.context.memory ?? "not reported"),
+				],
+				["Last memory decision", memory?.lastDecision ?? "none reported"],
+			],
+		},
+		...(state.harness ?? [
+			{ title: "HARNESS SETTINGS", entries: [["Settings", "not available in this snapshot"]] as const },
+		]),
+	];
+	const render = (section: Section, columns: number) => [
+		rule(theme, columns, { left: section.title, leftToken: "accent" }),
+		...section.entries.flatMap(([label, value]) => {
+			const prefix = `${theme.fg("muted", label)}  `;
+			const available = Math.max(1, columns - visibleWidth(prefix));
+			if (available < 18)
+				return [prefix.trimEnd(), ...wrapTextWithAnsi(clean(value), Math.max(1, columns - 2)).map((line) => `  ${line}`)];
+			return wrapTextWithAnsi(clean(value), available).map(
+				(line, index) => `${index ? " ".repeat(visibleWidth(prefix)) : prefix}${line}`,
+			);
+		}),
+		"",
+	];
+	if (width < 110) return sections.flatMap((section) => render(section, width));
+	const col = Math.floor((width - 4) / 2);
+	return zipColumns(
+		[...(sections[0] ? render(sections[0], col) : []), ...(sections[2] ? render(sections[2], col) : [])],
+		[
+			...(sections[1] ? render(sections[1], width - col - 4) : []),
+			...(sections[3] ? render(sections[3], width - col - 4) : []),
+		],
+		col,
+		width - col - 4,
+		"    ",
+	);
+}
+
 export function renderDashboardPage(
 	state: FooterDashboardRenderState,
 	page: DashboardPage,
@@ -205,30 +342,14 @@ export function renderDashboardPage(
 	const budget = Math.max(6, terminalRows - 7);
 	const tabs = DASHBOARD_PAGES.map((name, index) =>
 		name === page
-			? theme.paint(` ${index + 1} ${name.toUpperCase()} `, { bg: "agent", fg: "frame", bold: true })
+			? theme.style("agent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
 			: theme.fg("dim", ` ${index + 1} ${name} `),
 	);
 	const heading = wrapTextWithAnsi(`${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`, safeWidth);
 	let content: string[];
 	if (page === "Activity") content = activityPage(state, safeWidth, budget - heading.length - 3);
 	else if (page === "Context") content = contextPage(state, safeWidth);
-	else {
-		const split = Math.floor((safeWidth - 3) / 2);
-		content =
-			safeWidth >= 100
-				? zipColumns(
-						sessionQuadrant(state.session, { width: split }),
-						workspaceQuadrant(state.workspace, { width: safeWidth - split - 3 }),
-						split,
-						safeWidth - split - 3,
-						theme.fg("frame", " │ "),
-					)
-				: [
-						...sessionQuadrant(state.session, { width: safeWidth }),
-						"",
-						...workspaceQuadrant(state.workspace, { width: safeWidth }),
-					];
-	}
+	else content = statusPage(state, safeWidth);
 	const next = page === "Status" ? "close dashboard" : `${DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1]} page`;
 	const hint = wrapTextWithAnsi(
 		theme.fg("dim", `${cycleKey || "Dashboard shortcut"} → ${next} · composer stays active`),

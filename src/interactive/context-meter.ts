@@ -10,11 +10,11 @@ import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.
 
 /** Color assigned to each category across every context rendering. */
 export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, ClioToken>> = {
-	system: "accentDeep",
-	tools: "tool",
-	agents: "agent",
+	system: "info",
+	tools: "warning",
+	agents: "reason",
 	skills: "success",
-	memory: "warning",
+	memory: "error",
 	project: "muted",
 	messages: "accent",
 	pending: "accentDeep",

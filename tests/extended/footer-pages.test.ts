@@ -4,14 +4,16 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createWorkerProgressFold } from "../../src/domains/observability/worker-progress.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interactive/context-meter.js";
 import { buildFooterDashboard, type FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
-import { DASHBOARD_PAGES, renderDashboardPage } from "../../src/interactive/footer/pages.js";
+import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
 	renderToolExecution,
 	renderToolPreview,
 	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
+import { clioTheme } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 
 function state(): FooterDashboardRenderState {
@@ -124,7 +126,7 @@ test("dashboard pages devote space to agents, context composition and complete s
 	match(context, /Estimated usage/);
 	const status = plain(renderDashboardPage(state(), "Status", 172, 40, "Alt+U"));
 	match(status, /dynamo\/qwopus3.8-27b-flash@q4_k_m/);
-	match(status, /WORKSPACE/);
+	match(status, /PROJECT & RESOURCES/);
 });
 
 test("resolved dashboard shortcut cycles Activity, Context, Status and closed without capturing text", () => {
@@ -225,4 +227,54 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Now.*Streaming response/);
 	match(render(), /Found the question navigation handlers/);
 	match(render(), /Live response · provisional/);
+});
+
+test("compact footer exposes activity, headroom and workspace in three bounded rows", () => {
+	for (const width of [40, 80, 160]) {
+		const rows = renderCompactDashboard(state(), width);
+		strictEqual(rows.length, 3);
+		ok(rows.every((row) => visibleWidth(row) <= width));
+	}
+	const text = plain(renderCompactDashboard(state(), 160));
+	match(text, /exploring.*1 agent active/);
+	match(text, /CONTEXT.*available/);
+	match(text, /dashboard/);
+	match(text, /v050.*auto-edit.*70k processed/);
+});
+
+test("Status renders live configured harness limits without exposing arbitrary settings", () => {
+	const footer = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		resolveCurrentBranch: async () => null,
+		getTerminalColumns: () => 172,
+		getTerminalRows: () => 75,
+		getSettings: () => DEFAULT_SETTINGS,
+	});
+	try {
+		for (let i = 0; i < 3; i++) footer.toggleExpanded();
+		const text = plain(footer.view.render(172));
+		match(text, /PERMISSIONS & LIMITS/);
+		match(text, /Worker approvals/);
+		match(text, /tracked pricing only/);
+		match(text, /EXECUTION & CONTEXT POLICY/);
+		match(text, /Fleet concurrency/);
+		match(text, /Working set/);
+		match(text, /Stream deadlines/);
+	} finally {
+		footer.dispose();
+	}
+});
+
+test("Context dashboard shares the overlay category swatches and filled/free/reserve grid", () => {
+	const snapshot = state();
+	const ledger = snapshot.context.ledger;
+	ok(ledger);
+	const theme = clioTheme();
+	const rows = renderDashboardPage(snapshot, "Context", 172, 75, "alt+u");
+	const ansi = rows.join("\n");
+	for (const group of ledger.meter.filter((group) => group.tokens > 0)) {
+		ok(ansi.includes(contextCategorySwatch(group.category, theme)));
+	}
+	for (const row of renderContextMeterGrid(ledger, 64, 10, theme)) ok(ansi.includes(row));
+	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
 });
