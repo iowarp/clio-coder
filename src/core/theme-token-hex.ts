@@ -1,5 +1,6 @@
 /** Semantic colors shared by Clio's terminal surfaces and generated companion profiles. */
 export type ClioToken =
+	| "editor"
 	| "accent"
 	| "accentDeep"
 	| "action"
@@ -24,19 +25,20 @@ export type ClioToken =
  * renderer and splitting the instant shell's Stage 0 chunk.
  */
 const TOKEN_HEX: Readonly<Record<ClioToken, `#${string}`>> = {
-	accent: "#46e5d0",
-	accentDeep: "#1fb7a6",
-	action: "#ff7e29",
-	tool: "#46e5d0",
-	agent: "#ff7e29",
-	success: "#57e389",
-	warning: "#ffb454",
-	error: "#ff5c66",
-	info: "#5ba8ff",
-	reason: "#9d8cff",
+	editor: "#40ffde",
+	accent: "#53b1a4",
+	accentDeep: "#3e9389",
+	action: "#d99b62",
+	tool: "#6fada5",
+	agent: "#cf905b",
+	success: "#77b891",
+	warning: "#d3b06b",
+	error: "#db8289",
+	info: "#80a7ce",
+	reason: "#af9bc9",
 	dim: "#6a7a85",
 	muted: "#8a99a4",
-	title: "#46e5d0",
+	title: "#72b8ad",
 	frame: "#2f5d5a",
 	frameStrong: "#2aab9e",
 };
