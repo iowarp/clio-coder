@@ -82,7 +82,7 @@ export interface InteractivePresentationDeps {
 	workspaceFacts: WorkspaceFacts;
 	sessionTranscript: Pick<SessionTranscript, "liveSessionTurns">;
 	tui: TUI;
-	terminal: { readonly columns: number };
+	terminal: { readonly columns: number; readonly rows?: number };
 	mount?: (root: Component, editor: Component) => void;
 	/** Stage 0's exact editor; when present no replacement editor is constructed. */
 	editor?: ClioEditor;
@@ -396,6 +396,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			};
 		},
 		getTerminalColumns: () => deps.terminal.columns,
+		getTerminalRows: () => deps.terminal.rows ?? process.stdout.rows ?? 40,
 		getSessionTokens: () => observabilitySnapshot.session.tokens,
 		getTokenThroughput: () =>
 			liveThroughput === null ? observabilitySnapshot.session.latestThroughput : currentLiveThroughput(),

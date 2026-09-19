@@ -587,24 +587,26 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 }
 
 function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args, status, undefined, meta.outcome));
+	const body = styleSublineBody(buildSublineBody(toolName, args, status, undefined, meta.outcome), toolName);
 	const head = `${dim(HEADER_PREFIX_PLAIN)}${body}`;
 	return `${head}${statusGlyph(status, meta)}`;
 }
 
 function sublineLead(token: string, rest: string): string {
-	return `${cyanBold(token)}${rest}`;
+	return `${theme.style("tool", token, { bold: true })}${rest}`;
 }
 
-function styleSublineBody(body: string): string {
+function styleSublineBody(body: string, toolName?: string): string {
 	const match = /^(?<lead>[^ (]+)(?<rest>.*)$/u.exec(body);
 	if (match?.groups?.lead === undefined || match.groups.rest === undefined) return body;
-	return sublineLead(match.groups.lead, match.groups.rest);
+	return toolName === "dispatch"
+		? `${theme.style("agent", match.groups.lead, { bold: true })}${match.groups.rest}`
+		: sublineLead(match.groups.lead, match.groups.rest);
 }
 
 function buildGenericToolBody(toolName: string, args: unknown): string {
 	const summary = summarizeArgs(toolName, args);
-	return summary.length > 0 ? `tool action ${summary}` : "tool action";
+	return summary.length > 0 ? `${sanitizeCallTargetText(toolName)} ${summary}` : sanitizeCallTargetText(toolName);
 }
 
 function buildFieldSublineBody(
@@ -668,7 +670,7 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 	read: (args) => buildFieldSublineBody(args, "path", "reading "),
 	edit: (args) => buildFieldSublineBody(args, "path", "editing "),
 	write: (args) => buildFieldSublineBody(args, "path", "writing "),
-	ls: (args) => buildFieldSublineBody(args, "path", "listing "),
+	ls: (args) => buildFieldSublineBody(args, "path", "listing ") ?? "listing workspace",
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
 	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
 	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
@@ -811,7 +813,10 @@ function sublineParts(
 	meta: StatusMeta,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
-	const body = styleSublineBody(buildSublineBody(call.toolName, call.args, status, finished?.result, finished?.outcome));
+	const body = styleSublineBody(
+		buildSublineBody(call.toolName, call.args, status, finished?.result, finished?.outcome),
+		call.toolName,
+	);
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
 	if (finished !== null) {
@@ -1360,6 +1365,32 @@ export function renderBashTranscriptExecution(
 		: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true });
 }
 
+function previewArguments(call: ToolExecutionStart | ToolExecutionFinished): unknown {
+	if (!isPlainObject(call.args)) return call.args;
+	const safe = redactToolArgs(call.args);
+	if (!isPlainObject(safe)) return safe;
+	if (call.toolName === "context" && safe.scope === "skills") {
+		const { scope: _scope, ...rest } = safe;
+		if (
+			typeof rest.name === "string" &&
+			rest.name.length > 0 &&
+			rest.name.length <= ARG_PREVIEW_LIMIT &&
+			!/[\r\n\t]/.test(rest.name)
+		)
+			delete rest.name;
+		return rest;
+	}
+	const primary = PRIMARY_ARG_FIELD[call.toolName];
+	if (!primary || typeof safe[primary] !== "string") return safe;
+	const value = safe[primary] as string;
+	// Commands retain their separate, readable command block even when short.
+	if (call.toolName === "bash" || /[\r\n\t]/.test(value) || value.length > ARG_PREVIEW_LIMIT) return safe;
+	const heading = buildSublineBody(call.toolName, safe, undefined, undefined, undefined);
+	if (!value || !heading.includes(value)) return safe;
+	const { [primary]: _shown, ...rest } = safe;
+	return rest;
+}
+
 /** Invocation intent stays visible in every style; /view retains the complete arguments and output. */
 export function renderToolPreview(
 	call: ToolExecutionStart | ToolExecutionFinished,
@@ -1381,7 +1412,12 @@ export function renderToolPreview(
 	);
 	const rows = renderToolSubline(call, width);
 	rows.push(
-		...renderToolArguments(call.args, width, failure, previewBudget(detail.invocationRows, options.terminalRows)),
+		...renderToolArguments(
+			previewArguments(call),
+			width,
+			failure,
+			previewBudget(detail.invocationRows, options.terminalRows),
+		),
 	);
 	const result = finished?.result ?? options.partialResult;
 	const diff = finished && !failure ? resultDiff(result) : null;
