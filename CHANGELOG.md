@@ -56,6 +56,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - A retry that moved to another target keeps the assignment's failover mode, so a later retry in the same chain can still leave a failing target instead of being pinned to it.
 - A worker's context overflow is retried once onto an eligible route whose context window is strictly larger, including another model on the same target, and the assignment lineage records `context-overflow: <from> -> <to> on <target>/<model>`. Without such a route, under `none` failover, or after an overflow retry, the assignment fails with a detail naming why.
 - The `/settings` targets rows show each route's dispatch breaker in the running session: an open route replaces the health cell with its remaining cooldown, a probe in flight shows `probing`, and the detail line names each route's state and last failure. `clio-coder targets` and `doctor` show none, since they never dispatch.
+- Recover `worktree: true` task worktrees after a crash. Each claim now carries a lease on the Clio process that created it; at the next start, a dead owner's worktree that holds no work is removed with its branch, and one with commits or uncommitted files is kept, marked abandoned, and named once on stderr. Nothing is merged or deleted on recovery, and a live owner is never touched. `doctor` lists every task worktree that outlived its run with its branch, age, and the git commands to inspect or drop it.
 
 ### doctor
 

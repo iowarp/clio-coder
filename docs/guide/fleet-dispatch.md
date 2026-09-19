@@ -297,6 +297,20 @@ application never merges and reports the branch. A detached task applies when it
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
 
+Each task worktree is claimed by `.clio-coder/worktrees/<runId>.task-owner.json`,
+which records the branch, the base commit, the apply mode, and a lease on the
+Clio process that created it (host, PID, and a PID-reuse-resistant start
+identity). A run that ends and keeps its worktree marks the claim `settled`.
+At the next start in the same checkout, a claim that is still `active` while
+its owner is gone is a crash. A worktree with no commit beyond its base and no
+modified, staged, or untracked file is removed with its branch. One that holds
+work is kept, marked `abandoned`, and named once on stderr as
+`[dispatch] task worktree recovery preserved <runId>: ...`; it is never merged
+and never deleted. A live owner, an owner on another host, a claim written
+before recovery existed, and anything git cannot inspect are left alone.
+`clio-coder doctor` lists every task worktree that outlived its run with its
+branch, age, and the git commands to inspect or drop it.
+
 ### Typed intent and host-run verification
 
 The singular request and every object in `tasks` accept an optional `intent`:
