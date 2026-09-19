@@ -10,8 +10,8 @@ interface TokenColor {
 const TOKENS: Record<ClioToken, TokenColor> = {
 	accent: { rgb: [70, 229, 208], xterm: 80 },
 	accentDeep: { rgb: [31, 183, 166], xterm: 44 },
-	tool: { rgb: [87, 214, 173], xterm: 79 },
-	agent: { rgb: [255, 139, 56], xterm: 208 },
+	tool: { rgb: [70, 229, 208], xterm: 80 },
+	agent: { rgb: [255, 126, 41], xterm: 208 },
 	// Second brand color: neon orange. The token name teaches the rule: orange
 	// means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
