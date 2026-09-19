@@ -16,14 +16,6 @@ import { runScenario } from "../../evals/tool-bench/lib/driver.js";
 import { renderSuite, SUITE_DIR, suitesFor } from "../../evals/tool-bench/lib/suite-gen.js";
 import type { ToolResult, ToolSpec } from "../../src/tools/registry.js";
 
-/**
- * Scenarios that expect behavior the tool path does not give yet. Each stays
- * in its suite and reads unsolved. When a gap closes this test fails, and the
- * entry comes out. invalid-utf8: rg reports a line that is not UTF-8 as bytes,
- * and grep drops the match.
- */
-const KNOWN_GAPS = new Set(["grep.search.invalid-utf8"]);
-
 // The 100 MB and 50 000 file templates are exercised by the full-profile suites, not here.
 function smallCorpus(seed: number, split: (typeof SPLITS)[number]): Scenario[] {
 	return templatesFor("grep", "full")
@@ -90,16 +82,12 @@ describe("tool-bench grep corpus", () => {
 });
 
 describe("tool-bench grep driver", () => {
-	it("gives identical digests and fs_ops across two runs of every default scenario, and solves each outside the known gaps", async () => {
+	it("gives identical digests and fs_ops across two runs of every default scenario, and solves each", async () => {
 		const first = new Map<string, { digest: string; fsOps: number }>();
 		for (const pass of [0, 1]) {
 			for (const scenario of generateCorpus("grep", DEFAULT_SEED, "search")) {
 				const measured = await runScenario(scenario, { warmup: pass === 0 ? 1 : 0 });
-				strictEqual(
-					measured.solved,
-					!KNOWN_GAPS.has(scenario.id),
-					`${scenario.id}: ${measured.errorMessage ?? "post-state or output mismatch"}`,
-				);
+				ok(measured.solved, `${scenario.id}: ${measured.errorMessage ?? "post-state or output mismatch"}`);
 				if (pass === 0) {
 					first.set(scenario.id, { digest: measured.digest, fsOps: measured.fsOps });
 					continue;

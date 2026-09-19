@@ -73,6 +73,18 @@ test("rg keeps partial matches and counts per-file errors beyond the stderr rete
 	});
 });
 
+test("rg shows a match on a line that is not valid UTF-8, which rg reports as base64 bytes", async () => {
+	const latin1 = Buffer.concat([Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x20]), Buffer.from("needle\n")]);
+	const record = JSON.stringify({
+		type: "match",
+		data: { path: { text: join(root, "a.txt") }, line_number: 2, lines: { bytes: latin1.toString("base64") } },
+	});
+	binary("rg", `console.log(${JSON.stringify(record)});`);
+	const result = await grepTool.run({ path: root, pattern: "needle" });
+	assert.match(ok(result).output, /a\.txt:2: caf\uFFFD needle/);
+	assert.equal(search(result).complete, true);
+});
+
 test("rg distinguishes complete empty searches, skipped-only searches, and invalid patterns", async () => {
 	binary("rg", "process.exitCode=1;");
 	let result = await grepTool.run({ path: root, pattern: "needle" });
