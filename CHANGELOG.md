@@ -10,6 +10,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Default LiteLLM onboarding to credential entry and return authentication failures to the credential step instead of presenting an empty catalog and requesting a manual model ID.
+
 - Reorganize `configure` and `/settings` around shared Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced sections. Guided connection setup skips unnecessary key/model questions, previews effective defaults, and preserves existing preferences when reconnecting. The complete control catalog supports search, custom numeric values, and validated collection editing. Version-2 settings remain compatible; no reset or new migration is required.
 - Add read-only `context(scope="settings")` awareness of effective session settings and their exact configuration destinations. Credentials, endpoint URLs, external-agent commands, and arbitrary configuration contents are omitted. Configured ceilings are distinguished from remaining budgets; inspection grants no authority to change permissions.
 - Route internal diagnostics through the active terminal owner and notice area, retaining stderr for headless use. Deduplicate repeated runtime notices and keep routine provider, middleware, and listener diagnostics from writing over the live TUI.

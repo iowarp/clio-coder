@@ -674,8 +674,8 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
 				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
 				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-env-target`.split(""), ENTER] },
-				// Skip's default highlight wraps one DOWN to "Environment variable".
-				{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
+				// LiteLLM defaults to storing a key; UP selects an environment variable.
+				{ waitFor: "How should Clio get the API key?", keys: ["\x1b[A", ENTER] },
 				{ waitFor: "Which environment variable?", keys: [CLEAR_LINE, ...envVar.split(""), ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
 				{ waitFor: "Which model?", keys: [ENTER] },
@@ -704,7 +704,7 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 		}
 	});
 
-	it("reports a rejected key rather than an unreachable gateway, and still completes", async () => {
+	it("returns missing authentication to credential entry before selecting a model", async () => {
 		const testEnv = unconfiguredEnv();
 		const server = await litellmServer("sk-a-key-this-run-never-sends");
 		try {
@@ -712,23 +712,27 @@ describe("contracts/configure-onboarding: credential before reachability", () =>
 				{ waitFor: "How will you connect Clio to a model?", keys: [DOWN, ENTER] },
 				{ waitFor: "Which runtime?", keys: [...stepsDownToRuntime("litellm"), ENTER] },
 				{ waitFor: "Target id", keys: [CLEAR_LINE, ...`litellm-nokey-target`.split(""), ENTER] },
-				// "No key" is already the default highlight for a fresh target.
-				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				// Deliberately skip the default stored-key choice.
+				{ waitFor: "How should Clio get the API key?", keys: [DOWN, ENTER] },
 				{ waitFor: "Where is the server?", keys: [CLEAR_LINE, ...server.url.split(""), ENTER] },
-				{ waitFor: "Which model?", keys: [CLEAR_LINE, ...`manual-model`.split(""), ENTER] },
+				{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+				{ waitFor: "Paste the API key", keys: [..."sk-a-key-this-run-never-sends".split(""), ENTER] },
+				{ waitFor: "Where is the server?", keys: [ENTER] },
+				{ waitFor: "Which model?", keys: [ENTER] },
 				{ waitFor: "Review target", keys: [ENTER] },
 				{ waitFor: "Delegate to any of these?", keys: [ENTER], optional: true },
 			]);
 			strictEqual(result.code, 0, `${result.stderr}\n${plainText(result.transcript())}`);
 
 			const screen = plainText(result.transcript());
-			ok(screen.includes("rejected the key"), `an auth failure must say so plainly:\n${screen}`);
+			ok(screen.includes("Authentication failed"), `an auth failure must say so plainly:\n${screen}`);
 			ok(!screen.includes("served no model catalog"), `the generic message must not survive an auth failure:\n${screen}`);
 
 			const settings = readFileSync(testEnv.settingsFile, "utf8");
 			match(settings, /id: litellm-nokey-target/u);
 			match(settings, /runtime: litellm/u);
-			match(settings, /defaultModel: manual-model/u, "declining a key still lets the wizard finish");
+			match(settings, /defaultModel: gateway-a/u, "the corrected credential retrieves the real catalog");
+			ok(!screen.includes("answered no model list"));
 		} finally {
 			await server.close();
 			testEnv.cleanup();

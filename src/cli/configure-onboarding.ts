@@ -125,7 +125,7 @@ interface Answers {
 	antigravity?: { targetId: string; model: string } | undefined;
 }
 
-type StepOutcome = "next" | "back" | "quit" | "cancel";
+type StepOutcome = "next" | "back" | "quit" | "cancel" | "credential";
 
 interface Wizard {
 	streams: OnboardingStreams;
@@ -354,13 +354,18 @@ const URL_STEP: Step = {
 		}
 		answers.url = url;
 		wizard.answer("URL", url);
-		await reportReachability(wizard, answers, runtime, url);
+		const authenticated = await reportReachability(wizard, answers, runtime, url);
+		if (!authenticated && runtime.auth === "api-key") {
+			answers.inventoryKey = undefined;
+			if (answers.credential === "skip") answers.credential = undefined;
+			return "credential";
+		}
 		return "next";
 	},
 };
 
 /**
- * Say what is at the URL, and never refuse over it.
+ * Keep offline setup possible, but repair rejected authentication before discovery.
  *
  * The readline wizard treated an unreachable endpoint as a question ("save this
  * target anyway?") and an LM Studio URL that did not greet back as a hard
@@ -372,7 +377,7 @@ async function reportReachability(
 	answers: Answers,
 	runtime: RuntimeDescriptor,
 	url: string,
-): Promise<void> {
+): Promise<boolean> {
 	const draft = draftDescriptor(answers, runtime, false);
 	// A freshly typed "store the key" answer is not on disk yet (that write
 	// happens at the end of the wizard), so it has to ride along as an explicit
@@ -384,7 +389,8 @@ async function reportReachability(
 			const readings = probeReadings(probe);
 			wizard.presenter.step(`reachable, ${readings.length > 0 ? readings.join(", ") : "no model list offered"}`);
 		} else if (probe.authFailed) {
-			wizard.presenter.warn("rejected the key");
+			wizard.presenter.warn("Authentication failed. Choose a credential for this server before selecting a model.");
+			return false;
 		} else {
 			wizard.presenter.warn(`not reachable, you can fix this later: ${probe.error ?? "no reply"}`);
 		}
@@ -399,6 +405,7 @@ async function reportReachability(
 			answers.detected = { runtimeId: fingerprint.runtimeId, displayName: fingerprint.displayName };
 		}
 	}
+	return true;
 }
 
 const DETECTED_RUNTIME_STEP: Step = {
@@ -445,6 +452,7 @@ function defaultCredentialSource(runtime: RuntimeDescriptor, targetId: string): 
 	const status = openAuthStorage().statusForTarget(resolveRuntimeAuthTarget(runtime), { includeFallback: false });
 	if (status.source === "stored-api-key") return "keep";
 	if (status.source === "environment") return "env";
+	if (runtime.id === "litellm") return "stored";
 	// A local llama.cpp server wants no credential, and offering `env` sent the
 	// user to an unexplained variable name with nothing correct to type into it.
 	return targetRequiresAuth({ id: targetId, runtime: runtime.id }, runtime) ? "env" : "skip";
@@ -527,7 +535,11 @@ const CREDENTIAL_STEP: Step = {
 				hint: "written to credentials.yaml, mode 0600, not encrypted",
 			},
 			...(hasStored ? [{ value: "keep" as CredentialSource, label: "Keep what is there", hint: stored }] : []),
-			{ value: "skip" as CredentialSource, label: "No key", hint: "this target needs no credential" },
+			{
+				value: "skip" as CredentialSource,
+				label: "No key",
+				hint: "only for servers that accept unauthenticated requests",
+			},
 		];
 		const current = answers.credential ?? defaultCredentialSource(runtime, answers.targetId ?? runtime.id);
 		const initial = Math.max(
@@ -1014,6 +1026,11 @@ export async function runOnboardingWizard(
 		marks[cursor] = writer.mark();
 		const outcome = await step.run(wizard, answers);
 		if (outcome === "quit" || outcome === "cancel") return cancel(presenter, answers, outcome === "quit");
+		if (outcome === "credential") {
+			direction = 1;
+			cursor = STEPS.indexOf(CREDENTIAL_STEP);
+			continue;
+		}
 		if (outcome === "back") {
 			direction = -1;
 			cursor -= 1;
