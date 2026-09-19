@@ -471,16 +471,19 @@ from the active branch. It retains settled and superseded values from
 operator supersede a decision or enter a correction. A correction is submitted
 to the model as an ordinary operator turn after the durable snapshot changes.
 
-The compact footer separates current activity, context occupancy, and workspace/Git
-state into three rows. Detailed throughput, cumulative usage, and harness settings
-are reserved for the expanded pages. `Alt+U` cycles through Activity, Context, Status, then closes
+The compact footer is a fixed five-row instrument strip: aligned Activity and
+Context columns, a divider, and workspace/Git with the dashboard shortcut. Narrow
+terminals stack the same facts. Expanded dashboard pages share a fixed height of
+one-third of the available terminal viewport (minimum eight rows), padded so
+switching pages does not move the composer. `Alt+U` cycles through Activity, Context, Status, then closes
 the dashboard; the composer remains active. Activity shows worker phases, recent
 actions, reported usage, and provisional answer text. Finished agents collapse into
 a bounded invocation history with outcomes, duration, usage, and inspection links;
 full tasks, action trails, and answers remain in `/view` and Fleet Runs. Context uses the same category
 colors and filled/free/reserved grid as `/context`, with token counts alongside it.
-Status shows the model route, project resources, memory state, permissions, and
-configured execution/context limits. Configured cost ceilings are not remaining
+Status groups the model route, project resources, memory state, permissions, and
+key configured execution/context limits into panels; `/settings` and `/context`
+provide deeper inspection. Configured cost ceilings are not remaining
 budgets, and unreported measurements remain labeled as such. Narrow or short
 terminals wrap content and explicitly indicate omitted detail.
 
