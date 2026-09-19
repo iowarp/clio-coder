@@ -1,3 +1,4 @@
+import { freemem, totalmem } from "node:os";
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
@@ -124,8 +125,7 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
-	/** Explicit display allowlist; never include credentials or arbitrary settings. */
-	harness?: ReadonlyArray<{ title: string; entries: ReadonlyArray<readonly [string, string]> }>;
+	resources?: { processRssBytes: number; hostFreeBytes: number; hostTotalBytes: number };
 
 	workspace: WorkspaceFacts;
 	session: SessionFacts;
@@ -406,59 +406,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 
 		return {
-			...(settings
-				? {
-						harness: [
-							{
-								title: "PERMISSIONS & LIMITS",
-								entries: [
-									["Autonomy", safety],
-									["Worker approvals", settings.fleet.permissions.mode],
-									["Safety review", settings.safety.review.enabled ? "enabled" : "disabled"],
-									["External tool governance", toolProfile],
-									["Configured cost ceiling", `$${settings.safety.limits.sessionCostUsd} · tracked pricing only`],
-									["Chat tool-call budget", String(settings.safety.limits.chatToolCallsPerTurn)],
-									["Worker tool-call limit", String(settings.fleet.limits.toolCallsPerRun)],
-									["Observation limit", `${Math.round(settings.safety.limits.observationBytesPerTurn / 1024)} KiB / turn`],
-								],
-							},
-							{
-								title: "EXECUTION & CONTEXT POLICY",
-								entries: [
-									["Fleet concurrency", `${settings.fleet.concurrency} (configured)`],
-									["Fleet nodes", `${settings.fleet.nodes.length} configured`],
-									[
-										"Worker default",
-										`${settings.fleet.default.target ?? "inherit target"} / ${settings.fleet.default.model ?? "inherit model"}`,
-									],
-									[
-										"Retries",
-										`chat ${settings.chat.retry.enabled ? settings.chat.retry.maxRetries : "off"} · workers ${settings.fleet.retry.maxRetries}`,
-									],
-									["Worker timeout", `${Math.round(settings.fleet.limits.internalRunTimeoutMs / 1000)}s`],
-									[
-										"Stream deadlines",
-										`first token ${Math.round(settings.chat.retry.firstTokenStallMs / 1000)}s · stalled stream ${Math.round(settings.chat.retry.streamStallMs / 1000)}s`,
-									],
-									["Output limit", settings.chat.maxOutputTokens > 0 ? `${settings.chat.maxOutputTokens} tokens` : "automatic"],
-									[
-										"Working set",
-										settings.context.workingSet.enabled
-											? `${settings.context.workingSet.policy} · target ${Math.round(settings.context.workingSet.target * 100)}% · protect ${settings.context.workingSet.protectLastTurns} turns`
-											: "disabled",
-									],
-									[
-										"Compaction",
-										settings.context.compaction.auto
-											? `automatic at ${Math.round(settings.context.compaction.threshold * 100)}%`
-											: "manual",
-									],
-									["Prompt prewarm", settings.chat.prewarm ? "enabled (eligible runtimes)" : "disabled"],
-								],
-							},
-						] satisfies NonNullable<FooterDashboardRenderState["harness"]>,
-					}
-				: {}),
+			resources: { processRssBytes: process.memoryUsage.rss(), hostFreeBytes: freemem(), hostTotalBytes: totalmem() },
+
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
 				name: sessionInfo.name,
@@ -534,9 +483,13 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
 		const current = state(width);
 		if (current.agent.statusText) frame = (frame + 1) % 10;
-		const notices = renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
+		const notices =
+			dashboardMode === "compact" ? [] : renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
 		const contributed = deps.getExtensionStatus?.() ?? [];
-		const extensionLine = contributed.length ? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)] : [];
+		const extensionLine =
+			dashboardMode === "expanded" && contributed.length
+				? [fitDashboardLine(`Extensions: ${contributed.join(" | ")}`, width)]
+				: [];
 		const grid =
 			dashboardMode === "expanded"
 				? renderDashboardPage(

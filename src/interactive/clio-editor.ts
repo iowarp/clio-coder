@@ -259,9 +259,9 @@ export class ClioEditor extends Editor {
 				left: mode,
 				leftToken: modeToken(mode),
 				right: styledRailLabel(theme, this.chrome, Math.max(1, safeWidth - visibleWidth(mode) - 5)),
-				fillToken: "frameStrong",
+				fillToken: "editor",
 				rightRaw: true,
-				rightTail: theme.style("frameStrong", "─", { bold: true }),
+				rightTail: theme.style("editor", "─", { bold: true }),
 			});
 		}
 
@@ -275,16 +275,16 @@ export class ClioEditor extends Editor {
 		if (bottomRail >= 0 && mode === "CONFIRM") {
 			lines[bottomRail] = rule(theme, safeWidth, {
 				right: confirmRailHint(theme, safeWidth, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none"),
-				fillToken: "frameStrong",
+				fillToken: "editor",
 				rightRaw: true,
-				rightTail: theme.style("frameStrong", "─", { bold: true }),
+				rightTail: theme.style("editor", "─", { bold: true }),
 			});
 		} else if (bottomRail >= 0 && safeWidth >= MIN_HINT_WIDTH) {
 			lines[bottomRail] = rule(theme, safeWidth, {
 				right: lowerRailHint(theme, this.chrome),
-				fillToken: "frameStrong",
+				fillToken: "editor",
 				rightRaw: true,
-				rightTail: theme.style("frameStrong", "─", { bold: true }),
+				rightTail: theme.style("editor", "─", { bold: true }),
 			});
 		}
 

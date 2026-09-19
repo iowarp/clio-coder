@@ -125,8 +125,8 @@ test("dashboard pages devote space to agents, context composition and complete s
 	match(context, /CONTEXT COMPOSITION/);
 	match(context, /Estimated usage/);
 	const status = plain(renderDashboardPage(state(), "Status", 172, 120, "Alt+U"));
-	match(status, /dynamo\/qwopus3.8-27b-flash@q4_k_m/);
-	match(status, /PROJECT & RESOURCES/);
+	match(status, /SESSION USAGE/);
+	match(status, /EXECUTION & RESOURCES/);
 });
 
 test("resolved dashboard shortcut cycles Activity, Context, Status and closed without capturing text", () => {
@@ -228,23 +228,23 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes activity, headroom and workspace in five aligned bounded rows", () => {
+test("compact footer exposes activity, headroom and workspace in two bounded dynamic rows", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
-		strictEqual(rows.length, 5);
+		strictEqual(rows.length, 2);
 		ok(rows.every((row) => visibleWidth(row) <= width));
 	}
 	const text = plain(renderCompactDashboard(state(), 160));
 	match(text, /exploring/);
-	match(text, /1 agent active/);
-	match(text, /CONTEXT/);
+	match(text, /1 active/);
+
 	match(text, /262.1k/);
-	match(text, /dashboard/);
-	match(text, /v050.*dashboard/);
+	match(text, /alt\+u|Dashboard/);
+	match(text, /v050/);
 	doesNotMatch(text, /auto-edit|70k processed|standard/);
 });
 
-test("Status renders live configured harness limits without exposing arbitrary settings", () => {
+test("Status renders live resource telemetry instead of a configuration dump", () => {
 	const footer = buildFooterDashboard({
 		providers: { list: () => [] } as never,
 		resolveCurrentBranch: async () => null,
@@ -255,13 +255,12 @@ test("Status renders live configured harness limits without exposing arbitrary s
 	try {
 		for (let i = 0; i < 3; i++) footer.toggleExpanded();
 		const text = plain(footer.view.render(172));
-		match(text, /PERMISSIONS & LIMITS/);
-		match(text, /Worker approvals/);
-		match(text, /tracked pricing only/);
-		match(text, /EXECUTION & CONTEXT POLICY/);
-		match(text, /Fleet concurrency/);
-		match(text, /Working set/);
-		match(text, /Compaction/);
+		match(text, /SESSION USAGE/);
+		match(text, /EXECUTION & RESOURCES/);
+		match(text, /Clio process RSS/);
+		match(text, /Host RAM/);
+		match(text, /Backend GPU/);
+		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
 	} finally {
 		footer.dispose();
 	}
@@ -272,12 +271,12 @@ test("Context dashboard shares the overlay category swatches and filled/free/res
 	const ledger = snapshot.context.ledger;
 	ok(ledger);
 	const theme = clioTheme();
-	const rows = renderDashboardPage(snapshot, "Context", 172, 75, "alt+u");
+	const rows = renderDashboardPage(snapshot, "Context", 172, 120, "alt+u");
 	const ansi = rows.join("\n");
 	for (const group of ledger.meter.filter((group) => group.tokens > 0)) {
 		ok(ansi.includes(contextCategorySwatch(group.category, theme)));
 	}
-	for (const row of renderContextMeterGrid(ledger, 64, 10, theme)) ok(ansi.includes(row));
+	for (const row of renderContextMeterGrid(ledger, 64, 8, theme)) ok(ansi.includes(row));
 	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
 });
 
@@ -294,7 +293,7 @@ test("finished agents collapse into bounded history while retries retain live ca
 			taskSummary: "Historical verbose task must not render",
 		})),
 	];
-	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 75, "alt+u"));
+	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u"));
 	match(text, /Active retry task/);
 	match(text, /INVOCATION HISTORY · 8 finished/);
 	match(text, /Scout · completed.*internal.*1[2]s.*↑68k ↓2k/);
@@ -314,13 +313,26 @@ test("expanded pages have identical viewport-relative height across widths and l
 			const snapshot = state();
 			for (const page of DASHBOARD_PAGES) {
 				const rows = renderDashboardPage(snapshot, page, width, height, "alt+u");
-				strictEqual(rows.length, Math.max(8, Math.floor(height / 3)));
+				strictEqual(rows.length, Math.max(8, Math.floor(height / 4)));
 				ok(rows.every((row) => visibleWidth(row) <= width));
 			}
 			snapshot.dispatchRows = [];
 			strictEqual(
 				renderDashboardPage(snapshot, "Activity", width, height, "alt+u").length,
-				Math.max(8, Math.floor(height / 3)),
+				Math.max(8, Math.floor(height / 4)),
 			);
 		}
+});
+
+test("compact notice borrows a row then expires without changing height", () => {
+	const snapshot = state();
+	snapshot.notices = [{ id: "n", text: "Worker finished", level: "info", key: null, addedAt: 11000, expiresAt: 13000 }];
+	const before = renderCompactDashboard(snapshot, 100);
+	strictEqual(before.length, 2);
+	match(plain(before), /Worker finished/);
+	snapshot.now = 14000;
+	const after = renderCompactDashboard(snapshot, 100);
+	strictEqual(after.length, 2);
+	doesNotMatch(plain(after), /Worker finished/);
+	match(plain(after), /v050/);
 });

@@ -8,25 +8,27 @@ interface TokenColor {
 }
 
 const TOKENS: Record<ClioToken, TokenColor> = {
-	accent: { rgb: [70, 229, 208], xterm: 80 },
-	accentDeep: { rgb: [31, 183, 166], xterm: 44 },
-	tool: { rgb: [70, 229, 208], xterm: 80 },
-	agent: { rgb: [255, 126, 41], xterm: 208 },
-	// Second brand color: neon orange. The token name teaches the rule: orange
+	// The composer rails alone own the neon intensity tier.
+	editor: { rgb: [64, 255, 222], xterm: 86 },
+	accent: { rgb: [83, 177, 164], xterm: 73 },
+	accentDeep: { rgb: [62, 147, 137], xterm: 66 },
+	tool: { rgb: [111, 173, 165], xterm: 109 },
+	agent: { rgb: [207, 144, 91], xterm: 173 },
+	// Secondary orange remains below the composer intensity tier. The token name teaches the rule: orange
 	// means Clio is acting. It fires only for Clio's signature actions
 	// (dispatching, queued and running fleet work, steering) and for the border
 	// of a prompt that has taken the keyboard and is waiting on a decision, never
 	// as decoration, and never a metric, at most one orange element per region of
 	// the screen. warning stays the soft amber for actual warnings.
-	action: { rgb: [255, 126, 41], xterm: 208 },
-	success: { rgb: [87, 227, 137], xterm: 114 },
-	warning: { rgb: [255, 180, 84], xterm: 221 },
-	error: { rgb: [255, 92, 102], xterm: 203 },
-	info: { rgb: [91, 168, 255], xterm: 75 },
-	reason: { rgb: [157, 140, 255], xterm: 141 },
+	action: { rgb: [217, 155, 98], xterm: 179 },
+	success: { rgb: [119, 184, 145], xterm: 108 },
+	warning: { rgb: [211, 176, 107], xterm: 179 },
+	error: { rgb: [219, 130, 137], xterm: 174 },
+	info: { rgb: [128, 167, 206], xterm: 110 },
+	reason: { rgb: [175, 155, 201], xterm: 146 },
 	dim: { rgb: [106, 122, 133], xterm: 59 },
 	muted: { rgb: [138, 153, 164], xterm: 102 },
-	title: { rgb: [70, 229, 208], xterm: 80 },
+	title: { rgb: [114, 184, 173], xterm: 109 },
 	frame: { rgb: [47, 93, 90], xterm: 23 },
 	frameStrong: { rgb: [42, 171, 158], xterm: 37 },
 };

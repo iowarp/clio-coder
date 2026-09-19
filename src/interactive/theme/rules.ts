@@ -62,7 +62,7 @@ export function rule(theme: ClioTheme, width: number, options: RuleOptions = {})
 	const labelsWidth = visibleWidth(left) + visibleWidth(right);
 	if (labelsWidth >= safeWidth) return truncateToWidth(`${left}${right}`.trim(), safeWidth, "", true);
 	const fill = theme.style(options.fillToken ?? "frame", "─".repeat(safeWidth - labelsWidth), {
-		bold: options.fillToken === "frameStrong",
+		bold: options.fillToken === "frameStrong" || options.fillToken === "editor",
 	});
 	return `${left}${fill}${right}`;
 }
