@@ -107,6 +107,7 @@ export function isLiveWorkerEscalationRequest(payload: PermissionRequestedPayloa
 }
 
 export interface InteractiveDeps {
+	getConnections?: () => { mcp: string[]; plugins: string[] };
 	bus: SafeEventBus;
 	providers: ProvidersContract;
 	dispatch: DispatchContract;
@@ -638,6 +639,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				}
 			: {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.getConnections ? { getConnections: deps.getConnections } : {}),
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.agents ? { agents: deps.agents } : {}),
 		...(deps.session ? { session: deps.session } : {}),

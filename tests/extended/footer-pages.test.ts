@@ -125,8 +125,8 @@ test("dashboard pages devote space to agents, context composition and complete s
 	match(context, /CONTEXT COMPOSITION/);
 	match(context, /Estimated usage/);
 	const status = plain(renderDashboardPage(state(), "Status", 172, 120, "Alt+U"));
-	match(status, /SESSION USAGE/);
-	match(status, /EXECUTION & RESOURCES/);
+	match(status, /COST & CONNECTIONS/);
+	match(status, /LOCAL MACHINE/);
 });
 
 test("resolved dashboard shortcut cycles Activity, Context, Status and closed without capturing text", () => {
@@ -255,11 +255,13 @@ test("Status renders live resource telemetry instead of a configuration dump", (
 	try {
 		for (let i = 0; i < 3; i++) footer.toggleExpanded();
 		const text = plain(footer.view.render(172));
-		match(text, /SESSION USAGE/);
-		match(text, /EXECUTION & RESOURCES/);
-		match(text, /Clio process RSS/);
-		match(text, /Host RAM/);
-		match(text, /Backend GPU/);
+		match(text, /COST & CONNECTIONS/);
+		match(text, /LOCAL MACHINE/);
+		match(text, /Clio RSS/);
+		match(text, /RAM/);
+		match(text, /GPU/);
+		match(text, /Provider quota.*not reported/);
+		match(text, /Clio ceiling/);
 		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
 	} finally {
 		footer.dispose();

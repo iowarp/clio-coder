@@ -1,4 +1,3 @@
-import { freemem, totalmem } from "node:os";
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { ContextState } from "../../domains/context/index.js";
@@ -49,6 +48,7 @@ import {
 	type NotificationCenter,
 } from "./notifications.js";
 import { DASHBOARD_PAGES, type DashboardPage, renderCompactDashboard, renderDashboardPage } from "./pages.js";
+import { createLocalMachineSampler, type LocalMachineMetrics } from "./system-metrics.js";
 
 function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
@@ -87,6 +87,7 @@ export type { ToolTallySnapshot } from "./widgets.js";
 export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
+	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
@@ -125,7 +126,9 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
-	resources?: { processRssBytes: number; hostFreeBytes: number; hostTotalBytes: number };
+	resources?: LocalMachineMetrics | null;
+	connections?: { mcp: string[]; plugins: string[] };
+	costCeilingUsd?: number;
 
 	workspace: WorkspaceFacts;
 	session: SessionFacts;
@@ -406,7 +409,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const toolProfile = settings?.integrations.externalAgents?.defaults?.toolGovernance ?? "clio-coder-policy";
 
 		return {
-			resources: { processRssBytes: process.memoryUsage.rss(), hostFreeBytes: freemem(), hostTotalBytes: totalmem() },
+			resources: machine.snapshot(),
+			...(deps.getConnections ? { connections: deps.getConnections() } : {}),
+			...(settings ? { costCeilingUsd: settings.safety.limits.sessionCostUsd } : {}),
 
 			workspace: workspaceFacts(deps, branchSlot),
 			session: {
@@ -508,6 +513,9 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		page = "Activity";
 		refresh();
 	};
+	const machine = createLocalMachineSampler(() => {
+		if (!disposed) refresh();
+	});
 	refresh();
 	const resolveBranch = deps.resolveCurrentBranch ?? getCurrentBranch;
 	void resolveBranch(process.cwd()).then((name) => {
@@ -540,6 +548,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		},
 		dispose() {
 			disposed = true;
+			machine.dispose();
 		},
 	};
 }

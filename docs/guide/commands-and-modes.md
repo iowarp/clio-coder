@@ -482,10 +482,20 @@ share one-quarter of the available viewport (minimum eight rows), with padding
 that keeps the composer anchored across page changes. Activity shows current
 worker progress; finished runs collapse into invocation history. Context shares
 its category palette and occupancy grid with `/context`, plus cache and compaction
-telemetry when available. Status consolidates live session usage, tracked cost,
-throughput, worker outcomes, tool counts, context activity, Clio process RSS, and
-OS-reported host RAM. Host RAM is not remote inference-server VRAM; unavailable
-backend GPU measurements stay explicitly unreported. `/cost`, `/context`, and
+telemetry when available. Status pairs Cost & Connections with Local Machine:
+tracked cost and the configured Clio spending ceiling, provider quota availability,
+ready MCP client IDs, active plugin packages, extension counts, and worker/tool
+activity. Provider quotas are explicitly unreported until supplied by a provider;
+the Clio ceiling is not a provider account balance.
+
+The local sampler updates every two seconds without subprocesses or inference-server
+requests. CPU/RAM and Clio process RSS use OS counters. On Linux, network and disk
+rates come from kernel counters; each shows the busiest interface or whole disk,
+not a potentially double-counted total. Supported GPU drivers expose utilization
+and VRAM through sysfs. Missing counters stay unavailable; WSL measurements are
+labeled as guest measurements and do not describe the Windows host or remote GPU.
+Counter resets wait for a fresh baseline instead of showing negative rates. Memory
+bank and context-engine activity remain visible. `/cost`, `/mcp`, `/library`, `/context`, and
 Fleet Runs retain deeper inspection. Narrow or short terminals explicitly indicate
 when detail does not fit.
 

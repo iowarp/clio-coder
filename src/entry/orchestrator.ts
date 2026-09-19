@@ -109,7 +109,7 @@ import type { BackgroundMemoryUsageSink } from "../domains/observability/backgro
 import { recordFailedCompactionCalls } from "../domains/observability/compaction-usage.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
 import { ObservabilityDomainModule } from "../domains/observability/index.js";
-import { PluginsDomainModule } from "../domains/plugins/index.js";
+import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
@@ -1772,7 +1772,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					getCwd: () => process.cwd(),
 				})
 			: null;
-	registerAllTools(toolRegistry, {
+	const toolBootstrap = registerAllTools(toolRegistry, {
 		getSettings: () => getCurrentSettings(),
 		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,
@@ -2448,7 +2448,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}
 	}
 
+	const activePluginIds = () =>
+		pluginSnapshotFor(process.cwd())
+			.packages.filter((p) => p.loadable && (p.kind === undefined || p.kind === "plugin"))
+			.map((p) => p.id);
+	let dashboardPlugins = activePluginIds();
+	const unsubscribeDashboardPlugins = bus.on(BusChannels.PluginsReloaded, () => {
+		dashboardPlugins = activePluginIds();
+	});
+	termination.onTerminate(() => unsubscribeDashboardPlugins());
 	await startInteractive({
+		getConnections: () => ({
+			mcp: toolBootstrap.mcpCapabilities?.connectedIds({ readyOnly: true }) ?? [],
+			plugins: dashboardPlugins,
+		}),
 		bus,
 		providers,
 		dispatch,

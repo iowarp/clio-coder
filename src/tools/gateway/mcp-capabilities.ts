@@ -83,7 +83,7 @@ export interface McpCapabilitySource {
 	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
 	authorityNote(name: string): string | null;
 	/** Ids of the servers launched this session and still open. */
-	connectedIds(): string[];
+	connectedIds(options?: { readyOnly?: boolean }): string[];
 	/**
 	 * Close every launched client. Idempotent. A process group that survived
 	 * the client's own SIGKILL is reported here and on stderr, with its pgid,
@@ -440,8 +440,10 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						: "calls run as reads at every autonomy level"
 			}. Launching the server does not sandbox it.`;
 		},
-		connectedIds() {
-			return [...(states?.values() ?? [])].filter((state) => state.client !== null).map((state) => state.declaration.id);
+		connectedIds(options) {
+			return [...(states?.values() ?? [])]
+				.filter((state) => state.client !== null && (!options?.readyOnly || state.client.state().status === "ready"))
+				.map((state) => state.declaration.id);
 		},
 		teardownReports() {
 			return [...teardowns];
