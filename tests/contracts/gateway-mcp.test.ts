@@ -478,6 +478,8 @@ describe("gateway MCP capabilities", () => {
 		open.push(source);
 		strictEqual(clients.length, 0, "registration launches nothing");
 		deepStrictEqual(source.connectedIds(), []);
+		deepStrictEqual(source.connectedIds({ readyOnly: true }), []);
+		strictEqual(clients.length, 0, "dashboard connection sampling must not start MCP clients");
 
 		const listing = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "mcp" } }));
 		const servers = listing.servers as Array<Record<string, unknown>>;

@@ -72,6 +72,7 @@ export interface InteractivePresentationFactories {
 }
 
 export interface InteractivePresentationDeps {
+	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	getExtensionStatus?: () => ReadonlyArray<string>;
 	bus: SafeEventBus;
@@ -384,6 +385,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const footerDeps: FooterDashboardDeps = {
 		providers: deps.providers,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
+		...(deps.getConnections ? { getConnections: deps.getConnections } : {}),
 		getAgentStatus: () => {
 			const status = statusController.current();
 			if (localBashStartedAt === null || (status.phase !== "idle" && status.phase !== "ended")) return status;

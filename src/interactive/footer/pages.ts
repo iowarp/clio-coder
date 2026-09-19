@@ -288,8 +288,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
-	const usage = state.sessionTokens;
-	const count = (value: number | undefined) => (value === undefined ? "unreported" : formatFooterTokens(value));
+
 	const active = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
 	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
 	const failed = state.dispatchRows.filter((row) => ["failed", "dead", "aborted"].includes(row.status)).length;
@@ -303,43 +302,81 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		return [
 			theme.fg("accent", title),
 			"",
-			...entries.map(
-				([label, value]) =>
-					`${theme.fg("dim", truncateToWidth(label, labelWidth, "…", true))}  ${truncateToWidth(clean(value), Math.max(1, columns - labelWidth - 2), "…", true)}`,
-			),
+			...entries.map(([label, value]) => {
+				let rendered = truncateToWidth(clean(value), Math.max(1, columns - labelWidth - 2), "…", true);
+				if (label === "CPU" || label === "RAM")
+					rendered = rendered
+						.replace(/━+/g, (part) => theme.fg("accent", part))
+						.replace(/─+/g, (part) => theme.fg("frame", part));
+				return `${theme.fg("dim", truncateToWidth(label, labelWidth, "…", true))}  ${rendered}`;
+			}),
 			"",
 		];
 	};
+	const throughput = (value: number) =>
+		value >= 1024 ** 2 ? `${(value / 1024 ** 2).toFixed(1)} MiB/s` : `${(value / 1024).toFixed(1)} KiB/s`;
+	const meter = (percent: number | null) =>
+		percent === null
+			? "warming up"
+			: `${theme.fg("accent", "━".repeat(Math.round(percent / 10)))}${theme.fg("frame", "─".repeat(10 - Math.round(percent / 10)))} ${percent.toFixed(0)}%`;
+	const names = (items: string[] | undefined) =>
+		items === undefined ? "unreported" : items.length ? `${items.length} · ${items.join(", ")}` : "none";
 	const left: [string, string][] = [
-		["Processed", count(usage?.totalTokens)],
-		["Input / output", `${count(usage?.input)} / ${count(usage?.output)}`],
-		["Reasoning", count(usage?.reasoningTokens)],
-		[
-			"Cache read/write",
-			usage ? `${count(usage.cacheRead)} / ${count(usage.cacheWrite)} (accounted totals)` : "unreported",
-		],
-		["Model calls", usage?.apiCalls === undefined ? "unreported" : String(usage.apiCalls)],
+		["Target", state.session.target ?? "not selected"],
 		["Tracked cost", formatCostAggregate(state.sessionCost) ?? "not yet priced"],
-		["Speed", state.session.throughput ?? "awaiting measurement"],
-		["Timing", state.session.throughputDetail ?? "awaiting measurement"],
-	];
-	const right: [string, string][] = [
-		["Workers", `${active.length} active · ${completed} done · ${failed} unsuccessful`],
+		["Clio ceiling", state.costCeilingUsd === undefined ? "unknown" : `$${state.costCeilingUsd} · tracked pricing only`],
+		["Provider quota", "not reported by provider"],
+		["MCP connected", names(state.connections?.mcp)],
+		["Plugins active", names(state.connections?.plugins)],
 		[
-			"Worker tokens",
-			formatFooterTokens(state.dispatchRows.reduce((sum, row) => sum + row.inputTokens + row.outputTokens, 0)),
-		],
-		["Tools", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
-		["Truncated results", String(state.toolCounts.truncatedResults ?? 0)],
-		["Local worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
-		["Clio process RSS", resource ? gib(resource.processRssBytes) : "unreported"],
-		[
-			"Host RAM (OS)",
-			resource
-				? `${gib(resource.hostTotalBytes - resource.hostFreeBytes)} / ${gib(resource.hostTotalBytes)} used`
+			"Extensions",
+			state.context.extensions
+				? `${state.context.extensions.active} active / ${state.context.extensions.installed} installed`
 				: "unreported",
 		],
-		["Backend GPU", "not reported · host RAM is not VRAM"],
+		["Workers", `${active.length} active · ${completed} done · ${failed} unsuccessful`],
+		["Tools", `${toolCalls} calls · ${state.toolCounts.active ?? 0} active · ${state.toolCounts.errors} failed`],
+		["Worker cap", capacity ? `${capacity.limit} · ${capacity.bound}` : "not sampled"],
+	];
+	const right: [string, string][] = [
+		["Scope", resource?.scope ?? "local OS · sampling"],
+		["CPU", resource ? meter(resource.cpuPercent) : "sampling"],
+		[
+			"RAM",
+			resource
+				? `${meter((1 - resource.hostFreeBytes / resource.hostTotalBytes) * 100)}  ${gib(resource.hostTotalBytes - resource.hostFreeBytes)} / ${gib(resource.hostTotalBytes)}`
+				: "sampling",
+		],
+		["Clio RSS", resource ? gib(resource.processRssBytes) : "sampling"],
+		[
+			"GPU",
+			resource?.gpu
+				? `${resource.gpu.name} · ${resource.gpu.busyPercent === null ? "load unavailable" : `${resource.gpu.busyPercent}%`}`
+				: "unavailable on this OS/driver",
+		],
+		[
+			"GPU VRAM",
+			resource?.gpu?.usedBytes != null && resource.gpu.totalBytes != null
+				? `${gib(resource.gpu.usedBytes)} / ${gib(resource.gpu.totalBytes)}`
+				: "unreported",
+		],
+		[
+			"Network",
+			resource?.network
+				? `${resource.network.name} ↓${throughput(resource.network.receivedPerSecond)} ↑${throughput(resource.network.sentPerSecond)}`
+				: "warming up / unavailable",
+		],
+		[
+			"Disk I/O",
+			resource?.disk
+				? `${resource.disk.name} R ${throughput(resource.disk.readPerSecond)} W ${throughput(resource.disk.writtenPerSecond)}`
+				: "warming up / unavailable",
+		],
+		[
+			"Sampling",
+			resource ? `${Math.max(0, Math.round((Date.now() - resource.sampledAt) / 1000))}s ago · 2s cadence` : "pending",
+		],
+		["Scope note", "busiest interface/disk · local only"],
 	];
 	const extras: [string, string][] = [
 		[
@@ -358,8 +395,8 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	];
 	if (width < 76)
 		return [
-			...section("SESSION USAGE", left, width),
-			...section("EXECUTION & RESOURCES", right, width),
+			...section("COST & CONNECTIONS", left, width),
+			...section("LOCAL MACHINE", right, width),
 			theme.fg("accent", "CONTEXT ENGINE"),
 			...wrapTextWithAnsi(
 				extras.map(([label, value]) => `${theme.fg("dim", label)} ${clean(value)}`).join("  ·  "),
@@ -369,8 +406,8 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	const col = Math.floor((width - 5) / 2);
 	return [
 		...zipColumns(
-			section("SESSION USAGE", left, col),
-			section("EXECUTION & RESOURCES", right, width - col - 5),
+			section("COST & CONNECTIONS", left, col),
+			section("LOCAL MACHINE", right, width - col - 5),
 			col,
 			width - col - 5,
 			`  ${theme.fg("frame", "│")}  `,
@@ -402,7 +439,7 @@ export function renderDashboardPage(
 	const hint = truncateToWidth(
 		theme.fg(
 			"muted",
-			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/cost · /context for detail" : "composer stays active"}`,
+			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/cost · /mcp · /library" : "composer stays active"}`,
 		),
 		safeWidth,
 		"…",
