@@ -12,9 +12,24 @@ typed intent, ACP terminal auth, Settings Center, and LiteLLM provider. It
 shipped fast and under-tested; the 0.4.x line pays that down while finishing
 the product surfaces those systems opened.
 
+## v0.5.0 — Safety admission, fleet resilience, and diagnostics
+
+The local v0.5.0 is dated 2026-09-18 on the `v050` branch; publication remains pending maintainer authorization. This milestone closes the path-admission holes the security review found, ports the PanCode ideas that survived verification (H01, H02, H04, H06, H08), and adds the tool-bench harness the autoresearch loop measures against.
+
+- [x] Safety admission follows symlinks, physical `..`, `cd`, new links, and run-time expansions in bash; `read`, `ls`, `grep`, and `find` follow the autonomy level outside the workspace; admission judges the path a tool opens (`@` prefix, unread `cwd`, fallback spellings).
+- [x] Repository test runners run without confirmation at `auto-edit` (#377); headless no-op runs seal `noop` and `eval run` scores them failed (#378); `run --timeout`, `run --cwd`.
+- [x] H02 host-aware `fleet.concurrency: auto` as the default; H04 failure classification, threshold and half-open breakers, breaker state in `targets`, `doctor`, and `/settings`.
+- [x] H08 live tool-call probe, HPC toolchain rows, `doctor --deep`, TUI `/doctor`.
+- [x] H01 task worktree restart recovery and `fleet.worktrees.root` for task worktrees (default `disk`).
+- [x] H06 Slurm through the clio-kit MCP server: guide, `slurm-jobs` skill, doctor rows.
+- [x] Tool-bench harness with edit, read, write, grep, and find suites; `custom.*` grader metrics.
+- [ ] Qualify and authorize the version cut through `docs/process/release-cut-checklist.md`.
+
+Next, in order: OS containment of bash children (Landlock helper with a bwrap fallback, the dir-fd TOCTOU, `evaluateWriteRoots` link following); the search-scope rule for `data`, `code_nav`, and `git`; a per-tool action class for trusted MCP servers; compete candidates under `fleet.worktrees.root`. Deferred from the heist: H03 query-aware memory, H05 cross-route hedging, H07 remote operator, H09 Claude SDK stream translation.
+
 ## v0.4.9 — Scientific tool quality and capability gateway
 
-The implementation is landed on the candidate branch, and the local v0.4.9 candidate is dated 2026-09-17; candidate qualification and publication remain pending. This milestone improves file I/O, scientific processing, and inspectable verification while moving secondary capabilities behind one admitted gateway. See [the individual tool audit](docs/process/tool-audit-v0.4.9.md) for contracts, limitations, and commit status.
+The v0.4.9 candidate is dated 2026-09-17 and was superseded by v0.5.0 before publication. This milestone improves file I/O, scientific processing, and inspectable verification while moving secondary capabilities behind one admitted gateway. See [the individual tool audit](docs/process/tool-audit-v0.4.9.md) for contracts, limitations, and commit status.
 
 - [x] Windowed text reads, honest encoding/identity, atomic write/edit, bounded diffs, and explicit search completeness and symlink listings.
 - [x] Direct run_script with streamed logs, provenance, partial-output outcomes, bounded process-group cleanup and pipe draining, and run retention.

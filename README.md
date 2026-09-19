@@ -73,11 +73,13 @@ setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
 it. An optional local **browser app** over the same runtime is described under
 [Optional browser app](#optional-browser-app). The first session does not need it.
 
-**New in 0.4.9:** File tools report bounded reads, atomic edits, and partial
-search results more precisely. Script runs retain streamed logs and provenance,
-and scientific verification exposes explicit tolerance and non-finite policies.
-A capability gateway adds data inspection and trusted local MCP alongside
-secondary tools. See the [changelog](CHANGELOG.md) for release details and
+**New in 0.5.0:** `read`, `ls`, `grep`, and `find` ask before they leave the
+workspace below `full-auto`, and bash admission follows `cd`, links, and
+run-time expansions. Dispatch sizes its worker pool from the host, opens and
+probes route breakers, and recovers crashed task worktrees. `doctor` gains HPC
+toolchain rows, `--deep`, a live tool-call probe, and an in-session `/doctor`.
+Slurm arrives through the clio-kit MCP server, and headless runs seal no-op
+results. See the [changelog](CHANGELOG.md) for release details and
 [Install](#install) for source builds and other package managers.
 
 ## Built for scientific software
@@ -373,7 +375,7 @@ can also be installed with your package manager. See
 From source, the latest stable release uses the pinned pnpm workflow:
 
 ```bash
-git clone --branch v0.4.9 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.5.0 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local

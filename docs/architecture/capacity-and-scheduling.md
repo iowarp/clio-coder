@@ -25,7 +25,7 @@ graph TD
 
 | Dimension | Identity | Limit resolution |
 | :--- | :--- | :--- |
-| Global | All dispatches using the state directory. | `fleet.concurrency: auto` remains four. |
+| Global | All dispatches using the state directory. | `fleet.concurrency: auto` sizes the pool from the host, at most eight. |
 | Node | The local node or one configured fleet node. | The configured node limit applies. An unset local node cap remains unbounded. |
 | Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, then a probe in this process, then a persisted probe from an earlier process, then one slot for other local-native targets. vLLM and SGLang remain unbounded. |
 

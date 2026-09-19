@@ -91,7 +91,7 @@ describe("harness extension package boundary", () => {
 				name: "Research Kit",
 				version: "2.0.0",
 				description: "Hook-only harness package.",
-				compatibility: { clio: ">=0.4.0 <0.5.0" },
+				compatibility: { clio: ">=0.4.0 <1.0.0" },
 			},
 			"clio-coder-extension.yaml",
 		);
@@ -101,7 +101,7 @@ describe("harness extension package boundary", () => {
 			name: "Research Kit",
 			version: "2.0.0",
 			description: "Hook-only harness package.",
-			compatibility: { clio: ">=0.4.0 <0.5.0" },
+			compatibility: { clio: ">=0.4.0 <1.0.0" },
 		});
 		deepStrictEqual(evaluateClioCompatibility(">=0.4.0 <0.5.0", "0.4.1"), {
 			rangeValid: true,
