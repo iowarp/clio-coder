@@ -19,6 +19,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### agent behavior
 
+- Present shadow/internal helpers through compact footer counts and lifecycle notices; omit their worker transcript blocks and floating fleet cards while keeping detailed runs inspectable in the dispatch board.
+
 - Include the current local OS account and hostname in the main session’s workspace prompt, reusing receipt identity detection. Treat them as execution facts rather than personal identity; keep them out of persistent project configuration.
 - Recognize “Find where” and “Look at” as evidence of an investigation when checking a read-only Scout assignment, so configuration topic words do not alone reject reconnaissance. Tool authority and declared-write checks remain unchanged.
 - Preserve required terminal formats through loop lockout and markup recovery. Workers receive their declared result shape immediately; a JSON report is not redirected into prose. Keep bounded recovery and result validation, prevent contract revisions from reopening tools after a repeated-call or hard-cap lock, and guide focused source reads instead of repeated small-page exploration. For workers, detect consecutive reads that only revisit already-delivered lines of unchanged files, while allowing new ranges and separate numbered citation reads. Simplify Scout’s report instructions and explicitly end tool-use guidance during locked synthesis.

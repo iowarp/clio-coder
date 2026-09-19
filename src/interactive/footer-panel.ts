@@ -1,8 +1,10 @@
 import type { TokenThroughputSnapshot, UsageBreakdown } from "../domains/observability/index.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Text, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import type { DispatchBoardRow, DispatchBoardStatus } from "./dispatch-board.js";
 import { formatReasoningChip } from "./status/reasoning.js";
 import { type ClioTheme, formatCompactMs, formatContextPercent, GLYPH } from "./theme/index.js";
+import { isHelperRun } from "./worker-stream.js";
 
 /**
  * Render a token count with a single-letter magnitude suffix so the footer
@@ -86,13 +88,33 @@ function dispatchStatusCounts(rows: ReadonlyArray<DispatchBoardRow>): {
 
 export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | undefined): string | null {
 	if (!rows || rows.length === 0) return null;
-	const counts = dispatchStatusCounts(rows);
-	const parts: string[] = [];
-	if (counts.active > 0) parts.push(`${counts.active} active`);
-	if (counts.completed > 0) parts.push(`${counts.completed} done`);
-	if (counts.failed > 0) parts.push(`${counts.failed} fail`);
-	if (counts.tokens > 0) parts.push(`${formatFooterTokens(counts.tokens)}tok`);
-	return `dispatch ${parts.length > 0 ? parts.join(" ") : `${rows.length} runs`}`;
+	const groups = [
+		{ label: "helpers", rows: rows.filter(isHelperRun) },
+		{ label: "dispatch", rows: rows.filter((row) => !isHelperRun(row)) },
+	];
+	return groups
+		.filter((group) => group.rows.length > 0)
+		.map((group) => {
+			const counts = dispatchStatusCounts(group.rows);
+			const parts: string[] = [];
+			if (group.label === "helpers") {
+				const names = new Map<string, number>();
+				for (const row of group.rows) names.set(row.agentId, (names.get(row.agentId) ?? 0) + 1);
+				parts.push(
+					[...names]
+						.slice(0, 2)
+						.map(([name, count]) => `${sanitizeCallTargetText(name).slice(0, 24)}${count > 1 ? ` ×${count}` : ""}`)
+						.join(", "),
+				);
+				if (names.size > 2) parts.push(`+${names.size - 2} kinds`);
+			}
+			if (counts.active > 0) parts.push(`${counts.active} active`);
+			if (counts.completed > 0) parts.push(`${counts.completed} done`);
+			if (counts.failed > 0) parts.push(`${counts.failed} fail`);
+			if (counts.tokens > 0) parts.push(`${formatFooterTokens(counts.tokens)}tok`);
+			return `${group.label} ${parts.length > 0 ? parts.join(" ") : `${group.rows.length} runs`}`;
+		})
+		.join(" · ");
 }
 
 export interface FooterPanel {
