@@ -133,7 +133,6 @@
         temperature: 0.5
         topP: 0.9
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.5
         topP: 0.9
@@ -399,7 +398,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.7
         topP: 0.80
@@ -469,7 +467,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.6
         topP: 0.95
@@ -550,7 +547,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.6
         topP: 0.95
@@ -1467,7 +1463,6 @@
         temperature: 0.3
         topP: 0.9
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.7  # 0.7 keeps tool-call JSON parseable; gemma card's 1.0 is for chat
         topP: 0.95
@@ -1604,7 +1599,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 4096
       instruct:
         temperature: 0.2
         topP: 0.9
@@ -1673,7 +1667,6 @@
         temperature: 0.6
         topP: 0.95
         topK: 20
-        reasoningBudget: 2048
     gpuTiers:
       "16gb": "Use this as the local 16GB emulation target. It keeps the output cap below the 32GB-class MoE defaults."
     runtimePreference:

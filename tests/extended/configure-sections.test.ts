@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -6,10 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
-
+import { parse } from "yaml";
 import { runConfigureCommand } from "../../src/cli/configure.js";
 import { runOnboardingWizard } from "../../src/cli/configure-onboarding.js";
 import { runtimesForCategory } from "../../src/cli/configure-target.js";
+import { SETTINGS_SECTIONS } from "../../src/core/settings-navigation.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listProviderSupportEntries } from "../../src/domains/providers/index.js";
 import { getRuntimeRegistry } from "../../src/domains/providers/registry.js";
@@ -814,10 +815,10 @@ describe("contracts/configure-sections", () => {
 			// on EOF, which reads as a hang to anything scripting it.
 			const res = await captureConfigure(["--section", "models"], testEnv.env, []);
 			strictEqual(res.code, 0, res.stderr);
-			match(res.stdout, /Models & Thinking/u);
+			match(res.stdout, /Chat/u);
 			match(res.stdout, /Source: .*settings\.yaml/u);
 			match(res.stdout, /Chat thinking\s+low/u);
-			match(res.stdout, /Fleet thinking\s+off/u);
+			ok(!res.stdout.includes("Fleet thinking"), "fleet thinking belongs in Fleet");
 			ok(!/Action \[/u.test(res.stdout), `no prompt belongs in a pipe:\n${res.stdout}`);
 		} finally {
 			testEnv.cleanup();
@@ -826,9 +827,9 @@ describe("contracts/configure-sections", () => {
 
 	it("renders every section's current values from settings.yaml", async () => {
 		const expected: ReadonlyArray<readonly [string, RegExp]> = [
-			["targets", /Chat target\s+test-target/u],
+			["targets", /test-target\s+openai-compat/u],
 			["models", /Chat model\s+mock-model/u],
-			["chat", /Smooth streaming\s+off/u],
+			["chat", /Chat thinking\s+low/u],
 			["fleet", /Concurrency limit\s+auto/u],
 			["permissions", /Autonomy level\s+auto-edit/u],
 			["panes", /TUI mode\s+regular/u],
@@ -854,7 +855,7 @@ describe("contracts/configure-sections", () => {
 			for (const name of ["permissions", "autonomy", "safety"]) {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 0, `${name}: ${res.stderr}`);
-				match(res.stdout, /Permissions & Autonomy/u);
+				match(res.stdout, /Permissions & Limits/u);
 			}
 			// Substring matching used to accept anything containing "perm", so
 			// `--section permanent` silently opened this screen.
@@ -862,7 +863,7 @@ describe("contracts/configure-sections", () => {
 				const res = await captureConfigure(["--section", name], testEnv.env, []);
 				strictEqual(res.code, 2, `${name} must be rejected`);
 				match(res.stderr, /unknown section/u);
-				match(res.stderr, /targets, models, chat, fleet, permissions, panes, skills, diagnostics/u);
+				match(res.stderr, /targets, chat, fleet, context, safety, interface, integrations, advanced/u);
 			}
 		} finally {
 			testEnv.cleanup();
@@ -878,14 +879,14 @@ describe("contracts/configure-sections", () => {
 			strictEqual(res.code, 0, res.stderr);
 			strictEqual(res.stderr, "", "leaving the menu is not an error");
 			for (const title of [
-				"Targets & Auth",
-				"Models & Thinking",
-				"Chat Defaults",
+				"Connections",
+				"Chat",
 				"Fleet",
-				"Permissions & Autonomy",
-				"Panes & Layout",
-				"Skills & Extensions",
-				"Diagnostics",
+				"Context & Memory",
+				"Permissions & Limits",
+				"Appearance",
+				"Integrations",
+				"Advanced",
 			]) {
 				ok(res.stdout.includes(title), `${title} missing from the top menu`);
 			}
@@ -897,7 +898,7 @@ describe("contracts/configure-sections", () => {
 	it("writes an edited setting through to settings.yaml", async () => {
 		const testEnv = isolatedEnv();
 		try {
-			// Top menu -> Models & Thinking -> chat thinking level -> high -> back -> quit.
+			// Top menu -> Chat -> chat thinking level -> high -> back -> quit.
 			const res = await captureConfigure([], testEnv.env, ["2\n", "1\n", "high\n", "b\n", "q\n"]);
 			strictEqual(res.code, 0, res.stderr);
 			match(res.stdout, /Chat thinking level set to high/u);
@@ -916,6 +917,49 @@ describe("contracts/configure-sections", () => {
 			match(readFileSync(testEnv.settingsFile, "utf8"), /thinkingLevel: low/u);
 		} finally {
 			testEnv.cleanup();
+		}
+	});
+
+	it("shares section names with the TUI and keeps unrelated controls out of each overview", async () => {
+		const testEnv = isolatedEnv();
+		try {
+			for (const section of SETTINGS_SECTIONS) {
+				const result = await captureConfigure(["--section", section.id], testEnv.env, []);
+				strictEqual(result.code, 0, result.stderr);
+				ok(result.stdout.includes(section.label), section.id);
+			}
+			for (const [section, absent] of [
+				["chat", ["Smooth streaming", "Fleet thinking", "Auto-compaction"]],
+				["fleet", ["Worker permissions", "Startup layout"]],
+				["interface", ["Git commit attribution", "Worker profiles"]],
+				["targets", ["Chat thinking", "Session cost limit"]],
+			] as const) {
+				const result = await captureConfigure(["--section", section], testEnv.env, []);
+				for (const label of absent) ok(!result.stdout.includes(label), `${label} leaked into ${section}`);
+			}
+		} finally {
+			testEnv.cleanup();
+		}
+	});
+
+	it("moved controls save only their own setting from the new menu location", async () => {
+		for (const [inputs, path, value] of [
+			[["6\n", "1\n", "on\n", "b\n", "q\n"], ["interface", "smoothStreaming"], "on"],
+			[["3\n", "2\n", "high\n", "b\n", "q\n"], ["fleet", "default", "thinkingLevel"], "high"],
+			[["7\n", "1\n", "b\n", "q\n"], ["integrations", "git", "commitAttribution"], false],
+		] as const) {
+			const testEnv = isolatedEnv();
+			try {
+				const expected = parse(readFileSync(testEnv.settingsFile, "utf8"));
+				let cursor = expected;
+				for (const key of path.slice(0, -1)) cursor = cursor[key];
+				cursor[path.at(-1) as string] = value;
+				const result = await captureConfigure([], testEnv.env, inputs);
+				strictEqual(result.code, 0, result.stderr);
+				deepStrictEqual(parse(readFileSync(testEnv.settingsFile, "utf8")), expected);
+			} finally {
+				testEnv.cleanup();
+			}
 		}
 	});
 

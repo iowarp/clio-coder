@@ -28,7 +28,13 @@ import type { DispatchRunEventRegistry } from "./dispatch.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
-import { receiptEvidenceLabels, workerTextLabel, workerTextNonEvidenceNotices } from "./worker-evidence.js";
+import {
+	compactHelperResultLines,
+	receiptEvidenceLabels,
+	receiptHelperResult,
+	workerTextLabel,
+	workerTextNonEvidenceNotices,
+} from "./worker-evidence.js";
 
 /**
  * The monitor tool: read-only visibility into known synchronous and detached
@@ -569,6 +575,10 @@ function failedIntegrityReason(integrity: ReceiptIntegrityResult): string {
 }
 
 function collectRunLine(row: CollectedRunRow): string[] {
+	if (row.evidence.receipt !== null) {
+		const helperLines = compactHelperResultLines(row.evidence.receipt, row.evidence.integrity, COLLECT_TEXT_BYTES);
+		if (helperLines !== null) return helperLines;
+	}
 	const run = row.run;
 	const lines = run
 		? [
@@ -743,7 +753,10 @@ async function runCollect(
 			failedCount: failed.length,
 			runs: collectedRows.map((row) => {
 				const output = row.evidence.output;
+				const helperResult =
+					row.evidence.receipt === null ? null : receiptHelperResult(row.evidence.receipt, row.evidence.integrity);
 				return {
+					...(helperResult !== null ? { helperResult } : {}),
 					runId: row.runId,
 					...(row.assignmentId !== null
 						? {

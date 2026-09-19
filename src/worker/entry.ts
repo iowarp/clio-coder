@@ -110,6 +110,7 @@ function announceWorker(spec: WorkerSpec, input: WorkerRunInput): void {
 			toolSignature: attestedToolSignature({
 				allowedTools: spec.allowedTools,
 				toolsSupported: workerProviderSupportsTools(input),
+				...(spec.helperResult === true ? { helperResult: true } : {}),
 				...(spec.toolProfile !== undefined ? { toolProfile: spec.toolProfile } : {}),
 				agentId: spec.agentId,
 				task: spec.task,
@@ -221,6 +222,7 @@ async function main(): Promise<number> {
 			: {}),
 		...(spec.responseSchema !== undefined ? { responseSchema: spec.responseSchema } : {}),
 		...(spec.resultContract !== undefined ? { resultContract: spec.resultContract } : {}),
+		...(spec.helperResult === true ? { helperResult: true } : {}),
 		...(spec.product !== undefined ? { product: spec.product } : {}),
 		agentLedger: ledgerPort,
 		cwd: process.cwd(),

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from "node:fs";
 import { join } from "node:path";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { clioStateDir, stateRootRemoved } from "../../core/xdg.js";
 import type { SafetyPolicyDecision } from "./policy-engine.js";
 
@@ -404,7 +405,7 @@ interface OpenFile {
 function logAuditError(err: unknown, path?: string): void {
 	const msg = err instanceof Error ? err.message : String(err);
 	const where = path ? ` (${path})` : "";
-	process.stderr.write(`[clio-coder:audit] ${msg}${where}\n`);
+	writeDiagnostic(`[clio-coder:audit] ${msg}${where}\n`);
 }
 
 /** Cadence of the background safety flush that bounds how long rows can sit unfsynced. */

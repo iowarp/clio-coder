@@ -31,6 +31,7 @@ function mainPrompt(input: {
 	providerSupportsTools?: boolean | null;
 	toolNames?: ReadonlyArray<ToolName>;
 	reverse?: boolean;
+	skillDiscoveryEnabled?: boolean;
 }): CompiledSessionPrompt {
 	const toolNames = [...(input.toolNames ?? [])];
 	const hints = [...toolPromptHintsForNames(toolNames, "session")];
@@ -53,6 +54,7 @@ function mainPrompt(input: {
 			toolNames,
 			toolPromptHints: hints,
 			fleetRoster,
+			...(input.skillDiscoveryEnabled !== undefined ? { skillDiscoveryEnabled: input.skillDiscoveryEnabled } : {}),
 		},
 	});
 }
@@ -96,6 +98,17 @@ function workerPrompt(input: {
 }
 
 describe("compact prompt contracts", () => {
+	it("disabling skill discovery preserves the agent library without unsolicited skill activation instructions", () => {
+		const prompt = mainPrompt({
+			toolNames: [ToolNames.Context, ToolNames.Gateway, ToolNames.Dispatch],
+			skillDiscoveryEnabled: false,
+		}).systemPrompt;
+		strictEqual(prompt.includes("# Skills"), false);
+		strictEqual(prompt.includes("Load matching installed skills"), false);
+		match(prompt, /clio_library/u);
+		match(prompt, /shadow agents/u);
+	});
+
 	it("keeps main composition deterministic across autonomy and tool input order", () => {
 		const tools = [
 			ToolNames.Read,
@@ -166,7 +179,9 @@ describe("compact prompt contracts", () => {
 		match(compiled.systemPrompt, /A sealed run receipt is the durable record/u);
 		match(compiled.systemPrompt, /advisory claim until its evidence is verified/u);
 		match(compiled.systemPrompt, /before repeating a "tests pass" claim/u);
-		match(compiled.systemPrompt, /report receipt integrity, evidence verification, briefing\s+provenance/u);
+		match(compiled.systemPrompt, /Do not repeat the\s+helper's entire investigation/u);
+		match(compiled.systemPrompt, /detach:true/u);
+		match(compiled.systemPrompt, /clio_library/u);
 		match(compiled.systemPrompt, /Provider: dynamo/u);
 		match(compiled.systemPrompt, /Model: qwen3\.8-27b/u);
 		match(compiled.systemPrompt, /Context window: 262144/u);

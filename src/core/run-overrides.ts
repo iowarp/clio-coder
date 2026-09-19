@@ -16,7 +16,7 @@
 export const RUN_OVERRIDES_ENV = "CLIO_CODER_RUN_OVERRIDES";
 
 export interface RunOverrides {
-	/** One-run context-window override for supported local runtimes. */
+	/** One-run planning ceiling; cannot enlarge the server's context window. */
 	maxContextTokens?: number;
 	/**
 	 * One-run sampling parameter overrides. Kept as a loose numeric record

@@ -10,7 +10,7 @@ import {
 	skillActivationFromToolDetails,
 } from "../../core/skill-activation.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
-import { ToolNames } from "../../core/tool-names.js";
+import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
 import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
@@ -28,6 +28,7 @@ import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
 import { type RunUsageSummary, sumRunUsage } from "../../interactive/chat-loop-messages.js";
+import { TOOL_PLANES } from "../../tools/policy.js";
 import { flushRawStdout, writeRawStdout } from "../output-guard.js";
 import { setupSteerChannel } from "../steer-channel.js";
 import { projectHeadlessJsonEvent } from "./json-stream.js";
@@ -67,9 +68,8 @@ export interface HeadlessMainAgentOptions {
 	getSessionHeader?: () => unknown | null;
 	shutdown?: HeadlessShutdownHooks;
 	/**
-	 * Turn a run that would otherwise succeed into a failure when its receipt
-	 * says it was a no-op (see `headlessNoop`). Off by default, so the exit code
-	 * and outcome of every existing caller stay as they were.
+	 * Also fail when all attempted tools failed without a block. Blocked runs
+	 * without recovery or a successful write, and explicit limitations, fail unconditionally.
 	 */
 	failOnNoop?: boolean;
 	/**
@@ -124,6 +124,8 @@ interface HeadlessMainAgentReceiptStats {
 	blockedAttemptsTruncated: number;
 	/** Successful calls the registry classified as `MUTATING_ACTION_CLASS`. */
 	mutatingSucceeded: number;
+	/** Blocked action classes not followed by successful substantive work of that class. */
+	unresolvedBlocks: Set<string>;
 }
 
 /**
@@ -304,6 +306,29 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 	// marker for that kind of result and survives the gateway hop, where the
 	// call's tool name is `gateway` rather than `artifact`.
 	const terminating = (event.result as { terminate?: unknown } | undefined)?.terminate === true;
+	const action = typeof actionClass === "string" ? actionClass : "unknown";
+	if (outcome === "blocked" || decision === "blocked") {
+		stats.unresolvedBlocks.add(action);
+	} else if (outcome === "ok" || (outcome === undefined && !event.isError)) {
+		const capability =
+			tool === ToolNames.Gateway
+				? (event.result as { details?: { capability?: unknown } } | undefined)?.details?.capability
+				: tool;
+		const plane =
+			typeof capability === "string" && Object.hasOwn(TOOL_PLANES, capability)
+				? TOOL_PLANES[capability as BuiltinToolName].plane
+				: undefined;
+		// A later alternate read/command can recover its blocked action class.
+		// Bookkeeping, discovery, limitation, and terminal reports cannot.
+		if (
+			!terminating &&
+			capability !== ToolNames.Context &&
+			capability !== ToolNames.CredentialPresent &&
+			(plane === "observe" || plane === "retrieve" || plane === "execute" || plane === "mutate")
+		) {
+			stats.unresolvedBlocks.delete(action);
+		}
+	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
 	if (tool === ToolNames.Context) {
 		const rawTurnId = (event as { turnId?: unknown }).turnId;
@@ -341,13 +366,13 @@ function addRunUsage(left: RunUsageSummary, right: RunUsageSummary): RunUsageSum
 /**
  * Ticket #378: a run whose every write was denied, and whose model then wrote
  * an apology, used to seal as a success. The receipt now says so in one bit.
- * A run is a no-op when a call was blocked and no mutating call succeeded, or
+ * A run is a no-op when a block remains unresolved and no mutating call succeeded, or
  * when it ran tools and none of them succeeded. A run that called no tool and
  * answered in prose is not a no-op; answering a question is a legitimate run.
  */
 function headlessNoop(stats: HeadlessMainAgentReceiptStats): boolean {
 	const totals = toolTotals(stats.toolStats);
-	if (totals.blocked > 0 && stats.mutatingSucceeded === 0) return true;
+	if (stats.unresolvedBlocks.size > 0 && stats.mutatingSucceeded === 0) return true;
 	return totals.calls > 0 && totals.succeeded === 0;
 }
 
@@ -361,13 +386,13 @@ function toolTotals(stats: Map<string, ToolCallStat>): { calls: number; succeede
 	return totals;
 }
 
-function noopFailureMessage(stats: HeadlessMainAgentReceiptStats): string {
+function noopFailureMessage(stats: HeadlessMainAgentReceiptStats, failOnNoop: boolean): string {
 	const totals = toolTotals(stats.toolStats);
 	const cause =
-		totals.blocked > 0 && stats.mutatingSucceeded === 0
-			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked and no write succeeded`
+		stats.unresolvedBlocks.size > 0 && stats.mutatingSucceeded === 0
+			? `${totals.blocked} tool call${totals.blocked === 1 ? " was" : "s were"} blocked without recovery and no write succeeded`
 			: `${totals.calls} tool call${totals.calls === 1 ? "" : "s"} ran and none succeeded`;
-	return `clio-coder run: no-op under --fail-on-noop: ${cause}`;
+	return `clio-coder run: no-op${failOnNoop ? " under --fail-on-noop" : ""}: ${cause}`;
 }
 
 function sortedToolStats(stats: Map<string, ToolCallStat>): ToolCallStat[] {
@@ -585,6 +610,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		blockedAttempts: [],
 		blockedAttemptsTruncated: 0,
 		mutatingSucceeded: 0,
+		unresolvedBlocks: new Set<string>(),
 	};
 	// The receipt is this run's accounting, so it has to exist on the costly
 	// failure paths too. Two callers can reach it: the turn's own completion
@@ -784,13 +810,22 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else {
-		// The turn answered. Under --fail-on-noop an answer is not enough: a run
-		// that was blocked from every write, or whose every tool failed, fails
-		// here with a detail a driver can match, and the answer still prints so
-		// the operator can read what the model said about it.
-		if (options.failOnNoop === true && headlessNoop(receiptStats)) {
-			const failureMessage = noopFailureMessage(receiptStats);
-			terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage, outcomeDetail: "noop" };
+		// A normal provider stop does not erase an explicit limitation or a
+		// block with no applied change. Judge settled tool outcomes, not prose
+		// or the presence of a validation contract. Recovered failures may succeed.
+		const limited = (receiptStats.toolStats.get(ToolNames.Limitation)?.ok ?? 0) > 0;
+		const blockedWithoutChange = receiptStats.unresolvedBlocks.size > 0 && receiptStats.mutatingSucceeded === 0;
+		if (limited || blockedWithoutChange || (options.failOnNoop === true && headlessNoop(receiptStats))) {
+			const failureMessage = limited
+				? "clio-coder run: the agent recorded an explicit limitation; the task is incomplete"
+				: noopFailureMessage(receiptStats, options.failOnNoop === true);
+			terminal = {
+				exitCode: 1,
+				outcome: "failed",
+				status: "failed",
+				failureMessage,
+				outcomeDetail: limited ? "limitation" : "noop",
+			};
 			stderrMessage = failureMessage;
 		}
 		if (mode === "text") {

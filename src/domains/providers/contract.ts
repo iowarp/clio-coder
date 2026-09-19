@@ -96,6 +96,8 @@ export interface ToolCallVerification {
 }
 
 export interface LiveProbeOptions {
+	/** Explicit generating reasoning qualification. Omitted/false keeps discovery passive. */
+	reasoning?: boolean;
 	/** Opt-in streamed tool-call probe. Generates tokens and can load a cold model. */
 	tools?: boolean;
 	/**
@@ -122,36 +124,39 @@ export interface ProvidersContract {
 	/** Config-only readiness sweep. Does not hit the network. */
 	probeAll(): Promise<void>;
 
-	/** Live liveness + probeModels sweep. `tools: true` adds the streamed tool-call probe per target. */
+	/** Passive live metadata sweep. `reasoning: true` / `tools: true` explicitly enable generation. */
 	probeAllLive(options?: LiveProbeOptions): Promise<void>;
 
 	/**
 	 * Probe a single target live. Null when the id is not in settings.targets.
-	 * `reasoning: false` skips an inference-based reasoning-capability probe while
-	 * retaining the target's liveness and model-catalog checks. `tools: true`
+	 * `reasoning: true` opts into generating reasoning qualification; otherwise
+	 * only passive liveness and model-catalog checks run. `tools: true`
 	 * adds the streamed tool-call probe against the chat or default model.
 	 */
 	/** Optional cancellation covers auth and metadata; a cancelled probe does not publish health. */
-	probeTarget(id: string, options?: { reasoning?: boolean } & LiveProbeOptions): Promise<TargetStatus | null>;
+	probeTarget(id: string, options?: LiveProbeOptions): Promise<TargetStatus | null>;
 
 	/** Clear in-memory live connection state for a configured target. */
 	disconnectTarget(id: string): TargetStatus | null;
 
 	/**
 	 * Cached reasoning detection result for a given (target, wire model id).
-	 * Returns true/false when a probe has populated the cache, null otherwise.
+	 * Returns true for positive observed reasoning, null when unqualified.
 	 * Surfaces local-server reasoning capability that is per loaded model and
 	 * cannot be inferred from runtime defaults alone.
 	 */
 	getDetectedReasoning(targetId: string, modelId: string): boolean | null;
 
 	/**
-	 * Probe an target's loaded model for reasoning support. Caches the result
-	 * keyed by `(targetId, modelId)` and returns it. Null when the runtime
-	 * lacks `probeReasoning`, the target is unknown, or the probe could not
-	 * reach the server.
+	 * Return cached positive reasoning evidence unless `active: true` explicitly
+	 * authorizes generating qualification. Only positive observations are cached;
+	 * errors and responses without reasoning are inconclusive, never false.
 	 */
-	probeReasoningForModel(targetId: string, modelId: string): Promise<boolean | null>;
+	probeReasoningForModel(
+		targetId: string,
+		modelId: string,
+		options?: { active?: boolean; signal?: AbortSignal },
+	): Promise<boolean | null>;
 
 	/**
 	 * Shared auth access for both API keys and OAuth credentials. Provider ids

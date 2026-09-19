@@ -442,7 +442,7 @@ describe("clio_library (the former context library scope)", () => {
 		const unknown = await context.run({ scope: "packages" }, {});
 		strictEqual(unknown.kind, "error");
 		if (unknown.kind !== "error") throw new Error("unreachable");
-		ok(unknown.message.includes("workspace, skills, or recall"), unknown.message);
+		ok(unknown.message.includes("workspace, settings, skills, or recall"), unknown.message);
 
 		const moved = await context.run({ scope: "library" }, {});
 		strictEqual(moved.kind, "error");

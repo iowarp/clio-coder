@@ -1,6 +1,7 @@
 import { BusChannels, type PermissionRequestedPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { nextOutputStyle } from "../core/defaults.js";
+import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
@@ -57,7 +58,6 @@ import type {
 	ContextClearCommandOptions,
 	InitCommandOptions,
 	RunIo,
-	SettingsAreaId,
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
@@ -476,6 +476,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const initialSmoothStreaming = deps.getSettings?.().interface.smoothStreaming ?? "off";
 	const initialAutoPacingAllowed = processAutoPacingAllowed(false);
 	const lease = deps.terminalLease;
+	let removeDiagnosticSink = () => {};
 	const shell =
 		lease?.shell ??
 		createProcessInteractiveShell({
@@ -850,19 +851,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		openModelScope: (ref) => openModelScopeState(ref),
 		openSettings: (area, group) => {
 			if (!area) return openSettingsOverlayState();
-			// Compatibility adapter until the seven-area Settings shell replaces
-			// the legacy section ids. Slash grammar never exposes these old names.
-			if (area === "chat" && group === "model-picker") return openSettingsOverlayState("models", "scope");
-			const section = {
-				chat: "orchestrator",
-				fleet: "fleet",
-				targets: "targets",
-				context: "compaction",
-				safety: "safety",
-				interface: "terminal",
-				integrations: "advanced",
-			} satisfies Record<SettingsAreaId, Parameters<typeof openSettingsOverlayState>[0]>;
-			openSettingsOverlayState(section[area]);
+			if (area === "chat" && group === "model-picker") return openSettingsOverlayState("chat", "scope");
+			openSettingsOverlayState(area);
 		},
 		openResume: () => openResumeOverlayState(),
 		startNewSession: () => startNewSession(),
@@ -1303,6 +1293,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			};
 		})(),
 		stopUi: () => {
+			removeDiagnosticSink();
 			if (lease) void lease.close();
 			else shell.stop();
 		},
@@ -1381,5 +1372,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		if (!adopted) void applicationController.shutdown();
 	}
 
-	return applicationController.run;
+	removeDiagnosticSink = installDiagnosticSink((text, level) => {
+		const message = text.trim();
+		if (message) notify(level, message, `diagnostic:${message}`);
+	});
+	try {
+		return await applicationController.run;
+	} finally {
+		removeDiagnosticSink();
+	}
 }

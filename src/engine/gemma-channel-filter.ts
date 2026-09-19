@@ -140,6 +140,7 @@ type ReplacementBlock = TextContent | ThinkingContent;
 export function filterGemmaChannelStream(
 	source: AssistantMessageEventStream,
 	enabled: boolean,
+	fail: (stream: AssistantMessageEventStream, error: unknown) => void,
 ): AssistantMessageEventStream {
 	if (!enabled) return source;
 	const filtered = createAssistantMessageEventStream();
@@ -234,8 +235,8 @@ export function filterGemmaChannelStream(
 				} else filtered.push(event as AssistantMessageEvent);
 			}
 			filtered.end();
-		} catch {
-			filtered.end();
+		} catch (error) {
+			fail(filtered, error);
 		}
 	})();
 	return filtered;

@@ -5,7 +5,8 @@ import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeModelStatus, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
-import { synthLocalModel, targetBaseUrl, withAsIs } from "../common/local-synth.js";
+import { synthLocalModel, targetRootUrl, withAsIs } from "../common/local-synth.js";
+import { ollamaModelIds } from "../common/ollama-model-ids.js";
 
 const defaultCapabilities: CapabilityFlags = {
 	chat: true,
@@ -44,9 +45,12 @@ function positiveNumber(value: unknown): number | undefined {
 	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
-function ollamaParallelSlots(): number {
-	const parsed = Number(process.env.OLLAMA_NUM_PARALLEL);
-	return Number.isInteger(parsed) && parsed > 0 ? parsed : 1;
+function probeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
+	const headers = new Headers(target.auth?.headers);
+	const envName = target.auth?.apiKeyEnvVar;
+	const token = ctx.authToken ?? (envName && ctx.credentialsPresent.has(envName) ? process.env[envName] : undefined);
+	if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
+	return Object.fromEntries(headers);
 }
 
 /**
@@ -62,8 +66,9 @@ function ollamaParallelSlots(): number {
 async function probeResidentModelStates(
 	base: string,
 	ctx: ProbeContext,
+	headers: Record<string, string>,
 ): Promise<Record<string, ProbeModelStatus> | undefined> {
-	const opts = { url: `${base}/api/ps`, timeoutMs: ctx.httpTimeoutMs } as const;
+	const opts = { url: `${base}/api/ps`, headers, timeoutMs: ctx.httpTimeoutMs } as const;
 	const result = await (ctx.signal
 		? probeJson<OllamaPsResponse>({ ...opts, signal: ctx.signal })
 		: probeJson<OllamaPsResponse>(opts));
@@ -79,7 +84,9 @@ async function probeResidentModelStates(
 		if (size !== undefined) status.sizeBytes = size;
 		const contextLength = positiveNumber(row?.context_length);
 		if (contextLength !== undefined) status.contextLength = contextLength;
-		states[id] = status;
+		for (const alias of ollamaModelIds(id, ...(typeof row.name === "string" ? [row.name] : []))) {
+			states[alias] = status;
+		}
 	}
 	return Object.keys(states).length > 0 ? states : undefined;
 }
@@ -98,11 +105,12 @@ async function probeModelContextWindow(
 	model: string,
 	ctx: ProbeContext,
 	baked: boolean,
+	headers: Record<string, string>,
 ): Promise<number | undefined> {
 	const opts = {
 		url: `${base}/api/show`,
 		method: "POST",
-		headers: { "content-type": "application/json" },
+		headers: { ...headers, "content-type": "application/json" },
 		body: JSON.stringify({ model }),
 		timeoutMs: ctx.httpTimeoutMs,
 	} as const;
@@ -137,9 +145,10 @@ const ollamaRuntime: RuntimeDescriptor = {
 	},
 	coldContextWindowCap: CLIO_MIN_CONTEXT_WINDOW,
 	async probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {
-		const base = targetBaseUrl(target);
+		const base = targetRootUrl(target);
 		if (!base) return { ok: false, error: "target has no url" };
-		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
+		const headers = probeHeaders(target, ctx);
+		const opts = { url: `${base}/api/tags`, headers, timeoutMs: ctx.httpTimeoutMs } as const;
 		const result = await (ctx.signal
 			? probeJson<OllamaTagsResponse>({ ...opts, signal: ctx.signal })
 			: probeJson<OllamaTagsResponse>(opts));
@@ -149,7 +158,9 @@ const ollamaRuntime: RuntimeDescriptor = {
 			if (result.latencyMs !== undefined) failed.latencyMs = result.latencyMs;
 			return failed;
 		}
-		const out: ProbeResult = { ok: true, discoveredCapabilities: { parallelSlots: ollamaParallelSlots() } };
+		// The client environment does not describe the daemon's OLLAMA_NUM_PARALLEL.
+		// Its API exposes no slot count; maxConcurrentRequests supplies an explicit override.
+		const out: ProbeResult = { ok: true, discoveredCapabilities: { parallelSlots: 1 } };
 		if (result.latencyMs !== undefined) out.latencyMs = result.latencyMs;
 		// The model maximum, which bounds planning when the model is not
 		// resident. Newer servers put it on every `/api/tags` row; older ones
@@ -160,19 +171,21 @@ const ollamaRuntime: RuntimeDescriptor = {
 			if (typeof row?.name === "string" && window !== undefined) modelCapabilities[row.name] = { contextWindow: window };
 		}
 		const defaultModel = target.defaultModel?.trim();
-		if (defaultModel) {
-			const window = await probeModelContextWindow(base, defaultModel, ctx, target.ollama?.numCtx === undefined);
-			if (window !== undefined) modelCapabilities[defaultModel] = { contextWindow: window };
-		}
+		const [window, modelStates] = await Promise.all([
+			defaultModel
+				? probeModelContextWindow(base, defaultModel, ctx, target.ollama?.numCtx === undefined, headers)
+				: undefined,
+			probeResidentModelStates(base, ctx, headers),
+		]);
+		if (defaultModel && window !== undefined) modelCapabilities[defaultModel] = { contextWindow: window };
 		if (Object.keys(modelCapabilities).length > 0) out.modelCapabilities = modelCapabilities;
-		const modelStates = await probeResidentModelStates(base, ctx);
 		if (modelStates) out.modelStates = modelStates;
 		return out;
 	},
 	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
-		const base = targetBaseUrl(target);
+		const base = targetRootUrl(target);
 		if (!base) return [];
-		const opts = { url: `${base}/api/tags`, timeoutMs: ctx.httpTimeoutMs } as const;
+		const opts = { url: `${base}/api/tags`, headers: probeHeaders(target, ctx), timeoutMs: ctx.httpTimeoutMs } as const;
 		const result = await (ctx.signal
 			? probeJson<OllamaTagsResponse>({ ...opts, signal: ctx.signal })
 			: probeJson<OllamaTagsResponse>(opts));

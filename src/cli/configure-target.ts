@@ -23,6 +23,7 @@ import {
 	resolveRuntimeAuthTarget,
 } from "../domains/providers/index.js";
 import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
+import { loadedContextWindowForModel } from "../domains/providers/model-discovery.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import type {
 	ProbeContext,
@@ -316,6 +317,12 @@ export function setWorkerProfilePointer(
 export function contextWindowUndiscovered(descriptor: TargetDescriptor, probe: ProbeResult | null): boolean {
 	if (!probe?.ok) return false;
 	if (typeof descriptor.capabilities?.contextWindow === "number" && descriptor.capabilities.contextWindow > 0) {
+		return false;
+	}
+	if (
+		descriptor.defaultModel &&
+		loadedContextWindowForModel({ discoveredModelStates: probe.modelStates ?? null }, descriptor.defaultModel) !== null
+	) {
 		return false;
 	}
 	const discovered = probeCapabilitiesForModel(

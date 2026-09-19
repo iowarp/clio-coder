@@ -61,7 +61,7 @@ const MUTATING_TASK_TYPES: ReadonlySet<AgentTaskType> = new Set([
 const READ_SHAPED_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(review|audit|critique|inspect for)\b/i,
 	/\b(research|investigate|explore|survey|compare|find out)\b/i,
-	/\b(read|explain|understand|summarize|describe|walk through|map|locate|trace)\b/i,
+	/\b(read|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i,
 ];
 
 /**

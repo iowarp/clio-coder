@@ -23,6 +23,12 @@ docs/
 └── history/        Dated records that are not current guidance
 ```
 
+For the v0.5.0 candidate, start with the [release notes](../CHANGELOG.md),
+[configuration and target guide](guide/configuration-and-targets.md), and
+[pre-release checks](process/release-cut-checklist.md#working-tree-pre-release-checks).
+The current guides describe the working implementation, not a promise that the
+candidate has been published or that every server capability has been tested.
+
 ## Start here
 
 | Goal | Guide |

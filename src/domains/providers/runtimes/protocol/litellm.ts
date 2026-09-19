@@ -186,6 +186,8 @@ export function aggregateLiteLLMCapabilities(rows: ReadonlyArray<Partial<Capabil
 }
 
 interface LiteLLMCatalog {
+	/** Whether the authenticated inference listing returned a valid catalog. */
+	listed: boolean;
 	models: string[];
 	modelCapabilities: Record<string, Partial<CapabilityFlags>>;
 	modelStates: Record<string, ProbeModelStatus>;
@@ -193,9 +195,11 @@ interface LiteLLMCatalog {
 	deployments: Record<string, Array<{ model: string; apiBase?: string }>>;
 	/** Whether the empty catalog is specifically because the gateway rejected the key. */
 	authFailed: boolean;
+	notes?: string[];
 }
 
 const EMPTY_CATALOG: LiteLLMCatalog = {
+	listed: false,
 	models: [],
 	modelCapabilities: {},
 	modelStates: {},
@@ -209,65 +213,68 @@ function isAuthError(leg: { ok: boolean; error?: string }): boolean {
 }
 
 /**
- * Read the catalog from `/v1/model/info`, falling back to `/v1/models`.
- *
- * The detail endpoint is the only one that carries capabilities, but it can be
- * refused for a virtual key with narrower permissions than the master key. A
- * gateway that answers the plain listing and refuses the detail is still usable;
- * it just cannot tell Clio anything beyond which aliases exist, so the target
- * falls back to its declared capabilities exactly as `openai-compat` would.
+ * The inference listing controls alias availability; detail only enriches exact
+ * aliases. Detail access may be restricted independently of inference access.
  */
 async function fetchCatalog(base: string, ctx: ProbeContext, headers: Record<string, string>): Promise<LiteLLMCatalog> {
-	const detailOpts = { url: `${base}/v1/model/info`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
-	const detail = await (ctx.signal
-		? probeJson<LiteLLMModelInfoResponse>({ ...detailOpts, signal: ctx.signal })
-		: probeJson<LiteLLMModelInfoResponse>(detailOpts));
+	const options = { timeoutMs: ctx.httpTimeoutMs, headers, ...(ctx.signal ? { signal: ctx.signal } : {}) };
+	const list = await probeJson<LiteLLMModelsResponse>({ ...options, url: `${base}/v1/models` });
+	if (isAuthError(list)) return { ...EMPTY_CATALOG, authFailed: true };
+	const listed = list.ok && Array.isArray(list.data?.data);
+	const models = listed
+		? [...new Set(list.data?.data?.flatMap((row) => (typeof row?.id === "string" && row.id.length > 0 ? [row.id] : [])))]
+		: [];
+	// An explicitly empty inference listing must not be broadened by admin metadata.
+	if (listed && models.length === 0) return { ...EMPTY_CATALOG, listed: true };
 
-	if (detail.ok && Array.isArray(detail.data?.data)) {
-		const catalog: LiteLLMCatalog = {
-			models: [],
-			modelCapabilities: {},
-			modelStates: {},
-			deployments: {},
-			authFailed: false,
-		};
-		const capabilityRows: Record<string, Array<Partial<CapabilityFlags>>> = {};
-		for (const row of detail.data.data) {
-			if (typeof row?.model_name !== "string" || row.model_name.length === 0) continue;
-			const alias = row.model_name;
-			if (catalog.deployments[alias] === undefined) {
-				catalog.models.push(alias);
-				catalog.deployments[alias] = [];
-				capabilityRows[alias] = [];
-			}
-			const caps = row.model_info ? capabilitiesFromLiteLLMModelInfo(row.model_info) : {};
-			capabilityRows[alias]?.push(caps);
-			const upstream = row.litellm_params?.model;
-			const apiBase = row.litellm_params?.api_base;
-			catalog.deployments[alias]?.push({
-				model: typeof upstream === "string" ? upstream : alias,
-				...(typeof apiBase === "string" ? { apiBase } : {}),
-			});
-		}
-		for (const alias of catalog.models) {
-			const caps = aggregateLiteLLMCapabilities(capabilityRows[alias] ?? []);
-			if (Object.keys(caps).length > 0) catalog.modelCapabilities[alias] = caps;
-		}
-		if (catalog.models.length > 0) return catalog;
+	let detail = await probeJson<LiteLLMModelInfoResponse>({ ...options, url: `${base}/v1/model/info` });
+	if (
+		(!detail.ok && /^HTTP (404|405|501)\b/u.test(detail.error ?? "")) ||
+		(detail.ok && !Array.isArray(detail.data?.data))
+	) {
+		detail = await probeJson<LiteLLMModelInfoResponse>({ ...options, url: `${base}/model/info` });
 	}
-	const detailAuthFailed = isAuthError(detail);
-
-	const listOpts = { url: `${base}/v1/models`, timeoutMs: ctx.httpTimeoutMs, headers } as const;
-	const list = await (ctx.signal
-		? probeJson<LiteLLMModelsResponse>({ ...listOpts, signal: ctx.signal })
-		: probeJson<LiteLLMModelsResponse>(listOpts));
-	if (!list.ok || !Array.isArray(list.data?.data)) {
-		return { ...EMPTY_CATALOG, authFailed: detailAuthFailed || isAuthError(list) };
+	const catalog: LiteLLMCatalog = {
+		listed,
+		models,
+		modelCapabilities: {},
+		modelStates: {},
+		deployments: {},
+		authFailed: false,
+	};
+	if (!detail.ok || !Array.isArray(detail.data?.data)) {
+		catalog.notes = ["Gateway detail metadata is unavailable; route capabilities are unknown."];
+		return catalog;
 	}
-	const models = list.data.data
-		.map((row) => (typeof row?.id === "string" ? row.id : null))
-		.filter((id): id is string => id !== null && id.length > 0);
-	return { models, modelCapabilities: {}, modelStates: {}, deployments: {}, authFailed: false };
+	if (!listed) {
+		catalog.notes = [
+			"Inference model listing is unavailable; aliases come from gateway detail metadata and availability is unverified.",
+		];
+	}
+	const available = new Set(models);
+	const capabilityRows: Record<string, Array<Partial<CapabilityFlags>>> = {};
+	for (const row of detail.data.data) {
+		if (typeof row?.model_name !== "string" || row.model_name.length === 0) continue;
+		const alias = row.model_name;
+		if (listed && !available.has(alias)) continue;
+		if (catalog.deployments[alias] === undefined) {
+			if (!listed) catalog.models.push(alias);
+			catalog.deployments[alias] = [];
+			capabilityRows[alias] = [];
+		}
+		capabilityRows[alias]?.push(row.model_info ? capabilitiesFromLiteLLMModelInfo(row.model_info) : {});
+		const upstream = row.litellm_params?.model;
+		const apiBase = row.litellm_params?.api_base;
+		catalog.deployments[alias]?.push({
+			model: typeof upstream === "string" ? upstream : alias,
+			...(typeof apiBase === "string" ? { apiBase } : {}),
+		});
+	}
+	for (const alias of catalog.models) {
+		const caps = aggregateLiteLLMCapabilities(capabilityRows[alias] ?? []);
+		if (Object.keys(caps).length > 0) catalog.modelCapabilities[alias] = caps;
+	}
+	return catalog;
 }
 
 const litellmRuntime: RuntimeDescriptor = {
@@ -284,25 +291,27 @@ const litellmRuntime: RuntimeDescriptor = {
 		if (!base) return { ok: false, error: "target has no url" };
 		const headers = bearerHeaders(target, ctx);
 
-		// Liveness first, and deliberately on the unauthenticated endpoint. A
-		// gateway with authentication enforced answers 401 to `/v1/models` when
-		// credentials are missing or wrong, which is indistinguishable from an
-		// unreachable host if that is the only thing probed. `/health/liveliness`
-		// separates "the gateway is down" from "this key is not valid", and the
-		// two have completely different remedies.
+		// Liveness is supplementary: a reverse proxy may restrict this public
+		// endpoint while the authenticated inference listing remains usable.
 		const liveOpts = { url: `${base}/health/liveliness`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const live = await (ctx.signal
 			? probeJson<unknown>({ ...liveOpts, signal: ctx.signal })
 			: probeJson<unknown>(liveOpts));
-		if (!live.ok) return { ok: false, error: live.error ?? "gateway is not reachable" };
 
 		const catalog = await fetchCatalog(base, ctx, headers);
-		if (catalog.models.length === 0) {
+		if (!catalog.listed || catalog.models.length === 0) {
 			const result: ProbeResult = {
 				ok: false,
 				error: catalog.authFailed
-					? "gateway rejected the key"
-					: "gateway is live but served no model catalog; check the target's API key",
+					? "gateway rejected model-list access"
+					: "gateway inference model catalog is unavailable or empty",
+				failureKind: catalog.authFailed
+					? "authentication"
+					: live.ok || catalog.listed || catalog.models.length > 0
+						? "catalog-unavailable"
+						: "generic",
+				...(catalog.models.length > 0 ? { models: catalog.models } : {}),
+				...(catalog.notes ? { notes: catalog.notes } : {}),
 			};
 			if (catalog.authFailed) result.authFailed = true;
 			if (live.latencyMs !== undefined) result.latencyMs = live.latencyMs;
@@ -320,7 +329,8 @@ const litellmRuntime: RuntimeDescriptor = {
 				result.capabilityModelId = selected;
 			}
 		}
-		const notes: string[] = [];
+		const notes: string[] = [...(catalog.notes ?? [])];
+		if (!live.ok) notes.push("Unauthenticated liveness check failed; authenticated model listing succeeded.");
 		const configured = target.defaultModel?.trim();
 		if (configured && !catalog.models.includes(configured)) {
 			notes.push(`configured model '${configured}' is not in the gateway catalog`);
@@ -351,7 +361,9 @@ const litellmRuntime: RuntimeDescriptor = {
 	async probeModels(target: TargetDescriptor, ctx: ProbeContext): Promise<string[]> {
 		const base = rootUrl(target);
 		if (!base) return [];
-		return (await fetchCatalog(base, ctx, bearerHeaders(target, ctx))).models;
+		const catalog = await fetchCatalog(base, ctx, bearerHeaders(target, ctx));
+		// This legacy string-array surface cannot distinguish hints from live IDs.
+		return catalog.listed ? catalog.models : [];
 	},
 
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {

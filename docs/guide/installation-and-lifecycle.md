@@ -17,7 +17,8 @@ lifecycle operations.
 | Task | Command | Result |
 | --- | --- | --- |
 | Set up a new installation | `clio-coder configure` | Quick Connect: endpoint, key if needed, model, Connect; then start `clio-coder`. |
-| Change a connection | `clio-coder configure --section targets` | Add or edit endpoints, credentials, and models; choose role defaults. |
+| Change a connection | `clio-coder configure --section targets` | Open Connections to add or edit endpoints, credentials, and available models. |
+| Choose models for each role | `clio-coder configure --settings` | Open Chat, Fleet, or Context & Memory to choose the target and model used for that work. |
 | Change any setting or repair YAML | `clio-coder configure --edit` | Edit a draft, validate, and save with a backup. |
 | Diagnose the installation | `clio-coder doctor` | Read-only diagnosis. `clio-coder doctor --fix` repairs structure and permissions, and records fleet preflight results. |
 | Finish a package-manager update | `clio-coder upgrade --post-install` | Apply local migrations and installation checks. |
@@ -441,17 +442,26 @@ clio-coder configure --quick
 clio-coder configure --settings
 ```
 
-**Settings** contains the nine advanced sections:
+**Settings** uses the same organization as the TUI `/settings` overlay:
 
-1. **Targets & Auth**: manage providers, endpoints, credentials, and models.
-2. **Models & Thinking**: default models, thinking levels, model favorites, cycle set.
-3. **Chat Defaults**: smooth streaming, terminal progress, token limits, compaction.
-4. **Fleet**: concurrency, retries, tool call caps, worker timeouts, profiles.
-5. **Permissions & Autonomy**: autonomy level, worker permissions, cost limits, review watchdog.
-6. **Panes & Layout**: terminal panes capability, dock layout, TUI display mode, notifications.
-7. **Skills & Extensions**: trust project imports, external ACP agents, plugins, library sync.
-8. **Diagnostics**: version information, resolved directories, doctor check, raw settings inspection.
-9. **All Settings**: validated file editor for the complete settings schema.
+1. **Connections**: providers, endpoints, credentials, and available models.
+2. **Chat**: chat model, thinking, favorites, response length, and retries.
+3. **Fleet**: worker models, profiles, routing, concurrency, retries, and run limits.
+4. **Context & Memory**: compaction, working set, context limits, and proactive memory.
+5. **Permissions & Limits**: autonomy, worker approvals, external-agent governance, spending, and safety review.
+6. **Appearance**: display, streaming, notifications, panes, and keyboard shortcuts.
+7. **Integrations**: project skills, external agents, plugins, library, and Git attribution.
+8. **Advanced**: diagnostics, configuration files, and the validated full-file editor.
+
+Configure puts common actions first and offers **All controls in this section**
+for the shared settings catalog, with descriptions, defaults, validation, and
+explicit save review. Collections accept JSON; the full-file editor remains
+available in Advanced. The launcher also keeps its Diagnostics shortcut.
+
+This menu reorganization preserves the version-2 settings schema, file paths,
+credentials, and defaults. It needs no new data migration or reset. Older
+version-1 installations still use the existing migration through
+`clio-coder upgrade --post-install`, which backs up the original settings.
 
 Every section header indicates the exact settings file path being modified
 (`Source: ~/.config/clio-coder/settings.yaml`), prints the current active values,
@@ -460,7 +470,9 @@ parent menu remembers your selected row. Dumb terminals use numbered menus
 with `b` for Back and `q` to quit.
 
 The `--section <name>` flag jumps directly into any section (e.g.,
-`clio-coder configure --section models` or `clio-coder configure --section fleet`).
+`clio-coder configure --section chat` or `clio-coder configure --section fleet`).
+Previous names such as `models`, `permissions`, `panes`, and `skills` remain
+accepted aliases. `--section diagnostics` opens diagnostics directly.
 The `--json` flag emits user settings with defaults in formatted JSON for scripting.
 `--edit` opens a temporary settings draft in `VISUAL`/`EDITOR`, validates it before
 saving, and keeps the previous file as `settings.yaml.bak`. It can repair a file

@@ -20,6 +20,7 @@ import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifact } from "../domains/safety/protected-artifacts.js";
 import type { ToolProfileName } from "../tools/profiles.js";
 import { parseWorkerContextSeed } from "./context-seed.js";
+import { INTERNAL_HELPER_RESULT_KINDS } from "./protocol.js";
 
 /** Current attested, budget-bearing dispatch document emitted by this release. */
 export const WORKER_SPEC_VERSION = 4;
@@ -104,6 +105,8 @@ interface WorkerSpecFields {
 	 * first and only notice that its result was the wrong shape.
 	 */
 	resultContract?: ResultContract;
+	/** Host-selected internal JSON handoff mode; never a caller-supplied authority grant. */
+	helperResult?: true;
 	/**
 	 * What this run delivers. It widens the reserve window's delivery-tool set,
 	 * so it is validated here like every other closed field on the wire rather
@@ -678,6 +681,13 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 		}
 	}
 	validateAllowedTools(spec.allowedTools);
+	if (spec.helperResult !== undefined) {
+		if (spec.helperResult !== true) throw new Error("WorkerSpec.helperResult must be true when present");
+		const contract = readRecord(spec.resultContract, "WorkerSpec.resultContract");
+		if (!(INTERNAL_HELPER_RESULT_KINDS as readonly unknown[]).includes(contract.kind)) {
+			throw new Error("WorkerSpec.helperResult requires a supported internal JSON result contract");
+		}
+	}
 	validateWorkerBudget(spec.budget);
 	validateProtectedModels(spec.protectedModels);
 	validateRuntimeResolution(spec.runtimeResolution);

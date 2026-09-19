@@ -19,9 +19,9 @@ function makeStatus(source?: TargetStatus["discoveredModelsSource"], models: str
 }
 
 describe("contracts/model-discovery", () => {
-	it("treats probe and cache sources as live catalogs", () => {
+	it("treats only successful probe sources as live catalogs", () => {
 		strictEqual(hasLiveModelCatalog(makeStatus("probe")), true);
-		strictEqual(hasLiveModelCatalog(makeStatus("cache")), true);
+		strictEqual(hasLiveModelCatalog(makeStatus("cache")), false);
 	});
 
 	it("does not treat an undefined source as a live catalog even with nonempty models", () => {

@@ -149,7 +149,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		const { agent } = createEngineAgent({ initialState: { model, thinkingLevel: "off", systemPrompt: "instructions" } });
 		const result = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
 		strictEqual(result.errorMessage, null);
-		deepStrictEqual(paths, ["GET /v1/models", "POST /v1/chat/completions?autoload=false"]);
+		deepStrictEqual(paths, ["POST /v1/chat/completions?autoload=false"]);
 		strictEqual(body?.cache_prompt, true);
 		strictEqual(
 			(model as { clioCoder?: { lifecycle?: string } }).clioCoder?.lifecycle,
@@ -159,7 +159,7 @@ test("native warm cannot administer residency or JIT-load a model and applies it
 		agent.transformContext = async (messages) => [{ role: "user", content: "x".repeat(1000), timestamp: 0 }, ...messages];
 		const refused = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture", maxInputTokens: 100 });
 		ok(refused.errorMessage?.includes("token budget"));
-		strictEqual(paths.length, 2, "oversized transformed warm never reaches the server");
+		strictEqual(paths.length, 1, "oversized transformed warm never reaches the server");
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	}

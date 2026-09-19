@@ -1,6 +1,6 @@
 import { performance } from "node:perf_hooks";
+import { setTimeout as sleep } from "node:timers/promises";
 import { residencyTargetKey } from "../../core/residency-target-key.js";
-import { sleep } from "../../core/timers.js";
 import {
 	type ResidencyAdapter,
 	ResidencyPreconditionError,
@@ -31,6 +31,8 @@ export interface LlamaCppResidencyInput {
 	 * to managed for direct adapter callers.
 	 */
 	managed?: boolean;
+	signal?: AbortSignal;
+	headers?: Record<string, string>;
 	fetchImpl?: typeof fetch;
 	now?: () => number;
 	ttlMs?: number;
@@ -42,6 +44,17 @@ export interface LlamaCppResidencyInput {
 
 const LOAD_TIMEOUT_MS = 120_000;
 const POLL_INTERVAL_MS = 500;
+
+function routerFetch(input: Pick<LlamaCppResidencyInput, "fetchImpl" | "headers" | "signal">): typeof fetch {
+	return (url, init) => {
+		const headers = new Headers(input.headers);
+		new Headers(init?.headers).forEach((value, name) => {
+			headers.set(name, value);
+		});
+		const signal = input.signal ? AbortSignal.any([input.signal, ...(init?.signal ? [init.signal] : [])]) : init?.signal;
+		return (input.fetchImpl ?? fetch)(url, { ...init, headers, ...(signal ? { signal } : {}) });
+	};
+}
 
 /**
  * `sleeping` is a resident state, not an unloaded one. A router started with
@@ -137,6 +150,7 @@ async function fetchRouterProps(input: LlamaCppResidencyInput, fetchImpl: typeof
 		if (!response.ok) return {};
 		return parseLlamaCppRouterProps(await response.json());
 	} catch {
+		input.signal?.throwIfAborted();
 		return {};
 	}
 }
@@ -224,7 +238,7 @@ async function waitForLoaded(input: LlamaCppResidencyInput, fetchImpl: typeof fe
 		// the whole load timeout on an idle router.
 		if (model?.state === "loaded" || model?.state === "sleeping") return;
 		if (model?.state === "failed") throw new Error(`llama.cpp router reports '${modelId}' failed to load`);
-		await sleep(POLL_INTERVAL_MS);
+		await sleep(POLL_INTERVAL_MS, undefined, input.signal ? { signal: input.signal } : {});
 	}
 	throw new Error(`timed out waiting for '${modelId}' to load`);
 }
@@ -285,8 +299,9 @@ async function restoreDisplacedPinned(
 export async function listLlamaCppResidentModels(
 	baseUrl: string,
 	fetchImpl: typeof fetch = fetch,
+	options: Pick<LlamaCppResidencyInput, "headers" | "signal"> = {},
 ): Promise<ResidentModelInfo[]> {
-	const models = await fetchRouterModels({ baseUrl }, fetchImpl);
+	const models = await fetchRouterModels({ baseUrl }, routerFetch({ ...options, fetchImpl }));
 	const router = models.some((entry) => entry.state !== "unknown");
 	return models
 		.filter((entry) => !router || residentModel(entry))
@@ -294,7 +309,9 @@ export async function listLlamaCppResidentModels(
 }
 
 export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Promise<void> {
-	const fetchImpl = input.fetchImpl ?? fetch;
+	input.signal?.throwIfAborted();
+	if (input.managed === false) return;
+	const fetchImpl = routerFetch(input);
 	let snapshot: LlamaCppRouterModel[] = [];
 	const adapter: ResidencyAdapter = {
 		targetKey: residencyTargetKey("llamacpp", input.baseUrl),
@@ -303,6 +320,7 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 		keepModelId: input.keepModelId,
 		managed: input.managed ?? true,
 		strategy: "router",
+		...(input.signal ? { signal: input.signal } : {}),
 		listResident: async () => {
 			const models = await fetchRouterModels(input, fetchImpl);
 			if (!models.some((entry) => entry.state !== "unknown")) {
@@ -333,11 +351,19 @@ export async function ensureLlamaCppResidency(input: LlamaCppResidencyInput): Pr
 		// `snapshot` predates the eviction and still calls this model resident, so
 		// the state is deliberately not read here: the reload has to be forced.
 		reloadEvicted: async (modelId) => {
-			await ensureModelLoaded(input, fetchImpl, modelId, undefined);
+			// Recovery must survive request cancellation, but has its own total deadline.
+			const recovery = { ...input, signal: AbortSignal.timeout(LOAD_TIMEOUT_MS) };
+			await ensureModelLoaded(recovery, routerFetch(recovery), modelId, undefined);
 		},
 	};
 	if (input.withLock) adapter.withLock = input.withLock;
 	if (input.now) adapter.now = input.now;
 	if (input.ttlMs !== undefined) adapter.ttlMs = input.ttlMs;
-	await reconcileResidency(adapter);
+	const plan = await reconcileResidency(adapter);
+	if (plan.decision === "decline") {
+		throw new ResidencyPreconditionError(
+			plan.notices.find((notice) => notice.level === "error")?.message ??
+				`llama.cpp residency declined loading '${input.keepModelId}' on '${input.targetId}'`,
+		);
+	}
 }

@@ -1,5 +1,6 @@
 import { BusChannels } from "../../core/bus-events.js";
 import { type ClioSettings, readSettings } from "../../core/config.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { ensurePiAiRegistered } from "../../engine/ai.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "../../engine/apis/index.js";
@@ -60,7 +61,7 @@ function loadKnowledgeBase(): KnowledgeBase {
 		if (roots.length === 0) return new NullKnowledgeBase();
 		return new FileKnowledgeBase(roots);
 	} catch (err) {
-		process.stderr.write(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
+		writeDiagnostic(`[providers] knowledge base disabled: ${err instanceof Error ? err.message : String(err)}\n`);
 		return new NullKnowledgeBase();
 	}
 }
@@ -151,8 +152,10 @@ function discoveredModelsSource(
 	cachedModels: ReadonlyArray<string>,
 	desc: RuntimeDescriptor,
 ): "probe" | "cache" | "runtime" | "none" {
-	if (probe?.models !== undefined) return "probe";
-	if (preservePreviousProbe && previous?.discoveredModels && previous.discoveredModels.length > 0) return "cache";
+	if (probe?.ok && probe.models !== undefined) return "probe";
+	if (preservePreviousProbe && previous?.discoveredModels && previous.discoveredModels.length > 0) {
+		return previous.discoveredModelsSource === "runtime" ? "runtime" : "cache";
+	}
 	if (cachedModels.length > 0) return "cache";
 	if (desc.knownModels && desc.knownModels.length > 0) return "runtime";
 	return "none";
@@ -182,10 +185,10 @@ export interface ProbeMerge {
 /**
  * Merge a fresh probe result with the previous known status. A probe that was
  * not attempted (`probe === null`) or that failed (`probe.ok === false`) must
- * not discard the last successful catalog and load states for an unchanged
- * target: a transient outage keeps the known models selectable, sourced from
+ * not discard the last successful catalog for an unchanged target. Failed
+ * probes clear resident state; a transient outage keeps models selectable from
  * `cache`, while health and availability (decided by the caller from `probe`)
- * reflect the failure. Only a successful probe replaces the catalog.
+ * reflect the failure. Only a successful nonempty catalog replaces the cached candidates.
  */
 function mergeProbeResult(
 	desc: RuntimeDescriptor,
@@ -196,35 +199,65 @@ function mergeProbeResult(
 	cachedModelLabels: Readonly<Record<string, string>> = {},
 ): ProbeMerge {
 	const probeSucceeded = probe?.ok ?? false;
-	const preservePrevious = !probeSucceeded && previous !== undefined && sameProbeIdentity(previous.target, target);
+	const preserveCatalog = previous !== undefined && sameProbeIdentity(previous.target, target);
+	// Successful metadata replaces the factual snapshot, including absent fields.
+	// Only catalog candidates may survive a successful but empty metadata read.
+	const preservePrevious = !probeSucceeded && preserveCatalog;
+	// Several catalog adapters return [] when metadata cannot be read. It is
+	// not sufficient evidence to erase the last useful catalog.
+	const catalogProbe = probeSucceeded && probe?.models && probe.models.length > 0 ? probe : null;
 	const probeCapabilities =
 		probe?.discoveredCapabilities ?? (preservePrevious ? previous.probeCapabilities : null) ?? null;
-	const probeModelCapabilities =
+	let probeModelCapabilities =
 		probe?.modelCapabilities ?? (preservePrevious ? previous.probeModelCapabilities : null) ?? null;
 	const probeModelId =
 		probe?.discoveredCapabilities !== undefined
 			? (probe.capabilityModelId ?? null)
 			: ((preservePrevious ? previous.probeModelId : null) ?? null);
-	const probeNotes =
+	let probeNotes =
 		probe?.notes && probe.notes.length > 0 ? probe.notes : preservePrevious ? previous.probeNotes : undefined;
 	const probeSurfaces = probe?.surfaces ?? (preservePrevious ? previous.probeSurfaces : undefined);
 	const discoveredModels = uniqueModels(
-		probe?.models ??
-			(preservePrevious ? previous.discoveredModels : undefined) ??
+		catalogProbe?.models ??
+			(preserveCatalog ? previous.discoveredModels : undefined) ??
 			(cachedModels.length > 0 ? cachedModels : undefined) ??
 			desc.knownModels ??
 			[],
 	);
-	const discoveredModelStates = probe?.modelStates ?? (preservePrevious ? previous.discoveredModelStates : null) ?? null;
+	const discoveredModelStates =
+		probe === null
+			? ((preservePrevious ? previous.discoveredModelStates : null) ?? null)
+			: probe.ok
+				? (probe.modelStates ?? null)
+				: null;
+	if (probe?.ok === false && preservePrevious && previous.discoveredModelStates) {
+		// Keep only conservative context bounds from the last observation, not
+		// a claim that its model, instance, load config or slots are still live.
+		for (const [modelId, state] of Object.entries(previous.discoveredModelStates)) {
+			const window = positiveWindow(state.contextLength);
+			if (window === undefined) continue;
+			const caps = probeModelCapabilities?.[modelId] ?? probeCapabilitiesForModel(previous, modelId);
+			probeModelCapabilities = {
+				...probeModelCapabilities,
+				[modelId]: { ...caps, contextWindow: Math.min(window, positiveWindow(caps?.contextWindow) ?? window) },
+			};
+		}
+		probeNotes = [
+			...new Set([
+				...(probeNotes ?? []),
+				"Current model residency is unknown after the failed probe; last observed context limits are retained conservatively.",
+			]),
+		];
+	}
 	const discoveredModelLabels =
-		probe?.modelLabels ??
-		(preservePrevious ? previous.discoveredModelLabels : undefined) ??
-		(cachedModels.length > 0 ? cachedModelLabels : undefined) ??
+		catalogProbe?.modelLabels ??
+		(catalogProbe === null && preserveCatalog ? previous.discoveredModelLabels : undefined) ??
+		(catalogProbe === null && cachedModels.length > 0 ? cachedModelLabels : undefined) ??
 		{};
 	const merge: ProbeMerge = {
 		discoveredModels,
 		discoveredModelLabels,
-		discoveredModelsSource: discoveredModelsSource(probe, preservePrevious, previous, cachedModels, desc),
+		discoveredModelsSource: discoveredModelsSource(catalogProbe, preserveCatalog, previous, cachedModels, desc),
 		discoveredModelStates,
 		probeCapabilities,
 		probeModelCapabilities,
@@ -268,7 +301,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
 	const statuses = new Map<string, TargetStatus>();
-	const reasoningCache = new Map<string, boolean>();
+	const reasoningCache = new Map<string, true>();
 	const unsubscribeConfigListeners: Array<() => void> = [];
 	let stopped = false;
 
@@ -370,16 +403,25 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
 		const unservedDefault = probe?.ok ? unservedDefaultModelReason(desc, target, merge) : null;
+		// A failed probe is still failed health evidence. Separately, permit a
+		// configured HTTP inference attempt; the inference endpoint can differ.
+		const allowHttpInferenceAttempt =
+			desc.kind === "http" &&
+			Boolean(target.url?.trim()) &&
+			!probe?.authFailed &&
+			probe?.failureKind !== "authentication" &&
+			probe?.failureKind !== "missing";
+		const catalogOnlyFailure = probe?.failureKind === "catalog-unavailable";
 		const health: TargetHealth =
 			probe === null
 				? (previous?.health ?? emptyHealth())
 				: {
-						status: healthy ? (unservedDefault === null ? "healthy" : "degraded") : "down",
+						status: healthy ? (unservedDefault === null ? "healthy" : "degraded") : catalogOnlyFailure ? "degraded" : "down",
 						lastCheckAt: new Date().toISOString(),
 						lastError: probe.error ?? unservedDefault,
 						latencyMs: probe.latencyMs ?? null,
 					};
-		const available = availability.available && (probe === null || probe.ok);
+		const available = availability.available && (probe === null || probe.ok || allowHttpInferenceAttempt);
 		const reason = probe !== null && !probe.ok ? (probe.error ?? "probe failed") : availability.reason;
 		const out: TargetStatus = {
 			target,
@@ -406,7 +448,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	async function probeTargetInternal(
 		target: TargetDescriptor,
 		live: boolean,
-		options?: { reasoning?: boolean } & LiveProbeOptions,
+		options?: LiveProbeOptions,
 	): Promise<TargetStatus | null> {
 		options?.signal?.throwIfAborted();
 		if (stopped) return null;
@@ -446,31 +488,51 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		}
 		options?.signal?.throwIfAborted();
 		if (!currentProbeTarget(target)) return null;
-		if (probeResult.ok && options?.reasoning !== false && typeof desc.probeReasoning === "function") {
+		if (options?.reasoning === true) {
+			const note = (outcome: string): void => {
+				probeResult = { ...probeResult, notes: [...(probeResult.notes ?? []), outcome] };
+			};
 			const candidateModelId = probeCandidateModelId(target);
-			if (candidateModelId) {
+			if (!probeResult.ok) {
+				note("Reasoning qualification not run: metadata probe failed.");
+			} else if (typeof desc.probeReasoning !== "function") {
+				note("Reasoning qualification not run: runtime has no reasoning qualification probe.");
+			} else if (!candidateModelId) {
+				note("Reasoning qualification not run: no chat or default model is configured.");
+			} else {
 				try {
 					const result = await desc.probeReasoning(target, candidateModelId, probeCtx);
 					options?.signal?.throwIfAborted();
 					if (!currentProbeTarget(target)) return null;
-					reasoningCache.set(reasoningCacheKey(target.id, candidateModelId), result.reasoning);
-					const capabilityModelId = probeResult.capabilityModelId ?? null;
-					if (capabilityModelId === null || capabilityModelId === candidateModelId) {
-						probeResult = {
-							...probeResult,
-							discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: result.reasoning },
-							modelCapabilities: {
-								...(probeResult.modelCapabilities ?? {}),
-								[candidateModelId]: {
-									...(probeResult.modelCapabilities?.[candidateModelId] ?? {}),
-									reasoning: result.reasoning,
+					if (result.reasoning === true && !result.error) {
+						note(`Reasoning qualification observed reasoning output for '${candidateModelId}'.`);
+						reasoningCache.set(reasoningCacheKey(target.id, candidateModelId), true);
+						const capabilityModelId = probeResult.capabilityModelId ?? null;
+						if (capabilityModelId === null || capabilityModelId === candidateModelId) {
+							probeResult = {
+								...probeResult,
+								discoveredCapabilities: { ...(probeResult.discoveredCapabilities ?? {}), reasoning: result.reasoning },
+								modelCapabilities: {
+									...(probeResult.modelCapabilities ?? {}),
+									[candidateModelId]: {
+										...(probeResult.modelCapabilities?.[candidateModelId] ?? {}),
+										reasoning: result.reasoning,
+									},
 								},
-							},
-							capabilityModelId: capabilityModelId ?? candidateModelId,
-						};
+								capabilityModelId: capabilityModelId ?? candidateModelId,
+							};
+						}
+					} else {
+						note(
+							result.error
+								? `Reasoning qualification error for '${candidateModelId}': ${result.error}; support remains unqualified by this check.`
+								: `Reasoning qualification inconclusive for '${candidateModelId}': no reasoning output observed; this does not establish lack of support.`,
+						);
 					}
-				} catch {
-					// reasoning detection is best-effort; missing/timeout leaves the cache cold.
+				} catch (err) {
+					note(
+						`Reasoning qualification error for '${candidateModelId}': ${err instanceof Error ? err.message : String(err)}; support remains unqualified by this check.`,
+					);
 				}
 			}
 		}
@@ -500,7 +562,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const status = buildStatus(current, desc, probeResult, previous);
 		if (toolProbe) status.toolProbe = toolProbe;
 		statuses.set(target.id, status);
-		if (probeResult.ok && probeResult.models !== undefined) {
+		if (probeResult.ok && probeResult.models !== undefined && probeResult.models.length > 0) {
 			recordTargetModelSnapshot(
 				target,
 				probeResult.models,
@@ -580,7 +642,11 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		return out;
 	}
 
-	async function probeReasoningForModelInternal(targetId: string, modelId: string): Promise<boolean | null> {
+	async function probeReasoningForModelInternal(
+		targetId: string,
+		modelId: string,
+		options?: { active?: boolean; signal?: AbortSignal },
+	): Promise<boolean | null> {
 		if (stopped) return null;
 		const settings = readConfig();
 		const configuredTarget = settings.targets.find((ep) => ep.id === targetId);
@@ -588,13 +654,19 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const target = structuredClone(configuredTarget);
 		const desc = registry.get(target.runtime);
 		if (!desc || typeof desc.probeReasoning !== "function") return null;
-		const probeCtx = await buildProbeContextForTarget(target, desc);
+		const cached = reasoningCache.get(reasoningCacheKey(targetId, modelId)) ?? null;
+		if (options?.active !== true) return cached;
+		options.signal?.throwIfAborted();
+		const probeCtx = await buildProbeContextForTarget(target, desc, options.signal);
 		if (!currentProbeTarget(target)) return null;
 		try {
 			const result = await desc.probeReasoning(target, modelId, probeCtx);
-			if (!currentProbeTarget(target)) return null;
-			reasoningCache.set(reasoningCacheKey(targetId, modelId), result.reasoning);
-			return result.reasoning;
+			if (!currentProbeTarget(target) || options.signal?.aborted) return null;
+			if (result.reasoning === true && !result.error) {
+				reasoningCache.set(reasoningCacheKey(targetId, modelId), true);
+				return true;
+			}
+			return cached;
 		} catch {
 			return null;
 		}
@@ -603,7 +675,14 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 	async function probeAll(): Promise<void> {
 		const settings = readConfig();
 		const next = new Map<string, TargetStatus>();
-		reasoningCache.clear();
+		for (const previous of statuses.values()) {
+			const current = settings.targets.find((target) => target.id === previous.target.id);
+			if (!current || !sameProbeIdentity(previous.target, current)) {
+				for (const key of reasoningCache.keys()) {
+					if (key.startsWith(`${previous.target.id}:`)) reasoningCache.delete(key);
+				}
+			}
+		}
 		for (const target of settings.targets) {
 			const desc = registry.get(target.runtime);
 			const status = buildStatus(target, desc, null, statuses.get(target.id));
@@ -687,8 +766,8 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 			const cached = reasoningCache.get(reasoningCacheKey(targetId, modelId));
 			return cached ?? null;
 		},
-		probeReasoningForModel(targetId, modelId) {
-			return probeReasoningForModelInternal(targetId, modelId);
+		probeReasoningForModel(targetId, modelId, options) {
+			return probeReasoningForModelInternal(targetId, modelId, options);
 		},
 		auth: {
 			statusForTarget(target, runtime) {

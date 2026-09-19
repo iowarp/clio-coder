@@ -1,6 +1,6 @@
 /**
  * One capacity-aware model-residency reconciler, shared by every local runtime
- * that pins weights in VRAM. Both the interactive chat loop and the headless
+ * that manages loaded models. Both the interactive chat loop and the headless
  * worker drive the provider stream path, so calling the reconciler at the top
  * of each manageable runtime's stream gives exactly one place that decides
  * load and evict for both paths.
@@ -8,12 +8,12 @@
  * Co-residency is the default. Local servers are multi-model hosts with finite
  * VRAM, not single-model slots: when the runtime advertises capacity (the
  * llama.cpp router's `max_instances`) and a slot is free, Clio loads without
- * evicting anything; when the runtime loads just-in-time and fails an
- * oversized load cleanly (LM Studio), Clio attempts the co-resident load first
- * and swaps only after that failure; when the server schedules fits itself
+ * evicting anything; when the runtime loads just-in-time (LM Studio), Clio
+ * attempts the co-resident load first and considers swapping only after an
+ * explicit capacity rejection; when the server schedules fits itself
  * (Ollama), Clio releases only its own unprotected stragglers. Eviction is the
- * exception, taken only when a slot must be freed, and it never selects a
- * protected resident while an unprotected one is available.
+ * exception, using only Clio-attributed loads. It never selects a protected
+ * resident while an unprotected owned one is available.
  *
  * Protection is symmetric and role-aware. Residents tagged `pinned:true` or
  * `role:scout` by the server operator are never evicted. Residents referenced
@@ -24,12 +24,12 @@
  * when capacity is exhausted. No Clio profile silently evicts another profile's
  * model, and no chat switch silently unloads the memory plane.
  *
- * The reconciler is best-effort and non-blocking. A slow or unreachable
- * server, or a malformed resident listing, degrades to observe-only and never
- * crashes a turn. An explicit target `lifecycle: user-managed` forces
- * observe-only on every runtime path.
- * Every collision or stress case emits a notice over the event bus instead of
- * a thrown error. One reconcile decision holds per (target, model) within a
+ * Failed metadata reads degrade to observe-only. Explicit mutation failures
+ * propagate after rollback, and router adapters must honor a declined plan
+ * before allowing an inference request to trigger an automatic load.
+ * An explicit target `lifecycle: user-managed` forces observe-only.
+ * Collision and stress notices travel over the event bus. One successful
+ * reconcile decision holds per (target, model) within a
  * TTL, and mutations for a target are serialized across processes through a
  * state-dir lock file so a worker and the orchestrator cannot interleave
  * unload/load against the same server.
@@ -178,12 +178,11 @@ export function residentTagProtected(tags: ReadonlyArray<string> | undefined): b
 
 // Models Clio itself loaded, keyed by a stable per-server target key. The
 // registry is per-process; a resident model absent from it may still be
-// another Clio process's model, which is why eviction relies on the symmetric
-// protection above rather than on attribution alone.
+// another Clio process's model. Those loads are foreign to this session.
 const clioLoaded = new Map<string, Set<string>>();
 
 /** Record that Clio loaded `modelId` on the target identified by `targetKey`. */
-function markClioLoaded(targetKey: string, modelId: string): void {
+export function markClioLoaded(targetKey: string, modelId: string): void {
 	let set = clioLoaded.get(targetKey);
 	if (!set) {
 		set = new Set();
@@ -399,10 +398,8 @@ const reconcileCache = new Map<string, { modelId: string; decision: "reconcile" 
  * eviction is even on the table:
  *   - "router": Clio must POST an explicit load (llama.cpp router) and the
  *     server advertises a slot capacity. A free slot loads without eviction;
- *     a full server frees exactly the slots needed; unknown capacity falls
- *     back to a conservative swap of unprotected residents.
- *   - "jit": the runtime loads on open and fails an oversized load cleanly
- *     (LM Studio with gpuStrictVramCap). Nothing is evicted up front; the
+ *     a full server frees exactly the slots needed; unknown capacity with existing residents declines the load.
+ *   - "jit": the runtime loads on open. Nothing is evicted up front; the
  *     plan carries ranked `fallbackEvict` candidates for a retry after a
  *     will-not-fit failure.
  *   - "scheduler": the server places and fits models itself (Ollama). Only
@@ -485,10 +482,6 @@ function makeNotice(
 	return notice;
 }
 
-function clioLoadedFirst(entries: ReadonlyArray<ResidentClassified>): ResidentClassified[] {
-	return [...entries.filter((entry) => entry.loadedByClio), ...entries.filter((entry) => !entry.loadedByClio)];
-}
-
 /** `the memory model` / `the chat model` for a notice, or the bare id's article. */
 function describeRole(role: ResidencyRole | undefined): string {
 	if (role === "chat") return "the chat model";
@@ -508,24 +501,12 @@ function evictionNotice(facts: ResidencyFacts, entry: ResidentClassified): Recon
 			{ swappedOut: entry.modelId, configProtected: true, ...(entry.role ? { role: entry.role } : {}) },
 		);
 	}
-	if (entry.loadedByClio) {
-		return makeNotice(
-			facts,
-			"about-to-evict",
-			"info",
-			`evicting Clio-loaded model '${entry.modelId}' from '${facts.targetId}' to free a slot for '${facts.keepModelId}'.`,
-			entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
-		);
-	}
 	return makeNotice(
 		facts,
-		"swap",
-		"warning",
-		`swapping resident '${entry.modelId}' for requested '${facts.keepModelId}' on '${facts.targetId}' (Clio did not load it; recorded transition instead of a silent unload; set lifecycle: user-managed to forbid swaps).`,
-		{
-			...(entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : {}),
-			swappedOut: entry.modelId,
-		},
+		"about-to-evict",
+		"info",
+		`evicting Clio-loaded model '${entry.modelId}' from '${facts.targetId}' to free a slot for '${facts.keepModelId}'.`,
+		entry.sizeVramBytes !== undefined ? { freedVramBytes: entry.sizeVramBytes } : undefined,
 	);
 }
 
@@ -613,31 +594,38 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 		return { decision: "reconcile", evict: [], fallbackEvict: [], keepResident, notices };
 	}
 
-	// The keep model is not resident. Rank potential evictions by protection
-	// tier: unprotected residents first (Clio-attributed before foreign), then
-	// config-protected ones as a loud last resort. Tag-pinned residents are
-	// never candidates. A keep model that will itself come back tag-pinned may
-	// not displace the config tier: once resident it is never a candidate, so
-	// the configured role could not reclaim its slot.
-	const tierUnprotected = clioLoadedFirst(others.filter((entry) => entry.protection === undefined));
-	const tierConfig = clioLoadedFirst(others.filter((entry) => entry.protection === "config"));
+	// Only loads attributed to this Clio session may be eviction candidates.
+	// Configured model names describe demand, not ownership of foreign loads.
+	const owned = others.filter((entry) => entry.loadedByClio);
+	const tierUnprotected = owned.filter((entry) => entry.protection === undefined);
+	const tierConfig = owned.filter((entry) => entry.protection === "config");
 	const configEvictable = facts.keepTagProtected !== true;
 
 	let evict: ResidentClassified[] = [];
 	let fallbackEvict: ResidentClassified[] = [];
 
 	if (facts.strategy === "jit") {
-		// Attempt the co-resident load first; the runtime turns an oversized
-		// load into a clean failure, and only that failure justifies a swap.
+		// Attempt co-residency first; only an explicit capacity failure
+		// justifies swapping an owned instance. GPU fit is not guaranteed.
 		fallbackEvict = configEvictable ? [...tierUnprotected, ...tierConfig] : tierUnprotected;
 	} else if (facts.strategy === "scheduler") {
 		// The server fits and places models itself. Release only Clio's own
 		// unprotected stragglers; foreign and protected residents stay.
-		evict = tierUnprotected.filter((entry) => entry.loadedByClio);
-	} else if (facts.capacity === undefined) {
-		// Router without readable capacity: no way to prove a free slot, so
-		// fall back to swapping the unprotected residents before the load.
 		evict = tierUnprotected;
+	} else if (facts.capacity === undefined) {
+		// Without a capacity bound, a load can silently displace another model.
+		// Preserve the current serving set rather than guess how much to evict.
+		if (others.length > 0) {
+			notices.push(
+				makeNotice(
+					facts,
+					"will-not-fit",
+					"error",
+					`cannot load '${facts.keepModelId}' on '${facts.targetId}': router capacity is unknown while other models are resident. Restore capacity inspection or load the model on the server.`,
+				),
+			);
+			return { decision: "decline", evict: [], fallbackEvict: [], keepResident, notices };
+		}
 	} else {
 		const slotsNeeded = facts.resident.length + 1 - facts.capacity;
 		if (slotsNeeded > 0) {
@@ -673,7 +661,7 @@ function decideResidency(facts: ResidencyFacts): ResidencyPlan {
 						facts,
 						"will-not-fit",
 						"error",
-						`cannot load '${facts.keepModelId}' on '${facts.targetId}': all ${facts.capacity} instance slots hold pinned models (${others.map((entry) => entry.modelId).join(", ")}). Unload one manually or raise the server's max instances.`,
+						`cannot load '${facts.keepModelId}' on '${facts.targetId}': its ${facts.capacity} instance slots cannot be freed using Clio-owned, evictable models (${others.map((entry) => entry.modelId).join(", ")}). Unload one manually or raise the server's max instances.`,
 						{ residentCount: facts.resident.length, maxInstances: facts.capacity },
 					),
 				);
@@ -717,6 +705,7 @@ export interface ResidencyAdapter {
 	contextLength?: number;
 	modelMaxContext?: number;
 	listResident(): Promise<ResidentModelInfo[]>;
+	signal?: AbortSignal;
 	/**
 	 * Runtime tags of the keep model itself, when the runtime lists them before
 	 * the load (the llama.cpp router lists tags for unloaded models too). Called
@@ -787,6 +776,7 @@ async function restoreEvictedModels(
 		}
 		try {
 			await adapter.reloadEvicted(entry.modelId);
+			markClioLoaded(adapter.targetKey, entry.modelId);
 			restored.push(entry.modelId);
 			emitResidencyMutation({
 				targetKey: adapter.targetKey,
@@ -849,7 +839,12 @@ export class ResidencyPreconditionError extends Error {
  * connection error.
  */
 export async function reconcileResidency(adapter: ResidencyAdapter): Promise<ReconcileResult> {
-	const now = adapter.now ?? Date.now;
+	return reconcileResidencyState(adapter, false);
+}
+
+async function reconcileResidencyState(adapter: ResidencyAdapter, lockHeld: boolean): Promise<ReconcileResult> {
+	adapter.signal?.throwIfAborted();
+	const now = adapter.now ?? (() => performance.now());
 	const ttl = adapter.ttlMs ?? RECONCILE_TTL_MS;
 
 	const cached = reconcileCache.get(adapter.targetKey);
@@ -862,11 +857,20 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 			notices: [],
 		};
 	}
+	// Router capacity and its eviction plan must describe the server after the
+	// previous lock holder finished loading, not a snapshot from before the wait.
+	if (adapter.managed && adapter.strategy === "router" && !lockHeld) {
+		const reconcile = () => reconcileResidencyState(adapter, true);
+		return adapter.withLock
+			? adapter.withLock(adapter.targetKey, reconcile)
+			: withResidencyLock(adapter.targetKey, reconcile, adapter.signal);
+	}
 
 	let resident: ResidentModelInfo[];
 	try {
 		resident = await adapter.listResident();
 	} catch {
+		adapter.signal?.throwIfAborted();
 		// Unreachable or slow server: never block the turn, just observe.
 		return { decision: "observe", evict: [], fallbackEvict: [], keepResident: false, notices: [] };
 	}
@@ -922,13 +926,13 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 	};
 
 	const plan = decideResidency(facts);
+	adapter.signal?.throwIfAborted();
 
 	// An eviction is only justified if the load it makes room for can succeed.
 	// Unloading first and discovering afterwards that the keep model does not
 	// exist leaves the target serving nothing, which took a shared node out of
-	// service on the live fleet (#127). Nothing has mutated yet at this point,
-	// so refusing here is a clean no-op: the turn continues to the provider call
-	// and fails with the server's own error for the unknown model.
+	// service on the live fleet (#127). Nothing has mutated yet at this point;
+	// the adapter can stop the request with the loadability diagnostic.
 	if (plan.decision === "reconcile" && plan.evict.length > 0 && adapter.assertLoadable) {
 		try {
 			await adapter.assertLoadable();
@@ -953,9 +957,10 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 
 	if (plan.decision === "reconcile") {
 		const mutate = async (): Promise<void> => {
+			adapter.signal?.throwIfAborted();
 			const evicted: ResidentModelInfo[] = [];
-			for (const entry of plan.evict) {
-				try {
+			try {
+				for (const entry of plan.evict) {
 					await adapter.unload(entry.modelId);
 					forgetClioLoaded(adapter.targetKey, entry.modelId);
 					evicted.push(entry);
@@ -966,12 +971,8 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 						model: entry.modelId,
 						operation: "evict",
 					});
-				} catch {
-					// Best-effort: a failed unload self-heals on the next reconcile.
 				}
-			}
-			if (!adapter.load) return;
-			try {
+				if (!adapter.load) return;
 				await adapter.load(adapter.keepModelId);
 				if (!plan.keepResident) {
 					emitResidencyMutation({
@@ -998,15 +999,21 @@ export async function reconcileResidency(adapter: ResidencyAdapter): Promise<Rec
 		// Serialize actual mutations across processes; a keep model that is
 		// already fully resident needs no lock (the load hook is a no-op) and
 		// waiting on a still-loading model is read-only polling.
-		if (plan.evict.length > 0 || (adapter.load && !plan.keepResident)) {
-			const lock = adapter.withLock ?? withResidencyLock;
-			await lock(adapter.targetKey, mutate);
+		if (!lockHeld && (plan.evict.length > 0 || (adapter.load && !plan.keepResident))) {
+			if (adapter.withLock) await adapter.withLock(adapter.targetKey, mutate);
+			else await withResidencyLock(adapter.targetKey, mutate, adapter.signal);
 		} else {
 			await mutate();
 		}
 		// Attribute the keep model to Clio only when Clio is the one loading it.
-		if (!plan.keepResident) markClioLoaded(adapter.targetKey, adapter.keepModelId);
-		reconcileCache.set(adapter.targetKey, { modelId: adapter.keepModelId, decision: "reconcile", at: now() });
+		if (!plan.keepResident && adapter.load) markClioLoaded(adapter.targetKey, adapter.keepModelId);
+		// A scheduler/JIT plan does not load anything itself. A failed upcoming
+		// chat must not turn that plan into a cached claim that the model is resident.
+		if (plan.keepResident || adapter.load) {
+			reconcileCache.set(adapter.targetKey, { modelId: adapter.keepModelId, decision: "reconcile", at: now() });
+		} else {
+			reconcileCache.delete(adapter.targetKey);
+		}
 	} else if (plan.decision === "observe" && !adapter.managed) {
 		// Cache the opt-out observation so its notices dedupe per TTL; a
 		// degraded observe (listResident failure) is never cached, so the next

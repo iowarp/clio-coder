@@ -132,7 +132,8 @@ export interface ProbeResult {
 }
 
 export interface ReasoningProbeResult {
-	reasoning: boolean;
+	/** Only true establishes observed support; false/null are inconclusive. */
+	reasoning: boolean | null;
 	latencyMs: number;
 	error?: string;
 }
@@ -209,8 +210,8 @@ export interface RuntimeDescriptor {
 	 * Anthropic wire surface regardless of whether the loaded model supports
 	 * thinking. Implementations here send a one-shot priming request and look at
 	 * `reasoning_content` / `reasoning` / `reasoning_text` in the response.
-	 * Result is cached per (target, model) by the providers domain so
-	 * /thinking can surface the correct level set.
+	 * Only positive observations are cached per (target, model). This generates
+	 * tokens and must be explicitly requested, never part of routine discovery.
 	 */
 	probeReasoning?(target: TargetDescriptor, modelId: string, ctx: ProbeContext): Promise<ReasoningProbeResult>;
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api>;

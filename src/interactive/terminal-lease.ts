@@ -9,6 +9,7 @@
  */
 
 import type { ClioSettings } from "../core/config.js";
+import { installDiagnosticSink } from "../core/diagnostics.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import {
 	type Component,
@@ -245,6 +246,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	let closePromise: Promise<void> | null = null;
 	let inputDisposed = false;
 	let signalDisposed = false;
+	let removeDiagnosticSink = () => {};
 
 	const termination = options.testing?.termination ?? getTerminationCoordinator();
 	const signals = options.testing?.signals ?? process;
@@ -492,6 +494,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 					}
 				} finally {
 					state = "closed";
+					removeDiagnosticSink();
 				}
 				if (errors.length > 0) throw new AggregateError(errors, "terminal lease cleanup failed");
 			})();
@@ -502,6 +505,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		},
 	};
 
+	removeDiagnosticSink = installDiagnosticSink((text) => lease.writeDiagnostic("stderr", text));
 	termination.onDrain(() => lease.close({ recoverInput: state !== "adopted" }));
 	try {
 		shell.mount(host, editor);

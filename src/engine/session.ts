@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../core/diagnostics.js";
 /**
  * Clio session JSONL writer + reader.
  *
@@ -184,7 +185,7 @@ function defaultSessionJsonlWarning(warning: SessionJsonlWarning): void {
 	if (reportedSessionJsonlWarnings.has(key)) return;
 	if (reportedSessionJsonlWarnings.size >= REPORTED_SESSION_JSONL_WARNING_LIMIT) reportedSessionJsonlWarnings.clear();
 	reportedSessionJsonlWarnings.add(key);
-	process.stderr.write(`[clio-coder:session] ${warning.path}:${warning.line}: ${warning.message}\n`);
+	writeDiagnostic(`[clio-coder:session] ${warning.path}:${warning.line}: ${warning.message}\n`);
 }
 
 function serializeJsonl(entries: ReadonlyArray<unknown>): string {

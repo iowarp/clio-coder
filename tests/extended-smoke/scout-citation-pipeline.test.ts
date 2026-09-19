@@ -148,7 +148,7 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			const requests = server.requests.filter((request) => request.stream !== false);
 			const scoutRequests = requests.filter(isScout);
 			ok(scoutRequests.length > 0, result.stdout);
-			match(JSON.stringify(scoutRequests[0]?.messages), /Keep this JSON shape even when a pipeline handoff asks/u);
+			match(JSON.stringify(scoutRequests[0]?.messages), /Keep this shape even when the handoff asks/u);
 			match(JSON.stringify(scoutRequests[0]?.messages), /line_numbers: true/u);
 			const finalScoutRequest = scoutRequests.at(-1);
 			ok(finalScoutRequest);
@@ -170,14 +170,18 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 					String(feedback[1]?.content),
 					/not grounded in a live read: findiff\/interface.py:64 \(this run read only 1-63\)/u,
 				);
-				match(String(feedback[1]?.content), /path:start-end, inclusive/u);
-				match(String(feedback[1]?.content), /Never shift a rejected citation into range/u);
-				// Advisory planning leaves admitted tools available for a grounded
-				// repair. This fixture answers from its two original reads; the
-				// unchanged range assertions above still reject invented evidence.
+				match(String(feedback[1]?.content), /Observed read ranges:/u);
+				match(String(feedback[1]?.content), /Required arguments schema:/u);
+				// Terminal helper repair preserves the work-tool lock. Existing read
+				// evidence survives, but the only remaining tool is the handoff.
 				for (const request of scoutRequests.filter((entry) => repairs(entry).length > 0)) {
-					ok(Array.isArray(request.tools) && request.tools.some((tool) => tool.function?.name === "read"));
-					match(String(repairs(request).at(-1)?.content), /may use the admitted tools to repair/u);
+					ok(Array.isArray(request.tools));
+					deepStrictEqual(
+						request.tools.map((tool) => tool.function?.name),
+						["clio_submit_result"],
+					);
+					strictEqual(request.tool_choice, "required");
+					match(String(repairs(request).at(-1)?.content), /Work tools remain disabled/u);
 				}
 			}
 			const journal = readRunJournal(join(scratch.dir, "state"));

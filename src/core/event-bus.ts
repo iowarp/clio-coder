@@ -1,4 +1,5 @@
 import type { BusChannel, BusPayloadMap } from "./bus-events.js";
+import { writeDiagnostic } from "./diagnostics.js";
 
 /**
  * Listener invoked by {@link SafeEventBus.emit}.
@@ -40,7 +41,7 @@ type StoredListener = (payload: never) => void | Promise<void>;
 
 function reportListenerError(channel: string, error: unknown): void {
 	const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-	console.error(`[clio-coder:event-bus] Listener crashed on ${channel}: ${message}`);
+	writeDiagnostic(`[clio-coder:event-bus] Listener crashed on ${channel}: ${message}`, "error");
 }
 
 export function createSafeEventBus(): SafeEventBus {

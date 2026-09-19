@@ -2,11 +2,9 @@
  * LM Studio-specific residency arithmetic, kept pure so the fit and duplicate
  * rules are testable without a server connection.
  *
- * LM Studio's `/api/v1/models` response exposes no total or free GPU memory,
- * and a GPU offload cap does not prove that a load fits
- * rather than failing an oversized load, so a request that does not fit is
- * served from CPU at a fraction of the speed instead of erroring. Fit therefore
- * cannot be computed from memory arithmetic; it is bounded by evidence.
+ * LM Studio's `/api/v1/models` response exposes no total or free GPU memory.
+ * A successful load can still offload work to CPU, so fit cannot be inferred
+ * from load success alone; the context ceiling is an empirical safeguard.
  *
  * The evidence rule: while another model is resident on the same server, an
  * explicit load is capped at {@link CO_RESIDENT_CONTEXT_CEILING} tokens.

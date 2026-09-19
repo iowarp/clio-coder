@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Observability domain wire-up. Listens to dispatch + safety bus channels and
  * folds payloads into telemetry/cost trackers. Other domains read the snapshot
@@ -103,7 +104,7 @@ async function buildAndIndexEvidence(
 		});
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
-		process.stderr.write(`[clio-coder:evidence] auto-build failed for run ${runId}: ${message}\n`);
+		writeDiagnostic(`[clio-coder:evidence] auto-build failed for run ${runId}: ${message}\n`);
 		hooks.onFailed(runId, message);
 	}
 }

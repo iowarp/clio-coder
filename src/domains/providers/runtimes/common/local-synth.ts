@@ -65,7 +65,7 @@ function localOpenAICompat(caps: CapabilityFlags, runtimeId: string): OpenAIComp
 		supportsUsageInStreaming: true,
 		supportsFinishReason: false,
 		maxTokensField: "max_tokens",
-		supportsThinkingTokenBudget: runtimeId === "vllm",
+		...(runtimeId === "vllm" ? { thinkingTokenBudgetField: "thinking_token_budget" as const } : {}),
 		supportsStrictMode: false,
 		// Native and generic gateway schemas do not establish hosted 24h retention.
 		supportsLongCacheRetention: false,

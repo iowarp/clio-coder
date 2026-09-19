@@ -185,8 +185,11 @@ export function createDegradedInferenceStream(options: WatchDegradedInferenceOpt
 	const push = stream.push.bind(stream);
 	const end = stream.end.bind(stream);
 	let watchdog: DegradedInferenceWatchdog | null = null;
+	let stopped = false;
+	let generated = 0;
 	const aborted = (): boolean => options.signal?.aborted === true;
 	const stop = (): void => {
+		stopped = true;
 		options.signal?.removeEventListener("abort", stop);
 		if (watchdog === null) return;
 		watchdog.stop();
@@ -195,7 +198,7 @@ export function createDegradedInferenceStream(options: WatchDegradedInferenceOpt
 	options.signal?.addEventListener("abort", stop, { once: true });
 	const onDegraded = (report: DegradedInferenceReport): void => {
 		void residentSummary(options).then((residents) => {
-			if (aborted()) return;
+			if (stopped || aborted()) return;
 			const seconds = Math.round(report.elapsedMs / 1000);
 			const rate = report.tokensPerSecond.toFixed(2);
 			const residentLine =
@@ -219,12 +222,16 @@ export function createDegradedInferenceStream(options: WatchDegradedInferenceOpt
 		});
 	};
 	stream.push = (event: AssistantMessageEvent): void => {
-		if (event.type === "start" && watchdog === null && !aborted()) {
+		if (event.type === "start" && watchdog === null && !stopped && !aborted()) {
 			watchdog = startDegradedInferenceWatchdog({ ...options.timing, onDegraded });
 			runningWatchdogs.add(watchdog);
 		}
 		const chars = generatedChars(event);
-		if (chars > 0) watchdog?.addTokens(ceilChars(chars));
+		if (chars > 0) {
+			const before = ceilChars(generated);
+			generated += chars;
+			watchdog?.addTokens(ceilChars(generated) - before);
+		}
 		if (event.type === "done" || event.type === "error") stop();
 		push(event);
 	};

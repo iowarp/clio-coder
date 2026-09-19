@@ -74,17 +74,19 @@ function matchesPrefix(path: string, fields: Set<string>): boolean {
 	return false;
 }
 
+/** Shared effect timing for settings editors and the runtime reload path. */
+export function settingsChangeKind(path: string): ChangeKind {
+	if (matchesPrefix(path, HOT_RELOAD_FIELDS)) return "hotReload";
+	if (matchesPrefix(path, RESTART_REQUIRED_FIELDS)) return "restartRequired";
+	if (matchesPrefix(path, NEXT_TURN_FIELDS)) return "nextTurn";
+	return "restartRequired";
+}
+
 export function diffSettings(prev: ClioSettings, next: ClioSettings): ConfigDiff {
 	const changed = collectChangedPaths(prev, next);
 	const diff: ConfigDiff = { hotReload: [], nextTurn: [], restartRequired: [] };
 	for (const p of changed) {
-		if (matchesPrefix(p, HOT_RELOAD_FIELDS)) diff.hotReload.push(p);
-		else if (matchesPrefix(p, RESTART_REQUIRED_FIELDS)) diff.restartRequired.push(p);
-		else if (matchesPrefix(p, NEXT_TURN_FIELDS)) diff.nextTurn.push(p);
-		else {
-			// Unknown field falls back to restartRequired to fail closed.
-			diff.restartRequired.push(p);
-		}
+		diff[settingsChangeKind(p)].push(p);
 	}
 	return diff;
 }

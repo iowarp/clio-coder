@@ -103,14 +103,14 @@ describe("fleet.concurrency auto resolution", () => {
 		strictEqual(sampler.resolve("auto").limit, 6);
 		strictEqual(samples, 1, "a resolve inside the interval reuses the sample");
 		clock = 5000;
-		strictEqual(sampler.resolve("auto").limit, 6, "the idle baseline holds while workers run");
-		strictEqual(samples, 1);
+		strictEqual(sampler.resolve("auto").limit, 6, "worker memory add-back preserves the limit after resampling");
+		strictEqual(samples, 2, "busy hosts are resampled with the matching worker add-back");
 		// Once idle again the host is resampled.
 		active = 0;
 		facts = host({ availableMemoryBytes: 4 * GiB });
 		clock = 10_000;
 		strictEqual(sampler.resolve("auto").limit, 2);
-		strictEqual(samples, 2);
+		strictEqual(samples, 3);
 	});
 
 	it("adds back running workers when the first sample is taken busy", () => {

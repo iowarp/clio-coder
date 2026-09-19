@@ -1,5 +1,6 @@
 import { BusChannels, type ConfigChangePayload } from "../../core/bus-events.js";
 import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
 import { readStrictLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
@@ -45,7 +46,10 @@ export function createConfigBundle(
 			try {
 				listener(payload);
 			} catch (err) {
-				console.error(`[clio-coder:config] listener for ${kind} threw:`, err);
+				writeDiagnostic(
+					`[clio-coder:config] listener for ${kind} threw: ${err instanceof Error ? err.message : String(err)}`,
+					"error",
+				);
 			}
 		}
 	}

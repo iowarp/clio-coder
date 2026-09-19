@@ -441,7 +441,7 @@ export function formatNotificationBadge(
 	const glyph = notificationGlyph(level);
 	const count = entries.length;
 	const noun = count === 1 ? "notice" : "notices";
-	const lead = entries[0]?.text ?? "";
+	const lead = (entries[0]?.text ?? "").replace(/\s+/gu, " ").trim();
 	const dismiss = options.dismissKeyLabel ?? "/notifications dismiss";
 	const compactHead = theme.fg(token, `${glyph} ${count}`);
 	const head = theme.fg(token, `${glyph} ${count} ${noun}`);

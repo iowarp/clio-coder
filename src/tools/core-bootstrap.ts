@@ -1,4 +1,5 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
+import type { ClioSettings } from "../core/config.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
@@ -39,6 +40,7 @@ import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js"
 import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
+	getSettings?: () => Readonly<ClioSettings>;
 	workerRecall?: WorkerRecall;
 	session?: SessionContract;
 	/** Full ledger of the current session; context(scope=recall) folds it. Absent in worker registries. */
@@ -162,6 +164,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	const skillToolDeps = {
+		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),

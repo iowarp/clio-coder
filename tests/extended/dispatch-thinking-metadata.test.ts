@@ -120,6 +120,7 @@ test("cold worker freezes discovered gateway controls before the actual engine r
 		// The controlled spawn seam captures production admission's exact input;
 		// run the real worker engine against the HTTP fixture without a recipe report.
 		delete input.resultContract;
+		delete input.helperResult;
 		const result = await startWorkerRun(input, () => {}).promise;
 		strictEqual(result.exitCode, 0);
 		ok(f.fixture.requests.length > 0, "the worker must actually request a completion");

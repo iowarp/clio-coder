@@ -46,6 +46,9 @@ interface LmStudioHostCatalog {
 	targetId: string;
 	rootUrl: string;
 	models: LmStudioModelInfo[];
+	catalog: LmStudioCatalog;
+	requestHeaders: string;
+	at: number;
 }
 
 const catalogsByHost = new Map<string, LmStudioHostCatalog>();
@@ -82,10 +85,10 @@ function lmStudioRequestHeaders(
 	base: Readonly<Record<string, string>> | undefined,
 	apiKey: string | undefined,
 ): Record<string, string> {
-	const headers: Record<string, string> = { ...(base ?? {}) };
+	const headers = new Headers(base);
 	const token = apiKey?.trim();
-	if (token) headers.authorization = `Bearer ${token}`;
-	return headers;
+	if (token && !headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
+	return Object.fromEntries(headers);
 }
 
 function lmStudioProbeHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> {
@@ -124,6 +127,7 @@ export async function requestLmStudioJson(
 		try {
 			data = await response.json();
 		} catch {
+			bounded.signal.throwIfAborted();
 			data = undefined;
 		}
 		const result: LmStudioJsonResponse = {
@@ -133,11 +137,14 @@ export async function requestLmStudioJson(
 		};
 		if (data !== undefined) result.data = data;
 		if (!response.ok) {
-			const message = isRecord(data) ? nonEmptyString(data.error) : undefined;
-			result.error = message ?? `HTTP ${response.status}`;
+			const detail = isRecord(data) ? (data.error ?? data) : undefined;
+			const message = nonEmptyString(detail) ?? (isRecord(detail) ? nonEmptyString(detail.message) : undefined);
+			const code = isRecord(detail) ? nonEmptyString(detail.code) : undefined;
+			result.error = [code, message].filter(Boolean).join(": ") || `HTTP ${response.status}`;
 		}
 		return result;
 	} catch (error) {
+		signal?.throwIfAborted();
 		return {
 			ok: false,
 			status: 0,
@@ -226,10 +233,8 @@ export function foldLmStudioModels(models: ReadonlyArray<LmStudioModelInfo>): Lm
 	return [...byKey.values()];
 }
 
-function rememberHostCatalog(target: TargetDescriptor, models: ReadonlyArray<LmStudioModelInfo>): void {
-	const rootUrl = lmStudioRootUrl(target.url ?? "");
-	if (!rootUrl) return;
-	catalogsByHost.set(rootUrl, { targetId: target.id, rootUrl, models: foldLmStudioModels(models) });
+export function invalidateLmStudioCatalog(target: TargetDescriptor): void {
+	catalogsByHost.delete(lmStudioRootUrl(target.url ?? ""));
 }
 
 function peerTargetsFor(target: TargetDescriptor, instanceId: string): string[] {
@@ -362,43 +367,54 @@ function authFailure(result: LmStudioJsonResponse): LmStudioCatalog | null {
 	};
 }
 
-export async function listLmStudioModels(target: TargetDescriptor, ctx: ProbeContext): Promise<LmStudioCatalog> {
+export async function listLmStudioModels(
+	target: TargetDescriptor,
+	ctx: ProbeContext,
+	maxAgeMs = 0,
+): Promise<LmStudioCatalog> {
+	ctx.signal?.throwIfAborted();
 	if (!target.url) return { ok: false, models: [], error: "target has no url" };
 	const root = lmStudioRootUrl(target.url);
 	const headers = lmStudioProbeHeaders(target, ctx);
-	const init: RequestInit = { headers };
-	const v1 = await requestLmStudioJson(`${root}/api/v1/models`, init, ctx.httpTimeoutMs, ctx.signal);
-	const v1Auth = authFailure(v1);
-	if (v1Auth) return v1Auth;
-	const parsedV1 = parseLmStudioV1Models(v1.data);
-	if (v1.ok && parsedV1) {
-		rememberHostCatalog(target, parsedV1);
-		return { ok: true, models: parsedV1, tier: "0.4+", latencyMs: v1.latencyMs };
+	const requestHeaders = JSON.stringify(headers);
+	const cached = catalogsByHost.get(root);
+	if (cached && cached.requestHeaders === requestHeaders && performance.now() - cached.at < maxAgeMs) {
+		return cached.catalog;
 	}
-
-	const v0 = await requestLmStudioJson(`${root}/api/v0/models`, init, ctx.httpTimeoutMs, ctx.signal);
-	const v0Auth = authFailure(v0);
-	if (v0Auth) return v0Auth;
-	const parsedV0 = v0Models(v0.data);
-	if (v0.ok && parsedV0) {
-		rememberHostCatalog(target, parsedV0);
-		return { ok: true, models: parsedV0, tier: "0.3.x", latencyMs: v0.latencyMs };
+	const endpoints: Array<[string, LmStudioApiTier, (data: unknown) => LmStudioModelInfo[] | null]> = [
+		["/api/v1/models", "0.4+", parseLmStudioV1Models],
+		["/api/v0/models", "0.3.x", v0Models],
+		["/v1/models", "openai-compat", openAIModels],
+	];
+	let latencyMs = 0;
+	let error = "LM Studio returned no recognized model catalog";
+	for (const [path, tier, parse] of endpoints) {
+		const response = await requestLmStudioJson(`${root}${path}`, { headers }, ctx.httpTimeoutMs, ctx.signal);
+		latencyMs += response.latencyMs;
+		const auth = authFailure(response);
+		if (auth) {
+			invalidateLmStudioCatalog(target);
+			return auth;
+		}
+		const models = response.ok ? parse(response.data) : null;
+		if (models) {
+			const catalog = { ok: true, models: foldLmStudioModels(models), tier, latencyMs };
+			catalogsByHost.set(root, {
+				targetId: target.id,
+				rootUrl: root,
+				models: catalog.models,
+				catalog,
+				requestHeaders,
+				at: performance.now(),
+			});
+			return catalog;
+		}
+		error = response.error ?? error;
+		// Try older API versions only when this endpoint is unavailable, not on a server outage.
+		if (response.status !== 404 && response.status !== 405) break;
 	}
-
-	const openAI = await requestLmStudioJson(`${root}/v1/models`, init, ctx.httpTimeoutMs, ctx.signal);
-	const openAIAuth = authFailure(openAI);
-	if (openAIAuth) return openAIAuth;
-	const parsedOpenAI = openAIModels(openAI.data);
-	if (openAI.ok && parsedOpenAI) {
-		rememberHostCatalog(target, parsedOpenAI);
-		return { ok: true, models: parsedOpenAI, tier: "openai-compat", latencyMs: openAI.latencyMs };
-	}
-	return {
-		ok: false,
-		models: [],
-		latencyMs: v1.latencyMs + v0.latencyMs + openAI.latencyMs,
-		error: v1.error ?? v0.error ?? openAI.error ?? "LM Studio returned no recognized model catalog",
-	};
+	invalidateLmStudioCatalog(target);
+	return { ok: false, models: [], latencyMs, error };
 }
 
 export async function greetLmStudio(

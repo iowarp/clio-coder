@@ -71,7 +71,7 @@ Quick Connect detects LM Studio, Ollama, and LiteLLM where their discovery APIs
 are available; other servers use the OpenAI- or Anthropic-compatible protocol.
 It checks live model discovery, without sending a generation request. An
 unreachable endpoint or empty model list stays in setup with a useful error.
-Use **Settings → Targets & Auth → Add a target** for browser sign-in,
+Use **Settings → Connections → Add a target** for browser sign-in,
 subscriptions, AWS credentials, explicit runtime selection, or a server that
 needs a manually entered model id.
 
@@ -118,21 +118,44 @@ the changed default is worker concurrency `auto`; an explicit
 Choose **Settings**, or run `clio-coder configure --settings`, to open the full
 configuration menu:
 
-- **Targets & Auth**: add, edit, rename, or remove a target; choose chat, fleet,
-  and background-memory defaults. Add and Edit share the full target wizard.
-  Adding a target preserves existing defaults. Editing preserves its other
-  capabilities, gateway settings, and role-specific model overrides. Rename
-  updates the target name and its references together.
-- **Models & Thinking**, **Chat Defaults**, **Fleet**, **Permissions & Autonomy**,
-  **Panes & Layout**, and **Skills & Extensions** cover common settings.
-- **Diagnostics** shows paths, runs the read-only doctor, and displays saved YAML.
-- **All Settings** opens a validated editor for every settings key, including
-  fleet profiles, routing, memory, compaction, plugins, hooks, and keybindings.
+The configure menu and TUI `/settings` use the same sections, in the same order:
 
-Escape returns to the parent menu, which remembers the selected row. Each
-accepted setting is saved immediately; leaving another field does not undo
-previously accepted settings. Clear a model override or list by deleting its
-prefilled text before accepting it. The full target wizard instead saves at
+| Section | What belongs here | Direct link |
+| --- | --- | --- |
+| **Connections** | Providers, endpoints, credentials, and available models | `targets` |
+| **Chat** | Chat model, thinking, favorites, output tokens, and retries | `chat` |
+| **Fleet** | Worker models, profiles, routing, concurrency, retries, and run limits | `fleet` |
+| **Context & Memory** | Compaction, working set, context limits, and proactive memory | `context` |
+| **Permissions & Limits** | Autonomy, worker approvals, external-agent governance, spending, and safety review | `safety` |
+| **Appearance** | Display mode, streaming, notifications, panes, and keyboard shortcuts | `interface` |
+| **Integrations** | Project skills, external agents, plugins, library, and Git attribution | `integrations` |
+| **Advanced** | Diagnostics, configuration files, and the full settings editor | `advanced` |
+
+Use `clio-coder configure --section <name>` or `/settings <name>` to open an
+area directly. Previous names such as `models`, `permissions`, `panes`, and
+`skills` remain aliases for their new homes. `/settings` groups related controls
+within each section; `/` filters by label, description, or settings path.
+
+Connections manages the provider inventory. Chat, Fleet, and Context & Memory
+choose which connection and model their work uses. Adding a connection preserves
+existing defaults. Editing preserves its other capabilities, gateway settings,
+and role-specific model overrides. Rename updates references together.
+
+Configure puts common actions first. **All controls in this section** opens the
+complete shared catalog, grouped by purpose and searchable by name or settings
+path. Each control explains its meaning, current value, shipped default, and
+when changes take effect. Both interfaces validate edits against the existing
+settings schema. Collections such as keybinding overrides, remote nodes, and
+rosters accept JSON; Connections and Fleet also retain their guided actions.
+Library remote confirmation remains owned by the library's trust flow.
+Advanced opens the validated full-file editor and diagnostics; the TUI links to
+those commands. The launcher retains a Diagnostics shortcut, and
+`configure --section diagnostics` still opens that screen directly.
+
+Escape returns to the parent menu, which remembers the selected row. Common
+actions save when accepted; the complete catalog asks you to review and save
+each edit. Leaving another field does not undo previously saved settings. Clear
+a model override or list by deleting its prefilled text before accepting it. The full target wizard instead saves at
 **Save target** after review. Pasted keys wait for Save; browser sign-in stores
 credentials when sign-in succeeds. Optional delegation review follows Save.
 
@@ -140,7 +163,7 @@ Open a section directly, or open the full editor:
 
 ```bash
 clio-coder configure --section targets
-clio-coder configure --section models
+clio-coder configure --section chat
 clio-coder configure --edit
 ```
 
@@ -151,7 +174,28 @@ never replace the saved file. A save keeps the previous file at
 `settings.yaml.bak` and refuses to overwrite concurrent changes. `--edit` also
 works when malformed settings prevent the regular menu from loading.
 
-These commands edit user settings. Approved project settings and session
+Configure saves user defaults globally. The TUI offers session-only or global
+saves for live controls and identifies changes that require a restart.
+
+Clio can explain these settings herself: ask “What can you do without asking?”
+or “What are my worker limits?” Her `context(scope="settings")` tool reads the
+running session's effective configuration, including overrides, and returns
+specific `/settings` and configure commands. It reports configured ceilings,
+not remaining spending or call counts. It omits credentials, endpoint URLs,
+external-agent commands, and arbitrary free-form values. This tool is read-only;
+Clio guides you through changes and does not raise permissions or budgets to
+work around a denial. Workers without an authoritative settings snapshot say
+so instead of assuming the parent's settings.
+
+The shipped `auto-edit` level allows workspace edits, recognized checks, and
+routine delegation. Unfamiliar commands, reads outside the permitted workspace
+roots, declared outward actions, and larger dispatch plans need approval.
+Worker mode `deny` only denies calls that need approval; permitted worker work
+continues. Choose `escalate` when you want supported worker runtimes to ask you,
+with a timeout and explicit fallback. `full-auto` skips autonomy approvals but
+still passes through the safety policy. No level disables hard safety blocks.
+
+Approved project settings and session
 choices can override them; use `clio-coder config inspect` to see the active
 sources. Without a terminal, `--section` prints its values and exits; `--json`
 and `--list` inspect settings and runtimes without initializing an installation.
@@ -334,8 +378,13 @@ Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reas
 
 ### LiteLLM gateways
 
-Register LiteLLM with its first-class runtime so discovery reads
-`/v1/model/info` rather than treating routed names as bare OpenAI models. For a
+Register LiteLLM with its first-class runtime. The authenticated `/v1/models`
+listing controls selectable aliases. `/v1/model/info` (with `/model/info` fallback)
+enriches matching aliases with capability and deployment metadata. An explicitly
+empty inference listing stays empty; admin metadata cannot broaden it. If the
+inference listing is unavailable, detail rows are unverified hints, not a healthy
+catalog. A restricted `/health/liveliness` endpoint does not invalidate a successful
+authenticated listing. For a
 gateway where placement matters, publish one deterministic `node/model` name
 per deployment instead of task categories such as `chat` or `code`:
 
@@ -382,11 +431,49 @@ Clio does not invent it; that includes structured-output support.
 
 Upstream `model_info.runtime` declarations may identify the thinking-control dialect of a routed model. Clio accepts only recognized declarations shared by every deployment of that alias; unknown or mixed declarations remain unguessed. A resolved LM Studio dialect uses its explicit off effort, while llama.cpp uses template controls. This metadata does not turn the target into a native management endpoint: LiteLLM continues to own authentication, routing, loading and eviction. Thinking off is a request to the selected runtime/model, not evidence that the server complied or that every route has been live-validated.
 
+### Current user and machine awareness
+
+At session startup Clio includes the local OS account, machine hostname, and
+workspace in the model’s prompt context. This lets it answer where it is running
+without invoking `whoami` or a shell. The account name is not a verified personal
+identity, and the machine is the Clio host, not the inference server. No new
+configure question, stored profile, or settings migration is required.
+
+### Local inference and server management
+
+Clio connects to running inference servers. The server remains responsible for
+model downloads, runtime/driver installation, GPU placement, KV allocation, MTP,
+and scheduling. Clio’s target configuration selects a protocol and model, applies
+supported request controls, and uses available metadata for planning and admission.
+It does not guarantee that a model fits in VRAM or that a requested knob took effect.
+
+| Runtime | Chat transport | Additional controls and limits |
+| --- | --- | --- |
+| `ollama` | Native HTTP `/api/chat` | Native thinking, sampling, `num_ctx`, and owned-load keep-alive; `/api/ps` reports residency. |
+| `lmstudio` | Shared OpenAI-compatible chat | REST catalog and optional explicit load settings; loaded-instance resolution. Use `reasoning_effort` for thinking control. |
+| `llamacpp` | Shared OpenAI-compatible chat | Router residency, context/slot metadata and `cache_prompt`; server flags determine KV layout, MTP and parallelism. |
+| `lemonade` | Shared OpenAI-compatible chat | Advertised model labels distinguish chat, tools, reasoning, vision, embedding and reranking support. Configure the backend and model loading in Lemonade. |
+| `litellm` | Shared OpenAI-compatible chat | Gateway aliases and capability metadata; upstream loading and eviction remain the gateway/server’s responsibility. |
+
+The hidden `lemonade-anthropic` runtime exposes Lemonade’s Anthropic-compatible
+surface when that protocol is needed. Generic runtime defaults do not establish
+capabilities for every model in a server’s catalog. Use a live tool/reasoning check
+when those abilities matter to a workflow.
+
+`lifecycle: user-managed` disables Clio’s explicit load/unload management. A chat
+request may still trigger the server’s own automatic load policy. LM Studio REST
+load options cover only the supported fields in the target schema; they do not
+promise SDK-only GPU guardrails or KV quantization controls. If explicit loading
+is required, unavailable management metadata is an error; otherwise Clio can
+attempt inference despite a temporary metadata outage. Capacity-specific load
+failures may trigger eviction of Clio-owned instances and bounded restoration on
+failure. Authentication or invalid-option errors do not authorize eviction.
+
 ### `maxConcurrentRequests`
 
 `maxConcurrentRequests` is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator's override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.
 
-Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then a persisted discovery result that is still fresh and matches the runtime; then one slot for any other `local-native` runtime; then no invented endpoint bound for a cloud runtime, LiteLLM, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama reads `OLLAMA_NUM_PARALLEL` from the environment the Clio process can see and otherwise reports one.
+Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then a persisted discovery result that is still fresh and matches the runtime; then one slot for any other `local-native` runtime; then no invented endpoint bound for a cloud runtime, LiteLLM, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama exposes no native API slot count, so Clio conservatively reports one. Set `maxConcurrentRequests` explicitly when the daemon supports more; the client process’s `OLLAMA_NUM_PARALLEL` does not describe the server.
 
 The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md) for the admission model and the exact denial text.
 
@@ -426,7 +513,7 @@ Ollama reloads a model whenever a request asks for a `num_ctx` different from th
 
 ### Ollama residency and release on exit
 
-Every chat request on an `ollama` target sends `keep_alive: -1`, so the model stays loaded for the whole session instead of expiring between turns. Ollama places and fits models itself, so Clio never unloads a model it did not load: models the operator or another client loaded, and models that were already resident when Clio first used them, stay loaded. When an interactive session switches models, Clio releases the model it loaded earlier before the next turn.
+Requests for managed Ollama loads that Clio can own and release send `keep_alive: -1` to keep them warm between turns. Pre-existing, user-managed, and otherwise unowned models retain the server’s normal keep-alive policy; a failed preflight does not grant pinning authority. Ollama places and fits models itself, so Clio never unloads a model it did not load: models the operator or another client loaded, and models that were already resident when Clio first used them, stay loaded. When an interactive session switches models, Clio releases the model it loaded earlier before the next turn.
 
 When the process exits, Clio sends `keep_alive: 0` for each model this process loaded and pinned, so a finished `clio-coder run` does not hold its weights after it ends. A model counts as loaded by Clio when it was absent from `/api/ps` before Clio's first request for it and that request then answered. The release runs on every coordinated exit: a headless run that completes or fails, `run --timeout` (exit 124), SIGINT, SIGTERM, interactive quit, and a `clio-coder acp` session whose client closes the connection. It is bounded at two seconds, and a server that is unreachable or slow leaves the model loaded without changing the exit code. A target with `lifecycle: user-managed` is observe-only, so nothing is released there.
 
@@ -1092,7 +1179,7 @@ Useful flags:
 ## Target management
 
 ```bash
-clio-coder targets [--json] [--probe [--tools [--tools-timeout <seconds>]]] [--target <id>]
+clio-coder targets [--json] [--probe [--reasoning] [--tools [--tools-timeout <seconds>]]] [--target <id>]
 clio-coder targets add [configure flags]
 clio-coder targets use <id> [--model <id>] [--orchestrator-model <id>] [--background-model <id>]
                       [--fleet-target <id>] [--fleet-model <id>]
@@ -1112,9 +1199,12 @@ clio-coder targets rename <old> <new>
 
 The `clio-coder targets` listing shows no breaker column, because the dispatch breaker lives in the memory of the session that dispatches and the listing process never dispatches. Inside a session, each `/settings` targets row shows its routes' breaker state: an open route takes over the health cell with its remaining cooldown (`○ open 42s`), a route whose probe is in flight shows `◐ probing`, and the row's detail line lists one phrase per route, such as `qwen open 42s after target-transient` or `coder 1 failure (target-overloaded)` for a closed route that has failed below the threshold.
 
-`clio-coder targets --probe` checks reachability, lists models, and runs the
-reasoning probe. It does not verify tool calls: the `tools` capability it shows
-is a runtime default or server metadata. Add `--tools` to check it live.
+`clio-coder targets --probe` checks reachability and model metadata without
+requesting generation. Add `--reasoning` for a generating reasoning check, or
+`--tools` for a generating tool-call check. These checks can load models and
+consume resources. Declared capabilities alone are not live verification;
+reasoning generation that produces no reasoning, errors, or times out is
+inconclusive.
 `clio-coder targets --probe --tools` sends one small request with a single
 typed tool through the same engine stream path a chat turn uses, against the
 chat model when the target is the chat target and the target's default model
@@ -1167,6 +1257,13 @@ Target status resolution tracks provenance explicitly in `TargetStatus.contextWi
 - `runtime-default`: Unanswered placeholder fall-back provided by the runtime descriptor.
 
 When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio-coder targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio-coder configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
+
+`capabilities.contextWindow` declares an existing serving limit; it does not
+resize the server or override a smaller observed limit. One-run context limits
+likewise cap Clio’s planning budget, not the server’s allocation. Slot count does
+not establish independent context capacity: a server may share one KV pool across
+several concurrent requests. Confirm allocation semantics in the server before
+multiplying a context figure by its slot count.
 
 A runtime that reports the window a resident model is loaded at (LM Studio, and Ollama through `/api/ps`) bounds the session by that serving window, because a model open at 32,768 tokens rejects a longer prompt whatever its weights allow. The text output then names both numbers, as in `ctx 32768 (serving; model max 262144)`, so the operator can see which one a run is planned against. In JSON output the serving window is `discoveredModelStates.<model>.contextLength` and the maximum is `capabilities.contextWindow`.
 

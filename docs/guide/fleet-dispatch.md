@@ -173,10 +173,10 @@ The 1 GiB per-worker estimate is about four times the observed worker process
 (160 to 270 MB RSS), because workers run compilers, type checkers, and test
 suites. Under `auto` the global pool is the cap, so a small orchestrator host
 never shrinks work placed on SSH nodes. Host facts are sampled at most every 30
-seconds. A sample taken while no local worker runs is kept while workers run,
-and a sample taken while they run adds back 1 GiB per running worker, so Clio's
-own workers never lower the limit that admitted them. Inference remains bounded
-separately by per-endpoint slot limits.
+seconds. Each sample records the host facts and active local worker count together.
+The sampler adds back the estimated memory of those workers, avoiding a capacity
+reduction caused solely by Clio's own workers while still observing changes in
+host pressure. Calls inside the sampling interval reuse that same paired sample.
 
 When a host input binds the limit, the `/settings` fleet row for `local` shows
 it after the busy count (`1/2 busy · memory-bound at 2`), and the footer worker
@@ -1094,8 +1094,14 @@ Documenter and Coder use a structured report (`mutation-report`). Explicit recip
 
 Documenter exposes no arbitrary shell commands; it relies on declared verifier checks or grounded source reads. In validation reporting, unexecuted checks must never be recorded as failures (`passed: false` applies only to checks that actually ran and failed). Unexecuted checks or execution limitations belong in the `summary` deliverable as stated limitations.
 
+Eligible native HTTP shadow/internal workers with tool support finish through the worker-local `clio_submit_result` tool. Its arguments are the existing contract payload, not a second model-authored envelope. The host validates the payload and grounding, seals `output.structured = {version: 1, kind, data}`, and retains canonical JSON in `output.text` for older consumers. A valid handoff ends generation without another narration round. During synthesis or repair only the terminal handoff remains available; mixed work/handoff batches are rejected and repairs remain bounded. Strict JSON text fallback is validated through the same contract. Other transports retain their existing output path, and Wiki Writer retains its scoped artifact workflow.
+
+Dispatch and `monitor(mode="collect")` expose successful sealed payloads in `details.runs[].helperResult`, with compact text and a receipt lookup. Failed integrity, failed runs, partial/truncated output, or failed contract conformance do not become consumable typed results. `quality=unmeasured` remains unmeasured. Typed data never grants write authority or authorizes Scout split continuation by itself.
+
+For an independent helper task, use `detach:true` and continue useful work; collect the batch when its result is needed. This uses the existing durable detached-run mechanism. The TUI announces helper start and settlement in its notice area even for internal invocations without a transcript island.
+
 The Scout recipe instructs the model to return structured findings with source paths and exact lines checked against live reads. A search hit alone does not establish a citation. On repair, unsupported findings should be removed rather than moved to convenient range endpoints. Inline delivery and schema conformance do not establish semantic citation accuracy.
 
-Ordinary dispatcher, council, and wiki planning time and tool estimates are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, and capacity rules. The fleet tool-call cap limits tool use. The `fleet.limits.internalRunTimeoutMs` setting bounds internal CLI dispatch; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
+Ordinary dispatcher, council, and wiki planning time and tool estimates are advisory during execution rather than automatic aborts. Enforced bounds are explicit caller deadlines (`timeout_ms`), operator cancellation, contract output bounds, and capacity rules. In ordinary advisory dispatch, `fleet.limits.toolCallsPerRun` is a recorded baseline, not an enforced cutoff, despite the legacy `hardCap` field name. Repetition guards still apply; legacy enforced budget envelopes retain their tool-call cap. The `fleet.limits.internalRunTimeoutMs` setting bounds internal CLI dispatch; it does not impose a wall-clock deadline on ordinary TUI dispatch workers.
 
 A pipeline stops before admitting a dependent when a completed step reports failed quality. Execution success, result conformance, and deliverable quality remain separate facts. An independent recovery has its own receipt and does not replace the failed pipeline result. When delivery is missing or incomplete, report the terminal result and limitation; a successful process exit alone does not establish the requested deliverable.

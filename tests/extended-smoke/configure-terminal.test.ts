@@ -345,7 +345,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			await tty.expect("Chat default model cleared");
 			await tty.expect("esc back");
 			tty.send(BACK);
-			await tty.expect("❯ Models & Thinking");
+			await tty.expect("❯ Chat");
 			tty.send(DOWN.repeat(3) + ENTER);
 			await tty.expect("Worker permission mode");
 			tty.send(ENTER);
@@ -357,6 +357,45 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			strictEqual(saved.chat.thinkingLevel, "high");
 			strictEqual(saved.chat.model, null);
 			strictEqual(saved.safety.autonomy, "full-auto");
+		} finally {
+			tty.close();
+			home.cleanup();
+		}
+	});
+
+	it("edits an uncommon control with help, rejects invalid input, and saves a custom value", async () => {
+		const home = makeScratchHome("clio-coder-controls-tty-");
+		const file = seed(home, "http://127.0.0.1:1");
+		const original = readFileSync(file, "utf8");
+		const tty = terminal(home, ["--section", "chat"]);
+		try {
+			await tty.expect("All controls in this section");
+			tty.send(DOWN.repeat(7) + ENTER);
+			await tty.expect("Settings group");
+			tty.send(ENTER);
+			await tty.expect("chat.maxOutputTokens");
+			tty.send(`chat.maxOutputTokens${ENTER}`);
+			await tty.expect("Shipped default");
+			await tty.expect("New value");
+			tty.send(`${CLEAR}-1${ENTER}`);
+			await tty.expect("Not saved:");
+			strictEqual(readFileSync(file, "utf8"), original);
+			await tty.expect("chat.maxOutputTokens");
+			tty.send(`chat.maxOutputTokens${ENTER}`);
+			await tty.expect("New value");
+			tty.send(`${CLEAR}12345${ENTER}`);
+			await tty.expect("globally?");
+			strictEqual(readFileSync(file, "utf8"), original);
+			tty.send(ENTER);
+			await tty.expect("saved");
+			const saved = parse(readFileSync(file, "utf8")) as ClioSettings;
+			strictEqual(saved.chat.maxOutputTokens, 12345);
+			strictEqual(saved.chat.model, "alpha");
+			tty.send(BACK);
+			await tty.expect("Settings group");
+			tty.send(BACK);
+			await tty.expect("All controls in this section");
+			await tty.quit();
 		} finally {
 			tty.close();
 			home.cleanup();
@@ -442,7 +481,7 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			deepStrictEqual(added.chat, before.chat);
 			deepStrictEqual(added.fleet, before.fleet);
 			strictEqual(added.targets[1]?.capabilities?.contextWindow, 24576);
-			tty.send(DOWN.repeat(4) + ENTER);
+			tty.send(DOWN + ENTER);
 			await tty.expect("Target to edit");
 			tty.send(ENTER);
 			await tty.expect("How should Clio get the API key?");

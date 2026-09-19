@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
@@ -65,7 +66,11 @@ import {
 } from "../../worker/spec-contract.js";
 import type { AgentsContract } from "../agents/contract.js";
 import type { AgentRecipe } from "../agents/recipe.js";
-import { validateRecipeResult } from "../agents/result-contract.js";
+import {
+	INTERNAL_HELPER_RESULT_KINDS,
+	validateRecipeResult,
+	validateStructuredHelperResult,
+} from "../agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../agents/result-contract-filesystem.js";
 import {
 	type AgentAudience,
@@ -755,7 +760,7 @@ async function awaitEventDrain(drained: Promise<void>, graceMs = DISPATCH_DRAIN_
 function reportDispatchDiagnostic(scope: string, error: unknown): void {
 	const message = error instanceof Error ? error.message : String(error);
 	try {
-		process.stderr.write(`[clio-coder:dispatch] ${scope}: ${message}\n`);
+		writeDiagnostic(`[clio-coder:dispatch] ${scope}: ${message}\n`);
 	} catch {
 		// stderr itself is best-effort
 	}
@@ -2042,6 +2047,14 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	// the same resolver the seal uses, so the two never disagree.
 	const workerResultContract = dispatchResultContract(input.req, input.recipe);
 	if (workerResultContract) spec.resultContract = workerResultContract;
+	if (
+		(input.recipe?.audience === "shadow" || input.recipe?.audience === "internal") &&
+		input.target.runtime.kind === "http" &&
+		targetToolCapability(input.target) === true &&
+		workerResultContract &&
+		(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(workerResultContract.kind)
+	)
+		spec.helperResult = true;
 	const product = input.req.product ?? input.recipe?.product;
 	if (product) spec.product = product;
 	// The orchestrator's tool decision is the one the run was admitted under and
@@ -5326,8 +5339,31 @@ export function createDispatchBundle(
 		let workerPolicyPermissionCounter = 0;
 		// The bound the receipt can seal follows the contract this run will be
 		// validated against; a conforming result never arrives clipped.
+		const helperContract = dispatchResultContract(req, lifecycle.recipe);
 		const outputCapture = createWorkerOutputCapture({
-			maxBytes: workerOutputCaptureBytes(dispatchResultContract(req, lifecycle.recipe)),
+			maxBytes: workerOutputCaptureBytes(helperContract),
+			...(spec.helperResult === true &&
+			acceptsOutcomeCodeEvents &&
+			(lifecycle.agentAudience === "shadow" || lifecycle.agentAudience === "internal") &&
+			helperContract &&
+			(INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(helperContract.kind)
+				? {
+						helperResult: {
+							contract: helperContract,
+							validate: (data: unknown) =>
+								validateStructuredHelperResult({
+									contract: helperContract,
+									data,
+									cwd: lifecycle.cwd,
+									networkAllowed:
+										lifecycle.admission.allowedTools.includes(ToolNames.WebFetch) ||
+										lifecycle.admission.allowedTools.includes(ToolNames.WebRead),
+									observedRunEffects: runEffects.snapshot(),
+									filesystem: nodeResultContractFilesystem(),
+								}).structured,
+						},
+					}
+				: {}),
 		});
 		const markObservedPhase = (field: "firstModelTokenAt" | "firstToolAt"): void => {
 			if (timing[field] !== undefined) return;

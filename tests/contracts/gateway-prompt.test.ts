@@ -68,13 +68,12 @@ describe("gateway in the session prompt", () => {
 				hasContext,
 			);
 			strictEqual(compiled.systemPrompt.includes('context (scope="skills")'), hasContext);
-			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasContext);
+			strictEqual(compiled.systemPrompt.includes('capability="clio_library"'), hasGateway);
+			if (hasGateway) {
+				match(compiled.systemPrompt, /Catalog reads activate and install nothing/);
+				match(compiled.systemPrompt, /kind:"agent"/);
+			}
 			if (hasContext) {
-				match(
-					compiled.systemPrompt,
-					/If gateway is on the attached direct-tool surface, use\s+gateway\(op="call", capability="clio_library", args=\{\}\) to read the catalog\s+of recipes and installable packages; it activates and installs nothing\./,
-				);
-				ok(compiled.systemPrompt.includes("Without gateway, this catalog route is unavailable."));
 				match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
 				match(compiled.systemPrompt, /Only the operator installs marketplace skills/);
 				doesNotMatch(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);

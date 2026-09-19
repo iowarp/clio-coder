@@ -5,6 +5,8 @@
  * producer.
  */
 
+import { hasDiagnosticSink, writeDiagnostic } from "./diagnostics.js";
+
 const warned = new Set<string>();
 
 export const LEGACY_NAMING_COMPATIBILITY_RETIREMENT = "v0.7.0";
@@ -14,11 +16,11 @@ export function warnLegacyNaming(legacy: string, canonical: string): void {
 	const key = `${legacy}\0${canonical}`;
 	if (warned.has(key)) return;
 	warned.add(key);
-	process.emitWarning(
+	const message =
 		`'${legacy}' is a deprecated Clio Coder identifier; use '${canonical}'. ` +
-			`Legacy naming compatibility is scheduled for removal in ${LEGACY_NAMING_COMPATIBILITY_RETIREMENT}.`,
-		{ code: "CLIO_CODER_LEGACY_NAMING", type: "DeprecationWarning" },
-	);
+		`Legacy naming compatibility is scheduled for removal in ${LEGACY_NAMING_COMPATIBILITY_RETIREMENT}.`;
+	if (hasDiagnosticSink()) writeDiagnostic(`[CLIO_CODER_LEGACY_NAMING] DeprecationWarning: ${message}`);
+	else process.emitWarning(message, { code: "CLIO_CODER_LEGACY_NAMING", type: "DeprecationWarning" });
 }
 
 /** Prefer a canonical environment variable and temporarily fall back to its released alias. */

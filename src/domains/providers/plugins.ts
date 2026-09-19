@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Loads out-of-tree runtime descriptors into the registry. Two surfaces:
  *
@@ -31,9 +32,7 @@ export async function loadPluginRuntimes(
 		const ids = await registry.loadFromDir(pluginDir, activateExternalPluginApiBridge);
 		loaded.push(...ids);
 	} catch (err) {
-		process.stderr.write(
-			`[providers] loadFromDir ${pluginDir} failed: ${err instanceof Error ? err.message : String(err)}\n`,
-		);
+		writeDiagnostic(`[providers] loadFromDir ${pluginDir} failed: ${err instanceof Error ? err.message : String(err)}\n`);
 	}
 
 	for (const packageName of packages) {
@@ -41,7 +40,7 @@ export async function loadPluginRuntimes(
 			const ids = await registry.loadFromPackage(packageName, activateExternalPluginApiBridge);
 			loaded.push(...ids);
 		} catch (err) {
-			process.stderr.write(
+			writeDiagnostic(
 				`[providers] loadFromPackage ${packageName} failed: ${err instanceof Error ? err.message : String(err)}\n`,
 			);
 		}

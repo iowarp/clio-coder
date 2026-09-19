@@ -35,6 +35,8 @@ export interface SessionPromptInputs {
 	thinkingGuidance?: string | null;
 	/** Canonical names on the frozen direct-tool surface, rendered as a compact harness inventory. */
 	toolNames?: ReadonlyArray<string>;
+	/** False for --no-skills; only explicitly supplied skills remain available. */
+	skillDiscoveryEnabled?: boolean;
 	/**
 	 * Per-tool prompt hints derived once from the frozen surface at compile
 	 * time (registry metadata `promptHint`). Rendered into the Tool Contract
@@ -311,13 +313,21 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 					"dispatch(list:true) answers a question about agents, the fleet, or which target and model run this session and its workers",
 				]
 			: []),
-		...(canListSkills ? ['context(scope="skills") lists skills for discovery or skill questions'] : []),
+		...(canListSkills
+			? [
+					inputs.skillDiscoveryEnabled === false
+						? 'context(scope="skills") lists only explicitly supplied skills; automatic discovery and marketplace suggestions are disabled'
+						: 'context(scope="skills") lists bundled and installed skills plus marketplace options',
+				]
+			: []),
 		...(hasGateway ? ['gateway(op="find") answers a question about secondary capabilities'] : []),
 	].join("; ");
 	const capabilityKinds = [
 		"direct tools are attached schemas",
 		...(hasGateway ? ["secondary capabilities are reached through gateway find, describe, and call"] : []),
-		...(canDispatch ? ["fleet agents are workers behind dispatch"] : []),
+		...(canDispatch
+			? ["shadow agents are your internal helpers and fleet agents do delegated work through dispatch"]
+			: []),
 		...(canListSkills ? ["skills are workflows reached through context"] : []),
 	];
 	const orientationTools = ["context", "code_nav", "grep", "read"].filter((name) => admitted.has(name));
@@ -335,6 +345,11 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
 		`Harness model: ${capabilityKinds.join("; ")}. Keep these capability sets distinct.`,
 		`${inventoryGuidance}.`,
+		...(hasGateway
+			? [
+					'Your built-in library also contains agent recipes, reusable prompts, fleets, and installable packages. When a specialist or workflow would help, query gateway(op="call", capability="clio_library", args={query:"<task>",kind:"agent"}) (or kind "fleet", "prompt", "plugin") and use the returned invocation. Catalog reads activate and install nothing; do not search the workspace or invent library names.',
+				]
+			: []),
 		"Call tools only for concrete inspection or changes the task requires; a tool-free question gets a tool-free answer.",
 		// The tool-specific instantiation of the operating contract's "narrow
 		// work: inspect directly" rule; the contract cannot name tools.
@@ -615,7 +630,10 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	// Role text gated on the surface, following the Fleet-block rule: text
 	// about a tool renders only when the tool is there to be called.
 	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
-	const skills = sessionHasContext(session) ? table.byId.get("operating.skills") : undefined;
+	const skills =
+		sessionHasContext(session) && session.skillDiscoveryEnabled !== false
+			? table.byId.get("operating.skills")
+			: undefined;
 	const skillActivation =
 		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills(autonomyLevel)
 			? 'Load matching installed skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'

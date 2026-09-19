@@ -1093,7 +1093,7 @@ function finish(wizard: Wizard, answers: Answers): number {
 	else if (!chatEligible)
 		presenter.completedStep(`${runtime.id} cannot answer chat; ${targetId} is registered for dispatch only`);
 	if (answers.mode === "first") presenter.completedStep(`fleet default is ${targetId}`);
-	else presenter.note("Use Targets & Auth to change chat, fleet, or background defaults.");
+	else presenter.note("Use Settings → Chat, Fleet, or Context & Memory to change model defaults.");
 	if (answers.mode === "first" && answers.thinking !== undefined)
 		presenter.completedStep(`thinking level ${answers.thinking}`);
 	if (answers.antigravity !== undefined) {

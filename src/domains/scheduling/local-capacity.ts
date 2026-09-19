@@ -126,15 +126,14 @@ export interface LocalCapacitySampler {
 interface HostSample {
 	facts: HostCapacityFacts;
 	activeWorkers: number;
-	/** Last time this sample was taken or confirmed as the baseline to keep. */
+	/** Last time host facts and the active-worker count were sampled together. */
 	checkedAtMs: number;
 }
 
 /**
- * Rate-limited host sampling for `auto`. A sample taken while no local worker
- * runs is kept until a later idle moment replaces it, so Clio's own workers
- * never lower the limit; a sample taken while workers run adds back the
- * per-worker estimate for each of them.
+ * Rate-limited host sampling for `auto`, including while workers run. Each
+ * sample captures its active-worker count so the add-back accounts for workers
+ * included in those memory facts, not workers admitted after the sample.
  */
 export function createLocalCapacitySampler(options: LocalCapacitySamplerOptions): LocalCapacitySampler {
 	const observe = options.observe ?? observeHostCapacityFacts;
@@ -146,9 +145,7 @@ export function createLocalCapacitySampler(options: LocalCapacitySamplerOptions)
 		const atMs = monotonicNow();
 		if (sample !== null && atMs - sample.checkedAtMs < intervalMs) return sample;
 		const activeWorkers = options.activeLocalWorkers();
-		// An idle sample is the better baseline; keep it while workers run.
-		if (sample !== null && sample.activeWorkers === 0 && activeWorkers > 0) sample.checkedAtMs = atMs;
-		else sample = { facts: observe(), activeWorkers, checkedAtMs: atMs };
+		sample = { facts: observe(), activeWorkers, checkedAtMs: atMs };
 		return sample;
 	}
 

@@ -1,5 +1,6 @@
-import { BusChannels } from "../core/bus-events.js";
+import { BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
 import { type WorkerRunEntryFields, workerRunEntryFields } from "./worker-replay.js";
 import {
@@ -60,6 +61,19 @@ export interface InteractiveSubscriptions {
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
 	const workers = createWorkerStream({ readReceipt: deps.readWorkerReceipt ?? readWorkerReceiptFacts });
+	const helperNotice = (payload: DispatchRunIdentity, status: "working" | "completed" | "failed"): void => {
+		if (
+			payload.agentAudience !== "shadow" &&
+			payload.agentAudience !== "internal" &&
+			payload.requestOrigin !== "internal"
+		)
+			return;
+		deps.notify(
+			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
+			`Clio → ${sanitizeCallTargetText(payload.agentId).slice(0, 80)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
+			`helper:${payload.runId}:${status}`,
+		);
+	};
 	const repaint = (): void => {
 		deps.refreshFooter();
 		deps.renderTaskIsland();
@@ -80,10 +94,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.bus.on(BusChannels.DispatchEnqueued, repaint),
 		// Every attempt writes its own session entry: a failover is history, and
 		// the attempt trail a resumed block shows is that history read back.
-		deps.bus.on(
-			BusChannels.DispatchStarted,
-			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry))),
-		),
+		deps.bus.on(BusChannels.DispatchStarted, (payload) => {
+			helperNotice(payload, "working");
+			folded(workers.started, (change) => deps.recordWorkerRun?.(workerRunEntryFields(change.entry)))(payload);
+		}),
 		deps.bus.on(
 			BusChannels.DispatchProgress,
 			folded((payload) => {
@@ -96,10 +110,12 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		),
 		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
 		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
+			helperNotice(payload, "completed");
 			folded(workers.completed)(payload);
 			deps.onDispatchSettled?.();
 		}),
 		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
+			helperNotice(payload, "failed");
 			folded(workers.failed)(payload);
 			deps.onDispatchSettled?.();
 		}),

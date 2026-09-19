@@ -1,4 +1,9 @@
-import { RESPONSE_SCHEMA_RUNTIME_ID, type ResponseSchemaDialect } from "../core/response-schema.js";
+import {
+	GATEWAY_SCHEMA_RUNTIME_ID,
+	RESPONSE_SCHEMA_RUNTIME_ID,
+	type ResponseSchemaDialect,
+	responseSchemaDialectFor,
+} from "../core/response-schema.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { EngineModel } from "./types.js";
 
@@ -14,6 +19,39 @@ function isOpenAIResponsesApi(api: string): boolean {
 
 function isAnthropicMessagesApi(api: string): boolean {
 	return api === "anthropic-messages";
+}
+
+/** APIs whose named-tool request dialect is implemented below. */
+export function supportsNamedToolChoice(api: string): boolean {
+	return (
+		isAnthropicMessagesApi(api) ||
+		isOpenAIResponsesApi(api) ||
+		[
+			"openai-completions",
+			"google-generative-ai",
+			"google-vertex",
+			"bedrock-converse-stream",
+			"mistral-conversations",
+		].includes(api)
+	);
+}
+
+/** A terminal protocol round exposes one handoff tool, never the work surface. */
+export function patchTerminalToolPayload(payload: unknown, model: EngineModel, toolName: string): unknown | undefined {
+	if (!supportsNamedToolChoice(model.api)) return undefined;
+	const patched = patchToolChoiceNamedPayload(payload, model, toolName);
+	if (!isRecord(patched)) return undefined;
+	// Named Anthropic choices normally preserve the schema cache. A terminal
+	// handoff deliberately removes the work surface as well as requiring its name.
+	if (isAnthropicMessagesApi(model.api)) {
+		const tools = namedToolDefinitions(patched.tools, toolName);
+		if (tools === null) return undefined;
+		return { ...patched, tools, tool_choice: { type: "tool", name: toolName, disable_parallel_tool_use: true } };
+	}
+	if (model.api === "openai-completions" || isOpenAIResponsesApi(model.api)) {
+		return { ...patched, parallel_tool_calls: false };
+	}
+	return patched;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -196,27 +234,21 @@ export function patchToolChoiceNamedPayload(
 	return { ...payload, tools, tool_choice: "required" };
 }
 
-/** Attach llama-server's native JSON-schema response constraint without changing its tool surface. */
+/** Attach the admitted runtime's JSON-schema constraint without changing its tool surface. */
 function patchLlamaCppResponseSchemaPayload(
 	payload: unknown,
 	runtimeId: string,
 	responseSchema: Record<string, unknown> | undefined,
 ): unknown | undefined {
 	if (responseSchema === undefined) return undefined;
-	if (runtimeId !== RESPONSE_SCHEMA_RUNTIME_ID) {
-		throw new Error(`responseSchema requires the native llamacpp runtime; received '${runtimeId}'`);
+	if (runtimeId !== RESPONSE_SCHEMA_RUNTIME_ID && runtimeId !== GATEWAY_SCHEMA_RUNTIME_ID) {
+		throw new Error(`responseSchema requires the native llamacpp or litellm runtime; received '${runtimeId}'`);
 	}
 	if (!isRecord(payload)) throw new Error("cannot apply responseSchema to a non-object provider payload");
-	return {
-		...payload,
-		response_format: {
-			// llama-server accepts schema-constrained JSON through the widely
-			// compatible json_object form; some deployed gateways silently ignore
-			// the newer json_schema discriminator while still returning HTTP 200.
-			type: "json_object",
-			schema: responseSchema,
-		},
-	};
+	const dialect = responseSchemaDialectFor(runtimeId);
+	return dialect === null
+		? undefined
+		: patchResponseSchemaPayloadForDialect(payload, dialect, responseSchema, "clio_result");
 }
 
 /**
@@ -255,6 +287,8 @@ export interface WorkerPayloadPatchOptions {
 	toolChoiceName?: string;
 	/** Synthesis-locked round: remove the tool surface, see {@link patchToolSurfaceLockedPayload}. */
 	toolSurfaceLocked?: boolean;
+	/** Host-owned terminal handoff; takes precedence over the work-tool lock. */
+	terminalToolName?: string;
 }
 
 /** Compose all worker-owned request mutations over one payload in a stable order. */
@@ -278,6 +312,10 @@ export function patchWorkerRequestPayload(
 		changed = true;
 	}
 
+	if (options.terminalToolName !== undefined) {
+		const terminal = patchTerminalToolPayload(patched, model, options.terminalToolName);
+		if (terminal !== undefined) return terminal;
+	}
 	if (options.toolSurfaceLocked === true) {
 		const lockedPatched = patchToolSurfaceLockedPayload(patched, model);
 		if (lockedPatched !== undefined) {

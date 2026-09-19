@@ -16,6 +16,32 @@ implicitly repeated by a publish lifecycle hook.
 4. Install once with `pnpm install --frozen-lockfile`. Record cold installation time
    separately when comparing hosted gate times.
 
+## Working-tree pre-release checks
+
+Before the final candidate is committed, use the existing development commands:
+
+```bash
+pnpm run ci
+pnpm --filter @iowarp/clio-coder-web typecheck
+node scripts/check-release.mjs
+pnpm run test:package
+```
+
+Run relevant extended provider, configuration, and terminal checks when those
+surfaces changed. These working-tree results prepare a candidate; they do not
+create the publication qualification receipt. Do not invoke `ci:release` on a
+dirty tree: it requires a clean commit and invalidates the previous receipt before
+checking the source. Qualify again after the remaining implementation work is
+finished and the final candidate is committed.
+
+For v0.5.0, inspect configure and `/settings` navigation, effective-settings
+privacy, footer diagnostics, passive target discovery, explicit reasoning/tool
+qualification, and direct/gateway cancellation and lifecycle behavior. Treat live
+provider smokes as resource-consuming checks and coordinate server access. A
+metadata listing does not prove tool correctness, full-context capacity, or GPU
+residency. Keep platform coverage and unresolved process-isolation limitations
+explicit; a successful smoke is not evidence of OS containment.
+
 ## Qualify the candidate
 
 ```bash

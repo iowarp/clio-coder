@@ -16,11 +16,18 @@ function nonEmpty(value: string | undefined): string | null {
 export function detectRunIdentity(env: NodeJS.ProcessEnv = process.env): RunIdentity {
 	let user = "unknown";
 	try {
-		user = userInfo().username;
+		user =
+			nonEmpty(userInfo().username) ?? nonEmpty(env.USER) ?? nonEmpty(env.LOGNAME) ?? nonEmpty(env.USERNAME) ?? "unknown";
 	} catch {
-		user = nonEmpty(env.USER) ?? nonEmpty(env.LOGNAME) ?? "unknown";
+		user = nonEmpty(env.USER) ?? nonEmpty(env.LOGNAME) ?? nonEmpty(env.USERNAME) ?? "unknown";
 	}
-	const identity: RunIdentity = { host: hostname(), user, hpc: null };
+	let host = "unknown";
+	try {
+		host = hostname() || "unknown";
+	} catch {
+		// Restricted environments may not expose a host identity.
+	}
+	const identity: RunIdentity = { host, user, hpc: null };
 
 	const slurmJobId = nonEmpty(env.SLURM_JOB_ID);
 	if (slurmJobId !== null) {

@@ -87,6 +87,12 @@ describe("contracts/DOG-001 doctor credential reads", () => {
 					response.end("{}");
 				} else if (
 					request.method === "GET" &&
+					request.url === "/v1/models" &&
+					request.headers.authorization === `Bearer ${FAKE_KEY}`
+				) {
+					response.end(JSON.stringify({ data: [{ id: MODEL }] }));
+				} else if (
+					request.method === "GET" &&
 					request.url === "/v1/model/info" &&
 					request.headers.authorization === `Bearer ${FAKE_KEY}`
 				) {

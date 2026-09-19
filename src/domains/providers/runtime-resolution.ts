@@ -770,8 +770,10 @@ export function resolveContextWindowDetails(
 		effective = loadedWindow;
 		source = "loaded";
 	} else if (overrideWindow !== undefined) {
-		effective = overrideWindow;
-		source = "target-override";
+		// A declaration cannot enlarge an observed server limit, including a
+		// conservative limit retained after resident-state discovery failed.
+		effective = Math.min(overrideWindow, probeWindow ?? overrideWindow);
+		source = probeWindow !== undefined && probeWindow < overrideWindow ? "probe" : "target-override";
 	} else if (probeWindow !== undefined) {
 		effective = coldCap(probeWindow);
 		// Not "loaded": a probed window is what the target reported for the
@@ -792,20 +794,20 @@ export function resolveContextWindowDetails(
 
 	// One-run CLI override (clio-coder run --max-context-tokens), delivered over the
 	// run-overrides transport; see core/run-overrides.ts.
+	const targetContextWindow = effective;
 	const overrideMaxContextTokens = runOverrides().maxContextTokens;
-	if (overrideMaxContextTokens !== undefined) {
+	if (overrideMaxContextTokens !== undefined && overrideMaxContextTokens < effective) {
 		effective = overrideMaxContextTokens;
 		source = "target-override";
 	}
 
-	// Below the floor is a warning on every tier. A target that reports less
-	// than Clio's minimum will compact on the first substantial read no matter
-	// where it runs, and the operator can act on that only if they are told.
+	// Warn about target capacity, not a deliberately smaller per-run budget.
+	// The latter does not mean that reloading the server would help.
 	let warning: string | null = null;
-	if (effective < CLIO_CONTEXT_WINDOW_WARN_BELOW) {
+	if (targetContextWindow < CLIO_CONTEXT_WINDOW_WARN_BELOW) {
 		warning =
-			`Target offers ${effective} context tokens, below the ${CLIO_CONTEXT_WINDOW_WARN_BELOW} Clio needs. ` +
-			`Load the model with a larger context, or set capabilities.contextWindow on this target.`;
+			`Target offers ${targetContextWindow} context tokens, below Clio's recommended ${CLIO_CONTEXT_WINDOW_WARN_BELOW}. ` +
+			`Load the model with a larger context; capabilities.contextWindow only declares an existing server limit.`;
 	}
 
 	// Deliberately not folded into `warning`. That field means the window is

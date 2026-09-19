@@ -1,6 +1,8 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { writeDiagnostic } from "../../core/diagnostics.js";
+import { warnLegacyNaming } from "../../core/naming-compat.js";
 
 import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
@@ -30,7 +32,11 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 		canonical.add(desc.id);
 	};
 
-	const get = (id: string): RuntimeDescriptor | null => byId.get(id) ?? null;
+	const get = (id: string): RuntimeDescriptor | null => {
+		const runtime = byId.get(id) ?? null;
+		if (runtime && runtime.id !== id) warnLegacyNaming(id, runtime.id);
+		return runtime;
+	};
 
 	const list = (): ReadonlyArray<RuntimeDescriptor> =>
 		Array.from(canonical, (id) => byId.get(id)).filter((entry): entry is RuntimeDescriptor => entry !== undefined);
@@ -59,7 +65,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 				register(desc);
 				loaded.push(desc.id);
 			} catch (err) {
-				process.stderr.write(`[providers] runtime plugin ${full} rejected: ${describeError(err)}\n`);
+				writeDiagnostic(`[providers] runtime plugin ${full} rejected: ${describeError(err)}\n`);
 			}
 		}
 		return loaded;
@@ -74,19 +80,19 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 			await beforeImport?.();
 			mod = await import(packageName);
 		} catch (err) {
-			process.stderr.write(`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`);
+			writeDiagnostic(`[providers] runtime package ${packageName} failed to import: ${describeError(err)}\n`);
 			return [];
 		}
 		const exported = (mod as { clioRuntimes?: unknown }).clioRuntimes;
 		if (!Array.isArray(exported)) {
-			process.stderr.write(`[providers] runtime package ${packageName} has no 'clioRuntimes' array export\n`);
+			writeDiagnostic(`[providers] runtime package ${packageName} has no 'clioRuntimes' array export\n`);
 			return [];
 		}
 		const loaded: string[] = [];
 		for (const candidate of exported) {
 			const validation = validateRuntimeDescriptor(candidate);
 			if (!validation.ok) {
-				process.stderr.write(
+				writeDiagnostic(
 					`[providers] runtime package ${packageName} exported an invalid descriptor: ${validation.reason}\n`,
 				);
 				continue;
@@ -95,7 +101,7 @@ export function createRuntimeRegistry(): RuntimeRegistry {
 				register(validation.descriptor);
 				loaded.push(validation.descriptor.id);
 			} catch (err) {
-				process.stderr.write(`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`);
+				writeDiagnostic(`[providers] runtime package ${packageName} id conflict: ${describeError(err)}\n`);
 			}
 		}
 		return loaded;
@@ -158,13 +164,13 @@ async function importDescriptor(
 		await beforeImport?.();
 		mod = await import(href);
 	} catch (err) {
-		process.stderr.write(`[providers] runtime plugin ${file} failed to import: ${describeError(err)}\n`);
+		writeDiagnostic(`[providers] runtime plugin ${file} failed to import: ${describeError(err)}\n`);
 		return null;
 	}
 	const candidate = (mod as { default?: unknown }).default;
 	const validation = validateRuntimeDescriptor(candidate);
 	if (!validation.ok) {
-		process.stderr.write(
+		writeDiagnostic(
 			`[providers] runtime plugin ${file} has invalid default-export RuntimeDescriptor: ${validation.reason}\n`,
 		);
 		return null;

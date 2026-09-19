@@ -1,3 +1,4 @@
+import { writeDiagnostic } from "../../core/diagnostics.js";
 /**
  * Durable record of the model calls that were billed beside a session rather
  * than inside it: `/btw` side questions, `/handoff` extraction rounds, and the
@@ -143,7 +144,7 @@ export function appendOutOfTurnUsageRow(
 		}
 	} catch (error) {
 		if (options.required) throw new Error(`compaction usage row not written: ${messageOf(error)}`, { cause: error });
-		process.stderr.write(`[clio-coder:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
+		writeDiagnostic(`[clio-coder:usage] out-of-turn usage row not written: ${messageOf(error)}\n`);
 		return;
 	}
 	appendsSinceBoundCheck += 1;
@@ -152,7 +153,7 @@ export function appendOutOfTurnUsageRow(
 	try {
 		boundOutOfTurnUsageFile(path);
 	} catch (error) {
-		process.stderr.write(`[clio-coder:usage] out-of-turn usage ring not bounded: ${messageOf(error)}\n`);
+		writeDiagnostic(`[clio-coder:usage] out-of-turn usage ring not bounded: ${messageOf(error)}\n`);
 	}
 }
 

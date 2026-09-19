@@ -50,23 +50,13 @@ const llamacppRerankRuntime: RuntimeDescriptor = {
 		const healthOpts = { url: `${base}/health`, timeoutMs: ctx.httpTimeoutMs } as const;
 		const health = await (ctx.signal ? probeHttp({ ...healthOpts, signal: ctx.signal }) : probeHttp(healthOpts));
 		if (!health.ok) return health;
-		const modelId = target.defaultModel ?? "default";
-		const probeResponse = await probeHttp({
-			url: `${base}/reranking`,
-			method: "POST",
-			timeoutMs: ctx.httpTimeoutMs,
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ query: "probe", documents: ["a"], model: modelId }),
-			...(ctx.signal ? { signal: ctx.signal } : {}),
-		});
-		if (!probeResponse.ok || !(probeResponse.status === 200 || probeResponse.status === 202)) {
-			return {
-				ok: false,
-				error: `/reranking not available: ${probeResponse.error ?? `HTTP ${probeResponse.status}`}`,
-			};
-		}
-		const props = await probeLlamaCppProps(base, ctx, target.defaultModel);
-		const result: ProbeResult = { ok: true };
+		// Inference POSTs can load a model. Even /props?model=<id> can load a
+		// router worker, so ordinary discovery reads only the root metadata.
+		const props = await probeLlamaCppProps(base, ctx);
+		const result: ProbeResult = {
+			ok: true,
+			notes: ["Reranking inference not qualified: discovery read health and metadata only."],
+		};
 		if (health.latencyMs !== undefined) result.latencyMs = health.latencyMs;
 		if (props.discoveredCapabilities) result.discoveredCapabilities = props.discoveredCapabilities;
 		if (props.serverVersion) result.serverVersion = props.serverVersion;

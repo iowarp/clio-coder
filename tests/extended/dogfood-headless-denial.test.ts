@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, rejects, strictEqual } from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -96,7 +96,7 @@ test("interactive denials remain terminal, while actual hard blocks retain hard-
 for (const check of ["correlation", "receipt"] as const)
 	test(`headless production ${check} preserves authoritative outcomes rather than classifying text`, async () => {
 		const eventsPath = join(env.dir, "events.json");
-		const output = execFileSync(
+		const child = spawnSync(
 			process.execPath,
 			[
 				"--import",
@@ -106,6 +106,9 @@ for (const check of ["correlation", "receipt"] as const)
 			],
 			{ cwd: env.dir, env: process.env, encoding: "utf8", timeout: 30_000 },
 		);
+		strictEqual(child.error, undefined);
+		strictEqual(child.status, 1, "the unresolved hard block fails the run");
+		const output = child.stdout;
 		const events = JSON.parse(readFileSync(eventsPath, "utf8")) as ChatLoopEvent[];
 		const { safety } = tools();
 		const ends = events.filter((event) => event.type === "tool_execution_end") as Array<
@@ -171,7 +174,7 @@ for (const check of ["correlation", "receipt"] as const)
 			for (const stat of receipt.toolStats) strictEqual(stat.count, stat.ok + stat.errors + stat.blocked);
 			// Both blocked bash calls land in the worker-shaped safety summary with
 			// the rule that blocked them, and no write succeeded, so the run is a
-			// no-op even though it answered and exited 0.
+			// no-op despite its final answer, and exits 1.
 			const { safety } = tools();
 			deepStrictEqual(
 				receipt.safety?.blockedAttempts.map((attempt) => [attempt.tool, attempt.ruleId]),
@@ -185,7 +188,7 @@ for (const check of ["correlation", "receipt"] as const)
 			// producer reports no admission decision at all.
 			deepStrictEqual(receipt.safety?.decisions, { allowed: 2, blocked: 1, permissionRequested: 1 });
 			strictEqual(receipt.noop, true);
-			strictEqual(receipt.outcome, "succeeded");
+			strictEqual(receipt.outcome, "failed");
 		}
 	});
 
@@ -264,7 +267,7 @@ describe("headless no-op contract through the built binary", () => {
 	}
 
 	for (const failOnNoop of [true, false]) {
-		test(`a run whose write was denied ${failOnNoop ? "fails under --fail-on-noop" : "keeps exit 0 without the flag"}`, async () => {
+		test(`a run whose write was denied ${failOnNoop ? "fails under --fail-on-noop" : "also fails without the flag"}`, async () => {
 			// At suggest a write parks for approval, and a headless run has no
 			// operator, so the ask is denied and the model answers with prose.
 			const { turn, receipt, project } = await headlessTurn({ autonomy: "suggest", steps: [writeProof], failOnNoop });
@@ -281,14 +284,14 @@ describe("headless no-op contract through the built binary", () => {
 				strictEqual(turn.code, 1, turn.stderr);
 				strictEqual(receipt.outcome, "failed");
 				strictEqual(receipt.outcomeDetail, "noop");
-				match(turn.stderr, /no-op under --fail-on-noop: 1 tool call was blocked and no write succeeded/);
+				match(turn.stderr, /no-op under --fail-on-noop: 1 tool call was blocked without recovery and no write succeeded/);
 				// The model's answer still reaches stdout; stderr says why the run failed.
 				match(turn.stdout, /I could not apply the change\./);
 			} else {
-				strictEqual(turn.code, 0, turn.stderr);
-				strictEqual(receipt.outcome, "succeeded");
-				strictEqual(receipt.outcomeDetail, null);
-				doesNotMatch(turn.stderr, /no-op/);
+				strictEqual(turn.code, 1, turn.stderr);
+				strictEqual(receipt.outcome, "failed");
+				strictEqual(receipt.outcomeDetail, "noop");
+				match(turn.stderr, /no-op: 1 tool call was blocked without recovery/);
 			}
 		});
 	}

@@ -1,6 +1,8 @@
 import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
 import type { ContextRecalledPayload } from "../../core/bus-events.js";
+import type { ClioSettings } from "../../core/config.js";
+import { settingsAwareness } from "../../core/settings-awareness.js";
 import {
 	SKILL_INSTALL_OFFER_OPTION_NEVER,
 	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
@@ -74,6 +76,8 @@ export interface ContextSessionDeps {
 }
 
 export interface ContextToolDeps {
+	/** Live session view, including overrides. Omit when no authoritative settings snapshot exists. */
+	getSettings?: () => Readonly<ClioSettings>;
 	/** Run-scoped evidence port; never reads or appends the parent session. */
 	workerRecall?: WorkerRecall;
 	getCwd?: () => string;
@@ -359,7 +363,12 @@ function runWorkspaceScope(
 	// Orientation is where the model actually looks before multi-step work, so
 	// the snapshot carries a one-line pointer at the skill catalog. Pointer
 	// only: no catalog entries here, and loading stays operator-gated.
-	const payload = withSkillsPointer(deps, snap);
+	const payload = {
+		...withSkillsPointer(deps, snap),
+		...(deps.getSettings
+			? { configuration: 'For current autonomy, limits, and configuration guidance, call context(scope="settings").' }
+			: {}),
+	};
 	return finalizeObservation({
 		tool: ToolNames.Context,
 		unit: "results",
@@ -715,10 +724,10 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 					message: `context: scope "${scope}" is a gateway capability now: call gateway(op="call", capability="${capability}", args={...}) or gateway(op="describe", capability="${capability}") for its arguments.`,
 				};
 			}
-			if (scope !== "workspace" && scope !== "skills" && scope !== "recall") {
+			if (scope !== "workspace" && scope !== "settings" && scope !== "skills" && scope !== "recall") {
 				return {
 					kind: "error",
-					message: `context: scope must be workspace, skills, or recall; got '${scope}'`,
+					message: `context: scope must be workspace, settings, skills, or recall; got '${scope}'`,
 				};
 			}
 			const selfCap = scope === "skills" ? OBSERVE_SELF_CAPS.contextSkills : OBSERVE_SELF_CAPS.contextWorkspace;
@@ -732,6 +741,43 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 					reservation,
 					subject: `scope=${scope}`,
 					hint: "Continue in a follow-up turn.",
+				});
+			}
+			if (scope === "settings") {
+				if (!deps.getSettings)
+					return {
+						kind: "error",
+						message:
+							"An authoritative live settings snapshot is unavailable in this run. Ask the user to open /settings or run clio-coder config inspect; do not infer current limits from defaults.",
+					};
+				const offset = args.offset === undefined ? 0 : args.offset;
+				const limit = args.limit === undefined ? 12 : args.limit;
+				if (
+					typeof offset !== "number" ||
+					!Number.isSafeInteger(offset) ||
+					offset < 0 ||
+					typeof limit !== "number" ||
+					!Number.isSafeInteger(limit) ||
+					limit < 1 ||
+					limit > 12
+				)
+					return { kind: "error", message: "Use a non-negative integer offset and a limit from 1 to 12." };
+				const snapshot = settingsAwareness(
+					deps.getSettings(),
+					typeof args.query === "string" ? args.query : "",
+					offset,
+					limit,
+				);
+				return finalizeObservation({
+					tool: ToolNames.Context,
+					unit: "entries",
+					format: "json",
+					output: JSON.stringify(snapshot, null, 2),
+					shownCount: snapshot.rows.length,
+					totalCount: snapshot.total,
+					truncated: snapshot.nextOffset !== null,
+					reservation,
+					...(options ? { options } : {}),
 				});
 			}
 			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);

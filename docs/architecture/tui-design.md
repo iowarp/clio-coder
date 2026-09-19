@@ -404,11 +404,7 @@ so partial fences never flicker into incomplete diagrams while streaming.
 
 ### 7.1 Settings Center Architecture
 The `/settings` overlay is a full-screen transactional control center:
-- **Group Structure**: Sections are organized under non-selectable section headers:
-  - `CORE`: Autonomy & Safety (`safety`), Orchestrator (`orchestrator`)
-  - `ROUTING`: Fleet (`fleet`), Targets (`targets`), Models (`models`)
-  - `RUNTIME`: Budget (`budget`), Compaction (`compaction`), Retry (`retry`)
-  - `EXPERIENCE`: Terminal (`terminal`), Advanced (`advanced`)
+- **Shared navigation**: `src/core/settings-navigation.ts` defines Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced for both configure and `/settings`. `src/core/settings-controls.ts` supplies the searchable control catalog, validation, descriptions and application timing. Legacy section spellings resolve to the corresponding current section.
 - **Semantic Row Grammar**: Explicit presentation kinds (`setting`, `status`, `action`, `group-header`, `read-only-fact`, `destructive-action`) prevent confusion between focus (teal), health (green/amber/red), modified status (neutral/teal mark), and active operations (scarce orange).
 - **Transactional Edits**: Selecting a row and pressing `Enter` opens a dedicated value picker, input dialog, or checklist rather than immediately toggling values. Edits construct an immutable `SettingsChangePlan` and present explicit destination choices:
   - `Apply this session` (for live-capable settings)
@@ -418,8 +414,13 @@ The `/settings` overlay is a full-screen transactional control center:
   - Destructive actions (target/profile removal) execute preflight analysis showing affected chat, fleet, and memory routes before confirmation.
 - **Fleet Workbench**: Organizes fleet settings with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Profiles render as one-row summaries with `◆ Edit` affordance; pressing `Enter` drills into profile fields (target, model, thinking level, placement) or destructive removal.
 - **Targets Console Table**: Displays configured targets in an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer (URL, default model, last probe, failure reason). Actions include `Use`, `Connect`, `Probe`, and `Remove`. Active connect/probe operations show the single orange activity indicator.
-- **Scoped Models Checklist**: Settings → `Models` provides a provider-backed checklist subview with target-level and target/model items, checked current selections, `Space` to toggle, and capability details in the inspector. Unresolved model references are preserved under an `Unavailable` group.
+- **Scoped Models Checklist**: Settings → `Chat` → model favorites provides a provider-backed checklist subview with target-level and target/model items, checked current selections, `Space` to toggle, and capability details in the inspector. Unresolved model references are preserved under an `Unavailable` group.
 - **Narrow Terminal Drill-Down Navigation**: Below 72 columns, Settings transitions from a split view to a modal drill-down stack (section list → section rows → detail drawer) with a breadcrumb and `Esc` moving up one level before closing. Includes `/` filtering across label, path, and description, narrowing per keystroke like `/model` and `/resume`. Below 60 columns, side margins are removed for full-width presentation.
+
+Internal warnings and errors use `src/core/diagnostics.ts`. The active terminal
+owner installs a sink that presents them through the notice area instead of raw
+stderr writes over the frame; headless processes retain stderr. This covers Clio’s
+routed diagnostics, not arbitrary third-party code writing directly to the terminal.
 
 ### 7.2 Fleet Runs Board
 

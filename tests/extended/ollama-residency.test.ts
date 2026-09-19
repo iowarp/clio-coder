@@ -36,6 +36,7 @@ async function fixture() {
 	const failedChats = new Set<string>();
 	const failedUnloads = new Set<string>();
 	const hang = { unloads: false };
+	const pinned = new Set<string>();
 	const server = createServer(async (req, res) => {
 		res.setHeader("content-type", "application/json");
 		if (req.url === "/api/ps") {
@@ -53,12 +54,19 @@ async function fixture() {
 				return;
 			}
 			resident.delete(body.model);
+			pinned.delete(body.model);
 			res.end(JSON.stringify({ done: true }));
 			return;
 		}
 		strictEqual(req.url, "/api/chat");
-		strictEqual(body.keep_alive, -1);
+		const preflightFailed = [...failedUnloads].some((id) => resident.has(id) && pinned.has(id) && id !== body.model);
+		strictEqual(
+			body.keep_alive,
+			!preflightFailed && (!resident.has(body.model) || pinned.has(body.model)) ? -1 : undefined,
+		);
+		if (body.keep_alive === -1) pinned.add(body.model);
 		if (failedChats.has(body.model)) {
+			pinned.delete(body.model);
 			res.end(`${JSON.stringify({ error: "load failed" })}\n`);
 			return;
 		}
@@ -126,7 +134,7 @@ it("forgets successful unloads and retains ownership after failed unloads", asyn
 	strictEqual(await chat(target.url, "second:latest"), "stop");
 	target.failedUnloads.clear();
 	strictEqual(await chat(target.url, "third:latest"), "stop");
-	deepStrictEqual(target.unloads, ["first:latest", "first:latest", "second:latest"]);
+	deepStrictEqual(target.unloads, ["first:latest", "first:latest"]);
 	target.failedChats.add("first:latest");
 	strictEqual(await chat(target.url, "first:latest"), "error");
 	target.resident.add("first:latest");
