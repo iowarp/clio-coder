@@ -52,6 +52,7 @@ import {
 	cleanupTaskWorktree,
 	createTaskWorktree,
 	gitCheckoutRoot,
+	settleTaskWorktree,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import {
@@ -6287,6 +6288,15 @@ export function createDispatchBundle(
 					} catch (cleanupError) {
 						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
 					}
+				} else if (req.taskWorktree !== undefined) {
+					// The run is over and its worktree stays for the operator (preserve
+					// mode, a failed run, a refused merge). Saying so on the claim keeps
+					// restart recovery from reading it as a crash.
+					try {
+						settleTaskWorktree(req.taskWorktree);
+					} catch (settleError) {
+						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
+					}
 				}
 				active.delete(envelope.id);
 				recordTargetOutcome(
@@ -6411,7 +6421,7 @@ export function createDispatchBundle(
 			const runId = newRunId();
 			let taskWorktree: NonNullable<DispatchRequest["taskWorktree"]>;
 			try {
-				taskWorktree = createTaskWorktree(root, runId);
+				taskWorktree = createTaskWorktree(root, runId, undefined, req.apply ?? "merge");
 			} catch (error) {
 				writerLease?.release();
 				throw error;

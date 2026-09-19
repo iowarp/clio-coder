@@ -15,6 +15,7 @@ import { hpcToolchainFindings } from "./doctor-hpc.js";
 import { namingFootprintFindings } from "./doctor-naming.js";
 import { panesFindings } from "./doctor-panes.js";
 import { stateStorageFinding } from "./doctor-state-size.js";
+import { taskWorktreeFindings } from "./doctor-task-worktrees.js";
 import { toolchainFindings } from "./doctor-toolchain.js";
 import { validationContractFinding } from "./doctor-validation-contract.js";
 import { printError } from "./shared.js";
@@ -151,6 +152,9 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 	// The validation contract lives in the workspace, not the home, so it is
 	// checked on every run: a broken contract is why rigor stayed normal.
 	const contractChecks = [validationContractFinding(workspaceRoot)];
+	// Task worktrees live in the workspace too. The sweep reads claims and asks
+	// git; it removes nothing.
+	const worktreeChecks = taskWorktreeFindings(workspaceRoot);
 	const deepChecks = options.deep ? await deepFindings(untouched, workspaceRoot, options.deep) : [];
 	return [
 		...findings,
@@ -164,6 +168,7 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 		...paneChecks,
 		...namingChecks,
 		...contractChecks,
+		...worktreeChecks,
 		...deepChecks,
 	];
 }

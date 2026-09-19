@@ -54,6 +54,18 @@ seconds from a scratch directory, and all of them run at once.
   unconfigured Slurm client, which cannot reach its controller, shows up this
   way.
 
+## Task worktree rows
+
+In a git checkout, doctor lists every `worktree: true` task worktree that
+outlived its run, one `task worktree <runId>` row each, or a single
+`task worktrees` row reading `none preserved`. A `settled` row is a worktree
+its run kept on purpose and is informational. An `abandoned` row is a crashed
+run's worktree that restart recovery kept because it holds work, and it is a
+warning, as is a claim whose owner is gone or that predates recovery. Each row
+gives the branch, the age, the `git log <base>..<branch>` command to inspect
+it, and the commands to drop it. Doctor never removes one. See
+[worktree per task](fleet-dispatch.md#worktree-per-task).
+
 ## Deep checks
 
 `--deep` and `/doctor deep` add two groups of rows.

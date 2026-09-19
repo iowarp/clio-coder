@@ -230,6 +230,7 @@ import { dispatchSchemaCompositionFor } from "../tools/dispatch-schema.js";
 import { createFileMutationObserver, createSkillActivationObserver } from "../tools/observers.js";
 import { createRegistry } from "../tools/registry.js";
 import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
+import { gitCheckoutRoot, recoverTaskWorktrees } from "../tools/task-worktree.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -1138,6 +1139,23 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}
 		} catch (err) {
 			bootStderr(`[dispatch] compete recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
+		}
+		// Task worktrees (`worktree: true`) get the same restart sweep: a dead
+		// owner's empty worktree goes, one holding work stays and is named once.
+		try {
+			// Dispatch creates them under the checkout root, which a session started
+			// in a subdirectory is not.
+			const recovery = recoverTaskWorktrees(gitCheckoutRoot(process.cwd()) ?? process.cwd());
+			for (const kept of recovery.preserved) {
+				bootStderr(
+					`[dispatch] task worktree recovery preserved ${kept.runId}: ${kept.reason} on ${kept.branch}; inspect with git log ${kept.base}..${kept.branch}\n`,
+				);
+			}
+			for (const failure of recovery.failed) {
+				bootStderr(`[dispatch] task worktree recovery preserved ${failure.runId}: ${failure.message}\n`);
+			}
+		} catch (err) {
+			bootStderr(`[dispatch] task worktree recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
 	}
 
