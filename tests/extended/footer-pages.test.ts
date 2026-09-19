@@ -174,3 +174,20 @@ test("invocation previews omit redundant short primary values, retain options an
 	}
 	doesNotMatch(plain(renderToolSubline({ toolName: "ls", toolCallId: "ls", args: {} }, 100)), /tool action/);
 });
+
+test("Activity gives two live agents full-width tasks and distinct work measurements", () => {
+	const snapshot = state();
+	const task = `${"Read the interview implementation and explain navigation, preserved drafts, round transitions, and cancellation. ".repeat(
+		3,
+	)}Include the final state transition.`;
+	snapshot.dispatchRows = snapshot.dispatchRows.flatMap((row) => [
+		{ ...row, taskSummary: task },
+		{ ...row, runId: "second-scout", taskSummary: "Inspect the dashboard telemetry." },
+	]);
+	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 60, "alt+u"));
+	match(text, /Include the final state transition\./);
+	match(text, /Inspect the dashboard telemetry\./);
+	match(text, /Tokens.*68k input.*2k output/);
+	match(text, /Work.*context 17k \/ 262\.1k/);
+	doesNotMatch(text, /│/);
+});

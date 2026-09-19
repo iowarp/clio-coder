@@ -31,7 +31,7 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 	const field = (label: string, value: string) =>
 		wrapTextWithAnsi(`${theme.fg("dim", `${label}  `)}${clean(value)}`, width);
 	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
-	if (row.taskSummary) lines.push(...previewRows(field("Task", row.taskSummary), 3, width));
+	if (row.taskSummary) lines.push(...field("Task", row.taskSummary));
 	const action = row.progress?.currentAction;
 	if (action)
 		lines.push(
@@ -44,12 +44,15 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0)
 		usage.push(`↑ ${formatFooterTokens(row.inputTokens)} input`, `↓ ${formatFooterTokens(row.outputTokens)} output`);
 	const context = row.progress?.contextTokens ?? row.lastContextTokens;
+	lines.push(...field("Tokens", usage.length ? usage.join(" · ") : "awaiting reported measurements"));
+	const workload: string[] = [];
 	if (context !== undefined && context > 0)
-		usage.push(
+		workload.push(
 			`context ${formatFooterTokens(context)}${row.contextWindow ? ` / ${formatFooterTokens(row.contextWindow)}` : ""}`,
 		);
-	if (row.progress?.toolCalls !== undefined) usage.push(`${row.progress.toolCalls} tool calls`);
-	lines.push(...field("Usage", usage.length ? usage.join(" · ") : "awaiting reported measurements"));
+	if (row.progress?.toolCalls !== undefined)
+		workload.push(`${row.progress.toolCalls} tool ${row.progress.toolCalls === 1 ? "call" : "calls"}`);
+	if (workload.length) lines.push(...field("Work", workload.join(" · ")));
 	const timing: string[] = [];
 	if (row.ttftMs !== null) timing.push(`first token ${formatCompactMs(row.ttftMs)}`);
 	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance));
@@ -69,7 +72,7 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 function activityPage(state: FooterDashboardRenderState, width: number, budget: number): string[] {
 	const theme = clioTheme();
 	const sideBySide = width >= 110;
-	const summaryWidth = sideBySide ? Math.min(48, Math.floor(width * 0.35)) : width;
+	const summaryWidth = sideBySide ? Math.floor((width - 3) / 2) : width;
 	const summary = activityQuadrant(
 		{ ...state.agent, dispatchRows: [] },
 		{
@@ -89,8 +92,12 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 	const rows = [...state.dispatchRows].sort((a, b) => Number(live.has(b.status)) - Number(live.has(a.status)));
 	if (!rows.length)
 		return [...summary, "", theme.fg("dim", "No agent invocations yet. Worker cards appear here as agents start.")];
-	const cardWidth = sideBySide ? width - summaryWidth - 3 : width;
-	const cardBudget = sideBySide ? budget : budget - 4;
+	const midpoint = Math.ceil(summary.length / 2);
+	const summaryRows = sideBySide
+		? zipColumns(summary.slice(0, midpoint), summary.slice(midpoint), summaryWidth, width - summaryWidth - 3, "   ")
+		: summary;
+	const cardWidth = width;
+	const cardBudget = budget - summaryRows.length - 1;
 	const cards = [rule(theme, cardWidth, { left: "AGENT ACTIVITY", leftToken: "agent" })];
 	let shown = 0;
 	for (const row of rows) {
@@ -106,9 +113,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 				`${rows.length - shown} more agent runs · ${getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Workers shortcut"} for all`,
 			),
 		);
-	return sideBySide
-		? zipColumns(summary, cards, summaryWidth, cardWidth, theme.fg("frame", " │ "))
-		: [...summary.slice(0, 3), "", ...cards];
+	return [...summaryRows, "", ...cards];
 }
 
 function contextPage(state: FooterDashboardRenderState, width: number): string[] {
