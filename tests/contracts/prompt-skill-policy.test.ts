@@ -59,7 +59,7 @@ for (const level of AUTONOMY_LEVELS) {
 		);
 		assert.equal(result.kind, enabled ? "ok" : "error");
 		const text = prompt(level).systemPrompt;
-		assert.match(text, /Only the operator installs marketplace skills/);
+		assert.match(text, /Install marketplace packages only when the operator requests or approves installation/);
 		assert.doesNotMatch(text, /\{SKILL_ACTIVATION_POLICY\}/);
 		if (enabled) {
 			assert.match(text, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
@@ -133,7 +133,10 @@ for (const level of AUTONOMY_LEVELS) {
 			result.message,
 			modelMayActivateSkills(level) ? /not installed.*marketplace.*operator/ : /only the operator can activate/,
 		);
-		assert.match(prompt(level).systemPrompt, /Only the operator installs marketplace skills/);
+		assert.match(
+			prompt(level).systemPrompt,
+			/Install marketplace packages only when the operator requests or approves installation/,
+		);
 	});
 }
 

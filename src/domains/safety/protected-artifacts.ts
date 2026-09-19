@@ -762,7 +762,7 @@ export function extractCommandDeleteTargets(command: string): string[] {
 /** Recognizable operator CLI installation paths invoked through a model shell.
  * This is command inspection, not confinement of arbitrary scripts or aliases.
  */
-export function invokesClioSkillMutation(command: string): boolean {
+export function invokesClioSkillMutation(command: string, excludeLibrary = false): boolean {
 	for (const segment of expandedShellSegments(command)) {
 		const argv = shellCommandArguments(segment);
 		const index = commandTokenIndex(argv);
@@ -801,6 +801,7 @@ export function invokesClioSkillMutation(command: string): boolean {
 			args[0] !== "interop"
 		)
 			continue;
+		if (excludeLibrary && args[0] === "library") continue;
 		if (resourceCliMutatesSkills(args[0], args.slice(1))) return true;
 	}
 	return false;

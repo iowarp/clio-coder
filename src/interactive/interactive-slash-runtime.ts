@@ -4,7 +4,6 @@ import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
-import { clioConfigDir } from "../core/xdg.js";
 import type { AgentsContract } from "../domains/agents/contract.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
@@ -169,7 +168,6 @@ export interface InteractiveSlashRuntimeDeps {
 	/** Worker blocks this session folded, oldest first; `/share` picks a finished one. */
 	listWorkerRuns?: () => ReadonlyArray<WorkerEntryState>;
 	getCwd?: () => string;
-	getConfigDir?: () => string;
 	installSkill?: typeof installSkill;
 	now?: () => Date;
 }
@@ -344,36 +342,36 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 						{
 							question: `Skill "${uninstalled.name}" is not installed. Would you like to install it?`,
 							options: [
-								{ label: "Install and run", description: `Install from ${uninstalled.marketplaceRef}` },
+								{ label: "Install and run", description: "Install in the active user profile and run." },
+								{ label: "Install for this project and run", description: "Install in this workspace only and run." },
 								{ label: "Cancel", description: "Do not install." },
 							],
 						},
 					])
 					.then((res) => {
-						if (res.cancelled || res.answers[0]?.answer !== "Install and run") {
+						const answer = res.answers[0]?.answer;
+						if (res.cancelled || (answer !== "Install and run" && answer !== "Install for this project and run")) {
 							deps.io.stderr("Installation cancelled.\n");
 							return;
 						}
 						void (async () => {
 							try {
 								deps.io.stdout(`Installing skill "${uninstalled.name}"...\n`);
-								let configDir: string | undefined;
-								try {
-									configDir = (deps.getConfigDir ?? clioConfigDir)();
-								} catch (configErr) {
-									deps.io.stderr(
-										`Skill install: config dir unavailable (${configErr instanceof Error ? configErr.message : String(configErr)}); continuing without it.\n`,
-									);
-								}
 								(deps.installSkill ?? installSkill)({
 									source: uninstalled.name,
 									cwd: cwd(),
-									...(configDir ? { configDir } : {}),
+									scope: answer === "Install for this project and run" ? "project" : "user",
 								});
 								deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
 								await deps.resources?.reload();
 								const postInstallSubmitted = await deps.expandSubmit(text);
-								submitExpanded(postInstallSubmitted);
+								if (postInstallSubmitted.pendingSkillRequests.some((request) => !request.installed)) {
+									throw new Error(
+										"Installed package is not available after reload; inspect it with clio-coder library inspect skill:" +
+											uninstalled.name,
+									);
+								}
+								await submitExpanded(postInstallSubmitted);
 							} catch (err) {
 								deps.io.stderr(
 									`Failed to install skill "${uninstalled.name}": ${err instanceof Error ? err.message : String(err)}\n`,

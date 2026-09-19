@@ -4,6 +4,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.5.0 - 2026-09-18
 
+### library
+
+- Fix `/skill` installation through the active profile and add project-scope installation. Keep bundled packages available without automatic installation. Report damaged copies accurately across all package kinds and provide explicit repair guidance with recovery backups. Allow operator-approved canonical library commands through bash while preserving direct instruction-file protections and package integrity validation.
+
 ### configuration and terminal
 
 - Reorganize `configure` and `/settings` around shared Connections, Chat, Fleet, Context & Memory, Permissions & Limits, Appearance, Integrations, and Advanced sections. Guided connection setup skips unnecessary key/model questions, previews effective defaults, and preserves existing preferences when reconnecting. The complete control catalog supports search, custom numeric values, and validated collection editing. Version-2 settings remain compatible; no reset or new migration is required.

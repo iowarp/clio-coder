@@ -191,7 +191,10 @@ describe("compact prompt contracts", () => {
 		// longer carries it); the skills protocol is stated once, in Skills.
 		strictEqual(occurrences(compiled.systemPrompt, "count the independent file-scoped changes"), 1);
 		match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/u);
-		match(compiled.systemPrompt, /Only the operator installs marketplace skills/u);
+		match(
+			compiled.systemPrompt,
+			/Install marketplace packages only when the operator requests or approves installation/u,
+		);
 		match(compiled.systemPrompt, /\[Marketplace\] reminder\s+states its\s+own offer options/u);
 		strictEqual(occurrences(compiled.systemPrompt, "harness performs any install"), 0);
 		strictEqual(occurrences(compiled.systemPrompt, "A sealed run receipt is the durable record"), 1);

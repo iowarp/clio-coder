@@ -440,9 +440,11 @@ export function planLibraryLifecycle(request: LibraryLifecycleRequest): LibraryL
 				(ref) => !entries.some((item) => item.loadable && `${item.kind ?? "plugin"}:${item.id}` === ref),
 			);
 			if (request.operation === "enable") {
-				if (!copy.valid || !copy.compatible)
+				if (!copy.valid || !copy.compatible) {
 					refusal = `${identity.ref} cannot be enabled: ${copy.diagnostics.map((d) => d.message).join("; ")}`;
-				else if (missing.length)
+					if (libraryCopyState(copy) === "damaged")
+						refusal += `. Inspect local changes first; to replace from the recorded source and preserve changed files in a recovery backup, run clio-coder library update ${identity.ref} --${copy.scope} --force`;
+				} else if (missing.length)
 					refusal = `library_requirement_missing: ${missing.join(", ")}; install or enable those first`;
 				const winner = entries.find((item) => item.id === identity.name && item.effective);
 				effectiveAfter = winner

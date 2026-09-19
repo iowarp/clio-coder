@@ -88,6 +88,11 @@ for (const kind of LIBRARY_KINDS)
 			equal(existsSync(installed.rootPath), false);
 			ok(removed.recovery?.packageBackup);
 			equal(listInstalledPlugins(cwd, { scope: "user", all: true }).find((p) => p.id === "example")?.kind, kind);
+			ok(updatePlugin("example", { cwd, scope: "user" }).plugin?.version === "1.1.0");
+			ok(disablePlugin("example", { cwd, scope: "user" }).plugin?.enabled === false);
+			ok(enablePlugin("example", { cwd, scope: "user" }).plugin?.loadable);
+			ok(!removePlugin("example", { cwd, scope: "user" }).diagnostics.some((d) => d.type === "error"));
+			equal(listInstalledPlugins(cwd, { all: true }).filter((p) => p.id === "example").length, 0);
 		} finally {
 			env.restore();
 		}

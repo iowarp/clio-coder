@@ -421,7 +421,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				});
 			}
 			const skillReason =
-				mutationCommand !== null && invokesClioSkillMutation(mutationCommand)
+				mutationCommand !== null && invokesClioSkillMutation(mutationCommand, true)
 					? "resource installation and lifecycle changes require the operator CLI or an explicit operator install choice; draft outside installed resource roots"
 					: skillMutationReason(skillRoots, candidates, walkMemo);
 			if (skillReason !== null) {
@@ -482,6 +482,18 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					if (projectPolicy.path !== null) blockInput.projectPolicyPath = projectPolicy.path;
 					return blockDecision(base, blockInput);
 				}
+			}
+
+			// Managed library changes can be authorized by the operator. Direct
+			// mutations and all hard path/trust blocks above remain non-overridable.
+			if (mutationCommand !== null && invokesClioSkillMutation(mutationCommand)) {
+				const input = {
+					ruleId: "library-confirm",
+					reasonCode: "library-confirm",
+					reasons: ["Library changes require one-shot operator confirmation"],
+					policySource: "builtin-classifier" as const,
+				};
+				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
 			// The authored ask rail (sd-01 M3) decides only among calls that
