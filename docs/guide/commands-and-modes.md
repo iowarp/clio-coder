@@ -471,6 +471,16 @@ from the active branch. It retains settled and superseded values from
 operator supersede a decision or enter a correction. A correction is submitted
 to the model as an ordinary operator turn after the durable snapshot changes.
 
+The compact footer separates current activity, context headroom, and workspace/session
+state into three rows. `Alt+U` cycles through Activity, Context, Status, then closes
+the dashboard; the composer remains active. Activity shows worker phases, recent
+actions, reported usage, and provisional answer text. Context uses the same category
+colors and filled/free/reserved grid as `/context`, with token counts alongside it.
+Status shows the model route, project resources, memory state, permissions, and
+configured execution/context limits. Configured cost ceilings are not remaining
+budgets, and unreported measurements remain labeled as such. Narrow or short
+terminals wrap content and explicitly indicate omitted detail.
+
 The read-only `/memory` overlay keeps durable and session memory attributable
 in one place. It lists approved evidence-backed lessons, then the live task
 bank by private status, knowledge, and procedural class, including each
