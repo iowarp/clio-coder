@@ -783,6 +783,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.retry.maxRetries` | `2` | integer ≥ 0 | next dispatch |
 | `fleet.retry.routeCooldownMs` | `15000` | integer ≥ 0 | next dispatch |
 | `fleet.retry.breakerThreshold` | `1` | integer ≥ 1 | next dispatch |
+| `fleet.worktrees.root` | `disk` | `disk`, `tmpfs`, `auto`, or an absolute path | next dispatch |
 | `fleet.limits.toolCallsPerRun` | `150` | integer ≥ 1 | next dispatch |
 | `fleet.limits.internalRunTimeoutMs` | `900000` | integer ≥ 1 | next dispatch |
 | `fleet.history.maxRuns` | `1000` | integer ≥ 1 | next dispatch |

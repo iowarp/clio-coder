@@ -10,15 +10,23 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { currentProcessLease, ownerIsAlive, type ProcessLease, validProcessLease } from "./process-lease.js";
+import { diskWorktreeParent } from "./worktree-root.js";
 
 export type TaskWorktreeApply = "merge" | "preserve";
 
 export interface TaskWorktree {
 	root: string;
 	runId: string;
+	/** `<parent>/<runId>`. */
 	path: string;
+	/**
+	 * Directory the working tree was created in: the project-root location or
+	 * the resolved `fleet.worktrees.root`. Absent on a value built before the
+	 * root was configurable, which always means the project-root location.
+	 */
+	parent?: string;
 	branch: string;
 	base: string;
 	ownerToken: string;
@@ -37,6 +45,8 @@ export type TaskWorktreeState = "active" | "settled" | "abandoned";
 export interface PreservedTaskWorktree {
 	runId: string;
 	path: string;
+	/** The claim file, always under the project root. */
+	claimPath: string;
 	branch: string;
 	base: string;
 	state: TaskWorktreeState;
@@ -204,25 +214,36 @@ export function gitCheckoutRoot(cwd: string): string | null {
 	}
 }
 
+/** The claim always lives on disk with the repository, wherever the working tree is. */
+function claimPathFor(root: string, runId: string): string {
+	return join(diskWorktreeParent(root), `${runId}${OWNER_FILE_SUFFIX}`);
+}
+
 export function createTaskWorktree(
 	root: string,
 	runId: string,
 	base?: string,
 	apply: TaskWorktreeApply = "merge",
+	/** Resolved `fleet.worktrees.root` parent; the project-root location when absent. */
+	worktreeParent?: string,
 ): TaskWorktree {
 	validateRunId(runId);
 	const canonical = realpathSync(root);
 	const resolvedBase = base ?? git(canonical, ["rev-parse", "HEAD"]);
-	const parent = join(canonical, ".clio-coder", "worktrees");
+	const claimParent = diskWorktreeParent(canonical);
+	const parent = worktreeParent ?? claimParent;
 	const path = join(parent, runId);
 	const branch = `clio-coder/task/${runId}`;
-	mkdirSync(parent, { recursive: true });
+	mkdirSync(claimParent, { recursive: true });
+	// Off the project root the directory may sit on a filesystem other users
+	// share (/dev/shm), so it is ours alone.
+	mkdirSync(parent, { recursive: true, mode: 0o700 });
 	if (!isCanonicalWorktreePathInside(parent, path))
 		throw new Error(`task worktree path escapes its parent for run ${runId}`);
 	git(canonical, ["worktree", "add", "-b", branch, path, resolvedBase]);
 	const ownerToken = randomBytes(16).toString("hex");
 	writeFileSync(
-		`${path}${OWNER_FILE_SUFFIX}`,
+		claimPathFor(canonical, runId),
 		`${JSON.stringify(
 			{
 				version: 2,
@@ -237,24 +258,23 @@ export function createTaskWorktree(
 				apply,
 				createdAt: new Date().toISOString(),
 				owner: currentProcessLease(),
+				path,
 			},
 			null,
 			2,
 		)}\n`,
 		{ encoding: "utf8", flag: "wx" },
 	);
-	return { root: canonical, runId, path, branch, base: resolvedBase, ownerToken };
+	return { root: canonical, runId, path, parent, branch, base: resolvedBase, ownerToken };
 }
 
 function assertOwnership(worktree: TaskWorktree): void {
-	const expected = join(worktree.root, ".clio-coder", "worktrees", worktree.runId);
-	if (
-		resolve(worktree.path) !== resolve(expected) ||
-		!isCanonicalWorktreePathInside(join(worktree.root, ".clio-coder", "worktrees"), worktree.path)
-	) {
+	const parent = worktree.parent ?? diskWorktreeParent(worktree.root);
+	const expected = join(parent, worktree.runId);
+	if (resolve(worktree.path) !== resolve(expected) || !isCanonicalWorktreePathInside(parent, worktree.path)) {
 		throw new Error(`task worktree ${worktree.runId} has an invalid ownership path`);
 	}
-	const ownerPath = `${worktree.path}${OWNER_FILE_SUFFIX}`;
+	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	if (!existsSync(ownerPath)) throw new Error(`task worktree ${worktree.runId} has no ownership file`);
 	let marker: Record<string, unknown>;
 	try {
@@ -271,7 +291,9 @@ function assertOwnership(worktree: TaskWorktree): void {
 		marker.runId !== worktree.runId ||
 		marker.branch !== worktree.branch ||
 		marker.base !== worktree.base ||
-		marker.ownerToken !== worktree.ownerToken
+		marker.ownerToken !== worktree.ownerToken ||
+		// A claim that names a path names this one; an older claim names none.
+		(marker.path !== undefined && marker.path !== worktree.path)
 	) {
 		throw new Error(`task worktree ${worktree.runId} ownership facts do not match`);
 	}
@@ -325,11 +347,7 @@ export function cleanupTaskWorktree(worktree: TaskWorktree, deleteBranch: boolea
 		git(worktree.root, ["worktree", "prune"]);
 	}
 	if (deleteBranch) git(worktree.root, ["branch", "-D", worktree.branch]);
-	rmSync(`${worktree.path}${OWNER_FILE_SUFFIX}`, { force: true });
-}
-
-function taskWorktreeParent(root: string): string {
-	return join(root, ".clio-coder", "worktrees");
+	rmSync(claimPathFor(worktree.root, worktree.runId), { force: true });
 }
 
 function replaceMarker(ownerPath: string, marker: Record<string, unknown>): void {
@@ -345,7 +363,7 @@ function replaceMarker(ownerPath: string, marker: Record<string, unknown>): void
  */
 export function settleTaskWorktree(worktree: TaskWorktree): void {
 	assertOwnership(worktree);
-	const ownerPath = `${worktree.path}${OWNER_FILE_SUFFIX}`;
+	const ownerPath = claimPathFor(worktree.root, worktree.runId);
 	const marker = JSON.parse(readFileSync(ownerPath, "utf8")) as Record<string, unknown>;
 	if (marker.version !== 2) return;
 	replaceMarker(ownerPath, { ...marker, state: "settled" satisfies TaskWorktreeState });
@@ -366,11 +384,11 @@ interface TaskClaim {
 /**
  * Every task claim under the root whose facts are internally consistent: the
  * marker names this root, its own run id, the canonical branch, and a path
- * that is exactly `<parent>/<runId>`. Anything else is not provably ours and
+ * that is exactly `<parent>/<runId>` under an allowed parent. Anything else is not provably ours and
  * is never returned, so recovery never touches it.
  */
-function readTaskClaims(canonical: string): TaskClaim[] {
-	const parent = taskWorktreeParent(canonical);
+function readTaskClaims(canonical: string, allowedParents: ReadonlyArray<string>): TaskClaim[] {
+	const parent = diskWorktreeParent(canonical);
 	let names: string[];
 	try {
 		names = readdirSync(parent);
@@ -391,7 +409,11 @@ function readTaskClaims(canonical: string): TaskClaim[] {
 		} catch {
 			continue;
 		}
-		const path = join(parent, runId);
+		// The claim names where its working tree is. It is believed only when
+		// that is `<allowed parent>/<runId>`; recovery runs git and rm on it.
+		const path = typeof marker.path === "string" ? marker.path : join(parent, runId);
+		const pathParent = allowedParents.find((allowed) => resolve(allowed) === resolve(dirname(path)));
+		if (pathParent === undefined || basename(path) !== runId) continue;
 		if (
 			(marker.version !== 1 && marker.version !== 2) ||
 			(marker.kind !== TASK_WORKTREE_KIND && marker.kind !== LEGACY_TASK_WORKTREE_KIND) ||
@@ -400,7 +422,7 @@ function readTaskClaims(canonical: string): TaskClaim[] {
 			(marker.branch !== `clio-coder/task/${runId}` && marker.branch !== `clio/task/${runId}`) ||
 			typeof marker.base !== "string" ||
 			!/^[0-9a-f]{40,64}$/u.test(marker.base) ||
-			(existsSync(path) && !isCanonicalWorktreePathInside(parent, path))
+			(existsSync(path) && !isCanonicalWorktreePathInside(pathParent, path))
 		) {
 			continue;
 		}
@@ -429,7 +451,12 @@ function workHeldBy(canonical: string, claim: TaskClaim): string | null {
 	try {
 		const commits = Number.parseInt(git(canonical, ["rev-list", "--count", `${claim.base}..${claim.branch}`]), 10);
 		if (!Number.isSafeInteger(commits)) return "its commits could not be counted";
-		if (commits > 0) return `${commits} commit(s) beyond its base`;
+		if (commits > 0) {
+			return existsSync(claim.path)
+				? `${commits} commit(s) beyond its base`
+				: `${commits} commit(s) beyond its base (its working tree is gone)`;
+		}
+		// Gone with a tmpfs root at reboot: whatever was uncommitted went with it.
 		if (!existsSync(claim.path)) return null;
 		const dirty = git(claim.path, ["status", "--porcelain", "--untracked-files=all"]);
 		return dirty.length > 0 ? `${dirty.split("\n").length} uncommitted path(s)` : null;
@@ -442,6 +469,7 @@ function preservedView(claim: TaskClaim, state: TaskWorktreeState, reason: strin
 	return {
 		runId: claim.runId,
 		path: claim.path,
+		claimPath: claim.ownerPath,
 		branch: claim.branch,
 		base: claim.base,
 		state,
@@ -460,7 +488,11 @@ function preservedView(claim: TaskClaim, state: TaskWorktreeState, reason: strin
  * another host, a claim without a lease, and a settled or already abandoned
  * claim are left exactly as they are.
  */
-export function recoverTaskWorktrees(root: string): TaskWorktreeRecoveryResult {
+export function recoverTaskWorktrees(
+	root: string,
+	/** Defaults to the project-root location; pass allowedWorktreeParents() to cover a configured root. */
+	allowedParents?: ReadonlyArray<string>,
+): TaskWorktreeRecoveryResult {
 	const result: TaskWorktreeRecoveryResult = { removed: [], preserved: [], failed: [] };
 	let canonical: string;
 	try {
@@ -468,7 +500,7 @@ export function recoverTaskWorktrees(root: string): TaskWorktreeRecoveryResult {
 	} catch {
 		return result;
 	}
-	for (const claim of readTaskClaims(canonical)) {
+	for (const claim of readTaskClaims(canonical, allowedParents ?? [diskWorktreeParent(canonical)])) {
 		if (claim.state !== "active" || claim.owner === null || ownerIsAlive(claim.owner)) continue;
 		try {
 			const held = workHeldBy(canonical, claim);
@@ -494,7 +526,10 @@ export function recoverTaskWorktrees(root: string): TaskWorktreeRecoveryResult {
  * purpose, abandoned ones recovery kept, and claims too old to carry a lease.
  * A claim whose owner is still alive is a run in flight and is not listed.
  */
-export function listPreservedTaskWorktrees(root: string): PreservedTaskWorktree[] {
+export function listPreservedTaskWorktrees(
+	root: string,
+	allowedParents?: ReadonlyArray<string>,
+): PreservedTaskWorktree[] {
 	let canonical: string;
 	try {
 		canonical = realpathSync(root);
@@ -502,7 +537,7 @@ export function listPreservedTaskWorktrees(root: string): PreservedTaskWorktree[
 		return [];
 	}
 	const out: PreservedTaskWorktree[] = [];
-	for (const claim of readTaskClaims(canonical)) {
+	for (const claim of readTaskClaims(canonical, allowedParents ?? [diskWorktreeParent(canonical)])) {
 		if (claim.state === "settled") out.push(preservedView(claim, "settled", "kept by its run"));
 		else if (claim.state === "abandoned") out.push(preservedView(claim, "abandoned", "its owner died holding work"));
 		else if (claim.owner === null) out.push(preservedView(claim, "active", "its claim predates restart recovery"));

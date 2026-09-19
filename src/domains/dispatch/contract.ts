@@ -50,6 +50,8 @@ export interface DispatchRequest extends JobSpec {
 		root: string;
 		runId: string;
 		path: string;
+		/** Directory the working tree was created in; absent means the project-root location. */
+		parent?: string;
 		branch: string;
 		base: string;
 		ownerToken: string;

@@ -297,13 +297,33 @@ application never merges and reports the branch. A detached task applies when it
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
 
+`fleet.worktrees.root` chooses where the working tree is created: `disk` (the
+default, the location above), `tmpfs`, `auto`, or an absolute path. `tmpfs`
+uses a per-user, per-checkout directory, mode 0700, under `$XDG_RUNTIME_DIR`
+when that is a tmpfs mount and under `/dev/shm` otherwise; `auto` does the
+same when such a mount exists and quietly uses disk when none does. Before
+creating a worktree off disk Clio compares the mount's free space with twice
+the size of the tracked tree plus 256 MiB and falls back to disk, with a
+`[clio-coder:dispatch] task worktree root` notice, when it is short. A tmpfs
+is RAM: what a worker builds inside its worktree counts against it, and
+uncommitted files there do not survive a reboot. Only the working tree moves.
+Git objects, the index, the branch, and the ownership claim stay with the
+repository, and a directory on a shared mount that Clio does not own
+outright is refused. The setting applies to local placement only: when
+`fleet.nodes` is non-empty a run may be placed on another host, which reaches
+the worktree by the project-root path, so task worktrees stay on disk.
+Compete candidates always stay under the project root.
+
 Each task worktree is claimed by `.clio-coder/worktrees/<runId>.task-owner.json`,
-which records the branch, the base commit, the apply mode, and a lease on the
+which always stays under the project root and records the working tree's path,
+the branch, the base commit, the apply mode, and a lease on the
 Clio process that created it (host, PID, and a PID-reuse-resistant start
 identity). A run that ends and keeps its worktree marks the claim `settled`.
 At the next start in the same checkout, a claim that is still `active` while
 its owner is gone is a crash. A worktree with no commit beyond its base and no
-modified, staged, or untracked file is removed with its branch. One that holds
+modified, staged, or untracked file is removed with its branch, and so is one
+whose tmpfs working tree a reboot took, after its stale git metadata is pruned;
+its commits, if any, keep it. One that holds
 work is kept, marked `abandoned`, and named once on stderr as
 `[dispatch] task worktree recovery preserved <runId>: ...`; it is never merged
 and never deleted. A live owner, an owner on another host, a claim written

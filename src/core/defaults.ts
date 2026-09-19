@@ -390,11 +390,21 @@ export interface FleetNodeSettings {
 	residency?: FleetNodeResidency;
 }
 
+export interface FleetWorktreesSettings {
+	/**
+	 * Where a `worktree: true` task's working tree is created, for local
+	 * placement: `disk` (under the project root), `tmpfs`, `auto` (tmpfs when
+	 * one exists and has room), or an absolute path.
+	 */
+	root: string;
+}
+
 export interface FleetSettings extends FleetRouteSettings {
 	nodes: FleetNodeSettings[];
 	adaptiveRouting: AdaptiveRoutingSettings;
 	permissions: FleetPermissionsSettings;
 	concurrency: "auto" | number;
+	worktrees: FleetWorktreesSettings;
 	retry: FleetRetrySettings;
 	limits: FleetLimitsSettings;
 	history: FleetHistorySettings;
@@ -517,6 +527,7 @@ export const DEFAULT_SETTINGS = {
 			escalation: { timeoutMs: 120000, fallback: "deny" } as WorkerEscalationSettings,
 		},
 		concurrency: "auto" as "auto" | number,
+		worktrees: { root: "disk" },
 		retry: { maxRetries: 2, routeCooldownMs: 15000, breakerThreshold: 1 },
 		limits: {
 			toolCallsPerRun: GUARDRAIL_DEFAULTS.workerToolCallCap,
@@ -651,6 +662,8 @@ fleet:
       timeoutMs: 120000
       fallback: deny
   concurrency: auto
+  worktrees:
+    root: disk
   retry:
     maxRetries: 2
     routeCooldownMs: 15000

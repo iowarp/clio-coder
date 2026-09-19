@@ -55,6 +55,7 @@ import {
 	settleTaskWorktree,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
+import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
 import {
 	serializeWorkerRuntimeDescriptor,
 	WORKER_PROTECTED_ARTIFACT_STATE_VERSION,
@@ -6421,7 +6422,27 @@ export function createDispatchBundle(
 			const runId = newRunId();
 			let taskWorktree: NonNullable<DispatchRequest["taskWorktree"]>;
 			try {
-				taskWorktree = createTaskWorktree(root, runId, undefined, req.apply ?? "merge");
+				// fleet.worktrees.root moves the working tree for local placement
+				// only: with fleet nodes the run may land on another host, which
+				// reaches the worktree by the project-root path alone.
+				const fleetSettings = getEffectiveSettings()?.fleet;
+				let worktreeRoot = resolveWorktreeRoot({
+					setting: fleetSettings?.worktrees?.root ?? "disk",
+					projectRoot: root,
+					remoteEligible: (fleetSettings?.nodes?.length ?? 0) > 0,
+				});
+				const untrusted = prepareWorktreeParent(worktreeRoot);
+				if (untrusted !== null) {
+					worktreeRoot = {
+						parent: diskWorktreeParent(root),
+						kind: "disk",
+						notice: `${untrusted}; using the project root`,
+					};
+				}
+				if (worktreeRoot.notice !== undefined) {
+					reportDispatchDiagnostic(`task worktree root for ${runId}`, new Error(worktreeRoot.notice));
+				}
+				taskWorktree = createTaskWorktree(root, runId, undefined, req.apply ?? "merge", worktreeRoot.parent);
 			} catch (error) {
 				writerLease?.release();
 				throw error;

@@ -1566,6 +1566,7 @@ const SECTIONS: ReadonlyArray<SectionSpec> = [
 			return [
 				["Concurrency limit", concurrencyLabel(settings.fleet.concurrency)],
 				["Max retries", String(settings.fleet.retry.maxRetries)],
+				["Task worktree root", settings.fleet.worktrees.root],
 				["Tool calls per run", String(settings.fleet.limits.toolCallsPerRun)],
 				["Run timeout", `${settings.fleet.limits.internalRunTimeoutMs / 1000}s`],
 				["Worker profiles", listOr(Object.keys(settings.fleet.profiles))],
