@@ -12,7 +12,7 @@ export type Split = (typeof SPLITS)[number];
 export const PROFILES = ["default", "full"] as const;
 export type Profile = (typeof PROFILES)[number];
 export const DEFAULT_SEED = 1;
-export const TOOLS = ["edit", "read", "write", "grep"] as const;
+export const TOOLS = ["edit", "read", "write", "grep", "find"] as const;
 export type BenchTool = (typeof TOOLS)[number];
 
 export type CorpusEntry =
