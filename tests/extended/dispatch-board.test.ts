@@ -25,6 +25,7 @@ import {
 	type DispatchBoardRow,
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
+import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
@@ -696,7 +697,7 @@ describe("dispatch quality presentation", () => {
 				);
 				match(plain(collapsed), /3 execution ok/u);
 				ok(plain(collapsed).includes(wording), plain(collapsed));
-				const island = formatTaskIslandLines([row]);
+				const island = formatTaskIslandLines([{ ...row, agentAudience: "base" }]);
 				ok(plain(island).replace(/\s+/gu, " ").includes(wording), plain(island));
 				match(plain(island), /done/u);
 				const card = createDispatchBoardView(
@@ -708,7 +709,7 @@ describe("dispatch quality presentation", () => {
 				const stream = createWorkerStream({
 					readReceipt: () => ({ outcome: "succeeded", contract: "pass", trust: inspection.status }),
 				});
-				stream.started({ ...IDENTITY, pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
+				stream.started({ ...IDENTITY, agentAudience: "base", pid: null, assignmentId: IDENTITY.runId, attempt: 0 });
 				const worker = stream.completed(COMPLETED)?.entry;
 				ok(worker);
 				for (const style of ["compact", "standard", "detailed"] as const) {
@@ -746,4 +747,33 @@ describe("dispatch quality presentation", () => {
 			}
 		});
 	}
+});
+
+it("keeps shadow runs inspectable while presenting them only as compact helper activity", () => {
+	const { bus, board } = setup();
+	for (let i = 0; i < 4; i++) {
+		bus.emit(BusChannels.DispatchStarted, {
+			...IDENTITY,
+			agentId: "scout",
+			agentAudience: "shadow",
+			requestOrigin: "agent",
+			runId: `helper-${i}`,
+			assignmentId: `helper-${i}`,
+			attempt: 0,
+			pid: null,
+			council: undefined,
+		});
+	}
+	board.reconcile();
+	const rows = board.activeRows();
+	strictEqual(rows.length, 4);
+	match(dispatchSegment(rows) ?? "", /helpers scout ×4 4 active/);
+	doesNotMatch(stripTerminalSequences(formatTaskIslandLines(rows).join("\n")), /scout/);
+	const first = rows[0];
+	ok(first);
+	const ordinary = { ...first, runId: "ordinary", agentId: "coder", agentAudience: "base" as const };
+	const mixed = stripTerminalSequences(formatTaskIslandLines([...rows, ordinary]).join("\n"));
+	match(mixed, /coder/);
+	doesNotMatch(mixed, /scout/);
+	match(dispatchSegment([...rows, ordinary]) ?? "", /helpers scout ×4 4 active · dispatch 1 active/);
 });

@@ -115,6 +115,11 @@ export interface WorkerReceiptFacts extends WorkerReceiptSummary {
 /** Reads `receipts/<runId>.json` and projects it; null when it is absent or unreadable. */
 export type WorkerReceiptReader = (runId: string) => WorkerReceiptFacts | null;
 
+/** Presentation follows the admitted audience, never a recipe name. */
+export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agentAudience"] }): boolean {
+	return run.agentAudience === "shadow" || run.agentAudience === "internal";
+}
+
 export interface WorkerEntryState {
 	assignmentId: string;
 	/** Current attempt's run id. */
@@ -333,6 +338,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				}
 				return { kind: "updated", entry: existing };
 			}
+			if (isHelperRun(payload)) return null;
 			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
 			attemptByAssignment.set(assignmentId, payload.attempt);
 			const progress = createWorkerProgressFold();

@@ -38,8 +38,8 @@ import {
 	joinSections,
 	sectionTag,
 } from "../theme/index.js";
-
 import { fitIdentityLabel } from "../theme/labels.js";
+import { isHelperRun } from "../worker-stream.js";
 
 export interface ToolTallySnapshot {
 	tools: Readonly<Record<string, number>>;
@@ -946,8 +946,9 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	// counted out loud instead of vanishing, so the row count an operator sees
 	// always reconciles with the `fleet` line above it.
 	const workerWidth = options.width !== undefined && Number.isFinite(options.width) ? options.width : 48;
-	for (const row of facts.dispatchRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row, workerWidth)));
-	const hiddenWorkers = facts.dispatchRows.length - maxWorkers;
+	const fleetRows = facts.dispatchRows.filter((row) => !isHelperRun(row));
+	for (const row of fleetRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row, workerWidth)));
+	const hiddenWorkers = fleetRows.length - maxWorkers;
 	if (hiddenWorkers > 0) rows.push(statusRow(theme.fg("dim", `+${hiddenWorkers} more`)));
 	if (facts.taskBoard && facts.taskBoard.tasks.length > 0) {
 		rows.push(styledKv("tasks", taskBoardValue(theme, facts.taskBoard)));
@@ -1074,8 +1075,14 @@ function activeWorkerRows(rows: ReadonlyArray<DispatchBoardRow>): ReadonlyArray<
  */
 function activeWorkerChip(rows: ReadonlyArray<DispatchBoardRow>, localCapacity: LocalCapacity | null = null): string {
 	const active = activeWorkerRows(rows);
-	const count = active.length;
-	const chip = `${count} worker${count === 1 ? "" : "s"}`;
+	const helpers = active.filter(isHelperRun).length;
+	const workers = active.length - helpers;
+	const chip = [
+		helpers > 0 ? `${helpers} helper${helpers === 1 ? "" : "s"}` : null,
+		workers > 0 ? `${workers} worker${workers === 1 ? "" : "s"}` : null,
+	]
+		.filter(Boolean)
+		.join(" · ");
 	if (localCapacity === null) return chip;
 	const localDemand = active.filter((row) => row.node === undefined || row.node === "local").length;
 	const bound = localDemand > localCapacity.limit ? describeLocalCapacity(localCapacity) : null;

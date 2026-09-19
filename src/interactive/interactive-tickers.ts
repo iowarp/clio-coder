@@ -7,6 +7,7 @@ import {
 } from "./context-activity.js";
 import { type DispatchBoardRow, formatTaskIslandLines, TASK_ISLAND_WIDTH } from "./dispatch-board.js";
 import { clioTheme, frame, GLYPH } from "./theme/index.js";
+import { isHelperRun } from "./worker-stream.js";
 
 export interface InteractiveTickerHandle {
 	unref?(): void;
@@ -94,7 +95,7 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 	let taskIslandHidden = true;
 
 	const renderTaskIsland = (): boolean => {
-		const rows = deps.dispatchBoardStore.activeRows();
+		const rows = deps.dispatchBoardStore.activeRows().filter((row) => !isHelperRun(row));
 		const board = rows.length === 0 ? (deps.getTaskBoard?.() ?? null) : null;
 		const boardHasOpenTasks = board !== null && taskBoardCounts(board).open > 0;
 		const contextActive = deps.contextActivityStore.active();

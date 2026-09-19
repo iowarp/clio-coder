@@ -45,6 +45,7 @@ import {
 	spinnerFrame,
 } from "./theme/index.js";
 import { fitIdentityLabel } from "./theme/labels.js";
+import { isHelperRun } from "./worker-stream.js";
 
 export type DispatchBoardStatus = ObservabilityRunSummary["status"];
 
@@ -1082,7 +1083,7 @@ export function createDispatchBoardView(
 export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
 	// island one card and never crowds out the runs beside it.
-	const items = dispatchBoardItems(rows);
+	const items = dispatchBoardItems(rows.filter((row) => !isHelperRun(row)));
 	const visibleItems = items.slice(0, Math.max(1, maxRows));
 	const body: string[] = [];
 
