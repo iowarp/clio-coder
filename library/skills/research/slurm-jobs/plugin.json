@@ -1,0 +1,23 @@
+{
+	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+	"name": "slurm-jobs",
+	"version": "0.1.0",
+	"description": "Submits a batch script to Slurm through the clio-kit Slurm MCP server, polls it to a terminal state, fetches its output, and stamps the scheduler job id into the final answer. Not for writing the science inside the script or for interactive allocations.",
+	"license": "Apache-2.0",
+	"extensions": {
+		"ai.iowarp.clio": {
+			"manifestVersion": 1,
+			"kind": "skill",
+			"resources": {
+				"skills": "."
+			},
+			"components": [
+				{
+					"kind": "skill",
+					"id": "slurm-jobs",
+					"path": "SKILL.md"
+				}
+			]
+		}
+	}
+}

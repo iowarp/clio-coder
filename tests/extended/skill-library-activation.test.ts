@@ -37,7 +37,7 @@ it("activates every bundled skill from its native package in a workspace with pe
 			recursive: true,
 		});
 		const catalog = discoverLibrary({ cwd }).entries;
-		strictEqual(catalog.length, 34);
+		strictEqual(catalog.length, 35);
 		const refresh = pluginSnapshotRefreshHost();
 		refresh(cwd);
 		for (const entry of catalog) {
@@ -48,7 +48,7 @@ it("activates every bundled skill from its native package in a workspace with pe
 		}
 		refresh(cwd);
 		const skills = loadSkills({ cwd }).items;
-		strictEqual(skills.length, 39);
+		strictEqual(skills.length, 40);
 		const context = createContextTool({ getCwd: () => cwd });
 		for (const skill of skills) {
 			strictEqual(skill.source, "plugin", skill.name);

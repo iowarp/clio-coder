@@ -29,7 +29,7 @@ claude plugin marketplace add ./path/to/clio-coder
 claude plugin marketplace add "$(npm root -g)/@iowarp/clio-coder"
 ```
 
-The marketplace publishes 34 entries: the 33 curated skill packages and the
+The marketplace publishes 35 entries: the 34 curated skill packages and the
 `materio` bundle. What each entry becomes on the Claude Code side:
 
 | Source layout | What Claude Code loads |
@@ -75,7 +75,7 @@ own `.agents/skills` links straight at the canonical trees:
 .agents/skills/materio     -> ../../library/plugins/materio/skills
 ```
 
-A Codex session started anywhere in a clone therefore sees all 33 curated skills
+A Codex session started anywhere in a clone therefore sees all 34 curated skills
 and Materio's 6 portable skills under their canonical names, with no install step
 and no copied `SKILL.md`. To get the same catalog in every repository, link the
 canonical directories into your user skills root:

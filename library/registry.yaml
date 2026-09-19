@@ -803,6 +803,31 @@ entries:
           description, body, and length earn their cost. Not for packaging a
           workflow that just happened; use workflow-distiller.
   - kind: skill
+    name: slurm-jobs
+    description: Submits a batch script to Slurm through the clio-kit Slurm MCP
+      server, polls it to a terminal state, fetches its output, and stamps the
+      scheduler job id into the final answer. Not for writing the science inside
+      the script or for interactive allocations.
+    category: research
+    audit: pass
+    triggers:
+      - submit this job to slurm
+      - run this on the cluster
+      - sbatch this script
+      - check my slurm job
+      - cancel my slurm job
+      - is the queue busy
+    version: 0.1.0
+    sourceUrl: skills/research/slurm-jobs
+    sha256: d57b83965e1a1dbc46adbad605d755a7a69368c4f4e63e1e181a416a876dce40
+    provides:
+      - kind: skill
+        name: slurm-jobs
+        description: Submits a batch script to Slurm through the clio-kit Slurm MCP
+          server, polls it to a terminal state, fetches its output, and stamps
+          the scheduler job id into the final answer. Not for writing the
+          science inside the script or for interactive allocations.
+  - kind: skill
     name: tdd
     description: Builds a feature or fix test-first, red to green at pre-agreed
       public seams, one vertical slice at a time. Not for designing benchmark
