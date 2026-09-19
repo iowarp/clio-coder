@@ -4,7 +4,7 @@ import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, renderContextMeterBar } from "../context-meter.js";
-import { type DispatchBoardRow, dispatchStatusPresentation } from "../dispatch-board.js";
+import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { previewRows } from "../renderers/preview.js";
 import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
@@ -32,14 +32,7 @@ function agentCard(row: DispatchBoardRow, width: number): string[] {
 		wrapTextWithAnsi(`${theme.fg("dim", `${label}  `)}${clean(value)}`, width);
 	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
 	if (row.taskSummary) lines.push(...field("Task", row.taskSummary));
-	const action = row.progress?.currentAction;
-	if (action)
-		lines.push(
-			...field(
-				"Now",
-				action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object ?? ""}` : action.tool,
-			).slice(0, 2),
-		);
+	lines.push(...renderDispatchActivity(row, width));
 	const usage: string[] = [];
 	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0)
 		usage.push(`↑ ${formatFooterTokens(row.inputTokens)} input`, `↓ ${formatFooterTokens(row.outputTokens)} output`);
