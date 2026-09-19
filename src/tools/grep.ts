@@ -96,6 +96,18 @@ interface GrepRenderInput {
 const NO_MATCH_OUTPUT = "No matches found";
 
 /**
+ * The string in one of rg's JSON "arbitrary data" objects. rg writes `text`
+ * when the bytes are valid UTF-8 and base64 `bytes` when they are not, so a
+ * match on a Latin-1 line arrives without `text`. It decodes the way the
+ * fallback reads a file: invalid sequences become U+FFFD and the line shows.
+ */
+function rgJsonText(field: unknown): string | undefined {
+	if (!field || typeof field !== "object") return undefined;
+	const { text, bytes } = field as { text?: unknown; bytes?: unknown };
+	if (typeof text === "string") return text;
+	return typeof bytes === "string" ? Buffer.from(bytes, "base64").toString("utf8") : undefined;
+}
+/**
  * Shared shaping for the rg and fallback paths: byte-cap the rendered lines at
  * the reservation cap (never mid-line), recount shown items, offload the full
  * rendering when anything was cut, and close the envelope.
@@ -219,9 +231,9 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		const type = (event as { type?: unknown }).type;
 		if (type !== "match" && type !== "context") return;
 		const data = (event as { data?: Record<string, unknown> }).data;
-		const filePath = (data?.path as { text?: unknown } | undefined)?.text;
+		const filePath = rgJsonText(data?.path);
 		const lineNumber = data?.line_number;
-		const lineText = (data?.lines as { text?: unknown } | undefined)?.text;
+		const lineText = rgJsonText(data?.lines);
 		if (typeof filePath !== "string" || typeof lineNumber !== "number" || typeof lineText !== "string") return;
 		if (!input.pathFilter.allows(filePath)) return;
 		const { text, wasTruncated } = truncateLine(sanitizeMatchText(lineText));
