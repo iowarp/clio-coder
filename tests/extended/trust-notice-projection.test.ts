@@ -6,7 +6,7 @@ import { createInteractiveEventProjection } from "../../src/interactive/interact
 import { createInteractiveSubscriptions } from "../../src/interactive/interactive-subscriptions.js";
 
 for (const audience of ["internal", "shadow"] as const)
-	test(`${audience} helpers announce work and failures through notices without requiring a transcript island`, () => {
+	test(`${audience} helpers announce work and failures through notices with compact inline agent state`, () => {
 		const bus = createSafeEventBus();
 		const notices: string[] = [];
 		let islands = 0;
@@ -18,7 +18,8 @@ for (const audience of ["internal", "shadow"] as const)
 			renderContextIsland: noop,
 			requestRender: noop,
 			notify: (_level, text) => notices.push(text),
-			applyWorkerState: () => {
+			applyWorkerState: (state) => {
+				strictEqual(state.helper, true);
 				islands += 1;
 			},
 		});
@@ -43,7 +44,7 @@ for (const audience of ["internal", "shadow"] as const)
 			"Clio → context-bootstrap · working · run helper-1",
 			"Clio → context-bootstrap · failed · run helper-1",
 		]);
-		strictEqual(islands, 0);
+		strictEqual(islands, 2);
 		subscriptions.dispose();
 		bus.emit(BusChannels.DispatchStarted, { ...identity, pid: null, assignmentId: "helper-1", attempt: 0 });
 		strictEqual(notices.length, 2);

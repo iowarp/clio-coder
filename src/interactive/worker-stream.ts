@@ -121,6 +121,9 @@ export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agent
 }
 
 export interface WorkerEntryState {
+	/** Compact agent-to-agent presentation, selected from the admitted audience. */
+	helper?: true;
+	task?: string;
 	assignmentId: string;
 	/** Current attempt's run id. */
 	runId: string;
@@ -338,14 +341,16 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				}
 				return { kind: "updated", entry: existing };
 			}
-			if (isHelperRun(payload)) return null;
-			if (payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
+			const helper = isHelperRun(payload);
+			if (!helper && payload.requestOrigin !== "user" && payload.requestOrigin !== "agent") return null;
 			attemptByAssignment.set(assignmentId, payload.attempt);
 			const progress = createWorkerProgressFold();
 			const entry: WorkerEntryState = {
 				assignmentId,
 				runId,
-				origin: payload.requestOrigin,
+				origin: payload.requestOrigin === "user" ? "user" : "agent",
+				...(helper ? { helper: true as const } : {}),
+				...(payload.task ? { task: payload.task.slice(0, 1000) } : {}),
 				agentId: payload.agentId,
 				runtime,
 				text: "",

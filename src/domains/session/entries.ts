@@ -459,6 +459,8 @@ export interface WorkerRunRuntime {
  * as ordinary text.
  */
 export interface WorkerRunEntry extends BaseSessionEntry {
+	helper?: true;
+	task?: string;
 	kind: "workerRun";
 	/** Logical work item. Retries and failovers of one run share it. */
 	assignmentId: string;
@@ -860,6 +862,8 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			);
 		case "workerRun":
 			return (
+				(v.helper === undefined || v.helper === true) &&
+				isOptionalString(v.task) &&
 				isString(v.assignmentId) &&
 				isString(v.runId) &&
 				isOneOf(v.origin, WORKER_RUN_ORIGINS) &&

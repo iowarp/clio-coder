@@ -22,9 +22,11 @@ import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-pane
 import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
+import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
-import { workerEntriesFromRunEntries } from "../../src/interactive/worker-replay.js";
+import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
+import { workerEntriesFromRunEntries, workerRunEntryFields } from "../../src/interactive/worker-replay.js";
 import {
 	createWorkerStream,
 	type WorkerEntryState,
@@ -503,4 +505,78 @@ describe("Pi TUI compatibility", () => {
 			tui.stop();
 		}
 	});
+});
+
+it("renders a distinct compact helper card and preserves its identity on replay", () => {
+	const stream = createWorkerStream({ readReceipt: () => null });
+	const started = stream.started({
+		runId: "helper-run",
+		assignmentId: "helper-task",
+		attempt: 0,
+		requestOrigin: "agent",
+		agentAudience: "shadow",
+		agentId: "scout",
+		task: "Explore the source architecture",
+		runtimeKind: "http",
+		runtimeId: "openai-compat",
+		targetId: "blade",
+		wireModelId: "model",
+		pid: null,
+	});
+	ok(started);
+	const state = started.entry;
+	const lines = renderWorkerEntryLines(state, 100, {});
+	strictEqual(lines.length, 3);
+	const plain = stripTerminalSequences(lines.join("\n"));
+	match(plain, /Clio → scout.*internal agent.*working/);
+	match(plain, /Explore the source architecture/);
+	match(plain, /Gathering findings for Clio/);
+	ok(lines.every((line) => visibleWidth(line) <= 100));
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		for (const width of [32, 80, 120]) {
+			const rendered = renderWorkerEntryLines(state, width, { detail: transcriptDetail(style), terminalRows: 24 });
+			ok(rendered.every((line) => visibleWidth(line) <= width));
+			if (style === "compact") strictEqual(rendered.length, 1);
+		}
+	}
+	const call = renderToolSubline(
+		{
+			toolName: "dispatch",
+			toolCallId: "helper-call",
+			args: { agent: "scout", task: "Explore the source architecture" },
+		},
+		100,
+	);
+	match(stripTerminalSequences(call.join("\n")), /dispatching scout/);
+	doesNotMatch(stripTerminalSequences(call.join("\n")), /tool action/);
+	const fields = workerRunEntryFields(state);
+	const entry: WorkerRunEntry = {
+		...fields,
+		parentTurnId: null,
+		turnId: "helper-entry",
+		timestamp: new Date().toISOString(),
+	};
+	const replayed = workerEntriesFromRunEntries([entry], () => ({
+		outcome: "succeeded",
+		contract: "pass",
+		text: "full findings",
+	})).get("helper-task");
+	ok(replayed);
+	const done = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
+	match(done, /internal agent.*completed/);
+	match(done, /Explore the source architecture/);
+	match(done, /Findings returned to Clio/);
+	doesNotMatch(done, /full findings/);
+	const expanded = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, { unbounded: true }).join("\n"));
+	match(expanded, /full findings/);
+	match(expanded, /internal agent/);
+	const detailed = stripTerminalSequences(
+		renderWorkerEntryLines(replayed, 100, { detail: transcriptDetail("detailed") }).join("\n"),
+	);
+	match(detailed, /full findings/);
+
+	replayed.receipt = { outcome: "failed", failureMessage: "Invalid helper result" };
+	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
+	match(failed, /internal agent.*failed/);
+	match(failed, /Invalid helper result/);
 });

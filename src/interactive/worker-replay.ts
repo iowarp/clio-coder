@@ -46,6 +46,8 @@ export function workerRunEntryFields(state: WorkerEntryState): WorkerRunEntryFie
 	const { assignmentId, runId, origin, agentId, runtime, parentToolCallId } = state;
 	return {
 		kind: "workerRun",
+		...(state.helper ? { helper: true as const } : {}),
+		...(state.task !== undefined ? { task: state.task } : {}),
 		assignmentId,
 		runId,
 		origin,
@@ -96,6 +98,8 @@ export function workerEntriesFromRunEntries(
 			assignmentId,
 			runId: last.runId,
 			origin: last.origin,
+			...(last.helper ? { helper: true as const } : {}),
+			...(last.task !== undefined ? { task: last.task } : {}),
 			agentId: last.agentId,
 			runtime: last.runtime,
 			text: bounded.text,

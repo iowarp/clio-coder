@@ -644,7 +644,13 @@ function dispatchSublineBody(args: unknown): string | null {
 			}
 		}
 	}
-	const tasks = Array.isArray(rawTasks) ? rawTasks : rawTasks === undefined ? [] : [rawTasks];
+	const tasks = Array.isArray(rawTasks)
+		? rawTasks
+		: rawTasks === undefined
+			? typeof args.task === "string"
+				? [args]
+				: []
+			: [rawTasks];
 	if (tasks.length === 0) return null;
 	const first = tasks[0];
 	const record = isPlainObject(first) ? first : null;
