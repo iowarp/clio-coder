@@ -22,7 +22,11 @@ import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-pane
 import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
-import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
+import {
+	renderToolExecution,
+	renderToolPreview,
+	renderToolSubline,
+} from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
@@ -525,10 +529,13 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 	});
 	ok(started);
 	const state = started.entry;
-	const lines = renderWorkerEntryLines(state, 100, {});
-	strictEqual(lines.length, 3);
+	state.startedAtMs = 1000;
+	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 7000 }).join("\n")), /6.0s/);
+	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 13000 }).join("\n")), /12s/);
+	const lines = renderWorkerEntryLines(state, 100, { nowMs: 1000 });
+	strictEqual(lines.length, 4);
 	const plain = stripTerminalSequences(lines.join("\n"));
-	match(plain, /Clio → scout.*internal agent.*working/);
+	match(plain, /Clio-Coder → Scout.*internal agent.*working/);
 	match(plain, /Explore the source architecture/);
 	match(plain, /Gathering findings for Clio/);
 	ok(lines.every((line) => visibleWidth(line) <= 100));
@@ -536,7 +543,7 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 		for (const width of [32, 80, 120]) {
 			const rendered = renderWorkerEntryLines(state, width, { detail: transcriptDetail(style), terminalRows: 24 });
 			ok(rendered.every((line) => visibleWidth(line) <= width));
-			if (style === "compact") strictEqual(rendered.length, 1);
+			if (style === "compact") match(stripTerminalSequences(rendered.join("\n")), /Explore the source/);
 		}
 	}
 	const call = renderToolSubline(
@@ -579,4 +586,56 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
 	match(failed, /internal agent.*failed/);
 	match(failed, /Invalid helper result/);
+});
+
+it("preserves complete invocation arguments in inspection and meaningful intent in every style", () => {
+	const command = `printf '%s\\n' ${"long-command-argument ".repeat(30)}FINAL_ARGUMENT`;
+	const call = {
+		toolName: "bash",
+		toolCallId: "transparent",
+		args: { command, cwd: "/tmp/project", api_key: "do-not-display-me" },
+		result: "done",
+		isError: false,
+	};
+	const full = stripTerminalSequences(renderToolExecution(call, 72).join("\n"));
+	match(full, /FINAL_ARGUMENT/);
+	match(full, /cwd.*project/);
+	doesNotMatch(full, /do-not-display-me/);
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		const rows = renderToolPreview(call, 72, transcriptDetail(style));
+		const text = stripTerminalSequences(rows.join("\n"));
+		match(text, /command/);
+		match(text, /long-command-argument/);
+		if (style !== "detailed") match(text, /\/view/);
+		doesNotMatch(text, /do-not-display-me/);
+		ok(rows.every((row) => visibleWidth(row) <= 72));
+	}
+	const nested = {
+		toolName: "gateway",
+		toolCallId: "nested",
+		args: { payload: { prompt: `start\n${"line\n".repeat(30)}END_OF_PROMPT` } },
+		result: "ok",
+		isError: false,
+	};
+	match(stripTerminalSequences(renderToolExecution(nested, 72).join("\n")), /END_OF_PROMPT/);
+});
+
+it("keeps helper context occupancy separate from cumulative tokens and counts observed tool invocations", () => {
+	const fold = createWorkerProgressFold();
+	strictEqual(fold.snapshot().processedTokens, undefined);
+	strictEqual(fold.snapshot().contextTokens, undefined);
+	for (const input of [100, 200])
+		fold.observe({
+			type: "message_end",
+			message: { role: "assistant", usage: { input, output: 20, cacheRead: 50, cacheWrite: 10 } },
+		});
+	fold.observe({ type: "clio_coder_tool_start", payload: { tool: "read", toolCallId: "one" } });
+	fold.observe({ type: "clio_coder_tool_start", payload: { tool: "read", toolCallId: "one" } });
+	fold.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "one" } });
+	strictEqual(fold.snapshot().processedTokens, 460);
+	strictEqual(fold.snapshot().contextTokens, 280);
+	strictEqual(fold.snapshot().toolCalls, 1);
+	fold.restart();
+	strictEqual(fold.snapshot().processedTokens, undefined);
+	strictEqual(fold.snapshot().toolCalls, undefined);
 });

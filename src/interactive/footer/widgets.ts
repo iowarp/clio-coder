@@ -10,7 +10,7 @@ import { describeLocalCapacity, type LocalCapacity } from "../../domains/schedul
 import type { ContextUsageBreakdown } from "../../domains/session/context-accounting.js";
 import type { ContextLedger, ContextLedgerCategory } from "../../domains/session/context-ledger.js";
 import { type TaskBoardSnapshot, taskBoardCounts } from "../../domains/session/task-board.js";
-import { truncateToWidth, visibleWidth } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { CONTEXT_CATEGORY_TOKEN, contextCategorySwatch, renderContextMeterBar } from "../context-meter.js";
 import {
 	agentDisplayLabel,
@@ -136,7 +136,7 @@ export interface AgentWorkFacts {
 /** Responsive bands for the expanded footer. */
 export const EXPANDED_WIDE = 80;
 export const EXPANDED_MID = 70;
-export const EXPANDED_ULTRAWIDE = 120;
+export const EXPANDED_ULTRAWIDE = 220;
 
 /** Compact footer shows the git section only when there is room for it. */
 const COMPACT_GIT_MIN_WIDTH = 72;
@@ -487,14 +487,25 @@ function renderDashboardRow(theme: ClioTheme, row: DashboardRow, keyWidth: numbe
 	return `${key}${value}`;
 }
 
-function dashboardBlock(theme: ClioTheme, label: string, rows: ReadonlyArray<DashboardRow>): string[] {
+function dashboardBlock(
+	theme: ClioTheme,
+	label: string,
+	rows: ReadonlyArray<DashboardRow>,
+	width = Number.POSITIVE_INFINITY,
+): string[] {
 	const keyWidth = rows.reduce((max, row) => (row.kind === "kv" ? Math.max(max, row.key.length) : max), 0);
-	const body = rows
-		.map((row) => renderDashboardRow(theme, row, keyWidth))
-		.filter((row): row is string => typeof row === "string" && row.length > 0);
-	// Every quadrant tag shares one structure color. The tag names the quadrant;
-	// the color is not a per-quadrant signal, so all four render bold accentDeep
-	// rather than the old info/accent/reason/success carnival.
+	const body = rows.flatMap((row) => {
+		const rendered = renderDashboardRow(theme, row, keyWidth);
+		if (!rendered) return [];
+		if (!Number.isFinite(width)) return [rendered];
+		if (row.kind !== "kv") return wrapTextWithAnsi(rendered, Math.max(1, width));
+		const prefixWidth = Math.min(keyWidth + 1, Math.max(0, width - 1));
+		const value = row.styled ? (row.value ?? "") : theme.fg(row.valueToken ?? "muted", row.value ?? "");
+		return wrapTextWithAnsi(value, Math.max(1, width - prefixWidth)).map(
+			(line, index) =>
+				`${index === 0 ? theme.fg("dim", `${row.key.padEnd(keyWidth)} `.slice(0, prefixWidth)) : " ".repeat(prefixWidth)}${line}`,
+		);
+	});
 	return [sectionTag(theme, "accentDeep", label.toUpperCase(), 0), ...body];
 }
 
@@ -517,12 +528,17 @@ function legendRow(value: string | null | undefined): DashboardRow {
 export function workspaceQuadrant(facts: WorkspaceFacts, _options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const remote = collapseRemote(facts.remote);
-	return dashboardBlock(theme, "Workspace", [
-		kv("cwd", facts.cwd),
-		styledKv("git", gitValue(theme, facts.branch, facts.dirty)),
-		kv("type", facts.projectType),
-		kv("remote", remote),
-	]);
+	return dashboardBlock(
+		theme,
+		"Workspace",
+		[
+			kv("cwd", facts.cwd),
+			styledKv("git", gitValue(theme, facts.branch, facts.dirty)),
+			kv("type", facts.projectType),
+			kv("remote", remote),
+		],
+		_options.width,
+	);
 }
 
 function sessionIdentity(facts: SessionFacts): { key: string; value: string } | null {
@@ -539,7 +555,7 @@ function capabilitiesValue(theme: ClioTheme, capabilities: string[] | null): str
 	);
 }
 
-export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOptions = {}): string[] {
+export function sessionQuadrant(facts: SessionFacts, _options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const identity = sessionIdentity(facts);
 	const memory = facts.memoryIntervention;
@@ -556,25 +572,30 @@ export function sessionQuadrant(facts: SessionFacts, options: ExpandedQuadrantOp
 					...(memory.stepInFlight ? [theme.fg("reason", "working")] : []),
 					...(memory.lastDecision ? [theme.fg("dim", memory.lastDecision)] : []),
 				],
-				Math.max(1, (options.width ?? Number.POSITIVE_INFINITY) - 9),
+				Number.POSITIVE_INFINITY,
 			)
 		: null;
-	return dashboardBlock(theme, "Session", [
-		identity ? kv(identity.key, identity.value, "accent") : statusRow(null),
-		kv("target", facts.target, "accent"),
-		kv("think", facts.thinking, "reason"),
-		styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
-		// accentDeep is a structure color reserved for the section tag; the autonomy
-		// value is a plain fact and reads muted like the other neutral values.
-		kv("autonomy", facts.safety),
-		kv("profile", facts.toolProfile),
-		kv(
-			"output",
-			facts.outputStyle && facts.outputStyle !== "standard" ? facts.outputStyle : null,
-			facts.outputStyle === "detailed" ? "accent" : "muted",
-		),
-		styledKv("memory", memoryValue),
-	]);
+	return dashboardBlock(
+		theme,
+		"Session",
+		[
+			identity ? kv(identity.key, identity.value, "accent") : statusRow(null),
+			kv("target", facts.target, "accent"),
+			kv("think", facts.thinking, "reason"),
+			styledKv("caps", capabilitiesValue(theme, facts.capabilities)),
+			// accentDeep is a structure color reserved for the section tag; the autonomy
+			// value is a plain fact and reads muted like the other neutral values.
+			kv("autonomy", facts.safety),
+			kv("profile", facts.toolProfile),
+			kv(
+				"output",
+				facts.outputStyle && facts.outputStyle !== "standard" ? facts.outputStyle : null,
+				facts.outputStyle === "detailed" ? "accent" : "muted",
+			),
+			styledKv("memory", memoryValue),
+		],
+		_options.width,
+	);
 }
 
 function expandedContextBarCells(width: number | undefined): number {
@@ -719,18 +740,23 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 
 	const usedTokens = hasLedger && ledger ? ledger.usedTokens : facts.used;
 	const windowTokens = hasLedger && ledger ? ledger.contextWindow : facts.contextWindow;
-	return dashboardBlock(theme, "Context", [
-		statusRow(bar),
-		kv("used", formatUsedWindow(usedTokens, windowTokens)),
-		fill ? styledKv("fill", fill) : statusRow(null),
-		chatFree ? styledKv("chat", chatFree) : statusRow(null),
-		kv("compact", formatCompaction(facts)),
-		styledKv("source", sourceState(theme, facts)),
-		facts.extensions && facts.extensions.installed > 0
-			? kv("ext", `${facts.extensions.active}/${facts.extensions.installed}`)
-			: statusRow(null),
-		...legendRows.map((row) => legendRow(row)),
-	]);
+	return dashboardBlock(
+		theme,
+		"Context",
+		[
+			statusRow(bar),
+			kv("used", formatUsedWindow(usedTokens, windowTokens)),
+			fill ? styledKv("fill", fill) : statusRow(null),
+			chatFree ? styledKv("budget", chatFree) : statusRow(null),
+			kv("compact", formatCompaction(facts)),
+			styledKv("source", sourceState(theme, facts)),
+			facts.extensions && facts.extensions.installed > 0
+				? kv("ext", `${facts.extensions.active}/${facts.extensions.installed}`)
+				: statusRow(null),
+			...legendRows.map((row) => legendRow(row)),
+		],
+		options.width,
+	);
 }
 
 function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; token: ClioToken } {
@@ -748,7 +774,7 @@ function stopReasonStyle(reason: TurnSummary["stopReason"]): { glyph: string; to
  * rather than clipping a receipt id into a string that still reads like a valid
  * trace argument.
  */
-function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): string {
+function workerLine(theme: ClioTheme, row: DispatchBoardRow, _width: number): string {
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
 	// The Activity section already promotes the fleet summary (or dispatch phase)
 	// to action orange. Worker rows remain readable without repeating that signal.
@@ -760,7 +786,13 @@ function workerLine(theme: ClioTheme, row: DispatchBoardRow, width: number): str
 		theme.fg("dim", formatCompactMs(row.elapsedMs)),
 		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
 	];
-	return fitUnits(theme, dispatchRowPrefix(theme, row).text, units, Math.max(1, Math.floor(width)));
+	if (row.progress?.toolCalls !== undefined) units.push(theme.fg("muted", `${row.progress.toolCalls} calls`));
+	if (row.progress?.contextTokens !== undefined)
+		units.push(theme.fg("muted", `context ${formatFooterTokens(row.progress.contextTokens)}`));
+	if (row.progress?.inputTokens !== undefined || row.inputTokens > 0 || row.outputTokens > 0) {
+		units.push(theme.fg("dim", `↑${formatFooterTokens(row.inputTokens)} ↓${formatFooterTokens(row.outputTokens)}`));
+	}
+	return `${dispatchRowPrefix(theme, row).text}${units.join(" · ")}`;
 }
 
 interface ActivityQuadrantOptions extends ExpandedQuadrantOptions {
@@ -946,7 +978,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 	// counted out loud instead of vanishing, so the row count an operator sees
 	// always reconciles with the `fleet` line above it.
 	const workerWidth = options.width !== undefined && Number.isFinite(options.width) ? options.width : 48;
-	const fleetRows = facts.dispatchRows.filter((row) => !isHelperRun(row));
+	const fleetRows = facts.dispatchRows;
 	for (const row of fleetRows.slice(0, maxWorkers)) rows.push(statusRow(workerLine(theme, row, workerWidth)));
 	const hiddenWorkers = fleetRows.length - maxWorkers;
 	if (hiddenWorkers > 0) rows.push(statusRow(theme.fg("dim", `+${hiddenWorkers} more`)));
@@ -955,7 +987,7 @@ export function activityQuadrant(facts: AgentWorkFacts, options: ActivityQuadran
 		rows.push(statusRow(activeTaskLine(theme, facts.taskBoard)));
 	}
 	rows.push(kv("tools", meaningfulToolTally(facts.toolTally)));
-	return dashboardBlock(theme, "Activity", rows);
+	return dashboardBlock(theme, "Activity", rows, options.width);
 }
 
 /**
@@ -969,6 +1001,8 @@ export function zipColumns(
 	rightWidth: number,
 	sep: string,
 ): string[] {
+	left = left.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, leftWidth)));
+	right = right.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, rightWidth)));
 	const rowCount = Math.max(left.length, right.length);
 	const lines: string[] = [];
 	for (let i = 0; i < rowCount; i += 1) {
@@ -978,6 +1012,9 @@ export function zipColumns(
 }
 
 export function zipColumnBlocks(blocks: ReadonlyArray<string[]>, widths: ReadonlyArray<number>, sep: string): string[] {
+	blocks = blocks.map((block, index) =>
+		block.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, widths[index] ?? 1))),
+	);
 	const rowCount = blocks.reduce((max, block) => Math.max(max, block.length), 0);
 	const lines: string[] = [];
 	for (let row = 0; row < rowCount; row += 1) {

@@ -88,6 +88,13 @@ export interface WorkerAction {
  * renderer can skip a repaint by identity rather than by diffing text.
  */
 export interface WorkerProgressSnapshot {
+	/** Measured totals for the current attempt, absent until the producer reports them. */
+	inputTokens?: number;
+	outputTokens?: number;
+	processedTokens?: number;
+	/** Occupancy from the last completed model call, never cumulative usage. */
+	contextTokens?: number;
+	toolCalls?: number;
 	revision: number;
 	phase: WorkerProgressPhase;
 	/** Bounded worker prose: the live tail while running, the sealed answer once settled. */
@@ -252,6 +259,11 @@ const EMPTY_SNAPSHOT: WorkerProgressSnapshot = {
 
 export function createWorkerProgressFold(): WorkerProgressFold {
 	let revision = 0;
+	let inputTokens: number | undefined;
+	let outputTokens: number | undefined;
+	let processedTokens: number | undefined;
+	let contextTokens: number | undefined;
+	let toolCalls: number | undefined;
 	let phase: WorkerProgressPhase = "starting";
 	let tailText = "";
 	let droppedLines = 0;
@@ -339,6 +351,31 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		observe(event: unknown, nowMs = Date.now()): boolean {
 			if (!isRecord(event) || settled) return false;
 			let changed = false;
+			if (
+				event.type === "message_end" &&
+				isRecord(event.message) &&
+				event.message.role === "assistant" &&
+				isRecord(event.message.usage)
+			) {
+				const usage = event.message.usage;
+				const count = (value: unknown) => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : 0);
+				if (
+					typeof usage.input === "number" &&
+					Number.isFinite(usage.input) &&
+					usage.input >= 0 &&
+					typeof usage.output === "number" &&
+					Number.isFinite(usage.output) &&
+					usage.output >= 0
+				) {
+					const input = count(usage.input) + count(usage.cacheRead);
+					const output = count(usage.output);
+					inputTokens = (inputTokens ?? 0) + input;
+					outputTokens = (outputTokens ?? 0) + output;
+					processedTokens = (processedTokens ?? 0) + input + output + count(usage.cacheWrite);
+					contextTokens = input + output + count(usage.cacheWrite);
+					changed = touch();
+				}
+			}
 
 			const delta = workerTextDelta(event);
 			if (delta.length > 0) {
@@ -364,6 +401,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 
 			const action = toolEventAction(event);
 			if (action !== null && event.type === "clio_coder_tool_start") {
+				if (action.toolCallId === undefined || !pendingActionsById.has(action.toolCallId)) toolCalls = (toolCalls ?? 0) + 1;
 				if (action.toolCallId !== undefined) {
 					const duplicate = pendingActionsById.get(action.toolCallId);
 					if (duplicate !== undefined) removePendingAction(duplicate);
@@ -413,6 +451,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		},
 
 		restart(): void {
+			inputTokens = outputTokens = processedTokens = contextTokens = toolCalls = undefined;
 			currentAction = null;
 			pendingActions.length = 0;
 			pendingActionsById.clear();
@@ -426,6 +465,15 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 		snapshot(): WorkerProgressSnapshot {
 			if (cached !== null) return cached;
 			cached = {
+				...(inputTokens === undefined
+					? {}
+					: {
+							inputTokens,
+							outputTokens: outputTokens ?? 0,
+							processedTokens: processedTokens ?? 0,
+							contextTokens: contextTokens ?? 0,
+						}),
+				...(toolCalls === undefined ? {} : { toolCalls }),
 				revision,
 				phase,
 				tailText,

@@ -4,6 +4,7 @@ import type { OutputStyle } from "../core/defaults.js";
 export interface TranscriptDetailPolicy {
 	style: OutputStyle;
 	reasoningRows: number;
+	invocationRows: number;
 	resultRows: number;
 	bashRows: number;
 	operatorBashRows: number;
@@ -17,6 +18,7 @@ export interface TranscriptDetailPolicy {
 const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 	compact: {
 		style: "compact",
+		invocationRows: 4,
 		reasoningRows: 0,
 		resultRows: 0,
 		bashRows: 0,
@@ -29,6 +31,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 	},
 	standard: {
 		style: "standard",
+		invocationRows: 8,
 		reasoningRows: 3,
 		resultRows: 0,
 		bashRows: 0,
@@ -41,6 +44,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 	},
 	detailed: {
 		style: "detailed",
+		invocationRows: 18,
 		reasoningRows: 12,
 		resultRows: 8,
 		bashRows: 12,

@@ -111,7 +111,7 @@ export interface DispatchBoardRow {
 	failoverHops?: number;
 	/** Model context window for the per-worker context meter. */
 	contextWindow?: number;
-	/** Last assistant message's input+cacheRead+output: current context occupancy. */
+	/** Last assistant message's input+cacheRead+cacheWrite+output: current context occupancy. */
 	lastContextTokens?: number;
 	/** Tool currently executing in the worker; null between calls. Projected from `progress`. */
 	currentTool?: string | null;
@@ -811,8 +811,10 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 		? `  ${theme.fg("warning", `attempt ${row.retry.attempt}`)}${dot}${theme.fg("muted", retryCountdown(row.retry))}`
 		: `  ${up}${dot}${down}${dot}${theme.fg("muted", cost)}`;
 	const task = row.taskSummary
-		? `  ${theme.fg("muted", truncateToWidth(row.taskSummary, Math.max(1, width - 2), "…", false))}`
-		: null;
+		? wrapTextWithAnsi(row.taskSummary, Math.max(1, width - 2))
+				.slice(0, 3)
+				.map((line) => `  ${theme.fg("muted", line)}`)
+		: [];
 
 	const quality = isTerminalStatus(row.status)
 		? wrapTextWithAnsi(
@@ -823,8 +825,9 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 	return [
 		padAnsi(line1, width),
 		...quality.map((line) => padAnsi(theme.fg("muted", line), width)),
-		...(task ? [padAnsi(task, width)] : []),
+		...task.map((line) => padAnsi(line, width)),
 		padAnsi(telemetry, width),
+		...wrapTextWithAnsi(theme.fg("dim", `  /view dispatch:${row.runId}`), width),
 	];
 }
 

@@ -843,7 +843,7 @@ class AskUserOverlayView implements Component {
 	 */
 	private renderQuestionHeader(question: AskUserQuestion, width: number): string[] {
 		const theme = clioTheme();
-		const parts: string[] = [];
+		const parts: string[] = [theme.fg("accent", "Clio-Coder asks you")];
 		if (question.header) parts.push(screenTitle(theme, question.header));
 		if (this.questions.length <= 1 && this.roundsAnswered > 0) {
 			parts.push(theme.fg("dim", `Round ${this.roundsAnswered + 1}`));

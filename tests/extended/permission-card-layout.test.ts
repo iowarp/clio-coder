@@ -110,3 +110,23 @@ test("? folds the terms while the card owns the keys and yields while the mutati
 	strictEqual(calls.filter((call) => call === "terms").length, 1, "the key is inert while the mutation is open");
 	ok(calls.includes("confirm"));
 });
+
+test("local invocation inspection scrolls complete redacted arguments without adding them to the shared approval view", () => {
+	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "unknown", target: "preview" };
+	delete view.mutation;
+	const before = JSON.stringify(view);
+	const body = createPermissionOverlayBody(view, undefined, () => ({
+		command: `first\n${"middle\n".repeat(40)}final-command`,
+		api_key: "secret-never-shown",
+	}));
+	ok(body.canInspect());
+	body.toggleInspect();
+	match(plain(body.render(60)).join("\n"), /Exact invocation.*bash/);
+	body.scrollInspect(1000);
+	const tail = plain(body.render(60)).join("\n");
+	match(tail, /final-command/);
+	doesNotMatch(tail, /secret-never-shown/);
+	strictEqual(JSON.stringify(view), before);
+	body.toggleInspect();
+	ok(!body.isInspecting());
+});

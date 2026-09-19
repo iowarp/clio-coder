@@ -52,7 +52,6 @@ const ARG_PREVIEW_LIMIT = 60;
 const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
 const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
-const ARGS_BODY_LINE_LIMIT = 24;
 const STATUS_OK_GLYPH = GLYPH.ok;
 const STATUS_ERROR_GLYPH = GLYPH.error;
 
@@ -712,8 +711,8 @@ const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string |
 		const query = readStringField(args, "query")?.trim() ?? "";
 		const name = readStringField(args, "name")?.trim() ?? "";
 		if (scope === "docs" && query.length > 0) return `context docs \`${truncate(query, ARG_PREVIEW_LIMIT)}\``;
-		if (scope === "skills" && name.length > 0) return `context skills ${truncate(name, ARG_PREVIEW_LIMIT)}`;
-		return `context ${scope}`;
+		if (scope === "skills" && name.length > 0) return `loading skill ${truncate(name, ARG_PREVIEW_LIMIT)}`;
+		return scope === "skills" ? "discovering skills" : `context ${scope}`;
 	},
 	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
 	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
@@ -868,58 +867,40 @@ function indentAndWrap(line: string, width: number, isError: boolean): string[] 
 	return out;
 }
 
-function scalarArgValue(value: unknown): string | null {
-	if (typeof value === "string") {
-		const lines = value.split("\n").length;
-		const bytes = Buffer.byteLength(value, "utf8");
-		if (lines > 1 || value.length > 160) return dim(`<${lines} lines · ${formatSize(bytes)} text>`);
-		return green(JSON.stringify(value));
-	}
-	if (typeof value === "number") return cyan(String(value));
-	if (typeof value === "boolean") return yellow(String(value));
-	if (value === null) return dim("null");
-	return null;
-}
-
-/**
- * Render secondary arguments as a compact typed field list. The primary path,
- * command, pattern, or query already lives in the call signature; keeping the
- * rest means `cwd`, timeout, range, glob, and flags no longer disappear merely
- * because one field was important enough for the header. Nested values retain
- * the structured JSON renderer, while large strings become byte/line facts
- * instead of flooding the transcript.
- */
-function renderArgsBody(toolName: string, args: unknown, width: number, isError: boolean): string[] {
+/** Full redacted arguments are retained for inspection; transcript callers budget rows. */
+export function renderToolArguments(
+	args: unknown,
+	width: number,
+	isError = false,
+	maxRows = Number.POSITIVE_INFINITY,
+): string[] {
 	if (isEmptyArgs(args)) return [];
 	const safeArgs = redactToolArgs(args);
-	if (!isPlainObject(safeArgs)) {
-		const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-		const lines = tryRenderJson(safeArgs, bodyWidth, { lineLimit: ARGS_BODY_LINE_LIMIT });
-		return lines?.flatMap((line) => indentAndWrap(line, width, isError)) ?? [];
-	}
-	const primary = PRIMARY_ARG_FIELD[toolName];
-	const entries = Object.entries(safeArgs).filter(([key]) => key !== primary);
-	if (entries.length === 0) return [];
 	const out: string[] = [];
-	const bodyWidth = Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH);
-	out.push(...indentAndWrap(`${cyanBold("args")}${dim(` · ${entries.length}`)}`, width, isError));
-	const keyWidth = Math.min(18, Math.max(...entries.map(([key]) => visibleWidth(key))));
+	const entries = isPlainObject(safeArgs) ? Object.entries(safeArgs) : [["input", safeArgs] as const];
 	for (const [key, value] of entries) {
-		const label = `${cyan(key.padEnd(keyWidth))}  `;
-		const scalar = scalarArgValue(value);
-		if (scalar !== null) {
-			out.push(...indentAndWrap(`${label}${scalar}`, width, isError));
-			continue;
+		const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+		const full = String(text ?? value);
+		const chars = Number.isFinite(maxRows) ? Math.max(1, maxRows * Math.max(1, width) * 4) : full.length;
+		const lines = full.slice(0, chars).split("\n");
+		out.push(
+			...indentAndWrap(
+				`${cyan(sanitizeCallTargetText(key))} ${dim("›")} ${sanitizeMultilineDisplayText(lines[0] ?? "").text}`,
+				width,
+				isError,
+			),
+		);
+		for (const line of lines.slice(1)) {
+			if (out.length > maxRows) break;
+			out.push(...indentAndWrap(`  ${sanitizeMultilineDisplayText(line).text}`, width, isError));
 		}
-		out.push(...indentAndWrap(cyan(key), width, isError));
-		const lines = tryRenderJson(value, Math.max(1, bodyWidth - 2), { lineLimit: ARGS_BODY_LINE_LIMIT });
-		for (const line of lines ?? [jsonStringifySafe(value)]) {
-			out.push(...indentAndWrap(`  ${line}`, width, isError));
-			if (out.length >= ARGS_BODY_LINE_LIMIT) break;
+		if (out.length > maxRows || full.length > chars) {
+			return [
+				...out.slice(0, Math.max(0, maxRows - 1)),
+				...indentAndWrap(dim("… more arguments · /view"), width, isError),
+			];
 		}
-		if (out.length >= ARGS_BODY_LINE_LIMIT) break;
 	}
-	if (out.length >= ARGS_BODY_LINE_LIMIT) out.push(...indentAndWrap(dim("… more arguments hidden"), width, isError));
 	return out;
 }
 
@@ -1233,6 +1214,7 @@ export function renderToolExecution(
 	if ((finished.toolName === "edit" || finished.toolName === "write") && finished.isError === false) {
 		const diff = resultDiff(finished.result);
 		if (diff !== null) {
+			out.push(...renderToolArguments(finished.args, width, false));
 			out.push(...renderOutputMeta(finished, width, false, "change"));
 			out.push(...renderMutationDiffBlock(diff, width, opts.diffStyle !== "plain"));
 			out.push(...renderOutputFooter(finished, width, false));
@@ -1247,7 +1229,7 @@ export function renderToolExecution(
 	if (finished.toolName === "bash") {
 		const bashArgs = asBashArgs(redactToolArgs(finished.args));
 		if (bashArgs !== null) {
-			out.push(...renderArgsBody(finished.toolName, finished.args, width, finished.isError));
+			out.push(...renderToolArguments(finished.args, width, finished.isError));
 			out.push(
 				...renderOutputMeta(
 					finished,
@@ -1262,10 +1244,8 @@ export function renderToolExecution(
 		}
 	}
 
-	// The primary argument already lives in the signature. Keep the secondary
-	// fields below it so flags, ranges, working directories, and timeouts remain
-	// inspectable without repeating the primary value.
-	out.push(...renderArgsBody(finished.toolName, finished.args, width, finished.isError));
+	// The heading is a preview; inspection retains every redacted argument.
+	out.push(...renderToolArguments(finished.args, width, finished.isError));
 	out.push(
 		...renderOutputMeta(
 			finished,
@@ -1380,7 +1360,7 @@ export function renderBashTranscriptExecution(
 		: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true });
 }
 
-/** One action identity plus a bounded result; arguments and full output belong in /view. */
+/** Invocation intent stays visible in every style; /view retains the complete arguments and output. */
 export function renderToolPreview(
 	call: ToolExecutionStart | ToolExecutionFinished,
 	width: number,
@@ -1400,6 +1380,9 @@ export function renderToolPreview(
 		options.terminalRows,
 	);
 	const rows = renderToolSubline(call, width);
+	rows.push(
+		...renderToolArguments(call.args, width, failure, previewBudget(detail.invocationRows, options.terminalRows)),
+	);
 	const result = finished?.result ?? options.partialResult;
 	const diff = finished && !failure ? resultDiff(result) : null;
 	if (diff !== null && detail.diffRows > 0) {

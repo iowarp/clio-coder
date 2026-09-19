@@ -70,7 +70,11 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 			return;
 		deps.notify(
 			status === "failed" ? "warning" : status === "completed" ? "success" : "info",
-			`Clio → ${sanitizeCallTargetText(payload.agentId).slice(0, 80)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
+			`Clio-Coder → ${sanitizeCallTargetText(payload.agentId)
+				.slice(0, 80)
+				.replace(/^./, (letter) =>
+					letter.toUpperCase(),
+				)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
 			`helper:${payload.runId}:${status}`,
 		);
 	};

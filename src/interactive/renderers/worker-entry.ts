@@ -32,6 +32,7 @@ const SEPARATOR = " · ";
 const BODY_LINE_LIMIT = 80;
 
 export interface WorkerEntryRenderOptions {
+	nowMs?: number;
 	detail?: TranscriptDetailPolicy;
 	terminalRows?: number;
 	/** Render the full body without the line cap; `/export` sets this. */
@@ -56,7 +57,7 @@ function identityUnits(entry: WorkerEntryState): string[] {
 		theme.fg(
 			"muted",
 			entry.helper
-				? `Clio → ${entry.agentId} · internal agent`
+				? `Clio-Coder → ${entry.agentId.replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)} · internal agent`
 				: kind === "acp"
 					? `${entry.agentId} (acp)`
 					: entry.agentId,
@@ -140,7 +141,8 @@ function footerUnits(entry: WorkerEntryState, receipt: WorkerReceiptSummary): st
 	}
 	if (receipt.tokenCount !== undefined && receipt.tokenCount > 0) {
 		units.push(dim(`${formatFooterTokens(receipt.tokenCount)} tok`));
-	} else if (receipt.toolCalls !== undefined && receipt.toolCalls > 0) {
+	}
+	if (receipt.toolCalls !== undefined && receipt.toolCalls > 0) {
 		units.push(dim(`${receipt.toolCalls} tool call${receipt.toolCalls === 1 ? "" : "s"}`));
 	}
 	if (receipt.durationMs !== undefined) units.push(dim(formatCompactMs(receipt.durationMs)));
@@ -301,12 +303,24 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 	return truncateToWidth(header, width, GLYPH.ellipsis, false);
 }
 
+function workerMetrics(entry: WorkerEntryState): string[] {
+	const metrics: string[] = [];
+	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
+	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
+	if (tokens !== undefined) metrics.push(`${formatFooterTokens(tokens)} tokens processed`);
+	if (entry.progress?.contextTokens !== undefined)
+		metrics.push(`context ${formatFooterTokens(entry.progress.contextTokens)}`);
+	if (calls !== undefined) metrics.push(`${calls} tool calls`);
+	return metrics;
+}
+
 /** A helper is an agent invocation, but its report belongs to the coordinator. */
 function helperCard(
 	entry: WorkerEntryState,
 	width: number,
 	detail: TranscriptDetailPolicy,
 	terminalRows?: number,
+	nowMs = Date.now(),
 ): string[] {
 	const pending = isPending(entry);
 	const failed = !pending && (entry.receipt?.outcome !== "succeeded" || entry.receipt?.contract === "fail");
@@ -321,28 +335,23 @@ function helperCard(
 	const activity = pending
 		? action
 			? `${action.descriptor?.verb ?? action.tool} ${action.descriptor?.object ?? ""}`
-			: "Gathering findings for Clio"
+			: "Gathering findings for Clio-Coder"
 		: failed
 			? (entry.receipt?.failureMessage ?? entry.receipt?.outcomeCode ?? "Open details for the failure")
-			: "Findings returned to Clio";
+			: "Findings returned to Clio-Coder";
 	const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
-	const elapsed = entry.receipt?.durationMs === undefined ? "" : ` · ${formatCompactMs(entry.receipt.durationMs)}`;
-	const header = `${theme.fg("action", `↳ Clio → ${clean(entry.agentId)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
-	const body =
-		detail.workerRows > 0
-			? [
-					`${dim(RAIL)}${theme.fg("muted", clean(entry.task ?? "Assisting the main agent"))}`,
-					`${dim(FOOTER)}${dim(clean(activity))}${dim(` · /view dispatch:${entry.runId}`)}`,
-				]
-			: [];
+	const elapsedMs =
+		pending && entry.startedAtMs !== undefined ? Math.max(0, nowMs - entry.startedAtMs) : entry.receipt?.durationMs;
+	const elapsed = elapsedMs === undefined ? "" : ` · ${formatCompactMs(elapsedMs)}`;
+	const header = `${theme.fg("action", `↳ Clio-Coder → ${clean(entry.agentId).replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
+	const body = railLines(clean(entry.task ?? "Assisting the main agent"), "muted", width);
+	const metrics = workerMetrics(entry);
 	return [
-		truncateToWidth(header, width),
-		...previewRows(
-			body.map((line) => truncateToWidth(line, width)),
-			previewBudget(detail.workerRows, terminalRows),
-			width,
-			pending,
-		),
+		...wrapTextWithAnsi(header, width),
+		...previewRows(body, previewBudget(detail.invocationRows, terminalRows), width),
+		...railLines(clean(activity), pending ? "accent" : "muted", width),
+		...(metrics.length ? railLines(metrics.join(" · "), "dim", width) : []),
+		...wrapTextWithAnsi(`${dim(FOOTER)}${dim(`/view dispatch:${entry.runId}`)}`, width),
 		...previewRows(failureLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
 		...previewRows(attemptLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
 		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", width) : []),
@@ -358,7 +367,7 @@ export function renderWorkerEntryLines(
 	const safeWidth = Math.max(1, Math.floor(width));
 	const detail = options.detail ?? transcriptDetail();
 	if (entry.helper && !options.unbounded && detail.style !== "detailed" && !workerNeedsInput(entry))
-		return helperCard(entry, safeWidth, detail, options.terminalRows);
+		return helperCard(entry, safeWidth, detail, options.terminalRows, options.nowMs);
 	const integrity = entry.receipt?.trust;
 	const provenance =
 		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
@@ -416,7 +425,10 @@ export function renderWorkerEntryLines(
 	const presented = presentedContractAnswer(entry)?.footer;
 	return [
 		actionLine(entry, safeWidth),
-		...(entry.helper && entry.task ? previewRows(railLines(entry.task, "muted", safeWidth), budget(2), safeWidth) : []),
+		...(workerMetrics(entry).length ? railLines(workerMetrics(entry).join(" · "), "dim", safeWidth) : []),
+		...(entry.helper && entry.task
+			? previewRows(railLines(entry.task, "muted", safeWidth), budget(detail.invocationRows), safeWidth)
+			: []),
 		...(detail.workerRows > 0 || needsInput ? previewRows(summary, summaryRows, safeWidth, entry.pending) : []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
 		...(tools ? [tools] : []),

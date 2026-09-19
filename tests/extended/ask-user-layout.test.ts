@@ -185,7 +185,11 @@ for (const [columns, rows] of [
 		ok(!text.some((row) => row.includes("Conversational answer")), "tier boilerplate is folded away");
 		ok(!text.some((row) => row.includes("[Enter]")), "rows carry no key affordance");
 		ok(!text.some((row) => row.includes("…")), "nothing is elided");
-		strictEqual(text[0], "Research Exploration; Material Science", "the question header is the first row");
+		strictEqual(
+			text[0],
+			"Clio-Coder asks you · Research Exploration; Material Science",
+			"the speaker and question header lead the dialog",
+		);
 		const lastQuestionRow = text.findIndex((row) => row.includes("combination?"));
 		const firstOption = text.findIndex((row) => row.includes("Provided details"));
 		ok(firstOption - lastQuestionRow <= 2, "options sit directly under the question");

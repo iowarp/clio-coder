@@ -50,7 +50,7 @@ export interface OverlayPermissionLifecycleDeps {
 	 * mutation text and is the only channel that does; it is process-local by
 	 * construction, so it is passed here rather than folded into the view.
 	 */
-	openPermissionOverlay(view: ApprovalRequestView, inspect?: MutationInspector): boolean;
+	openPermissionOverlay(view: ApprovalRequestView, inspect?: MutationInspector, invocation?: () => unknown): boolean;
 	closeOverlay(): void;
 	appendNotice(level: NoticeLevel, text: string): void;
 	applyApprovalState(event: ToolApprovalStateEvent): void;
@@ -304,7 +304,7 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					view,
 				});
 			}
-			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view))) {
+			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args)) {
 				announceParked();
 				return;
 			}

@@ -5,7 +5,7 @@ import {
 	type DecisionPresentation,
 	decisionFactsForPermission,
 } from "../domains/safety/decision-presentation.js";
-import type { Component, OverlayOptions, TUI } from "../engine/tui.js";
+import { type Component, type OverlayOptions, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	MUTATION_PREVIEW_VISIBLE_ROWS,
 	type MutationFacts,
@@ -22,7 +22,9 @@ import {
 	type PermissionTermsHint,
 	permissionHintEntries,
 } from "./permission-hint.js";
+import { renderToolArguments } from "./renderers/tool-execution.js";
 import type { ClioToken } from "./theme/index.js";
+import { clioTheme } from "./theme/index.js";
 
 export { type AskAxis, askAxis } from "../domains/safety/approval-axis.js";
 export { describeCallTarget, sanitizeCallTargetText } from "../domains/safety/call-target.js";
@@ -128,22 +130,28 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	private scroll = 0;
 	private lastLineCount = 0;
 	private terms = false;
+	private argumentsOpen = false;
 
 	constructor(
 		private readonly view: ApprovalRequestView,
 		private readonly inspect?: MutationInspector,
+		private readonly invocation?: () => unknown,
 	) {}
 
 	canInspect(): boolean {
-		return this.inspect !== undefined;
+		return this.inspect !== undefined || this.invocation !== undefined;
 	}
 
 	isInspecting(): boolean {
-		return this.preview !== null;
+		return this.preview !== null || this.argumentsOpen;
 	}
 
 	toggleInspect(): void {
-		if (this.inspect === undefined) return;
+		if (this.inspect === undefined) {
+			if (this.invocation !== undefined) this.argumentsOpen = !this.argumentsOpen;
+			this.scroll = 0;
+			return;
+		}
 		if (this.preview !== null) {
 			this.preview = null;
 			this.scroll = 0;
@@ -154,7 +162,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	}
 
 	scrollInspect(delta: number): void {
-		if (this.preview === null) return;
+		if (!this.isInspecting()) return;
 		const maxScroll = Math.max(0, this.lastLineCount - MUTATION_PREVIEW_VISIBLE_ROWS);
 		this.scroll = Math.max(0, Math.min(this.scroll + delta, maxScroll));
 	}
@@ -168,7 +176,29 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 	}
 
 	render(width: number): string[] {
-		if (this.preview === null) return permissionOverlayLines(this.view, width, this.terms);
+		if (this.argumentsOpen && this.invocation) {
+			const rows = renderToolArguments(this.invocation(), width);
+			this.lastLineCount = rows.length;
+			this.scroll = Math.min(this.scroll, Math.max(0, rows.length - MUTATION_PREVIEW_VISIBLE_ROWS));
+			return [
+				...wrapTextWithAnsi(clioTheme().fg("accent", `Exact invocation · ${this.view.tool}`), width),
+				...rows.slice(this.scroll, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS),
+				...wrapTextWithAnsi(
+					clioTheme().fg(
+						"dim",
+						`${this.scroll + 1}–${Math.min(rows.length, this.scroll + MUTATION_PREVIEW_VISIBLE_ROWS)} of ${rows.length} rows · ↑↓ scroll · v back`,
+					),
+					width,
+				),
+			];
+		}
+		if (this.preview === null)
+			return [
+				...permissionOverlayLines(this.view, width, this.terms),
+				...(this.invocation && !this.inspect
+					? wrapTextWithAnsi(clioTheme().fg("dim", "v · inspect the complete invocation before deciding"), width)
+					: []),
+			];
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
 		this.lastLineCount = rendered.wrappedLineCount;
 		return rendered.lines;
@@ -186,9 +216,9 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
  * continuation row hangs under the value's first column.
  */
 function field(label: string, value: string, width: number): string[] {
-	const indent = " ".repeat(label.length);
-	const rows = wrapSentence(value, Math.max(1, width - label.length));
-	return rows.map((row, index) => `${index === 0 ? label : indent}${row}`);
+	const indent = " ".repeat(visibleWidth(label));
+	const rows = wrapSentence(value, Math.max(1, width - visibleWidth(label)));
+	return rows.map((row, index) => `${index === 0 ? clioTheme().fg("dim", label) : indent}${row}`);
 }
 
 /**
@@ -198,23 +228,7 @@ function field(label: string, value: string, width: number): string[] {
  * decision about a tool call.
  */
 function wrapSentence(value: string, max: number): string[] {
-	if (max <= 0) return [value];
-	const lines: string[] = [];
-	let current = "";
-	for (const word of value.split(" ")) {
-		if (current.length === 0) current = word;
-		else if (current.length + 1 + word.length <= max) current = `${current} ${word}`;
-		else {
-			lines.push(current);
-			current = word;
-		}
-		while (current.length > max) {
-			lines.push(current.slice(0, max));
-			current = current.slice(max);
-		}
-	}
-	if (current.length > 0) lines.push(current);
-	return lines;
+	return wrapTextWithAnsi(value, Math.max(1, max));
 }
 
 function wrapArtifactLine(value: string, max: number): string[] {
@@ -414,6 +428,7 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number, terms 
 export function createPermissionOverlayBody(
 	view: ApprovalRequestView,
 	inspect?: MutationInspector,
+	invocation?: () => unknown,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect);
+	return new PermissionOverlayBody(view, inspect, invocation);
 }
