@@ -503,6 +503,20 @@ class AskUserOverlayView implements Component {
 		// options, so the region has keys of its own that neither control claims.
 		if (this.handleScrollInput(data, state.mode)) return;
 
+		// Question navigation must work from both choices and the answer editor.
+		// Bare arrows browse an empty answer; once typing starts they edit text.
+		const canBrowseWithArrows = state.mode !== "text" || !(this.text?.getText() ?? state.inputValue);
+		if (this.questions.length > 1) {
+			if (matchesKey(data, "shift+tab") || (canBrowseWithArrows && matchesKey(data, "left"))) {
+				this.goToRelativeQuestion(-1);
+				return;
+			}
+			if (matchesKey(data, "tab") || (canBrowseWithArrows && matchesKey(data, "right"))) {
+				this.goToRelativeQuestion(1);
+				return;
+			}
+		}
+
 		if (state.mode === "text") {
 			if (matchesKey(data, "escape")) {
 				this.escapeFromTextInput(question, state);
@@ -512,14 +526,6 @@ class AskUserOverlayView implements Component {
 			return;
 		}
 
-		if (this.isPreviousQuestionKey(data)) {
-			this.goToRelativeQuestion(-1);
-			return;
-		}
-		if (this.isNextQuestionKey(data)) {
-			this.goToRelativeQuestion(1);
-			return;
-		}
 		if (question.multi_select === true && data === " ") {
 			this.toggleCurrentSelection(question, state);
 			return;
@@ -553,6 +559,34 @@ class AskUserOverlayView implements Component {
 	 * rows it needs.
 	 */
 	render(width: number): string[] {
+		const wide = width >= 120 && this.maxInnerRows() >= 24 && this.phase === "asking" && this.questions.length > 1;
+		const menuWidth = 28;
+		const bodyWidth = Math.min(104, Math.max(1, width - (wide ? menuWidth + 5 : 0)));
+		const body = this.renderBody(bodyWidth, wide);
+		if (!wide) return body;
+		const theme = clioTheme();
+		const menu = [theme.style("accent", "QUESTIONS", { bold: true }), ""];
+		this.questions.forEach((question, index) => {
+			const active = index === this.index;
+			const answered = Boolean(this.states[index]?.answer.trim());
+			const prefix = active ? "› " : answered ? "✓ " : "○ ";
+			menu.push(
+				...wrapLabeledValue(
+					prefix,
+					theme.paint(`${index + 1}. ${compactTitle(question)}`, { fg: active ? "accent" : "muted", bold: active }),
+					menuWidth,
+				),
+				"",
+			);
+		});
+		menu.push(theme.fg("muted", "Tab / Shift+Tab to browse"));
+		return Array.from({ length: Math.min(this.maxInnerRows(), Math.max(menu.length, body.length)) }, (_, index) => {
+			const left = menu[index] ?? "";
+			return `${left}${" ".repeat(Math.max(0, menuWidth - visibleWidth(left)))}  ${theme.fg("frame", "│")}  ${body[index] ?? ""}`;
+		});
+	}
+
+	private renderBody(width: number, hasMenu: boolean): string[] {
 		const safeWidth = Math.max(1, width);
 		const maxRows = this.maxInnerRows();
 		if (this.phase !== "asking") return this.renderWaiting(safeWidth, maxRows);
@@ -568,12 +602,12 @@ class AskUserOverlayView implements Component {
 				safeWidth,
 			),
 			"",
-			...this.renderQuestionStrip(safeWidth),
+			...(hasMenu ? [] : this.renderQuestionStrip(safeWidth)),
 		];
 		const header = this.renderQuestionHeader(question, safeWidth);
 		const details = this.renderDecisionContext(safeWidth);
 		const status = this.status.length > 0 ? wrapTextWithAnsi(clioTheme().fg("dim", this.status), safeWidth) : [];
-		const body = formatAskUserQuestion(question.question, safeWidth);
+		const body = formatAskUserQuestion(question.question, safeWidth).map((line) => theme.paint(line, { bold: true }));
 		const fixedTop = [...strip, ...header, ...details];
 		// The control is sized after the question has claimed its minimum, so a
 		// long option list cannot push a short question off the box.
@@ -656,12 +690,14 @@ class AskUserOverlayView implements Component {
 			// back; a question without one has nothing behind it and the key still
 			// leaves the interview. The footer says which one this is.
 			const escapeVerb: OverlayEscVerb = questionHasOptions(question) ? "back" : "close";
-			const entries: HintEntry[] = [{ key: "Enter", verb: recordAnswer }];
+			const entries: HintEntry[] = [];
+			if (this.questions.length > 1) entries.push({ key: "Tab/Shift+Tab", verb: "question" });
+			entries.push({ key: "Enter", verb: recordAnswer });
 			if (this.deps.tui) entries.push({ key: getKeybindings().getKeys("tui.input.newLine").join("/"), verb: "newline" });
 			return buildHint([...entries, ...scroll], escapeVerb);
 		}
 		const entries: HintEntry[] = [];
-		if (this.questions.length > 1) entries.push({ key: "Left/Right", verb: "question" });
+		if (this.questions.length > 1) entries.push({ key: "←/→ or Tab", verb: "question" });
 		if (question.multi_select === true) entries.push({ key: "Space", verb: "toggle" });
 		// `t` is on every select footer because the operator cannot tell from a
 		// label whether the option needs a figure attached until they read it.
@@ -750,14 +786,6 @@ class AskUserOverlayView implements Component {
 
 	private currentState(): QuestionState | null {
 		return this.states[this.index] ?? null;
-	}
-
-	private isPreviousQuestionKey(data: string): boolean {
-		return this.questions.length > 1 && matchesKey(data, "left");
-	}
-
-	private isNextQuestionKey(data: string): boolean {
-		return this.questions.length > 1 && matchesKey(data, "right");
 	}
 
 	/**
@@ -896,6 +924,10 @@ class AskUserOverlayView implements Component {
 			items.findIndex((item) => item.value === selectedItem.value),
 		);
 		const layout = layoutOptionRows(items, focusedIndex, width);
+		const totalRows = layout.rows.reduce((sum, rows) => sum + rows.length, 0);
+		if (totalRows + items.length <= rowBudget) {
+			for (const rows of layout.rows) rows.push("");
+		}
 		if ((layout.rows[focusedIndex]?.length ?? 0) >= rowBudget) {
 			this.optionDetailRows = [
 				"",
