@@ -1,6 +1,7 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { createWorkerProgressFold } from "../../src/domains/observability/worker-progress.js";
 import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { buildFooterDashboard, type FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
@@ -190,4 +191,38 @@ test("Activity gives two live agents full-width tasks and distinct work measurem
 	match(text, /Tokens.*68k input.*2k output/);
 	match(text, /Work.*context 17k \/ 262\.1k/);
 	doesNotMatch(text, /│/);
+});
+
+test("Activity retains fast tool actions between calls and shows live worker output", () => {
+	const snapshot = state();
+	const progress = createWorkerProgressFold();
+	const render = () => {
+		snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({ ...row, progress: progress.snapshot() }));
+		return plain(renderDashboardPage(snapshot, "Activity", 160, 60, "alt+u"));
+	};
+	progress.observe({
+		type: "clio_coder_tool_start",
+		payload: {
+			tool: "read",
+			toolCallId: "read1",
+			action: { verb: "reading", object: "src/interactive/overlays/ask-user.ts" },
+		},
+	});
+	match(render(), /Now.*Executing tool/);
+	progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId: "read1" } });
+	match(render(), /Recent.*ask-user\.ts/);
+	match(render(), /awaiting next worker event/);
+	progress.observe({
+		type: "message_update",
+		assistantMessageEvent: { type: "thinking_delta", delta: "private reasoning must never render" },
+	});
+	match(render(), /Now.*Thinking/);
+	doesNotMatch(render(), /private reasoning/);
+	progress.observe({
+		type: "message_update",
+		assistantMessageEvent: { type: "text_delta", delta: "Found the question navigation handlers." },
+	});
+	match(render(), /Now.*Streaming response/);
+	match(render(), /Found the question navigation handlers/);
+	match(render(), /Live response · provisional/);
 });

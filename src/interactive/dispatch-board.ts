@@ -485,6 +485,34 @@ function progressActionLine(theme: ClioTheme, progress: WorkerProgressSnapshot, 
 	return cardUnitsLine(theme, "doing", units, contentWidth);
 }
 
+/** Live dashboard detail shares the board's redacted actions and contract-aware answer rendering. */
+export function renderDispatchActivity(row: DispatchBoardRow, width: number): string[] {
+	const theme = clioTheme();
+	const progress = row.progress;
+	if (!progress) return [];
+	const lines: string[] = [];
+	const phase = {
+		starting: "Starting worker",
+		thinking: "Thinking",
+		writing: "Streaming response",
+		tool: "Executing tool",
+		waiting: "Between tool calls · awaiting next worker event",
+		settled: "Worker output finished",
+	}[progress.phase];
+	lines.push(...wrapTextWithAnsi(`${theme.style("agent", "Now", { bold: true })}  ${phase}`, width));
+	if (progress.currentAction)
+		lines.push(...wrapTextWithAnsi(`  → ${sanitizeCallTargetText(actionPhrase(progress.currentAction))}`, width));
+	for (const action of progress.recentActions.slice(0, 3))
+		lines.push(
+			...wrapTextWithAnsi(`${theme.fg("dim", "Recent")}  ${sanitizeCallTargetText(actionPhrase(action))}`, width),
+		);
+	if (progress.tailText.trim()) {
+		lines.push(theme.fg("dim", progress.settled ? "Worker output" : "Live response · provisional"));
+		lines.push(...progressAnswerLines(theme, progress, row.runId, width, row.resultContract, 3));
+	}
+	return lines;
+}
+
 /**
  * The `answer` block: the newest rows of the worker's bounded prose on a rail,
  * then what is not shown and where to read it. Wrapping happens before the row
@@ -498,6 +526,7 @@ function progressAnswerLines(
 	runId: string,
 	contentWidth: number,
 	contract: ObservabilityRunSummary["resultContract"],
+	maxRows = WORKER_PROGRESS_CARD_ROWS,
 ): string[] {
 	if (progress.tailText.length === 0) return [];
 	const gutter = CARD_KV_KEY_WIDTH + 1;
@@ -515,9 +544,7 @@ function progressAnswerLines(
 	for (const line of source) {
 		for (const row of wrapTextWithAnsi(sanitizeCallTargetText(line), railWidth)) wrapped.push(row);
 	}
-	const shown = progress.settled
-		? wrapped.slice(0, WORKER_PROGRESS_CARD_ROWS)
-		: wrapped.slice(Math.max(0, wrapped.length - WORKER_PROGRESS_CARD_ROWS));
+	const shown = progress.settled ? wrapped.slice(0, maxRows) : wrapped.slice(Math.max(0, wrapped.length - maxRows));
 	const hiddenRows = wrapped.length - shown.length;
 	const rail = theme.fg("dim", `${GLYPH.rail} `);
 	const body = shown.map((row) => `${rail}${theme.fg("muted", row)}`);
