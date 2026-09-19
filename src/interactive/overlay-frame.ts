@@ -386,6 +386,7 @@ export class ClioOverlayFrame implements Component {
 		 * decision treatment only while it is actually holding a decision.
 		 */
 		private readonly tone?: OverlayTone,
+		private readonly fullscreen = false,
 	) {}
 
 	setRowBudget(rows: number): void {
@@ -418,11 +419,21 @@ export class ClioOverlayFrame implements Component {
 		}
 		const label = titleText.length > 0 ? `─ ${titleText} ` : "─ ";
 		const side = clioFrame("│", tone ?? "frame");
-		const boxLines = [
-			brandedTopBorder(label, contentWidth + 2, tone),
-			...fitBody(childLines, this.rowBudget, contentWidth).map((line) => `${side} ${padAnsi(line, contentWidth)} ${side}`),
-			brandedBottomBorder(contentWidth + 2, hint, tone),
-		];
+		const body = [...fitBody(childLines, this.rowBudget, contentWidth)];
+		if (this.fullscreen) {
+			while (body.length < Math.max(0, this.rowBudget - 2)) body.push("");
+		}
+		const boxLines = this.fullscreen
+			? [
+					padAnsi(`  ${clioTitle(titleText, tone)}`, boxWidth),
+					...body.map((line) => `  ${padAnsi(line, contentWidth)}  `),
+					padAnsi(`  ${clioTheme().fg("muted", hint ?? "")}`, boxWidth),
+				]
+			: [
+					brandedTopBorder(label, contentWidth + 2, tone),
+					...body.map((line) => `${side} ${padAnsi(line, contentWidth)} ${side}`),
+					brandedBottomBorder(contentWidth + 2, hint, tone),
+				];
 		const slack = Math.max(0, width - boxWidth);
 		const lines = ((): string[] => {
 			if (slack === 0) return boxLines;
@@ -500,11 +511,22 @@ export function showClioOverlayFrame(
 		 * really is fixed and surface-specific.
 		 */
 		markerId: string;
+		/** Cover the viewport, including unused rows, while background content updates. */
+		fullscreen?: boolean;
 	},
 ): OverlayHandle {
-	const { title, footerHint, tone, width, visible, maxHeight, margin, markerId, ...overlayOptions } = options;
+	const { title, footerHint, tone, width, visible, maxHeight, margin, markerId, fullscreen, ...overlayOptions } =
+		options;
 	const boxWidth = typeof width === "number" ? width : 0;
-	const frame = new ClioOverlayFrame(child, title, footerHint, boxWidth, frameAlignForAnchor(options.anchor), tone);
+	const frame = new ClioOverlayFrame(
+		child,
+		title,
+		footerHint,
+		boxWidth,
+		frameAlignForAnchor(options.anchor),
+		tone,
+		fullscreen,
+	);
 	const handle = tui.showOverlay(frame, {
 		...overlayOptions,
 		...(margin !== undefined ? { margin } : {}),

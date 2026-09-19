@@ -126,6 +126,30 @@ export class InstrumentedTuiMainScreen extends TuiMainScreen {
 }
 
 export class InstrumentedTuiAltScreen extends TuiAltScreen {
+	private terminalSelectionUsers = 0;
+	private readonly capturesMouse: boolean;
+
+	/** pi-tui selects transcript text, but capturing overlays consume its mouse path.
+	 * Let the terminal select the stable interview screen until it closes. */
+	useTerminalSelection(): () => void {
+		if (!this.capturesMouse) return () => {};
+		if (this.terminalSelectionUsers++ === 0) this.terminal.write("\x1b[?1006l\x1b[?1003l\x1b[?1002l\x1b[?1000l");
+		let released = false;
+		return () => {
+			if (released) return;
+			released = true;
+			if (--this.terminalSelectionUsers !== 0) return;
+			// Match pi-tui's negotiated tracking mode; focus reporting was never disabled.
+			const term = process.env.TERM?.toLowerCase() ?? "";
+			const multiplexed =
+				process.env.TMUX !== undefined ||
+				process.env.ZELLIJ !== undefined ||
+				process.env.STY !== undefined ||
+				term.startsWith("tmux") ||
+				term.startsWith("screen");
+			this.terminal.write(`\x1b[?1000h\x1b[?1002h${multiplexed ? "" : "\x1b[?1003h"}\x1b[?1006h`);
+		};
+	}
 	private currentFrame: unknown | undefined;
 
 	constructor(
@@ -137,6 +161,7 @@ export class InstrumentedTuiAltScreen extends TuiAltScreen {
 		renderAdmission?: TuiRenderAdmission,
 	) {
 		super(terminal, showHardwareCursor, logDirectory, options);
+		this.capturesMouse = options?.mouse ?? true;
 		this.deferredAdmission = new DeferredRenderAdmission(renderAdmission, (force) => super.requestRender(force));
 	}
 
