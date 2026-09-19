@@ -852,6 +852,8 @@ Gateway discovery is lazy and session-cached. Untrusted or stale project declara
 
 Transport bounds are 4 MiB per incoming JSON-RPC line, 4 MiB pending outbound bytes, 16 KiB stderr tail, 1 MiB normalized result text, and at most 500 tools or 100 pages per server discovery. Gateway result shaping bounds one MCP result to 16 KiB in model context, offloading larger results to disk artifacts with preview and reference. Request timeout or per-call abort can fail one call without closing a ready server; discovery cancellation closes the shared connection. Teardown uses TERM, a 3000 ms grace, KILL, and 2000 ms bounded confirmation, reporting incomplete cleanup. Launching an MCP server is not sandboxing; remote MCP/OAuth and general OS isolation are deferred.
 
+A worked declaration, with how autonomy treats its tools: [Slurm through the clio-kit MCP server](slurm.md).
+
 ## Project files
 
 Keys read from files under `.clio-coder/` in the repository.

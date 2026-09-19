@@ -66,6 +66,15 @@ gives the branch, the age, the `git log <base>..<branch>` command to inspect
 it, and the commands to drop it. Doctor never removes one. See
 [worktree per task](fleet-dispatch.md#worktree-per-task).
 
+## Slurm MCP rows
+
+`slurm clio-kit` names the `clio-kit` binary on `PATH` and whether its build
+ships the Slurm MCP server. `slurm mcp server` names the `mcp.yaml` that
+declares `clio-kit mcp-server slurm`, its scope, and its trust. `slurm
+scheduler` reports `sbatch` and `squeue`. An install with none of the three
+gets a single informational `slurm mcp` row. These rows never fail doctor. See
+[Slurm](slurm.md).
+
 ## Deep checks
 
 `--deep` and `/doctor deep` add two groups of rows.

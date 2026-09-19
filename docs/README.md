@@ -32,6 +32,7 @@ docs/
 | Understand what Clio may read, change, or execute | [Safety Model](architecture/safety-model.md) |
 | Diagnose a problem by its exact message | [Troubleshooting](guide/troubleshooting.md) |
 | Check an install, its targets, and the HPC toolchain | [Doctor](guide/doctor.md) |
+| Submit, poll, and cancel Slurm jobs through the clio-kit MCP server | [Slurm](guide/slurm.md) |
 
 A minimal first run needs Node.js 22.19 or newer and a model to talk to: a
 local inference server such as Ollama or LM Studio, a lab gateway, or a cloud
