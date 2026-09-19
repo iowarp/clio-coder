@@ -244,8 +244,10 @@ describe("safety gate boundary", () => {
 			"clio-coder library pin plugin:example",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
-			strictEqual(decision.kind, "block", command);
-			strictEqual(decision.reasonCode, "skill-authority", command);
+			strictEqual(decision.kind, command.includes(" library ") ? "ask" : "block", command);
+			strictEqual(decision.reasonCode, command.includes(" library ") ? "library-confirm" : "skill-authority", command);
+			if (command.includes(" library "))
+				strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "confirmed").kind, "allow");
 		}
 		for (const command of [
 			"clio-coder skills list",
@@ -285,7 +287,7 @@ describe("safety gate boundary", () => {
 				]) {
 					strictEqual(
 						policy.evaluate({ tool: ToolNames.Bash, args: { command: `${wrapper} ${args}` } }).kind,
-						"block",
+						args.startsWith("library ") ? "ask" : "block",
 						`${wrapper} ${args}`,
 					);
 				}
@@ -342,18 +344,18 @@ describe("safety gate boundary", () => {
 			]) {
 				const call = { tool: ToolNames.Bash, args: { command } };
 				const decision = policy.evaluate(call);
-				strictEqual(decision.kind, "block", command);
+				strictEqual(decision.kind, command.includes(" library ") ? "ask" : "block", command);
 				strictEqual(
 					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
-					"skill-authority",
+					command.includes(" library ") ? "library-confirm" : "skill-authority",
 					command,
 				);
-				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+				strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 			}
 		}
 	});
 
-	it("reserves confirmed library installs and their skill dependencies for operators", () => {
+	it("requires approval for library installs and their dependencies, then accepts confirmation", () => {
 		for (const policy of [engine(), createWorkerSafety({ cwd: scratch })]) {
 			for (const command of [
 				"clio-coder library install skill:example --yes",
@@ -372,14 +374,27 @@ describe("safety gate boundary", () => {
 			]) {
 				const call = { tool: ToolNames.Bash, args: { command } };
 				const decision = policy.evaluate(call);
-				strictEqual(decision.kind, "block", command);
+				strictEqual(decision.kind, command.includes(" library ") ? "ask" : "block", command);
 				strictEqual(
 					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
-					"skill-authority",
+					command.includes(" library ") ? "library-confirm" : "skill-authority",
 					command,
 				);
-				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+				strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 			}
+		}
+	});
+
+	it("never lets a library command bypass direct instruction or credential protections", () => {
+		const policy = engine();
+		for (const command of [
+			"clio-coder library install skill:example && rm -r .clio-coder/skills",
+			"clio-coder library install skill:example && cat ~/.ssh/id_rsa",
+			"clio-coder library install skill:example && clio-coder skills sync --force",
+		]) {
+			const call = { tool: ToolNames.Bash, args: { command } };
+			strictEqual(policy.evaluate(call).kind, "block");
+			strictEqual(policy.evaluate(call, "confirmed").kind, "block");
 		}
 	});
 
@@ -443,13 +458,13 @@ describe("safety gate boundary", () => {
 			for (const policy of [main, worker]) {
 				const call = { tool: ToolNames.Bash, args: { command } };
 				const decision = policy.evaluate(call);
-				strictEqual(decision.kind, "block", command);
+				strictEqual(decision.kind, command.includes(" library ") ? "ask" : "block", command);
 				strictEqual(
 					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
-					"skill-authority",
+					command.includes(" library ") ? "library-confirm" : "skill-authority",
 					command,
 				);
-				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+				strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 			}
 		}
 	});
@@ -470,13 +485,13 @@ describe("safety gate boundary", () => {
 			for (const policy of [main, worker]) {
 				const call = { tool: ToolNames.Bash, args: { command } };
 				const decision = policy.evaluate(call);
-				strictEqual(decision.kind, "block", command);
+				strictEqual(decision.kind, command.includes(" library ") ? "ask" : "block", command);
 				strictEqual(
 					"reasonCode" in decision ? decision.reasonCode : decision.policy?.reasonCode,
-					"skill-authority",
+					command.includes(" library ") ? "library-confirm" : "skill-authority",
 					command,
 				);
-				strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+				strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 			}
 		}
 	});
@@ -528,7 +543,7 @@ describe("safety gate boundary", () => {
 					for (const policy of [main, worker]) {
 						const call = { tool: ToolNames.Bash, args: { command } };
 						strictEqual(policy.evaluate(call).kind, "block", command);
-						strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+						strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 					}
 				}
 			}
@@ -584,7 +599,7 @@ describe("safety gate boundary", () => {
 		for (const command of ["git push --force origin main", "find . -name '*.log' -delete", "shred -u key.txt"]) {
 			const call = { tool: ToolNames.Bash, args: { command } };
 			strictEqual(policy.evaluate(call).kind, "block", command);
-			strictEqual(policy.evaluate(call, "confirmed").kind, "block", command);
+			strictEqual(policy.evaluate(call, "confirmed").kind, command.includes(" library ") ? "allow" : "block", command);
 		}
 		for (const command of ["git stash drop", "truncate -s 0 server.log"]) {
 			const call = { tool: ToolNames.Bash, args: { command } };

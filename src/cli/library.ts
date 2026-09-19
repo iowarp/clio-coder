@@ -288,6 +288,7 @@ export async function runLibraryCommand(
 							{
 								...entry,
 								provenance: record.origin,
+								copies: record.copies.filter((copy) => !options.scope || copy.scope === options.scope),
 								...(record.format ? { format: record.format } : {}),
 								...(record.provides ? { provides: record.provides } : {}),
 							},
@@ -297,13 +298,7 @@ export async function runLibraryCommand(
 			if (parsed.json) emit({ entries, diagnostics: discovery.diagnostics });
 			else {
 				for (const entry of entries) {
-					const states =
-						entry.installed
-							.map(
-								(item) =>
-									`${item.scope}:${item.loadable ? "loadable" : !item.enabled ? "disabled" : !item.effective ? "shadowed" : "unloadable"}`,
-							)
-							.join(", ") || "available";
+					const states = entry.copies.map((item) => `${item.scope}:${item.state}`).join(", ") || "available";
 					process.stdout.write(
 						`${libraryEntryRef(entry)}\t${entry.version ?? ""}\t${states}\t${originLabel(entry.provenance)}\t${entry.description}\n`,
 					);

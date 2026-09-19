@@ -63,7 +63,7 @@ const WORKER_UNAVAILABLE =
 	"Work from the resources your assignment already bound, and record the gap with the limitation tool if it blocks the task.";
 
 const OPERATOR_NOTE =
-	"Read-only catalog: you cannot install or activate from here. Suggest /library to the operator for packages and /skill <name> for a skill. A hint row is a catalog claim, not a loaded recipe, and cannot be invoked.";
+	"Read-only catalog: this tool does not install or activate. For an operator-requested installation, use clio-coder library install kind:name --user or --project through bash with operator approval. /library is the interactive package manager; /skill <name> activates a skill. A hint row is a catalog claim, not a loaded recipe, and cannot be invoked.";
 const NOTE_SKILLS_OFF = "Skill discovery is off for this run, so no skill rows are listed.";
 const NOTE_INVENTORY_CAPPED =
 	"The inventory returned as many records as it carries, so this listing and its install evidence are incomplete; narrow with kind or query.";

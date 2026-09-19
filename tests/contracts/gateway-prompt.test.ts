@@ -75,7 +75,10 @@ describe("gateway in the session prompt", () => {
 			}
 			if (hasContext) {
 				match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
-				match(compiled.systemPrompt, /Only the operator installs marketplace skills/);
+				match(
+					compiled.systemPrompt,
+					/Install marketplace packages only when the operator requests or approves installation/,
+				);
 				doesNotMatch(compiled.systemPrompt, /only the operator\s+activates or installs a skill/);
 			}
 			doesNotMatch(compiled.systemPrompt, /\bcontext\s*\(\s*scope\s*=\s*["'](?:docs|library)["']/);

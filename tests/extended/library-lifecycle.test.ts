@@ -27,6 +27,8 @@ import {
 	releaseLibraryLifecycle,
 	retryLibraryRefresh,
 } from "../../src/domains/resources/library-actions.js";
+import { readLibraryInventory } from "../../src/domains/resources/library-inventory.js";
+import { installSkill } from "../../src/domains/resources/skills/marketplace.js";
 
 let root: string;
 let previousConfig: string | undefined;
@@ -462,6 +464,39 @@ describe("library lifecycle plans", () => {
 		const admission = outcome.verification?.resources.find((item) => item.name === "imported-skill");
 		ok(admission, "the published skill is visible to verification");
 		equal(admission.available, false, "publication is not admission for foreign content");
+	});
+
+	it("bundles the catalog without installing it, and the skill offer uses the active profile in both scopes", () => {
+		const inventory = readLibraryInventory({ cwd: root });
+		ok(inventory.packages.some((item) => item.ref === "skill:architecture"));
+		equal(inventory.copies.length, 0);
+		for (const scope of ["user", "project"] as const) {
+			const installed = installSkill({ source: "skill:architecture", cwd: root, scope });
+			ok(existsSync(installed.path));
+			ok(copy(scope, "architecture")?.valid);
+		}
+		equal(copy("project", "architecture")?.loadable, true);
+		equal(copy("user", "architecture")?.effective, false);
+	});
+
+	it("labels drift as damaged and repairs through a forced update with a backup", () => {
+		catalog([source({ name: "repair", kind: "skill" })]);
+		install("skill:repair");
+		const installed = copy("user", "repair");
+		ok(installed);
+		writeFileSync(path.join(installed.rootPath, "assets", "evidence.txt"), "local changes");
+		const listed = cli(["list", "--kind", "skill"]);
+		const row = (listed.json.entries as Array<{ name: string; copies: Array<{ state: string }> }>).find(
+			(item) => item.name === "repair",
+		);
+		equal(row?.copies[0]?.state, "damaged");
+		const refused = cli(["enable", "skill:repair", "--user"]);
+		equal(refused.code, 1);
+		match(String(refused.json.error), /library update skill:repair --user --force/);
+		const repaired = cli(["update", "skill:repair", "--user", "--force"]);
+		equal(repaired.code, 0, JSON.stringify(repaired.json));
+		ok(copy("user", "repair")?.loadable);
+		ok(JSON.stringify(repaired.json).includes("backup"));
 	});
 
 	it("exposes plans and outcomes through the CLI with additive JSON and dry-run for every mutation", () => {

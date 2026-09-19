@@ -340,8 +340,9 @@ describe("skill tool surface lifetime", () => {
 		});
 	}
 
-	for (const installed of [true, false]) {
-		it(`preserves runtime skill activation when ${installed ? "installed" : "installation is approved"}`, async () => {
+	for (const mode of ["installed", "user", "project"] as const) {
+		const installed = mode === "installed";
+		it(`preserves runtime skill activation when ${installed ? "installed" : `${mode} installation is approved`}`, async () => {
 			const root = scratchRoot();
 			const directory = writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"]);
 			explicitPaths = [directory];
@@ -356,7 +357,6 @@ describe("skill tool surface lifetime", () => {
 			const runtime = createInteractiveSlashRuntime({
 				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
 				getCwd: () => root,
-				getConfigDir: () => root,
 				chatPanel: { appendReplayBlock() {}, appendUser() {} },
 				requestRender() {},
 				refreshFooter() {},
@@ -393,11 +393,16 @@ describe("skill tool surface lifetime", () => {
 				},
 				openAskUser: async () => {
 					asked += 1;
-					return { cancelled: false, answers: [{ answer: "Install and run" }] };
+					return {
+						cancelled: false,
+						answers: [{ answer: mode === "project" ? "Install for this project and run" : "Install and run" }],
+					};
 				},
 				installSkill: (input: Parameters<NonNullable<InteractiveSlashRuntimeDeps["installSkill"]>>[0]) => {
 					strictEqual(input.source, "interview");
 					strictEqual(input.cwd, root);
+					strictEqual(input.scope, mode);
+					strictEqual("configDir" in input, false);
 					installs += 1;
 					available = true;
 				},

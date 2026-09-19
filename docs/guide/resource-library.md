@@ -2,6 +2,8 @@
 
 The **library** is Clio's collection of installable **packages**. Each package has one kind: `plugin`, `skill`, `agent`, `prompt`, or `fleet`. Every kind uses a root `plugin.json`, an explicit Semantic Version, a full-tree SHA-256 pin, and the same installation state. A plugin bundles several resources; each other kind exposes one public resource and may include supporting files.
 
+Bundled packages are available on a fresh installation, but none are installed automatically. Built-in runtime tools and helper recipes remain available independently of optional library packages.
+
 ## Browse and install
 
 ```bash
@@ -33,6 +35,8 @@ clio-coder library update plugin:materio --project --dry-run
 clio-coder library update plugin:materio --project
 clio-coder library remove plugin:materio --project
 ```
+
+The list labels drifted copies `damaged`, not `shadowed`. Inspect changes before running `clio-coder library update kind:name --user --force` (or `--project`) to restore the recorded source; edited files are preserved in a recovery backup. Enabling alone cannot repair drift.
 
 Drift prevents resources from loading. `pin` verifies and reports the recorded pin; it never blesses local changes. Updates of registered packages use the current index version and pin. Local installations update from their recorded directory. Update and replacement preserve disabled state. Removal preserves edited content and reports the recovery path. Installed state remains addressable after its index entry disappears.
 
