@@ -237,9 +237,10 @@ test("compact footer exposes activity, headroom and workspace in three bounded r
 	}
 	const text = plain(renderCompactDashboard(state(), 160));
 	match(text, /exploring.*1 agent active/);
-	match(text, /CONTEXT.*available/);
+	match(text, /Context.*262.1k.*tokens/);
 	match(text, /dashboard/);
-	match(text, /v050.*auto-edit.*70k processed/);
+	match(text, /v050.*dashboard/);
+	doesNotMatch(text, /auto-edit|70k processed|tool calls|standard/);
 });
 
 test("Status renders live configured harness limits without exposing arbitrary settings", () => {
@@ -277,4 +278,31 @@ test("Context dashboard shares the overlay category swatches and filled/free/res
 	}
 	for (const row of renderContextMeterGrid(ledger, 64, 10, theme)) ok(ansi.includes(row));
 	match(plain(rows), /Filled = context.*empty = available.*shaded = reserve/);
+});
+
+test("finished agents collapse into bounded history while retries retain live cards", () => {
+	const snapshot = state();
+	const row = snapshot.dispatchRows[0];
+	ok(row);
+	snapshot.dispatchRows = [
+		{ ...row, status: "retrying", runId: "retry", taskSummary: "Active retry task" },
+		...Array.from({ length: 8 }, (_, index) => ({
+			...row,
+			status: "completed" as const,
+			runId: `done-${index}`,
+			taskSummary: "Historical verbose task must not render",
+		})),
+	];
+	const text = plain(renderDashboardPage(snapshot, "Activity", 160, 75, "alt+u"));
+	match(text, /Active retry task/);
+	match(text, /INVOCATION HISTORY · 8 finished/);
+	match(text, /Scout · completed.*internal.*1[2]s.*↑68k ↓2k/);
+	match(text, /4 more finished runs/);
+	doesNotMatch(text, /Historical verbose task/);
+	snapshot.dispatchRows = [{ ...row, status: "failed", outcomeDetail: "result_contract_exhausted" }];
+	const settled = plain(renderDashboardPage(snapshot, "Activity", 86, 75, "alt+u"));
+	match(settled, /No agents running/);
+	match(settled, /Scout · failed/);
+	match(settled, /result_contract_exhausted.*\/view dispatch:scout-run/);
+	doesNotMatch(settled, /AGENT ACTIVITY|Task |Recent |Worker output|Budget /);
 });

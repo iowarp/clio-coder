@@ -471,10 +471,13 @@ from the active branch. It retains settled and superseded values from
 operator supersede a decision or enter a correction. A correction is submitted
 to the model as an ordinary operator turn after the durable snapshot changes.
 
-The compact footer separates current activity, context headroom, and workspace/session
-state into three rows. `Alt+U` cycles through Activity, Context, Status, then closes
+The compact footer separates current activity, context occupancy, and workspace/Git
+state into three rows. Detailed throughput, cumulative usage, and harness settings
+are reserved for the expanded pages. `Alt+U` cycles through Activity, Context, Status, then closes
 the dashboard; the composer remains active. Activity shows worker phases, recent
-actions, reported usage, and provisional answer text. Context uses the same category
+actions, reported usage, and provisional answer text. Finished agents collapse into
+a bounded invocation history with outcomes, duration, usage, and inspection links;
+full tasks, action trails, and answers remain in `/view` and Fleet Runs. Context uses the same category
 colors and filled/free/reserved grid as `/context`, with token counts alongside it.
 Status shows the model route, project resources, memory state, permissions, and
 configured execution/context limits. Configured cost ceilings are not remaining
