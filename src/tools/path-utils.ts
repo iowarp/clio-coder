@@ -46,8 +46,18 @@ function tryCurlyQuoteVariant(filePath: string): string {
 	return filePath.replace(/'/g, "\u2019");
 }
 
+/**
+ * The spelling changes every path-taking tool applies before it resolves a
+ * path: a leading `@` is dropped and Unicode spaces become plain ones. Safety
+ * admission applies the same changes first, so it judges the path the tool
+ * opens: `@../x` is `../x`, not a directory named `@..`.
+ */
+export function normalizeToolPath(filePath: string): string {
+	return normalizeUnicodeSpaces(normalizeAtPrefix(filePath));
+}
+
 export function expandPath(filePath: string): string {
-	const normalized = normalizeUnicodeSpaces(normalizeAtPrefix(filePath));
+	const normalized = normalizeToolPath(filePath);
 	if (normalized === "~") return homedir();
 	if (normalized.startsWith("~/")) return homedir() + normalized.slice(1);
 	return normalized;
@@ -80,21 +90,23 @@ export function resolveMutationTarget(
 	return { path: isAbsolute(expanded) ? expanded : `${cwd}${sep}${expanded}`, physical: undefined };
 }
 
+/**
+ * The other spellings resolveReadPath tries, in order, when the resolved path
+ * does not exist: the macOS screenshot AM/PM space, NFD, a curly apostrophe,
+ * and NFD with the curly apostrophe. Read admission judges each of them too,
+ * because any of them can name a link the plain spelling does not.
+ */
+export function readPathVariants(resolved: string): string[] {
+	const nfd = tryNfdVariant(resolved);
+	const variants = [tryMacOSScreenshotPath(resolved), nfd, tryCurlyQuoteVariant(resolved), tryCurlyQuoteVariant(nfd)];
+	return [...new Set(variants)].filter((variant) => variant !== resolved);
+}
+
 export function resolveReadPath(filePath: string, cwd: string = process.cwd()): string {
 	const resolved = resolveToCwd(filePath, cwd);
 	if (fileExists(resolved)) return resolved;
-
-	const amPmVariant = tryMacOSScreenshotPath(resolved);
-	if (amPmVariant !== resolved && fileExists(amPmVariant)) return amPmVariant;
-
-	const nfdVariant = tryNfdVariant(resolved);
-	if (nfdVariant !== resolved && fileExists(nfdVariant)) return nfdVariant;
-
-	const curlyVariant = tryCurlyQuoteVariant(resolved);
-	if (curlyVariant !== resolved && fileExists(curlyVariant)) return curlyVariant;
-
-	const nfdCurlyVariant = tryCurlyQuoteVariant(nfdVariant);
-	if (nfdCurlyVariant !== resolved && fileExists(nfdCurlyVariant)) return nfdCurlyVariant;
-
+	for (const variant of readPathVariants(resolved)) {
+		if (fileExists(variant)) return variant;
+	}
 	return resolved;
 }

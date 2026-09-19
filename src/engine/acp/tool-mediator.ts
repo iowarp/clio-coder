@@ -92,6 +92,19 @@ const SINGLE_MUTATION_PATH_KEYS = [
 	"uri",
 ] as const;
 
+/**
+ * A read or a search also names the directory it reaches under these keys,
+ * and that directory is judged like any other path target.
+ */
+const READ_PATH_KEYS = [
+	...SINGLE_MUTATION_PATH_KEYS,
+	"directory",
+	"dir",
+	"dirPath",
+	"dir_path",
+	"folder",
+	"root",
+] as const;
 const MULTI_MUTATION_PATH_KEYS = ["paths", "files", "filePaths", "file_paths", "targets", "targetPaths"] as const;
 const MOVE_SOURCE_PATH_KEYS = [
 	"source",
@@ -415,7 +428,7 @@ function mapPathBearingToolCall(
 	targetRequired: boolean,
 ): MappedToolCall {
 	const rawInput = isRecord(toolCall?.rawInput) ? toolCall.rawInput : {};
-	const raw = extractPathFields(rawInput, SINGLE_MUTATION_PATH_KEYS, MULTI_MUTATION_PATH_KEYS, cwd, "rawInput");
+	const raw = extractPathFields(rawInput, READ_PATH_KEYS, MULTI_MUTATION_PATH_KEYS, cwd, "rawInput");
 	const locations = extractLocationPaths(toolCall?.locations, cwd);
 	const errors = [...raw.errors, ...locations.errors];
 	if (toolCall?.rawInput !== undefined && !isRecord(toolCall.rawInput)) errors.push("rawInput must be an object");
@@ -512,10 +525,10 @@ function mapToolCall(toolCall: AcpToolCallUpdate | undefined, cwd: string): Mapp
 		const args = commandArgs(rawInput, cwd);
 		return { tool: ToolNames.Bash, args, evaluations: [{ tool: ToolNames.Bash, args }], known: true, displayTool };
 	}
-	const inferredPattern = stringField(rawInput, "pattern");
-	if (inferredPattern) {
-		const args = { pattern: inferredPattern };
-		return { tool: ToolNames.Grep, args, evaluations: [{ tool: ToolNames.Grep, args }], known: true, displayTool };
+	// A search names where it looks as well as what it looks for, so the
+	// inferred grep keeps its path targets for the policy to judge.
+	if (stringField(rawInput, "pattern")) {
+		return mapPathBearingToolCall(toolCall, ToolNames.Grep, displayTool, cwd, false);
 	}
 	const inferredPath = stringField(rawInput, "file_path", "filePath", "path", "notebook_path");
 	if (inferredPath) {
@@ -621,6 +634,7 @@ export class AcpToolMediator {
 					candidate,
 					disposition: mapAutonomy(level, candidate.classification.actionClass, {
 						executeRecognized: candidate.policy?.execRecognition !== "unrecognized",
+						...(candidate.policy?.readScope === "outside-workspace" ? { readOutsideWorkspace: true } : {}),
 					}),
 				}));
 				const deniedDisposition = dispositions.find((candidate) => candidate.disposition === "deny");
@@ -628,11 +642,20 @@ export class AcpToolMediator {
 				if (deniedDisposition !== undefined) {
 					safetyDecision = deniedDisposition.candidate;
 					decision = "denied";
-					reason = autonomyDenyRejection(level, mapped.tool, deniedDisposition.candidate.classification.actionClass).short;
+					reason = autonomyDenyRejection(
+						level,
+						mapped.tool,
+						deniedDisposition.candidate.classification.actionClass,
+						deniedDisposition.candidate.policy?.readScope === "outside-workspace",
+					).short;
 				} else if (askDisposition !== undefined) {
 					safetyDecision = askDisposition.candidate;
 					decision = "denied";
-					reason = `permission_required: autonomy ${level} requires approval for ${askDisposition.candidate.classification.actionClass}; denied by non-stall policy (no interactive operator in delegation context)`;
+					const asked =
+						askDisposition.candidate.policy?.readScope === "outside-workspace"
+							? "a path outside the workspace"
+							: askDisposition.candidate.classification.actionClass;
+					reason = `permission_required: autonomy ${level} requires approval for ${asked}; denied by non-stall policy (no interactive operator in delegation context)`;
 				} else {
 					decision = "approved";
 					reason = safetyDecision?.policy?.reasonCode ?? "allowed";

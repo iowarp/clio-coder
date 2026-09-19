@@ -8,11 +8,18 @@ import {
 	canonicalizePath,
 	canonicalizeRawPath,
 	createPathWalkMemo,
+	type PathWalkMemo,
 } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
 import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
-import { type ActionClass, type Classification, type ClassifierCall, classify } from "./action-classifier.js";
+import {
+	type ActionClass,
+	type Classification,
+	type ClassifierCall,
+	classify,
+	normalizeCallPaths,
+} from "./action-classifier.js";
 import type { DamageControlMatch, DamageControlRule } from "./damage-control.js";
 import {
 	DEFAULT_DAMAGE_CONTROL_PATH_POLICY,
@@ -39,6 +46,7 @@ import {
 	scanShellLike,
 	scanShellLikeDeep,
 } from "./protected-artifacts.js";
+import { isReadScopeTool, readScopeEscape, readScopeExemptRoots, readScopeSpellings } from "./read-scope.js";
 import { formatRejection, type RejectionMessage } from "./rejection-feedback.js";
 import { getCachedDefaultRulePacks, type PackId, type RulePacks } from "./rule-pack-loader.js";
 import { activeClioSkillRoots, mutationCandidates, skillMutationReason } from "./skill-authority.js";
@@ -81,6 +89,12 @@ export interface SafetyPolicyDecision {
 	 * autonomy mapping asks for unrecognized execution below full-auto.
 	 */
 	execRecognition?: "recognized" | "unrecognized";
+	/**
+	 * Set on an allowed read, ls, grep, or find whose path resolves outside the
+	 * workspace and outside Clio's own readable roots. The net passed; the
+	 * autonomy mapping asks for it below full-auto.
+	 */
+	readScope?: "outside-workspace";
 }
 
 export interface SafetyPolicyMetadata {
@@ -99,6 +113,12 @@ export interface SafetyPolicyMetadata {
 
 export interface SafetyPolicyEngine {
 	evaluate(call: ClassifierCall, posture?: string): SafetyPolicyDecision;
+	/**
+	 * False when a zero-access entry covers the path. The per-entry filter of a
+	 * listing or a search asks this about every result, so it runs the path
+	 * policy alone instead of a whole admission.
+	 */
+	readablePath(target: string): boolean;
 	metadata(posture?: string): SafetyPolicyMetadata;
 }
 
@@ -244,6 +264,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const writeRootCwd = path.resolve(options.cwd ?? process.cwd());
 	const writeRoots = (options.writeRoots ?? []).map((root) => resolvePathBoundary(writeRootCwd, root));
 	const skillRoots = activeClioSkillRoots(cwd);
+	const readExemptRoots = readScopeExemptRoots();
 	const packs = options.rulePacks ?? getCachedDefaultRulePacks();
 	const projectPolicy = options.projectPolicy ?? gateProjectSafetyPolicy(cwd, loadProjectSafetyPolicy(cwd));
 	const projectPolicyRoot =
@@ -273,7 +294,8 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 	const sourcedRules: SourcedRule[] = packs.base.rules.map((rule) => ({ rule, source: "damage-control:base" }));
 
 	return {
-		evaluate(call, posture) {
+		evaluate(rawCall, posture) {
+			const call = normalizeCallPaths(rawCall);
 			const rawClassification = classify(call);
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
@@ -376,7 +398,10 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// resolution and one walk memo, both dropped when this call is decided.
 			const walkMemo = createPathWalkMemo();
 			const candidates = mutationCandidates(
-				pathPolicyTargets(catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } }),
+				pathPolicyTargets(
+					catalogCommand === null ? call : { tool: ToolNames.Bash, args: { command: catalogCommand } },
+					callCwd,
+				),
 				callCwd,
 				mutationCommand,
 				walkMemo,
@@ -416,7 +441,7 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// protection (`.env`, `~/.ssh/`, `credentials.yaml`, ...) active on a
 			// broken config, which is the fail-closed intent; project-authored
 			// additions and exemptions stay gated on validity inside the loader.
-			const pathBlock = evaluateProjectPathPolicy(pathPolicy, call, callCwd);
+			const pathBlock = evaluateProjectPathPolicy(pathPolicy, call, callCwd, walkMemo);
 			if (pathBlock !== null) {
 				const blockInput: Omit<
 					SafetyPolicyDecision,
@@ -545,7 +570,21 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			// Catalog argv already went through canonical command recognition above.
 			// Package scripts and the frontend validator retain their fixed typed surface.
 			if (classification.actionClass === "execute") allowInput.execRecognition = "recognized";
+			// Search scope: the zero-access list above is the only path rail a
+			// read-class tool meets, so a path through a link or a plain `..` used
+			// to be read, listed, and searched at every level. The net still passes
+			// it; the flag lets the autonomy mapping ask below full-auto.
+			if (isReadScopeTool(call.tool) && posture !== "confirmed") {
+				const escaped = readScopeEscape(pathArg(call.args) ?? ".", callCwd, cwd, readExemptRoots, walkMemo);
+				if (escaped !== null) {
+					allowInput.readScope = "outside-workspace";
+					allowInput.reasons = [...allowInput.reasons, `read-path-outside-workspace: ${escaped}`];
+				}
+			}
 			return allowDecision(base, allowInput);
+		},
+		readablePath(target) {
+			return evaluatePathPolicy(zeroAccessPolicy, "read", target, cwd).kind === "allow";
 		},
 		metadata() {
 			return {
@@ -653,16 +692,20 @@ function evaluateProjectPathPolicy(
 	policy: CompiledPathPolicy,
 	call: ClassifierCall,
 	callCwd: string,
+	memo: PathWalkMemo,
 ): Extract<PathPolicyDecision, { kind: "block" }> | null {
 	if (policy.entries.length === 0) return null;
-	for (const target of pathPolicyTargets(call)) {
-		const decision = evaluatePathPolicy(policy, target.operation, target.path, callCwd);
+	for (const target of pathPolicyTargets(call, callCwd)) {
+		const decision = evaluatePathPolicy(policy, target.operation, target.path, callCwd, memo);
 		if (decision.kind === "block") return decision;
 	}
 	return null;
 }
 
-function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyOperation; path: string }> {
+function pathPolicyTargets(
+	call: ClassifierCall,
+	callCwd: string,
+): Array<{ operation: PathPolicyOperation; path: string }> {
 	const args = call.args;
 	switch (call.tool) {
 		case ToolNames.Read:
@@ -670,7 +713,7 @@ function pathPolicyTargets(call: ClassifierCall): Array<{ operation: PathPolicyO
 		case ToolNames.Grep:
 		case ToolNames.Find: {
 			const target = pathArg(args) ?? ".";
-			return [{ operation: "read", path: target }];
+			return readScopeSpellings(target, callCwd).map((spelling) => ({ operation: "read" as const, path: spelling }));
 		}
 		case ToolNames.Data: {
 			// data streams one named file; a zero-access path is refused here,

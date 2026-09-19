@@ -66,6 +66,12 @@ export interface AutonomyMappingOptions {
 	 * behavior every call had before the tier existed.
 	 */
 	exposure?: AutonomyExposure;
+	/**
+	 * Read-class path tools only (read, ls, grep, find): true when the path the
+	 * call names resolves outside the workspace and outside Clio's own readable
+	 * roots. The policy engine decides it and carries it as `readScope`.
+	 */
+	readOutsideWorkspace?: boolean;
 }
 
 /**
@@ -104,6 +110,12 @@ export function mapAutonomy(
 	// level it describes is "inspect and answer" and the outward effect it is
 	// confirming is itself denied there.
 	if ((level === "auto-edit" || level === "suggest") && options.exposure === "outward") return "ask";
+	// The workspace is what the operator handed over. A read, listing, or
+	// search aimed outside it asks at every supervised level and runs at
+	// full-auto. `read-only` never invokes approvals, so the ask is its deny.
+	if (actionClass === "read" && options.readOutsideWorkspace === true && level !== "full-auto") {
+		return level === "read-only" ? "deny" : "ask";
+	}
 	if (actionClass === "read") return "allow";
 	if (level === "read-only") return "deny";
 	if (level === "suggest") return "ask";
@@ -131,9 +143,27 @@ export function mapAutonomy(
 
 /**
  * Rejection text for autonomy `deny` dispositions. Only `read-only` produces
- * denies, so the message is the propose-instead contract from §2.3.
+ * denies, so the message is the propose-instead contract from §2.3, or the
+ * search-scope text when the denied call is a read outside the workspace.
  */
-export function autonomyDenyRejection(level: AutonomyLevel, tool: string, actionClass: ActionClass): RejectionMessage {
+export function autonomyDenyRejection(
+	level: AutonomyLevel,
+	tool: string,
+	actionClass: ActionClass,
+	readOutsideWorkspace = false,
+): RejectionMessage {
+	if (readOutsideWorkspace) {
+		return {
+			short: `${tool} denied: the path is outside the workspace at autonomy ${level}`,
+			detail:
+				`The path resolves outside the workspace. Autonomy ${level} reads, lists, and searches inside the workspace ` +
+				"and denies a path outside it without prompting.",
+			hints: [
+				"Work from paths inside the workspace, or name the outside path to the operator as text.",
+				"The operator can raise the level in interactive /settings or with clio-coder run --autonomy <level>.",
+			],
+		};
+	}
 	return {
 		short: `${tool} denied: autonomy level is ${level}`,
 		detail:
@@ -162,7 +192,20 @@ export function autonomyAskRejection(
 	tool: string,
 	actionClass: ActionClass,
 	exposure: AutonomyExposure = DEFAULT_AUTONOMY_EXPOSURE,
+	readOutsideWorkspace = false,
 ): RejectionMessage {
+	if (readOutsideWorkspace && exposure !== "outward") {
+		return {
+			short: `${tool} needs approval: the path is outside the workspace at autonomy ${level}`,
+			detail:
+				`The path resolves outside the workspace, through a link, a \`..\`, or an absolute path. ` +
+				`Autonomy ${level} reads, lists, and searches inside the workspace without asking and parks a path outside it for the operator.`,
+			hints: [
+				"Approving resumes only this call.",
+				"Autonomy full-auto reads outside the workspace without asking; zero-access paths stay refused at every level.",
+			],
+		};
+	}
 	if (exposure === "outward") {
 		return {
 			short: `${tool} needs approval: outward-facing gate at autonomy ${level}`,
