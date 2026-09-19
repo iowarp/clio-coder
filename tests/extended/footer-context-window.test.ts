@@ -1,6 +1,12 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
-import { compactContextWindowLabel, compactSecondaryLine } from "../../src/interactive/footer/widgets.js";
+import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import {
+	compactContextWindowLabel,
+	compactSecondaryLine,
+	sessionQuadrant,
+	zipColumns,
+} from "../../src/interactive/footer/widgets.js";
 import { clioTheme } from "../../src/interactive/theme/index.js";
 
 const agent = { lastTurn: null } as never;
@@ -31,4 +37,21 @@ describe("compact footer names the live context window", () => {
 		strictEqual(compactContextWindowLabel(facts(262_144), 60), null);
 		ok(!compactSecondaryLine(facts(262_144), agent, 60, clioTheme()).includes("of "));
 	});
+});
+
+it("expanded dashboard wraps long model identities rather than discarding them", () => {
+	const target = `blade · dynamo/${"long-model-".repeat(10)}FINAL_MODEL`;
+	for (const width of [28, 44, 72]) {
+		const rows = zipColumns(
+			sessionQuadrant({ target } as never),
+			["CONTEXT", "used 17.9k / 262.1k"],
+			width,
+			width,
+			" │ ",
+		);
+		const plain = rows.map(stripTerminalSequences).join("\n");
+		ok(plain.includes("FINAL_MODEL"), plain);
+		ok(!plain.includes("…"), plain);
+		ok(rows.every((row) => visibleWidth(row) <= width * 2 + 3));
+	}
 });

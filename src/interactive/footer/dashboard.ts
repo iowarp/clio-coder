@@ -214,8 +214,8 @@ function renderFooterDashboardLines(
 
 /**
  * Expanded footer: responsive sections ordered by operational urgency.
- * Widths at 120 columns and above use four weighted horizontal sections.
- * Widths from 80 to 119 columns use a two by two grid.
+ * Widths at 220 columns and above use four weighted horizontal sections.
+ * Widths from 80 to 219 columns use a two by two grid.
  * Widths below 80 columns use a vertical stack with all sections retained.
  */
 function renderFooterStatusLines(state: FooterDashboardRenderState, width: number): string[] {
@@ -404,7 +404,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		const statuses = deps.providers.list();
 		const current = settings?.chat?.target ? (statuses.find((s) => s.target.id === settings.chat?.target) ?? null) : null;
 
-		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model);
+		const target = formatTargetLabel(settings?.chat?.target, settings?.chat?.model, { abbreviate: false });
 
 		const resolution = resolveModelRuntimeCapabilitiesForProviders(
 			deps.providers,

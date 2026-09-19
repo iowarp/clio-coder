@@ -1,5 +1,5 @@
 import { type TaskBoardSnapshot, type TaskBoardStore, taskBoardCounts } from "../domains/session/task-board.js";
-import { Text, type TUI, visibleWidth } from "../engine/tui.js";
+import { Text, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	CONTEXT_ISLAND_WIDTH,
 	type ContextActivitySnapshot,
@@ -50,7 +50,15 @@ function formatTaskBoardIslandLines(board: TaskBoardSnapshot): string[] {
 		const glyph = active ? theme.fg("accent", GLYPH.running) : theme.fg("dim", GLYPH.queued);
 		body.push(`${glyph} ${theme.fg("dim", next.id)} ${theme.fg("muted", next.title)}`);
 	}
-	return frame(theme, "Tasks", body, TASK_ISLAND_WIDTH + 4);
+	return frame(
+		theme,
+		"Tasks",
+		[
+			...body.flatMap((line) => wrapTextWithAnsi(line, TASK_ISLAND_WIDTH)).slice(0, 7),
+			theme.fg("dim", "/tasks · full task board"),
+		],
+		TASK_ISLAND_WIDTH + 4,
+	);
 }
 
 export interface InteractiveTickers {
@@ -70,13 +78,17 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		((handle: InteractiveTickerHandle) => clearInterval(handle as ReturnType<typeof setInterval>));
 	const taskIsland = new Text("", 0, 0);
 	const contextIsland = new Text("", 0, 0);
+	let taskIslandHeight = 24;
 	const taskIslandWidth = formatTaskIslandLines([]).reduce((max, line) => Math.max(max, visibleWidth(line)), 0);
 	const taskIslandHandle = deps.tui.showOverlay(taskIsland, {
 		anchor: "top-right",
 		width: taskIslandWidth,
 		margin: { top: 1, right: 1 },
 		nonCapturing: true,
-		visible: (width, height) => width >= 80 && height >= 18,
+		visible: (width, height) => {
+			taskIslandHeight = height;
+			return width >= 80 && height >= 18;
+		},
 	});
 	taskIslandHandle.setHidden(true);
 	const contextIslandHandle = deps.tui.showOverlay(contextIsland, {
@@ -112,7 +124,10 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		// leaves the last text in place, which is unreachable while hidden.
 		if (hidden && taskIslandHidden && rows.length === 0 && !boardHasOpenTasks) return visibilityChanged;
 		taskIslandHidden = hidden;
-		if (rows.length > 0) taskIsland.setText(formatTaskIslandLines(rows).join("\n"));
+		if (rows.length > 0)
+			taskIsland.setText(
+				formatTaskIslandLines(rows, Math.max(1, Math.min(4, Math.floor((taskIslandHeight - 8) / 9)))).join("\n"),
+			);
 		else if (board) taskIsland.setText(formatTaskBoardIslandLines(board).join("\n"));
 		taskIsland.invalidate();
 		return visibilityChanged || !hidden;

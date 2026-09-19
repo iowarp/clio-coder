@@ -121,6 +121,8 @@ export function isHelperRun(run: { agentAudience?: DispatchStartedPayload["agent
 }
 
 export interface WorkerEntryState {
+	/** Local presentation clock; never restored as a live timer from a receipt. */
+	startedAtMs?: number;
 	/** Compact agent-to-agent presentation, selected from the admitted audience. */
 	helper?: true;
 	task?: string;
@@ -331,6 +333,7 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				existing.runId = runId;
 				existing.runtime = runtime;
 				existing.pending = true;
+				existing.startedAtMs = Date.now();
 				delete existing.receipt;
 				existing.attempts.push({ runId, targetLabel: workerTargetLabel(runtime) });
 				assignmentByRun.set(runId, assignmentId);
@@ -350,13 +353,14 @@ export function createWorkerStream(options: WorkerStreamOptions = {}): WorkerStr
 				runId,
 				origin: payload.requestOrigin === "user" ? "user" : "agent",
 				...(helper ? { helper: true as const } : {}),
-				...(payload.task ? { task: payload.task.slice(0, 1000) } : {}),
+				...(payload.task ? { task: payload.task } : {}),
 				agentId: payload.agentId,
 				runtime,
 				text: "",
 				droppedLines: 0,
 				tools: [],
 				progress: progress.snapshot(),
+				startedAtMs: Date.now(),
 				attempts: [{ runId, targetLabel: workerTargetLabel(runtime) }],
 				pending: true,
 				...(payload.council !== undefined ? { council: { ...payload.council } } : {}),

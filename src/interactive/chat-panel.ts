@@ -16,6 +16,7 @@ import { presentProviderError, providerErrorEvidence } from "./renderers/provide
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import {
 	canGroupObservation,
+	renderToolArguments,
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
@@ -836,7 +837,7 @@ function renderEntryLines(
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "worker") {
-		return renderWorkerEntryLines(entry.state, width, { detail, terminalRows, unbounded: unboundedToolBodies });
+		return renderWorkerEntryLines(entry.state, width, { detail, terminalRows, unbounded: unboundedToolBodies, nowMs });
 	}
 	// A settled assistant entry that rendered nothing at all contributes nothing.
 	// A mid-turn notice splits the transcript, so the events after it open a
@@ -874,6 +875,13 @@ function renderEntryLines(
 			}
 			if (count > 1) {
 				lines.push(dimLine(`✓ ${kind === "read" ? `Read ${count} files` : `${count} ${kind} actions`} · /view`, width));
+				for (let offset = 0; offset < count; offset++) {
+					const grouped = entry.segments[segIndex + offset];
+					if (grouped?.kind === "tool")
+						lines.push(
+							...renderToolArguments(grouped.args, width, false, previewBudget(detail.invocationRows, terminalRows)),
+						);
+				}
 				segIndex += count - 1;
 			} else lines.push(...renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows));
 			continue;
@@ -1186,6 +1194,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// only thinking still needs the time-keyed render key.
 			) ||
 				(entry.pending && openThinkingSegment(entry)?.startedAtMs !== undefined))) ||
+		(entry.role === "worker" && entry.state.pending && entry.state.startedAtMs !== undefined) ||
 		(entry.role === "replayBlock" && entry.isLive?.() === true) ||
 		(entry.role === "user" && (entry.status?.() ?? "committed") !== "committed");
 

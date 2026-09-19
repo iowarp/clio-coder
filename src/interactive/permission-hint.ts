@@ -69,9 +69,9 @@ export function permissionHintEntries(
 			: inspection === "open"
 				? [
 						{ key: "↑↓", verb: "scroll", critical: false },
-						{ key: MUTATION_PREVIEW_KEY, verb: "hide mutation", short: "hide", critical: false },
+						{ key: MUTATION_PREVIEW_KEY, verb: "hide details", short: "hide", critical: false },
 					]
-				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect mutation", short: "inspect", critical: false }]),
+				: [{ key: MUTATION_PREVIEW_KEY, verb: "inspect details", short: "inspect", critical: false }]),
 		{ key: "s", verb: "stop turn", short: "stop", critical: true },
 		// With a draft, deny and stop are the only immediate answers, so Esc
 		// outranks the narrowing that would otherwise drop it first.

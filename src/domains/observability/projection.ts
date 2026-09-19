@@ -649,7 +649,7 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 					summary.tokens.input += input;
 					summary.tokens.output += output;
 					summary.tokens.total += input + output + num(message.usage.cacheWrite, 0);
-					summary.lastContextTokens = input + output;
+					summary.lastContextTokens = input + output + num(message.usage.cacheWrite, 0);
 				}
 			}
 			// A worker's agent_end settles its displayed progress; only a terminal
