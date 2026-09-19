@@ -56,7 +56,9 @@ seconds from a scratch directory, and all of them run at once.
 
 ## Task worktree rows
 
-In a git checkout, doctor lists every `worktree: true` task worktree that
+In a git checkout, the `task worktree root` row gives the directory
+`fleet.worktrees.root` resolves to, its filesystem type, and its free space,
+and warns when an off-disk setting fell back to disk. Doctor then lists every `worktree: true` task worktree that
 outlived its run, one `task worktree <runId>` row each, or a single
 `task worktrees` row reading `none preserved`. A `settled` row is a worktree
 its run kept on purpose and is informational. An `abandoned` row is a crashed

@@ -166,10 +166,10 @@ describe("task worktree restart recovery", () => {
 		recoverTaskWorktrees(root);
 
 		mkdirSync(join(root, "sub"));
-		const findings = taskWorktreeFindings(
-			join(root, "sub"),
-			Date.parse(readMarker(task).createdAt as string) + 3 * 3_600_000,
-		);
+		const findings = taskWorktreeFindings(join(root, "sub"), {
+			now: Date.parse(readMarker(task).createdAt as string) + 3 * 3_600_000,
+			rootSetting: "disk",
+		}).slice(1);
 		deepStrictEqual(
 			findings.map((finding) => [finding.name, finding.level, finding.ok]),
 			[
@@ -180,11 +180,16 @@ describe("task worktree restart recovery", () => {
 		const settled = findings[1]?.detail ?? "";
 		match(settled, /clio-coder\/task\/run-settled \(settled, 3h old, kept by its run\)/u);
 		match(settled, /git log [0-9a-f]{40}\.\.clio-coder\/task\/run-settled/u);
-		match(settled, /git worktree remove --force .*run-settled && git branch -D clio-coder\/task\/run-settled/u);
+		match(
+			settled,
+			/git worktree remove --force .*run-settled && git branch -D clio-coder\/task\/run-settled && rm .*run-settled\.task-owner\.json/u,
+		);
 	});
 
 	it("reports none preserved in a clean checkout and nothing outside a git checkout", () => {
-		deepStrictEqual(taskWorktreeFindings(root), [{ ok: true, name: "task worktrees", detail: "none preserved" }]);
+		deepStrictEqual(taskWorktreeFindings(root, { rootSetting: "disk" }).slice(1), [
+			{ ok: true, name: "task worktrees", detail: "none preserved" },
+		]);
 		const plain = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-task-recovery-plain-")));
 		try {
 			deepStrictEqual(taskWorktreeFindings(plain), []);

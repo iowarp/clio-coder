@@ -231,6 +231,7 @@ import { createFileMutationObserver, createSkillActivationObserver } from "../to
 import { createRegistry } from "../tools/registry.js";
 import { sweepExpiredToolOffloads } from "../tools/result-shaping.js";
 import { gitCheckoutRoot, recoverTaskWorktrees } from "../tools/task-worktree.js";
+import { allowedWorktreeParents } from "../tools/worktree-root.js";
 
 export interface BootResult {
 	exitCode: number;
@@ -1145,7 +1146,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		try {
 			// Dispatch creates them under the checkout root, which a session started
 			// in a subdirectory is not.
-			const recovery = recoverTaskWorktrees(gitCheckoutRoot(process.cwd()) ?? process.cwd());
+			const checkout = gitCheckoutRoot(process.cwd()) ?? process.cwd();
+			// A configured absolute root is only known from settings; the disk and
+			// tmpfs locations are recognized whatever the settings say.
+			const worktreeRootSetting = options.startupSettings?.fleet.worktrees.root ?? startupWorktreeRootSetting();
+			const recovery = recoverTaskWorktrees(checkout, allowedWorktreeParents(worktreeRootSetting, checkout));
 			for (const kept of recovery.preserved) {
 				bootStderr(
 					`[dispatch] task worktree recovery preserved ${kept.runId}: ${kept.reason} on ${kept.branch}; inspect with git log ${kept.base}..${kept.branch}\n`,
@@ -2679,4 +2684,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		},
 	});
 	return { exitCode: 0, bootTimeMs: timer.snapshot().totalMs };
+}
+
+/** The configured task worktree root, or the default when settings cannot be read this early in boot. */
+function startupWorktreeRootSetting(): string {
+	try {
+		return readSettings().fleet.worktrees.root;
+	} catch {
+		return "disk";
+	}
 }

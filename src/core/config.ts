@@ -13,7 +13,7 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
 	ACTIVE_AGENT_AUTOMATION_ROLES,
@@ -1353,6 +1353,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"nodes",
 				"permissions",
 				"concurrency",
+				"worktrees",
 				"retry",
 				"limits",
 				"history",
@@ -1588,6 +1589,28 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 			else {
 				const parsed = expectInteger(issues, "fleet.concurrency", rawFleet.concurrency, { min: 1 });
 				if (parsed !== undefined) settings.fleet.concurrency = parsed;
+			}
+		}
+		if ("worktrees" in rawFleet) {
+			const rawWorktrees = rawFleet.worktrees;
+			if (!isPlainObject(rawWorktrees)) {
+				issues.add("fleet.worktrees", `expected a mapping, got ${describe(rawWorktrees)}`);
+			} else {
+				issues.unknownKeys("fleet.worktrees", rawWorktrees, ["root"]);
+				if ("root" in rawWorktrees) {
+					const root = rawWorktrees.root;
+					if (
+						typeof root === "string" &&
+						(root === "auto" || root === "tmpfs" || root === "disk" || (isAbsolute(root) && !root.includes("\0")))
+					) {
+						settings.fleet.worktrees.root = root;
+					} else {
+						issues.add(
+							"fleet.worktrees.root",
+							`expected auto, tmpfs, disk, or an absolute path, got ${describe(rawWorktrees.root)}`,
+						);
+					}
+				}
 			}
 		}
 		for (const [blockName, fields] of [

@@ -46,6 +46,7 @@ const NEXT_TURN_FIELDS = new Set<string>([
 	"fleet.nodes",
 	"fleet.permissions",
 	"fleet.retry",
+	"fleet.worktrees",
 	"fleet.limits",
 	"fleet.history",
 	"context",
