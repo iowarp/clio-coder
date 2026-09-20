@@ -229,7 +229,7 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 					disabled={intent.kind === "blocked"}
 					title={intent.kind === "blocked" ? intent.reason : undefined}
 				>
-					{send.isPending ? "Sending…" : submitLabel(intent, situation)}
+					{send.isPending ? "Sending…" : submitLabel(intent, situation, draft.mode)}
 				</button>
 			</div>
 			{intent.kind === "blocked" && draft.text.trim() !== "" ? (

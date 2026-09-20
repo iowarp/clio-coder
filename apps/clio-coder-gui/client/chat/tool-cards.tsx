@@ -51,8 +51,10 @@ function FactStrip({ facts }: { facts: readonly ToolFact[] }) {
 	);
 }
 
-function Locations({ locations }: { locations: readonly ToolLocation[] }) {
+function Locations({ locations, headline }: { locations: readonly ToolLocation[]; headline: string }) {
 	if (locations.length === 0) return null;
+	// One location that only restates the headline path is noise.
+	if (locations.length === 1 && locations[0] !== undefined && formatLocation(locations[0]) === headline) return null;
 	const shown = locations.slice(0, 3);
 	const rest = locations.length - shown.length;
 	return (
@@ -175,7 +177,7 @@ export const ToolCard = memo(function ToolCard({ item, options }: ToolCardProps)
 			</header>
 			<FactStrip facts={card.facts} />
 			{card.note === null ? null : <p className="tool-card__note">{card.note}</p>}
-			<Locations locations={card.locations} />
+			<Locations locations={card.locations} headline={card.headline} />
 			<Body card={card} />
 			<RawDisclosure item={item} />
 		</article>

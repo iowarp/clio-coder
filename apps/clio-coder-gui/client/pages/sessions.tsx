@@ -20,6 +20,7 @@ import {
 	TRUNCATION_NOTE,
 } from "../chat/chat-turn.js";
 import { FleetStrip } from "../chat/FleetStrip.js";
+import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, summarizeHealth } from "../chat/health.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { StatusMark } from "../design/status.js";
@@ -271,6 +272,8 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 		previousTurns.current = next;
 		return next;
 	}, [snapshot?.timeline, statuses]);
+	const fleet = snapshot?.fleet;
+	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
 	const notices = useMemo(() => {
 		const health = summarizeHealth(snapshot?.health ?? []);
 		const rows = [health.compaction, health.toolBudget].filter((row): row is HealthRow => row !== null);
@@ -311,7 +314,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			<SessionHealth session={snapshot} />
 			<SessionControls client={client} session={snapshot} />
 			<ApprovalBanner client={client} session={snapshot} />
-			<FleetStrip session={snapshot} />
+			<FleetStrip client={client} session={snapshot} />
 			{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
 			<div className="chat-transcript" ref={scroll}>
 				<div className="chat-transcript__content">
@@ -337,6 +340,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							stopping={false}
 							notices={notices.after.get(item.turnId) ?? NO_ROWS}
 							workspaceRoot={workspaceRoot}
+							liveWorkers={item.settled ? 0 : liveWorkers}
 						/>
 					))}
 					{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}

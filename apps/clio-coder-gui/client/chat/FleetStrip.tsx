@@ -5,9 +5,15 @@
 // The Running-only filter is off by default and says how many rows it hid, because a settled row
 // must never disappear unannounced. The taxonomy and the fold live in ./fleet-facts.ts.
 
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { useId, useState } from "react";
+import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
+import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
+import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
+import { capabilityRefusal, steeringAffordances } from "./composer.js";
 import {
 	FLEET_EMPTY,
 	FLEET_EMPTY_FILTERED,
@@ -22,12 +28,114 @@ import {
 	fleetRunTitle,
 	fleetSummaryLabel,
 	foldFleetRuns,
+	guidanceReady,
 	isLiveRun,
+	type SteerOutcome,
+	steerOutcome,
 } from "./fleet-facts.js";
 import "./approval.css";
 
+export interface RunSteering {
+	readonly client: Client;
+	readonly sessionId: string;
+}
+
+/**
+ * Guide or stop one live worker. Stop is a two-press control because it discards the worker's
+ * in-flight work and there is no undo. `accepted` only means the engine queued the request, so
+ * the outcome sentence never claims the worker has read or obeyed it.
+ */
+function RunSteer({ run, steering }: { run: FleetRun; steering: RunSteering }) {
+	const [mode, setMode] = useState<"idle" | "guide" | "confirm-stop">("idle");
+	const [text, setText] = useState("");
+	const [outcome, setOutcome] = useState<SteerOutcome | null>(null);
+	const field = useId();
+	const steer = useMutation({
+		mutationFn: (body: { action: "guide" | "cancel"; message?: string }) =>
+			steering.client.call(routes.steerDispatchRun, {
+				params: { id: steering.sessionId },
+				query: {},
+				body: { runId: run.runId, ...body },
+			}),
+		onSuccess: (result, body) => {
+			setOutcome(steerOutcome(body.action, result));
+			if (result.accepted && body.action === "guide") setText("");
+			setMode("idle");
+		},
+		onError: (error) => {
+			setOutcome({
+				tone: capabilityRefusal(error) === null ? "fail" : "warn",
+				message: capabilityRefusal(error) ?? (error instanceof Error ? error.message : String(error)),
+			});
+			setMode("idle");
+		},
+	});
+	return (
+		<div className="fleet-steer">
+			{mode === "guide" ? (
+				<form
+					className="fleet-steer__form"
+					onSubmit={(event) => {
+						event.preventDefault();
+						if (guidanceReady(text)) steer.mutate({ action: "guide", message: text.trim() });
+					}}
+				>
+					<label htmlFor={field}>Guidance for {run.agentId}</label>
+					<textarea
+						id={field}
+						rows={2}
+						value={text}
+						maxLength={STEER_TEXT_MAX_BYTES / 4}
+						onChange={(event) => setText(event.target.value)}
+						onKeyDown={(event) => {
+							if (event.key === "Escape") {
+								event.stopPropagation();
+								setMode("idle");
+							}
+						}}
+						// biome-ignore lint/a11y/noAutofocus: the operator just pressed Guide; the field is the next thing they type in.
+						autoFocus
+					/>
+					<div className="fleet-steer__actions">
+						<button type="submit" disabled={!guidanceReady(text) || steer.isPending}>
+							Send guidance
+						</button>
+						<button type="button" onClick={() => setMode("idle")}>
+							Cancel
+						</button>
+					</div>
+				</form>
+			) : mode === "confirm-stop" ? (
+				<div className="fleet-steer__actions">
+					<span>Stop this worker? Its unfinished work is discarded.</span>
+					<button type="button" disabled={steer.isPending} onClick={() => steer.mutate({ action: "cancel" })}>
+						Stop run
+					</button>
+					<button type="button" onClick={() => setMode("idle")}>
+						Keep running
+					</button>
+				</div>
+			) : (
+				<div className="fleet-steer__actions">
+					<button type="button" onClick={() => setMode("guide")} aria-label={`Guide ${run.agentId}`}>
+						Guide
+					</button>
+					<button type="button" onClick={() => setMode("confirm-stop")} aria-label={`Stop ${run.agentId}`}>
+						Stop
+					</button>
+				</div>
+			)}
+			{outcome === null ? null : (
+				<p role="status" className="fleet-steer__outcome" data-tone={outcome.tone}>
+					{outcome.message}
+				</p>
+			)}
+		</div>
+	);
+}
+
 /** The run rows alone, so a dispatch tool card can render its own matching runs inline. */
-export function FleetRunRows({ runs }: { runs: readonly FleetRun[] }) {
+export function FleetRunRows({ runs, steering }: { runs: readonly FleetRun[]; steering?: RunSteering | undefined }) {
 	return (
 		<ul className="fleet-runs">
 			{runs.map((run) => {
@@ -45,6 +153,7 @@ export function FleetRunRows({ runs }: { runs: readonly FleetRun[] }) {
 						<span className="fleet-run__state">
 							<StatusMark tone={FLEET_STATE_TONES[run.state]} label={fleetRunDetail(run)} />
 						</span>
+						{steering !== undefined && isLiveRun(run) ? <RunSteer run={run} steering={steering} /> : null}
 					</li>
 				);
 			})}
@@ -52,16 +161,22 @@ export function FleetRunRows({ runs }: { runs: readonly FleetRun[] }) {
 	);
 }
 
-export function FleetStrip({
-	session,
-	runningOnly = false,
-	onRunningOnly,
-}: {
-	session: SessionSnapshot;
-	/** Off by default. Owned by the caller so the choice survives a re-render of the conversation. */
-	runningOnly?: boolean;
-	onRunningOnly?: (next: boolean) => void;
-}) {
+export function FleetStrip({ client, session }: { client: Client; session: SessionSnapshot }) {
+	// Off by default, and it says how many rows it hid.
+	const [runningOnly, setRunningOnly] = useState(false);
+	// Same key as the composer, so this is one request per session. A build that announced no
+	// dispatch steering gets no controls at all rather than buttons that answer 409.
+	const capabilities = useQuery({
+		queryKey: ["session-capabilities", session.id],
+		queryFn: () => client.call(routes.sessionCapabilities, { params: { id: session.id }, query: {}, body: {} }),
+		staleTime: Number.POSITIVE_INFINITY,
+		retry: false,
+		enabled: session.state === "open",
+	});
+	const steering =
+		session.state === "open" && steeringAffordances(capabilities.data).dispatch
+			? { client, sessionId: session.id }
+			: undefined;
 	const runs = foldFleetRuns(session.fleet);
 	const notices = fleetNotices(session.fleet);
 	if (runs.length === 0 && notices.length === 0) return null;
@@ -76,17 +191,12 @@ export function FleetStrip({
 			{runs.length > 0 ? (
 				<>
 					<div className="fleet-strip__filter">
-						<button
-							type="button"
-							aria-pressed={runningOnly}
-							onClick={() => onRunningOnly?.(!runningOnly)}
-							disabled={onRunningOnly === undefined}
-						>
+						<button type="button" aria-pressed={runningOnly} onClick={() => setRunningOnly(!runningOnly)}>
 							Running only
 						</button>
 						<p role="status">{fleetFilterStatus(shown.length, runs.length)}</p>
 					</div>
-					{shown.length === 0 ? <p>{FLEET_EMPTY_FILTERED}</p> : <FleetRunRows runs={shown} />}
+					{shown.length === 0 ? <p>{FLEET_EMPTY_FILTERED}</p> : <FleetRunRows runs={shown} steering={steering} />}
 				</>
 			) : (
 				<p>{FLEET_EMPTY}</p>

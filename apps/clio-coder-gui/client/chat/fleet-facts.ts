@@ -303,3 +303,48 @@ export function fleetNotices(items: readonly FleetItemLike[]): readonly FleetNot
 		.filter((item) => !isRunFact(item.fact.type))
 		.map((item) => ({ id: item.id, at: item.at, presentation: presentFleetFact(item.fact) }));
 }
+
+/* --------------------------------------------------------------- steering */
+
+/**
+ * The engine answers a refused steer with a closed reason code
+ * (src/engine/acp/server.ts, `dispatchSteerReason`). Each reads as a sentence the
+ * operator can act on. An unknown code is printed as reported, never hidden.
+ */
+export const STEER_REFUSALS: Readonly<Record<string, string>> = {
+	"dispatch-unavailable": "This Clio Coder build has no dispatch domain to steer.",
+	"fleet-unavailable": "The fleet control channel is not available in this session.",
+	"run-not-active": "That run is no longer active, so there is nothing to steer.",
+	"cancel-failed": "Clio Coder could not stop that run. It may already be settling.",
+	"empty-message": "Guidance needs some text.",
+	"steering-unsupported": "That worker's runtime does not accept live guidance. It can still be stopped.",
+	"no-input-channel": "That worker has no input channel, so guidance cannot reach it. It can still be stopped.",
+	"input-closed": "That worker no longer accepts input. It is finishing on its own.",
+	"run-terminating": "That run is already terminating.",
+	"steer-failed": "Clio Coder refused the guidance and reported no specific reason.",
+};
+
+export interface SteerOutcome {
+	readonly tone: StatusTone;
+	readonly message: string;
+}
+
+/** `accepted` means queued on the worker's stdin, not delivered, and the sentence must not overclaim. */
+export function steerOutcome(
+	action: "guide" | "cancel",
+	result: { readonly accepted: boolean; readonly reason?: string },
+): SteerOutcome {
+	if (result.accepted)
+		return {
+			tone: "success",
+			message:
+				action === "guide"
+					? "Guidance queued. The worker reads it at its next step."
+					: "Stop requested. The run row settles when the worker exits.",
+		};
+	const reason = result.reason ?? "steer-failed";
+	return { tone: "warn", message: STEER_REFUSALS[reason] ?? `Clio Coder refused: ${reason}.` };
+}
+
+/** Guidance is trimmed before it is sent; whitespace alone is refused upstream with a 422. */
+export const guidanceReady = (text: string): boolean => text.trim().length > 0;

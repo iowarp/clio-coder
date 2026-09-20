@@ -313,6 +313,12 @@ test("the live status machine reaches all nine states from one realistic sequenc
 		record(liveStatus(chatTurn([user], "running"), turnRow({ id: "t", status: "running" }), null)),
 		"starting",
 	);
+	// A live worker outranks the orchestrator's silent timeline: "Starting" through a five-minute
+	// dispatch is a lie.
+	const waitingOnWorker = liveStatus(chatTurn([user], "running"), undefined, null, false, 2);
+	assert.equal(waitingOnWorker.state, "acting");
+	assert.equal(waitingOnWorker.label, "Waiting on 2 workers");
+	assert.equal(liveStatus(chatTurn([user], "running"), undefined, null, false, 1).label, "Waiting on 1 worker");
 	assert.equal(record(liveStatus(chatTurn([user, thought], "running"), undefined, null)), "thinking");
 	assert.equal(record(liveStatus(chatTurn([user, thought, prose], "running"), undefined, null)), "writing");
 	const acting = liveStatus(chatTurn([user, thought, prose, running], "running"), undefined, null);

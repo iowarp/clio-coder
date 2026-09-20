@@ -185,12 +185,11 @@
 	padding: var(--space-2);
 	background: var(--surface-sunken);
 }
+/* Dashed means "not confirmed on disk". Dimming was dropped: it pushed every row under 4.5:1. */
 .diff.is-proposed,
-.diff.is-rejected {
+.diff.is-rejected,
+.diff.is-unverified {
 	border-style: dashed;
-}
-.diff.is-rejected {
-	opacity: 0.75;
 }
 .diff__head {
 	display: flex;
