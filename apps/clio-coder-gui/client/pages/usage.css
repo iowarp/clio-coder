@@ -43,3 +43,30 @@
 		order: 3;
 	}
 }
+.usage-table > summary {
+	cursor: pointer;
+}
+/* The table scrolls inside its own box, so a wide report never widens the page. */
+.usage-table__scroll {
+	overflow-x: auto;
+	margin-top: var(--space-3);
+}
+.usage-table table {
+	border-collapse: collapse;
+	width: 100%;
+	font-size: var(--text-meta);
+}
+.usage-table th,
+.usage-table td {
+	text-align: left;
+	vertical-align: top;
+	padding: var(--space-2) var(--space-3) var(--space-2) 0;
+	border-top: 1px solid var(--line);
+	overflow-wrap: anywhere;
+	min-width: 6rem;
+}
+.usage-table th {
+	color: var(--ink-muted);
+	font-weight: 600;
+	border-top: 0;
+}

@@ -130,3 +130,38 @@ test("an unknown fact still reads as words", () => {
 	assert.equal(usageLabel("permission-approval"), "Permission approval");
 	assert.equal(usageLabel("unverifiedSuccesses"), "Unverified successes");
 });
+
+test("a fact recorded many times is one bounded table, and one recorded once stays a card", () => {
+	const fact = (name: string, values: Record<string, unknown>) => ({ name, values });
+	const view = usageView({
+		workspaceId: "w",
+		schema: "experimental",
+		windowDays: 30,
+		from: "2026-01-01T00:00:00.000Z",
+		to: "2026-01-31T00:00:00.000Z",
+		facts: [
+			fact("memory", { approved: 0, pending: 2 }),
+			...Array.from({ length: 30 }, (_, index) =>
+				fact("session-cache", {
+					sessionId: `s${index}`,
+					uncachedPrefillTokens: null,
+					verdictCounts: { hot: 0, cold: index },
+				}),
+			),
+			fact("top-tool", { tool: "read", count: 173, a: 1, b: 2, c: 3, d: 4, e: 5 }),
+			fact("top-tool", { tool: "bash", count: 9, a: 1, b: 2, c: 3, d: 4, e: 5 }),
+		],
+		opportunities: [],
+	});
+	assert.deepEqual(
+		view.rest.map((row) => row.name),
+		["memory"],
+	);
+	const cache = view.tables.find((table) => table.name === "session-cache");
+	assert.deepEqual(cache?.columns, ["Session ID", "Uncached prefill tokens", "Verdict counts"]);
+	assert.deepEqual([cache?.total, cache?.rows.length, cache?.omitted], [30, 24, 6]);
+	// Absent is not zero, and a nested record reads as words rather than JSON.
+	assert.deepEqual(cache?.rows[3], ["s3", "Not recorded", "hot 0 · cold 3"]);
+	const tools = view.tables.find((table) => table.name === "top-tool");
+	assert.deepEqual([tools?.columns.length, tools?.omittedColumns, tools?.omitted], [6, 1, 0]);
+});

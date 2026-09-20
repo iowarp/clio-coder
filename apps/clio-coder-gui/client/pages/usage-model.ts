@@ -5,7 +5,7 @@
 
 import type { UsageReport } from "../../contracts/reports.js";
 import { formatCost, formatDay, formatTokens } from "../api/clock.js";
-import { humanizeKey } from "../design/facts-model.js";
+import { humanizeKey, scalarText } from "../design/facts-model.js";
 import { emptyState } from "../design/panel-model.js";
 
 export interface UsageFigure {
@@ -29,6 +29,24 @@ export interface UsageGroup {
 	single: string | null;
 }
 
+/**
+ * Facts that repeat, such as one `session-cache` row per session, read as one table rather than as
+ * one card each. A month of real use records dozens of them, and a card apiece made the page thirty
+ * screens tall.
+ */
+export interface UsageTable {
+	name: string;
+	label: string;
+	total: number;
+	columns: string[];
+	rows: string[][];
+	/** Rows beyond the display bound. */
+	omitted: number;
+	/** Columns beyond the display bound. */
+	omittedColumns: number;
+}
+export const USAGE_TABLE_LIMITS = { rows: 24, columns: 6 } as const;
+
 export interface UsageView {
 	window: string;
 	headline: UsageFigure[];
@@ -41,7 +59,10 @@ export interface UsageView {
 	models: UsageGroup[];
 	skillsActivated: UsageGroup[];
 	skillsDormant: string[];
+	/** Facts recorded once, shown as a card each. */
 	rest: UsageGroup[];
+	/** Facts recorded more than once, shown as one table per name. */
+	tables: UsageTable[];
 }
 
 /** Bars compare token fields with one another. Provider accounting can report the same tokens twice. */
@@ -90,6 +111,45 @@ const text = (value: unknown): string | null => (typeof value === "string" && va
  * humanizer the fact renderer uses, so one vocabulary covers every inspector.
  */
 export const usageLabel = humanizeKey;
+
+/** One cell. A nested record reads as `hot 0 · cold 13`, never as JSON. */
+function cell(key: string, value: unknown): string {
+	if (Array.isArray(value)) return value.length ? value.map((item) => cell(key, item)).join(", ") : "None";
+	if (value && typeof value === "object")
+		return (
+			Object.entries(value)
+				.map(([inner, item]) => `${humanizeKey(inner).toLowerCase()} ${cell(inner, item)}`)
+				.join(" · ") || "None"
+		);
+	return scalarText(key, value as string | number | boolean | null | undefined).text;
+}
+
+function tablesOf(rows: UsageGroup[]): { singles: UsageGroup[]; tables: UsageTable[] } {
+	const byName = new Map<string, UsageGroup[]>();
+	for (const row of rows) byName.set(row.name, [...(byName.get(row.name) ?? []), row]);
+	const singles: UsageGroup[] = [];
+	const tables: UsageTable[] = [];
+	for (const [name, members] of byName) {
+		const first = members[0];
+		if (!first) continue;
+		if (members.length === 1) {
+			singles.push(first);
+			continue;
+		}
+		const keys = [...new Set(members.flatMap((member) => Object.keys(member.values)))];
+		const shown = keys.slice(0, USAGE_TABLE_LIMITS.columns);
+		tables.push({
+			name,
+			label: first.label,
+			total: members.length,
+			columns: shown.map(humanizeKey),
+			rows: members.slice(0, USAGE_TABLE_LIMITS.rows).map((member) => shown.map((key) => cell(key, member.values[key]))),
+			omitted: Math.max(0, members.length - USAGE_TABLE_LIMITS.rows),
+			omittedColumns: keys.length - shown.length,
+		});
+	}
+	return { singles, tables };
+}
 
 export function usageView(report: UsageReport): UsageView {
 	const rows = report.facts.map((fact) => ({
@@ -144,6 +204,7 @@ export function usageView(report: UsageReport): UsageView {
 		return value === null ? [] : [{ label, value: value.toLocaleString("en-US") }];
 	});
 
+	const leftover = tablesOf(rows.filter((row) => !CLAIMED.has(row.name)));
 	return {
 		window: `from ${formatDay(report.from)} through ${formatDay(report.to)}`,
 		headline,
@@ -164,6 +225,7 @@ export function usageView(report: UsageReport): UsageView {
 			const name = text(row.values.skill);
 			return name ? [name] : [];
 		}),
-		rest: rows.filter((row) => !CLAIMED.has(row.name)),
+		rest: leftover.singles,
+		tables: leftover.tables,
 	};
 }

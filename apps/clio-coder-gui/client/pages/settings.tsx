@@ -139,7 +139,7 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 									{rows.map((row) => (
 										<div key={row.key}>
 											<dt>
-												<code>{row.key}</code>
+												<code className="setting-key">{row.key}</code>
 											</dt>
 											<dd>
 												{settingValue(row)}
