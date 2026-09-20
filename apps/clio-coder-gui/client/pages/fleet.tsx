@@ -4,6 +4,7 @@ import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { Facts } from "../design/facts.js";
 import { MarkdownContent } from "../render/Markdown.js";
 
 function Topologies({
@@ -234,11 +235,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 				</>
 			)}
 			<h2>Receipt</h2>
-			{artifact ? (
-				<pre className="fleet-receipt">{JSON.stringify(artifact, null, 2)}</pre>
-			) : (
-				<p>No readable receipt recorded.</p>
-			)}
+			{artifact ? <Facts value={artifact} hide={["version"]} /> : <p>No readable receipt recorded.</p>}
 		</section>
 	);
 }

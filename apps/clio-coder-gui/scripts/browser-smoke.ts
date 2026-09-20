@@ -203,12 +203,28 @@ try {
 		await check("evidence-detail-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("evidence-detail");
+		// The inspectors live inside closed disclosures, so they are opened before they are judged.
+		const openInspectors = async (name: string) => {
+			await page.locator("main details").evaluateAll((nodes) => {
+				for (const node of nodes) (node as HTMLDetailsElement).open = true;
+			});
+			await page.locator("main .facts").first().waitFor();
+			const raw = await page
+				.locator("main pre")
+				.evaluateAll((nodes) => nodes.map((node) => node.textContent ?? "").filter((text) => /^\s*[{[]/.test(text)));
+			assert.deepEqual(raw, [], `${name} still renders a raw JSON dump`);
+			await check(`${name}-inspectors`);
+			if (width === 1600 || width === 390)
+				await page.screenshot({ path: join(output, `${name}-inspectors-${width}.png`), fullPage: true });
+		};
+		await openInspectors("evidence-detail");
 		await navigate("Evals");
 		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).waitFor();
 		await check("evals");
 		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).click();
 		await page.getByRole("heading", { name: "Trials", exact: true }).waitFor();
 		await check("eval-detail");
+		await openInspectors("eval-detail");
 		await navigate("Docs");
 		await page.locator(".docs-page .markdown").waitFor();
 		await check("docs-map");
