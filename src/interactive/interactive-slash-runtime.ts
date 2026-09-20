@@ -38,6 +38,7 @@ import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
 import type { OracleDigestSources } from "./oracle.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
+import { renderDoctorReport } from "./renderers/doctor-report.js";
 import {
 	type ContextClearCommandOptions,
 	type CouncilDispatchOutcome,
@@ -412,6 +413,10 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			: {}),
 		shutdown: () => {
 			void deps.shutdown();
+		},
+		showDoctor: (findings) => {
+			deps.chatPanel.appendReplayBlock((width) => renderDoctorReport(findings, width));
+			deps.requestRender();
 		},
 		runDoctor: async ({ deep }) => {
 			// Loaded on first use: doctor pulls in every sweep it runs, and a

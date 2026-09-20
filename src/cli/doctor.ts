@@ -179,18 +179,19 @@ export async function collectDoctorFindings(options: DoctorCollectOptions = {}):
 }
 
 /**
- * The in-session rendering of a doctor run: the same report the CLI prints,
- * headed by a tally, at the level of its worst row.
+ * In-session diagnostics: structured findings for the TUI card, plus the plain
+ * report for hosts without a card renderer, at the level of the worst row.
  */
 export function doctorNotice(findings: ReadonlyArray<DoctorFinding>): {
 	level: "success" | "warn" | "error";
 	text: string;
+	findings: ReadonlyArray<DoctorFinding>;
 } {
 	const errors = findings.filter((f) => !f.ok).length;
 	const warnings = findings.filter((f) => f.ok && f.level === "warn").length;
 	const level = errors > 0 ? "error" : warnings > 0 ? "warn" : "success";
 	const head = `doctor: ${findings.length} checks, ${errors} error(s), ${warnings} warning(s)`;
-	return { level, text: `${head}\n${formatDoctorReport([...findings])}` };
+	return { level, text: `${head}\n${formatDoctorReport([...findings])}`, findings };
 }
 
 interface DoctorArgs {

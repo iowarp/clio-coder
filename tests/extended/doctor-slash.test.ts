@@ -1,7 +1,10 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { stripVTControlCharacters } from "node:util";
 import { collectDoctorFindings, doctorNotice } from "../../src/cli/doctor.js";
 import type { LiveProbeOptions, ProvidersContract, TargetStatus } from "../../src/domains/providers/contract.js";
+import { visibleWidth } from "../../src/engine/tui.js";
+import { renderDoctorReport } from "../../src/interactive/renderers/doctor-report.js";
 import {
 	BUILTIN_SLASH_COMMANDS,
 	commandReference,
@@ -65,6 +68,38 @@ describe("/doctor", () => {
 		match(notices[0]?.[1] ?? "", /deep checks/);
 		deepStrictEqual(notices[1], ["warn", "doctor: 2 checks, 0 error(s), 1 warning(s)\nOK   a  b\nWARN c  d"]);
 		strictEqual(rendered(), 1);
+	});
+
+	it("routes structured findings to the report card instead of flattening a notice", async () => {
+		const findings = [{ ok: true, name: "example", detail: "a long path" }];
+		let displayed: unknown;
+		const { ctx, notices } = context({
+			runDoctor: async () => doctorNotice(findings),
+			showDoctor: (rows) => {
+				displayed = rows;
+			},
+		});
+		dispatchSlashCommand(parseSlashCommand("/doctor"), ctx);
+		await settle();
+		deepStrictEqual(displayed, findings);
+		strictEqual(notices.length, 1);
+	});
+
+	it("wraps complete check details independently and puts problems first", () => {
+		const findings = [
+			{ ok: true, name: "healthy", detail: "/a/very/long/path/that/must/not/disappear/at/the/right/edge" },
+			{ ok: true, level: "warn" as const, name: "optional tool", detail: "Install it with the documented command." },
+			{ ok: false, name: "broken", detail: "first line\nsecond line" },
+		];
+		for (const width of [24, 80, 160]) {
+			const lines = renderDoctorReport(findings, width);
+			ok(lines.every((line) => visibleWidth(line) <= width));
+			const plain = lines.map(stripVTControlCharacters).join("\n");
+			ok(plain.indexOf("FAIL") < plain.indexOf("WARN"));
+			ok(plain.indexOf("WARN") < plain.indexOf("OK"));
+			match(plain, /first line\n {2}second line/);
+			ok(plain.replace(/\s/g, "").includes(findings[0]?.detail ?? "missing"));
+		}
 	});
 
 	it("reports a runner failure and says so when the host has no runner", async () => {
