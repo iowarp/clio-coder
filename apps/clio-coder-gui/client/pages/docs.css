@@ -79,7 +79,7 @@
 	align-items: start;
 }
 /* Prose keeps a readable measure; code, tables and diagrams may use the whole column. */
-.docs-page .markdown > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, .md-heading) {
+.docs-page .markdown :is(p, ul, ol, blockquote, .md-heading) {
 	max-width: 46rem;
 }
 .docs-page .markdown {
@@ -88,8 +88,21 @@
 .docs-page .md-heading {
 	scroll-margin-top: 5rem;
 }
-.docs-path {
+.docs-meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 0.5rem 1rem;
 	margin: 0 0 0.75rem;
+}
+.docs-expand {
+	min-height: 0;
+	padding: 4px 10px;
+	font-size: 0.8rem;
+}
+.docs-path {
+	margin: 0;
 	font: 0.75rem var(--font-mono);
 	color: var(--muted);
 	overflow-wrap: anywhere;

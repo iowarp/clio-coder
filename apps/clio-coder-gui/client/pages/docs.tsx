@@ -5,6 +5,7 @@ import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { Boundary, PanelHeading } from "../design/panel.js";
 import { PANELS } from "../design/panel-model.js";
+import { openEnclosingDetails } from "../render/details.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import "./docs.css";
 
@@ -44,6 +45,8 @@ export function Docs({ client }: { client: Client }) {
 	const [browse, setBrowse] = useState(() => window.matchMedia("(min-width: 1100px)").matches);
 	const [rail, setRail] = useState(() => window.matchMedia(WIDE_RAIL).matches);
 	const searchInput = useRef<HTMLInputElement>(null);
+	const article = useRef<HTMLElement>(null);
+	const [expanded, setExpanded] = useState(false);
 	const tree = useQuery({
 		queryKey: ["docs-tree"],
 		queryFn: () => client.call(routes.docsTree, emptyInput),
@@ -85,6 +88,8 @@ export function Docs({ client }: { client: Client }) {
 		const timer = setTimeout(() => setSearch(text), SEARCH_DELAY_MS);
 		return () => clearTimeout(timer);
 	}, [query]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a new document starts with its sections as authored.
+	useEffect(() => setExpanded(false), [path]);
 	useEffect(() => {
 		const focusSearch = (event: KeyboardEvent) => {
 			const target = event.target as HTMLElement | null;
@@ -97,6 +102,7 @@ export function Docs({ client }: { client: Client }) {
 		window.addEventListener("keydown", focusSearch);
 		return () => window.removeEventListener("keydown", focusSearch);
 	}, []);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: a link to the current hash after its section was closed again is a new navigation with a new key.
 	useEffect(() => {
 		if (!page.data) return;
 		let id: string;
@@ -106,11 +112,14 @@ export function Docs({ client }: { client: Client }) {
 			return;
 		}
 		const frame = requestAnimationFrame(() => {
-			if (id) document.getElementById(id)?.scrollIntoView();
+			// A heading inside a collapsed section cannot be scrolled to until its sections are open.
+			const target = id ? document.getElementById(id) : null;
+			openEnclosingDetails(target);
+			if (target) target.scrollIntoView();
 			else document.querySelector(".docs-heading")?.scrollIntoView({ block: "start" });
 		});
 		return () => cancelAnimationFrame(frame);
-	}, [page.data, location.hash]);
+	}, [page.data, location.hash, location.key]);
 	const headings = page.data?.headings.filter((row) => row.depth === 2 || row.depth === 3) ?? [];
 	const terms = useMemo(() => [...new Set(search.toLowerCase().split(/\s+/).filter(Boolean))], [search]);
 	// Reading order is the curated map, so previous and next follow it.
@@ -242,7 +251,7 @@ export function Docs({ client }: { client: Client }) {
 						)}
 					</details>
 				</aside>
-				<article className="docs-page" aria-label={page.data?.title ?? "Document"}>
+				<article className="docs-page" ref={article} aria-label={page.data?.title ?? "Document"}>
 					{page.isPending ? (
 						<p role="status">Reading document…</p>
 					) : page.error ? (
@@ -258,7 +267,24 @@ export function Docs({ client }: { client: Client }) {
 						</div>
 					) : (
 						<>
-							<p className="docs-path">{page.data.path}</p>
+							<div className="docs-meta">
+								<p className="docs-path">{page.data.path}</p>
+								{/<details[\s>]/i.test(page.data.markdown) && (
+									<button
+										type="button"
+										className="docs-expand"
+										aria-pressed={expanded}
+										onClick={() => {
+											const next = !expanded;
+											setExpanded(next);
+											for (const section of article.current?.querySelectorAll<HTMLDetailsElement>("details.md-details") ?? [])
+												section.open = next;
+										}}
+									>
+										{expanded ? "Collapse all sections" : "Expand all sections"}
+									</button>
+								)}
+							</div>
 							{headings.length > 0 && (
 								<nav className="docs-outline" aria-label="On this page">
 									<details open={rail || undefined} key={`${path}:${rail}`}>
