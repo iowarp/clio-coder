@@ -317,14 +317,17 @@ function renderSkillsList(
 		lines.push(`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`);
 	}
 	if (discovered.length > 0) {
-		lines.push("", "Discovered skills (shared, other-agent, or explicit roots; not Clio library installations):");
+		lines.push(
+			"",
+			"Discovered skills (shared, other-agent, or explicit roots; discovery does not establish installation ownership):",
+		);
 		for (const skill of discovered) {
 			lines.push(
 				`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}; file: ${skill.filePath}): ${skill.description}`,
 			);
 		}
 		lines.push(
-			"These skills are available through compatibility discovery. Preserve their source when describing the inventory; discovery does not mean Clio installed or copied them.",
+			"These skills are available through compatibility or explicit-path discovery. Preserve their source when describing the inventory; discovery does not mean Clio installed or copied them.",
 		);
 	}
 

@@ -246,7 +246,8 @@ describe("skill install and activation boundary", () => {
 			const listing = await context.run({ scope: "skills" });
 			strictEqual(listing.kind, "ok");
 			if (listing.kind === "ok") {
-				match(listing.output, /context-prime \(cli\)/u);
+				match(listing.output, /discovery does not establish installation ownership/u);
+				match(listing.output, /context-prime \(source: path; scope: cli; file:/u);
 				match(listing.output, /Suggested skill: \/skill <name>/u);
 				ok(!listing.output.includes("# Context Prime"), "listing must not activate or expose the workflow body");
 			}
