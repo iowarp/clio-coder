@@ -114,6 +114,19 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 		strictEqual(assessment.reason, "validation_evidence");
 	});
 
+	it("accepts a successful native Node test receipt after an edit but not a failed test", () => {
+		for (const isError of [false, true]) {
+			const entries = [
+				...mutationWindow(),
+				toolCall("node-test", ToolNames.Bash, { command: "node --test sum.test.mjs" }),
+				toolResult("node-test", ToolNames.Bash, isError),
+				assistantMessage("assistant-1", "Test run completed."),
+			];
+			const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
+			strictEqual(assessment.reason, isError ? "unvalidated_mutation" : "validation_evidence");
+		}
+	});
+
 	it("projects the limitation kind onto the completion-evidence tag", () => {
 		deepStrictEqual(finishContractEvidenceTags("limitation"), ["completion-evidence"]);
 	});

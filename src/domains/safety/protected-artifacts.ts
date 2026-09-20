@@ -1149,6 +1149,7 @@ function pathMatchesArtifact(commandPath: string, artifactKey: string, mode: "ta
  */
 export const VALIDATION_COMMAND_LABELS = [
 	"npm test",
+	"node --test",
 	"pytest",
 	"python -m pytest",
 	"python -m unittest",
@@ -1169,6 +1170,7 @@ function validationMatch(
 	executable: string,
 	args: ReadonlyArray<string>,
 ): ValidationCommandLabel | `npm run ${string}` | null {
+	if (executable === "node" && args[0] === "--test") return "node --test";
 	if (executable === "npm") {
 		if (args[0] === "test") return "npm test";
 		const script = args[0] === "run" && typeof args[1] === "string" ? args[1] : null;

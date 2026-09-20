@@ -22,6 +22,7 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 /** One canonical spelling per validation label. */
 const SPELLINGS: Record<ValidationCommandLabel, string> = {
 	"npm test": "npm test",
+	"node --test": "node --test sum.test.mjs",
 	pytest: "pytest -q tests",
 	"python -m pytest": "python3 -m pytest -q test_index_policy.py",
 	"python -m unittest": "python3 -m unittest -q test_solver",
@@ -39,6 +40,7 @@ const SPELLINGS: Record<ValidationCommandLabel, string> = {
 /** The validation label each unattended test runner stands for. */
 const TEST_RUNNER_LABELS: Record<string, ValidationCommandLabel> = {
 	"builtin:npm-test": "npm test",
+	"builtin:node-test": "node --test",
 	"builtin:pytest": "pytest",
 	"builtin:python-pytest": "python -m pytest",
 	"builtin:python-unittest": "python -m unittest",
@@ -121,7 +123,11 @@ describe("test runner vocabulary (#377)", () => {
 	});
 
 	it("runs the project's test command unattended at auto-edit and full-auto only", () => {
-		for (const command of ["python3 -m unittest -q test_solver", "ctest --output-on-failure"]) {
+		for (const command of [
+			"python3 -m unittest -q test_solver",
+			"ctest --output-on-failure",
+			"node --test sum.test.mjs",
+		]) {
 			strictEqual(disposition(policy, command, "auto-edit"), "allow", command);
 			strictEqual(disposition(policy, command, "full-auto"), "allow", command);
 			strictEqual(disposition(policy, command, "suggest"), "ask", command);
@@ -131,6 +137,9 @@ describe("test runner vocabulary (#377)", () => {
 
 	it("keeps compound, substituted, and redirected test runs behind a confirmation", () => {
 		for (const command of [
+			"node --test sum.test.mjs && curl https://example.com",
+			"node --test $(cat f)",
+			"node --test > /etc/x",
 			"ctest; rm -rf x",
 			"make check && curl https://example.com",
 			"python3 -m unittest $(cat f)",
@@ -145,6 +154,13 @@ describe("test runner vocabulary (#377)", () => {
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
 		strictEqual(disposition(policy, "python3 -m unittest 'test solver'", "auto-edit"), "ask");
+	});
+
+	it("does not mistake a Node script argument or evaluation for the test runner", () => {
+		for (const command of ["node sum.mjs --test", "node -e process.exit(0) -- --test", "node --test-only sum.mjs"]) {
+			strictEqual(detectValidationCommand(command).kind, "none", command);
+			strictEqual(disposition(policy, command, "auto-edit"), "ask", command);
+		}
 	});
 
 	it("recognizes a cd into the build tree followed by a test runner", () => {

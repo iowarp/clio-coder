@@ -161,6 +161,7 @@ const BUILTIN_ALLOWLIST: ReadonlyArray<{ id: string; re: RegExp }> = [
  */
 export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-test", re: /^npm\s+(?:test|run\s+test)(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
+	{ id: "builtin:node-test", re: /^node\s+--test(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:pytest", re: /^pytest(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:python-pytest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+pytest(?:\s+[\w=./:-]+)*$/ },
 	{ id: "builtin:python-unittest", re: /^python(?:3(?:\.\d+)?)?\s+-m\s+unittest(?:\s+[\w=./:-]+)*$/ },
