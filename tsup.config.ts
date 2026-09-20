@@ -76,6 +76,7 @@ export default defineConfig({
 	// full module-load tax.
 	splitting: true,
 	sourcemap: true,
+	metafile: true,
 	clean: true,
 	dts: false,
 	// The web-tree-sitter runtime (bundled from @vscode/tree-sitter-wasm) is a

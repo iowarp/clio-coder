@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../core/diagnostics.js";
+import { readPiMonoVersion } from "./pi-mono-names.js";
 /**
  * Clio session JSONL writer + reader.
  *
@@ -43,7 +44,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import { normalizeClioCoderEventTree } from "../core/naming-events.js";
-import { readClioVersion, readPiMonoVersion } from "../core/package-root.js";
+import { readClioVersion } from "../core/package-root.js";
 import { assertSafeId } from "../core/safe-id.js";
 import { fsyncDirectory, safeResourceWrite } from "../core/safe-resource-write.js";
 import { clioStateDir, stateRootRemoved } from "../core/xdg.js";

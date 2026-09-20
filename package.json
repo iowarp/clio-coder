@@ -51,6 +51,7 @@
 	"files": [
 		"dist",
 		"!dist/**/*.map",
+		"!dist/metafile*.json",
 		"assets/clio-coder-logo-128.webp",
 		"src/**",
 		"library/**",

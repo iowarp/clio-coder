@@ -127,7 +127,7 @@ function isChatLoopTurnModule(filePath: string): boolean {
 /**
  * The instant shell's Stage 0 owner. `tests/contracts/instant-shell-import-graph.test.ts`
  * walks the built chunk that contains this module and holds its static closure
- * to 6 chunks and 110,000 bytes, because that closure is what a cold
+ * to 16 chunks, 700,000 total bytes and 165,000 Clio source bytes, because that closure is what a cold
  * `clio-coder` start pays before it can draw anything.
  */
 const STAGE_0_OWNER = path.join("src", "interactive", "terminal-lease.ts");
@@ -477,7 +477,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 				if (seam === undefined) {
 					const qualifier = typeOnly ? " (type-only)" : "";
 					violations.push(
-						`rule6: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves to ${seamPath}; runtime importers outside the computed Stage 0 closure and its src/interactive/** and src/engine/** trees may enter those protected trees only through a seam declared in STAGE0_SEAMS (tests/boundaries/check-boundaries.ts). A new disjoint reacher makes esbuild split the merged chunk the instant shell's Stage 0 closure sits on. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the needed value into a leaf seam, route through an existing seam, or declare a legitimate edge with its reason.`,
+						`rule6: ${path.relative(projectRoot, filePath)} ${kind}${qualifier} ${specifier} which resolves to ${seamPath}; runtime importers outside the computed Stage 0 closure and its src/interactive/** and src/engine/** trees may enter those protected trees only through a seam declared in STAGE0_SEAMS (tests/boundaries/check-boundaries.ts). A new disjoint reacher makes esbuild split the merged chunk the instant shell's Stage 0 closure sits on. That closure is held to 16 chunks, 700,000 total bytes and 165,000 Clio source bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the needed value into a leaf seam, route through an existing seam, or declare a legitimate edge with its reason.`,
 					);
 				} else if (!typeOnly) {
 					const importers = valueReachedSeams.get(resolved) ?? new Set<string>();
@@ -544,7 +544,7 @@ export function runBoundaryCheck(projectRoot: string): BoundaryCheckResult {
 			.sort();
 		if (importers.length === 0) continue;
 		violations.push(
-			`rule6: seam ${seamPath}, reached by ${importers.join(", ")}, value-imports its way into the Stage 0 closure (${reached.join(", ")}); an external seam must stay off the modules ${STAGE_0_OWNER} already reaches, or its importer becomes a second reacher and esbuild splits their merged chunk. That closure is held to 6 chunks and 110,000 bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the value the seam needs into a leaf module instead of importing the render module that happens to hold it.`,
+			`rule6: seam ${seamPath}, reached by ${importers.join(", ")}, value-imports its way into the Stage 0 closure (${reached.join(", ")}); an external seam must stay off the modules ${STAGE_0_OWNER} already reaches, or its importer becomes a second reacher and esbuild splits their merged chunk. That closure is held to 16 chunks, 700,000 total bytes and 165,000 Clio source bytes by tests/contracts/instant-shell-import-graph.test.ts, which only fails after a full build. Move the value the seam needs into a leaf module instead of importing the render module that happens to hold it.`,
 		);
 	}
 

@@ -1,4 +1,4 @@
-import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { readClioVersion } from "../../core/package-root.js";
 import {
 	addResponseModelIdObservationCounts,
 	emptyResponseModelIdObservationCounts,
@@ -24,6 +24,7 @@ import type {
 	ToolCallStat,
 } from "../../domains/dispatch/types.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
+import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import type { AgentMessage, ImageContent } from "../../engine/types.js";
 import type { HeadlessRunDeadline } from "../../entry/boot-options.js";
 import type { ChatLoop, ChatLoopEvent } from "../../interactive/chat-loop.js";
