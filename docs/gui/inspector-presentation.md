@@ -9,18 +9,18 @@ reproduced; the presentation decisions recorded here are what the new GUI still 
 | Inspector | Data reproduced by | Verdict |
 | --- | --- | --- |
 | catalog (26K) | `contracts/library.ts` | yes, with agents/skills/verifiers/extensions collapsed into one `Library` shape |
-| config (16K) | `contracts/settings.ts` + `settings-safe.ts` | partial: `WireCustomizationEntry.contextCostTokens` and `reloadClass` have no counterpart — add them |
+| config (16K) | `contracts/settings.ts` + `settings-safe.ts` | yes: `ConfigEntry.contextCostTokens` and `reloadClass` are on the wire |
 | decisions (12K) | `contracts/evidence.ts` (`gate`) | yes, but shape is opaque (`JSON.stringify(gate)` at evidence.tsx:226) |
 | dispatch (8K) | `contracts/fleet.ts` | yes |
 | eval (24K) | `contracts/reports.ts` | yes |
 | evidence (17K) | `contracts/evidence.ts` | yes |
 | fleet (25K) | `contracts/fleet.ts` + `fleet-events.ts` | yes |
-| interop (11K) | `contracts/targets.ts` + `targets-cli.ts` | partial: the four wiring states (configured / not-ACP / proposed / decided) are not modelled |
+| interop (11K) | `contracts/system.ts` | yes: `wiring`, `decisionStale` and `decidedAt` are on the wire, derived by the core's own `interopProposals` |
 | recovery (10K) | `contracts/system.ts` | yes |
 | routing (12K) | `contracts/targets.ts` | yes |
 | toolchain (9K) | `contracts/toolchain.ts` | yes |
 | trace (15K) | `contracts/traces.ts` | yes |
-| usage (16K) | `contracts/reports.ts` | partial: the 5-field token split + origin split (turns/sideQuestions/handoffs) is not modelled |
+| usage (16K) | `contracts/reports.ts` | yes: the token fields and the origin split are read out of `facts[].values` by `client/pages/usage-model.ts` |
 
 **The empty-state grammar — the most reusable thing here.** Every panel distinguished four states and used different words for each. Reproduce this everywhere:
 1. *Not read in this session* — `"The durable evidence inventory has not been read in this session."` / `"No diagnostic sweep has run in this desktop session. Nothing is inferred from a successful conversation."`
@@ -47,3 +47,23 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 - A `PanelHeading` with `eyebrow` (all-caps, wide-tracked), `title`, optional action slot. Every panel opens with an eyebrow that names the data's *scope and mutability*: `EVIDENCE BUNDLES · INSTALLATION-WIDE`, `DURABLE ACCOUNTING · TRACE DATABASE`, `EVAL REPORTS · INSTALLATION-WIDE · READ ONLY`, `INSTALLATION · REDACTED DIAGNOSTICS`, `MODELS · WORKER ROUTING`, `GATE DECISIONS · SEALED COORDINATOR VERDICTS`, `COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS`, `APPROVAL NEEDED · ONE USE`.
 - A closing **boundary paragraph** on every panel naming exactly what stays on the host. These are not boilerplate; each one is specific and each should survive.
 - Formatters: `formatTokens(v) = v === null ? "not recorded" : v.toLocaleString("en-US")`; `formatCostUsd(v) = v === null ? "not recorded" : "$" + v.toFixed(v > 0 && v < 0.01 ? 4 : 2)` — **exactly zero prints as `$0.00`, not "free", because a local runtime that prices at zero and a run whose cost was never recorded are different facts and only the second is null**. `client/api/clock.ts` already has `formatCost` and `formatTokens` matching this; keep them.
+
+**Status against this atlas.** Every claim above is either built or listed here as a deliberate difference.
+
+| Inspector | Where it lives now | Pure model and test |
+| --- | --- | --- |
+| config | `/settings/why` (four figures, influence path, inventory by category) and `/settings/effective` (settings grouped by family) | `client/pages/config-map-model.ts`, `tests/config-map-model.test.ts` |
+| catalog | `/library`: a `tablist` with arrow, Home and End keys; agent cards in the fact order above; skill cards led by the reach sentence; free text across every string field | `client/pages/library-model.ts`, `tests/library-model.test.ts` |
+| interop | `/system/interop`: summary, one card per kind with the wiring sentence | `client/pages/interop-model.ts`, `tests/interop-model.test.ts`, `tests/system-http.test.ts` |
+| dispatch | `/fleet`, which carries the installation-wide sentence as `DISPATCH_SCOPE` | `client/design/panel-model.ts` |
+| usage, trace, toolchain, routing, evidence, eval, decisions | unchanged since the previous sprint | `usage-model.ts`, `trace-model.ts`, `toolchain-model.ts` |
+
+Every page now opens with a `PanelHeading` from the `PANELS` registry and closes with its own `Boundary`. An eyebrow ends in one word from `MUTABILITIES`, and `tests/panel-model.test.ts` holds the registry to that list.
+
+Deliberate differences from the retired workbench:
+
+- **The interop read probes versions.** The workbench read ran no foreign executable and showed the last version Clio Coder recorded. This application runs one bounded `<bin> --version` per installed agent inside a scratch home, and `tests/system-http.test.ts` holds it to that. The panel's boundary sentence says so; the workbench's sentence would be false here.
+- **Wiring has a fifth and a sixth word.** Besides configured, not-ACP, proposed and decided, the wire carries `not-offered` (an ACP kind with no executable to wire and no standing answer) and `unknown` (the settings that decide wiring could not be read). Neither may collapse into one of the four.
+- **Two skill footer flags are not on the wire.** "Has an upstream" is derived from `origin.kind === "remote"`. "Installed by a dispatched worker" has no counterpart in `LibraryResource` and is not shown.
+- **The entry source line shows the path as the wire gives it.** `ConfigEntry.sourcePath` is absolute in this application, which is local by construction, so there is no project-relative form to prefer. The `"project root"` and `` `${scope} scope` `` rules hold.
+- **Wire vocabulary reads as words.** `scalarText` humanizes a lowercase wire token only under a vocabulary key (`kind`, `state`, `status`, `reason`, `outcome`, `verdict`, `level`, `tier`, `mode`, `phase`, `class`, `category`, alone or as a camel-case or snake-case suffix). The key decides, never the value, so an id, name or model is never rewritten.

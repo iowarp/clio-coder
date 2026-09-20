@@ -4,9 +4,10 @@ import { routes } from "../../contracts/routes.js";
 import type { TargetAdd } from "../../contracts/targets-cli.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
-import { reportedCount } from "../design/facts-model.js";
+import { humanizeKey, reportedCount } from "../design/facts-model.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
+import { StatusMark } from "../design/status.js";
 import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { AddConnection } from "./target-onboarding.js";
 
@@ -47,14 +48,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		operation.data?.status === "running";
 	return (
 		<section>
-			{view === "targets" ? (
-				<>
-					<p className="eyebrow">Configuration / Model endpoints</p>
-					<h1>Targets</h1>
-				</>
-			) : (
-				<PanelHeading panel={PANELS.routing} level={1} />
-			)}
+			<PanelHeading panel={view === "targets" ? PANELS.targets : PANELS.routing} level={1} />
 			<WorkspacePicker selection={selection} />
 			<ConfigurationTabs id={id} active={view} />
 			{view === "targets" ? (
@@ -63,9 +57,9 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 					<p>Clio’s probe checks all configured endpoints before returning the selected target’s result.</p>
 					{targets.isPending && id && <p>Reading targets…</p>}
 					{targets.error && <p role="alert">{targets.error.message}</p>}
-					{targets.data?.truncated && <p>The inventory exceeds 200 targets; the first 200 are shown.</p>}
+					{targets.data?.truncated && <PanelEmpty>{emptyState.bounded("targets", "Later")}</PanelEmpty>}
 					{targets.data && !targets.data.targets.length && (
-						<p>No model targets configured. Add a connection to start a conversation.</p>
+						<PanelEmpty>No model target is configured yet. Add a connection to start a conversation.</PanelEmpty>
 					)}
 					{targets.data && (
 						<AddConnection
@@ -83,8 +77,12 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 								<p>
 									{target.runtime} · {target.tier}
 								</p>
-								<p>
-									{target.available ? "Available" : "Unavailable"} · Health: {target.health}
+								<p className="panel-marks">
+									<StatusMark
+										tone={target.available ? "success" : "warn"}
+										label={target.available ? "Available" : "Unavailable"}
+									/>
+									<span>Health {humanizeKey(target.health).toLowerCase()}</span>
 								</p>
 								<p className="config-path">{target.url ?? "Runtime default endpoint"}</p>
 								<p>Default model: {target.defaultModel ?? "Not configured"}</p>
@@ -100,7 +98,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 											))}
 										</ul>
 									) : (
-										<p>No model inventory reported.</p>
+										<PanelEmpty>{emptyState.emptyStore("model", "for this target")}</PanelEmpty>
 									)}
 								</details>
 								<div className="actions">

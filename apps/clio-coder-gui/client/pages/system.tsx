@@ -2,7 +2,21 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { formatTime } from "../api/clock.js";
+import { humanizeKey } from "../design/facts-model.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { emptyState, PANELS } from "../design/panel-model.js";
+import { StatusMark } from "../design/status.js";
+import {
+	adapterText,
+	interopSummary,
+	orderedAgents,
+	presenceMark,
+	wiringMark,
+	wiringSentence,
+} from "./interop-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import "../design/facts.css";
 
 function SystemTabs() {
 	return (
@@ -17,8 +31,11 @@ export function SystemPage({ client }: { client: Client }) {
 	const meta = useQuery({ queryKey: ["meta"], queryFn: () => client.call(routes.meta, emptyInput) });
 	return (
 		<section>
-			<p className="eyebrow">Installation / Health and paths</p>
-			<h1>System</h1>
+			<PanelHeading
+				panel={PANELS.system}
+				level={1}
+				action={report.data ? <span className="count">Checked {formatTime(report.data.checkedAt)}</span> : null}
+			/>
 			<SystemTabs />
 			<p>
 				Check this installation and find the folders Clio uses. These checks inspect existing state without repairing or
@@ -54,14 +71,18 @@ export function SystemPage({ client }: { client: Client }) {
 			)}
 			{report.data && (
 				<>
-					<h2>Health checks</h2>
-					<p>Checked {report.data.checkedAt}</p>
+					<h2>Health checks · {report.data.findings.length}</h2>
+					{!report.data.findings.length && <PanelEmpty>{emptyState.emptyStore("health finding")}</PanelEmpty>}
 					<div className="config-entries">
 						{report.data.findings.map((row) => (
 							<article className="trace-panel" key={row.name}>
 								<h3>{row.name}</h3>
-								<p>{row.level === "ok" ? "Ready" : row.level === "warn" ? "Note" : "Needs attention"}</p>
+								<StatusMark
+									tone={row.level === "ok" ? "success" : row.level === "warn" ? "warn" : "fail"}
+									label={row.level === "ok" ? "Ready" : row.level === "warn" ? "Note" : "Needs attention"}
+								/>
 								<p>{row.detail}</p>
+								{row.detailRedacted && <small>Parser details withheld</small>}
 								{row.name === "settings.yaml" && !row.ok && <Link to="/settings">Inspect settings</Link>}
 							</article>
 						))}
@@ -70,12 +91,15 @@ export function SystemPage({ client }: { client: Client }) {
 					<dl className="settings-list">
 						{Object.entries(report.data.paths).map(([role, path]) => (
 							<div key={role}>
-								<dt>{role}</dt>
-								<dd>{path}</dd>
+								<dt>{humanizeKey(role)}</dt>
+								<dd>
+									<code>{path}</code>
+								</dd>
 								<dd />
 							</div>
 						))}
 					</dl>
+					<Boundary panel={PANELS.system} />
 				</>
 			)}
 		</section>
@@ -90,71 +114,108 @@ export function InteropPage({ client }: { client: Client }) {
 	});
 	return (
 		<section>
-			<p className="eyebrow">Installation / Other coding agents</p>
-			<h1>Other coding agents</h1>
+			<PanelHeading panel={PANELS.interop} level={1} />
 			<SystemTabs />
 			<WorkspacePicker selection={selection} />
 			<p>
-				See which coding agents and shared resources Clio can find. Presence does not grant an agent permission to work.
+				Which coding agents are on this machine, and how far each one is wired as a delegation peer. Presence does not grant
+				an agent permission to work.
 			</p>
 			<button type="button" disabled={!selection.id || report.isFetching} onClick={() => void report.refetch()}>
-				Check again
+				{report.isFetching ? "Detecting agents…" : "Detect again"}
 			</button>
+			{!selection.id && !selection.workspaces.isPending && (
+				<PanelEmpty>{emptyState.unread("external agent inventory")}</PanelEmpty>
+			)}
 			{selection.id && report.isPending && <p>Checking installed agents and their versions…</p>}
 			{report.error && <p role="alert">{report.error.message}</p>}
 			{report.data && (
 				<>
-					<p>Checked {report.data.detectedAt}</p>
-					<div className="config-entries">
-						{report.data.agents.map((agent) => (
-							<article className="trace-panel" key={agent.kind}>
-								<h2>{agent.label}</h2>
-								<p>
-									{!agent.hasExecutable
-										? "Shared resource conventions"
-										: agent.presence === "present"
-											? "Found on this machine"
-											: agent.presence === "absent"
-												? "No executable found"
-												: "Executable presence could not be established"}
-								</p>
-								<p>Version: {agent.version ?? "Not reported"}</p>
-								{agent.decision && <p>Saved choice: {agent.decision}</p>}
-								{agent.adapter && <p>Local ACP adapter: {agent.adapter}</p>}
-								<p>
-									{agent.skillCount ?? "Unreported"} skills · {agent.projectArtifacts ?? "Unreported"} workspace resources
-								</p>
-								{agent.inventory.status === "unknown" && (
-									<p>The resource inventory is incomplete or unsupported for this agent.</p>
-								)}
-								<details>
-									<summary>Resources and discovery details</summary>
-									{agent.binary && <p>Executable: {agent.binary}</p>}
-									{agent.installDir && <p>Installation: {agent.installDir}</p>}
-									{agent.inventory.items.length ? (
-										<dl className="settings-list">
-											{agent.inventory.items.map((item) => (
-												<div key={`${item.scope}:${item.kind}:${item.path}:${item.name}`}>
-													<dt>{item.name}</dt>
-													<dd>
-														{item.kind} · {item.scope}
-														<br />
-														{item.path}
-													</dd>
-													<dd>{item.installation ?? "Installation unreported"}</dd>
-												</div>
-											))}
-										</dl>
-									) : (
-										<p>No resource entries reported.</p>
-									)}
-									{[...new Set(agent.inventory.diagnostics)].map((message) => (
-										<p key={message}>{message}</p>
-									))}
-								</details>
-							</article>
+					<dl className="facts panel-summary" aria-label="Detected agent summary">
+						{interopSummary(report.data).map((figure) => (
+							<div className="fact" key={figure.label}>
+								<dt>{figure.label}</dt>
+								<dd>{figure.value}</dd>
+							</div>
 						))}
+					</dl>
+					<div className="config-entries">
+						{orderedAgents(report.data).map((agent) => {
+							const presence = presenceMark(agent);
+							const wiring = wiringMark(agent);
+							return (
+								<article className="trace-panel" key={agent.kind}>
+									<h2>{agent.label}</h2>
+									<p className="panel-marks">
+										<StatusMark tone={presence.tone} label={presence.label} />
+										<StatusMark tone={wiring.tone} label={wiring.label} />
+									</p>
+									<p>{wiringSentence(agent)}</p>
+									<dl className="facts">
+										<div className="fact">
+											<dt>Version</dt>
+											<dd data-tone={agent.version ? undefined : "absent"}>{agent.version ?? "Not reported"}</dd>
+										</div>
+										<div className="fact">
+											<dt>ACP adapter</dt>
+											<dd>{adapterText(agent.adapter)}</dd>
+										</div>
+										<div className="fact">
+											<dt>Answered</dt>
+											<dd data-tone={agent.decidedAt ? undefined : "absent"}>
+												{agent.decidedAt ? formatTime(agent.decidedAt) : "Never"}
+											</dd>
+										</div>
+										<div className="fact">
+											<dt>Skills</dt>
+											<dd>{agent.skillCount ?? "Not reported"}</dd>
+										</div>
+										<div className="fact">
+											<dt>Workspace resources</dt>
+											<dd>{agent.projectArtifacts ?? "Not reported"}</dd>
+										</div>
+									</dl>
+									{agent.inventory.status === "unknown" && (
+										<PanelEmpty>The resource inventory is incomplete or unsupported for this agent.</PanelEmpty>
+									)}
+									<details>
+										<summary>Resources and discovery details · {agent.inventory.items.length}</summary>
+										{agent.binary && (
+											<p className="config-path">
+												Executable <code>{agent.binary}</code>
+											</p>
+										)}
+										{agent.installDir && (
+											<p className="config-path">
+												Installation <code>{agent.installDir}</code>
+											</p>
+										)}
+										{agent.inventory.items.length ? (
+											<dl className="settings-list">
+												{agent.inventory.items.map((item) => (
+													<div key={`${item.scope}:${item.kind}:${item.path}:${item.name}`}>
+														<dt>{item.name}</dt>
+														<dd>
+															{humanizeKey(item.kind)} · {item.scope === "user" ? "yours" : "this project"}
+															<br />
+															<code>{item.path}</code>
+														</dd>
+														<dd>{item.installation === "installed" ? "Installed" : "Installation not reported"}</dd>
+													</div>
+												))}
+											</dl>
+										) : (
+											<PanelEmpty>{emptyState.emptyStore("resource entry", `for ${agent.label} on this machine`)}</PanelEmpty>
+										)}
+										{[...new Set(agent.inventory.diagnostics)].map((message) => (
+											<p key={message}>{message}</p>
+										))}
+									</details>
+								</article>
+							);
+						})}
 					</div>
+					<Boundary panel={PANELS.interop} />
 				</>
 			)}
 		</section>

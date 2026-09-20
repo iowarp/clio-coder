@@ -223,6 +223,9 @@
 													"installDir",
 													"adapter",
 													"decision",
+													"decidedAt",
+													"decisionStale",
+													"wiring",
 													"skillCount",
 													"projectArtifacts",
 													"inventory"
@@ -318,6 +321,47 @@
 															},
 															{
 																"type": "null"
+															}
+														]
+													},
+													"decidedAt": {
+														"anyOf": [
+															{
+																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"decisionStale": {
+														"type": "boolean"
+													},
+													"wiring": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "configured"
+															},
+															{
+																"type": "string",
+																"const": "not-acp"
+															},
+															{
+																"type": "string",
+																"const": "proposed"
+															},
+															{
+																"type": "string",
+																"const": "decided"
+															},
+															{
+																"type": "string",
+																"const": "not-offered"
+															},
+															{
+																"type": "string",
+																"const": "unknown"
 															}
 														]
 													},

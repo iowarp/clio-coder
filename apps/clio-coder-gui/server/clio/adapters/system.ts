@@ -1,9 +1,11 @@
 import { homedir } from "node:os";
+import { readLayeredSettings } from "../../../../../src/core/settings-layers.js";
 import { resolveClioDirs } from "../../../../../src/core/xdg.js";
 import {
 	detectInteropAgents,
 	discoverInteropInventory,
 	INTEROP_AGENT_KINDS,
+	interopProposals,
 	resolveOnPath,
 } from "../../../../../src/domains/interop/index.js";
 import { runDoctor } from "../../../../../src/domains/lifecycle/doctor.js";
@@ -29,11 +31,34 @@ export function inspectSystem() {
 export async function inspectInterop(cwd: string, fixture = false) {
 	const home = fixture ? process.env.CLIO_CODER_HOME : undefined;
 	const report = await detectInteropAgents({ cwd, inventory: true, probeVersion: true, ...(home ? { home } : {}) });
+	// Wiring is decided by the same function the terminal review uses, so this page can never offer
+	// or withhold an agent the review would treat differently.
+	let wired: { configured: Set<string>; proposed: Set<string> } | undefined;
+	try {
+		const { settings } = readLayeredSettings(cwd);
+		wired = {
+			configured: new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id)),
+			proposed: new Set(interopProposals(report, settings).map((proposal) => proposal.kind)),
+		};
+	} catch {
+		wired = undefined;
+	}
 	return {
 		detectedAt: report.detectedAt,
 		agents: INTEROP_AGENT_KINDS.map((kind) => {
 			const row = report.agents.find((row) => row.kind === kind.id);
 			const resolved = row ?? resolveOnPath(kind.binaryNames);
+			const wiring = !wired
+				? ("unknown" as const)
+				: wired.configured.has(kind.id)
+					? ("configured" as const)
+					: kind.acp === undefined
+						? ("not-acp" as const)
+						: wired.proposed.has(kind.id)
+							? ("proposed" as const)
+							: row?.decision !== undefined
+								? ("decided" as const)
+								: ("not-offered" as const);
 			return {
 				kind: kind.id,
 				label: kind.label,
@@ -44,6 +69,9 @@ export async function inspectInterop(cwd: string, fixture = false) {
 				installDir: row?.installDir ?? null,
 				adapter: row?.adapter ?? null,
 				decision: row?.decision ?? null,
+				decidedAt: row?.decidedAt ?? null,
+				decisionStale: row?.decision !== undefined && row.decidedFingerprint !== row.fingerprint,
+				wiring,
 				skillCount: row?.skillCount ?? null,
 				projectArtifacts: row?.projectArtifacts ?? null,
 				inventory: row?.inventory ?? discoverInteropInventory(kind, home ?? homedir(), cwd, home ? {} : process.env),

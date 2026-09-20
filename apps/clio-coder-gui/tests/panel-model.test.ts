@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { emptyState, eyebrow, PANELS } from "../client/design/panel-model.js";
+import { emptyState, eyebrow, MUTABILITIES, PANELS } from "../client/design/panel-model.js";
 
 test("every panel eyebrow names a scope and a mutability", () => {
 	assert.equal(
@@ -8,18 +8,15 @@ test("every panel eyebrow names a scope and a mutability", () => {
 		"EVIDENCE BUNDLES · INSTALLATION-WIDE · READ ONLY",
 	);
 	const panels = Object.entries(PANELS);
-	assert.ok(panels.length >= 9, `expected the inspector panels to be registered, saw ${panels.length}`);
+	assert.ok(panels.length >= 22, `expected the inspector panels to be registered, saw ${panels.length}`);
+	const mutabilities = new Set(MUTABILITIES.map((word) => word.toUpperCase()));
 	for (const [id, panel] of panels) {
 		const segments = panel.eyebrow.split(" · ");
 		assert.ok(segments.length >= 2, `${id} eyebrow states only a scope: ${panel.eyebrow}`);
 		assert.equal(panel.eyebrow, panel.eyebrow.toUpperCase(), `${id} eyebrow is not an eyebrow`);
 		assert.doesNotMatch(panel.eyebrow, /\.$/u, `${id} eyebrow ends in a period`);
 		const mutability = segments.at(-1) as string;
-		assert.match(
-			mutability,
-			/READ ONLY|READ OFFLINE|COLLECT AND RECHECK|INSTALL AND REMOVE/u,
-			`${id} does not say what the panel may do to this data: ${mutability}`,
-		);
+		assert.ok(mutabilities.has(mutability), `${id} does not say what the panel may do to this data: ${mutability}`);
 	}
 });
 

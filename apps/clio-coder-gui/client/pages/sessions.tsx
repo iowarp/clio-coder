@@ -23,6 +23,8 @@ import { FleetStrip } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, summarizeHealth } from "../chat/health.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark } from "../design/status.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
@@ -42,10 +44,15 @@ export function Workspaces({ client }: { client: Client }) {
 	});
 	return (
 		<section>
-			<p className="eyebrow">Your work</p>
-			<h1>
-				Sessions<span className="period">.</span>
-			</h1>
+			<PanelHeading
+				panel={PANELS.sessions}
+				level={1}
+				title={
+					<>
+						Sessions<span className="period">.</span>
+					</>
+				}
+			/>
 			<p className="intro">Open a workspace and continue a conversation with Clio.</p>
 			<form
 				className="workspace-open"
@@ -80,7 +87,10 @@ export function Workspaces({ client }: { client: Client }) {
 					<span aria-hidden="true">→</span>
 				</Link>
 			))}
-			{workspaces.data?.length === 0 ? <p>Open your first workspace using its absolute path.</p> : null}
+			{workspaces.data?.length === 0 ? (
+				<PanelEmpty>No workspace has been opened here yet. Open your first one using its absolute path.</PanelEmpty>
+			) : null}
+			<Boundary panel={PANELS.sessions} />
 		</section>
 	);
 }
@@ -115,8 +125,7 @@ export function Sessions({ client }: { client: Client }) {
 	return (
 		<section>
 			<Link to="/sessions">← Workspaces</Link>
-			<p className="eyebrow">Workspace</p>
-			<h1>{workspace.data?.name ?? "Sessions"}</h1>
+			<PanelHeading panel={PANELS.sessions} level={1} title={workspace.data?.name ?? "Sessions"} />
 			<p className="workspace-path">{workspace.data?.path}</p>
 			<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
 				{open.isPending ? "Starting session…" : "New session"}
@@ -136,7 +145,7 @@ export function Sessions({ client }: { client: Client }) {
 						</div>
 					</Link>
 				))}
-				{!active.length ? <p>No sessions open.</p> : null}
+				{!active.length ? <PanelEmpty>No session of this workspace is open in this server.</PanelEmpty> : null}
 			</section>
 			<section className="trace-panel">
 				<h2>Session history</h2>
@@ -148,7 +157,10 @@ export function Sessions({ client }: { client: Client }) {
 							<div>
 								<h3>{session.name ?? session.firstMessagePreview ?? session.id}</h3>
 								<p>
-									{session.model ?? "Model not recorded"} · {session.messageCount ?? 0} messages
+									{session.model ?? "Model not recorded"} ·{" "}
+									{session.messageCount == null
+										? "message count not recorded"
+										: `${session.messageCount.toLocaleString("en-US")} ${session.messageCount === 1 ? "message" : "messages"}`}
 								</p>
 								<small>
 									{formatTime(session.lastActivityAt ?? session.createdAt)} · {session.endedAt ? "closed" : "open in Clio"}
@@ -160,8 +172,11 @@ export function Sessions({ client }: { client: Client }) {
 							{session.endedAt ? <DeleteSession client={client} id={session.id} workspaceId={workspaceId} /> : null}
 						</article>
 					))}
-				{history.data?.length === 0 ? <p>No saved sessions in this workspace.</p> : null}
+				{history.data?.length === 0 ? (
+					<PanelEmpty>{emptyState.emptyStore("saved session", "for this workspace")}</PanelEmpty>
+				) : null}
 			</section>
+			<Boundary panel={PANELS.sessions} />
 		</section>
 	);
 }

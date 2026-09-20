@@ -1,8 +1,23 @@
-import { Type } from "typebox";
+import { type Static, Type } from "typebox";
 
 const closed = { additionalProperties: false };
 const nullable = Type.Union([Type.String(), Type.Null()]);
 const presence = Type.Union([Type.Literal("present"), Type.Literal("absent"), Type.Literal("unknown")]);
+/**
+ * How far one agent is wired as a delegation peer. The states are different facts and never share a
+ * word: `configured` has a delegation entry, `not-acp` has no recipe Clio Coder could speak,
+ * `proposed` is what the terminal review would offer, `decided` holds a standing answer against
+ * unchanged facts, and `not-offered` is none of those. `unknown` means the settings that decide it
+ * could not be read.
+ */
+export const InteropWiring = Type.Union([
+	Type.Literal("configured"),
+	Type.Literal("not-acp"),
+	Type.Literal("proposed"),
+	Type.Literal("decided"),
+	Type.Literal("not-offered"),
+	Type.Literal("unknown"),
+]);
 export const SystemReport = Type.Object(
 	{
 		checkedAt: Type.String(),
@@ -25,6 +40,7 @@ export const SystemReport = Type.Object(
 	},
 	closed,
 );
+export type InteropWiring = Static<typeof InteropWiring>;
 export const Interop = Type.Object(
 	{
 		detectedAt: Type.String(),
@@ -40,6 +56,10 @@ export const Interop = Type.Object(
 					installDir: nullable,
 					adapter: Type.Union([presence, Type.Null()]),
 					decision: Type.Union([Type.Literal("accepted"), Type.Literal("declined"), Type.Null()]),
+					decidedAt: nullable,
+					/** The answer was given against facts that have since moved, so the agent is offered again. */
+					decisionStale: Type.Boolean(),
+					wiring: InteropWiring,
 					skillCount: Type.Union([Type.Integer(), Type.Null()]),
 					projectArtifacts: Type.Union([Type.Integer(), Type.Null()]),
 					inventory: Type.Object(
@@ -73,3 +93,4 @@ export const Interop = Type.Object(
 	},
 	closed,
 );
+export type Interop = Static<typeof Interop>;
