@@ -256,7 +256,7 @@ export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
 
 export interface InterfaceSettings {
-	/** Interactive onboarding persona and contextual footer tips. */
+	/** Interactive project-work guidance and contextual footer tips. */
 	demo: boolean;
 	terminalProgress: boolean;
 	/** Output style: Compact, Standard, or Detailed bounded previews. */
@@ -709,7 +709,7 @@ safety:
     enabled: false
 
 interface:
-  # Friendly onboarding guidance; disable for a quiet experience.
+  # Capability guidance during project work; disable for a quiet experience.
   demo: true
   outputDetail: standard
   smoothStreaming: auto
