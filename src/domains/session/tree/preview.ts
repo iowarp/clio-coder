@@ -14,6 +14,7 @@
  */
 import type { ClioTurnRecord } from "../../../engine/session.js";
 import { stripTokenizerSentinels } from "../../../engine/strip-tokenizer-sentinels.js";
+import { operatorTextOfUserPayload } from "../history.js";
 
 /**
  * Maximum characters for the inline preview slice. Keeps a row readable on
@@ -202,8 +203,8 @@ export function buildTurnPreview(turn: TurnPreviewInput, max: number = TURN_PREV
 	const budget = Math.max(1, max);
 	switch (turn.kind) {
 		case "user": {
-			const text = extractPlainText(turn.payload);
-			return text === null ? "(empty)" : clamp(text, budget);
+			const text = operatorTextOfUserPayload(turn.payload);
+			return text === null ? "(empty)" : clamp(sanitize(text), budget);
 		}
 		case "assistant": {
 			const stop = assistantStopMarker(turn.payload);

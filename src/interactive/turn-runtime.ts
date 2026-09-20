@@ -36,6 +36,7 @@ import {
 } from "../engine/provider-payload.js";
 import type { AgentEvent, AgentMessage, EngineModel, Usage } from "../engine/types.js";
 import type { resolveAgentTools, ToolFinishEvent, ToolTelemetry } from "../tools/agent-tools.js";
+import { createAssistantGenerationTiming, hasAssistantGenerationDelta } from "./assistant-generation-timing.js";
 import {
 	type AssistantCallTiming,
 	type BackendCacheVerdict,
@@ -636,15 +637,31 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => {
 			stallSuspendDepth += 1;
 			try {
-				return await context.postToolContinuationGuard(localRuntime, signal);
+				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				const contextChanged = await middleware.prepareToolContinuation(localRuntime, signal);
+				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
+				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
+				// Compaction owns any replacement snapshot. Without one, publish the
+				// already-accounted reminder through context, not message events that
+				// would manufacture a new operator turn and reset task authority.
+				return (
+					update ??
+					(contextChanged
+						? {
+								context: {
+									messages: [...localRuntime.agent.state.messages],
+									tools: [...localRuntime.agent.state.tools],
+								},
+							}
+						: undefined)
+				);
 			} finally {
 				stallSuspendDepth -= 1;
 				lastActivityAt = performance.now();
 			}
 		};
 
-		let streamStartedAt: number | null = null;
-		let firstAssistantDeltaAt: number | null = null;
+		const generationTiming = createAssistantGenerationTiming();
 		// First call of the run is the one whose verdict says whether the
 		// backend reused the session prefix; later calls in a tool loop are
 		// trivially warm.
@@ -782,10 +799,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					publicEvent = { ...enrichedEvent, messages: reported } as typeof enrichedEvent;
 				}
 			}
+			if (publicEvent) generationTiming.record(publicEvent, eventClock);
 			if (publicEvent?.type === "agent_start") {
 				runStartMessageCount = localRuntime.agent.state.messages.length;
-				streamStartedAt = eventClock;
-				firstAssistantDeltaAt = null;
 				apiCallStartedAt = null;
 				apiCallFirstDeltaAt = null;
 				runFirstCallVerdict = null;
@@ -804,15 +820,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			// at the turn that issued it instead of for the rest of the run.
 			if (publicEvent?.type === "turn_end") toolsInFlight = 0;
 			if (publicEvent?.type === "message_update") {
-				const assistantEvent = publicEvent.assistantMessageEvent as { type?: string; delta?: unknown };
-				const hasDelta =
-					assistantEvent.type === "toolcall_start" ||
-					((assistantEvent.type === "text_delta" ||
-						assistantEvent.type === "thinking_delta" ||
-						assistantEvent.type === "toolcall_delta") &&
-						typeof assistantEvent.delta === "string" &&
-						assistantEvent.delta.length > 0);
-				if (hasDelta && firstAssistantDeltaAt === null) firstAssistantDeltaAt = eventClock;
+				const hasDelta = hasAssistantGenerationDelta(publicEvent.assistantMessageEvent);
 				if (hasDelta && apiCallFirstDeltaAt === null) {
 					apiCallFirstDeltaAt = eventClock;
 					// The timer may be armed for the longer first-token window; the
@@ -854,13 +862,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						},
 					);
 				}
-				if (summary.output > 0 && firstAssistantDeltaAt !== null) {
-					const durationMs = Math.round(Math.max(1, eventClock - firstAssistantDeltaAt));
+				const timing = generationTiming.snapshot(eventClock);
+				if (summary.output > 0 && timing) {
+					const durationMs = Math.round(timing.durationMs);
 					deps.observability.recordTokenThroughput({
 						tokensPerSecond: summary.output / (durationMs / 1000),
 						outputTokens: summary.output,
 						durationMs,
-						...(streamStartedAt !== null ? { ttftMs: Math.round(firstAssistantDeltaAt - streamStartedAt) } : {}),
+						ttftMs: Math.round(timing.ttftMs),
 						providerId: localRuntime.targetId,
 						modelId: localRuntime.wireModelId,
 						recordedAt: eventAt,

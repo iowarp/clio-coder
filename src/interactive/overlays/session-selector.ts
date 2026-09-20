@@ -50,10 +50,11 @@ function shortTarget(meta: SessionMeta): string {
 }
 
 function previewLine(meta: SessionMeta): string {
+	const fork = meta.parentSessionId ? `Fork ${sanitizeCallTargetText(meta.id).slice(0, 6)} · ` : "";
 	const explicit = sanitizeCallTargetText(meta.firstMessagePreview ?? "");
-	if (explicit) return explicit;
+	if (explicit) return `${fork}${explicit}`;
 	const name = sanitizeCallTargetText(meta.name ?? "");
-	if (name) return `(${name})`;
+	if (name) return `${fork}(${name})`;
 	const cwdLeaf = sanitizeCallTargetText(meta.cwd ? basename(meta.cwd) : "");
 	const id = sanitizeCallTargetText(meta.id) || "Unnamed session";
 	return `${id} · ${cwdLeaf || "no preview"}`;

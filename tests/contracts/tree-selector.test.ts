@@ -1,8 +1,21 @@
 import { deepStrictEqual, doesNotMatch, match, strictEqual } from "node:assert/strict";
 import { it } from "node:test";
 import type { TreeSnapshot } from "../../src/domains/session/tree/navigator.js";
+import { buildTurnPreview } from "../../src/domains/session/tree/preview.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
 import { TreeOverlayView } from "../../src/interactive/overlays/tree-selector.js";
+
+it("previews operator words instead of injected scaffolding and identifies tool-only assistant turns", () => {
+	const text = "<system-reminder>Marketplace guidance</system-reminder>\nImplement clearQueue reasons";
+	for (const payload of [{ text, operatorText: "Implement clearQueue reasons" }, { text }]) {
+		strictEqual(buildTurnPreview({ kind: "user", payload }), "Implement clearQueue reasons");
+	}
+	strictEqual(buildTurnPreview({ kind: "user", payload: { text, displayText: "/review queue" } }), "/review queue");
+	match(
+		buildTurnPreview({ kind: "assistant", payload: { text: "", content: [{ type: "toolCall", name: "read" }] } }),
+		/tool calls.*read/u,
+	);
+});
 
 function fixture(cwd = "/workspace") {
 	const snapshot: TreeSnapshot = {

@@ -1,6 +1,6 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { test } from "node:test";
 import type { Metafile } from "esbuild";
 
@@ -13,13 +13,18 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 		([, output]) => "src/interactive/terminal-lease.ts" in output.inputs,
 	);
 	strictEqual(owners.length, 1, "build with pnpm build before checking the Stage 0 artifact");
+	const owner = owners[0];
+	ok(owner);
+	// Metafile output names belong to the build checkout. Resolve the Stage 0
+	// chunks against the selected artifact directory, including isolated builds.
+	const chunkPath = (name: string): string => resolve(root, buildDirectory, relative(dirname(owner[0]), name));
 	const closure = new Set<string>();
 	const visit = (name: string): void => {
 		if (closure.has(name)) return;
 		const output = metadata.outputs[name];
 		ok(output, `missing static output: ${name}`);
 		closure.add(name);
-		ok(statSync(resolve(root, name)).isFile(), `missing built chunk: ${name}`);
+		ok(statSync(chunkPath(name)).isFile(), `missing built chunk: ${name}`);
 		for (const dependency of output.imports) {
 			if (dependency.kind === "dynamic-import") continue;
 			if (dependency.external) {
@@ -30,8 +35,6 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 			} else visit(dependency.path);
 		}
 	};
-	const owner = owners[0];
-	ok(owner);
 	visit(owner[0]);
 	let totalBytes = 0;
 	let clioBytes = 0;
@@ -41,7 +44,7 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 		const output = metadata.outputs[name];
 		ok(output);
 		// tsup appends source-map comments after esbuild reports its byte count.
-		totalBytes += statSync(resolve(root, name)).size;
+		totalBytes += statSync(chunkPath(name)).size;
 		for (const [source, contribution] of Object.entries(output.inputs)) {
 			ok(!forbidden.test(source), `heavy runtime source entered Stage 0: ${source}`);
 			if (source.startsWith("src/")) clioBytes += contribution.bytesInOutput;

@@ -13,10 +13,32 @@ import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { createStatusController } from "../../src/interactive/status/controller.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
+import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { ViewOverlayView } from "../../src/interactive/view/view-overlay.js";
 
 const plain = (rows: string[]) => rows.map(stripTerminalSequences).join("\n");
+
+test("streamed tool arguments show preparation before execution and clear on answer text", () => {
+	const ctx = { now: 1000, localRuntime: true };
+	let state = reduceStatus(INITIAL_STATUS, { type: "agent_start" } as never, ctx);
+	state = reduceStatus(state, { type: "turn_start" } as never, ctx);
+	state = reduceStatus(
+		state,
+		{ type: "message_update", assistantMessageEvent: { type: "toolcall_start" } } as never,
+		ctx,
+	);
+	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Preparing tool call · 100ms");
+	strictEqual(state.toolStartedAt, undefined);
+	state = reduceStatus(state, { type: "text_delta", delta: "Answer" } as never, ctx);
+	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Writing · 100ms");
+	state = reduceStatus(
+		state,
+		{ type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: {} } as never,
+		ctx,
+	);
+	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Running read · 100ms");
+});
 
 test("legacy preferences normalize without changing other settings or the input", () => {
 	for (const [legacy, expected] of [

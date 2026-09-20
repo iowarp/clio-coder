@@ -305,11 +305,20 @@ function withLiteLLMRouteFailureAdvice(
 	const metadata = runtimeMetadata(model);
 	if (metadata?.runtimeId !== "litellm") return source;
 	const advised = createAssistantMessageEventStream();
+	let hasPartialResponse = false;
 	(async () => {
 		try {
 			for await (const event of source) {
+				if (event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") {
+					hasPartialResponse = true;
+				}
 				if (event.type === "error" && event.reason !== "aborted" && event.error.stopReason !== "aborted") {
-					event.error.errorMessage = liteLLMRouteFailureMessage(event.error.errorMessage, metadata.targetId, model.id);
+					event.error.errorMessage = liteLLMRouteFailureMessage(
+						event.error.errorMessage,
+						metadata.targetId,
+						model.id,
+						hasPartialResponse || event.error.content.length > 0,
+					);
 				}
 				advised.push(event as AssistantMessageEvent);
 			}
@@ -321,7 +330,7 @@ function withLiteLLMRouteFailureAdvice(
 				model,
 				err instanceof Error && err.name === "AbortError"
 					? err
-					: new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id)),
+					: new Error(liteLLMRouteFailureMessage(message, metadata.targetId, model.id, hasPartialResponse)),
 			);
 		}
 	})();

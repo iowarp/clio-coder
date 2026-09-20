@@ -94,6 +94,8 @@ export interface AgentStatus {
 	watchdogTier: WatchdogTier;
 	watchdogPeak: WatchdogTier;
 	localRuntime: boolean;
+	/** The model is streaming tool arguments; execution has not started. */
+	preparingToolCall?: boolean;
 	runId?: string | null | undefined;
 	resumePhase?: StatusPhase | undefined;
 	activePhases?: ReadonlySet<OverlayPhase> | undefined;

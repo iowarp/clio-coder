@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { streamSimple } from "../../src/engine/ai.js";
 import type { EngineModel } from "../../src/engine/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
+import { dispatchRequestsFromArgs } from "../../src/tools/dispatch-arguments.js";
 import {
 	buildDispatchParameters,
 	type DispatchSchemaComposition,
@@ -29,6 +30,26 @@ function modeEnum(schema: unknown): string[] {
 }
 
 describe("dispatch schema composition", () => {
+	it("routes explicit reviews mentioning tests to the verifier without changing test-writing or explicit recipes", () => {
+		const parsed = dispatchRequestsFromArgs(
+			{
+				agent: "auto",
+				tasks: [
+					"Review the following diff for the clsx fix. Check correctness, regression tests, and documentation.",
+					"Please independently review the regression tests and README.",
+					"Write regression tests for the review findings.",
+					{ agent: "coder", task: "Review and fix the tests." },
+				],
+			},
+			{ auto: { approvedAuthorities: ["read-only", "workspace-edit"], authorityBasis: "full-auto-policy" } },
+		);
+		assert.ok(parsed.ok);
+		assert.deepEqual(
+			parsed.requests.map((request) => request.agentId),
+			["verifier", "verifier", "tester", "coder"],
+		);
+	});
+
 	it("advertises compete for a one-route fleet without a roster or adaptive routing", () => {
 		const composition = dispatchSchemaCompositionFor(
 			fleetWith({ default: { target: "mini", model: "ornith", thinkingLevel: "off" } }),

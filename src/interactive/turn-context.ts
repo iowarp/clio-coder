@@ -208,6 +208,8 @@ export interface TurnContext {
 	postToolContinuationGuard(
 		agentRuntime: AgentRuntime,
 		signal?: AbortSignal,
+		/** A completed background reminder was just appended to the context tail. */
+		contextChanged?: boolean,
 	): Promise<
 		| {
 				context: { messages: AgentMessage[]; tools: AgentRuntime["agent"]["state"]["tools"] };
@@ -353,7 +355,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!runExpectedColdReasons.includes(reason)) runExpectedColdReasons.push(reason);
 		if (nextAssistantColdReasons.includes(reason)) return;
 		nextAssistantColdReasons.push(reason);
-		deps.emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reason}`);
+		deps.emitNotice(`[context engine] ${reason} may affect cache reuse; actual reuse is reported with the response.`);
 	};
 	const unsubscribeColdReasonSources = [
 		...[BusChannels.DispatchStarted, BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
@@ -1379,8 +1381,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			for (const path of paths) sessionWorkingContextPaths.add(path);
 		},
 
-		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal) {
-			if (signal?.aborted || !toolResultTail(agentRuntime)) return undefined;
+		async postToolContinuationGuard(agentRuntime: AgentRuntime, signal?: AbortSignal, contextChanged = false) {
+			if (signal?.aborted || (!contextChanged && !toolResultTail(agentRuntime))) return undefined;
+			// A background reminder has its own middleware receipt, not a user
+			// ledger turn. Preserve its newly appended context tail if compaction
+			// rebuilds messages from the ledger, and count it in both estimates.
+			const reminder = contextChanged ? agentRuntime.agent.state.messages.at(-1) : undefined;
 			const before = liveContextEstimate(agentRuntime);
 			if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
 
@@ -1398,6 +1404,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				}
 			}
 
+			if (reminder && !agentRuntime.agent.state.messages.includes(reminder)) {
+				agentRuntime.agent.state.messages.push(reminder);
+			}
 			const after = liveContextEstimate(agentRuntime);
 			if (after.tokens >= after.contextWindow) {
 				throw new Error(
@@ -1514,7 +1523,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				if (reasons.length > 0) {
 					runExpectedColdReasons = reasons;
 					nextAssistantColdReasons = reasons;
-					deps.emitNotice(`[context engine] backend prefix cache likely cold this turn: ${reasons.join(", ")}`);
+					deps.emitNotice(
+						`[context engine] ${reasons.join(", ")} may affect cache reuse; actual reuse is reported with the response.`,
+					);
 				}
 			}
 		},

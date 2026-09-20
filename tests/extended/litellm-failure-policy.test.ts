@@ -1,6 +1,7 @@
 import { ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { isLiteLLMConnectionFailure, liteLLMRouteFailureMessage } from "../../src/core/gateway-routing.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import type { TurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnPersistence } from "../../src/interactive/turn-persistence.js";
@@ -8,6 +9,14 @@ import { createTurnRecovery } from "../../src/interactive/turn-recovery.js";
 import type { AgentRuntime, ChatTurnState } from "../../src/interactive/turn-state.js";
 
 describe("LiteLLM interactive failure policy", () => {
+	it("only leaves a pre-output client connection failure eligible for visible same-route recovery", () => {
+		ok(isLiteLLMConnectionFailure(liteLLMRouteFailureMessage("Connection error.", "blade", "mini/model")));
+		strictEqual(
+			isLiteLLMConnectionFailure(liteLLMRouteFailureMessage("Connection error.", "blade", "mini/model", true)),
+			false,
+		);
+		strictEqual(isLiteLLMConnectionFailure("503 upstream Connection error."), false);
+	});
 	it("persists one failure and never enters Clio's transient retry ladder", async () => {
 		const failureMessage = {
 			role: "assistant",

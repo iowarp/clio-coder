@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
 import {
+	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
+	RESOLVED_DISPATCH_PLAN_ARGUMENT,
+} from "../../tools/dispatch-plan.js";
+import {
 	legacyToolResultDigest,
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
@@ -222,6 +226,10 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					case "after_tool":
 						return observeAfterTool(input);
 					case "turn_end": {
+						if (input.metadata?.stopReason === "aborted") {
+							cancelStoppedTurn();
+							return NO_EFFECTS;
+						}
 						// Middleware continuations can evaluate turn_end again without any
 						// completed tools. They are not new memory boundaries and must not
 						// replace the prior operator-visible outcome or emit telemetry.
@@ -285,12 +293,17 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		 * full latency. Small local models measure in tens of seconds, which is far
 		 * past any tolerable end-of-turn pause and past the policy timeout itself.
 		 * The reminder is delivered through `onDeferredReminder` instead, landing
-		 * in the next submitted turn, which is where an awaited turn_end reminder
-		 * would have been buffered anyway.
+		 * at the next native tool-batch boundary or the next submitted turn.
 		 */
 		async evaluateAsync(input, context): Promise<ReadonlyArray<MiddlewareEffect>> {
 			observeSession(input);
-			if (disposed || !settings().enabled || input.hook !== "turn_end" || pendingTriggers.size === 0) return NO_EFFECTS;
+			if (input.hook === "turn_end" && input.metadata?.stopReason === "aborted") {
+				cancelStoppedTurn();
+				return NO_EFFECTS;
+			}
+			const boundaryHook =
+				input.hook === "turn_end" || (input.hook === "after_tool" && input.metadata?.stage === "tool_batch_end");
+			if (disposed || !settings().enabled || !boundaryHook || pendingTriggers.size === 0) return NO_EFFECTS;
 			const boundary = input.turnId ?? input.metadata?.userTurnId?.toString() ?? `tool-step:${toolStep}`;
 			if (boundary === lastPromptedBoundary) return NO_EFFECTS;
 			// One row rather than none, so a headless operator reading the log sees
@@ -372,6 +385,26 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		if (input.sessionId === undefined) return;
 		if (observedSessionId !== undefined && observedSessionId !== input.sessionId) reset();
 		observedSessionId = input.sessionId;
+	}
+
+	function cancelStoppedTurn(): void {
+		if (!promptedStepInFlight && pendingTriggers.size === 0 && toolStep <= lastTurnEndStep) return;
+		const tier = promptedStepInFlight ? promptedStepTier : "rules";
+		// Retain completed bank entries, but revoke pending content and delivery
+		// authority. Late provider usage still belongs to its captured origin.
+		generation += 1;
+		generationController.abort();
+		generationController = new AbortController();
+		promptedStepInFlight = false;
+		outstandingStep = Promise.resolve();
+		pendingTriggers.clear();
+		toolsSinceMemoryStep = 0;
+		consecutiveErrors = 0;
+		lastTurnEndStep = toolStep;
+		rulesInjectedSincePromptedStep = false;
+		annotatedSinceTurnEnd = false;
+		lastDecision = "silent";
+		emitTelemetry(["turn_end"], tier, "silent", "scope_changed", 0, 0, 0, process.hrtime.bigint());
 	}
 
 	function reset(): void {
@@ -799,10 +832,24 @@ function prepareToolStep(input: MiddlewareHookInput): PendingToolStep | null {
 	const toolName = input.toolName?.trim();
 	if (!toolName) return null;
 	const canonical = hashToolCall(toolName, input.toolArgs ?? {});
+	// Host preparation artifacts belong to exact identity, not descriptive
+	// context. Keep public arguments so memory can explain what was attempted.
+	const publicArgs = Object.fromEntries(
+		Object.entries(input.toolArgs ?? {}).filter(
+			([key]) => key !== RESOLVED_DISPATCH_PLAN_ARGUMENT && key !== DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
+		),
+	);
 	return {
 		toolName,
 		operationFingerprint: createHash("sha256").update(canonical).digest("hex").slice(0, 16),
-		callDescription: shortText(canonical, CALL_DESCRIPTION_MAX_CHARS),
+		callDescription: shortText(
+			Object.keys(publicArgs).length > 0
+				? `${toolName} ${hashToolCall("", publicArgs)}`
+				: toolName === "dispatch"
+					? "dispatch plan preparation"
+					: toolName,
+			CALL_DESCRIPTION_MAX_CHARS,
+		),
 	};
 }
 

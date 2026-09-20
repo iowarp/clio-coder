@@ -6,6 +6,7 @@
  * terminal failure.
  */
 
+import { isLiteLLMConnectionFailure } from "../core/gateway-routing.js";
 import type { toContextOverflowError } from "../domains/providers/errors.js";
 import {
 	computeRetryDelayMs,
@@ -217,17 +218,18 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 		text: string,
 		initialFailure: TerminalAssistantFailure,
 	): Promise<boolean> => {
-		// A LiteLLM model id can be a deliberate physical route. Retrying it in
-		// Clio obscures the failure, delays operator recovery, and can multiply
-		// attempts beneath a gateway. Preserve and emit the one terminal failure;
-		// the operator can choose another advertised route with /model.
-		if (agentRuntime.runtimeId === "litellm") {
+		// Retry only a client connection failure before output on this exact
+		// route. Keep HTTP gateway/backend failures terminal and never substitute
+		// a model. The SDK itself still performs no hidden gateway retries.
+		const canRetry = (message: string): boolean =>
+			agentRuntime.runtimeId === "litellm" ? isLiteLLMConnectionFailure(message) : isRetryableErrorMessage(message);
+		if (agentRuntime.runtimeId === "litellm" && !canRetry(initialFailure.errorMessage)) {
 			ensureFailureVisibleAndPersisted(initialFailure);
 			return true;
 		}
 		const settings = deps.retrySettings();
 		if (!settings.enabled || settings.maxRetries <= 0) return false;
-		if (initialFailure.stopReason === "aborted" || !isRetryableErrorMessage(initialFailure.errorMessage)) return false;
+		if (initialFailure.stopReason === "aborted" || !canRetry(initialFailure.errorMessage)) return false;
 
 		let failure = initialFailure;
 		for (let attempt = 1; attempt <= settings.maxRetries; attempt += 1) {
@@ -268,7 +270,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 				await agentRuntime.agent.continue();
 			} catch (err) {
 				const message = err instanceof Error ? err.message : String(err);
-				if (!isRetryableErrorMessage(message) || attempt >= settings.maxRetries) {
+				if (!canRetry(message) || attempt >= settings.maxRetries) {
 					recordRetryStatus({
 						phase: "exhausted",
 						attempt,
@@ -304,7 +306,7 @@ export function createTurnRecovery(deps: TurnRecoveryDeps): TurnRecovery {
 			// watchdog's abort as an operator cancel and stop one rung in.
 			const nextFailure = reclassifyStallAbort(state, settled);
 			ensureFailureVisibleAndPersisted(nextFailure);
-			if (nextFailure.stopReason === "aborted" || !isRetryableErrorMessage(nextFailure.errorMessage)) {
+			if (nextFailure.stopReason === "aborted" || !canRetry(nextFailure.errorMessage)) {
 				pruneFailedAssistantFromContext(agentRuntime.agent);
 				return true;
 			}

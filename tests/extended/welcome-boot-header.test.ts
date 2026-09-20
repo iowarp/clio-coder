@@ -9,6 +9,7 @@ import {
 } from "../../src/engine/tui.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
 import { createEditorSubmitController } from "../../src/interactive/editor-submit.js";
+import { buildFooterDashboard } from "../../src/interactive/footer/dashboard.js";
 import {
 	createInteractivePresentation,
 	type InteractivePresentationDeps,
@@ -549,7 +550,7 @@ function noop(): void {}
  * transitions below run through the wiring the application uses rather than
  * through direct calls on the component.
  */
-function presentation(over: Partial<InteractivePresentationDeps> = {}, realEditor = false) {
+function presentation(over: Partial<InteractivePresentationDeps> = {}, realEditor = false, realFooter = false) {
 	let rendered = 0;
 	const view = { render: () => [], invalidate: noop };
 	const deps = {
@@ -559,7 +560,7 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 		observability: { bindRunReaders: () => noop, snapshot: () => ({ session: {} }), subscribe: () => noop },
 		chat: {
 			contextUsage: () => ({}),
-			contextLedger: () => ({}),
+			contextLedger: () => null,
 			isStreaming: () => false,
 			turnPreparation: () => ({ phase: "idle" }),
 		},
@@ -595,7 +596,10 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			createDispatchBoardStore: () => ({ rows: () => [], unsubscribe: noop }),
 			createContextActivityStore: () => ({ current: () => ({}), unsubscribe: noop }),
 			createNotificationCenter: () => ({ add: noop, list: () => [], dismiss: noop }),
-			buildFooter: () => ({ view, refresh: noop, dispose: noop, isExpanded: () => false }),
+			buildFooter: realFooter
+				? (deps: Parameters<typeof buildFooterDashboard>[0]) =>
+						buildFooterDashboard({ ...deps, resolveCurrentBranch: async () => null })
+				: () => ({ view, refresh: noop, dispose: noop, isExpanded: () => false }),
 			createEditor: (_tui: unknown, chrome: EditorChrome) =>
 				realEditor
 					? new ClioEditor(new TuiMainScreen({ columns: 120, rows: 24, write: noop } as unknown as Terminal), chrome)
@@ -699,41 +703,62 @@ test("disposing the presentation disposes the header", () => {
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
-	test(`production settings-to-composer identity preserves distinct families at ${width} columns`, () => {
+	test(`production presentation footer preserves model identity at ${width} columns`, () => {
 		let model = "very-long-placement/qwopus3.8-27b-q6";
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		const terminal = { columns: width };
 		const { presentation: built } = presentation(
 			{
-				getSettings: () =>
-					({
-						chat: { target: "blade-gateway", model, thinkingLevel: "low" },
-						interface: { mode: "regular", outputDetail: "standard", smoothStreaming: "off" },
-					}) as never,
+				terminal,
+				getSettings: () => ({
+					...settings,
+					chat: { ...settings.chat, target: "blade-gateway", model, thinkingLevel: "low" },
+					interface: { ...settings.interface, mode: "regular", outputDetail: "standard", smoothStreaming: "off" },
+				}),
 			},
 			true,
+			true,
 		);
+		const footerRows = (columns: number): string[] => {
+			terminal.columns = columns;
+			built.footer.refresh();
+			const rows = built.footer.view.render(columns);
+			for (const row of rows) ok(visibleWidth(row) <= columns);
+			return rows;
+		};
 		try {
-			const rails: string[] = [];
+			const identities: string[] = [];
 			for (const placement of ["very-long-placement", "dynamo-long-placement"]) {
 				for (const family of ["qwopus3.8", "llamus3.8", "qwen3", "llama3"]) {
 					model = `${placement}/${family}-27b-q6`;
 					deepStrictEqual(built.editorChrome.getModelLabel(), { targetId: "blade-gateway", modelId: model });
-					const rows = built.editor.render(width);
-					for (const row of rows) ok(visibleWidth(row) <= width);
-					const rail = stripTerminalSequences(rows[0] ?? "");
-					ok(rail.includes(family.slice(0, 5)), rail);
-					ok(rail.includes("q6"), rail);
-					if (width >= 92) ok(rail.includes(model), rail);
-					rails.push(rail);
+					const composer = built.editor.render(width);
+					for (const row of composer) ok(visibleWidth(row) <= width);
+					const rail = stripTerminalSequences(composer[0] ?? "");
+					for (const label of [family, placement, "blade-gateway", "q6"]) ok(!rail.includes(label), rail);
+					const footer = footerRows(width).map(stripTerminalSequences).join("\n");
+					ok(footer.includes("q6"), footer);
+					// Compact footer uses middle truncation: narrow budgets can omit
+					// the family along with placement, but must retain the suffix.
+					if (width < 92) ok(footer.includes("…"), footer);
+					else ok(footer.includes(model), footer);
+					const wide = footerRows(120).map(stripTerminalSequences).join("\n");
+					ok(wide.includes(`blade-gateway · ${model}`), wide);
+					identities.push(wide);
 				}
 			}
-			strictEqual(new Set(rails.slice(0, 4)).size, 4);
-			strictEqual(new Set(rails.slice(4)).size, 4);
-			// The callback carries raw fields; only rendering removes terminal payloads.
+			strictEqual(new Set(identities).size, 8, "all families and placements stay distinct with room to show them");
+			// The callback carries raw fields; rendering sanitizes before truncation.
 			model = `very-long-placement/\x1b]0;FAKE_MODEL_NAME\x07qwopus3.8-27b-q6`;
-			const hostile = built.editor.render(width).map(stripTerminalSequences).join("\n");
-			ok(!hostile.includes("FAKE_MODEL_NAME"), hostile);
-			ok(hostile.includes("qwopus"), hostile);
-			ok(hostile.includes("q6"), hostile);
+			deepStrictEqual(built.editorChrome.getModelLabel(), { targetId: "blade-gateway", modelId: model });
+			for (const columns of [width, 120]) {
+				const raw = footerRows(columns).join("\n");
+				ok(!raw.includes("FAKE_MODEL_NAME"), raw);
+				ok(!raw.includes("\x1b]"), raw);
+				const clean = stripTerminalSequences(raw);
+				ok(clean.includes("q6"), clean);
+				if (columns >= 92) ok(clean.includes("very-long-placement/qwopus3.8-27b-q6"), clean);
+			}
 		} finally {
 			built.dispose();
 		}
