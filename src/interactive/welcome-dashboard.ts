@@ -74,6 +74,7 @@ export interface WelcomeDashboardStats {
 	projectContext: WelcomeProjectContextState;
 	/** Null in session mode: the collapsed row prints no key hint. */
 	submitKeyLabel: string | null;
+	autonomy: string;
 }
 
 export type WelcomeDashboardMode = "launchpad" | "session";
@@ -299,7 +300,7 @@ function routeGlyph(route: WelcomeRouteState): string {
  * back to the route alone; the action row still names the fault there.
  */
 function routeRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number): string {
-	const target = plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel));
+	const target = plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false }));
 	if (stats.route === "unset") return theme.fg("warning", truncateToWidth(target, room, GLYPH.ellipsis, false));
 	const token = routeToken(stats.route);
 	// A glyph rather than a word, so the verdicts stay distinct with no color.
@@ -352,37 +353,6 @@ function actionRow(theme: ClioTheme, stats: WelcomeDashboardStats, room: number)
 }
 
 /**
- * The masthead: identity flush left, workspace flush right, a frame-colored rule
- * between them. Exactly one line at every width. The identity gives up its
- * version before its name, because `Clio Coder` identifies the tool and `v0.4.7`
- * only dates it, and gives up its name before its wordmark.
- */
-function mastheadRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: string, width: number): string {
-	const mark = brandMark(theme);
-	const name = theme.style("title", "Clio Coder", { bold: true });
-	const identities = [`${mark} ${name} ${theme.fg("dim", `v${version}`)}`, `${mark} ${name}`, mark];
-	for (const identity of identities) {
-		const identityWidth = visibleWidth(identity);
-		// one space, at least two fill columns, one space
-		const room = width - identityWidth - 4;
-		if (room < 6) continue;
-		const workspace = workspaceLabel(theme, stats, room);
-		if (workspace.length === 0) continue;
-		const fill = width - identityWidth - visibleWidth(workspace) - 2;
-		if (fill < 2) continue;
-		return `${identity} ${theme.fg("frame", "─".repeat(fill))} ${workspace}`;
-	}
-	// Too narrow to pair them. The wordmark holds column 0 and the workspace takes
-	// what is left; below that, the wordmark alone.
-	const markWidth = visibleWidth(mark);
-	if (width >= markWidth + 3) {
-		const workspace = workspaceLabel(theme, stats, width - markWidth - 1);
-		if (workspace.length > 0) return `${mark} ${workspace}`;
-	}
-	return truncateToWidth(mark, width, "", false);
-}
-
-/**
  * The collapsed session header: one live line naming where Clio is working and
  * which route answers.
  *
@@ -401,7 +371,10 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	const branch = workspaceBranch(stats);
 	const units: Unit[] = [
 		{ text: `${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${version}`)}`, rank: 3 },
-		{ text: theme.fg("muted", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel))), rank: 0 },
+		{
+			text: theme.fg("muted", plainOneLine(formatTargetLabel(stats.targetLabel, stats.modelLabel, { abbreviate: false }))),
+			rank: 0,
+		},
 		{ text: theme.fg("muted", fitPathTail(workspacePath(stats), Math.max(8, Math.floor(room * 0.5)))), rank: 1 },
 		...(branch
 			? [
@@ -415,13 +388,17 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
 
-/**
- * Three rows in launchpad mode and one in session mode, at every width and in
- * every fact state. The row count never moves, because the banner sits at line 0
- * and a height change there forces pi-tui to clear and repaint the whole buffer
- * once the transcript has scrolled — and because a header that grows a row when
- * a probe lands makes the first seconds of a session jump.
- */
+/** The prompt and open C echo assets/clio-coder-logo-256.webp. */
+const WELCOME_LOGO = [
+	"        .--------.   ",
+	"  \\   /  .----.  \\  ",
+	"   \\ /  /      '--' ",
+	"    >   |   ____     ",
+	"   / /  \\  '---'  / ",
+	"  /_/    '--------'  ",
+] as const;
+
+/** Fixed height while facts load; collapses once the conversation begins. */
 function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
 	version: string,
@@ -431,13 +408,25 @@ function buildWelcomeDashboardLines(
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	if (mode === "session") return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth)];
-	const indent = safeWidth >= 12 ? "  " : "";
-	const room = Math.max(1, safeWidth - indent.length);
+	const showLogo = safeWidth >= 76;
+	const inset = showLogo ? 26 : safeWidth >= 12 ? 2 : 0;
+	const room = Math.max(1, safeWidth - inset);
+	const details = [
+		`${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${version}`)}`,
+		theme.fg("muted", "Built for the code behind science."),
+		routeRow(theme, stats, room),
+		workspaceLabel(theme, stats, room),
+		`${theme.fg("dim", "Permissions  ")}${theme.fg(stats.autonomy === "full-auto" ? "warning" : "muted", stats.autonomy)}`,
+		"",
+	];
 	return [
-		mastheadRow(theme, stats, version, safeWidth),
-		`${indent}${routeRow(theme, stats, room)}`,
-		`${indent}${actionRow(theme, stats, room)}`,
-	].map((line) => padAnsi(line, safeWidth));
+		"",
+		...details.map((detail, index) => {
+			const art = showLogo ? `  ${theme.fg("accent", (WELCOME_LOGO[index] ?? "").padEnd(21))}   ` : " ".repeat(inset);
+			return `${art}${truncateToWidth(detail, room, GLYPH.ellipsis, false)}`;
+		}),
+		`  ${actionRow(theme, stats, Math.max(1, safeWidth - 2))}`,
+	].map((line) => padAnsi(truncateToWidth(line, safeWidth, GLYPH.ellipsis, false), safeWidth));
 }
 
 /**
@@ -458,6 +447,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.routeReason,
 		stats.projectContext,
 		stats.submitKeyLabel,
+		stats.autonomy,
 	].join("\0");
 }
 
@@ -575,6 +565,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			routeReason,
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
 			submitKeyLabel: launchpad ? (this.deps.getSubmitKeyLabel?.() ?? null) : null,
+			autonomy: settings?.safety?.autonomy ?? "auto-edit",
 		};
 	}
 
@@ -651,4 +642,26 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 export function createWelcomeDashboard(deps: WelcomeDashboardDeps): WelcomeDashboard {
 	return new WelcomeDashboard(deps);
+}
+
+/** Same welcome geometry before hydration, using only the settings already read. */
+export function createBootWelcome(settings: Readonly<ClioSettings>, submitKeyLabel: string | null): Component {
+	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
+	const model = settings.chat.model ?? target?.defaultModel ?? null;
+	const version = readClioVersion();
+	const stats: WelcomeDashboardStats = {
+		cwd: process.cwd(),
+		workspace: null,
+		targetLabel: settings.chat.target ?? null,
+		modelLabel: model,
+		route: target && model ? "checking" : "unset",
+		routeReason: null,
+		projectContext: "checking",
+		submitKeyLabel,
+		autonomy: settings.safety.autonomy,
+	};
+	return {
+		render: (width) => buildWelcomeDashboardLines(stats, version, width, "launchpad"),
+		invalidate: () => {},
+	};
 }

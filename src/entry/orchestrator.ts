@@ -201,7 +201,7 @@ import {
 import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, sessionPaths } from "../engine/session.js";
 import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
-import { type RunIo, startInteractive } from "../interactive/index.js";
+import type { RunIo } from "../interactive/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
@@ -1302,19 +1302,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const mux = result.getContract<MuxContract>("mux");
 	const contextDomain = result.getContract<ContextContract>("context");
 	const interop = result.getContract<InteropContract>("interop");
-	// Boot detection resolves paths only: no `--version` subprocess and no skill
-	// walk on the boot path. The hint is gated on `interactive`, which is already
-	// false under headless and ACP.
-	const interopReport = interactive && interop ? await interop.detect({ cwd: process.cwd() }) : null;
 	const initialNotices = interactive ? [...(contextDomain?.startupHints() ?? [])] : [];
 	// Once per version, interactive only: headless and ACP have no operator at
 	// the keyboard to tell, and the record is left unclaimed for the boot that does.
 	const upgrade = interactive ? takeUpgradeNotice() : null;
 	if (upgrade !== null) initialNotices.push(describeUpgradeNotice(upgrade));
-	if (interop && interopReport) {
-		const interopHint = interop.bootHint(interopReport);
-		if (interopHint !== null) initialNotices.push(interopHint);
-	}
 	if (!providers || !dispatch || !observability || !safety || !middleware) {
 		bootStderr(
 			"Clio Coder: chat mode requires safety + middleware + providers + dispatch + observability contracts; aborting.\n",
@@ -2463,6 +2455,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		dashboardPlugins = activePluginIds();
 	});
 	termination.onTerminate(() => unsubscribeDashboardPlugins());
+	const { startInteractive } = await import("../interactive/index.js");
 	await startInteractive({
 		getConnections: () => ({
 			mcp: toolBootstrap.mcpCapabilities?.connectedIds({ readyOnly: true }) ?? [],

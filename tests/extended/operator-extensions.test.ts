@@ -193,7 +193,7 @@ test("real import failure and missing/undeclared handlers report degraded readin
 	const f = await fixture(t, 'throw new Error("synthetic import failure")');
 	const result = await f.runtime.reload();
 	equal(result.status, "committed");
-	match(result.message, /1 degraded/);
+	match(result.message, /1 failed to start/);
 	equal(f.runtime.entries()[0]?.state, "failed");
 	await rejects(f.runtime.invoke("ext:lab_status.v1:inspect", ""), /synthetic import failure/);
 	for (const script of ["export default ()=>{}", 'export default api=>api.handle("undeclared",()=>({text:"bad"}))']) {
@@ -713,4 +713,25 @@ test("runtime activation rejects metadata that differs from the digest-bound man
 		() => new ExtensionRuntimeProcess(forged, { workspace: f.cwd, sessionId: null, generation: 1, mode: "headless" }),
 		/declarations differ/,
 	);
+});
+
+test("empty startup reload reports structured readiness and its origin to the UI", async () => {
+	const observations: string[] = [];
+	const runtime = new OperatorExtensionRuntime({
+		context: () => ({ workspace: process.cwd(), sessionId: null, mode: "interactive" }),
+		isIdle: () => true,
+		list: () => [],
+		onReload: (result, reason) => observations.push(`${reason}:${result.degraded}`),
+	});
+	try {
+		const result = await runtime.reload("startup");
+		equal(result.status, "committed");
+		equal(result.degraded, 0);
+		deepStrictEqual(observations, ["startup:0"]);
+		ok(!result.message.includes("generation"));
+		await runtime.reload();
+		deepStrictEqual(observations, ["startup:0", "reload:0"]);
+	} finally {
+		await runtime.dispose();
+	}
 });

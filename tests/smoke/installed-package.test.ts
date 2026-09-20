@@ -20,7 +20,7 @@ import { describe, it } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
-import { checkInstalledBrowser } from "../../apps/clio-coder-web/tests/harness/installed-browser.js";
+import { checkInstalledBrowser } from "../../apps/clio-coder-gui/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
@@ -223,10 +223,10 @@ Compute the requested coefficient and report the value in one line.
 }
 
 /** 43 URL-safe characters, the exact shape the background configuration schema pins. */
-const WEB_TEST_TOKEN = "installed-web-smoke-token-0123456789abcdefg";
+const GUI_TEST_TOKEN = "installed-gui-smoke-token-0123456789abcdefg";
 const HONO_MARKER = "var Hono = class";
 
-/** A `clio-coder web` child: started from a foreign cwd, torn down with SIGTERM and a bounded SIGKILL fallback. */
+/** A `clio-coder gui` child: started from a foreign cwd, torn down with SIGTERM and a bounded SIGKILL fallback. */
 interface WebServer {
 	origin: string;
 	child: ChildProcess;
@@ -242,7 +242,7 @@ async function startInstalledWeb(
 	cwd: string,
 	env: NodeJS.ProcessEnv,
 	readyPattern: RegExp,
-	command = "web",
+	command = "gui",
 ): Promise<WebServer> {
 	const child = spawn(process.execPath, [bin, command, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
 	let stdout = "";
@@ -280,10 +280,10 @@ async function startInstalledWeb(
 			if (found) break;
 			if (spawnError) throw spawnError;
 			if (child.exitCode !== null || child.signalCode !== null)
-				throw new Error(`installed web server exited before it was ready:\n${stdout}\n${stderr}`);
+				throw new Error(`installed graphical server exited before it was ready:\n${stdout}\n${stderr}`);
 			await delay(50);
 		}
-		ok(found, `installed web server did not print its launch line within 10s:\n${stdout}\n${stderr}`);
+		ok(found, `installed graphical server did not print its launch line within 10s:\n${stdout}\n${stderr}`);
 		const url = found[0].match(/http:\/\/127\.0\.0\.1:\d+/u)?.[0];
 		ok(url, `ready line carries a loopback URL: ${found[0]}`);
 		return { origin: new URL(url).origin, child, stdout: () => stdout, stderr: () => stderr, close };
@@ -327,7 +327,7 @@ function filesLoadedBy(
 }
 
 /**
- * R1: the packaged `clio-coder web` runs from the installed prefix alone.
+ * R1: the packaged `clio-coder gui` runs from the installed prefix alone.
  *
  * Everything here goes through the installed CLI and plain HTTP; nothing imports
  * the app's source modules, so the assertions hold for what npm shipped rather
@@ -335,11 +335,11 @@ function filesLoadedBy(
  * server are started in turn; neither opens a browser or touches systemd.
  */
 async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: string, work: string): Promise<void> {
-	strictEqual(WEB_TEST_TOKEN.length, 43, "the background configuration schema pins a 43-character token");
-	match(WEB_TEST_TOKEN, /^[\w-]+$/u);
-	const webDist = join(packageRoot, "dist", "web");
-	const foreign = join(work, "web foreign project");
-	const home = join(work, "web-home");
+	strictEqual(GUI_TEST_TOKEN.length, 43, "the background configuration schema pins a 43-character token");
+	match(GUI_TEST_TOKEN, /^[\w-]+$/u);
+	const guiDist = join(packageRoot, "dist", "gui");
+	const foreign = join(work, "gui foreign project");
+	const home = join(work, "gui-home");
 	mkdirSync(foreign, { recursive: true });
 	const env: NodeJS.ProcessEnv = { ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" };
 
@@ -357,7 +357,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	strictEqual(resolved, "", "tsx must not resolve from the installed prefix");
 
 	// Importing the server entry is inert: no listener, no output.
-	const entry = join(webDist, "server.js");
+	const entry = join(guiDist, "server.js");
 	const imported = execFileSync(
 		process.execPath,
 		[
@@ -367,19 +367,19 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		],
 		{ cwd: foreign, env, encoding: "utf8", timeout: 20_000 },
 	);
-	strictEqual(imported, "", "importing dist/web/server.js must not start a server");
+	strictEqual(imported, "", "importing dist/gui/server.js must not start a server");
 
 	const server = await startInstalledWeb(
 		bin,
-		["--no-open", "--port", "0", "--token", WEB_TEST_TOKEN],
+		["--no-open", "--port", "0", "--token", GUI_TEST_TOKEN],
 		foreign,
 		env,
 		/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/u,
 	);
 	try {
 		const { origin } = server;
-		match(server.stdout(), new RegExp(`/#token=${WEB_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
-		const request = (path: string, body?: unknown) => webRequest(origin, WEB_TEST_TOKEN, path, body);
+		match(server.stdout(), new RegExp(`/#token=${GUI_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
+		const request = (path: string, body?: unknown) => webRequest(origin, GUI_TEST_TOKEN, path, body);
 
 		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires the launch token");
 		const meta = (await (await request("/api/meta")).json()) as { clio: string; apiVersion: number; pwa: boolean };
@@ -398,7 +398,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 			["reads", "reads-worker.js"],
 			["ops", "ops-worker.js"],
 		] as const) {
-			strictEqual(runtime[kind].entry, pathToFileURL(join(webDist, file)).href, `${kind} runs the emitted entry`);
+			strictEqual(runtime[kind].entry, pathToFileURL(join(guiDist, file)).href, `${kind} runs the emitted entry`);
 			strictEqual(runtime[kind].packageRoot, packageRoot, `${kind} resolves the installed package root`);
 			deepStrictEqual(
 				runtime[kind].execArgv.filter((arg) => arg === "--import" || arg.includes("tsx")),
@@ -413,7 +413,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		);
 		ok(threads[0] !== threads[1], "reads and ops are distinct worker threads");
 
-		await checkInstalledBrowser(origin, WEB_TEST_TOKEN);
+		await checkInstalledBrowser(origin, GUI_TEST_TOKEN);
 
 		const tools = await request("/api/toolchain/tools");
 		strictEqual(tools.status, 200);
@@ -432,7 +432,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 
 		const abort = new AbortController();
 		const events = await fetch(`${origin}/api/events`, {
-			headers: { Authorization: `Bearer ${WEB_TEST_TOKEN}` },
+			headers: { Authorization: `Bearer ${GUI_TEST_TOKEN}` },
 			signal: abort.signal,
 		});
 		strictEqual(events.status, 200);
@@ -497,8 +497,8 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 
 	// Service-configuration mode: the same file a background install would write,
 	// consumed by the installed CLI directly. No systemd, no browser.
-	const serviceDir = join(work, "web-service");
-	const serviceHome = join(work, "web-service-home");
+	const serviceDir = join(work, "gui-service");
+	const serviceHome = join(work, "gui-service-home");
 	mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
 	const roots = Object.fromEntries(
 		(["config", "data", "state", "cache"] as const).map((role) => {
@@ -517,7 +517,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		JSON.stringify({
 			v: 1,
 			port,
-			token: WEB_TEST_TOKEN,
+			token: GUI_TEST_TOKEN,
 			roots,
 			packageRoot,
 			path: process.env.PATH ?? "",
@@ -536,7 +536,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 	try {
 		const { origin } = service;
 		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
-		const request = (path: string) => webRequest(origin, WEB_TEST_TOKEN, path);
+		const request = (path: string) => webRequest(origin, GUI_TEST_TOKEN, path);
 		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
 		strictEqual(meta.pwa, true, "service configuration enables the installable app");
 		const index = await request("/");
@@ -555,7 +555,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 			const response = await request(path);
 			strictEqual(response.status, 200, `${path} is served in service mode`);
 			match(response.headers.get("content-type") ?? "", type, `${path} content type`);
-			if (!path.endsWith(".png")) ok(!(await response.text()).includes(WEB_TEST_TOKEN), `${path} carries no token`);
+			if (!path.endsWith(".png")) ok(!(await response.text()).includes(GUI_TEST_TOKEN), `${path} carries no token`);
 		}
 		const manifest = (await (await request("/manifest.webmanifest")).json()) as {
 			start_url: string;
@@ -571,14 +571,14 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		deepStrictEqual(exit, { code: 0, signal: null }, `service server stops cleanly on SIGTERM:\n${service.stderr()}`);
 	}
 
-	// Ordinary CLI invocations never evaluate the web server or its bundled Hono.
+	// Ordinary CLI invocations never evaluate the graphical server or its bundled Hono.
 	const honoChunks = emittedFilesContaining(packageRoot, HONO_MARKER);
 	ok(honoChunks.size > 0, "the packed dist bundles Hono somewhere");
-	const coverage = join(work, "web-coverage");
-	for (const args of [["--version"], ["--help"], ["web", "--help"], ["docs", "--help"]]) {
+	const coverage = join(work, "gui-coverage");
+	for (const args of [["--version"], ["--help"], ["gui", "--help"], ["docs", "--help"]]) {
 		const loaded = filesLoadedBy(bin, args, foreign, isolatedEnv(home), coverage);
-		const webLoaded = [...loaded].filter((file) => file.startsWith(`${webDist}${sep}`) || honoChunks.has(file));
-		deepStrictEqual(webLoaded, [], `${args.join(" ")} must not load the web server: ${webLoaded.join(", ")}`);
+		const guiLoaded = [...loaded].filter((file) => file.startsWith(`${guiDist}${sep}`) || honoChunks.has(file));
+		deepStrictEqual(guiLoaded, [], `${args.join(" ")} must not load the graphical server: ${guiLoaded.join(", ")}`);
 	}
 }
 
@@ -605,7 +605,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
-	// The web and docs checks below start three installed servers and run four
+	// The graphical and docs checks below start three installed servers and run four
 	// coverage-traced CLI invocations, which is why the budget grew from 120s.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
 		timeout: 180_000,

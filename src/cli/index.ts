@@ -30,7 +30,7 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 
 Usage:
   clio-coder                      start interactive repository chat
-  clio-coder web [--open]         start the browser application
+  clio-coder gui [--open]         start the graphical application
   clio-coder acp                  serve Clio as an ACP v1 agent over stdio
   clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
@@ -79,7 +79,7 @@ Usage:
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
-  clio-coder docs [topic]         open documentation in the web app (--no-open to print the launch link)
+  clio-coder docs [topic]         open documentation in the graphical app (--no-open to print the launch link)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      enable or disable interactive guidance for this session
   clio-coder --help, -h           this message
@@ -284,7 +284,7 @@ const COMMAND_HANDLERS = new Map<string, CommandHandler>([
 	["tasks", async (subArgs) => (await import("./tasks.js")).runTasksCommand(subArgs)],
 	["mcp", async (subArgs) => (await import("./mcp.js")).runMcpCommand(subArgs)],
 	["verifiers", async (subArgs) => (await import("./verifiers.js")).runVerifiersCommand(subArgs)],
-	["web", async (subArgs) => (await import("./web.js")).runWebCommand(subArgs)],
+	["gui", async (subArgs) => (await import("./gui.js")).runGuiCommand(subArgs)],
 	["docs", async (subArgs) => (await import("./docs.js")).runDocsCommand(subArgs)],
 	["share", async (subArgs) => (await import("./share.js")).runShareCommand(subArgs)],
 	["export", async (subArgs) => (await import("./share.js")).runExportCommand(subArgs)],

@@ -37,6 +37,10 @@ export async function runClioCommand(
 	if (!options.headless && !options.acp && process.env.CLIO_CODER_INTERACTIVE === undefined && process.stdin.isTTY) {
 		process.env.CLIO_CODER_INTERACTIVE = "1";
 	}
+	if (!options.headless && !options.acp) {
+		const { confirmStartupWorkspace } = await import("./workspace-check.js");
+		if (!(await confirmStartupWorkspace())) return 1;
+	}
 	let startupSettings: import("../core/config.js").ClioSettings | undefined;
 	if (terminalLeaseEligible(options)) {
 		initializeClioHome();

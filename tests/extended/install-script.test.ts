@@ -43,7 +43,7 @@ printf '%s\\n' "$*" >> "$FAKE_CLI_LOG"
 case "\${1:-}" in
 	--version) printf 'Clio Coder %s\\n' "$FAKE_CLI_VERSION" ;;
 	--help) cat "$FAKE_CLI_HELP_FILE" ;;
-	web) [[ "\${2:-}" == "--help" ]] && cat "$FAKE_CLI_WEB_HELP_FILE" ;;
+	gui) [[ "\${2:-}" == "--help" ]] && cat "$FAKE_CLI_GUI_HELP_FILE" ;;
 	upgrade) [[ -n "\${FAKE_CLI_UPGRADE_FAIL:-}" ]] && { echo "upgrade failed" >&2; exit 1; }; echo "post-install checks complete" ;;
 esac
 exit 0
@@ -78,18 +78,18 @@ ln -s ../lib/node_modules/@iowarp/clio-coder/dist/cli/index.js "$prefix/bin/clio
 echo "added 1 package"
 `;
 
-const HELP_WITHOUT_WEB = `Usage:
+const HELP_WITHOUT_GUI = `Usage:
   clio-coder                      start interactive repository chat
   clio-coder doctor [--fix]       diagnose state; --fix creates or repairs it
   clio-coder upgrade              upgrade Clio Coder and run pending migrations
 `;
 
-const HELP_WITH_WEB = `${HELP_WITHOUT_WEB}  clio-coder web [--open]         serve the local browser app
+const HELP_WITH_GUI = `${HELP_WITHOUT_GUI}  clio-coder gui [--open]         serve the local browser app
 `;
-/** What `clio-coder web --help` prints; the background subcommand lives here, not in the root help. */
-const WEB_HELP_WITH_BACKGROUND = `Usage:
-  clio-coder web [--open] [--port <0-65535>]
-  clio-coder web background install [--open] [--port <1-65535>]
+/** What `clio-coder gui --help` prints; the background subcommand lives here, not in the root help. */
+const GUI_HELP_WITH_BACKGROUND = `Usage:
+  clio-coder gui [--open] [--port <0-65535>]
+  clio-coder gui background install [--open] [--port <1-65535>]
 `;
 
 interface Scratch {
@@ -100,7 +100,7 @@ interface Scratch {
 	npmStdin: string;
 	cliLog: string;
 	helpFile: string;
-	webHelpFile: string;
+	guiHelpFile: string;
 	cleanup: () => void;
 }
 
@@ -119,9 +119,9 @@ function scratch(): Scratch {
 	const cliSource = join(root, "fake-cli.sh");
 	writeFileSync(cliSource, FAKE_CLI, { mode: 0o755 });
 	const helpFile = join(root, "help.txt");
-	writeFileSync(helpFile, HELP_WITHOUT_WEB, "utf8");
-	const webHelpFile = join(root, "web-help.txt");
-	writeFileSync(webHelpFile, "Usage:\n  clio-coder web [--open]\n", "utf8");
+	writeFileSync(helpFile, HELP_WITHOUT_GUI, "utf8");
+	const guiHelpFile = join(root, "gui-help.txt");
+	writeFileSync(guiHelpFile, "Usage:\n  clio-coder gui [--open]\n", "utf8");
 	return {
 		root,
 		home,
@@ -130,7 +130,7 @@ function scratch(): Scratch {
 		npmStdin: join(root, "npm.stdin"),
 		cliLog: join(root, "cli.log"),
 		helpFile,
-		webHelpFile,
+		guiHelpFile,
 		cleanup: () => rmSync(root, { recursive: true, force: true }),
 	};
 }
@@ -154,7 +154,7 @@ function run(s: Scratch, args: string[], options: RunOptions = {}) {
 		FAKE_CLI_LOG: s.cliLog,
 		FAKE_CLI_VERSION: "0.4.7",
 		FAKE_CLI_HELP_FILE: s.helpFile,
-		FAKE_CLI_WEB_HELP_FILE: s.webHelpFile,
+		FAKE_CLI_GUI_HELP_FILE: s.guiHelpFile,
 		...options.env,
 	};
 	const result = options.piped
@@ -289,7 +289,7 @@ describe("contracts/install-script", () => {
 		}
 	});
 
-	it("installs into $HOME/.local, prints the launcher path, runs post-install, and promises no web command the CLI lacks", () => {
+	it("installs into $HOME/.local, prints the launcher path, runs post-install, and promises no graphical command the CLI lacks", () => {
 		const s = scratch();
 		try {
 			const r = run(s, []);
@@ -303,9 +303,9 @@ describe("contracts/install-script", () => {
 			match(r.stdout, new RegExp(`^  ${launcher} --version$`, "mu"));
 			ok(r.stdout.includes(`Terminal (interactive TUI):\n  ${launcher}\n`));
 			match(r.stdout, /clio-coder configure$/mu);
-			doesNotMatch(r.stdout, /clio-coder web --open/u, "0.4.7 has no web command");
-			doesNotMatch(r.stdout, /web background install/u);
-			match(r.stdout, /this version has no 'clio-coder web' command/iu);
+			doesNotMatch(r.stdout, /clio-coder gui --open/u, "0.4.7 has no graphical command");
+			doesNotMatch(r.stdout, /gui background install/u);
+			match(r.stdout, /this version has no 'clio-coder gui' command/iu);
 			ok(
 				cliCalls(s).includes("upgrade --post-install"),
 				`post-install ran through the launcher:\n${cliCalls(s).join("\n")}`,
@@ -315,7 +315,7 @@ describe("contracts/install-script", () => {
 				/doctor --fix/u,
 				"the npm lifecycle is upgrade --post-install, not doctor --fix",
 			);
-			doesNotMatch(cliCalls(s).join("\n"), /web/u, "the installer never touches a web command the CLI lacks");
+			doesNotMatch(cliCalls(s).join("\n"), /gui/u, "the installer never touches a graphical command the CLI lacks");
 		} finally {
 			s.cleanup();
 		}
@@ -324,13 +324,13 @@ describe("contracts/install-script", () => {
 	it("printed next steps work before PATH is updated, including a prefix with spaces", () => {
 		const s = scratch();
 		try {
-			writeFileSync(s.helpFile, HELP_WITH_WEB);
-			writeFileSync(s.webHelpFile, WEB_HELP_WITH_BACKGROUND);
+			writeFileSync(s.helpFile, HELP_WITH_GUI);
+			writeFileSync(s.guiHelpFile, GUI_HELP_WITH_BACKGROUND);
 			const result = run(s, ["--prefix", join(s.home, "my tools")]);
 			strictEqual(result.code, 0, result.all);
 			const steps = result.stdout
 				.split("\n")
-				.filter((line) => /^ {2}.*clio-coder(?: configure| web --open| web background install --open)?$/u.test(line));
+				.filter((line) => /^ {2}.*clio-coder(?: configure| gui --open| gui background install --open)?$/u.test(line));
 			ok(steps.length >= 3, result.stdout);
 			for (const step of steps) {
 				const executed = spawnSync("bash", ["-c", step], {
@@ -341,39 +341,39 @@ describe("contracts/install-script", () => {
 				strictEqual(executed.status, 0, `${step}: ${executed.stderr}`);
 			}
 			ok(cliCalls(s).includes("configure"));
-			ok(cliCalls(s).includes("web --open"));
+			ok(cliCalls(s).includes("gui --open"));
 		} finally {
 			s.cleanup();
 		}
 	});
 
-	it("offers web --open when the installed help lists it, and the Linux background step only when listed", () => {
+	it("offers gui --open when the installed help lists it, and the Linux background step only when listed", () => {
 		const s = scratch();
 		try {
-			writeFileSync(s.helpFile, HELP_WITH_WEB, "utf8");
-			writeFileSync(s.webHelpFile, WEB_HELP_WITH_BACKGROUND, "utf8");
+			writeFileSync(s.helpFile, HELP_WITH_GUI, "utf8");
+			writeFileSync(s.guiHelpFile, GUI_HELP_WITH_BACKGROUND, "utf8");
 			const r = run(s, ["--prefix", join(s.home, "clio")]);
 			strictEqual(r.code, 0, r.all);
-			ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} web --open\n`));
+			ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} gui --open\n`));
 			strictEqual(
 				cliCalls(s)
-					.filter((call) => call.startsWith("web"))
+					.filter((call) => call.startsWith("gui"))
 					.join("\n"),
-				"web --help",
-				"the installer reads web --help and never starts the app",
+				"gui --help",
+				"the installer reads gui --help and never starts the app",
 			);
 			if (process.platform === "linux")
-				ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} web background install --open\n`));
+				ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} gui background install --open\n`));
 			else doesNotMatch(r.stdout, /background install/u);
-			doesNotMatch(r.stdout, /this version has no 'clio-coder web' command/iu);
+			doesNotMatch(r.stdout, /this version has no 'clio-coder gui' command/iu);
 
 			const s2 = scratch();
 			try {
-				writeFileSync(s2.helpFile, `${HELP_WITHOUT_WEB}  clio-coder web [--open]  serve the app\n`, "utf8");
+				writeFileSync(s2.helpFile, `${HELP_WITHOUT_GUI}  clio-coder gui [--open]  serve the app\n`, "utf8");
 				const r2 = run(s2, []);
 				strictEqual(r2.code, 0, r2.all);
-				match(r2.stdout, /clio-coder web --open/u);
-				doesNotMatch(r2.stdout, /background install/u, "a web command without a background subcommand promises none");
+				match(r2.stdout, /clio-coder gui --open/u);
+				doesNotMatch(r2.stdout, /background install/u, "a graphical command without a background subcommand promises none");
 			} finally {
 				s2.cleanup();
 			}

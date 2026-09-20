@@ -42,7 +42,7 @@ npm run test:file -- tests/smoke/<file>.test.ts  # requires a current build
 npm run test                              # required contracts and three process smoke files
 npm run test:full                         # explicit extended root investigation
 npm run test:web:full                     # explicit extended web investigation
-pnpm --filter @iowarp/clio-coder-web verify # app types, lint, tests, build, browser
+pnpm --filter @iowarp/clio-coder-gui verify # app types, lint, tests, build, browser
 npm run ci                                # deterministic root gate
 npm run ci:release                        # qualify clean committed source and exact installed tarball
 npm run release:preflight                 # fast check of the unchanged qualified package

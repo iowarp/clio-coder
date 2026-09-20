@@ -18,14 +18,14 @@ import {
 	isKeyRepeat,
 	matchesKey,
 	ScrollView,
-	Text,
 	type TUI,
 	VStack,
 } from "../engine/tui.js";
 import { ClioEditor, type EditorChrome } from "./clio-editor.js";
 import { createProcessInteractiveShell } from "./interactive-shell.js";
-import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
-import { brandMark, clioTheme, GLYPH } from "./theme/index.js";
+import { type ClioKeybindingManager, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
+import { clioTheme, GLYPH } from "./theme/index.js";
+import { createBootWelcome } from "./welcome-dashboard.js";
 
 export const INSTANT_SHELL_ENV = "CLIO_CODER_INSTANT_SHELL";
 const DOUBLE_TAP_MS = 500;
@@ -138,34 +138,20 @@ class BootSubmissionPanel implements Component {
 }
 
 function stageZeroRoot(
-	mode: Readonly<ClioSettings>["interface"]["mode"],
+	settings: Readonly<ClioSettings>,
+	submitKeyLabel: string | null,
 	editor: ClioEditor,
 	pending: Component,
 	shutdownArmed: () => boolean,
 ): Component {
 	const theme = clioTheme();
-	// The same wordmark the hydrated header paints, through the same helper, so
-	// the `>C_` does not change color at adoption. `brandMark` and the theme
-	// tokens are Stage-0-safe: pure string composition with no I/O and no import
-	// outside the theme leaf this module already depends on.
-	// Three lines, matching the hydrated header's footprint so adoption does not
-	// shift the editor down the screen. The third is deliberately blank: it costs
-	// nothing and asserts nothing, where any real fact here would need I/O the
-	// boot path must not do.
-	const heading = new Text(
-		`${brandMark(theme)} ${theme.style("title", "Clio Coder", { bold: true })}\n${theme.fg("muted", "Starting Clio · you can type now")}\n`,
-		0,
-		0,
-	);
-	// Only the armed-exit warning lives here. The reassurance that typing works
-	// is already the second heading line, and printing it twice on a two-line
-	// screen was the loudest thing on it.
+	const heading = createBootWelcome(settings, submitKeyLabel);
 	const footer: Component = {
 		render: () =>
 			shutdownArmed() ? [theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")] : [""],
 		invalidate: () => {},
 	};
-	if (mode === "fullscreen") {
+	if (settings.interface.mode === "fullscreen") {
 		const document = new Container();
 		document.addChild(heading);
 		const transcript = new ScrollView(document, { follow: "end", primary: true, overscroll: "chain" });
@@ -227,7 +213,14 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	editor.focused = true;
 	const pendingPanel = new BootSubmissionPanel();
 	let shutdownArmed = false;
-	const stage0 = stageZeroRoot(settings.interface.mode, editor, pendingPanel, () => shutdownArmed);
+	const submitKey = keybindings.isDisabled("tui.input.submit") ? undefined : keybindings.getKeys("tui.input.submit")[0];
+	const stage0 = stageZeroRoot(
+		settings,
+		submitKey ? formatKeyLabel(submitKey, "") : null,
+		editor,
+		pendingPanel,
+		() => shutdownArmed,
+	);
 	const host = new RootHost(stage0);
 
 	let state: TerminalLeaseState = "created";

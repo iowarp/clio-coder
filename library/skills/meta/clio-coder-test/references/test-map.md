@@ -13,8 +13,8 @@ Extended regressions are explicit development investigations.
 | Package qualification | Installed package and native call timing under `tests/smoke/` | `npm run ci:release` | Built once by qualification |
 | Extended regressions | `tests/extended/`, `tests/extended-smoke/` | `npm run test:full` or a focused `test:file` | Yes for CLI scenarios |
 | Static boundaries and pins | `scripts/check-hygiene.ts` | `npm run lint` | No |
-| Required web boundaries | Selected files in `apps/clio-coder-web/tests/` | `npm run test:web` | Root build |
-| Full web investigation | All web tests and browser matrix | `pnpm --filter @iowarp/clio-coder-web verify` | Yes |
+| Required web boundaries | Selected files in `apps/clio-coder-gui/tests/` | `npm run test:web` | Root build |
+| Full web investigation | All web tests and browser matrix | `pnpm --filter @iowarp/clio-coder-gui verify` | Yes |
 
 `npm run ci` runs the routine lane. `npm run ci:release` qualifies a clean,
 committed candidate and its exact tarball; `npm run release:preflight` checks

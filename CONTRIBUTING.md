@@ -17,9 +17,8 @@ Requirements:
 - Linux or macOS for full parity. Windows is best effort until a stable release.
 
 Enable pnpm through Corepack (`corepack enable pnpm`), or install the pinned version locally.
-The root workspace includes the unified web application. pnpm owns dependency
-installation. `apps/workbench/` is retained reference source and excluded from
-workspace builds, publication, and product gates.
+The root workspace includes the graphical application under `apps/clio-coder-gui/`.
+pnpm owns dependency installation.
 
 Bootstrap, in the order the checks depend on each other (the smoke tests run
 the built `dist/`, so build before testing):
@@ -55,7 +54,7 @@ pnpm run ci                                              # routine Linux CI
 pnpm run ci:release                                      # clean committed candidate
 pnpm run test:full                                       # explicit full root investigation
 pnpm run test:web:full                                   # explicit full web investigation
-pnpm --filter @iowarp/clio-coder-web verify                # full web development, including browser matrix
+pnpm --filter @iowarp/clio-coder-gui verify                # full web development, including browser matrix
 ```
 
 Candidate qualification runs the routine gate, web types, the dependency/package

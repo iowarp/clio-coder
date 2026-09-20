@@ -51,7 +51,7 @@ One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightni
 Prompt: "The web API changed. Which checks belong to this release?"
 Expected:
 - Builds the root CLI for ACP fixtures, then runs
-  `pnpm --filter @iowarp/clio-coder-web verify` with temporary state outside the checkout.
+  `pnpm --filter @iowarp/clio-coder-gui verify` with temporary state outside the checkout.
 - Names app type, API/worker boundary, test, client build and headless-browser checks.
 - Explains root `ci:release` includes web tests and the installed package audit.
 - Does not run the retired trace viewer or reference-only Workbench gates.

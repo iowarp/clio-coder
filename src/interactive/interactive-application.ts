@@ -594,9 +594,12 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 						}
 					: {}),
 				onDiagnostic: (message) => notify("warning", message, "operator-extensions:observation"),
-				onReload: (result) => {
-					if (result.status !== "deferred")
-						notify(result.status === "rejected" ? "error" : "info", result.message, "operator-extensions:reload");
+				onReload: (result, reason) => {
+					if (result.status === "deferred") return;
+					const failed = result.status === "rejected" || result.degraded === undefined;
+					const degraded = (result.degraded ?? 0) > 0;
+					if (reason !== "reload" && !failed && !degraded) return;
+					notify(failed ? "error" : degraded ? "warning" : "info", result.message, "operator-extensions:reload");
 				},
 			})
 		: undefined;

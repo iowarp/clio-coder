@@ -244,18 +244,18 @@ run_post_install() {
 }
 
 # The next steps promise only what the installed CLI actually lists. An older
-# published version has no web command, and a tutorial that names one would
+# published version has no graphical command, and a tutorial that names one would
 # send the operator to an error.
 print_next_steps() {
-	local help web_help="" web_listed=0 background_listed=0 launcher_command
+	local help gui_help="" gui_listed=0 background_listed=0 launcher_command
 	printf -v launcher_command '%q' "$launcher"
 	help="$("$launcher" --help 2>/dev/null </dev/null || true)"
-	if grep -Eq '^ *clio-coder web( |$)' <<<"$help"; then
-		web_listed=1
+	if grep -Eq '^ *clio-coder gui( |$)' <<<"$help"; then
+		gui_listed=1
 		# The background subcommand is documented one level down.
-		web_help="$("$launcher" web --help 2>/dev/null </dev/null || true)"
+		gui_help="$("$launcher" gui --help 2>/dev/null </dev/null || true)"
 	fi
-	grep -Eq 'clio-coder web background install' <<<"$help$web_help" && background_listed=1
+	grep -Eq 'clio-coder gui background install' <<<"$help$gui_help" && background_listed=1
 
 	printf '\nInstalled: %s\n' "$launcher"
 	cat <<NEXT
@@ -268,24 +268,24 @@ Verify this exact install, then configure a model target:
 Terminal (interactive TUI):
   $launcher_command
 NEXT
-	if [[ $web_listed -eq 1 ]]; then
+	if [[ $gui_listed -eq 1 ]]; then
 		cat <<NEXT
 
-Browser app (local, opens once you ask):
-  $launcher_command web --open
+Graphical app (local, opens once you ask):
+  $launcher_command gui --open
 NEXT
 		if [[ $background_listed -eq 1 && "$(uname -s 2>/dev/null || true)" == "Linux" ]]; then
 			cat <<NEXT
 
 Optional on Linux: keep it available in the background and install it as a PWA:
-  $launcher_command web background install --open
+  $launcher_command gui background install --open
 NEXT
 		fi
 	else
 		cat <<NEXT
 
-The browser app ships with a newer Clio Coder release.
-This version has no 'clio-coder web' command; check later with: $launcher_command --help
+The graphical app ships with a newer Clio Coder release.
+This version has no 'clio-coder gui' command; check later with: $launcher_command --help
 NEXT
 	fi
 	cat <<NEXT

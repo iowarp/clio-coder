@@ -55,16 +55,16 @@ function vendorGrammars(): void {
 
 const entries = {
 	"cli/index": "src/cli/index.ts",
-	"web/server": "apps/clio-coder-web/server/main.ts",
-	"web/reads-worker": "apps/clio-coder-web/server/worker/reads-main.ts",
-	"web/ops-worker": "apps/clio-coder-web/server/worker/ops-main.ts",
+	"gui/server": "apps/clio-coder-gui/server/main.ts",
+	"gui/reads-worker": "apps/clio-coder-gui/server/worker/reads-main.ts",
+	"gui/ops-worker": "apps/clio-coder-gui/server/worker/ops-main.ts",
 	"worker/entry": "src/worker/entry.ts",
 	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
 };
 
 export default defineConfig({
 	entry: entries,
-	define: { __CLIO_WEB_BUNDLED__: "true" },
+	define: { __CLIO_GUI_BUNDLED__: "true" },
 	format: ["esm"],
 	target: "node22",
 	platform: "node",
@@ -111,13 +111,13 @@ export default defineConfig({
 		js: 'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);',
 	},
 	async onSuccess() {
-		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-web/package.json"));
+		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
 		const { build: buildClient } = await import(appRequire.resolve("vite"));
-		await buildClient({ configFile: "apps/clio-coder-web/vite.config.ts", configLoader: "runner" });
-		cpSync("apps/clio-coder-web/dist/client", "dist/web/client", { recursive: true });
+		await buildClient({ configFile: "apps/clio-coder-gui/vite.config.ts", configLoader: "runner" });
+		cpSync("apps/clio-coder-gui/dist/client", "dist/gui/client", { recursive: true });
 		vendorGrammars();
 		vendorTuiNotices();
-		const notices = join("dist", "assets", "web-notices");
+		const notices = join("dist", "assets", "gui-notices");
 		mkdirSync(notices, { recursive: true });
 		for (const name of ["hono", "@hono/node-server"]) {
 			let directory = dirname(appRequire.resolve(name));
