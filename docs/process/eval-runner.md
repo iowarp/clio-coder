@@ -243,7 +243,7 @@ These observations also do not reconcile the separate `trackedMetrics` ledger se
 
 ---
 
-Full reconciliation across session, stdout, fork and out-of-turn evidence is deferred to v0.4.5 or later. Version 0.4.3 does not add an automatic rejection of cost or efficiency comparisons merely because those sources are partial or mixed. Matching source counts do not prove complete coverage or shared call identity. Existing missing-metric, serving-configuration and execution-envelope comparison gates still apply.
+In v0.5.0, full reconciliation across session, stdout, fork, and out-of-turn evidence remains an architectural limitation; eval tracked/stdout folds omit the failed-compaction sidecar. Evaluation runs do not automatically reject cost or efficiency comparisons merely because those sources are partial or mixed. Matching source counts do not prove complete coverage or shared call identity. Existing missing-metric, serving-configuration, and execution-envelope comparison gates still apply.
 
 ## Eval Artifact Format (v4)
 

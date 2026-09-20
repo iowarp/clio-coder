@@ -1,5 +1,7 @@
 # GUI boundary doctrine
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 These are the arguments the parity verdicts rest on. The protocol-v4 specifics below are historical; the reasoning is the artifact.
 
 ## 1. What the workbench boundary actually was (historical, for calibration)

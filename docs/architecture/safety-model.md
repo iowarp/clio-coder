@@ -388,6 +388,7 @@ When executing tasks in headless mode through `clio-coder run`, there is no term
 ### Workers and delegations
 
 - **Workers** inherit the session's autonomy level, capped by dispatch scope admission. A worker ask resolves per `fleet.permissions.mode`: `deny` continues the run with a rejection; `fail` ends it; `escalate` forwards it to the interactive operator (see the escalation section above). All three values are editable in the `/settings` center.
+- **Worker escalation scoping:** Answered permission escalations within a worker run are remembered and keyed by the exact call and permission conditions (`tool`, arguments, asking axis, action class, and policy provenance). Re-issuing an identical call under the same conditions reuses the prior operator decision rather than queuing duplicate permission cards, while any change in command arguments or asking rails requires a fresh decision. Denials are similarly scoped to prevent repetitive cards.
 - **Delegations (ACP)** under `clio-coder-policy` governance evaluate through the same net and autonomy mapping; an ask resolves as a non-stall deny so the external agent never hangs waiting for an operator.
 - **ACP server sessions** (a remote client driving Clio) snapshot the autonomy level at `session/new`, so a mid-session settings change on the host cannot alter an in-flight remote session's admission decisions.
 

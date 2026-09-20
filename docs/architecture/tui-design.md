@@ -61,7 +61,7 @@ All color styling is defined in [src/interactive/theme/tokens.ts](../../src/inte
 - Color is used functionally to indicate state. If removing a color does not lose information, the text is colored using `dim`, `muted`, or left unstyled.
 - `warning` amber is reserved for true warnings. Costs and neutral telemetry numbers use `muted`.
 - `accentDeep` is used only in section tags. Metric values (such as TTFT, tokens-per-second, and autonomy status) use `muted`.
-- `action` neon orange remains scarce and strictly disciplined: only while Clio is acting, for workspace-authority and worker-escalation decision frames, or in `STEER` mode. It is never used for idle decoration or settled telemetry, and never appears on more than one element per screen region. Outward, safety-net, and system decision frames use `warning`; conversational answers use `accent`.
+- `action` neon orange remains scarce and strictly disciplined: only while Clio is acting, for workspace-authority and worker-escalation decision frames, or during exceptional composer preparation/compacting phases. It is never used for idle decoration or settled telemetry, and never appears on more than one element per screen region. Outward, safety-net, and system decision frames use `warning`; conversational answers use `accent`.
 - Per-surface color budgets limit noise: chip strips use at most one non-neutral token per chip, and framed cards use at most one status token alongside neutral colors.
 
 ---
@@ -200,68 +200,22 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 
 ### 5.1 Welcome Launchpad & Session Header
 
-The header has two shapes and no box. Source: `src/interactive/welcome-dashboard.ts`;
-contracts: `tests/extended/welcome-boot-header.test.ts`.
+The header has two operational modes: a framed launchpad dashboard on fresh start, and a single live session row after prompt admission. Source: `src/interactive/welcome-dashboard.ts`; contracts: `tests/extended/welcome-boot-header.test.ts`.
 
-- **Launchpad (before the first prompt): exactly three rows.** A masthead with
-  identity flush left and workspace flush right separated by a `frame`-token
-  rule, then the route, then one next step.
+- **Launchpad (before the first prompt): framed panel dashboard.** A boxed container (`buildWelcomeDashboardLines`) enclosed by `╭─ Clio Coder v<version> ─╮` and `╰─╯`:
+  - **11 Detail Rows:** Subhead/title ("Built for the code behind science."), model route status (`routeRow`), workspace path, permissions/autonomy (`stats.autonomy`), guidance ("Ask Clio how to use or extend her."), target inventory (`stats.targets`), and fleet recipes inventory (`stats.fleet`).
+  - **Responsive Layout:** Renders wordmark ASCII art on the left at ≥76 columns (`sideBySide`), and rotating hint cards on the right at ≥160 columns (`WELCOME_HINT_MIN_WIDTH`) cycling commands and shortcuts every 15 seconds.
+  - **Action Row:** A horizontal rule (`├─┤`) separates details from the action row (`actionRow`), which prints the next step or work blocker: no route or model (`/model`), route unavailable or degraded (`/settings targets`), malformed handbook (`CLIO-CODER.md malformed · /context to inspect`), uninitialized handbook (`describe a task · /context init to index this repo`), stale handbook (`describe a task · /context refresh to update it`), or default `describe a task · <SubmitKey> to send · / for commands`.
 
-  ```
-  >C_ Clio Coder v0.4.7 ──────────────────── ~/iowarp/clio-coder · main*
-    ✓ dynamo · qwen3.8-27b
-    describe a task · Enter to send · / for commands
-  ```
-
-  Under width pressure the identity drops its version, then its name; the
-  workspace drops its branch, then head-truncates the path keeping the leaf
-  (`…/clio-coder`). The product name outranks the version, and the branch is
-  given up before the path's leaf is obscured.
-
-- **Route row.** `✓ <target> · <model>` healthy, `! …` degraded, `✗ …`
-  unavailable, `◌ …` configured but not yet probed, `not configured` when
-  neither is set. A healthy route prints no probe latency; the glyph carries the
-  verdict and `/doctor` owns the timing. A failing route prints its reason,
-  sanitized to one line. The row reserves room for that reason where it can,
-  shrinking the route text to keep it, and drops it only when the width cannot
-  hold even the floors. The action row still names the route problem either way.
-
-- **Action row: one line, chosen by what actually blocks work.** First match
-  wins: no route (`no route selected · /model`), no model
-  (`no model selected · /model`), route unavailable or degraded
-  (`… · /settings targets`), `CLIO-CODER.md` malformed
-  (`CLIO-CODER.md malformed · /context to inspect`), no handbook
-  (`describe a task · /context init to index this repo`), stale handbook
-  (`describe a task · /context refresh to update it`), otherwise
-  `describe a task · <SubmitKey> to send · / for commands`. Missing project
-  context is guidance, not a blocker; the line still invites work. A *malformed*
-  handbook is pointed at inspection rather than regeneration, since the file
-  needs repair before it needs rebuilding. `<SubmitKey>` comes from the live
-  `tui.input.submit` binding and is omitted when that action is unbound.
+- **Route row.** `✓ <target> · <model>` healthy, `! …` degraded, `✗ …` unavailable, `◌ …` configured but not yet probed, `not configured` when neither is set. Healthy routes omit latency; failing routes display sanitized failure reasons. Under width constraints, route text shrinks before dropping error reasons.
 
 - **Session header (after the first prompt): exactly one row, and live.**
-
   ```
-  >C_ Clio Coder v0.4.7 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*
+  >C_ Clio Coder v0.5.0 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*
   ```
+  Collapsed via `sessionRow`, this line tracks mid-session model or branch mutations. It preserves identity (`>C_ Clio Coder v<version>`), active route, workspace tail, and git dirty state (`*`), dropping readiness and onboarding hints owned by the footer. Under extreme width pressure, the route is preserved longest, outliving workspace and version labels.
 
-  It follows a mid-session model change rather than freezing at collapse. It
-  carries identity, route and workspace and deliberately drops readiness,
-  latency, project-context state and onboarding text, which the footer and the
-  composer rail own. When the row will not fit, the survival order is the `>C_`
-  wordmark, then the route, then the workspace path, then the branch, then
-  `Clio Coder v<version>`. **The route is the last fact given up**, and it
-  outlives the workspace and the product name; below roughly the width of the
-  wordmark itself the row is the truncated wordmark alone.
-
-- **Transitions.** The first submit collapses the launchpad exactly once, before
-  any handler appends transcript output, on all three submit paths (ordinary
-  submit, admission of a queued boot submission, interrupt-submit). `/new`
-  returns to the launchpad. `/resume`, `/tree`, `/fork` and `/handoff` collapse
-  it after a successful session transition, so a rebuilt transcript is never
-  shown under fresh-start onboarding. Interactive resume starts inside the app
-  with `/resume`; `--continue` and `--session <id>` belong to the headless
-  `clio-coder run` command. Transitions are idempotent.
+- **Transitions.** The first prompt submission collapses the launchpad before transcript appending. `/new` restores the framed launchpad. `/resume`, `/tree`, `/fork`, and `/handoff` collapse it after transition. Interactive resume uses `/resume`; headless runs use `--continue` or `--session <id>`. Transitions are idempotent.
 
 - **No filesystem work on the render path**, in any state, including the first
   frame and render-cache hits. Project-context state comes from the context
@@ -293,27 +247,32 @@ Starting Clio · you can type now
 
 ### 5.2 Composer (ClioEditor)
 
-- **Mode Section Tag**: The top rail features an explicit left section tag indicating prompt semantics:
-  - `MESSAGE` (dim/teal) while idle.
-  - `FOLLOW-UP` (muted) while Clio is actively processing a run.
-  - `STEER` (neon orange) when Enter will actively steer in-flight work.
-  - When the draft scrolls, the active mode folds into the scroll indicator row so the orange warning remains visible.
-- **Top Rail Metadata**: The top rail right displays target/model and thinking level. Narrow labels budget target and model separately, for example `blade… · qwopus3.…dense-q6 · low`, so the gateway does not consume the model family or variant. Thinking levels use a two-step color hierarchy: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
-- **Empty-State Placeholder**: Displays dim prompt `Ask Clio…  / for commands`.
-- **Lower Rail Affordance**: On terminals at or above 60 columns, the bottom rail displays `Enter send · Ctrl+J newline` (or resolved keybindings).
+- **Clean Normal Rails**: Normal composition keeps both top and bottom rails quiet without duplicate identity or keyboard hints (the footer owns target/model identity, thinking level, and keyboard affordance).
+- **Exceptional State Elevation**: The top rail only renders exceptional admission, safety, or compaction states:
+  - `CONFIRM` (`warning` token, or `CONFIRM · FULL-AUTO` in `editorDanger` token) when an approval prompt owns operator input.
+  - `PREPARING` (`action` token) while Clio prepares turn admission and dispatch.
+  - `COMPACTING` (`action` token) while compacting session context before prompt submission.
+  - `FULL-AUTO` (`editorDanger` token) when the session runs in full-auto autonomy.
+  - When a draft scrolls vertically, the base editor's native scroll indicator (`↑/↓` line counts) is preserved on line 0.
+- **Context-Aware Empty Placeholder**: When the draft is empty, line 1 displays dim placeholder text matching the active state:
+  - Idle / running: `Ask Clio…  / for commands`
+  - Awaiting approval: `A parked call is waiting for your decision`
+  - Preparing turn: `Clio has your prompt and is preparing the turn`
+  - Compacting: `Clio is compacting the session context`
+- **Bottom Rail Affordance**: During normal drafting, the bottom rail remains clean. In `CONFIRM` mode, the bottom rail displays fitted decision keys (`confirmRailHint` via `src/interactive/permission-hint.ts`: `Enter allow`, or `Backspace clear draft to allow` if a draft is present; `Esc deny`; `s stop turn`; `v inspect mutation`; standing approval terms toggle via `?` on the permission card itself).
+- **Rail Dynamics & Safety Accents**: `renderEditorRail` renders subtle pulse animations when Clio is working or in attention phase (unless reduced motion or dumb terminal is detected), and applies fixed bold `editorDanger` endcaps whenever `fullAuto` is active.
 
 ### 5.3 Progressively Disclosed Footer
 
-- **Compact Mode (Quiet Idle)**: Two always-on lines that eliminate idle telemetry noise (suppresses `tools none`, `◌ idle`, and duplicate turn receipts):
-  - **Line 1 (Workspace & Readiness)**: CWD path, git branch/dirty state, and active phase pill only when meaningful. Long workspace parents and branch decoration yield before current activity; the workspace suffix and live worker count remain visible at narrow widths, including while the main agent is idle.
-  - **Line 2 (Context & Style)**: Context window meter, Output style, and session cost.
-- **Expanded Mode (`Alt+U`)**: Four responsive sections ordered by operational urgency rather than a static telemetry grid:
-  1. `Activity`: Live agent phase, active workers, running tool calls.
-  2. `Context`: Context window gauge, breakdown, token headroom.
-  3. `Session`: Session cost, throughput, total token breakdown, leader key state.
-  4. `Workspace`: CWD, branch, target, git dirty status.
-  Empty rows collapse rather than occupying blank grid space.
-- **Notification Badge & Degradation Ladder**: The footer notification badge reserves the severity head (`ℹ 1 notice`, `⚠ 1 warning`, `✗ 1 error`), separator, and `[Ctrl+G x] dismiss` tail first, allocating the middle width to an ellipsized message. At narrow widths, it degrades gracefully down the ladder (`head · [Ctrl+G x] dismiss` → `head · [Ctrl+G x]` → `head` → glyph alone) without clipping the action key.
+Source: `src/interactive/footer/dashboard.ts`, `src/interactive/footer/pages.ts`.
+
+- **Compact Mode (Two-Line Ambient Strip)**:
+  - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · Target/model identity (`fitIdentityLabel`) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right.
+  - **Line 2 (Status & Hints)**: Urgent input prompt (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`), demo tips, or rotating shortcut hints alternating with workspace path and git branch/dirty (`*`) on the left; Session throughput (`tok/s`) and dashboard toggle shortcut (`Alt+U`) on the right.
+- **Expanded Mode (`Alt+U`)**: Renders across one-quarter of the viewport (minimum 8 rows), keeping the composer anchored below. Repeated presses cycle through three responsive pages (`DASHBOARD_PAGES`) and closed:
+  1. `Activity`: Live agent phase, tool counts, session metrics, active worker cards (route, task, token usage, tool calls, timing, budget, `/view dispatch:<id>`), and finished worker history.
+  2. `Context`: Context meter bar and category occupancy grid (system, tools, files, turns, memory), compaction/cache telemetry, headroom.
+  3. `Status`: Cost & Connections (session cost, MCP servers, plugins, extensions) and Local Machine metrics (CPU, memory, disk I/O sampled on 2s cadence), plus memory bank entries and free tokens.
 
 ### 5.4 State Choreography Table
 

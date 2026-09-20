@@ -1,5 +1,8 @@
 # Individual Tool Audit for v0.4.9
 
+> [!NOTE]
+> **Historical Record**: This document is a point-in-time architectural audit of tool placement, contracts, and dispositions conducted during the v0.4.9 cycle. For active, authoritative tool contracts and argument specifications, refer to [Tool Usage](../guide/tool-usage.md) and [Prompt Envelope and Tools](../architecture/prompt-envelope-and-tools.md).
+
 This is the landed disposition of each builtin tool and each dynamic capability family. It replaces the pre-implementation findings with the current contract, without treating placement as proof of correctness. Source references name the implementation; [Tool usage](../guide/tool-usage.md) supplies detailed arguments and examples. `src/tools/surface.ts` owns placement and `src/tools/policy.ts` owns action class/concurrency. There are 30 builtin names, plus extension and MCP families whose individual schemas are discovered at runtime.
 
 The implementation commits are on the candidate branch; this document does not claim that the version has been published. Scientific integrity below describes evidence and limits, not an empirical certification of each tool. Existing orchestration and interaction behavior was checked for its documentation contract; no new scientific benchmark or full source re-audit is claimed.

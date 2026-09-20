@@ -129,6 +129,10 @@ stateDiagram-v2
    - The demuxer resolves the parked promise, resuming tool execution.
    - **Timeout Safety:** If no decision arrives within `escalation.timeoutMs` (default `120000` ms), the worker resumes and applies the `escalation.fallback` posture (default `deny`). If running headlessly (no operator attached) or on runtimes that cannot support park loops, the posture collapses to the fallback immediately.
 
+### 4.1 Answered-escalation memory
+
+To prevent a worker process from repeatedly re-prompting the operator with identical approval cards after a decision has already been given, `src/engine/worker-runtime.ts` maintains an in-memory decision cache (`workerPermissionCacheKey`). Answered decisions are keyed by the exact call (`tool` name and arguments) combined with the permission conditions (asking axis, action class, and safety-net policy provenance). When a worker re-issues an identical call under the same conditions, the remembered decision (`approve` or `deny`) is resolved immediately without emitting a duplicate escalation event. Any change in arguments or policy rails requires a new card.
+
 ---
 
 ## 5. Assignment-aware retry and failover
@@ -236,6 +240,10 @@ not present in the current tree, so this page does not cite them as executable
 coverage. Retry and failover behavior remains owned by the dispatch source and
 the three maintained contracts above cover only the responsibilities stated in
 this table.
+
+### 5.4 Helper Acceptance and Capture Ceilings
+
+Structured helper results (`src/domains/agents/result-contract.ts`) enforce an aligned acceptance and capture ceiling of 32 KiB (`STRUCTURED_HELPER_RESULT_MAX_BYTES = 32_768`). A worker rejects outputs exceeding 32 KiB during validation, guaranteeing that a worker cannot accept a helper result that exceeds the orchestrator's durable receipt capture allowance.
 
 ## 6. Worker Exit Codes
 

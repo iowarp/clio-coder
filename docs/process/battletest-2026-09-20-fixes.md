@@ -1,5 +1,8 @@
 # Battletest fixes and verification — 2026-09-20
 
+> [!NOTE]
+> **Historical Record**: This document is a dated historical record of the Pi 0.86.1 battletest verification and defect resolution campaign conducted on 2026-09-20. It records candidate-specific test environments, findings, and verification outcomes, not active operator or contributor workflows. Current architecture and contracts are maintained in `docs/architecture/` and `docs/guide/`.
+
 This is the follow-up implementation campaign for the Pi 0.86.1 battletest.
 It fixes reproducible runtime and evaluation defects, and records the model
 failures that remain. A passing result schema or successful worker process is

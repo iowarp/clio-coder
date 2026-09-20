@@ -150,9 +150,13 @@ repeated failure uses exactly one of them:
   reads the advisory on its very next round. This is spent once per operation
   fingerprint per turn and re-earned in a later turn, because the same command
   failing again after an operator turn is news again.
-- **Next-turn reminder.** Post-compaction reactivation and any background-model
-  reminder ride the `inject_reminder` buffer into the next submitted turn, inside
-  the visible `<system-reminder>` block, and persist in the session ledger.
+- **Next-turn and tool-batch reminders.** Post-compaction reactivation and background-model
+  reminders ride the `inject_reminder` buffer into the visible `<system-reminder>` block
+  and persist in the session ledger. During active multi-tool execution loops, deferred
+  reminders from completed background evaluations can also drain at native tool-batch
+  boundaries (`prepareToolContinuation`), injecting actionable guidance between tool
+  iterations without waiting for the operator to submit a new prompt. Reminders for
+  aborted turns are dropped.
 
 A boundary that already spoke through the annotation stays silent at turn end and
 records one telemetry row, not two.

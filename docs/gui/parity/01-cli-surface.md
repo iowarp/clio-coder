@@ -1,5 +1,7 @@
 # GUI parity matrix — part 1: command-line surface
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 Extracted verbatim from `apps/workbench/PARITY.md`. Original audit anchor: commit `d41e7dd1` (`v0.4.0`), 2026-08-31, comparing `src/cli/index.ts`, `src/interactive/slash-commands.ts`, and `src/entry/orchestrator.ts` against the protocol-v4 GUI at `apps/workbench`.
 
 ## Verdict vocabulary (load-bearing — do not soften)

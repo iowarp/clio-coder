@@ -1,5 +1,7 @@
 # GUI settings write surface
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 ## 0. The correction that makes this artifact necessary
 
 The source table in `apps/workbench/HARNESS_COVERAGE.md` has **27 rows, not 29**. More importantly, **every group name in it is a retired v1 key.** `src/core/defaults.ts:490` pins `version: 2`, and `src/core/config.ts` holds `V1_ONLY_ROOTS`, the set of roots that exist only to be migrated away from:

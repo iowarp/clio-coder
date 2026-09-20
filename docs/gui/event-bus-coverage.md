@@ -1,5 +1,7 @@
 # Canonical event coverage
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 ## Framing (from the source, verbatim)
 
 > The event bus is grouped below so new upstream work can expose a small, sanitized projection rather than dumping raw bus payloads across ACP.

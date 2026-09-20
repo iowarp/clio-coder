@@ -25,8 +25,8 @@ graph TD
 
 | Dimension | Identity | Limit resolution |
 | :--- | :--- | :--- |
-| Global | All dispatches using the state directory. | `fleet.concurrency: auto` sizes the pool from the host, at most eight. |
-| Node | The local node or one configured fleet node. | The configured node limit applies. An unset local node cap remains unbounded. |
+| Global | All dispatches using the state directory. | `fleet.concurrency: auto` resolves to `AUTO_MAX_WORKERS` (8); a numeric setting sets the exact limit. It is not host-sized, so a small orchestrator host never shrinks remote execution. |
+| Node | The local node or one configured fleet node. | For the local node, `auto` sizes dynamically from host facts (usable CPUs, available memory minus a 2 GiB reserve divided by 1 GiB per worker, and cgroup limit, at most 8); a numeric setting sets an exact limit. Configured remote nodes apply their own `maxWorkers` (default 2). |
 | Inference endpoint | A normalized scheme, host, port, and base path. | A target's `maxConcurrentRequests` override wins, then a probe in this process, then a persisted probe from an earlier process, then one slot for other local-native targets. vLLM and SGLang remain unbounded. |
 
 The conventional final `/v1` mount and a trailing slash normalize to the same endpoint. Host aliases are not collapsed because Clio cannot prove they address the same server. For example, `http://localhost:8080/` and `http://127.0.0.1:8080/v1` remain distinct, while two target descriptors that use the same normalized URL share one endpoint limit.

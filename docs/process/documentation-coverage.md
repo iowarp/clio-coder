@@ -125,3 +125,11 @@ Per-run verification evidence for the refresh lives with the maintenance records
 for that sprint, not in this page. This page tracks documentation coverage, and
 run logs age out of usefulness faster than the docs they checked.
 
+## Ongoing Coverage and Maintenance Guidelines
+
+Documentation in `docs/` is maintained alongside code changes according to the following durable principles:
+
+- **Source anchoring:** Conceptual descriptions and feature summaries cite concrete implementation modules and contracts under `src/` or `tests/`, avoiding speculative capabilities or unbacked UI claims.
+- **Terminal-first framing:** Clio Coder is documented primarily as a terminal coding agent. Early GUI capabilities (`clio-coder gui`, `clio-coder docs`) are presented as developer preview tools for local browser viewing and telemetry inspection, distinguishing active terminal runtime behavior from recovered workbench reference specifications.
+- **Historical distinction:** Dated audit artifacts, incident reports, and design proposals must be clearly distinguished from active operator guides and architecture references via prominent status notices.
+- **Separation of receipts:** Test logs, per-commit audit inventories, and execution receipts belong in local scratch or release evidence outside the documentation tree.

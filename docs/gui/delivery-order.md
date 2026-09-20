@@ -1,5 +1,7 @@
 # Delivery order
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 Extracted from `apps/workbench/HARNESS_COVERAGE.md`. Items 1-8 are historical record with their constraints intact; items 9 and 10 are live policy for the new app.
 
 ## The ten items (verbatim, with current status)
