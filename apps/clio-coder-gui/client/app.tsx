@@ -3,11 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
+import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { subscribe } from "./api/events.js";
+import { lastTokenWasRefused } from "./api/token.js";
 import { MobileNavigation, Navigation, RouteFocus, ThemeToggle } from "./design/navigation.js";
 import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
 import { AppPreferences } from "./design/pwa.js";
+import { Reconnect } from "./design/reconnect.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
 import { appCommands } from "./interaction/commands.js";
 import { HelpDialog } from "./interaction/HelpDialog.js";
@@ -23,13 +26,14 @@ export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
-	const [connection, setConnection] = useState("Connecting…");
+	const [connection, setConnection] = useState(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
 	const notices = useNotices();
 	// A dialog or the palette claims a keyboard layer. While one is claimed, the page behind it must
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
 	const layered = useLayersActive();
+	const refused = useTokenRejected() || (!client.token && lastTokenWasRefused());
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
@@ -112,14 +116,8 @@ export function App({ client }: { client: Client }) {
 					<Navigation />
 				</aside>
 				<main id="main" tabIndex={-1}>
-					{!client.token ? (
-						<div role="alert">
-							<h1>Open your launch link</h1>
-							<p>
-								Open Clio Coder from your applications to connect this browser, or use the full launch URL printed by the
-								server.
-							</p>
-						</div>
+					{!client.token || refused ? (
+						<Reconnect refused={refused} />
 					) : meta.error ? (
 						<div role="alert">
 							<h1>Connection unavailable</h1>

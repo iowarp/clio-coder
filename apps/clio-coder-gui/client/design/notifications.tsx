@@ -110,6 +110,9 @@ const WARNING_CODES = new Set(["conflict", "unsupported"]);
 
 /** Every thrown value becomes a notice. An unrecognised error is still shown, never swallowed. */
 export function reportProblem(error: unknown): void {
+	// A refused token fails every request the same way. The shell replaces the page with one
+	// reconnect panel, so a toast per query would only bury it.
+	if (error instanceof ApiProblem && error.problem.status === 401) return;
 	if (error instanceof ApiProblem) {
 		notify({
 			id: error.problem.instance,

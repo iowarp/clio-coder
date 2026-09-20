@@ -3,6 +3,7 @@ import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
 import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
+import { tokenRejected } from "./auth-state.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { resetSessionBuffers, sessionBuffer } from "./sessions.js";
 
@@ -94,6 +95,13 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 	stream.onerror = () => {
 		// The last painted state must match the last state actually received.
 		buffer.flush();
+		// EventSource hides the status code and retries forever. Once a request has shown the token is
+		// refused, the stream can never open, so it stops instead of hammering the server.
+		if (tokenRejected()) {
+			stream.close();
+			connection("Not connected");
+			return;
+		}
 		connection("Reconnecting…");
 	};
 	const onVisibility = () => {
