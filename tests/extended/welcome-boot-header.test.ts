@@ -1,6 +1,12 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
-import { stripTerminalSequences, type Terminal, TuiMainScreen, visibleWidth } from "../../src/engine/tui.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import {
+	stripTerminalSequences as stripAnsi,
+	type Terminal,
+	TuiMainScreen,
+	visibleWidth,
+} from "../../src/engine/tui.js";
 import { ClioEditor, type EditorChrome } from "../../src/interactive/clio-editor.js";
 import { createEditorSubmitController } from "../../src/interactive/editor-submit.js";
 import {
@@ -8,11 +14,19 @@ import {
 	type InteractivePresentationDeps,
 } from "../../src/interactive/interactive-presentation.js";
 import {
+	createBootWelcome,
 	createWelcomeDashboard,
 	WELCOME_PROJECT_CONTEXT_RETRY_MS,
 	WELCOME_PROJECT_CONTEXT_TTL_MS,
 	type WelcomeDashboardDeps,
 } from "../../src/interactive/welcome-dashboard.js";
+
+/** Content assertions ignore the box; geometry tests below inspect raw rendered rows. */
+function stripTerminalSequences(line: string): string {
+	return stripAnsi(line)
+		.replace(/^│ /u, "  ")
+		.replace(/ │( *)$/u, "  $1");
+}
 
 const ESC = String.fromCharCode(27);
 const BEL = String.fromCharCode(7);
@@ -110,7 +124,7 @@ function rows(component: ReturnType<typeof banner>, width: number): string[] {
 
 test("a healthy route shows the route without a latency number", () => {
 	const lines = rows(banner(), 80);
-	strictEqual(lines[3]?.slice(26).trim(), "✓ dynamo · qwen3.8-27b");
+	strictEqual(lines[4]?.slice(34).trim(), "✓ dynamo · qwen3.8-27b");
 	ok(!lines.join("\n").includes("42ms"), "probe latency must not reach the header");
 	ok(!lines.join("\n").includes("healthy"), "the glyph carries the verdict, not the word");
 });
@@ -124,8 +138,8 @@ test("a failing route carries its reason, and the action names the repair surfac
 		}),
 		80,
 	);
-	ok(lines[3]?.includes("ECONNREFUSED 127.0.0.1:1234"), lines[3]);
-	strictEqual(lines[7]?.trim(), "route unavailable · /settings targets");
+	ok(lines[4]?.includes("ECONNREFUSED 127.0.0.1:1234"), lines[4]);
+	strictEqual(lines[13]?.trim(), "route unavailable · /settings targets");
 });
 
 test("the failure reason still fits at 60 columns, shrinking the route rather than vanishing", () => {
@@ -135,7 +149,7 @@ test("the failure reason still fits at 60 columns, shrinking the route rather th
 		}),
 		60,
 	);
-	ok(lines[3]?.includes("ECONNREFUSED 127.0.0.1:1234"), `reason lost at 60 columns: ${lines[3]}`);
+	ok(lines[4]?.includes("ECONNREFUSED 127.0.0.1:1234"), `reason lost at 60 columns: ${lines[4]}`);
 });
 
 test("at 40 columns the route shrinks and the reason is cut rather than dropped", () => {
@@ -145,8 +159,8 @@ test("at 40 columns the route shrinks and the reason is cut rather than dropped"
 		}),
 		40,
 	);
-	ok(lines[3]?.includes("ECONNREFUSED"), `reason dropped at 40 columns: ${lines[3]}`);
-	ok(lines[3]?.includes("…"), "a cut must be marked");
+	ok(lines[4]?.includes("ECONNREFUSED"), `reason dropped at 40 columns: ${lines[4]}`);
+	ok(lines[4]?.includes("…"), "a cut must be marked");
 });
 
 test("a configured but unprobed target is neither ready nor unavailable", () => {
@@ -165,15 +179,15 @@ test("a target with no model and no default is unset, not ready", () => {
 		}),
 		80,
 	);
-	strictEqual(lines[3]?.slice(26).trim(), "dynamo · no model");
-	strictEqual(lines[7]?.trim(), "no model selected · /model");
+	strictEqual(lines[4]?.slice(34).trim(), "dynamo · no model");
+	strictEqual(lines[13]?.trim(), "no model selected · /model");
 	ok(!lines.join("\n").includes("✓"), "a route with no model must not read as ready");
 });
 
 test("no target and no model names the route, not the context", () => {
 	const lines = rows(banner({ statuses: [], target: undefined, model: undefined, clioMd: "none" }), 80);
-	strictEqual(lines[3]?.slice(26).trim(), "not configured");
-	strictEqual(lines[7]?.trim(), "no route selected · /model");
+	strictEqual(lines[4]?.slice(34).trim(), "not configured");
+	strictEqual(lines[13]?.trim(), "no route selected · /model");
 });
 
 test("a target id absent from the list is a misconfiguration, not an unprobed route", () => {
@@ -181,12 +195,12 @@ test("a target id absent from the list is a misconfiguration, not an unprobed ro
 		banner({ statuses: [status({ target: { id: "other", defaultModel: "m", runtime: "lmstudio", wireModels: [] } })] }),
 		80,
 	);
-	ok(lines[3]?.includes("no such target in settings"), lines[3]);
+	ok(lines[4]?.includes("no such target in settings"), lines[4]);
 });
 
 test("a malformed CLIO-CODER.md points at the read-only view, never at a regenerating command", () => {
 	const lines = rows(banner({ clioMd: "malformed" }), 80);
-	strictEqual(lines[7]?.trim(), "CLIO-CODER.md malformed · /context to inspect");
+	strictEqual(lines[13]?.trim(), "CLIO-CODER.md malformed · /context to inspect");
 	const all = lines.join("\n");
 	ok(!all.includes("/context init"), "init would overwrite the file the operator must repair");
 	ok(!all.includes("/context refresh"), "refresh regenerates; it is not a repair for malformed content");
@@ -194,20 +208,23 @@ test("a malformed CLIO-CODER.md points at the read-only view, never at a regener
 
 test("missing project context is guidance that keeps the invitation to work", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
-	strictEqual(lines[7]?.trim(), "describe a task · /context init to index this repo");
+	strictEqual(lines[13]?.trim(), "describe a task · /context init to index this repo");
 });
 
 test("stale project context offers refresh", () => {
 	const lines = rows(banner({ clioMd: "stale" }), 80);
-	strictEqual(lines[7]?.trim(), "describe a task · /context refresh to update it");
+	strictEqual(lines[13]?.trim(), "describe a task · /context refresh to update it");
 });
 
 test("the submit hint prints only a key that works", () => {
 	// The component prints the label it is handed; the presentation owns the
 	// KeyId-to-label spelling (see the effective-binding test below).
-	strictEqual(rows(banner({ submitKey: "Enter" }), 80)[7]?.trim(), "describe a task · Enter to send · / for commands");
-	strictEqual(rows(banner({ submitKey: "Ctrl+S" }), 80)[7]?.trim(), "describe a task · Ctrl+S to send · / for commands");
-	strictEqual(rows(banner({ submitKey: null }), 80)[7]?.trim(), "describe a task · / for commands");
+	strictEqual(rows(banner({ submitKey: "Enter" }), 80)[13]?.trim(), "describe a task · Enter to send · / for commands");
+	strictEqual(
+		rows(banner({ submitKey: "Ctrl+S" }), 80)[13]?.trim(),
+		"describe a task · Ctrl+S to send · / for commands",
+	);
+	strictEqual(rows(banner({ submitKey: null }), 80)[13]?.trim(), "describe a task · / for commands");
 });
 
 test("route faults outrank project-context guidance", () => {
@@ -218,7 +235,7 @@ test("route faults outrank project-context guidance", () => {
 		}),
 		80,
 	);
-	strictEqual(lines[7]?.trim(), "route unavailable · /settings targets");
+	strictEqual(lines[13]?.trim(), "route unavailable · /settings targets");
 });
 
 // ---------------------------------------------------------------------------
@@ -247,8 +264,8 @@ test("a hostile provider reason cannot style, clear, or retitle the terminal", (
 	const component = banner({
 		statuses: [status({ available: false, reason: "configured", health: health("down", hostile) })],
 	});
-	component.render(80);
-	const lines = component.render(80);
+	component.render(120);
+	const lines = component.render(120);
 	const raw = lines.join("\n");
 	ok(!raw.includes(`${ESC}]`), "OSC introducer reached the screen");
 	ok(!raw.includes(`${ESC}[2J`), "a clear-screen sequence reached the screen");
@@ -320,11 +337,11 @@ const GEOMETRY_CASES: Array<[string, BannerOptions]> = [
 	],
 ];
 
-test("the launchpad is eight rows and the session header one, at every width and state", () => {
+test("the launchpad is fifteen rows and the session header one, at every width and state", () => {
 	for (const [label, options] of GEOMETRY_CASES) {
 		for (const width of WIDTHS) {
 			const launchpad = banner(options);
-			strictEqual(rows(launchpad, width).length, 8, `${label}@${width} launchpad rows`);
+			strictEqual(rows(launchpad, width).length, 15, `${label}@${width} launchpad rows`);
 			const session = banner(options);
 			session.collapseToSessionHeader();
 			strictEqual(rows(session, width).length, 1, `${label}@${width} session rows`);
@@ -374,7 +391,7 @@ test("the workspace gives up its branch before the path's leaf", () => {
 	const component = banner({
 		workspace: workspace({ cwd: "/tmp/a/b/c/project-leaf", branch: "an-extremely-long-branch-name-that-will-not-fit" }),
 	});
-	const masthead = rows(component, 60)[4] ?? "";
+	const masthead = rows(component, 60)[5] ?? "";
 	ok(masthead.includes("project-leaf"), `leaf lost while branch kept: ${masthead}`);
 });
 
@@ -388,7 +405,7 @@ test("render never calls the context reader on its own call stack", () => {
 	const component = banner({ countContextReads: reads, scheduleRefresh: (run) => deferred.push(run) });
 	const first = component.render(80).map(stripTerminalSequences);
 	strictEqual(reads.value, 0, "the reader ran inside render");
-	strictEqual(first[7]?.trim(), "describe a task · Enter to send · / for commands");
+	strictEqual(first[13]?.trim(), "describe a task · Enter to send · / for commands");
 	ok(deferred.length === 1, "a refresh should be scheduled exactly once");
 	for (const run of deferred.splice(0)) run();
 	strictEqual(reads.value, 1);
@@ -409,7 +426,7 @@ test("a scheduled refresh asks for a frame when it lands", () => {
 	for (const run of deferred.splice(0)) run();
 	strictEqual(frames, 1);
 	strictEqual(
-		component.render(80).map(stripTerminalSequences)[7]?.trim(),
+		component.render(80).map(stripTerminalSequences)[13]?.trim(),
 		"describe a task · /context init to index this repo",
 	);
 });
@@ -417,7 +434,7 @@ test("a scheduled refresh asks for a frame when it lands", () => {
 test("a reader that throws never becomes ok or none", () => {
 	const component = banner({ contextThrows: true });
 	const lines = rows(component, 80);
-	strictEqual(lines[7]?.trim(), "describe a task · Enter to send · / for commands");
+	strictEqual(lines[13]?.trim(), "describe a task · Enter to send · / for commands");
 	ok(!lines.join("\n").includes("/context"), "a failed read must not suggest a context command");
 });
 
@@ -438,7 +455,7 @@ test("a failure never renews the trust window, and a stale value stops being ass
 	});
 	const action = (): string => {
 		component.render(80);
-		return stripTerminalSequences(component.render(80)[7] ?? "").trim();
+		return stripTerminalSequences(component.render(80)[13] ?? "").trim();
 	};
 	strictEqual(action(), "describe a task · /context init to index this repo");
 
@@ -475,7 +492,7 @@ test("a reading is never served for a different directory", () => {
 	});
 	const action = (): string => {
 		component.render(80);
-		return stripTerminalSequences(component.render(80)[7] ?? "").trim();
+		return stripTerminalSequences(component.render(80)[13] ?? "").trim();
 	};
 	strictEqual(action(), "describe a task · /context init to index this repo");
 	cwd = "/tmp/work/second";
@@ -602,7 +619,7 @@ function headerRows(built: ReturnType<typeof presentation>["presentation"], widt
 
 test("the presentation opens on the launchpad and collapses on first submit", async () => {
 	const { presentation: built } = presentation();
-	strictEqual(headerRows(built).length, 8);
+	strictEqual(headerRows(built).length, 15);
 
 	// Drive the collapse through the real submit controller, the way a typed
 	// prompt reaches it, rather than by calling the banner directly.
@@ -647,7 +664,7 @@ test("a new session restores the launchpad", () => {
 	built.collapseWelcomeDashboard();
 	strictEqual(headerRows(built).length, 1);
 	built.resetForNewSession();
-	strictEqual(headerRows(built).length, 8);
+	strictEqual(headerRows(built).length, 15);
 });
 
 test("a boot-time resume opens collapsed, with no fresh-start onboarding", () => {
@@ -666,19 +683,19 @@ test("the presentation's submit hint follows the effective binding", () => {
 			actionLabel: () => "",
 		},
 	} as unknown as Partial<InteractivePresentationDeps>);
-	ok(headerRows(rebound.presentation)[7]?.includes("Ctrl+S to send"), headerRows(rebound.presentation)[7]);
+	ok(headerRows(rebound.presentation)[13]?.includes("Ctrl+S to send"), headerRows(rebound.presentation)[13]);
 
 	const unbound = presentation({
 		keybindings: { getKeys: () => [], isDisabled: () => true, actionLabel: () => "" },
 	} as unknown as Partial<InteractivePresentationDeps>);
-	ok(!headerRows(unbound.presentation)[7]?.includes("to send"), headerRows(unbound.presentation)[7]);
+	ok(!headerRows(unbound.presentation)[13]?.includes("to send"), headerRows(unbound.presentation)[13]);
 });
 
 test("disposing the presentation disposes the header", () => {
 	const { presentation: built } = presentation();
 	built.dispose();
 	// A disposed banner schedules nothing further; rendering must still be safe.
-	strictEqual(headerRows(built).length, 8);
+	strictEqual(headerRows(built).length, 15);
 });
 
 for (const width of [40, 44, 60, 92, 120]) {
@@ -730,8 +747,89 @@ test("the welcome keeps a full model name when space permits and shows the logo,
 	ok(wide.join("\n").includes(model));
 	ok(wide.join("\n").includes("Built for the code behind science."));
 	ok(wide.join("\n").includes("Permissions  auto-edit"));
-	ok(wide[1]?.includes(".--------."));
+	ok(wide[1]?.includes("████"));
 	component.collapseToSessionHeader();
 	strictEqual(rows(component, 120).length, 1);
 	ok(rows(component, 120)[0]?.includes(model));
+});
+
+test("the instant shell uses the finished welcome footprint without hydration copy or false readiness", () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = "local";
+	settings.chat.model = "model";
+	settings.targets = [{ id: "local", runtime: "llamacpp" }];
+	settings.safety.autonomy = "full-auto";
+	const boot = createBootWelcome(settings, "Ctrl+S");
+	for (const width of WIDTHS) {
+		const lines = boot.render(width).map(stripTerminalSequences);
+		strictEqual(lines.length, 15);
+		for (const line of lines) ok(visibleWidth(line) <= width);
+		ok(!lines.join("\n").includes("Starting Clio"));
+		ok(!lines.join("\n").includes("✓"));
+	}
+	const wide = boot.render(120).map(stripTerminalSequences).join("\n");
+	ok(wide.includes("Permissions  full-auto"));
+	ok(wide.includes("Ctrl+S to send"));
+	ok(wide.includes("Clio Coder v"));
+});
+
+test("the welcome box closes at the viewport edge on narrow and wide terminals", () => {
+	const component = banner();
+	for (const width of [60, 80, 100, 160, 240]) {
+		const lines = component.render(width).map(stripAnsi);
+		const edge = width - 1;
+		strictEqual(lines[0]?.[0], "╭");
+		strictEqual(lines[0]?.[edge], "╮");
+		strictEqual(lines[14]?.[edge], "╯");
+		for (const line of lines.slice(1, 12)) strictEqual(line[edge], "│", line);
+		for (const line of lines.slice(13, 14)) strictEqual(line[edge], "│", line);
+		ok(!lines.slice(1, 6).some((line) => line.includes("…")), "art must resize rather than truncate");
+	}
+});
+
+test("fleet and targets show cached facts, bound names, sanitize text, and refresh counts", () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = "dynamo";
+	settings.chat.model = "qwen3.8-27b";
+	settings.targets = [
+		{ id: "dynamo", runtime: "lmstudio" },
+		{ id: "cloud", runtime: "openai" },
+	];
+	settings.fleet.rosters = Object.fromEntries(
+		["review", "research", "verify", "more"].map((name) => [name, { members: [] }]),
+	);
+	let agents = 12;
+	let verdict = "unknown";
+	const component = createWelcomeDashboard({
+		getSettings: () => settings,
+		getAgentCount: () => agents,
+		providers: {
+			list: () =>
+				[status({ health: health(verdict) }), status({ target: settings.targets[1], health: health("unknown") })] as never,
+		},
+	});
+	let lines = component.render(120).map(stripAnsi).join("\n");
+	ok(lines.includes("2 configured"));
+	ok(!lines.includes("ready"), "unprobed targets must not claim readiness");
+	ok(lines.includes("12 agent recipes · Rosters: review, research, verify +1"));
+	agents = 14;
+	verdict = "healthy";
+	lines = component.render(120).map(stripAnsi).join("\n");
+	ok(lines.includes("14 agent recipes"));
+	ok(lines.includes("1 ready"));
+	settings.fleet.rosters = { [`review${ESC}[2J${BEL}team`]: { members: [] } };
+	lines = component.render(120).map(stripAnsi).join("\n");
+	ok(!lines.includes(ESC) && !lines.includes(BEL));
+	component.dispose();
+});
+
+test("the wordmark stacks CLIO over CODER with details beside both words and no separate emblem", () => {
+	for (const width of [80, 100, 120]) {
+		const lines = banner().render(width).map(stripAnsi);
+		for (const index of [1, 2, 3, 4, 5, 7, 8, 9, 10, 11]) ok(lines[index]?.includes("██"));
+		ok(lines[4]?.includes("dynamo"));
+		ok(lines[9]?.includes("configured"));
+		ok(!lines.join("\n").includes(">_C"));
+		ok(!lines.slice(1, 12).some((line) => line.includes("…") && line.indexOf("…") < 30));
+	}
 });

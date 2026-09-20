@@ -4,7 +4,7 @@ import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type Component, type Keybinding, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import {
 	brandMark,
 	type ClioTheme,
@@ -15,6 +15,7 @@ import {
 	GLYPH,
 	padAnsi,
 } from "./theme/index.js";
+import { WELCOME_WORDMARK, WELCOME_WORDMARK_WIDE } from "./welcome-art.js";
 
 /**
  * What the route can honestly be said to be.
@@ -39,6 +40,8 @@ export type WelcomeProjectContextState = "checking" | "ok" | "stale" | "none" | 
 
 export interface WelcomeDashboardDeps {
 	providers: Pick<ProvidersContract, "list">;
+	/** In-memory recipe inventory; excludes internal helper agents. */
+	getAgentCount?: () => number;
 	getSettings?: () => Readonly<ClioSettings>;
 	getWorkspaceSnapshot?: () => WorkspaceSnapshot | null;
 	/**
@@ -50,6 +53,8 @@ export interface WelcomeDashboardDeps {
 	getContextState?: (cwd: string) => ContextState;
 	/** Effective label for the submit binding; null when unbound or disabled. */
 	getSubmitKeyLabel?: () => string | null;
+	/** Effective shortcut labels; null hides an unbound action. */
+	getKeyLabel?: (action: Keybinding) => string | null;
 	/** Called when an off-render refresh lands, so the frame owner can ask for one. */
 	onFactsRefreshed?: () => void;
 	/**
@@ -75,6 +80,8 @@ export interface WelcomeDashboardStats {
 	/** Null in session mode: the collapsed row prints no key hint. */
 	submitKeyLabel: string | null;
 	autonomy: string;
+	targets: string;
+	fleet: string;
 }
 
 export type WelcomeDashboardMode = "launchpad" | "session";
@@ -388,44 +395,164 @@ function sessionRow(theme: ClioTheme, stats: WelcomeDashboardStats, version: str
 	return `${mark} ${fitByPriority(theme, units, room)}`;
 }
 
-/** The prompt and open C echo assets/clio-coder-logo-256.webp. */
-const WELCOME_LOGO = [
-	"        .--------.   ",
-	"  \\   /  .----.  \\  ",
-	"   \\ /  /      '--' ",
-	"    >   |   ____     ",
-	"   / /  \\  '---'  / ",
-	"  /_/    '--------'  ",
-] as const;
+function shortNames(names: string[]): string {
+	return names.slice(0, 3).map(plainOneLine).join(", ") + (names.length > 3 ? ` +${names.length - 3}` : "");
+}
 
-/** Fixed height while facts load; collapses once the conversation begins. */
+/** Inventory is configuration plus existing observations; rendering never probes. */
+function inventory(
+	settings: Readonly<ClioSettings> | undefined,
+	statuses?: ReadonlyArray<TargetStatus>,
+	agentCount?: number,
+): { targets: string; fleet: string } {
+	const configured = settings?.targets ?? statuses?.map((status) => status.target) ?? [];
+	const ready = statuses?.filter((status) => status.available && status.health.status === "healthy").length ?? 0;
+	const down = statuses?.filter((status) => !status.available || status.health.status === "down").length ?? 0;
+	const degraded = statuses?.filter((status) => status.available && status.health.status === "degraded").length ?? 0;
+	const targets =
+		configured.length === 0
+			? "None configured · /settings targets"
+			: [
+					`${configured.length} configured`,
+					...(ready ? [`${ready} ready`] : []),
+					...(degraded ? [`${degraded} degraded`] : []),
+					...(down ? [`${down} unavailable`] : []),
+					shortNames(configured.map((target) => target.id)),
+				].join(" · ");
+	const profiles = Object.keys(settings?.fleet?.profiles ?? {});
+	const rosters = Object.keys(settings?.fleet?.rosters ?? {});
+	const fleet =
+		[
+			...(agentCount === undefined ? [] : [`${agentCount} agent recipes`]),
+			...(rosters.length ? [`Rosters: ${shortNames(rosters)}`] : profiles.length ? [`${profiles.length} profiles`] : []),
+		].join(" · ") || "Uses main model · /agents to explore";
+	return { targets, fleet };
+}
+
+const WELCOME_HINT_INTERVAL_MS = 15_000;
+const WELCOME_HINT_MIN_WIDTH = 160;
+
+const WELCOME_HINTS: ReadonlyArray<{
+	title: string;
+	commands: ReadonlyArray<readonly [string, string]>;
+	keys: ReadonlyArray<readonly [Keybinding, string]>;
+}> = [
+	{
+		title: "Make Clio yours",
+		commands: [
+			["/model", "Choose a model and target"],
+			["/library", "Browse skills and extensions"],
+			["/help", "Explore commands and shortcuts"],
+		],
+		keys: [
+			["tui.input.newLine", "New line"],
+			["clio-coder.model.select", "Model picker"],
+			["clio-coder.editor.external", "Open your external editor"],
+		],
+	},
+	{
+		title: "Know your workspace",
+		commands: [
+			["/context", "Inspect the active context"],
+			["/fleet", "Explore your agent fleet"],
+			["/help", "Find a command by name"],
+		],
+		keys: [
+			["clio-coder.files.toggle", "Browse files"],
+			["clio-coder.status.toggle", "Cycle dashboard pages"],
+			["clio-coder.session.tree", "Explore the session tree"],
+		],
+	},
+	{
+		title: "Keep work moving",
+		commands: [
+			["/skills", "See available skills"],
+			["/model", "Switch the active model"],
+			["/help", "Look up a shortcut"],
+		],
+		keys: [
+			["clio-coder.dispatchBoard.toggle", "Open the worker board"],
+			["clio-coder.tasks.open", "Open tasks"],
+			["clio-coder.thinking.cycle", "Cycle thinking effort"],
+		],
+	},
+];
+
+function welcomeHints(theme: ClioTheme, page: number, getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"]): string[] {
+	const hint = WELCOME_HINTS[page % WELCOME_HINTS.length];
+	if (!hint) return [];
+	const keys = hint.keys.flatMap(([action, description]) => {
+		const label = getKeyLabel?.(action);
+		return label ? [`${theme.fg("accent", label)}  ${theme.fg("muted", description)}`] : [];
+	});
+	return [
+		theme.style("accent", hint.title, { bold: true }) +
+			theme.fg("dim", `  ${(page % WELCOME_HINTS.length) + 1}/${WELCOME_HINTS.length}`),
+		"",
+		...hint.commands.map(([command, description]) => `${theme.fg("accent", command)}  ${theme.fg("muted", description)}`),
+		"",
+		...(keys.length ? [theme.fg("dim", "Keyboard shortcuts"), ...keys] : []),
+	];
+}
+
+/** Shared by the instant shell and hydrated UI: one stable, framed welcome. */
 function buildWelcomeDashboardLines(
 	stats: WelcomeDashboardStats,
 	version: string,
 	width: number,
 	mode: WelcomeDashboardMode,
+	hintPage = 0,
+	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
 ): string[] {
 	const theme = clioTheme();
 	const safeWidth = Math.max(1, width);
 	if (mode === "session") return [padAnsi(sessionRow(theme, stats, version, safeWidth), safeWidth)];
-	const showLogo = safeWidth >= 76;
-	const inset = showLogo ? 26 : safeWidth >= 12 ? 2 : 0;
-	const room = Math.max(1, safeWidth - inset);
+	const panelWidth = safeWidth;
+	const room = Math.max(1, panelWidth - 4);
+	const frame = (text: string) => theme.fg("frame", text);
+	const row = (text: string) =>
+		`${frame("│")} ${padAnsi(truncateToWidth(text, room, GLYPH.ellipsis, false), room)} ${frame("│")}`;
+	const rule = (left: string, right: string) => frame(`${left}${"─".repeat(Math.max(0, panelWidth - 2))}${right}`);
+	const title = ` Clio Coder v${version} `;
+	const heading = `${frame("╭─")}${theme.fg("muted", title)}${frame(`${"─".repeat(Math.max(0, panelWidth - visibleWidth(title) - 3))}╮`)}`;
+	const wordmark = panelWidth >= 100 ? WELCOME_WORDMARK_WIDE : WELCOME_WORDMARK;
+	const sideBySide = panelWidth >= 76;
+	const artWidth = sideBySide ? visibleWidth(wordmark[0] ?? "") : 0;
+	const showHints = panelWidth >= WELCOME_HINT_MIN_WIDTH;
+	const contentWidth = showHints ? Math.min(132, Math.floor((room - 3) * 0.58)) : room;
+	const hintWidth = room - contentWidth - 3;
+	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
+	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
+	const field = (label: string, value: string) => `${theme.fg("dim", `${label}  `)}${value}`;
 	const details = [
-		`${theme.style("title", "Clio Coder", { bold: true })} ${theme.fg("dim", `v${version}`)}`,
-		theme.fg("muted", "Built for the code behind science."),
-		routeRow(theme, stats, room),
-		workspaceLabel(theme, stats, room),
-		`${theme.fg("dim", "Permissions  ")}${theme.fg(stats.autonomy === "full-auto" ? "warning" : "muted", stats.autonomy)}`,
+		sideBySide
+			? theme.fg("muted", "Built for the code behind science.")
+			: theme.style("title", "CLIO CODER", { bold: true }),
+		sideBySide ? "" : theme.fg("muted", "Built for the code behind science."),
+		theme.fg("dim", "Model"),
+		routeRow(theme, stats, detailWidth),
+		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
+		field("Permissions", theme.fg(stats.autonomy === "full-auto" ? "warning" : "muted", stats.autonomy)),
 		"",
+		theme.fg("dim", "Targets"),
+		theme.fg("muted", stats.targets),
+		theme.fg("dim", "Fleet"),
+		theme.fg("muted", stats.fleet),
 	];
 	return [
-		"",
+		heading,
 		...details.map((detail, index) => {
-			const art = showLogo ? `  ${theme.fg("accent", (WELCOME_LOGO[index] ?? "").padEnd(21))}   ` : " ".repeat(inset);
-			return `${art}${truncateToWidth(detail, room, GLYPH.ellipsis, false)}`;
+			const art = sideBySide ? `${theme.fg("accent", wordmark[index] ?? "")}   ` : "";
+			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
+			return row(
+				showHints
+					? `${padAnsi(content, contentWidth)} ${frame("│")} ${truncateToWidth(hints[index] ?? "", hintWidth, GLYPH.ellipsis, false)}`
+					: content,
+			);
 		}),
-		`  ${actionRow(theme, stats, Math.max(1, safeWidth - 2))}`,
+		rule("├", "┤"),
+		row(actionRow(theme, stats, room)),
+		rule("╰", "╯"),
 	].map((line) => padAnsi(truncateToWidth(line, safeWidth, GLYPH.ellipsis, false), safeWidth));
 }
 
@@ -448,6 +575,8 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.projectContext,
 		stats.submitKeyLabel,
 		stats.autonomy,
+		stats.targets,
+		stats.fleet,
 	].join("\0");
 }
 
@@ -471,6 +600,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	private disposed = false;
 	private mode: WelcomeDashboardMode = "launchpad";
 	private readonly now: () => number;
+	private hintStartedAt: number;
 	private readonly schedule: (run: () => void) => void;
 	/**
 	 * Read once, here, rather than inside a frame: resolving it walks up for
@@ -481,6 +611,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	constructor(private readonly deps: WelcomeDashboardDeps) {
 		this.now = deps.now ?? ((): number => Date.now());
+		this.hintStartedAt = this.now();
 		this.schedule =
 			deps.scheduleRefresh ??
 			((run: () => void): void => {
@@ -495,10 +626,19 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 
 	render(width: number): string[] {
 		const stats = this.stats();
-		const signature = `${this.mode}\0${statsSignature(stats)}`;
+		// Existing presentation refreshes advance the hints; no extra timer or startup work.
+		const hintPage =
+			this.mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
+				? Math.floor(Math.max(0, this.now() - this.hintStartedAt) / WELCOME_HINT_INTERVAL_MS) % WELCOME_HINTS.length
+				: 0;
+		const shortcutSignature =
+			this.mode === "launchpad" && width >= WELCOME_HINT_MIN_WIDTH
+				? WELCOME_HINTS[hintPage]?.keys.map(([action]) => this.deps.getKeyLabel?.(action)).join("|")
+				: "";
+		const signature = `${this.mode}\0${statsSignature(stats)}\0${hintPage}\0${shortcutSignature}`;
 		const cached = this.cachedRender;
 		if (cached !== null && cached.width === width && cached.signature === signature) return cached.lines;
-		const lines = buildWelcomeDashboardLines(stats, this.version, width, this.mode);
+		const lines = buildWelcomeDashboardLines(stats, this.version, width, this.mode, hintPage, this.deps.getKeyLabel);
 		this.cachedRender = { width, signature, lines };
 		return lines;
 	}
@@ -515,6 +655,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 	resetToLaunchpad(): boolean {
 		if (this.mode === "launchpad") return false;
 		this.mode = "launchpad";
+		this.hintStartedAt = this.now();
 		this.cachedRender = null;
 		return true;
 	}
@@ -566,6 +707,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
 			submitKeyLabel: launchpad ? (this.deps.getSubmitKeyLabel?.() ?? null) : null,
 			autonomy: settings?.safety?.autonomy ?? "auto-edit",
+			...inventory(settings, statuses, this.deps.getAgentCount?.()),
 		};
 	}
 
@@ -645,7 +787,11 @@ export function createWelcomeDashboard(deps: WelcomeDashboardDeps): WelcomeDashb
 }
 
 /** Same welcome geometry before hydration, using only the settings already read. */
-export function createBootWelcome(settings: Readonly<ClioSettings>, submitKeyLabel: string | null): Component {
+export function createBootWelcome(
+	settings: Readonly<ClioSettings>,
+	submitKeyLabel: string | null,
+	getKeyLabel?: WelcomeDashboardDeps["getKeyLabel"],
+): Component {
 	const target = settings.targets.find((entry) => entry.id === settings.chat.target);
 	const model = settings.chat.model ?? target?.defaultModel ?? null;
 	const version = readClioVersion();
@@ -659,9 +805,10 @@ export function createBootWelcome(settings: Readonly<ClioSettings>, submitKeyLab
 		projectContext: "checking",
 		submitKeyLabel,
 		autonomy: settings.safety.autonomy,
+		...inventory(settings),
 	};
 	return {
-		render: (width) => buildWelcomeDashboardLines(stats, version, width, "launchpad"),
+		render: (width) => buildWelcomeDashboardLines(stats, version, width, "launchpad", 0, getKeyLabel),
 		invalidate: () => {},
 	};
 }

@@ -27,10 +27,10 @@ export type ClioToken =
  * renderer and splitting the instant shell's Stage 0 chunk.
  */
 const TOKEN_HEX: Readonly<Record<ClioToken, `#${string}`>> = {
-	editor: "#40ffde",
+	editor: "#40ffbf",
 	editorDanger: "#ff5058",
 	editorAction: "#ffab45",
-	accent: "#53b1a4",
+	accent: "#53b196",
 	accentDeep: "#3e9389",
 	action: "#d99b62",
 	tool: "#6fada5",

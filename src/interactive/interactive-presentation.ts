@@ -1,4 +1,3 @@
-import { formatKeyLabel } from "./keybinding-manager.js";
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
@@ -34,7 +33,7 @@ import { buildFooterDashboard, type FooterDashboardDeps, type FooterDashboardPan
 import { createNotificationCenter, type NotificationCenter } from "./footer/notifications.js";
 import { getActiveRenderTrace } from "./interactive-shell.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
-import { type ClioKeybindingManager, createKeybindingManager } from "./keybinding-manager.js";
+import { type ClioKeybindingManager, createKeybindingManager, formatKeyLabel } from "./keybinding-manager.js";
 import { buildLayout, preserveTranscriptScroll } from "./layout.js";
 import type { SessionTranscript } from "./session-transcript.js";
 import { createSlashCommandAutocompleteProvider } from "./slash-autocomplete.js";
@@ -236,12 +235,17 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 
 	const banner = factories.createBanner({
 		providers: deps.providers,
+		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
 		getWorkspaceSnapshot,
 		// The authoritative project-context reader. It is synchronous on a cache
 		// miss, so the banner refreshes it off the frame rather than calling it
 		// during render; the frame that shows the result is asked for below.
 		...(deps.getContextState ? { getContextState: deps.getContextState } : {}),
 		getSubmitKeyLabel: () => effectiveSubmitKeyLabel(),
+		getKeyLabel: (action) => {
+			const key = keybindings.isDisabled(action) ? undefined : keybindings.getKeys(action)[0];
+			return key ? formatKeyLabel(key, "") : null;
+		},
 		onFactsRefreshed: requestRender,
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
