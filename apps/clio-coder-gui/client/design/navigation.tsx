@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
-import { composeTitle, useLiveState } from "../interaction/announcer.js";
+import { announce, composeTitle, useLiveState } from "../interaction/announcer.js";
+import { formatKeybinding, KEYBINDINGS } from "../interaction/keybindings.js";
 import { Icon } from "./icons.js";
 
 /** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
@@ -22,7 +23,63 @@ export const navigation = [
 	{ label: "Library", path: "/library", icon: "library" },
 	{ label: "System", path: "/system", icon: "system" },
 ] as const;
-export function Navigation({ close }: { close?: () => void }) {
+const SIDEBAR_KEY = "clio-coder-gui-sidebar";
+
+/** The desktop sidebar's collapsed state. It is a per-browser preference, kept like the theme. */
+export function useSidebarCollapsed(): readonly [boolean, () => void] {
+	const [collapsed, setCollapsed] = useState(() => {
+		try {
+			return localStorage.getItem(SIDEBAR_KEY) === "collapsed";
+		} catch {
+			return false;
+		}
+	});
+	useEffect(() => {
+		try {
+			localStorage.setItem(SIDEBAR_KEY, collapsed ? "collapsed" : "expanded");
+		} catch {
+			/* The choice holds for this tab. */
+		}
+	}, [collapsed]);
+	const toggle = useCallback(() => setCollapsed((current) => !current), []);
+	const first = useRef(true);
+	useEffect(() => {
+		// A keyboard chord has no visible focus change, so the new state is announced.
+		if (first.current) first.current = false;
+		else announce(collapsed ? "Sidebar collapsed" : "Sidebar expanded");
+	}, [collapsed]);
+	return [collapsed, toggle];
+}
+
+export const SIDEBAR_ID = "desktop-navigation";
+const SIDEBAR_CHORD = formatKeybinding(KEYBINDINGS.sidebar);
+
+/** Reachable in both states, so a collapsed rail can always be opened again. */
+export function SidebarToggle({ collapsed, toggle }: { collapsed: boolean; toggle: () => void }) {
+	const label = collapsed ? "Expand sidebar" : "Collapse sidebar";
+	return (
+		<button
+			type="button"
+			className="sidebar-toggle"
+			aria-label={label}
+			aria-expanded={!collapsed}
+			aria-controls={SIDEBAR_ID}
+			aria-keyshortcuts="Control+\\ Meta+\\"
+			data-tip={`${label} (${SIDEBAR_CHORD})`}
+			onClick={toggle}
+		>
+			<Icon name="sidebar" />
+			<span className="nav-label">{collapsed ? "Expand" : "Collapse"}</span>
+			<kbd className="nav-label">{navigator.platform.startsWith("Mac") ? "⌘\\" : "Ctrl \\"}</kbd>
+		</button>
+	);
+}
+
+/**
+ * Collapsed, the labels stay in the document for assistive technology and the icon carries the
+ * link visually; `data-tip` shows the name on hover and on keyboard focus.
+ */
+export function Navigation({ close, collapsed = false }: { close?: () => void; collapsed?: boolean }) {
 	const location = useLocation();
 	return (
 		<nav aria-label="Main navigation">
@@ -32,12 +89,13 @@ export function Navigation({ close }: { close?: () => void }) {
 					to={item.path}
 					end={item.path === "/"}
 					onClick={close}
+					data-tip={collapsed ? item.label : undefined}
 					className={({ isActive }) =>
 						isActive || (item.path === "/sessions" && location.pathname.startsWith("/workspaces/")) ? "active" : ""
 					}
 				>
 					<Icon name={item.icon} />
-					{item.label}
+					<span className="nav-label">{item.label}</span>
 				</NavLink>
 			))}
 		</nav>

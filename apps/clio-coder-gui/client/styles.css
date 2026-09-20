@@ -7,6 +7,53 @@
 * {
 	box-sizing: border-box;
 }
+
+/* Scrollbars: slim, in the theme's ink, without arrow buttons. They stay visible as a scroll
+   affordance; only the native weight is gone. The gutter is reserved on the page so a
+   scrollbar appearing on a long view does not move the layout. */
+:root {
+	--scroll-thumb: color-mix(in srgb, var(--ink-muted) 55%, transparent);
+	--scroll-thumb-hover: color-mix(in srgb, var(--ink-muted) 85%, transparent);
+	scrollbar-gutter: stable;
+}
+/* Code and diagrams are dark in both themes, so their thumb follows the code ink. */
+pre,
+.code-block,
+.md-diagram {
+	--scroll-thumb: color-mix(in srgb, var(--code-ink) 40%, transparent);
+	--scroll-thumb-hover: color-mix(in srgb, var(--code-ink) 70%, transparent);
+}
+/* Firefox has no pseudo-elements. Chromium honours the standard properties only by keeping its
+   arrow buttons, so it takes the WebKit rules below instead. */
+@supports not selector(::-webkit-scrollbar) {
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scroll-thumb) transparent;
+	}
+}
+@supports selector(::-webkit-scrollbar) {
+	::-webkit-scrollbar {
+		width: 10px;
+		height: 10px;
+	}
+	::-webkit-scrollbar-track,
+	::-webkit-scrollbar-corner {
+		background: transparent;
+	}
+	::-webkit-scrollbar-thumb {
+		background: var(--scroll-thumb);
+		border: 2px solid transparent;
+		border-radius: 999px;
+		background-clip: content-box;
+	}
+	::-webkit-scrollbar-thumb:hover {
+		background: var(--scroll-thumb-hover);
+		background-clip: content-box;
+	}
+	::-webkit-scrollbar-button {
+		display: none;
+	}
+}
 body {
 	margin: 0;
 	color: var(--ink);
@@ -238,6 +285,10 @@ main {
 	display: grid;
 	grid-template-columns: var(--rail-width) minmax(0, 1fr);
 	flex: 1;
+	transition: grid-template-columns var(--motion-base) var(--ease-standard);
+}
+.workspace[data-sidebar="collapsed"] {
+	grid-template-columns: var(--rail-collapsed-width) minmax(0, 1fr);
 }
 .desktop-navigation {
 	border-right: 1px solid var(--line);
@@ -248,9 +299,73 @@ nav {
 	gap: var(--space-1);
 	margin: 0;
 }
-.desktop-navigation nav {
+.sidebar {
 	position: sticky;
 	top: 78px;
+	display: grid;
+	gap: var(--space-2);
+}
+/* Sidebar toggle: the same footprint as a navigation link, so both states read as one rail. */
+.sidebar .sidebar-toggle {
+	display: flex;
+	align-items: center;
+	gap: var(--space-3);
+	width: 100%;
+	min-height: 0;
+	padding: 11px 14px;
+	border: 0;
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font-size: 14px;
+	text-align: left;
+}
+.sidebar .sidebar-toggle:hover:not(:disabled) {
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
+.sidebar-toggle kbd {
+	margin-left: auto;
+	font: 11px var(--font-mono);
+	color: var(--ink-muted);
+}
+.sidebar-toggle + nav {
+	padding-top: var(--space-2);
+	border-top: 1px solid var(--line);
+}
+/* Collapsed rail: icons only. Labels stay in the document for assistive technology. */
+.workspace[data-sidebar="collapsed"] .nav-label {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle) {
+	position: relative;
+	justify-content: center;
+	padding-inline: 0;
+}
+.workspace[data-sidebar="collapsed"] .desktop-navigation {
+	padding-inline: var(--space-2);
+}
+.workspace[data-sidebar="collapsed"] .sidebar :is(nav a, .sidebar-toggle):is(:hover, :focus-visible)::after {
+	content: attr(data-tip);
+	position: absolute;
+	left: calc(100% + 10px);
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 10;
+	padding: 5px 9px;
+	border-radius: var(--radius-sm);
+	background: var(--ink);
+	color: var(--paper);
+	font-size: 12px;
+	font-weight: 500;
+	white-space: nowrap;
+	pointer-events: none;
 }
 nav a {
 	display: flex;

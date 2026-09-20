@@ -1,4 +1,5 @@
 .docs-heading {
+	scroll-margin-top: 4.5rem;
 	display: flex;
 	align-items: end;
 	justify-content: space-between;
@@ -70,8 +71,16 @@
 }
 .docs-page {
 	min-width: 0;
-	max-width: 65rem;
+	max-width: 64rem;
 	scroll-margin-top: 5rem;
+	display: grid;
+	grid-template-columns: minmax(0, 1fr);
+	column-gap: 2.5rem;
+	align-items: start;
+}
+/* Prose keeps a readable measure; code, tables and diagrams may use the whole column. */
+.docs-page .markdown > :is(p, ul, ol, blockquote, h1, h2, h3, h4, h5, h6, .md-heading) {
+	max-width: 46rem;
 }
 .docs-page .markdown {
 	font-size: 1rem;
@@ -91,6 +100,15 @@
 	background: var(--inset);
 	border-radius: 6px;
 	font-size: 0.85rem;
+}
+.docs-outline a {
+	display: block;
+	padding-block: 0.15rem;
+	text-decoration: none;
+	overflow-wrap: anywhere;
+}
+.docs-outline a:hover {
+	text-decoration: underline;
 }
 .docs-outline ol {
 	list-style: none;
@@ -118,14 +136,90 @@
 .docs-results ul {
 	padding-left: 1.2rem;
 }
+.docs-results li {
+	margin-block: 0.9rem;
+}
 .docs-results p {
-	margin-top: 0.35rem;
+	margin-top: 0.25rem;
 	font-size: 0.9rem;
+	color: var(--muted);
+}
+.docs-results mark {
+	background: var(--accent-soft);
+	color: var(--ink);
+	border-radius: 2px;
+	padding-inline: 0.1em;
+}
+.docs-result-path {
+	display: block;
+	margin-top: 0.15rem;
+	font: 0.75rem var(--font-mono);
+	color: var(--muted);
+	overflow-wrap: anywhere;
+}
+.docs-result-count {
+	font-weight: 400;
+	color: var(--muted);
+}
+.docs-pager {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 1rem;
+	margin-top: 3rem;
+	padding-top: 1.5rem;
+	border-top: 1px solid var(--line);
+}
+.docs-pager a {
+	display: block;
+	max-width: 22rem;
+	padding: 0.7rem 1rem;
+	border: 1px solid var(--line);
+	border-radius: 6px;
+	text-decoration: none;
+	font-weight: 600;
+}
+.docs-pager a:hover {
+	background: var(--inset);
+}
+.docs-pager a[rel="next"] {
+	margin-left: auto;
+	text-align: right;
+}
+.docs-pager span {
+	display: block;
+	font: 0.7rem var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	font-weight: 400;
 	color: var(--muted);
 }
 .docs-page code,
 .docs-page a {
 	overflow-wrap: anywhere;
+}
+/* Wide screens keep the outline beside the text, so it needs no click to use. */
+@media (min-width: 1600px) {
+	.docs-page {
+		max-width: 66rem;
+		grid-template-columns: minmax(0, 1fr) 13rem;
+	}
+	.docs-page > * {
+		grid-column: 1;
+	}
+	.docs-page > .docs-outline {
+		grid-column: 2;
+		grid-row: 1 / span 3;
+		position: sticky;
+		top: 5rem;
+		max-height: calc(100vh - 7rem);
+		overflow: auto;
+		margin: 0;
+		padding: 0 0 0 1rem;
+		background: none;
+		border-radius: 0;
+		border-left: 1px solid var(--line);
+	}
 }
 @media (max-width: 1099px) {
 	.docs-layout {

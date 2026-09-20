@@ -7,7 +7,15 @@ import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
-import { MobileNavigation, Navigation, RouteFocus, ThemeToggle } from "./design/navigation.js";
+import {
+	MobileNavigation,
+	Navigation,
+	RouteFocus,
+	SIDEBAR_ID,
+	SidebarToggle,
+	ThemeToggle,
+	useSidebarCollapsed,
+} from "./design/navigation.js";
 import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
 import { AppPreferences } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
@@ -29,6 +37,7 @@ export function App({ client }: { client: Client }) {
 	const [connection, setConnection] = useState(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
+	const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
 	const notices = useNotices();
 	// A dialog or the palette claims a keyboard layer. While one is claimed, the page behind it must
 	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
@@ -57,6 +66,7 @@ export function App({ client }: { client: Client }) {
 
 	useShortcut("palette", () => setPaletteOpen(true));
 	useShortcut("help", () => setHelpOpen(true));
+	useShortcut("sidebar", toggleSidebar);
 
 	const commands = useMemo(
 		() =>
@@ -70,6 +80,7 @@ export function App({ client }: { client: Client }) {
 				{
 					navigate: (path) => void navigate(path),
 					openHelp: () => setHelpOpen(true),
+					toggleSidebar,
 					dismissNotices: dismissAll,
 					cancelTurn: (turnId) => {
 						if (sessionId === null) return;
@@ -87,7 +98,7 @@ export function App({ client }: { client: Client }) {
 					},
 				},
 			),
-		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state],
+		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state, toggleSidebar],
 	);
 
 	return (
@@ -111,9 +122,12 @@ export function App({ client }: { client: Client }) {
 					<MobileNavigation />
 				</div>
 			</header>
-			<div className="workspace" inert={layered}>
-				<aside className="desktop-navigation">
-					<Navigation />
+			<div className="workspace" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"} inert={layered}>
+				<aside className="desktop-navigation" id={SIDEBAR_ID}>
+					<div className="sidebar">
+						<SidebarToggle collapsed={sidebarCollapsed} toggle={toggleSidebar} />
+						<Navigation collapsed={sidebarCollapsed} />
+					</div>
 				</aside>
 				<main id="main" tabIndex={-1}>
 					{!client.token || refused ? (

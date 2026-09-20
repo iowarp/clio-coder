@@ -2,25 +2,37 @@ import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { printError } from "./argv.js";
+import {
+	backgroundAppInstalled,
+	DOCS_IDLE_EXIT_MS,
+	ensureDocsServer,
+	openInBrowser,
+	stopDocsServer,
+} from "./docs-server.js";
 import { runGuiCommand } from "./gui.js";
 
-const HELP = `clio-coder docs [topic] [--no-open]
+const HELP = `clio-coder docs [topic] [--no-open] [--foreground]
+clio-coder docs --stop
 
-Open the documentation in the Clio Coder graphical app. Pages, navigation and outlines
-are rendered from the same Markdown reference shipped with Clio.
+Open the documentation in your browser. Pages, navigation and outlines are
+rendered from the same Markdown reference shipped with Clio.
 
 Arguments:
-  [topic]      a topic such as safety, configuration, or fleet_dispatch, or a
-               document path such as architecture/safety-model.md.
-               Omit to open the documentation map.
+  [topic]        a topic such as safety, configuration, or fleet_dispatch, or a
+                 document path such as architecture/safety-model.md.
+                 Omit to open the documentation map.
 
 Flags:
-  --no-open    print the private launch link without opening a browser.
-  --help, -h   this message.
+  --no-open      print the private launch link without opening a browser.
+  --foreground   serve privately in this terminal until Ctrl+C. It neither starts nor
+                 reuses the background app or the shared documentation server.
+  --stop         stop the documentation server this command started.
+  --help, -h     this message.
 
-Reuses your installed background app when available. Otherwise starts a local
-foreground server on 127.0.0.1; press Ctrl+C to stop it. No background service
-is installed by this command. Your current directory does not affect the docs.
+Your installed background app is used when you have one. Otherwise a local server
+starts on 127.0.0.1 in the background, so this terminal stays free, and later
+calls reuse it. It stops by itself 15 minutes after the last page closes, or with
+--stop. No login service is installed. Your current directory does not affect the docs.
 `;
 
 const key = (value: string) => value.toLowerCase().replace(/_/g, "-");
@@ -68,14 +80,35 @@ export async function runDocsCommand(args: readonly string[] = []): Promise<numb
 		process.stdout.write(HELP);
 		return 0;
 	}
-	const positionals = args.filter((arg) => arg !== "--no-open");
+	const flags = new Set(["--no-open", "--foreground", "--stop"]);
+	const positionals = args.filter((arg) => !flags.has(arg));
 	const unknownFlag = positionals.find((arg) => arg.startsWith("-"));
 	if (unknownFlag || positionals.length > 1) {
 		printError(unknownFlag ? `unknown flag: ${unknownFlag}` : "docs accepts at most one [topic]");
 		return 2;
 	}
+	const stop = args.includes("--stop");
+	if (stop && args.length > 1) {
+		printError("--stop takes no topic or other flags");
+		return 2;
+	}
+	const noOpen = args.includes("--no-open");
 	try {
-		const pages = catalog(join(resolvePackageRoot(), "docs"));
+		if (stop) {
+			const result = await stopDocsServer();
+			process.stdout.write(
+				result.stopped
+					? `Stopped the documentation server (pid ${result.pid}).\n`
+					: result.survived
+						? `The documentation server (pid ${result.pid}) is still running after SIGTERM and SIGKILL. Its record is kept; run clio-coder docs --stop again.\n`
+						: result.unverified
+							? `Process ${result.pid} did not answer as the documentation server and this platform cannot prove it is one, so it was not signalled. Its record was cleared; a stale documentation server exits by itself when idle.\n`
+							: "No documentation server is running.\n",
+			);
+			return result.survived ? 1 : 0;
+		}
+		const root = resolvePackageRoot();
+		const pages = catalog(join(root, "docs"));
 		const path = docsTopicRoute(positionals[0], pages);
 		if (!path) {
 			printError(
@@ -83,7 +116,19 @@ export async function runDocsCommand(args: readonly string[] = []): Promise<numb
 			);
 			return 2;
 		}
-		return runGuiCommand(["--path", path, "--reuse-background", args.includes("--no-open") ? "--no-open" : "--open"]);
+		// A foreground request is a private server for this terminal; it never adopts the background app.
+		if (args.includes("--foreground")) return runGuiCommand(["--path", path, noOpen ? "--no-open" : "--open"]);
+		if (backgroundAppInstalled())
+			return runGuiCommand(["--path", path, "--reuse-background", noOpen ? "--no-open" : "--open"]);
+		const server = await ensureDocsServer(root);
+		const link = `${server.origin}${path}#token=${server.token}`;
+		process.stdout.write(`${link}\n`);
+		const opened = noOpen ? false : await openInBrowser(link, root);
+		if (!noOpen && !opened) process.stderr.write("Could not open a browser here. Open the link above in your browser.\n");
+		process.stderr.write(
+			`Documentation server ${server.reused ? "already running" : "started"} (pid ${server.pid}). It stops ${DOCS_IDLE_EXIT_MS / 60_000} minutes after the last page closes, or run: clio-coder docs --stop\n`,
+		);
+		return 0;
 	} catch (error) {
 		printError(error instanceof Error ? error.message : "Could not open the documentation.");
 		return 1;

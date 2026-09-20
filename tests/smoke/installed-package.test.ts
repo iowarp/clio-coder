@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
 	copyFileSync,
@@ -467,20 +467,19 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		deepStrictEqual(exit, { code: 0, signal: null }, `foreground server stops cleanly on SIGTERM:\n${server.stderr()}`);
 	}
 
-	// R3: the human docs command uses the same installed app from a foreign cwd.
-	const docs = await startInstalledWeb(
-		bin,
-		["safety", "--no-open"],
-		foreign,
-		env,
-		/http:\/\/127\.0\.0\.1:\d+\/docs\/architecture\/safety-model\.md#token=[\w-]+/u,
-		"docs",
-	);
+	// R3: the human docs command serves from the same installed app in the background, from a foreign cwd,
+	// returns control to the terminal, reuses that server on the next call, and stops it on request.
+	const runDocs = (args: string[]) =>
+		execFileSync(process.execPath, [bin, "docs", ...args], { cwd: foreign, env, encoding: "utf8", timeout: 30_000 });
+	let docsOrigin = "";
 	try {
-		const token = /#token=([\w-]+)/u.exec(docs.stdout())?.[1];
-		ok(token, "docs prints an authenticated app launch link");
-		strictEqual((await webRequest(docs.origin, token, "/api/docs/blueprints")).status, 404);
-		const page = await webRequest(docs.origin, token, "/api/docs/page?path=architecture/safety-model.md");
+		const printed = runDocs(["safety", "--no-open"]);
+		const link = /(http:\/\/127\.0\.0\.1:\d+)\/docs\/architecture\/safety-model\.md#token=([\w-]+)/u.exec(printed);
+		ok(link, `docs prints an authenticated app launch link: ${printed}`);
+		const [, origin = "", token = ""] = link;
+		docsOrigin = origin;
+		strictEqual((await webRequest(origin, token, "/api/docs/blueprints")).status, 404);
+		const page = await webRequest(origin, token, "/api/docs/page?path=architecture/safety-model.md");
 		strictEqual(page.status, 200);
 		const document = (await page.json()) as {
 			markdown: string;
@@ -490,10 +489,34 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		strictEqual(document.markdown, readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8"));
 		ok(document.headings.length > 0, "the installed Markdown generates its page outline");
 		ok(Object.values(document.links).every((link) => !link?.includes("blueprint")));
-		strictEqual((await webRequest(docs.origin, token, "/docs/architecture/safety-model.md")).status, 200);
+		strictEqual((await webRequest(origin, token, "/docs/architecture/safety-model.md")).status, 200);
+		const search = await webRequest(origin, token, "/api/docs/search?q=safety%20model");
+		strictEqual(search.status, 200);
+		const results = (await search.json()) as { path: string; excerpt: string }[];
+		strictEqual(results[0]?.path, "architecture/safety-model.md", "search ranks the page named for the query first");
+		ok(
+			results.every((row) => !/[`#|]/u.test(row.excerpt)),
+			"search excerpts are reading text, not Markdown",
+		);
+
+		const again = runDocs(["--no-open"]);
+		strictEqual(again.trim(), `${origin}/docs#token=${token}`, "a second call reuses the running server");
+		match(runDocs(["--stop"]), /^Stopped the documentation server \(pid \d+\)\.\n$/u);
+		ok(!existsSync(join(home, "state", "gui", "docs-server.json")), "stopping removes the registry");
+		strictEqual(runDocs(["--stop"]), "No documentation server is running.\n");
 	} finally {
-		deepStrictEqual(await docs.close(), { code: 0, signal: null }, `docs server shuts down cleanly: ${docs.stderr()}`);
+		try {
+			runDocs(["--stop"]);
+		} catch {
+			// Already stopped or never started; either way nothing must remain.
+		}
 	}
+	ok(docsOrigin, "the docs command reported an origin");
+	await rejects(
+		webRequest(docsOrigin, undefined, "/api/meta"),
+		/fetch failed/u,
+		"the documentation server is gone after --stop",
+	);
 
 	// Service-configuration mode: the same file a background install would write,
 	// consumed by the installed CLI directly. No systemd, no browser.

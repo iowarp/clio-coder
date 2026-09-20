@@ -50,5 +50,7 @@ describe("contracts/docs canonical navigation", () => {
 		strictEqual(await runDocsCommand(["--unexpected"]), 2);
 		strictEqual(await runDocsCommand(["safety", "configuration"]), 2);
 		strictEqual(await runDocsCommand(["../outside", "--no-open"]), 2);
+		strictEqual(await runDocsCommand(["--stop", "safety"]), 2);
+		strictEqual(await runDocsCommand(["--stop", "--foreground"]), 2);
 	});
 });

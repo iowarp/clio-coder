@@ -244,7 +244,9 @@ try {
 		assert.equal(await page.locator("iframe").count(), 0, "Docs render in the application without a legacy frame");
 		assert.equal(await page.getByRole("navigation", { name: "Reading view" }).count(), 0);
 		const outline = page.getByRole("navigation", { name: "On this page" });
-		await outline.locator("summary").click();
+		// Wide screens keep the outline open beside the text; narrower ones start it collapsed.
+		if (!(await outline.locator("details").evaluate((element) => (element as HTMLDetailsElement).open)))
+			await outline.locator("summary").click();
 		await outline.getByRole("link", { name: "Tables", exact: true }).click();
 		await page.waitForURL(`${origin}/docs/architecture/trace-store.md#tables`);
 		await page.waitForFunction(() => {
@@ -252,6 +254,29 @@ try {
 			return top !== undefined && top >= 0 && top < 120;
 		});
 		assert.equal(context.pages().length, 1);
+		if (width > 750) {
+			// The rail collapses to icons, keeps every destination reachable by name, and expands again.
+			const rail = page.locator(".desktop-navigation");
+			const railWidth = () => rail.evaluate((element) => Math.round(element.getBoundingClientRect().width));
+			const expanded = await railWidth();
+			await page.keyboard.press("Control+\\");
+			await page.waitForFunction(
+				(before) => (document.querySelector(".desktop-navigation")?.getBoundingClientRect().width ?? before) < before / 2,
+				expanded,
+			);
+			await check("docs-rail-collapsed");
+			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 11);
+			assert.equal(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("data-tip"), "Settings");
+			await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
+			await page.waitForFunction(
+				(before) => (document.querySelector(".desktop-navigation")?.getBoundingClientRect().width ?? 0) >= before - 1,
+				expanded,
+			);
+			assert.equal(
+				await page.getByRole("button", { name: "Collapse sidebar", exact: true }).getAttribute("aria-expanded"),
+				"true",
+			);
+		}
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("docs-page-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();

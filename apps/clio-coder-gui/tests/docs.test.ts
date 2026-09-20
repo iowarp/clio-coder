@@ -177,3 +177,60 @@ test("docs: walk every discovered Markdown page and live internal link; trace ra
 		await h.close();
 	}
 });
+
+test("docs search: whole-term ranking and excerpts that read as prose", async () => {
+	const fixture = await scratchHome();
+	await mkdir(join(fixture.path, "docs"), { recursive: true });
+	await writeFile(
+		join(fixture.path, "docs/store.md"),
+		"# Trace store\n\nThe **trace store** is a `SQLite` mirror. See [the guide](guide.md).\n\n## Retention\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n",
+	);
+	await writeFile(
+		join(fixture.path, "docs/restore.md"),
+		"# Recovery\n\nRestore a session, then trace what restored it.\n",
+	);
+	await writeFile(join(fixture.path, "docs/noise.md"), "# Notes\n\nA restored store of unrelated things.\n");
+	const h = await harness({ fixtureDocsPackageRoot: fixture.path });
+	const search = async (q: string) => json(await h.request(`/api/docs/search?q=${encodeURIComponent(q)}`), DocsSearch);
+	try {
+		const found = await search("trace store");
+		assert.deepEqual(
+			found.map((row) => row.path),
+			["store.md"],
+			"a page carrying every term outranks pages that carry one, and 'restore' is not evidence for 'store'",
+		);
+		const [top] = found;
+		assert.match(top?.excerpt ?? "", /trace store is a SQLite mirror\. See the guide\./);
+		assert.doesNotMatch(top?.excerpt ?? "", /[*`#|\]]|\(guide\.md\)/);
+		assert.deepEqual(
+			(await search("recovery retention")).map((row) => row.path),
+			["restore.md", "store.md"],
+			"a phrase no page carries whole still finds its parts",
+		);
+		assert.deepEqual(await search("   "), []);
+	} finally {
+		await h.close();
+		await fixture.close();
+	}
+});
+
+test("docs pages hide a decorative logo block but keep other raw HTML visible as text", () => {
+	const links = {};
+	const logo = renderToStaticMarkup(
+		createElement(MarkdownContent, {
+			source: '<p align="center">\n  <img src="../assets/logo.webp" alt="Logo" />\n</p>\n\n# Title\n',
+			complete: true,
+			documentLinks: links,
+		}),
+	);
+	assert.doesNotMatch(logo, /img|align/);
+	assert.match(logo, /Title/);
+	const other = renderToStaticMarkup(
+		createElement(MarkdownContent, { source: "<marquee>x</marquee>\n", complete: true, documentLinks: links }),
+	);
+	assert.match(other, /&lt;marquee&gt;/);
+	const chat = renderToStaticMarkup(
+		createElement(MarkdownContent, { source: '<p align="center"><img src="a.png" /></p>\n', complete: true }),
+	);
+	assert.match(chat, /&lt;p align/, "outside documents, raw HTML is still shown as text");
+});

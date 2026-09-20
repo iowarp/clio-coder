@@ -432,8 +432,10 @@ Grouped by command. Global flags appear under `global`.
 
 | Flag | Controls |
 |---|---|
+| `--foreground` | Serve privately in this terminal until Ctrl+C, without reusing an installed background app or the shared documentation server. |
 | `--help` | Print the command's usage and exit. |
 | `--no-open` | Do not launch a browser; print the local documentation URL only. |
+| `--stop` | Stop the temporary documentation server. Takes no topic or other flags; does not stop an installed background app. |
 | `-h` | Short form of --help. |
 
 ### `doctor`

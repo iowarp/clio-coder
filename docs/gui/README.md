@@ -1,5 +1,44 @@
 # GUI reference
 
+Clio Coder ships a graphical application as an early preview. It is a companion to
+the terminal agent, and it does not claim production parity. This page is the
+operator guide for starting it. The recovered design and parity documents that
+back its implementation follow.
+
+## Launching the application
+
+The default build bundles the application. These commands start and manage it.
+
+| Command | What it does |
+| --- | --- |
+| `clio-coder docs [topic]` | Opens the shipped documentation in your browser. A loopback server starts in the background, so the terminal is free, and later calls reuse it. |
+| `clio-coder docs --stop` | Stops that server and removes its record. |
+| `clio-coder docs --foreground` | Serves privately in the terminal until Ctrl+C. It never adopts the background app or the shared server. |
+| `clio-coder gui [--open]` | Serves the whole application in the terminal until Ctrl+C. |
+| `clio-coder gui background install\|status\|start\|open\|stop\|uninstall` | Runs the application as a login service. Linux with a systemd user session only. |
+
+The documentation server binds `127.0.0.1` and requires a private launch token. It
+stops on `--stop` or after 15 minutes without an open page, because an open page
+holds it through its event stream. Its record and log are private files under
+`<state>/gui/`, and `clio-coder docs` refuses to signal a process it cannot show is
+its own server. Where the operating system exposes process start times (Linux)
+that check needs no answer from the server. On macOS and Windows a server that
+does not answer cannot be proven ours, so it is left running and its record is
+cleared. Foreground `docs` and `gui` run on Linux and macOS, and the browser opens
+automatically on those two. On Windows, open the printed link. Background
+installation and the desktop launcher need Linux with systemd.
+
+## Sidebar navigation
+
+The desktop sidebar lists every destination. **Collapse sidebar** at its top, or `Ctrl`
+or `Cmd` plus `\`, shrinks it to an icon rail, and **Expand sidebar** restores it.
+Each icon keeps its name for assistive technology and shows it as a tooltip on hover
+and on keyboard focus, and the active destination stays marked. The choice is
+remembered per browser. The mobile navigation drawer is unchanged, and the command
+palette (`Ctrl` or `Cmd` plus `K`) offers the same toggle.
+
+## Design and parity documents
+
 Working documents for `apps/clio-coder-gui`. Every file here was recovered from the
 retired `apps/workbench` reference application before it was deleted, and re-verified
 against the current `src/` where the original had gone stale.

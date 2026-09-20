@@ -32,7 +32,28 @@ function boundedRead(path: string, max: number) {
 function titleOf(path: string, markdown: string) {
 	return /^#\s+(.+)$/m.exec(markdown)?.[1]?.replace(/[`*_]/g, "") ?? path.replace(/\.md$/i, "");
 }
-type Indexed = { path: string; title: string; markdown: string; anchors: Set<string> };
+type Indexed = { path: string; title: string; markdown: string; headings: string; anchors: Set<string> };
+
+/** Reading text for a result: the first match in prose, without link, code or heading syntax. */
+function excerptOf(markdown: string, terms: readonly string[]) {
+	const plain = markdown
+		.replace(/^```.*$/gm, " ")
+		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+		.replace(/^#{1,6}\s+/gm, "")
+		.replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+		.replace(/^\|?[\s:|-]+\|[\s:|-]*$/gm, " ")
+		.replace(/[`*_>|]/g, "")
+		.replace(/\s+/g, " ")
+		.trim();
+	const lower = plain.toLowerCase();
+	const at = Math.min(
+		...terms.map((term) => lower.indexOf(term)).filter((index) => index >= 0),
+		Number.POSITIVE_INFINITY,
+	);
+	const from = Number.isFinite(at) ? Math.max(0, at - 60) : 0;
+	const slice = plain.slice(from, from + 220);
+	return `${from > 0 ? "…" : ""}${from > 0 ? slice.replace(/^\S*\s/, "") : slice}${from + 220 < plain.length ? "…" : ""}`;
+}
 
 export class DocsAdapter {
 	private catalog: { pages: Map<string, Indexed>; tree: DocsTree } | undefined;
@@ -62,11 +83,13 @@ export class DocsAdapter {
 					bytes += Buffer.byteLength(markdown);
 					if (bytes > 16 * 1024 * 1024 || pages.size >= 10_000)
 						throw new AppProblem("unavailable", "Documentation index exceeds its limit.");
+					const headings = documentHeadings(marked.lexer(markdown));
 					pages.set(name, {
 						path: name,
 						title: titleOf(name, markdown),
 						markdown,
-						anchors: new Set(documentHeadings(marked.lexer(markdown)).values()),
+						headings: [...headings.keys()].map((token) => (token as Tokens.Heading).text).join("\n"),
+						anchors: new Set(headings.values()),
 					});
 				}
 			}
@@ -137,29 +160,34 @@ export class DocsAdapter {
 		if (input.kind === "search") {
 			const terms = input.q.toLowerCase().trim().split(/\s+/).filter(Boolean);
 			if (!terms.length) return [];
-			return [...this.index().pages.values()]
-				.map((page) => {
-					const text = page.markdown.toLowerCase();
-					const score = terms.reduce(
-						(n, term) =>
-							n +
-							(page.title.toLowerCase().includes(term) ? 100 : 0) +
-							(page.path.toLowerCase().includes(term) ? 50 : 0) +
-							Math.min(20, text.split(term).length - 1),
-						0,
-					);
-					const at = Math.max(0, text.indexOf(terms[0] ?? ""));
-					return {
-						path: page.path,
-						title: page.title,
-						excerpt: page.markdown.slice(Math.max(0, at - 50), at + 180).replace(/\s+/g, " "),
-						score,
-					};
-				})
-				.filter((row) => row.score > 0)
-				.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+			// A term counts where a word starts: "store" is not evidence for "restore" in text, a title or a path.
+			const starts = terms.map((term) => `(?<![\\p{L}\\p{N}])${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+			const once = starts.map((source) => new RegExp(source, "u")),
+				every = starts.map((source) => new RegExp(source, "gu"));
+			const scored = [...this.index().pages.values()].map((page) => {
+				const text = page.markdown.toLowerCase(),
+					title = page.title.toLowerCase(),
+					path = page.path.toLowerCase(),
+					headings = page.headings.toLowerCase();
+				let matched = 0,
+					score = 0;
+				terms.forEach((_term, index) => {
+					const seek = once[index] as RegExp,
+						count = text.match(every[index] as RegExp)?.length ?? 0,
+						inTitle = seek.test(title),
+						inPath = seek.test(path);
+					if (count > 0 || inTitle || inPath) matched += 1;
+					score += (inTitle ? 100 : 0) + (inPath ? 50 : 0) + (seek.test(headings) ? 30 : 0) + Math.min(20, count);
+				});
+				return { page, score, matched };
+			});
+			// Pages that carry every term come first; a phrase nothing carries whole still finds its parts.
+			const complete = scored.some((row) => row.matched === terms.length);
+			return scored
+				.filter((row) => row.score > 0 && (!complete || row.matched === terms.length))
+				.sort((a, b) => b.score - a.score || a.page.path.localeCompare(b.page.path))
 				.slice(0, 30)
-				.map(({ score: _score, ...row }) => row);
+				.map(({ page }) => ({ path: page.path, title: page.title, excerpt: excerptOf(page.markdown, terms) }));
 		}
 		if (!/\.md$/i.test(input.path)) throw new AppProblem("validation", "Only Markdown document paths are accepted.");
 		const markdown = boundedRead(contained(this.docsRoot(), input.path), 1024 * 1024).toString("utf8");
