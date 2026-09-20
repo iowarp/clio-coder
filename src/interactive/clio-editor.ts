@@ -11,7 +11,7 @@ import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
 import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
-import { fitIdentityLabel, formatTargetLabel, type TargetIdentity } from "./theme/labels.js";
+import type { TargetIdentity } from "./theme/labels.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
 const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode(27)}[0m`;
@@ -19,7 +19,6 @@ const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
 const COMPACTING_PROMPT = "Clio has your prompt and is compacting the context first";
-const MIN_HINT_WIDTH = 60;
 
 function hasScrollIndicator(line: string): boolean {
 	const stripped = stripTerminalSequences(line);
@@ -63,45 +62,6 @@ export interface EditorChrome {
 
 type ComposerMode = "MESSAGE" | "FOLLOW-UP" | "STEER" | "CONFIRM" | "PREPARING" | "COMPACTING";
 
-function normalizeThinkingHint(value: string): string {
-	return value
-		.replace(/^think\s+/i, "")
-		.trim()
-		.toLowerCase();
-}
-
-// The thinking-level hint reads on a two-step color scale that survives
-// squinting: `off` is dim, the low band (`minimal`/`low`) is muted, and
-// everything from `medium` up carries the reason token, going bold for the
-// top band (`xhigh`/`max`, and the generic `on`).
-function styledThinkingHint(theme: ClioTheme, value: string): string {
-	const hint = normalizeThinkingHint(value);
-	switch (hint) {
-		case "off":
-			return theme.fg("dim", hint);
-		case "minimal":
-		case "low":
-			return theme.fg("muted", hint);
-		case "xhigh":
-		case "max":
-		case "on":
-			return theme.style("reason", hint, { bold: true });
-		default:
-			return theme.fg("reason", hint);
-	}
-}
-
-function styledRailLabel(theme: ClioTheme, chrome: EditorChrome, width: number): string {
-	const thinking = styledThinkingHint(theme, chrome.getThinkingLabel());
-	const identity = chrome.getModelLabel();
-	const room = Math.max(1, width - visibleWidth(thinking) - 3);
-	const model =
-		typeof identity === "string"
-			? fitIdentityLabel(identity, room)
-			: formatTargetLabel(identity.targetId, identity.modelId, { width: room });
-	return `${theme.fg("dim", model)} ${theme.fg("dim", "·")} ${thinking}`;
-}
-
 function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 	if (chrome.isAwaitingApproval?.() ?? false) return "CONFIRM";
 	if (!(chrome.isStreaming?.() ?? false)) {
@@ -115,13 +75,6 @@ function composerMode(chrome: EditorChrome, text: string): ComposerMode {
 	}
 	const willSteer = chrome.willEnterSteer?.(text) ?? text.trim().length > 0;
 	return willSteer ? "STEER" : "FOLLOW-UP";
-}
-
-function lowerRailHint(theme: ClioTheme, chrome: EditorChrome): string {
-	return theme.fg(
-		"dim",
-		`${chrome.getSubmitKeyLabel?.() ?? "Enter"} send · ${chrome.getNewlineKeyLabel?.() ?? "Ctrl+J"} newline`,
-	);
 }
 
 /**
@@ -248,20 +201,13 @@ export class ClioEditor extends Editor {
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
 
-		if (hasScrollIndicator(lines[0] ?? "")) {
-			// The base editor has already fitted the scroll indicator to this width.
-			// Prefix the mode and trim only the indicator rail's trailing fill, keeping
-			// its direction/count text and its own narrow-width fallback intact.
-			const modeLabel = theme.style(modeToken(mode), mode, { bold: true });
-			lines[0] = truncateToWidth(`${modeLabel} ${lines[0] ?? ""}`, safeWidth, "", true);
-		} else {
+		// Normal composition needs no mode or model label on the input rail.
+		// Keep exceptional admission/permission states and native scroll counts.
+		if (!hasScrollIndicator(lines[0] ?? "")) {
+			const exceptional = mode === "CONFIRM" || mode === "PREPARING" || mode === "COMPACTING";
 			lines[0] = rule(theme, safeWidth, {
-				left: mode,
-				leftToken: modeToken(mode),
-				right: styledRailLabel(theme, this.chrome, Math.max(1, safeWidth - visibleWidth(mode) - 5)),
+				...(exceptional ? { left: mode, leftToken: modeToken(mode) } : {}),
 				fillToken: "editor",
-				rightRaw: true,
-				rightTail: theme.style("editor", "─", { bold: true }),
 			});
 		}
 
@@ -275,13 +221,6 @@ export class ClioEditor extends Editor {
 		if (bottomRail >= 0 && mode === "CONFIRM") {
 			lines[bottomRail] = rule(theme, safeWidth, {
 				right: confirmRailHint(theme, safeWidth, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none"),
-				fillToken: "editor",
-				rightRaw: true,
-				rightTail: theme.style("editor", "─", { bold: true }),
-			});
-		} else if (bottomRail >= 0 && safeWidth >= MIN_HINT_WIDTH) {
-			lines[bottomRail] = rule(theme, safeWidth, {
-				right: lowerRailHint(theme, this.chrome),
 				fillToken: "editor",
 				rightRaw: true,
 				rightTail: theme.style("editor", "─", { bold: true }),

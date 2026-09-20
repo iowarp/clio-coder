@@ -10,6 +10,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Simplify normal editor rails; move target/model/thinking to the footer and rotate resolved composer shortcuts below it. Keep the compact footer at two lines, preserve operational-notice priority, and retain permission controls and turn-preparation states.
+
 - Render in-session `/doctor` as a width-aware diagnostic report, with errors and warnings first, separate check labels and complete wrapped details. Preserve CLI output and diagnostic behavior.
 
 - Enable interactive Demo guidance by default, with `--demo`/`--no-demo` session overrides and a shared `interface.demo` setting. Add task-grounded capability suggestions, a bounded investigation reminder, follow-through on accepted offers, and expiring contextual footer tips; preserve the two-line footer, user keybindings, permissions, and quiet headless/worker prompts. Refine onboarding to answer greetings, request-writing, and self-contained examples without unnecessary skill discovery; suppress stale agent tips and follow live shortcut changes.

@@ -479,9 +479,14 @@ from the active branch. It retains settled and superseded values from
 operator supersede a decision or enter a correction. A correction is submitted
 to the model as an ordinary operator turn after the durable snapshot changes.
 
-The compact footer stays at two rows: current work with context occupancy, then
-workspace with throughput and the dashboard shortcut. Current notices temporarily
-borrow the workspace row and release it when dismissed or expired. Neon teal is
+The compact footer stays at two rows: target/model, thinking, current work and context
+occupancy, then shortcut hints with throughput and the dashboard shortcut. Normal
+editor rails have no MESSAGE/FOLLOW-UP labels, model labels, or send/newline hints.
+Footer shortcuts rotate every twelve seconds through small groups of currently bound
+composer actions, including send/newline, model/thinking controls, queues and navigation.
+They respect remapped and disabled bindings and remain available with Demo guidance off.
+Notices and contextual Demo tips take priority over shortcut reminders; parked permission
+controls remain visible on the editor rail. The workspace path and Git branch return between hint cycles. Neon teal is
 reserved for the editor rails; dashboard accents, tool colors, and agent colors
 use a quieter intensity tier.
 
