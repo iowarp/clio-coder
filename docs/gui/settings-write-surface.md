@@ -252,4 +252,14 @@ Four departures from the table above, each deliberate:
 
 Confirmation is enforced by the server, not the page: `fleet.history.maxRuns`, `integrations.projectResources.trustProjectImports` and `integrations.runtimePlugins` answer 422 without `confirmed: true`, and the page shows the named consequence beside the checkbox.
 
-The earlier effective-values list moved to `/settings/effective`. Provider onboarding, the `Confirm remote` action and the GUI-local notification and shortcut preferences are not part of this change.
+The earlier effective-values list moved to `/settings/effective`. The `Confirm remote` action and the GUI-local notification and shortcut preferences are not part of this change.
+
+## 8. Provider onboarding (v0.5.0)
+
+Targets has an **Add a connection** form. `GET /api/target-runtimes` is an in-process read of `listProviderSupportEntries` with the authentication vocabulary `configure --list` prints (`none`, `login`, `connected`, `credential`, `needs-key`, `key-optional`), a configured-target count, model hints, and `modelRequired` for runtimes whose ids come from a provider catalog. Status crosses; no credential does.
+
+`POST /api/workspaces/:id/targets` admits `{id, runtime, url?, model?, apiKeyEnv?, useForChat?}` and runs `clio-coder configure --id … --runtime …` through the closed command table as a `targets.add` operation. The CLI stays the authority: it greets LM Studio, fingerprints native runtimes, lists the endpoint's models and refuses a catalog runtime without a model. The command table marks this command `explain`, so the runner keeps the first 2 KiB of stderr. A refusal reaches the page as the CLI wrote it, and a save the CLI could not verify says so instead of reading as a clean success. Before this, every failed CLI operation read "exited with exit code 2".
+
+**There is no key field, and the command table has no credential flag.** `--api-key` would put a secret in a process argv. A key is named by environment variable, or stored from a terminal with `clio-coder auth login <runtime>`; the form says which applies for the chosen runtime. The contract rejects an `apiKey` property, a non-http(s)/ws(s) URL, and any value that starts with a dash.
+
+Still terminal-only: OAuth sign-in, stored keys, `convert`, `rename`, capability overrides, fleet profiles and gateway or lifecycle flags.

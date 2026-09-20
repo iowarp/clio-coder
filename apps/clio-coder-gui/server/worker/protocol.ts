@@ -32,6 +32,7 @@ export interface Methods {
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };
 	"settings.read": { params: { cwd: string }; result: unknown };
+	"targets.runtimes": { params: Record<string, never>; result: unknown };
 	"settings.controls": { params: { cwd: string }; result: unknown };
 	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };

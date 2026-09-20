@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { Accepted, Operation } from "../contracts/operations.js";
 import { Workspace } from "../contracts/sessions.js";
 import { SettingsReport } from "../contracts/settings.js";
-import { CliTargets, Routing } from "../contracts/targets-cli.js";
+import { CliTargets, Routing, TargetRuntimes } from "../contracts/targets-cli.js";
 import { harness, json } from "./harness/app.js";
 import { seedSettings } from "./harness/settings-fixture.js";
 
@@ -122,5 +122,65 @@ test("targets HTTP: probe cancellation reaps its child and failed CLI exits expo
 		} finally {
 			await h.close();
 		}
+	}
+});
+
+test("targets HTTP: a connection is created through the real CLI with no credential field, and a refusal says why", async () => {
+	const h = await harness();
+	try {
+		await seedSettings(h.home.path, h.home.env);
+		const cwd = join(h.home.path, "onboarding-workspace");
+		await mkdir(cwd);
+		const workspace = await json(await h.post("/api/workspaces", { path: cwd }), Workspace);
+		const path = `/api/workspaces/${workspace.id}`;
+
+		const { runtimes } = await json(await h.request("/api/target-runtimes"), TargetRuntimes);
+		const compat = runtimes.find((runtime) => runtime.id === "openai-compat");
+		assert.ok(compat?.supportsCustomUrl);
+		assert.equal(compat.targetCount, 1, "the seeded target counts against its runtime");
+		assert.ok(
+			runtimes.some((runtime) => runtime.modelRequired),
+			"a catalog runtime says it needs an explicit model",
+		);
+		assert.ok(!JSON.stringify(runtimes).includes("fixture-stored-credential"));
+
+		const added = await json(
+			await h.post(`${path}/targets`, {
+				id: "onboarded",
+				runtime: "openai-compat",
+				url: "http://127.0.0.1:9",
+				model: "fixture-onboarded-model",
+			}),
+			Accepted,
+		);
+		const done = await finished(h, added.operationId);
+		assert.equal(done.status, "succeeded");
+		const result =
+			done.status === "succeeded" && "kind" in done.result && done.result.kind === "targets" ? done.result : null;
+		assert.ok(result, "the operation settles as a targets result");
+		assert.match(result.message, /^Connection saved\./);
+		// The CLI could not reach port 9 and says so; the GUI passes that on instead of claiming a verified model.
+		assert.match(result.message, /could not verify model/);
+		const saved = result.targets.targets.find((target) => target.id === "onboarded");
+		assert.equal(saved?.runtime, "openai-compat");
+		assert.equal(saved?.defaultModel, "fixture-onboarded-model");
+
+		const refused = await json(await h.post(`${path}/targets`, { id: "no-model", runtime: "anthropic" }), Accepted);
+		const failure = await finished(h, refused.operationId);
+		assert.equal(failure.status, "failed");
+		assert.match(failure.status === "failed" ? failure.problem.detail : "", /--model is required for anthropic/);
+		const listed = await json(await h.request(`${path}/targets`), CliTargets);
+		assert.ok(!listed.targets.some((target) => target.id === "no-model"));
+
+		for (const body of [
+			{ id: "x", runtime: "openai-compat", apiKey: "sk-must-not-cross" },
+			{ id: "x", runtime: "openai-compat", url: "file:///etc/passwd" },
+			{ id: "x", runtime: "openai-compat", model: "--api-key" },
+			{ id: "x", runtime: "openai-compat", apiKeyEnv: "BAD NAME" },
+			{ id: "--force", runtime: "openai-compat" },
+		])
+			assert.equal((await h.post(`${path}/targets`, body)).status, 422, JSON.stringify(body));
+	} finally {
+		await h.close();
 	}
 });

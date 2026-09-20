@@ -49,7 +49,15 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 				if (event.payload.kind.startsWith("evidence."))
 					for (const key of ["evidence", "evidence-detail", "fleet-receipt"]) invalidate.add(key);
 				if (event.payload.kind.startsWith("targets."))
-					for (const key of ["targets", "routing", "workspace-settings", "config-graph"]) invalidate.add(key);
+					for (const key of [
+						"targets",
+						"routing",
+						"workspace-settings",
+						"config-graph",
+						"target-runtimes",
+						"settings-controls",
+					])
+						invalidate.add(key);
 			}
 			if (event.type === "operation.progress") operations.push({ ...event.payload });
 			if (event.type === "toolchain.changed") invalidate.add("tools");

@@ -1,9 +1,11 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { routes } from "../../contracts/routes.js";
+import type { TargetAdd } from "../../contracts/targets-cli.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
 import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./settings.js";
+import { AddConnection } from "./target-onboarding.js";
 
 export function TargetsPage({ client, view }: { client: Client; view: "targets" | "routing" }) {
 	const selection = useWorkspaceSelection(client),
@@ -28,6 +30,10 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			}),
 		onSuccess: (value) => setOperationId(value.operationId),
 	});
+	const add = useMutation({
+		mutationFn: (body: TargetAdd) => client.call(routes.targetsAdd, { params: { id }, query: {}, body }),
+		onSuccess: (value) => setOperationId(value.operationId),
+	});
 	const cancel = useMutation({
 		mutationFn: () => client.call(routes.cancel, { ...emptyInput, params: { id: operationId ?? "" } }),
 	});
@@ -44,15 +50,23 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 			<ConfigurationTabs id={id} active={view} />
 			{view === "targets" ? (
 				<>
-					<p>
-						Use a target for chat and fleet, or inspect its current health. To add a target, run{" "}
-						<code>clio-coder configure</code>.
-					</p>
+					<p>Use a target for chat and fleet, inspect its current health, or add a new connection.</p>
 					<p>Clio’s probe checks all configured endpoints before returning the selected target’s result.</p>
 					{targets.isPending && id && <p>Reading targets…</p>}
 					{targets.error && <p role="alert">{targets.error.message}</p>}
 					{targets.data?.truncated && <p>The inventory exceeds 200 targets; the first 200 are shown.</p>}
-					{targets.data && !targets.data.targets.length && <p>No model targets configured.</p>}
+					{targets.data && !targets.data.targets.length && (
+						<p>No model targets configured. Add a connection to start a conversation.</p>
+					)}
+					{targets.data && (
+						<AddConnection
+							client={client}
+							taken={targets.data.targets.map((target) => target.id)}
+							busy={busy || add.isPending}
+							onSubmit={(body) => add.mutate(body)}
+						/>
+					)}
+					{add.error && <p role="alert">{add.error.message}</p>}
 					<div className="config-entries">
 						{targets.data?.targets.map((target) => (
 							<article className="trace-panel" key={target.id} aria-label={target.id}>

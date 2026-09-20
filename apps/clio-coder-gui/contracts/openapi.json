@@ -7212,6 +7212,177 @@
 						}
 					}
 				}
+			},
+			"post": {
+				"operationId": "targetsAdd",
+				"summary": "Create a connection through the CLI's non-interactive configure; takes no credential",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["id", "runtime"],
+								"properties": {
+									"id": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"runtime": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"url": {
+										"type": "string",
+										"maxLength": 2048,
+										"pattern": "^(https?|wss?)://[^\\s]+$"
+									},
+									"model": {
+										"type": "string",
+										"pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$"
+									},
+									"apiKeyEnv": {
+										"type": "string",
+										"pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+									},
+									"useForChat": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"202": {
+						"description": "Accepted",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["operationId"],
+									"properties": {
+										"operationId": {
+											"type": "string",
+											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
 			}
 		},
 		"/api/workspaces/{id}/routing": {
@@ -7711,6 +7882,216 @@
 										"operationId": {
 											"type": "string",
 											"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/target-runtimes": {
+			"get": {
+				"operationId": "targetRuntimes",
+				"summary": "Runtimes a connection can be created for, with authentication state and no credential",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [],
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["runtimes"],
+									"properties": {
+										"runtimes": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"id",
+													"label",
+													"group",
+													"summary",
+													"defaultModel",
+													"modelHints",
+													"modelRequired",
+													"supportsCustomUrl",
+													"auth",
+													"targetCount"
+												],
+												"properties": {
+													"id": {
+														"type": "string",
+														"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+													},
+													"label": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"group": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"summary": {
+														"type": "string",
+														"maxLength": 256
+													},
+													"defaultModel": {
+														"anyOf": [
+															{
+																"type": "string",
+																"maxLength": 256
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"modelHints": {
+														"type": "array",
+														"items": {
+															"type": "string",
+															"maxLength": 256
+														},
+														"maxItems": 60
+													},
+													"modelRequired": {
+														"type": "boolean"
+													},
+													"supportsCustomUrl": {
+														"type": "boolean"
+													},
+													"auth": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "none"
+															},
+															{
+																"type": "string",
+																"const": "login"
+															},
+															{
+																"type": "string",
+																"const": "connected"
+															},
+															{
+																"type": "string",
+																"const": "credential"
+															},
+															{
+																"type": "string",
+																"const": "needs-key"
+															},
+															{
+																"type": "string",
+																"const": "key-optional"
+															},
+															{
+																"type": "string",
+																"const": "other"
+															}
+														]
+													},
+													"targetCount": {
+														"type": "integer",
+														"minimum": 0
+													}
+												},
+												"additionalProperties": false
+											},
+											"maxItems": 200
 										}
 									},
 									"additionalProperties": false

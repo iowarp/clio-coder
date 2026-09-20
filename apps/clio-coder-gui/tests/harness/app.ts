@@ -78,7 +78,7 @@ export async function harness(
 		library: new LibraryService(reads, cli, workspaces, ops),
 		reports: new ReportsService(reads, cli, workspaces),
 		evidence: new EvidenceService(reads, cli, workspaces, operations),
-		targets: new TargetsService(cli, workspaces, settingsService, operations),
+		targets: new TargetsService(cli, workspaces, settingsService, operations, reads),
 		sessions,
 		...(options.snapshotHold ? { snapshotHold: options.snapshotHold } : {}),
 		diagnostics: true,

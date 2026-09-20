@@ -1,0 +1,51 @@
+.add-connection {
+	max-width: 45rem;
+	margin-bottom: var(--space-6);
+}
+.add-connection label {
+	display: block;
+	margin-top: var(--space-4);
+	margin-bottom: var(--space-2);
+	font-weight: 700;
+	font-size: 14px;
+}
+.add-connection small {
+	display: block;
+	margin-top: var(--space-2);
+	color: var(--ink-muted);
+}
+.add-connection__auth {
+	border-left: 3px solid var(--status-success-line);
+	background: var(--status-success-tint);
+	color: var(--status-success-fg);
+	padding: var(--space-2) var(--space-3);
+	overflow-wrap: anywhere;
+}
+.add-connection__auth[data-tone="action"] {
+	border-left-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+	color: var(--status-warn-fg);
+}
+.add-connection .add-connection__check {
+	display: flex;
+	gap: var(--space-3);
+	align-items: center;
+	font-weight: 400;
+}
+.add-connection__check input {
+	width: auto;
+	flex: none;
+	padding: 0;
+}
+.add-connection__problems {
+	margin: var(--space-4) 0 0;
+	padding: var(--space-2) var(--space-3) var(--space-2) var(--space-8);
+	border-left: 3px solid var(--status-fail-line);
+	background: var(--status-fail-tint);
+	color: var(--status-fail-fg);
+	font-size: 14px;
+}
+.add-connection .actions .primary,
+.add-connection .actions button {
+	border-radius: var(--radius-sm);
+}
