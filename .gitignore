@@ -16,11 +16,6 @@ __pycache__/
 # Orchestrator-of-orchestrators runtime scripts (not part of the product).
 scripts/orch/
 
-# Local session handoff notes (not shipped; regenerated per session).
-
-
-
-
 # Dev-time scratch area: planning files, debugging notes, sprint plans, reports. Never shipped.
 .superpowers/
 CLIO-CODER.md
@@ -29,9 +24,6 @@ AGENTS.md
 
 # Throwaway scratch: probe scripts, benchmark fixtures, copied repositories.
 tmp/
-
-
-
 
 # npm pack output. Verifying an installed tarball is routine; committing one is not.
 *.tgz
