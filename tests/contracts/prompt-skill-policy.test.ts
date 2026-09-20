@@ -73,6 +73,8 @@ for (const level of AUTONOMY_LEVELS) {
 			assert.match(result.message, /only the operator can activate/);
 		}
 		const reminder = skillsReminderMessage(1, 1, enabled);
+		assert.match(reminder, /onboarding question.*answer directly without skill discovery/);
+		assert.match(reminder, /Honor requests not to use tools/);
 		assert.match(reminder, /Start this task by listing them with context\(scope="skills"\)/);
 		assert.match(reminder, /continue.*same turn/);
 		assert.equal(reminder.includes('load it with context(scope="skills", name="<name>")'), enabled);

@@ -25,10 +25,11 @@ export const SKILLS_REMINDER_REGISTRATION_ID = "observer.skills-reminder";
 export { SKILL_SUGGESTION_ANCHOR };
 
 export function skillsReminderMessage(installed: number, installable = 0, modelActivation = false): string {
-	// Unconditional imperative, deliberately: the skill-mastery batteries
-	// showed literal local models comply with "list and check" but never act
-	// on wording that first asks them to classify the task as skill-shaped.
-	// One listing call on the session's first turn is the accepted price.
+	// Keep discovery explicit for actionable work, but do not turn onboarding,
+	// supplied examples, or a request for wording into a repository investigation.
+	const conversationalException =
+		"For a greeting, onboarding question, request for wording, or self-contained example, answer directly without skill discovery. " +
+		"Honor requests not to use tools. The following applies when beginning actual repository work: ";
 	const counts =
 		installable > 0
 			? `${installed} installed, ${installable} installable from the marketplace`
@@ -42,14 +43,14 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 	// literal models this line exists for act on it over the listing footer.
 	if (modelActivation) {
 		return (
-			`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
+			`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
 			'and checking for a match; if one matches, load it with context(scope="skills", name="<name>") and ' +
 			"continue the task in the same turn. A marketplace skill is not installed and is offered for install " +
 			"when the operator runs it. If none match, do not mention skills and continue with the task."
 		);
 	}
 	return (
-		`[Skills] ${counts}. Start this task by listing them with context(scope="skills") ` +
+		`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
 		"and checking for a match; if one matches, open your reply with the line " +
 		`\`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose) ` +
 		"and then continue the task in the same turn without the skill. Only the operator loads a skill, and a " +
