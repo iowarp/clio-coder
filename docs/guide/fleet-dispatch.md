@@ -3,14 +3,23 @@
 Clio Coder dispatches bounded worker agents. With a fleet configured, those
 workers run on remote machines over SSH while the orchestrator keeps every
 guarantee it makes locally: one admission path, one autonomy matrix, one
-receipt chain. This page covers the architecture, node setup, the doctor
-preflight, placement, topologies, failure semantics, and the residency
-default. For the end-to-end demo see
-[fleet-demo-runbook.md](../process/fleet-demo-runbook.md).
+receipt chain.
 
 Source of truth: `src/domains/dispatch/**`, `src/domains/scheduling/cluster.ts`,
 `src/tools/dispatch.ts`, `src/tools/monitor.ts`, and the contract tests under
 `tests/contracts/`.
+
+### Start here
+
+| If you want to | Go to |
+| --- | --- |
+| Add machines to the fleet | [Node setup](#node-setup), then [Doctor preflight](#doctor-preflight) |
+| Understand how work is placed and admitted | [Placement and process-safe admission](#placement-and-process-safe-admission) |
+| Choose a review, compete, or council shape | [Topologies](#topologies) |
+| Know what happens when a route fails | [Failure semantics](#failure-semantics), [Assignments, attempts, and failover](#assignments-attempts-and-failover) |
+| Watch or steer running work | [Operator visibility](#operator-visibility) |
+| Read what a run proved | [Receipts](#receipts) |
+| Run the end-to-end demo | [fleet-demo-runbook.md](../process/fleet-demo-runbook.md) |
 
 ## Architecture
 
@@ -297,39 +306,54 @@ application never merges and reports the branch. A detached task applies when it
 Admission refuses a non-git checkout, a read-only agent, compete mode, or an
 explicit cwd outside the parent checkout with a named reason.
 
-`fleet.worktrees.root` chooses where the working tree is created: `disk` (the
-default, the location above), `tmpfs`, `auto`, or an absolute path. `tmpfs`
-uses a per-user, per-checkout directory, mode 0700, under `$XDG_RUNTIME_DIR`
-when that is a tmpfs mount and under `/dev/shm` otherwise; `auto` does the
-same when such a mount exists and quietly uses disk when none does. Before
-creating a worktree off disk Clio compares the mount's free space with twice
-the size of the tracked tree plus 256 MiB and falls back to disk, with a
-`[clio-coder:dispatch] task worktree root` notice, when it is short. A tmpfs
-is RAM: what a worker builds inside its worktree counts against it, and
-uncommitted files there do not survive a reboot. Only the working tree moves.
-Git objects, the index, the branch, and the ownership claim stay with the
-repository, and a directory on a shared mount that Clio does not own
-outright is refused. The setting applies to local placement only: when
-`fleet.nodes` is non-empty a run may be placed on another host, which reaches
-the worktree by the project-root path, so task worktrees stay on disk.
+`fleet.worktrees.root` chooses where the working tree is created:
+
+| Value | Location |
+| --- | --- |
+| `disk` (default) | The location above, under the project root. |
+| `tmpfs` | A per-user, per-checkout directory, mode 0700, under `$XDG_RUNTIME_DIR` when that is a tmpfs mount and under `/dev/shm` otherwise. |
+| `auto` | The `tmpfs` behavior when such a mount exists, quietly falling back to disk when none does. |
+| An absolute path | That directory, provided Clio owns it outright. A directory on a shared mount that Clio does not own outright is refused. |
+
+Before creating a worktree off disk, Clio compares the mount's free space with
+twice the size of the tracked tree plus 256 MiB and falls back to disk, with a
+`[clio-coder:dispatch] task worktree root` notice, when it is short. A tmpfs is
+RAM: what a worker builds inside its worktree counts against it, and uncommitted
+files there do not survive a reboot.
+
+Only the working tree moves. Git objects, the index, the branch, and the
+ownership claim stay with the repository. The setting applies to local placement
+only: when `fleet.nodes` is non-empty a run may be placed on another host, which
+reaches the worktree by the project-root path, so task worktrees stay on disk.
 Compete candidates always stay under the project root.
 
 Each task worktree is claimed by `.clio-coder/worktrees/<runId>.task-owner.json`,
 which always stays under the project root and records the working tree's path,
-the branch, the base commit, the apply mode, and a lease on the
-Clio process that created it (host, PID, and a PID-reuse-resistant start
-identity). A run that ends and keeps its worktree marks the claim `settled`.
-At the next start in the same checkout, a claim that is still `active` while
-its owner is gone is a crash. A worktree with no commit beyond its base and no
-modified, staged, or untracked file is removed with its branch, and so is one
-whose tmpfs working tree a reboot took, after its stale git metadata is pruned;
-its commits, if any, keep it. One that holds
-work is kept, marked `abandoned`, and named once on stderr as
-`[dispatch] task worktree recovery preserved <runId>: ...`; it is never merged
-and never deleted. A live owner, an owner on another host, a claim written
-before recovery existed, and anything git cannot inspect are left alone.
+the branch, the base commit, the apply mode, and a lease on the Clio process
+that created it (host, PID, and a PID-reuse-resistant start identity). A run that
+ends and keeps its worktree marks the claim `settled`.
+
 `clio-coder doctor` lists every task worktree that outlived its run with its
 branch, age, and the git commands to inspect or drop it.
+
+<details>
+<summary>What crash recovery removes, preserves, and refuses to touch</summary>
+
+At the next start in the same checkout, a claim that is still `active` while its
+owner is gone is a crash.
+
+A worktree with no commit beyond its base and no modified, staged, or untracked
+file is removed with its branch, and so is one whose tmpfs working tree a reboot
+took, after its stale git metadata is pruned. Its commits, if any, keep it.
+
+One that holds work is kept, marked `abandoned`, and named once on stderr as
+`[dispatch] task worktree recovery preserved <runId>: ...`. It is never merged
+and never deleted.
+
+A live owner, an owner on another host, a claim written before recovery existed,
+and anything git cannot inspect are left alone.
+
+</details>
 
 ### Typed intent and host-run verification
 
@@ -512,24 +536,39 @@ its own prior answer. Each briefing is limited to 8 KiB and carries an explicit
 truncation marker when necessary. A failed peer contributes a labelled failure
 marker and no answer text.
 
-`synthesis: "none"` returns the final member answers directly. `vote` performs
-a deterministic majority tally over structured `verdict` fields without a
-model call. A vote council asks each member for that verdict: the member's task
-carries the ballot directive and the member's run seals a `council-ballot`
-postcondition, `{"verdict":"...","text":"..."}`, in place of the seated
-recipe's own result contract. The seated agent, its persona, and its read-only
-tool profile are unchanged, so any recipe can be voted with. The verdict is a
-single line of at most 64 bytes and is lower-cased before the tally, so members
-who reach the same conclusion land on the same key; the reasoning belongs in
-`text`, which is what the council report shows as the member's answer. A member
-that seals no conforming ballot fails its own run and is reported as a failed
-member rather than dropping silently out of the count. A vote with no majority
-reports `no_majority`, and a vote whose final members all failed reports
-`no_verdict_field`. `judge` runs one additional read-only judge against all final
-answers. Every member run seals a receipt. A judge receipt points backward to
-every final member receipt through gate provenance. The approval artifact names
-each member's label, target, model, thinking level, node, color, round count,
-and synthesis mode, so the plan hash binds the whole council contract.
+Three synthesis modes are available:
+
+| `synthesis` | What it does | Model call |
+| --- | --- | --- |
+| `none` | Returns the final member answers directly. | No |
+| `vote` | Deterministic majority tally over structured `verdict` fields. | No |
+| `judge` | Runs one additional read-only judge against all final answers. | Yes, one |
+
+Every member run seals a receipt, a judge receipt points backward to every final
+member receipt through gate provenance, and the approval artifact names each
+member's label, target, model, thinking level, node, color, round count, and
+synthesis mode, so the plan hash binds the whole council contract.
+
+<details>
+<summary>How a vote council collects ballots and what it reports without a majority</summary>
+
+A vote council asks each member for that verdict: the member's task carries the
+ballot directive and the member's run seals a `council-ballot` postcondition,
+`{"verdict":"...","text":"..."}`, in place of the seated recipe's own result
+contract. The seated agent, its persona, and its read-only tool profile are
+unchanged, so any recipe can be voted with.
+
+The verdict is a single line of at most 64 bytes and is lower-cased before the
+tally, so members who reach the same conclusion land on the same key. The
+reasoning belongs in `text`, which is what the council report shows as the
+member's answer.
+
+A member that seals no conforming ballot fails its own run and is reported as a
+failed member rather than dropping silently out of the count. A vote with no
+majority reports `no_majority`, and a vote whose final members all failed reports
+`no_verdict_field`.
+
+</details>
 
 ### ExecutionPlan and plan approval
 
@@ -550,17 +589,20 @@ rolls the whole reservation back.
 
 A reservation holds three scarce things and nothing else: a global concurrency
 slot, a per-node slot, and a budget upper bound. It never pins route identity.
+
 Capacity and budget are checked for the plan as a unit at approval time, per
-wave, so a three-step sequential plan holds one slot rather than three and N
+wave, so a three-step sequential plan holds one slot rather than three, and N
 parallel tasks whose individual estimates each fit but whose sum breaches the
-ceiling are denied together with the aggregate figure. A member is consumed
-once by its assignment and released once when that assignment settles; a retry
-that lands on a different node or a differently priced route rebinds the member
-atomically and fails closed if the new node has no free slot or the new
-estimate breaches the ceiling. Reservations owned by a dead process are
-reclaimed at startup, with a TTL as the backstop, and live sibling processes'
-reservations are preserved. Execution consumes the
-same pins, including each expanded builder/reviewer/candidate/judge role and
+ceiling are denied together with the aggregate figure.
+
+A member is consumed once by its assignment and released once when that
+assignment settles. A retry that lands on a different node or a differently
+priced route rebinds the member atomically and fails closed if the new node has
+no free slot or the new estimate breaches the ceiling. Reservations owned by a
+dead process are reclaimed at startup, with a TTL as the backstop, and live
+sibling processes' reservations are preserved.
+
+Execution consumes the same pins, including each expanded builder/reviewer/candidate/judge role and
 the SSH node's transport kind and host. A placement, host, capability, or
 cost-ceiling change fails before launch rather than silently choosing an
 unapproved alternative. Full-auto skips the stop and seals the
@@ -802,36 +844,46 @@ neither open nor probing. When no other route qualifies, placement chooses
 again, which usually lands on the failed route after backoff; the admission
 capability gate still applies to whatever it picks.
 
-The cooldown is a per-route circuit breaker, keyed by target, runtime, and
-wire model, held in memory by the running process. A route starts closed.
-Each run that ends in a target-attributed failure (`target-auth`,
-`target-rate-limit`, `target-transient`, or `worker-runtime`) adds to a
-consecutive-failure count, and a success resets it. When the count reaches
-`fleet.retry.breakerThreshold` (default `1`, so the first failure trips it) the
-route opens for `fleet.retry.routeCooldownMs`. New dispatches to an open route
-reroute when their failover mode allows it and are refused otherwise. When the
-cooldown expires the route is half-open: the next new dispatch is admitted as
-the only probe, and every other dispatch still sees the route as cooling until
-that probe finishes. A probe success closes the route and resets the backoff.
-A probe failure reopens it with the cooldown doubled, up to five minutes (or
-the configured cooldown, if that is longer). A probe that ends for a reason
-that says nothing about the target, or never starts, frees the slot for the
-next dispatch to probe. The breaker is not persisted: `clio-coder targets` and
-`clio-coder doctor` run in their own processes and cannot see it, so the
-session's `/settings` targets rows are where an open, half-open, or probing
-route shows, with its remaining cooldown. A provider's context-overflow error
-and a response schema the server rejects are verdicts on the request, so they
-never count against the route. A rejected schema ends the attempt without a
-retry. A context overflow is retried once, and only onto a route whose
-effective context window is strictly larger than the failed route's. The route
-is chosen like a target-excluding retry, except that another model on the same
-target also qualifies, and under `approved` failover it must be in the approved
-envelope. The retry counts against `fleet.retry.maxRetries`, and the attempt's
-retry reason in the assignment lineage reads
-`context-overflow: 8192 -> 32768 on big/qwen`. An overflow is not retried under
-`none` failover, when the failed attempt was itself an overflow retry, or when
-no eligible route has a larger window; the assignment then settles failed with
-an `outcomeDetail` that names the reason.
+The cooldown is a per-route circuit breaker, keyed by target, runtime, and wire
+model, held in memory by the running process. It moves through three states:
+
+| State | How it is entered | What dispatches see |
+| --- | --- | --- |
+| Closed | Start, or a success resets the consecutive-failure count. | Normal admission. |
+| Open | Consecutive target-attributed failures reach `fleet.retry.breakerThreshold` (default `1`, so the first failure trips it). Lasts `fleet.retry.routeCooldownMs`. | Reroute when the failover mode allows it, refusal otherwise. |
+| Half-open | The cooldown expired. | The next new dispatch is admitted as the only probe; every other dispatch still sees the route as cooling until that probe finishes. |
+
+The failures that count are `target-auth`, `target-rate-limit`,
+`target-transient`, and `worker-runtime`. A probe success closes the route and
+resets the backoff. A probe failure reopens it with the cooldown doubled, up to
+five minutes, or the configured cooldown if that is longer. A probe that ends
+for a reason that says nothing about the target, or never starts, frees the slot
+for the next dispatch to probe.
+
+The breaker is not persisted. `clio-coder targets` and `clio-coder doctor` run in
+their own processes and cannot see it, so the session's `/settings` targets rows
+are where an open, half-open, or probing route shows with its remaining cooldown.
+
+<details>
+<summary>Why context overflow and rejected schemas do not trip the breaker</summary>
+
+A provider's context-overflow error and a response schema the server rejects are
+verdicts on the request, not on the route, so they never count against it.
+
+A rejected schema ends the attempt without a retry.
+
+A context overflow is retried once, and only onto a route whose effective context
+window is strictly larger than the failed route's. The route is chosen like a
+target-excluding retry, except that another model on the same target also
+qualifies, and under `approved` failover it must be in the approved envelope. The
+retry counts against `fleet.retry.maxRetries`, and the attempt's retry reason in
+the assignment lineage reads `context-overflow: 8192 -> 32768 on big/qwen`.
+
+An overflow is not retried under `none` failover, when the failed attempt was
+itself an overflow retry, or when no eligible route has a larger window. The
+assignment then settles failed with an `outcomeDetail` that names the reason.
+
+</details>
 
 Assignment status, attempt ids, and terminal run id are stored separately in
 `assignments.json` while each attempt keeps its own strict v20 receipt.
@@ -931,20 +983,22 @@ In particular, verified integrity cannot validate claims, known provenance
 cannot establish correctness, and a review verdict cannot establish
 authorship.
 
-Gate references point backward: a reviewer references the builder it
-reviewed, a revise builder references the reviewer whose findings it
-received, and a judge references every candidate. Because a worker receipt
-seals before the coordinator parses its final verdict, terminal pass/fail,
-exhaustion, winner, and confirmation outcomes are append-only integrity-
-covered gate-decision artifacts under the state directory. Evidence builds
-discover them from linked receipt ids and export `gate-decisions.json`.
+Gate references point backward: a reviewer references the builder it reviewed, a
+revise builder references the reviewer whose findings it received, and a judge
+references every candidate.
+
+Because a worker receipt seals before the coordinator parses its final verdict,
+terminal pass/fail, exhaustion, winner, and confirmation outcomes are append-only
+integrity-covered gate-decision artifacts under the state directory. Evidence
+builds discover them from linked receipt ids and export `gate-decisions.json`.
+
 Reviewer and judge terminal output first crosses an integrity-covered
 write-ahead boundary under `state/gate-decisions/pending/`, before the caller
-waits for the final receipt. Restart recovery verifies the receipt, applies
-the same verdict/winner parser, materializes the final artifact idempotently,
-and only then clears the pending record. Missing receipts, tampering, or a
-conflicting artifact fail closed and leave the journal and any compete
-worktrees available for inspection.
+waits for the final receipt. Restart recovery verifies the receipt, applies the
+same verdict/winner parser, materializes the final artifact idempotently, and
+only then clears the pending record. Missing receipts, tampering, or a
+conflicting artifact fail closed and leave the journal and any compete worktrees
+available for inspection.
 
 Protected-artifact hard blocks follow compete work into candidate worktrees:
 Clio mirrors every applicable parent-checkout path into each admitted worker
@@ -1090,7 +1144,28 @@ fleet execution is not hidden inside deterministic CI.
 
 ## Bounded result delivery
 
-Documenter and Coder use a structured report (`mutation-report`). Explicit recipe selections remain in force. For a read-only explanation, its `summary` carries the requested explanation and citations, with `mutatedPaths` empty. The inline `summary` allows up to 16,384 UTF-8 bytes by default, configurable up to a ceiling of 32,768 UTF-8 bytes via recipe `maxSummaryBytes` or dispatch `result_summary_max_bytes`. Internal helper results (`STRUCTURED_HELPER_RESULT_MAX_BYTES = 32_768`) share this aligned 32 KiB acceptance and receipt capture ceiling. In batch dispatches, a top-level `result_summary_max_bytes` default is inherited by mutating tasks and safely ignored by non-mutation steps; setting an explicit per-task `result_summary_max_bytes` on a non-mutation step fails validation before model dispatch. Authored `commitMessage` and `architect-plan` authorship remain bounded at 1,000 UTF-8 bytes. Coder and Documenter explanations have no global 15-line limit. If worker output exceeds the sealed output bound, capture fails explicitly naming the bound rather than reporting an ambiguous JSON syntax error. If the requested answer cannot fit within the summary allowance or cannot be grounded, the summary must state the specific limitation. A longer artifact requires authorization to write it; a shortened answer or validation log does not satisfy an unmet length requirement.
+Documenter and Coder use a structured report (`mutation-report`). Explicit recipe
+selections remain in force. For a read-only explanation, its `summary` carries
+the requested explanation and citations, with `mutatedPaths` empty.
+
+| Field | Bound |
+| --- | --- |
+| Inline `summary` | 16,384 UTF-8 bytes by default, raised up to 32,768 by recipe `maxSummaryBytes` or dispatch `result_summary_max_bytes`. |
+| Internal helper results | 32,768 bytes (`STRUCTURED_HELPER_RESULT_MAX_BYTES`), the same acceptance and receipt-capture ceiling. |
+| Authored `commitMessage` and `architect-plan` authorship | 1,000 UTF-8 bytes. |
+
+Coder and Documenter explanations have no global 15-line limit. In batch
+dispatches, a top-level `result_summary_max_bytes` default is inherited by
+mutating tasks and safely ignored by non-mutation steps; an explicit per-task
+`result_summary_max_bytes` on a non-mutation step fails validation before model
+dispatch.
+
+If worker output exceeds the sealed output bound, capture fails and names the
+bound rather than reporting an ambiguous JSON syntax error. If the requested
+answer cannot fit within the summary allowance or cannot be grounded, the summary
+must state the specific limitation. A longer artifact requires authorization to
+write it; a shortened answer or validation log does not satisfy an unmet length
+requirement.
 
 Documenter exposes no arbitrary shell commands; it relies on declared verifier checks or grounded source reads. In validation reporting, unexecuted checks must never be recorded as failures (`passed: false` applies only to checks that actually ran and failed). Unexecuted checks or execution limitations belong in the `summary` deliverable as stated limitations.
 

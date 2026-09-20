@@ -1342,7 +1342,7 @@ tokens and can load a cold model, so they run only when asked:
 | Flag | What it does | Timeout |
 | --- | --- | --- |
 | `--probe` | Reachability and model metadata. No generation. | 5s HTTP |
-| `--probe --reasoning` | Generating reasoning check. | 5s HTTP |
+| `--probe --reasoning` | Generating reasoning check. | Owned by the runtime descriptor's reasoning probe. |
 | `--probe --tools` | Generating tool-call check through the engine stream path. | 120s, set by `--tools-timeout <seconds>` |
 
 Declared capabilities alone are not live verification. Reasoning generation that
