@@ -483,11 +483,54 @@ Three behaviors in this release are gated on a runtime's tier being `local-nativ
 
 The tier means "an inference server the operator runs, whose prefix cache and resident model Clio's own behavior can displace." That is what the three gates are actually asking:
 
-- **Pre-warm** requires `chat.prewarm: true` and a verified, loaded and idle native deployment binding. The first supported path is the pinned llama.cpp deployment described below. Other native runtimes, unknown gateway routes and paid routes remain passive. Checks run before preparation and again before the request; a runtime tier alone grants no load or eviction authority.
+- **Pre-warm** requires `chat.prewarm: true` and a verified deployment binding. Pinned llama.cpp deployments require a loaded, idle server. Local LM Studio deployments require an additional `cache.warm.startup: true` opt-in and verified residency/capacity, including when reached through LiteLLM. Unknown gateway routes and paid routes remain passive. Checks run before preparation and again before the request; a runtime tier alone grants no load or eviction authority.
 - **Endpoint capacity** defaults to one slot here when discovery reports nothing, and to unbounded elsewhere. vLLM and SGLang are the deliberate exceptions inside the tier: both serve genuinely concurrent requests, so an undiscovered limit is left unbounded rather than guessed at one.
 - **Five of the eight expected-cold reasons** are stamped only here, because a single-slot local cache is the only one an interleaved run actually displaces. The other three moved the prompt bytes themselves and are stamped on every tier. The full split is in [context-engine.md](../architecture/context-engine.md#cache-divergence-honesty).
 
 The tool-prose-loop detector is keyed on the same tier, for the same reason: narrating a tool call instead of emitting one is a behavior of open-weight models served locally, and a list of server names would have left an Ollama or vLLM run with no cutoff at all.
+
+### Startup preparation
+
+The terminal paints the welcome and accepts input before session initialization finishes. Submitted text waits for the normal safety, tools, and session setup. Routine initialization stays silent; failures remain visible. Opening a home, system, or shared root folder requires confirmation before project settings load. This confirmation applies to that launch and does not grant trust to project settings or hooks.
+
+After the interactive frame commits and the session is idle, Clio prepares connections for up to four distinct local worker endpoints from the fleet default, profiles, and rosters. These are passive metadata requests, made sequentially with a 1.5-second timeout each. Cloud endpoints, remote-node profiles, and the main agent's endpoint are excluded. Headless commands and worker processes never run this interactive preparation. Node's compile cache is published while the parent is alive so worker processes can reuse it before the parent exits.
+
+For an already loaded local worker model with a verified `cache.deployment` binding, opt into one tiny inference warm-up per endpoint per launch:
+
+```yaml
+# Inside the worker target's existing cache configuration:
+cache:
+  # Keep the verified deployment binding here.
+  warm:
+    startup: true
+```
+
+`startup` defaults to false. The optional request has no system prompt, history, or tools, allows one output token, and is capped at 256 estimated input tokens and two seconds. Lower `maxInputTokens` or `maxDurationMs` bounds are honored. Paid routes, busy endpoints, and unknown or unsupported deployments remain ineligible. Usage is recorded under `prewarm`, including unknown usage when a request fails. This warms the serving path; it does not claim to cache a future worker's task-specific prompt. Server-side cancellation is backend-dependent, so even a bounded client request can briefly contend with a worker dispatched afterward.
+
+### Local LM Studio warming through LiteLLM
+
+Bind the target to one local deployment; Clio checks the gateway's authenticated route inventory before warming. Model requests remain opt-in:
+
+```yaml
+# Inside the existing target (runtime: litellm):
+cache:
+  deployment:
+    backend: lmstudio
+    controlUrl: http://192.168.1.20:1234
+    model: my-local-model
+    gatewayDeploymentId: deployment-id-from-litellm
+  warm:
+    startup: true
+    maxInputTokens: 20000
+    maxDurationMs: 30000
+    cooldownMs: 60000
+```
+
+The main agent also requires `chat.prewarm: true`. After a one-second startup delay, warming stands down for an editor draft, active turn, or dispatch. If the verified local model is absent, an opted-in tiny request may wake it. Once resident, Clio requires at least two configured LM Studio parallel slots before sending its actual instruction/tool prefix with one output token. The input budget includes tools; the default 8192-token limit may be too small for a full Clio prompt. Warm requests disable LiteLLM retries and fallbacks. Direct `runtime: lmstudio` targets use the same binding without `gatewayDeploymentId`.
+
+LM Studio does not expose an idle-slot API. Configured parallelism and Clio's endpoint leases reduce contention but cannot detect all external traffic or guarantee immediate foreground service. Submitting detaches an already-running warm; it does not await it, and server-side loading/prefill may still finish. Warm-up never gates the welcome or hydration. Headless runs and worker processes do not schedule main-session warming. The interactive worker preparation described above may warm separately configured local bindings, but never the main deployment, including aliases that share its bound endpoint.
+
+Results and skip reasons are written silently to `$XDG_STATE_HOME/clio-coder/startup/YYYY-MM-DD.jsonl` (normally `~/.local/state/clio-coder/startup/`), including before a session exists. Usage remains attributed to `prewarm`. A missing provider cache-read count is displayed as unknown, not a cold-cache claim. Old session records retain their original recorded verdicts.
 
 ### Ollama runtime id
 

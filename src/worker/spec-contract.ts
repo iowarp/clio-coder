@@ -390,9 +390,15 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 		if (cache.deployment !== undefined) {
 			const binding = readRecord(cache.deployment, "WorkerSpec.target.cache.deployment");
 			readString(binding.backend, "WorkerSpec.target.cache.deployment.backend");
-			readOptionalEnum(binding, "backend", "WorkerSpec.target.cache.deployment", ["llamacpp", "vllm"] as const);
-			for (const key of ["controlUrl", "model", "build"])
+			readOptionalEnum(binding, "backend", "WorkerSpec.target.cache.deployment", [
+				"llamacpp",
+				"vllm",
+				"lmstudio",
+			] as const);
+			for (const key of ["controlUrl", "model", "build"]) {
+				if (key === "build" && binding.backend === "lmstudio" && binding[key] === undefined) continue;
 				readString(binding[key], `WorkerSpec.target.cache.deployment.${key}`);
+			}
 			readOptionalString(binding, "gatewayDeploymentId", "WorkerSpec.target.cache.deployment");
 			const url = new URL(readString(binding.controlUrl, "WorkerSpec.target.cache.deployment.controlUrl"));
 			if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search || url.hash)
@@ -402,6 +408,7 @@ function validateTarget(value: unknown, runtimeId: string, runtimeAliases: Reado
 		}
 		if (cache.warm !== undefined) {
 			const warm = readRecord(cache.warm, "WorkerSpec.target.cache.warm");
+			readOptionalBoolean(warm, "startup", "WorkerSpec.target.cache.warm");
 			for (const key of ["maxInputTokens", "maxDurationMs", "cooldownMs"]) {
 				if (
 					warm[key] !== undefined &&

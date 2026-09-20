@@ -19,15 +19,16 @@ export interface TargetCacheSettings {
 	retention?: "none" | "short" | "long";
 	/** Explicit read-only deployment binding; never grants administrative authority. */
 	deployment?: {
-		backend: "llamacpp" | "vllm";
+		backend: "llamacpp" | "vllm" | "lmstudio";
 		controlUrl: string;
 		model: string;
-		build: string;
+		/** Required for build-pinned llama.cpp/vLLM deployments. */
+		build?: string;
 		/** Required for a gateway binding; compared with its current route inventory. */
 		gatewayDeploymentId?: string;
 	};
 	/** Local warm bounds. Paid routes remain ineligible. */
-	warm?: { maxInputTokens?: number; maxDurationMs?: number; cooldownMs?: number };
+	warm?: { startup?: boolean; maxInputTokens?: number; maxDurationMs?: number; cooldownMs?: number };
 }
 
 // Canonical persisted lifecycle name. Readers temporarily normalize the

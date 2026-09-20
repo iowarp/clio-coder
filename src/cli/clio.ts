@@ -76,8 +76,12 @@ export async function runClioCommand(
 			const { createProcessTerminalLease, instantShellEnabled } = await import("../interactive/terminal-lease.js");
 			if (instantShellEnabled()) {
 				let stage0FrameId: number | null = null;
+				const shellSettings = startupSettings ?? readLayeredSettings(process.cwd()).settings;
 				terminalLease = createProcessTerminalLease({
-					settings: startupSettings ?? readLayeredSettings(process.cwd()).settings,
+					settings:
+						options.autonomy === undefined
+							? shellSettings
+							: { ...shellSettings, safety: { ...shellSettings.safety, autonomy: options.autonomy } },
 					onStage0Commit: (frameId) => {
 						stage0FrameId = frameId;
 					},

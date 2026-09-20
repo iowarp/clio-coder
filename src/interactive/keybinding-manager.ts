@@ -580,4 +580,3 @@ export function formatKeyLabel(keyId: string | undefined, fallback = "unbound"):
 		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
 		.join("+");
 }
-

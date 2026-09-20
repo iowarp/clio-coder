@@ -1,5 +1,5 @@
 /** Cache classification for one backend completion call. */
-export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small";
+export type BackendCacheVerdict = "hot" | "partial" | "cold" | "small" | "unknown";
 
 /** Backend timing source that directly reports local prefill work. */
 export type BackendTimingsSource = "llamacpp-timings" | "lmstudio-timings";
@@ -20,10 +20,11 @@ export interface CacheVerdictCounts {
 	partial: number;
 	cold: number;
 	small: number;
+	unknown: number;
 }
 
 export function emptyCacheVerdictCounts(): CacheVerdictCounts {
-	return { hot: 0, partial: 0, cold: 0, small: 0 };
+	return { hot: 0, partial: 0, cold: 0, small: 0, unknown: 0 };
 }
 
 /** Return newly evaluated prefill tokens when the backend reports cache reads. */

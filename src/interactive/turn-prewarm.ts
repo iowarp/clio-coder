@@ -15,6 +15,7 @@ import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { endpointCapacityUsage } from "../domains/dispatch/index.js";
+import { registerForegroundStream } from "../domains/providers/endpoint-capacity.js";
 import {
 	type CacheDeploymentObservation,
 	observeCacheDeployment,
@@ -23,6 +24,7 @@ import {
 import type { SessionContract } from "../domains/session/contract.js";
 import type { Usage } from "../engine/types.js";
 import { type PrewarmTrigger, prewarmPromptTokens, runPrewarmRound } from "./prewarm.js";
+import { recordStartupDiagnostic } from "./startup-diagnostics.js";
 import type { TurnContext } from "./turn-context.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
@@ -203,26 +205,103 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		if (!target) return { ran: false, reason: "unresolved" };
 		const targetSettings = JSON.stringify(target);
 		const started = Date.now();
+		if (target.cache?.deployment?.backend === "lmstudio" && target.cache.warm?.startup !== true)
+			return { ran: false, reason: "disabled", detail: "local-warming-not-enabled" };
 		if (target.cache?.retention === "none") return { ran: false, reason: "disabled" };
 		if (target.pricing && Object.values(target.pricing).some((rate) => rate > 0))
 			return { ran: false, reason: "deployment", detail: "paid-warming-disabled" };
 		const cooldown = Math.max(1000, target.cache?.warm?.cooldownMs ?? 60000);
 		if (Date.now() - lastFinished < cooldown) return { ran: false, reason: "cooldown" };
 		const observe = deps.observeDeployment ?? observeCacheDeployment;
-		let deployment: CacheDeploymentObservation = await observe(target, deps.getSettings().chat.model ?? "", {
-			signal: controller.signal,
-		});
-		if (deployment.warm !== "bounded") return { ran: false, reason: "deployment", detail: deployment.reason };
+		const descriptor = deps.providers.getRuntime(target.runtime);
+		if (!descriptor) return { ran: false, reason: "unresolved" };
+		const auth = await deps.providers.auth.resolveForTarget(target, descriptor, { signal: controller.signal });
+		const observeOptions = { signal: controller.signal, ...(auth.apiKey ? { gatewayApiKey: auth.apiKey } : {}) };
+		const selectedModel = deps.getSettings().chat.model ?? target.defaultModel ?? "";
+		const stillSelected = () =>
+			JSON.stringify(deps.providers.getTarget(target.id)) === targetSettings &&
+			deps.getSettings().chat.target === target.id &&
+			(deps.getSettings().chat.model ?? target.defaultModel ?? "") === selectedModel;
+		const canSend = () =>
+			!admissionRefusal() && !detached.has(controller) && !controller.signal.aborted && stillSelected();
+		let deployment: CacheDeploymentObservation = await observe(target, selectedModel, observeOptions);
+		if (
+			deployment.warm !== "bounded" &&
+			!(
+				deployment.backend === "lmstudio" &&
+				deployment.reason === "model-not-loaded" &&
+				target.cache?.warm?.startup === true
+			)
+		)
+			return { ran: false, reason: "deployment", detail: deployment.reason };
 
+		if (admissionRefusal() || detached.has(controller) || controller.signal.aborted)
+			return { ran: false, reason: "superseded" };
 		const prepared = await deps.prepareRuntime(controller.signal);
 		if (!prepared.ok) return { ran: false, reason: "unresolved" };
 		const runtime = prepared.runtime;
-		if (deps.providers.getRuntime(runtime.runtimeId)?.tier !== "local-native") {
+		if (runtime.targetId !== target.id || runtime.wireModelId !== selectedModel || runtime.runtimeId !== target.runtime)
+			return { ran: false, reason: "superseded" };
+		if (
+			deps.providers.getRuntime(runtime.runtimeId)?.tier !== "local-native" &&
+			!(
+				runtime.runtimeId === "litellm" &&
+				deployment.backend === "lmstudio" &&
+				(deployment.warm === "bounded" || deployment.reason === "model-not-loaded")
+			)
+		) {
 			// Off on every other tier regardless of the setting. A cloud provider
 			// caches by exact prefix on its own schedule and bills the request; a
 			// pre-warm there is spend without a latency win.
 			return { ran: false, reason: "tier" };
 		}
+
+		if (
+			deployment.backend === "lmstudio" &&
+			deployment.reason === "model-not-loaded" &&
+			target.cache?.warm?.startup === true &&
+			!admissionRefusal() &&
+			!controller.signal.aborted &&
+			!detached.has(controller) &&
+			stillSelected() &&
+			deployment.endpoint &&
+			(endpointCapacityUsage()[deployment.endpoint] ?? 0) === 0
+		) {
+			// Wake-up is a tiny separate request; exact-prefix work follows only
+			// after residency is observed. Neither operation gates TUI startup.
+			const release = registerForegroundStream(deployment.endpoint);
+			const deadline = setTimeout(() => controller.abort(), Math.min(target.cache.warm.maxDurationMs ?? 30000, 120000));
+			try {
+				const wake = await round({
+					model: runtime.agent.state.model,
+					state: { systemPrompt: "", messages: [], tools: [], thinkingLevel: "off" },
+					...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
+					signal: controller.signal,
+					maxInputTokens: Math.min(256, target.cache.warm.maxInputTokens ?? 256),
+					canSend,
+				});
+				deps.recordUsage(runtime, wake.usage);
+				recordStartupDiagnostic({
+					kind: "model-wake",
+					target: target.id,
+					model: selectedModel,
+					timing: wake.timing,
+					usage: wake.usage,
+					aborted: wake.aborted,
+					failed: Boolean(wake.errorMessage),
+				});
+				if (wake.aborted || wake.errorMessage) return { ran: false, reason: "deployment", detail: "wake-incomplete" };
+			} finally {
+				clearTimeout(deadline);
+				release();
+			}
+			deployment = await observe(target, selectedModel, observeOptions);
+		}
+
+		if (deployment.warm !== "bounded") return { ran: false, reason: "deployment", detail: deployment.reason };
+
+		if (admissionRefusal() || detached.has(controller) || controller.signal.aborted || !stillSelected())
+			return { ran: false, reason: "superseded" };
 
 		deps.applySessionTools(runtime);
 		await deps.context.ensureSessionPrompt(runtime);
@@ -235,15 +314,11 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		if (detached.has(controller) || controller.signal.aborted) return { ran: false, reason: "superseded" };
 		// Binding/residency can change during preparation. Discovery itself never
 		// loads models and missing evidence leaves ordinary inference untouched.
-		deployment = await observe(target, runtime.wireModelId, { signal: controller.signal });
+		deployment = await observe(target, runtime.wireModelId, observeOptions);
 		if (deployment.warm !== "bounded") return { ran: false, reason: "deployment", detail: deployment.reason };
 		const finalRefusal = admissionRefusal();
 		if (finalRefusal) return { ran: false, reason: finalRefusal };
-		if (
-			detached.has(controller) ||
-			controller.signal.aborted ||
-			JSON.stringify(deps.providers.getTarget(target.id)) !== targetSettings
-		)
+		if (detached.has(controller) || controller.signal.aborted || !stillSelected())
 			return { ran: false, reason: "superseded" };
 		if (Date.now() - started > 30000) return { ran: false, reason: "expired" };
 		// This includes shared dispatch leases/reservations and this process's
@@ -269,6 +344,8 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		// finally, including on the detach path, because the request the server is
 		// still finishing is the one occupying the slot.
 		const releaseEndpointSlot = deps.registerEndpointSlot?.(runtime) ?? null;
+		const releaseBackend =
+			runtime.runtimeId === "litellm" && deployment.endpoint ? registerForegroundStream(deployment.endpoint) : null;
 		let result: Awaited<ReturnType<typeof round>>;
 		const deadline = setTimeout(() => controller.abort(), Math.min(target.cache?.warm?.maxDurationMs ?? 30000, 120000));
 		try {
@@ -284,11 +361,13 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
 				signal: controller.signal,
 				maxInputTokens: target.cache?.warm?.maxInputTokens ?? 8192,
+				canSend,
 			});
 		} finally {
 			clearTimeout(deadline);
 			lastFinished = Date.now();
 			releaseEndpointSlot?.();
+			releaseBackend?.();
 		}
 		lastPrefix = result.aborted || result.errorMessage ? null : prefix;
 
@@ -307,6 +386,17 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			});
 		}
 		deps.recordUsage(runtime, result.usage);
+		recordStartupDiagnostic({
+			kind: "prompt-warm",
+			target: runtime.targetId,
+			model: runtime.wireModelId,
+			trigger,
+			timing: result.timing,
+			promptTokens,
+			aborted: result.aborted,
+			detached: wasDetached,
+			failed: Boolean(result.errorMessage),
+		});
 
 		try {
 			deps.session?.appendEntry({
@@ -362,6 +452,7 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 		pendingTrigger = null;
 		if (trigger === null) return;
 		const controller = new AbortController();
+		const diagnosticStart = performance.now();
 		active = controller;
 		running = controller;
 		inFlight = (
@@ -370,6 +461,15 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				: runOnce(trigger, controller)
 		)
 			.then((outcome) => {
+				if (deps.isLatencySurface())
+					recordStartupDiagnostic({
+						kind: "warm-admission",
+						trigger,
+						target: deps.getSettings().chat.target,
+						model: deps.getSettings().chat.model,
+						durationMs: Math.round(performance.now() - diagnosticStart),
+						...outcome,
+					});
 				if (!outcome.ran && deps.getSettings().chat.prewarm && outcome.reason !== "surface") {
 					const key = `${outcome.reason}:${outcome.detail ?? ""}`;
 					if (lastSkip !== key) {
@@ -389,11 +489,16 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 				} else if (outcome.ran) lastSkip = null;
 				return outcome;
 			})
-			.catch(() => null)
+			.catch(() => {
+				if (deps.isLatencySurface())
+					recordStartupDiagnostic({ kind: "warm-admission", trigger, ran: false, reason: "preparation-failed" });
+				return null;
+			})
 			.finally(() => {
 				if (active === controller) active = null;
 				running = null;
-				if (!disposed && pendingTrigger !== null && timer === null) timer = setTimeout(fire, 0);
+				if (!disposed && pendingTrigger !== null && timer === null)
+					timer = setTimeout(fire, pendingTrigger === "session-start" && deps.isLatencySurface() ? 1000 : 0);
 			});
 	};
 
@@ -406,11 +511,9 @@ export function createTurnPrewarm(deps: TurnPrewarmDeps): TurnPrewarm {
 			pendingTrigger = trigger;
 			pendingSince = Date.now();
 			if (timer !== null || running !== null) return;
-			// Ref'd on purpose, same reasoning as `settled()` below: the timer is due
-			// in 0 ms, so it holds the event loop for one tick at most, and a Node 22
-			// loop that drains past a due unref'd timer would otherwise never start
-			// the round a test or caller is already awaiting.
-			timer = setTimeout(fire, 0);
+			// Give startup a quiet second before speculative work. Headless surfaces
+			// never schedule model work; other triggers coalesce on the next tick.
+			timer = setTimeout(fire, trigger === "session-start" && deps.isLatencySurface() ? 1000 : 0);
 		},
 
 		cancel(): void {

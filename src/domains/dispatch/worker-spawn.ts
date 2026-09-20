@@ -28,7 +28,11 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { withClioAgentEnvironment } from "../../core/agent-environment.js";
-import { enableClioCompileCache, workerCompileCacheEnvironment } from "../../core/compile-cache.js";
+import {
+	enableClioCompileCache,
+	publishClioCompileCache,
+	workerCompileCacheEnvironment,
+} from "../../core/compile-cache.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import type { WorkerSpec } from "../../worker/spec-contract.js";
 import type { HeartbeatStamp } from "./heartbeat.js";
@@ -658,6 +662,12 @@ export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): Spawne
  * process.env right after Node reads it, so the cache serves Clio's own
  * entry graph and never the user's node processes.
  */
+let publishedCompileCache = false;
 function withCompileCacheEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	return workerCompileCacheEnvironment(env, enableClioCompileCache());
+	const directory = enableClioCompileCache();
+	if (!publishedCompileCache && directory !== null) {
+		publishClioCompileCache();
+		publishedCompileCache = true;
+	}
+	return workerCompileCacheEnvironment(env, directory);
 }

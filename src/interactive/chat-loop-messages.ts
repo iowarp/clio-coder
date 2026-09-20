@@ -466,18 +466,21 @@ function classifyCacheUsage(input: number, cacheRead: number): BackendCacheVerdi
  * persisted value rather than reclassifying:
  *   hot      cacheRead > 0  and input < 2000   (prefix reused, prefill ≈ user text)
  *   partial  cacheRead > 0  and input >= 2000  (prefix reused up to a divergence point)
- *   cold     cacheRead == 0 and input >= 2000  (full re-prefill)
+ *   cold     reported cacheRead == 0 and input >= 2000
+ *   unknown  no cache-read count was supplied on the wire
  *   small    cacheRead == 0 and input < 2000   (too small to judge)
  */
 export function backendCacheVerdict(
 	input: number,
 	cacheRead: number,
 	backend?: BackendCompletionTimings | null,
+	cacheReadReported?: boolean,
 ): BackendCacheVerdict {
 	if (cacheRead === 0 && backend?.cachedTokens !== null && backend?.cachedTokens !== undefined) {
 		const backendInput = uncachedPrefillTokens(backend);
 		if (backendInput !== null) return classifyCacheUsage(backendInput, backend.cachedTokens);
 	}
+	if (cacheRead === 0 && cacheReadReported === false) return "unknown";
 	return classifyCacheUsage(input, cacheRead);
 }
 

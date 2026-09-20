@@ -74,7 +74,7 @@ const DispatchBudgetSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Advisory tool-call estimate; choose appropriate counts even above recipe recommendations. retryRevision sets a retry/revision estimate. Crossing estimates does not stop work.",
+			"Advisory tool-call counts; may exceed recipe recommendations and never stop work. retryRevision estimates a retry/revision.",
 	},
 );
 
@@ -101,7 +101,7 @@ const DispatchIntentSchema = Type.Object(
 			Type.Array(Type.String(), {
 				maxItems: 32,
 				description:
-					"Paths the worker may write; every expected output sits under one. Declaring any confines the worker and removes bash and verify from it, so put checks in verification instead of the task text.",
+					"Allowed write paths containing every expected output. Confines the worker and disables bash/verify; declare checks in verification.",
 			}),
 		),
 		relevant_paths: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
@@ -113,7 +113,7 @@ const DispatchIntentSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Repository-relative paths and outputs. Declare it on every dispatch: it selects the project rules that apply and pins worker context, where omitting it falls back to path tokens scraped from the task text. verification entries are declared check ids from package scripts or .clio-coder/verifiers.yaml. Per-task intent fields override inherited top-level fields within its scope. For disjoint parallel writes, set each task's write_roots to only its assigned outputs; expected_outputs alone does not narrow write access.",
+			"Required on every dispatch: repository-relative paths select project rules and worker context; omission falls back to task-text paths. verification names checks from package scripts or .clio-coder/verifiers.yaml. Per-task fields override batch defaults. Parallel writers need disjoint write_roots; expected_outputs does not restrict access.",
 	},
 );
 
@@ -154,7 +154,7 @@ const WorkerContextSchema = Type.Union(
 		),
 	],
 	{
-		description: `Parent conversation: isolated (default), fork (native history; never silently truncated), or splice (selected text evidence, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<call-id> or message:<index> in the current snapshot. Batch defaults may be overridden per task.`,
+		description: `Parent context: isolated (default), fork (native history, never silently truncated), or splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<call-id> or message:<index> in the current snapshot. Per-task overrides allowed.`,
 	},
 );
 const ContextRef = Type.Unsafe<Static<typeof WorkerContextSchema>>({ $ref: "#/$defs/workerContext" });
@@ -277,8 +277,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 						}),
 					],
 					{
-						description:
-							"Reviewer gate for one task: a read-only reviewer verdicts pass, revise, or fail, and revise re-runs the builder with the findings.",
+						description: "Read-only review of one task: pass, fail, or revise (re-run builder with findings).",
 					},
 				),
 			),
@@ -366,7 +365,7 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				Type.Integer({
 					minimum: 1,
 					maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
-					description: `UTF-8 byte allowance for a mutation-report worker's inline summary (coder, documenter), default 16384. A batch default applies to mutation-report steps only; other steps ignore it. Storage bound, not the returned preview (max_output_bytes).`,
+					description: `Stored inline summary limit in UTF-8 bytes for mutation-report workers (coder, documenter); default 16384. Other steps ignore it. max_output_bytes separately limits the returned preview.`,
 				}),
 			),
 		},

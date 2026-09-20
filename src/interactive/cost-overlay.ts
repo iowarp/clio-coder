@@ -227,7 +227,7 @@ function summaryBlock(
 					] as const,
 					[
 						"cache verdicts",
-						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small}`,
+						`hot ${promptCache.verdictCounts.hot} · partial ${promptCache.verdictCounts.partial} · cold ${promptCache.verdictCounts.cold} · small ${promptCache.verdictCounts.small} · unknown ${promptCache.verdictCounts.unknown}`,
 					] as const,
 				]
 			: [];

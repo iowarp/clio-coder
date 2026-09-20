@@ -64,6 +64,7 @@ function cacheVerdict(value: unknown): BackendCacheVerdict | null {
 		case "partial":
 		case "cold":
 		case "small":
+		case "unknown":
 			return value;
 		default:
 			return null;

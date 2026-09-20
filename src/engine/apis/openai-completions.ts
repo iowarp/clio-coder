@@ -49,6 +49,10 @@ import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overr
 import type { EngineApiProvider } from "./types.js";
 
 declare module "@earendil-works/pi-ai" {
+	interface Usage {
+		/** Whether the wire response explicitly supplied a cache-read count. */
+		cacheReadReported?: boolean;
+	}
 	interface AssistantMessage {
 		/** Direct observation of model-id presence in an OpenAI-compatible response. */
 		responseModelIdObservation?: ResponseModelIdObservation;
@@ -103,6 +107,7 @@ interface ResponseModelIdCapture {
 	reportedModelId: string | null;
 	observed: boolean;
 	modelIdDone: boolean;
+	cacheReadReported: boolean;
 	backendTimings: BackendCompletionTimings | null;
 	backendTimingsSource: BackendTimingsSource | null;
 	gatewayRouting: GatewayRoutingObservation | null;
@@ -151,10 +156,6 @@ function backendTimingsSourceForModel(model: Model<Api>): BackendTimingsSource |
 	return null;
 }
 
-function captureCanStopEarly(capture: ResponseModelIdCapture): boolean {
-	return capture.modelIdDone && capture.backendTimingsSource === null;
-}
-
 function observeResponseMetadataLine(line: string, capture: ResponseModelIdCapture): void {
 	const normalized = line.endsWith("\r") ? line.slice(0, -1) : line;
 	if (!normalized.startsWith("data:")) return;
@@ -163,6 +164,14 @@ function observeResponseMetadataLine(line: string, capture: ResponseModelIdCaptu
 	try {
 		const payload = JSON.parse(data) as unknown;
 		if (!isPlainRecord(payload)) return;
+		const usage = isPlainRecord(payload.usage) ? payload.usage : {};
+		const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
+		if (
+			nonnegativeFiniteNumber(details.cached_tokens) !== null ||
+			nonnegativeFiniteNumber(usage.cache_read_input_tokens) !== null
+		) {
+			capture.cacheReadReported = true;
+		}
 		if (!capture.modelIdDone) {
 			const model = payload.model;
 			if (typeof model === "string" && model.trim().length > 0) {
@@ -192,18 +201,13 @@ function observeResponseModelIdBytes(
 		const line = capture.buffer.slice(0, newline);
 		capture.buffer = capture.buffer.slice(newline + 1);
 		observeResponseMetadataLine(line, capture);
-		if (captureCanStopEarly(capture)) {
-			capture.buffer = "";
-			capture.decoder = null;
-			return;
-		}
 		newline = capture.buffer.indexOf("\n");
 	}
 	if (flush && capture.buffer.length > 0) {
 		observeResponseMetadataLine(capture.buffer, capture);
 		capture.buffer = "";
 	}
-	if (captureCanStopEarly(capture) || flush) capture.decoder = null;
+	if (flush) capture.decoder = null;
 }
 
 function captureResponseModelId(response: Response, capture: ResponseModelIdCapture, model: Model<Api>): Response {
@@ -243,6 +247,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		reportedModelId: null,
 		observed: false,
 		modelIdDone: false,
+		cacheReadReported: false,
 		backendTimings: null,
 		backendTimingsSource: backendTimingsSourceForModel(model),
 		gatewayRouting: null,
@@ -267,6 +272,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 						: { state: "reported", reportedModelId: capture.reportedModelId }
 					: { state: "not-observed" };
 				if (event.type === "done") {
+					event.message.usage.cacheReadReported = capture.cacheReadReported;
 					event.message.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.message.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.message.backendTimings = capture.backendTimings;
@@ -274,6 +280,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
 					}
+					event.error.usage.cacheReadReported = capture.cacheReadReported;
 					event.error.responseModelIdObservation = observation;
 					if (capture.gatewayRouting !== null) event.error.gatewayRouting = capture.gatewayRouting;
 					if (capture.backendTimings !== null) event.error.backendTimings = capture.backendTimings;
