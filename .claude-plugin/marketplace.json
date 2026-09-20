@@ -146,7 +146,7 @@
 			"name": "fix-issue",
 			"source": "./library/skills/git/fix-issue",
 			"description": "Resolves a tracker issue end to end: fetches it, diagnoses only when the issue does not name the code, fixes test-first, and self-reviews against the acceptance criteria, leaving a verified uncommitted change. Not for filing; use file-ticket. Not for committing or PRs; use ship.",
-			"version": "0.3.0",
+			"version": "0.3.1",
 			"category": "git",
 			"license": "Apache-2.0"
 		},
@@ -227,7 +227,7 @@
 			"name": "ship",
 			"source": "./library/skills/git/ship",
 			"description": "Ships finished work: writes one reviewed atomic commit, keeps maintainer branches local, or pushes a contributor branch to their fork and opens a PR only on explicit intent. Not for producing the change; use fix-issue.",
-			"version": "0.5.0",
+			"version": "0.5.1",
 			"category": "git",
 			"license": "Apache-2.0"
 		},

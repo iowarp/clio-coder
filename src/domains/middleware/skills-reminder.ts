@@ -29,7 +29,7 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 	// supplied examples, or a request for wording into a repository investigation.
 	const conversationalException =
 		"For a greeting, onboarding question, request for wording, or self-contained example, answer directly without skill discovery. " +
-		"Honor requests not to use tools. The following applies when beginning actual repository work: ";
+		"Honor requests not to use tools, other explicit tool restrictions, proposal-only scope, and declined installation offers. Do not activate a workflow for work the operator excluded (for example, ship when commits are forbidden). The following applies when beginning actual repository work: ";
 	const counts =
 		installable > 0
 			? `${installed} available in Clio, ${installable} additional marketplace skills available to install`
@@ -41,10 +41,13 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 	// At auto-edit and full-auto the model activates installed skills itself,
 	// so the reminder must not repeat "only the operator loads a skill": the
 	// literal models this line exists for act on it over the listing footer.
+	if (modelActivation && installed === 0) {
+		return `[Skills] ${counts}. No ready skill can be activated. Continue the requested task with available tools; do not load marketplace entries or repeat a declined installation offer. List skills only if the operator asks about them or installation.`;
+	}
 	if (modelActivation) {
 		return (
 			`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
-			'and checking for a match; if one matches, load it with context(scope="skills", name="<name>") and ' +
+			'and checking for a match; if a ready Clio skill matches the requested work, load it with context(scope="skills", name="<name>") and ' +
 			"continue the task in the same turn. Discovery in another agent’s folders does not mean installed in Clio. Marketplace additions are offered for install " +
 			"when the operator runs it. If none match, do not mention skills and continue with the task."
 		);

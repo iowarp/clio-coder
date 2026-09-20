@@ -7,7 +7,7 @@ triggers:
   - commit and open the PR
   - push and open a pull request
   - get this up for review
-version: 0.5.0
+version: 0.5.1
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (required for pr mode), POSIX-compatible shell
 allowed-tools:
@@ -16,6 +16,7 @@ allowed-tools:
   - ls
   - git
   - bash
+  - verify
   - tasks
   - ask_user
 clio-coder:

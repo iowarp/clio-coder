@@ -27,7 +27,8 @@ convention in prose; report any retention step requiring an unauthorized write.
 Capture is selective: rules require repeated failures; spontaneous reminders
 require task-bank citations. Remembering does not guarantee capture or retention.
 For an existing source-grounded knowledge/procedural entry, the operator can
-select it in `/memory` and press `p` to propose repo memory. Alternatively,
+select it in `/memory` and press `p` to propose repo memory, then separately
+review and approve the proposal. Include both steps when explaining this workflow. Alternatively,
 explicitly request context-handoff, export the actual bank snapshot where writes
 are authorized, and run `clio-coder memory promote --from-handoff <path>
 --entry <id> --scope repo --repository <canonical-absolute-path>`.

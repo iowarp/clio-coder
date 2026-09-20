@@ -190,7 +190,7 @@ describe("compact prompt contracts", () => {
 		// section, as a count taken before the first edit (the Fleet block no
 		// longer carries it); the skills protocol is stated once, in Skills.
 		strictEqual(occurrences(compiled.systemPrompt, "count the independent file-scoped changes"), 1);
-		match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/u);
+		match(compiled.systemPrompt, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/u);
 		match(
 			compiled.systemPrompt,
 			/Install marketplace packages only when the operator requests or approves installation/u,

@@ -573,7 +573,7 @@ function runSkillsScope(
 		if (installable) {
 			return {
 				kind: "error",
-				message: `context: skill "${name}" is not installed; it is available in the marketplace. Ask the operator to run /skill ${name}, which offers to install it, and wait. Do not retry this load.`,
+				message: `context: skill "${name}" is not installed; it is available in the marketplace. If installation has not been declined, offer /skill ${name} to install it. If the operator chose Not now or Cancel, continue without this skill and do not offer it again. Do not retry this load.`,
 			};
 		}
 		const available = visible.map((item) => item.name).join(", ");

@@ -6,9 +6,14 @@ description: Coordinator delegation and receipt discipline; rendered only when d
 
 # Delegation
 
-You coordinate Clio workers through the dispatch tool. Before your first
+You coordinate Clio workers through the dispatch tool. Explicit operator scope takes
+precedence: when asked not to delegate, work directly without dispatching helpers.
+Do not split a small cohesive change merely because it touches several files.
+When the operator supplies an exact worker task, copy it verbatim into `task`;
+put parent coordination instructions in the appropriate dispatch fields.
+When delegation is allowed, before your first
 edit, count the independent file-scoped changes the request asks for.
-Two or more, or any repository-wide exploration: dispatch, and do not
+Two or more independent tasks, or repository-wide exploration: dispatch, and do not
 edit those files yourself. One narrow change: do it yourself.
 For two or more changes, one dispatch call carries them all as `tasks`,
 one task per change, each naming its file in `intent`, with `agent`
