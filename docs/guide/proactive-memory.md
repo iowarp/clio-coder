@@ -24,7 +24,7 @@ flowchart LR
   D -->|background configured| L[two-phase local model policy]
   S --> V[visible advisory reminder]
   L --> V
-  V --> U[next user turn and session ledger]
+  V --> U[next tool-batch or prompt boundary and session ledger]
   R -. counts and outcomes only .-> J[bounded state JSONL]
   B -. explicit context-handoff .-> H[redacted handoff snapshot]
 ```
@@ -33,9 +33,10 @@ The task bank is in `src/domains/memory/` and belongs to one live session. It is
 separate from both durable approved lessons and the regenerable repository
 context engine.
 
-- **Private status** is the memory policy's short progress model. It can be
-  inspected with `/memory`, but is never rendered to either model, injected into
-  the action turn, or exported to a handoff.
+- **Private status** is the memory policy's short progress model. Inspect it
+  with `/memory`. It stays out of ordinary reminders, the memory model's bank
+  input, and handoffs. After compaction, Clio can include it in the restored
+  state sent to the action agent.
 - **Knowledge** contains stable task facts such as requirements, paths,
   environment facts, and constraints.
 - **Procedural memory** contains attempts and outcomes such as failed commands,
@@ -43,9 +44,11 @@ context engine.
 
 Knowledge and procedural entries have stable short IDs. A visible reminder is
 one `Memory:` advisory block and records the cited entry IDs' injection counts.
-The existing middleware path places that block in the next submitted user turn
-and persists its attribution in the session ledger; there is no hidden
-`transformContext` injection.
+
+The existing middleware path delivers that block at the first boundary that can
+carry it, which is either a native tool-batch boundary inside the running turn or
+the next accepted prompt, and persists its attribution in the session ledger.
+There is no hidden `transformContext` injection.
 
 ## Paper mapping and Clio constraints
 
@@ -58,6 +61,9 @@ and persists its attribution in the session ledger; there is no hidden
 | Fixed memory cadence | Deterministic decay signals plus a coarse interval floor |
 | Learned intervention calibration | Structural authority gate: spontaneous reminders must cite a bank entry; deterministic triggers may be uncited |
 | Passive and always-on ablations | A/B harness compares baseline, rules, and LLM tiers and flags always-noisy ties as regressions |
+
+<details>
+<summary>The two-line envelope grammar and what the parser tolerates</summary>
 
 Model output uses a strict two-line grammar parsed by `src/domains/memory/task-memory-policy.ts`:
 
@@ -112,6 +118,8 @@ Phase 1 writes remain valid when Phase 2 is gated or yields to a deterministic
 reminder; an over-budget reminder is recorded as `gated` and suppressed rather
 than discarding the writes that came with it. A timeout, provider failure,
 malformed response, or telemetry failure is silent and never blocks a tool.
+
+</details>
 
 ### Intervention Defaults & Cadence Knobs
 - `context.memory.enabled` (default `true`): Enables observation, task bank writes, and reminder injection.
@@ -170,9 +178,12 @@ typical step in the tens of seconds. This makes an awaited step intolerable as
 an end-of-turn pause.
 
 The prompted step is therefore detached. `evaluateAsync` starts it and returns
-immediately; the turn ends on schedule. When the step resolves, its reminder is
-delivered through the deferred-reminder path into the next submitted turn, which
-is exactly where an awaited turn_end reminder would have been buffered anyway.
+immediately; the turn ends on schedule. When the step resolves, its reminder
+joins the deferred-reminder buffer that an awaited `turn_end` reminder would have
+landed in anyway, and drains at the next boundary that can carry it: a native
+tool-batch boundary if the session is still executing tools, otherwise the next
+accepted prompt.
+
 Two consequences follow, both deliberate:
 
 - At most one background step is alive per session. A boundary that arrives while
@@ -195,27 +206,37 @@ procedural ID or it is recorded as `gated` and remains invisible.
 
 ### Outcome semantics
 
-The `/memory` overlay displays `last <decision>` where `<decision>` is the
-combined outcome of the most recent actual memory boundary. A **memory boundary**
-is a turn-end evaluation that includes newly completed tools or an explicit
-deterministic trigger (interval, error-streak, loop signal). A no-tool
-middleware continuation is another turn-end with no new tools since the previous
-boundary. It is not a new memory boundary and does not replace the prior outcome.
-Thus `last` remains `injected` across such continuations until a later
-tool-bearing or explicitly triggered memory step produces a new outcome (e.g.,
-a healthy tool leading to `silent`).
+The `/memory` overlay displays `last <decision>`, the combined outcome of the most
+recent actual memory boundary. A **memory boundary** evaluates newly completed
+tools or an explicit deterministic trigger, such as an interval, error streak, or
+loop signal. Model-backed evaluation can run at a settled native tool-batch
+boundary as well as at turn end.
+
+A no-tool middleware continuation is another turn-end with no new tools since the
+previous boundary, so it is not a new memory boundary and does not replace the
+prior outcome. `last` therefore remains `injected` across such continuations until
+a later tool-bearing or explicitly triggered step produces a new outcome, such as
+a healthy tool leading to `silent`.
 
 ## Cost and the default decision
 
 The LLM tier costs real tokens, real seconds of model time, and a request slot on
-a server that is usually the same machine the operator's own turns run on. Every
-step is therefore accounted for the way a `/btw` side question is: one cost entry
-under the `background-memory` label, which `/cost` shows as its own `memory steps`
-row, and one durable row in `<stateDir>/usage/out-of-turn.jsonl` carrying the
-usage, the call's duration, and the backend's prefill facts, which
-`clio-coder usage report` folds after the process exits. `/memory` shows the
-lifetime figures folded from `steps.jsonl`: steps, tokens, model time, and the
-hit rate.
+a server that is usually the same machine the operator's own turns run on.
+
+Every step is therefore accounted for the way a `/btw` side question is: one cost
+entry under the `background-memory` label, which `/cost` shows as its own
+`memory steps` row, and one durable row in `<stateDir>/usage/out-of-turn.jsonl`
+carrying the usage, the call's duration, and the backend's prefill facts.
+`clio-coder usage report` folds those rows after the process exits, and `/memory`
+shows the lifetime figures folded from `steps.jsonl`: steps, tokens, model time,
+and the hit rate.
+
+The measurements below are one operator's dated testbed run on one route. They
+are evidence for the default that was chosen, not a figure any other route will
+reproduce.
+
+<details>
+<summary>The 274-row operator export from 2026-08-14 to 2026-08-29</summary>
 
 ### The measurement
 
@@ -236,6 +257,8 @@ From one operator's dated `steps.jsonl` export, 274 rows spanning 2026-08-14 to
 Four further injections in the same window came from the free rules tier, so the
 lifetime total of 10 injections is not the model tier's score. Rules-tier
 injections cost nothing.
+
+</details>
 
 ### The decision
 
@@ -261,7 +284,14 @@ unexamined one:
 
 ### Dedicated routing, chat fallback and endpoint capacity
 
-Clio prefers the explicitly configured memory target and model. If that route is
+Clio prefers the explicitly configured memory target and model, uses the active
+chat route when that one is known unavailable, and skips the step entirely when
+the endpoint has no request capacity left.
+
+<details>
+<summary>Exactly which failures permit a chat attempt, and how capacity is counted</summary>
+
+If the dedicated route is
 known unavailable (missing target/runtime, down target, absent model in a known
 catalog, or a model reported unloaded/loading), Clio selects the active chat
 route for that step. A runtime client error on the dedicated route permits one
@@ -287,16 +317,19 @@ one-slot endpoint skips it. Known dedicated saturation does not itself initiate
 chat fallback. Larger declared capacities work without a new constant.
 
 LiteLLM is a gateway protocol, so Clio does not invent a local one-slot limit for
-its URL. Distinct model routes such as dynamo, mini and zbook can share that URL;
-the gateway owns their physical routing and backend residency. An explicit or
-observed endpoint-wide bound still applies when present. Clio's process-local
-foreground holds and observed dispatch state are not a global scheduler for every
-client using the gateway. Slot holds are released on success, failure and abort.
+its URL. Distinct model routes can share that gateway URL (for example, separate
+chat and memory target profiles pointing to the same LiteLLM proxy); the gateway
+owns their physical routing and backend residency. An explicit or observed
+endpoint-wide bound still applies when present. Clio's process-local foreground
+holds and observed dispatch state are not a global scheduler for every client
+using the gateway. Slot holds are released on success, failure and abort.
 
 The existing `background_memory` expected-cold stamp remains keyed by endpoint
 URL. It records a possible shared-endpoint cache disturbance, including after a
 failed request, rather than proving that a different model behind the gateway
 actually evicted the chat prefix.
+
+</details>
 
 ## Choosing a background model
 
@@ -355,43 +388,51 @@ context:
 ```
 
 With `context.memory.target` and `context.memory.model` unset, Clio stays in the
-zero-cost rules tier. `/memory` shows the current tier, last decision, approved
-durable lessons, the live bank, and a bounded history of the last twenty memory
-steps with their trigger, decision, write count, cited-entry count, tier, and
-latency. That history is the only place a capture, a gate, or a timeout becomes
-visible, since those outcomes produce no transcript entry by design; only an
-actual injection reaches the transcript. It carries counts and outcomes only,
-never bank or trajectory text. `/settings` exposes controls for every key above;
-its compact row labels retain shorter operator-facing names. The saved
-background-memory target is the Memory target row in Settings → Orchestrator,
-independent of the chat target and the fleet default. A running session owns
-its routing snapshot, while the saved
-selection becomes the default for new sessions.
+zero-cost rules tier.
+
+`/memory` shows the current tier, last decision, approved durable lessons, the
+live bank, and a bounded history of the last twenty memory steps with their
+trigger, decision, write count, cited-entry count, tier, and latency. That
+history is the only place a capture, a gate, or a timeout becomes visible, since
+those outcomes produce no transcript entry by design and only an actual injection
+reaches the transcript. It carries counts and outcomes only, never bank or
+trajectory text.
+
+`/settings` exposes controls for every key above, with shorter operator-facing
+row labels. The saved background-memory target is the Memory target row in
+Settings → Orchestrator, independent of the chat target and the fleet default. A
+running session owns its routing snapshot; the saved selection becomes the
+default for new sessions.
 
 An example gateway topology keeps the three backend routes distinct:
 
+<details>
+<summary>A worked three-route gateway topology and its role selection</summary>
+
 | Role | Target | Runtime and endpoint | Model | Capacity |
 | --- | --- | --- | --- | --- |
-| Chat and memory fallback | `dynamo` | LiteLLM at `http://gateway:4000` | `dynamo/qwen3.8-27b` | Gateway-owned unless an explicit or observed endpoint bound is available |
-| Preferred background memory | `zbook` | Same LiteLLM gateway | `zbook/ornith-1.5-35b-a3b` | Same capacity evidence rules |
-| Alternative memory candidate | `mini` | Same LiteLLM gateway | `mini/ornith1.5-35b-moe` | Same capacity evidence rules |
+| Chat and memory fallback | `chat-target` | LiteLLM at `http://192.168.1.20:4000` | `chat-profile/qwen3.8-27b` | Gateway-owned unless an explicit or observed endpoint bound is available |
+| Preferred background memory | `memory-dedicated` | Same LiteLLM gateway | `memory-profile/ornith-1.5-35b-a3b` | Same capacity evidence rules |
+| Alternative memory candidate | `memory-fallback` | Same LiteLLM gateway | `memory-profile/ornith1.5-35b-moe` | Same capacity evidence rules |
 
-The corresponding role selection is:
+The corresponding role selection in `settings.yaml` is:
 
 ```yaml
 chat:
-  target: dynamo
-  model: dynamo/qwen3.8-27b
+  target: chat-target
+  model: chat-profile/qwen3.8-27b
 context:
   memory:
-    target: zbook
-    model: zbook/ornith-1.5-35b-a3b
+    target: memory-dedicated
+    model: memory-profile/ornith-1.5-35b-a3b
 ```
 
 These are example configured target/model IDs, not built-in routes. Compare a
 slow dedicated model with an alternative using actual step latency, valid bank
 writes and known usage; the active chat route remains the fallback. Do not create
 aliases or change endpoint URLs just to bypass capacity accounting.
+
+</details>
 
 The deadline is a bound on what an optional call may hold that server for, not a
 figure sized to capture the tail. The shipped `60000` is a bounded compromise,
@@ -406,8 +447,8 @@ real target surfaces to verify the route:
 
 ```bash
 clio-coder targets --probe
-clio-coder models --target mini
-clio-coder models --target dynamo
+clio-coder models --target memory-dedicated
+clio-coder models --target chat-target
 clio-coder
 ```
 
@@ -429,6 +470,7 @@ the operator, the entries it cited are also proposed into the durable store at
 `<dataDir>/memory/records.json`, unapproved, scoped to the repository the session
 is working in, with provenance naming the session and the source entry. That is
 the one automatic writer of that file; everything else about it is unchanged.
+
 `/memory` and `clio-coder memory list` show the proposal, and
 `clio-coder memory approve <id>` is still a separate operator action, so nothing
 the background plane produced reaches a system prompt without review. A step with
@@ -442,6 +484,11 @@ lesson would fill the review queue with rows nobody asked for. They remain
 promotable by hand from `/memory`.
 
 ## What the LLM tier actually writes
+
+The historical measurements below describe one model and route; they are not guarantees for other models.
+
+<details>
+<summary>What one measured model produced across ten live steps and forty runs</summary>
 
 Measured on the shipped prompt against `google/gemma-4-26b-a4b-qat`, across ten
 live steps and forty controlled runs on the same route.
@@ -485,6 +532,8 @@ malformed envelope, usually `<operations>` with no list followed by
 model behavior rather than a route fault. The boundary drop rate remains 0% at
 shipped settings.
 
+</details>
+
 ## Handoff continuity
 
 The bank normally dies with the session. When `context-handoff` is explicitly
@@ -508,7 +557,12 @@ Each completed memory-policy attempt appends one content-free record to:
 ```
 
 Use `clio-coder paths --json` to resolve the state directory (the `"state"` property). The log rotates after 1 MiB and
-keeps one previous generation as `steps.jsonl.1`. Every exact-schema record has:
+keeps one previous generation as `steps.jsonl.1`.
+
+<details>
+<summary>Every field in a steps.jsonl record and what each outcome means</summary>
+
+Every exact-schema record has:
 
 - timestamp and schema version;
 - one to three coalesced trigger reasons;
@@ -543,7 +597,18 @@ Note that routine no-tool continuation checks do not emit telemetry rows, as the
 are not considered new memory boundaries. Only actual tool-bearing or explicitly
 triggered memory steps produce rows.
 
+</details>
+
 ## Evaluation and promotion bar
+
+The bar for promoting the LLM tier is a measured pass-rate gain from a small
+number of specific, usually cited reminders at an acceptable added token and
+latency cost. Injecting at least once per task while merely tying or losing to
+baseline is a regression, even when every reminder is cited, and one anecdotal
+task is not evidence.
+
+<details>
+<summary>How the A/B harness runs, what it reports, and how to compare live</summary>
 
 `src/domains/eval/proactive-memory.ts` exports a fixed three-task, matched A/B
 harness. It executes `baseline`, `rules`, and `llm` variants in stable order and
@@ -565,18 +630,23 @@ There is therefore no maintained direct test coverage or standalone
 explicit measurement campaign.
 
 For a live local comparison, an adapter should route only the `llm` variant
-through the request's target/model (the reference memory route is `mini` /
-`ornith1.5-35b-moe`), keep baseline memory telemetry empty, and run all
-nine trials in equivalent isolated workspaces. Do not promote the LLM tier from
-one anecdotal task. The evidence bar is a pass-rate gain from a small number of
-specific, usually cited reminders at acceptable added token and latency cost.
-Injecting at least once per task while merely tying or losing to baseline is
-always a regression, even when every reminder is cited.
+through the request's target/model (e.g., using a dedicated local memory target
+such as `memory-dedicated` / `ornith1.5-35b-moe`), keep baseline memory telemetry
+empty, and run all nine trials in equivalent isolated workspaces.
+
+</details>
 
 ## Worker growth path
 
-Worker-side intervention is intentionally not implemented in this sprint. The
-bank, policy client, telemetry, and registration interfaces carry no interactive
+Worker-side memory intervention is not implemented. Nothing in
+`src/domains/memory/` is worker-aware, and no worker path registers a memory
+policy. What exists today is a set of interfaces that were kept free of
+interactive chat-loop types so a per-worker instantiation stays possible.
+
+<details>
+<summary>The seams a future worker-side memory would use</summary>
+
+The bank, policy client, telemetry, and registration interfaces carry no interactive
 chat-loop types, so they can be instantiated per worker later without moving the
 policy into the action agent.
 
@@ -598,3 +668,5 @@ The future sequence is therefore worker events → worker-local registration →
 bounded steering advisory between batches. It must preserve the current receipt,
 safety, timeout, and permission semantics, and it should ship only after a
 Terminal-Bench-style long-run evaluation shows a selective benefit.
+
+</details>

@@ -1,44 +1,77 @@
 # Chat rendering specification
 
-> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+> **Historical design record.** This blueprint describes the GUI at an earlier
+> stage, before much of the conversation view shipped. Its proposed work, paths,
+> and counts are historical. For current behavior, read the [GUI reference](README.md).
 
-The blueprint for the conversation view and the thirteen domain inspectors. It was
-recovered from `apps/workbench` before that application was deleted and re-verified
-against the current `contracts/` and `src/`, so every quoted path, line number and
-taxonomy is checked against the code that ships today rather than against the
-workbench's own wire format.
+Use this page for the rationale behind conversation layouts, label taxonomies,
+and empty states. Expand the background and implementation sketches as needed.
 
-Seventeen artifacts follow, each with a named destination file. Two of them have
-already landed and are recorded here for their rationale, not as pending work:
-`useFollowLatest` shipped as `client/render/follow-latest.ts`, and the
-frame-coalesced event path shipped as `client/api/frame-buffer.ts`. The other
-fifteen are unbuilt.
+<details>
+<summary>Original scope and relationship to the current GUI</summary>
 
-The central finding is that the chat gap is not a protocol gap. `TimelineItem.rawInput`
+The blueprint covers the conversation view and the thirteen domain inspectors. It
+was recovered from `apps/workbench` before that application was deleted, and its
+quoted paths and taxonomies were checked against `contracts/` and `src/` at that
+time rather than against the workbench's own wire format. Treat every path and
+count below as a dated citation, not as a present-tense claim.
+
+Seventeen artifacts follow, each with a named destination file. When this was
+written, two had landed and fifteen had not. Several of the fifteen have shipped
+since, including `client/chat/turns.ts`, `client/chat/ActivityGroup.tsx`,
+`client/chat/Diff.tsx`, `client/chat/Approval.tsx`, `client/chat/live-status.ts`
+and `client/chat/tool-cards.tsx`. The list is kept in its original form because
+the rationale under each artifact is the reason to read it.
+
+The central finding was that the chat gap is not a protocol gap. `TimelineItem.rawInput`
 and `rawOutput` already carry the harness's full tool argument object and result, and
 `src/tools/edit-diff.ts` already emits a capped unified diff at
-`rawOutput.result.details.diff`, so per-tool-kind cards and diff rendering are
-buildable today with no ACP change. What is genuinely missing is conversational
+`rawOutput.result.details.diff`, so per-tool-kind cards and diff rendering were
+buildable with no ACP change. What was missing then was conversational
 architecture: turn grouping, the collapsing activity group, the live status chip,
-approval anchoring, and roughly forty closed label taxonomies that the GUI currently
-replaces with `JSON.stringify` dumps inside `<details>` at fourteen call sites.
+approval anchoring, and roughly forty closed label taxonomies that the GUI at the
+time replaced with `JSON.stringify` dumps inside `<details>` at fourteen call
+sites.
 
 ---
 
 
-The prior audit's claim is correct on data but wrong in emphasis. Every inspector's *payload* is reproduced by the new route table, but the workbench's value was never the payload: it was ~40 closed label taxonomies (gate reasons, eval failure classes, evidence trust axes, customization categories, recovery sections, verifier rejections), a consistent tone function per domain, and a rigorously-worked empty-state grammar that distinguishes "not read yet" from "store missing" from "store present but empty" from "record predates this schema". `apps/clio-coder-gui` currently renders those domains as `JSON.stringify` dumps in `<details>` (14 call sites), so all of that is lost unless carried. On chat, the finding is sharper than expected: the workbench had NO per-tool-kind rendering and NO diff rendering at all, because its wire (`TurnToolPayload`) carried only `{kind, title, summary, locations, status}`. The new GUI's wire is strictly richer — `TimelineItem.rawInput`/`rawOutput` already carry the harness's full tool argument object and result, and `src/tools/edit-diff.ts` already produces a capped unified diff at `rawOutput.result.details.diff` — so per-tool-kind cards and diffs are buildable today with no ACP change. What must be *ported* from the workbench is the conversational architecture the new GUI lacks entirely: turn grouping into request/response/activity segments, the collapsing activity group with its disclosure policy, the live status chip, follow-latest scrolling, the frame-coalescing event buffer, and the approval anchoring/escalation/keyboard model. 17 artifacts follow, 11 of them chat.
+The prior audit's claim was correct on data but wrong in emphasis. Every inspector's *payload*
+is reproduced by the new route table, but the workbench's value was never the payload: it was
+~40 closed label taxonomies (gate reasons, eval failure classes, evidence trust axes, customization
+categories, recovery sections, verifier rejections), a consistent tone function per domain, and a
+rigorously-worked empty-state grammar that distinguishes "not read yet" from "store missing" from
+"store present but empty" from "record predates this schema". Those taxonomies are the part of this
+document that survives; the rendering that carries them has since been built.
+
+On chat, the finding was sharper than expected: the workbench had NO per-tool-kind rendering and NO diff
+rendering at all, because its wire (`TurnToolPayload`) carried only `{kind, title, summary, locations, status}`.
+The new GUI's wire is strictly richer — `TimelineItem.rawInput`/`rawOutput` already carry the harness's
+full tool argument object and result, and `src/tools/edit-diff.ts` already produces a capped unified diff
+at `rawOutput.result.details.diff` — so per-tool-kind cards and diffs were buildable with no ACP change.
+
+What had to be *ported* from the workbench was the conversational architecture the
+GUI lacked at the time: turn grouping into request/response/activity segments, the
+collapsing activity group with its disclosure policy, the live status chip,
+follow-latest scrolling, the frame-coalescing event buffer, and the approval
+anchoring/escalation/keyboard model. 17 artifacts follow, 11 of them chat.
 
 
 ---
+
+</details>
 
 ## Conversation projection: groupTurns and the ChatSegment model
 
-- priority: must-keep
-- from: apps/workbench/src/chat.ts:20-126
-- to: apps/clio-coder-gui/client/chat/turns.ts
-- value: The single largest gap. `apps/clio-coder-gui/client/pages/sessions.tsx:270` renders `snapshot.timeline.map(item => <Timeline item/>)` — a flat list of undifferentiated cards. The workbench instead grouped the flat timeline into turns, and within a turn interleaved prose, reasoning, and *runs* of tool activity, so a turn that ran 14 tools between two paragraphs shows as: paragraph, one collapsed activity group, paragraph. Without this the chat is unreadable at real tool volume. It also carries the referential-identity trick that makes memoization work: a turn whose items are element-wise identical keeps its object identity, so settled turns never re-render while a later turn streams.
+- **priority**: must-keep
+- **from**: apps/workbench/src/chat.ts:20-126
+- **to**: apps/clio-coder-gui/client/chat/turns.ts
+- **value**: The single largest gap. `apps/clio-coder-gui/client/pages/sessions.tsx:270` renders `snapshot.timeline.map(item => <Timeline item/>)` — a flat list of undifferentiated cards. The workbench instead grouped the flat timeline into turns, and within a turn interleaved prose, reasoning, and *runs* of tool activity, so a turn that ran 14 tools between two paragraphs shows as: paragraph, one collapsed activity group, paragraph. Without this the chat is unreadable at real tool volume. It also carries the referential-identity trick that makes memoization work: a turn whose items are element-wise identical keeps its object identity, so settled turns never re-render while a later turn streams.
 
 Port verbatim in behavior, retyped for `contracts/sessions.ts` `TimelineItem` (kinds are `user|text|thought|tool|notice`, not the workbench's 8-kind set).
+
+<details>
+<summary>`ChatSegment`, `ChatTurn`, `buildTurn`, and the `sameItems` identity check</summary>
 
 ```ts
 import type { TimelineItem } from "../../contracts/sessions.js";
@@ -159,6 +192,8 @@ Memo comparator for the turn view (workbench `Chat.tsx:400-405`), which is what 
 
 And pass `nowMs={turn.settled ? 0 : nowMs}` down, so the once-a-second clock tick cannot invalidate a settled turn (`Chat.tsx:429`). This is the reason the workbench resumed a 64-turn session in 119–172 ms with 683 DOM nodes.
 
+</details>
+
 ---
 
 ## Activity group: summarizeActivity and the disclosure policy
@@ -167,6 +202,9 @@ And pass `nowMs={turn.settled ? 0 : nowMs}` down, so the once-a-second clock tic
 - from: apps/workbench/src/chat.ts:128-208 and apps/workbench/src/Chat.tsx:177-281
 - to: apps/clio-coder-gui/client/chat/activity.ts + client/chat/ActivityGroup.tsx
 - value: This is the mechanism that keeps a 40-tool turn readable. It derives a one-line label and a tone from item statuses alone (no new server field), decides whether the group opens itself, shows the currently-running tool's title on the collapsed summary line so a silent run still tells the operator what is happening, and respects a manual toggle forever after. `apps/clio-coder-gui` has no equivalent; every tool is a permanently-expanded card.
+
+<details>
+<summary>`summarizeActivity`, the `ActivityTone` scale, and the group component</summary>
 
 ```ts
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning" | "error";
@@ -263,6 +301,8 @@ export function workerLabel(provenance: Provenance | undefined): string | null {
 
 Title attribute on the tag: `"Reported by Clio Coder as the agent that ran this call"`.
 
+</details>
+
 ---
 
 ## Per-tool-kind tool call rendering
@@ -276,6 +316,9 @@ The ACP `kind` enum is a coarse UI hint only. `src/engine/acp/server.ts:235` map
 
 The canonical name set (from `iowarp/clio-coder/src/tools/`): `read ls context write edit artifact grep find code_nav bash verify web_fetch git dispatch monitor steer ask_user decide evidence ledger panes run_script safe_exec task`.
 
+<details>
+<summary>The `ToolPresenter` type every per-kind card implements</summary>
+
 ```ts
 export type ToolPresenter = {
 	/** Short kind chip, lowercase. */ chip: string;
@@ -284,6 +327,8 @@ export type ToolPresenter = {
 	body: "diff" | "terminal" | "matches" | "file" | "fetch" | "dispatch" | "json" | null;
 };
 ```
+
+</details>
 
 **Per-tool contract.** `in` = `item.rawInput`; `out` = `item.rawOutput.result` (`{ output?: string, details?: Record<string, unknown> }`), `err` = `item.rawOutput.isError === true`.
 
@@ -315,6 +360,9 @@ export type ToolPresenter = {
 - `dispatch`: see the fleet strip artifact; render the matching `FleetItem` rows inline under the call.
 - `json`: last resort — the current `<pre>{JSON.stringify(…)}</pre>`, but inside a closed `<details>` labelled `Tool input and result`, and only when the row is expanded.
 
+<details>
+<summary>`SAFE_TOOL_TITLES` and the path-shortening rules</summary>
+
 **Path presentation.** Port `presentableToolTitle` (clio-host.ts:320): replace every occurrence of the workspace root with `[project]`, strip every code point `< 0x20` and `0x7f`, trim, and cap at 511 UTF-8 bytes with a trailing `…`. Empty after stripping falls back to a generic label. The generic labels (clio-host.ts:303) are worth keeping as the fallback when `title` is missing:
 
 ```ts
@@ -325,6 +373,8 @@ export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
 	switch_mode: "Change work mode", other: "Use a Clio Coder tool",
 };
 ```
+
+</details>
 
 **Locations.** `item.locations` is `[{path, line?}]`. Render each as `path` with `:${line + 1}` appended when `line` is an integer (ACP lines are zero-based; the current code at sessions.tsx:190 already does the `+1`). Show at most 3 inline; the rest behind `+N more`.
 
@@ -341,7 +391,8 @@ export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
 
 **Where the diff lives.** `item.rawOutput.result.details.diff` is a unified-diff string; `item.rawOutput.result.details.firstChangedLine` is a 1-based line number. Produced by `generateDiffString()` in `src/tools/edit-diff.ts`, which caps each rendered line at `MAX_DIFF_LINE_CHARS = 500` (appending `… (+N chars)`) and the whole diff at `MAX_DIFF_BYTES = 32_768`. **It is `undefined` when the previous or new file exceeds 1 MiB** — in that case `out.output` contains the literal sentence `note: diff skipped because the previous or new file exceeds 1 MiB`, and the card must say so rather than showing an empty diff.
 
-**Parser** (no dependency; the string is a plain unified diff):
+<details>
+<summary>`parseUnifiedDiff`, the `DiffLine` union, and hunk-header handling</summary>
 
 ```ts
 export type DiffLine =
@@ -367,6 +418,8 @@ export function parseUnifiedDiff(source: string): readonly DiffLine[] {
 	return out;
 }
 ```
+
+</details>
 
 **Rendering.** A two-gutter table-free grid (`grid-template-columns: 3.5rem 3.5rem 1fr`) so copy-paste yields only the code:
 - old line number, new line number, then `<code>` with the text;
@@ -423,6 +476,9 @@ Banner eyebrow: `escalated ? "APPROVAL WAITING · ESCALATED" : "APPROVAL NEEDED"
 
 **Desktop notification** (`App.tsx:8369-8384`): one per card, and **only if `Notification.permission === "granted"` already** — this effect never asks for the permission; a settings toggle does. Body is `permission.title` only. A path in a notification would leave the project boundary. Wrap the constructor in try/catch; a browser that refuses is not a failure. Return `() => posted.close()`.
 
+<details>
+<summary>`RESOLUTION_SUMMARY`, the exact wording for each approval outcome</summary>
+
 **Resolution wording** for the settled notice row (workbench `timeline.ts:180-193`), which the new GUI currently renders as the bare string `Permission ${status}: ${title}`:
 
 ```ts
@@ -436,6 +492,8 @@ export const RESOLUTION_SUMMARY: Readonly<Record<string, string>> = {
 
 The distinction between 'told no' and 'not told no' is a real difference in what the model sees and must survive the port.
 
+</details>
+
 ---
 
 ## Live status chip: the nine-state turn state machine
@@ -444,6 +502,9 @@ The distinction between 'told no' and 'not told no' is a real difference in what
 - from: apps/workbench/src/chat.ts:210-258 and src/Chat.tsx:154-175
 - to: apps/clio-coder-gui/client/chat/live-status.ts
 - value: The new GUI's entire liveness signal is the string `" · Clio Coder is working…"` appended to a status line (sessions.tsx:257). The workbench derived nine distinct states from facts it already had and, critically, carried the *exact Clio-reported title* of the running tool as the chip's detail — so during a silent run the chip is the only place the operator learns which command is running. Cheap to port, disproportionate effect on perceived speed.
+
+<details>
+<summary>`liveStatus`, the nine `LiveState` values, `LIVE_GLYPHS`, and the `useNow` tick</summary>
 
 ```ts
 export type LiveState = "starting" | "thinking" | "writing" | "acting" | "waiting" | "stopping" | "done" | "failed" | "stopped";
@@ -479,11 +540,7 @@ export const LIVE_GLYPHS: Readonly<Record<LiveState, string>> = {
 };
 ```
 
-Chip markup (`Chat.tsx:166-175`): `role="status"`, glyph `aria-hidden`, label, optional detail, optional elapsed. Elapsed is only passed while the turn is live. Place it in the response header next to `Clio Coder`, not in a global status bar — it belongs to the turn.
-
-The empty-response placeholder (`Chat.tsx:392`): while a turn is live and has produced no segments yet, render `<p className="chat-response__placeholder">{status.label}…</p>` so the response block is never a blank box.
-
-**Shared clock.** One `useNow(active)` hook for the whole view, ticking at 1000 ms and only while `activeTurn !== null || pendingPermission !== null`, so the banner, the tool rows and the outcome footer can never disagree (`App.tsx:224-233`):
+**Shared clock implementation.** One `useNow(active)` hook for the whole view, ticking at 1000 ms and only while `activeTurn !== null || pendingPermission !== null`, so the banner, the tool rows and the outcome footer can never disagree (`App.tsx:224-233`):
 ```ts
 function useNow(active: boolean): number {
 	const [now, setNow] = useState(() => Date.now());
@@ -498,6 +555,12 @@ function useNow(active: boolean): number {
 ```
 Use `clock.now()` from `client/api/clock.ts` instead of `Date.now()` so the server-clock offset applies. And remember to pass `nowMs={turn.settled ? 0 : nowMs}` per the groupTurns artifact.
 
+</details>
+
+Chip markup (`Chat.tsx:166-175`): `role="status"`, glyph `aria-hidden`, label, optional detail, optional elapsed. Elapsed is only passed while the turn is live. Place it in the response header next to `Clio Coder`, not in a global status bar — it belongs to the turn.
+
+The empty-response placeholder (`Chat.tsx:392`): while a turn is live and has produced no segments yet, render `<p className="chat-response__placeholder">{status.label}…</p>` so the response block is never a blank box.
+
 ---
 
 ## Chat turn layout: request, response, reasoning disclosure, outcome footer
@@ -506,6 +569,9 @@ Use `clock.now()` from `client/api/clock.ts` instead of `Date.now()` so the serv
 - from: apps/workbench/src/Chat.tsx:283-437
 - to: apps/clio-coder-gui/client/chat/ChatTurn.tsx
 - value: The actual DOM shape of the conversation and the interleaving rules for text/thinking/tools/notices. Includes the reasoning disclosure (thinking is collapsed behind a one-line preview, never inline prose) and the outcome footer that carries tool count and token usage per turn rather than only for the last turn as the new GUI does at sessions.tsx:276.
+
+<details>
+<summary>The turn component, its settled-segment rule, and the reasoning preview</summary>
 
 ```tsx
 <article className={`chat-turn${live ? " is-live" : " is-settled"}${turn.origin === "replay" ? " is-replay" : ""}`}
@@ -583,6 +649,8 @@ const usageTitle = (u: Usage) => `input ${u.input} · output ${u.output} · cach
 ```
 Two numbers visible, five in the tooltip. The current GUI shows all five in a wall of text under the transcript, for the last turn only.
 
+</details>
+
 **Truncation note** (`Chat.tsx:423`), verbatim: `"Earlier turns are not shown; Clio Coder still has the full context."` — the current wording at sessions.tsx:263 says content "was omitted from this view to keep it bounded", which reads like data loss.
 
 **Empty transcript** (`App.tsx:5966-5992`): a reticle glyph `◎`, eyebrow `NEW RESEARCH THREAD`, heading `What would you like to understand or change?`, and three starter prompts that fill the composer and focus it:
@@ -606,6 +674,9 @@ const STARTER_PROMPTS = [
 - value: Absent from the new GUI. The hard part is not pinning to the bottom; it is distinguishing a scroll event caused by the hook's own write from one caused by the operator, so that content growth landing between a write and its event never reads as a scroll-away. The workbench solved this with a programmatic-top watermark plus a settling window for smooth scrolls, and used a ResizeObserver so no layout is read on the token path. The measured result: the transcript stayed put through the rest of a fast stream after a manual scroll, in every run.
 
 Constants: `BOTTOM_TOLERANCE_PX = 32`, `SETTLE_TIMEOUT_MS = 1_200`.
+
+<details>
+<summary>`useFollowLatest`, the `following`/`unseen` state, and the jump button</summary>
 
 ```ts
 export interface ScrollPosition { readonly top: number; readonly following: boolean; }
@@ -710,6 +781,8 @@ export function JumpToLatest({ follow }: { follow: FollowLatest }) {
 }
 ```
 
+</details>
+
 **Per-route scroll memory** (`App.tsx:5919-5933`): keep a `Map<string, ScrollPosition>` keyed by route, snapshot on navigate away, and `restore()` in a `useLayoutEffect` on arrival. Restoring through the hook is what keeps the scroll event caused by swapping content from reading as the operator's — a transcript left scrolled up stays there even after a short page clamped the region to the top in between.
 
 **On send**, call `jumpToLatest()` — the operator asking a question is consent to follow the answer.
@@ -724,6 +797,9 @@ export function JumpToLatest({ follow }: { follow: FollowLatest }) {
 - from: apps/workbench/src/event-buffer.ts (whole file) + apps/workbench/PERFORMANCE.md
 - to: apps/clio-coder-gui/client/api/frame-buffer.ts + docs/gui-performance.md
 - value: Directly serves the 120 fps ask. The new GUI applies every SSE delta synchronously in the EventSource handler (client/api/events.ts:22-30) and calls setQueryData per event, so a 1,358-event turn is 1,358 React renders. The workbench coalesced high-frequency text into one batch per animation frame while keeping every control event immediate, and the measured result is in PERFORMANCE.md: frame p95 16.7-16.8 ms, keystroke-to-input p95 2-3 ms, zero frames over 33 ms during streaming in the quiet runs. That is the HPC feel the product is claiming.
+
+<details>
+<summary>`FrameEventBuffer`, the injectable `FrameClock`, and the 128-event batch cap</summary>
 
 ```ts
 import type { Event } from "../../contracts/events.js";
@@ -770,6 +846,8 @@ export class FrameEventBuffer {
 
 **Wiring into `subscribe()`** (`client/api/events.ts`): construct one buffer per subscription; `receive` pushes into it; the deliver callback runs the *entire batch* through `SessionBuffer.event()` and calls `queries.setQueryData` **once**, with the final snapshot. Return `() => { buffer.close(); stream.close(); }`. Ordering is preserved because a control event flushes any pending text before itself — this invariant is why the buffer is safe, and it must be kept under test.
 
+</details>
+
 **Why this gives 120 Hz and not just 60 Hz:** `requestAnimationFrame` fires at the display's refresh rate. At 120 Hz the buffer simply delivers twice as often with half the batch, so the per-frame cost halves rather than the frame rate. The work that must NOT be on this path is layout reads and synchronous parsing — which is why the follow-latest hook uses a ResizeObserver rather than reading `scrollHeight` per token, and why the incremental Markdown lexer re-lexes only the tail after the last block boundary.
 
 **Budget to hold, from PERFORMANCE.md** (headless Chrome 151, 24 CPUs, WSL2, 60 Hz compositor, ~16 KB of Markdown per turn streamed in 5-char chunks, 1,358 `turn.text` events/turn, tool bursts between blocks, 64 keystrokes typed during the stream):
@@ -804,6 +882,9 @@ The workbench's harness (`scripts/perf-workload.ts`, 510 lines) is worth reimple
 
 **The rule** (`timeline.ts:275-293`): a text or thought delta continues the previous run only if the LAST item in the timeline is already that run; otherwise it starts a new run with a fresh ordinal.
 
+<details>
+<summary>How a stream run is keyed and split, and the safety card's summary line</summary>
+
 ```ts
 case "turn.text":
 case "turn.thought": {
@@ -818,6 +899,13 @@ case "turn.thought": {
 
 Keep the agent identity in the prefix (the new GUI's `identity` suffix is a genuine improvement — a worker's prose must not merge into the orchestrator's), but move it before the ordinal so the prefix test still works.
 
+**Loop/safety card summary string:**
+```
+Repeated ${repeatCount} times; ${blocksThisTurn} of ${budget} blocks used this turn (${disposition}).${interrupted ? " Clio Coder interrupted the turn." : ""}
+```
+
+</details>
+
 **Bounded append** — the workbench's version, which the new GUI already has as `boundedText` but applies with a different marker and limit. Reconcile on one:
 - `MAX_TIMELINE_STREAM_BYTES = 64 * 1024` per run (the new GUI uses 65536 — same number, keep it);
 - marker `"\n[… stream truncated by GUI …]"` — the new GUI's `"\n[… stream truncated …]"` loses the attribution; prefer the explicit one so the operator knows it was the GUI and not Clio;
@@ -826,11 +914,7 @@ Keep the agent identity in the prefix (the new GUI's `identity` suffix is a genu
 
 **Ordinal minting.** The workbench kept a monotonic `ordinal` that is the max `sequence` in the timeline, so new items take `ordinal + 1` and ids never collide after the timeline is bounded. The new GUI's `upsert` computes `(state.timeline.at(-1)?.sequence ?? 0) + 1`, which regresses after the head is dropped by the byte bound — two runs can then collide on the same id. Use `state.timeline.reduce((m, i) => Math.max(m, i.sequence), 0) + 1`, or better, carry the running maximum on the snapshot.
 
-**Loop/safety cards.** The workbench minted a first-class timeline item for `safety.loopBlocked` (`timeline.ts:325-342`) with the title `Clio Coder blocked a repeated ${tool} call` and the summary:
-```
-Repeated ${repeatCount} times; ${blocksThisTurn} of ${budget} blocks used this turn (${disposition}).${interrupted ? " Clio Coder interrupted the turn." : ""}
-```
-The new GUI routes `fleet.loopBlocked` into the fleet strip as a JSON blob (`session-controls.tsx:281`), where it is invisible in the conversation. It belongs in the activity group as a `notice` item with `kind: "safety"`, because it is the one thing that explains why a turn stopped making progress. `FleetPayloads["fleet.loopBlocked"]` already carries every field the sentence needs.
+**Loop/safety cards.** The workbench minted a first-class timeline item for `safety.loopBlocked` (`timeline.ts:325-342`) with the title `Clio Coder blocked a repeated ${tool} call`. The new GUI routes `fleet.loopBlocked` into the fleet strip as a JSON blob (`session-controls.tsx:281`), where it is invisible in the conversation. It belongs in the activity group as a `notice` item with `kind: "safety"`, because it is the one thing that explains why a turn stopped making progress. `FleetPayloads["fleet.loopBlocked"]` already carries every field the sentence needs.
 
 ---
 
@@ -859,7 +943,11 @@ The new GUI routes `fleet.loopBlocked` into the fleet strip as a JSON blob (`ses
 - Footer privacy line: `"Prompts go only to the Clio Coder target you configured."`
 - Placeholder: `"Ask Clio Coder to do something in this project"`, or `"Open a project first"` when there is no workspace.
 
+<details>
+<summary>The `KEYBINDINGS` registry and the `Keybinding` shape behind the help sheet</summary>
+
 **Keybinding registry** (`apps/workbench/src/help-reference.ts:27`). Keep the pattern: one exported table, handlers match against entries rather than literals, and the in-app help reference is generated from the same table so it cannot drift.
+
 ```ts
 export interface Keybinding { readonly id: string; readonly key: string; readonly modifiers: readonly ("primary" | "alt" | "shift")[]; readonly action: string; readonly where: string; }
 export const KEYBINDINGS = {
@@ -869,7 +957,10 @@ export const KEYBINDINGS = {
 	escape:    { id: "escape",    key: "Escape", modifiers: [],          action: "Close the open dialog or drawer",   where: "While a dialog or a drawer is open" },
 } as const;
 ```
+
 `primary` is Ctrl on Linux/Windows and Cmd on macOS; single-character keys compare case-insensitively.
+
+</details>
 
 ---
 
@@ -879,6 +970,9 @@ export const KEYBINDINGS = {
 - from: apps/workbench/src/Chat.tsx:79-152
 - to: apps/clio-coder-gui/client/chat/FleetStrip.tsx
 - value: The new GUI's FleetStrip (session-controls.tsx:270-286) prints `fleet.enqueued` and a JSON payload per row. The workbench folded every dispatch event into ONE row per run, keyed on runId, showing the agent, state, task preview, node, progress count, outcome and duration — a live fleet view inside the chat. It also carried a Running-only filter that is off by default, with the reasoning recorded: a settled row must never disappear unannounced.
+
+<details>
+<summary>`FleetRun`, the five run states, their glyphs, and the folding rule</summary>
 
 **Fold events into runs.** `SessionSnapshot.fleet` is an append-only list of `FleetItem { id, at, sourceSequence, fact }`. Reduce it to one row per `runId`:
 
@@ -892,13 +986,18 @@ export interface FleetRun {
 	readonly updatedAt: string;
 }
 ```
+
 Fold rules, by `fact.type`: `fleet.enqueued` → `queued` (sets agentId, taskPreview, node, attempt); `fleet.started` → `running`; `fleet.progress` → `progress` and sets `progressCount`/`progressTruncated` (note `progress` is deliberately NOT a phase of its own — it is a running run that has reported activity, kept distinct so the strip can show that a run is doing work rather than merely admitted); `fleet.completed` → `done` with `outcome`, `durationMs`, `tokenCount`; `fleet.failed` → `failed` with `outcome`/`reason`, `durationMs`. Cap at 64 runs, dropping the oldest **settled** one first. `evidence.ready` and `fleet.loopBlocked` are not runs — route the first to the evidence surface and the second into the activity group (see the stream-splitting artifact).
 
-**Presentation** (`Chat.tsx:85-152`):
+Glyph and state label mappings:
 ```ts
 const FLEET_GLYPHS = { queued: "…", running: "◐", progress: "◑", done: "✓", failed: "✕" };
 const FLEET_STATE_LABELS = { queued: "queued", running: "running", progress: "working", done: "done", failed: "failed" };
 ```
+
+</details>
+
+**Presentation** (`Chat.tsx:85-152`):
 - Container is `<details className="activity" open={live > 0}>` where `live = runs.filter(r => r.state === "queued" || r.state === "running" || r.state === "progress").length`. Summary: glyph `⛭`, label `Fleet · ${live} running of ${runs.length}`, count badge.
 - Filter chip `Running only` with `aria-pressed`, **off by default**, and a `role="status"` line reading either `` `${shown} of ${total} reported ${total === 1 ? "run" : "runs"} shown` `` or `` `All ${total} reported ${total === 1 ? "run" : "runs"} shown` ``.
 - Empty-with-filter: `"No run is running right now. Every reported run has settled."`
@@ -942,7 +1041,8 @@ const FLEET_STATE_LABELS = { queued: "queued", running: "running", progress: "wo
 
 And a fifth, for every bounded list: `"Older evidence bundles are outside this bounded window."` / `"Later phases are outside this bounded index."` / `"rarer kinds not shown"`. Every truncation flag on the wire gets a sentence; none is silently dropped.
 
-**Per-inspector fact order and grouping.**
+<details>
+<summary>The fact order and grouping each of the thirteen inspectors used</summary>
 
 - **config** → *Effective Clio Map*. Four summary figures first: effective setting facts, customization surfaces, estimated context cost (`~` + locale-formatted sum of `contextCostTokens`), needs-a-restart count. Then a three-stage "influence path" diagram: **01 Sources** (scope + setting-source counts, merged into one map, sorted by count descending then name, top 8) → **02 Loaded layers** (categories in `CUSTOMIZATION_CATEGORY_ORDER`, shown as a 3-4 letter code plus label) → **03 Behavior**. Then settings grouped by *family* (`key.split(/[.[]/, 1)[0]`), families sorted alphabetically. Entry source line: the project-relative path, or `"project root"` when the path is `/`, or `` `${scope} scope` `` when no path.
 - **catalog** → tabbed (Agents / Skills / Verifiers / Library / Extensions) with arrow-key tab navigation. Agent card facts in order: capability, project context tier, tool-call budget (`min–max` or bare `min`), read reserve; bound skills as chips; declared tool surfaces behind `<details>` with the count on the summary; footer = result contract + `"Text synthesis at boundary"` / `"Stops at boundary"`. Skill card leads with the *reach sentence* — `"The model can load this by name"` / `"Its root is not trusted, so the model never sees it"` / `"Its frontmatter reserves it for you"` — then precedence, root trust, model invocation; footer counts issues and flags `installed by a dispatched worker` / `has an upstream`. Free-text query filters across all string fields, case-folded with `toLocaleLowerCase("en-US")`.
@@ -953,6 +1053,8 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 - **routing** → target selector (targets derived client-side from the model rows, deduped and `localeCompare`-sorted), then a filtered model grid. Filter is a `useDeferredValue` over the lowercased query, matched against `[modelId, runtimeId, residency, ...capabilities]`. Zero values render `"Not reported"`, never `0`.
 - **dispatch** → installation-wide, explicitly not project-scoped and not a live stream: `"This is global installation state, not a fact about the selected project and not a live event stream."`
 - **recovery**, **evidence**, **fleet**, **eval**, **decisions** → see their own artifacts.
+
+</details>
 
 **Shared idioms worth extracting into `client/design/`:**
 - `<StatusMark tone label>` — a glyph + label pair with tones `success | warning | error | neutral | info | action`. Used by every panel; there is no other status primitive.
@@ -968,6 +1070,9 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 - from: apps/workbench/src/App.tsx:4556-4630 and 4633-4770 (EvidenceInventory)
 - to: apps/clio-coder-gui/client/pages/evidence.tsx (replacing JSON dumps at :201,:226,:231)
 - value: Six named trust axes with a three-way tone function that distinguishes a stated negative from a stated absence from a qualified positive. This distinction is the whole point of the evidence system and is currently invisible — evidence.tsx renders `JSON.stringify(run.status)`.
+
+<details>
+<summary>`EVIDENCE_VERDICT_PRESENTATION`, the axis labels, and `evidenceAxisTone`</summary>
 
 ```ts
 export const EVIDENCE_VERDICT_PRESENTATION: Record<string, { label: string; tone: string }> = {
@@ -997,7 +1102,10 @@ export function evidenceAxisTone(state: string): string {
 	return "success";
 }
 ```
+
 Axis state values render with `state.replaceAll("_", " ")`. Axes are rendered in the declaration order of `EVIDENCE_AXIS_LABEL` — iterate `Object.keys(EVIDENCE_AXIS_LABEL)`, never the payload's key order, so a bundle missing an axis still shows the slot.
+
+</details>
 
 **Bundle card, fact order:** id + `sourceKind · generatedAt` in the header with the verdict `StatusMark`; then a four-cell `<dl>`: Runs / Tool calls (with ` · N blocked` appended only when `> 0`) / Tokens / Cost; then tags as chips; then a row of run-id buttons, **each disabled when the run is outside the current run window** with `title="This run is outside the current run window"` — a disabled-but-present button is how the panel says "this exists, you just cannot get there from here"; then `and more` when `runIdsTruncated`.
 
@@ -1010,7 +1118,11 @@ Axis state values render with `state.replaceAll("_", " ")`. Axes are rendered in
 
 **Panel-level copy** (keep verbatim): `"Each bundle's shape and how far it can be trusted. A bundle covering several runs takes the verdict of its weakest run. Task text, working directories, and the files inside a bundle stay on the host."` The weakest-run rule is a semantic the reader cannot infer from the number.
 
+<details>
+<summary>`FLEET_VERIFY_PRESENTATION` and the reason text for each receipt verdict</summary>
+
 **Receipt verification**, a separate four-state axis with its own reason taxonomy:
+
 ```ts
 export const FLEET_VERIFY_PRESENTATION = {
 	pending:     { label: "Not sealed yet",                 tone: "neutral" },
@@ -1031,6 +1143,8 @@ export const FLEET_VERIFY_REASON_TEXT = {
 };
 ```
 
+</details>
+
 ---
 
 ## Gate decisions and council topology taxonomies
@@ -1039,6 +1153,9 @@ export const FLEET_VERIFY_REASON_TEXT = {
 - from: apps/workbench/src/App.tsx:4004-4235 (labels, tones, GateDecisions) and 4247-4445 (CouncilTopology)
 - to: apps/clio-coder-gui/client/pages/fleet.tsx + client/pages/evidence.tsx
 - value: Five closed label taxonomies that translate enum identifiers into operator English, plus the independence rule, which is a genuine piece of domain reasoning encoded in four lines. All of it is currently `JSON.stringify(gate)` at evidence.tsx:226 and `JSON.stringify(artifact)` at fleet.tsx:238.
+
+<details>
+<summary>Gate outcome and reason labels, `gateOutcomeTone`, and the council taxonomies</summary>
 
 ```ts
 export const GATE_OUTCOME_LABELS: Readonly<Record<string, string>> = {
@@ -1086,7 +1203,7 @@ export const councilTurnLabel = (turn: { terminal: boolean; round: number; outco
 		: `round ${turn.round} · ${turn.outcome === null ? "no outcome recorded" : COUNCIL_OUTCOME_LABELS[turn.outcome] ?? turn.outcome}`;
 ```
 
-**Independence** — the reasoning is the artifact, not the code:
+**Independence definition and helper:**
 > Independence is defined as sharing neither the agent nor the model family: a shared target, runtime, or node is an operational fact about a small fleet, while a shared agent or model family is a shared failure mode, and only those two can make a verdict self-confirming.
 
 ```ts
@@ -1097,6 +1214,8 @@ export function gateIndependenceText(decision: { correlation: { independent: boo
 	return `not independent: ${shared.join(" and ")}`;
 }
 ```
+
+</details>
 
 **Card shape.** Header: `` `${topology === "review" ? "Review" : "Compete"} gate ${GATE_OUTCOME_LABELS[outcome] ?? outcome}` `` plus the group id as `<code>`, with a `StatusMark` carrying `cycle ${n}`. `<dl>`: Sealed (timestamp) / Independence / Winner (`"not a winner-picking outcome"` when null, else `candidate ${index}`) / Confirms (`"not a confirmation"` when null). Then a run list: each subject with role `graded` or `graded · winner`, then the decider with role `reviewer` or `judge`; each is a button, **disabled and suffixed `· outside this run window`** when not in the known-run set, `aria-current` when selected. Then the classified reason plus the fixed clause `". The exact text Clio Coder recorded stays on the host."`
 
@@ -1116,6 +1235,9 @@ export function gateIndependenceText(decision: { correlation: { independent: boo
 - from: apps/workbench/src/App.tsx:332-397, 400-430, 7212-7264, 4847-4855, 2686-2760
 - to: apps/clio-coder-gui/client/pages/settings.tsx, system.tsx, reports.tsx, library.tsx
 - value: Four more closed taxonomies with their descriptions. settings.tsx:107 currently renders setting values as `JSON.stringify(row.value)`, reports.tsx:113 dumps the whole eval report, library.tsx:173 dumps skill detail. Without these tables the panels are unreadable enum soup.
+
+<details>
+<summary>Customization categories, reload classes, setting sources, and scope labels</summary>
 
 **Customization categories** (declaration order IS the display order — it traces the load path from settings outward to memory):
 ```ts
@@ -1151,7 +1273,13 @@ export const scopeLabel = (scope: string) => ({
 	package: "Package", extension: "Extension", cli: "Command line",
 }[scope.toLocaleLowerCase("en-US")] ?? scope);
 ```
+
 The session settings panel at `session-controls.tsx:120-180` should carry `RELOAD_PRESENTATION` per field; right now it says only `"Changes are available between turns"` as a blanket statement, which is wrong for the hot-reloadable ones.
+
+</details>
+
+<details>
+<summary>The recovery section and check taxonomies with their tones</summary>
 
 **Recovery sections** — order matters, it is outermost dependency first:
 ```ts
@@ -1171,7 +1299,13 @@ export const RECOVERY_CHECK_PRESENTATION: Record<string, { label: string; tone: 
 	ok: { label: "Passed", tone: "success" }, warn: { label: "Warning", tone: "warning" }, error: { label: "Failed", tone: "error" },
 };
 ```
+
 Each section is a `<details>` that **opens itself when `failures > 0 || warnings > 0`** — that is the row the operator came here to read. Section summary right-hand text: `` `${passed}/${checks} passed${warnings ? ` · ${warnings} warn` : ""}${failures ? ` · ${failures} fail` : ""}` ``. Verdict banner: `NO FAILURES` vs `ATTENTION REQUIRED`, with the headline `"All reported checks passed"` / `"${n} reported warning(s)"` / `"${n} reported failure(s)"`. Sub-line: `` `Inspected ${ts} · ${projectContext ? "selected-project context" : "installation context"}` ``. Versions strip: Clio Coder / Node / Platform / `Resolved roots ${pathsResolved}/4`, each `"not reported"` when absent. Boundary: the check crosses as name and verdict only, `"a check whose name is not name-shaped arrives unnamed rather than blanking the sweep"`, and the sweep passes no `--fix` flag.
+
+</details>
+
+<details>
+<summary>`EVAL_FAILURE_CLASS_LABEL` and how `evalPassTone` reads a report summary</summary>
 
 **Eval failure classes** — every one is a sentence, not an identifier:
 ```ts
@@ -1193,7 +1327,13 @@ export function evalPassTone(report: { summary: { runs: number; failed: number }
 	return report.summary.failed === 0 ? "success" : "warning";
 }
 ```
+
 Report card facts in order: Route (`target · model · runtime`, each falling back to `"unrecorded"`/`"no model"`), Comparable set (`Group ${servingGroup}` + `" · matrix only"` when not observed), Tokens (`"${total} over ${measuredRuns} of ${runs} runs"` or `"No run reported provider usage"`), Wall time, Built by (`Clio Coder ${version} · ${commit.slice(0,12)}`), Host attachments (`"${n} kept on the host · ${m} declared metrics"`). Panel boundary, which is the reason this panel is worded so carefully: `"A report also holds the whole session transcript its runner attached, the prompts inside it, and the workspace it ran in; those stay on the host and are counted here rather than shown."`
+
+</details>
+
+<details>
+<summary>Verifier origin, rejection and block copy, plus invalid-skill wording</summary>
 
 **Verifier and skill catalog rejection taxonomies** (library page):
 ```ts
@@ -1227,9 +1367,12 @@ export const SKILL_INVALID_COPY = {
 	"no-skills": "no skill loaded at all",
 };
 ```
+
 Skill-catalog summary sentence, assembled: `` `${valid ? "Clio Coder's loader accepts this installation's skills." : `Clio Coder's loader does not consider this catalog valid, because ${SKILL_INVALID_COPY[invalidReason ?? "no-skills"]}.`} ${hidden === 0 ? "The model can load every one of them by name." : `${hidden} of ${total} ${hidden === 1 ? "is" : "are"} yours alone; the model never sees them.`}` `` where `hidden = total - modelVisible`.
 
 Library boundary: `"Skill bodies, file paths, base directories, content hashes, install URLs, and the loader's own diagnostic text stay on the host. Whether a skill has an upstream to update from crosses; where that upstream is does not. Installing, updating, and evaluating a skill stay explicit terminal operations."`
+
+</details>
 
 ---
 
@@ -1240,6 +1383,9 @@ Library boundary: `"Skill bodies, file paths, base directories, content hashes, 
 - to: apps/clio-coder-gui/client/chat/provenance.ts
 - value: One rule and one four-value table that together decide whose name appears on every card in the product. The new contract carries `provenance` on TimelineItem and renders it nowhere. The source taxonomy has no counterpart in the new contract at all and needs adding, because 'Clio told us this' and 'we measured this ourselves' are different warranties and the whole evidence posture depends on the reader being able to tell.
 
+<details>
+<summary>`agentLabel`, `SOURCE_LABELS`, and the guidance string per source</summary>
+
 **The attribution rule** (`timeline.ts:217-227`): take the LAST entry of the provenance array — the most specific identity Clio reported, so a delegated agent wins over the orchestrator that dispatched it. Render it only when `role === "worker"`. An empty array means nothing was reported and the card falls back to the product name. The GUI never guesses; an unattributed card stays attributed to the product.
 
 ```ts
@@ -1249,6 +1395,7 @@ export function agentLabel(provenance: Provenance | undefined): string | null {
 	return last.node == null ? last.agentId : `${last.agentId} · ${last.node}`;
 }
 ```
+
 Use it in two places: as the *response author name* (replacing `"Clio Coder"` in `chat-response__meta`) when a whole narrative segment is attributed, and as the per-row `agent ${label}` tag inside the activity group.
 
 **Source taxonomy — add to the wire.** `contracts/sessions.ts` has no `source` field. Add `source: Type.Optional(Type.Union([…]))` to `TimelineItem` and set it in `server/acp/supervisor.ts` (everything from `session/update` is `observed-on-acp`, everything from a replay is `replayed-from-clio`, anything the server itself synthesizes is `observed-by-server`). The four values and their words:
@@ -1267,7 +1414,10 @@ export const SOURCE_GUIDANCE: Readonly<Record<string, string>> = {
 	"replayed-from-clio": "Clio Coder replayed this from its own stored session history.",
 };
 ```
+
 Show the label on the forensic timeline card and as a `title=` tooltip elsewhere; do not put it on every chat row, which would be noise.
+
+</details>
 
 **Replay origin.** `TimelineItem.origin` already exists. The workbench used it for three visible things and all three are worth keeping: the request heading becomes `"Earlier request"`, a `earlier record` chip appears in the request meta, and a replayed turn is permanently `settled` so it is never re-rendered or clock-ticked. A replayed turn also has `startedAt === null` — the host deliberately refuses to stamp a replayed item with the current wall clock, because that would be inventing a time. Render `"unavailable"` rather than a fabricated timestamp; the new GUI's `formatTime` already returns `"not recorded"` for an unparseable value, which is the right behavior.
 

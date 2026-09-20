@@ -6,6 +6,20 @@ Clio's engine is built on the pi SDK (see [docs/architecture/pi-boundary.md](../
 
 Source of truth: `src/core/defaults.ts`, `src/core/config.ts`, `src/domains/providers/**`, `src/cli/configure.ts`, `src/cli/targets.ts`, `src/cli/models.ts`, and `src/cli/auth.ts`.
 
+### Start here
+
+| If you want to | Go to |
+| --- | --- |
+| Get a first target working | [First-run flow](#first-run-flow), then `clio-coder configure` |
+| Know what to set for a local server | [Recommended defaults](#recommended-defaults) |
+| Look up one setting's default and validation | [Settings inventory](#settings-inventory) |
+| Look up a flag, environment variable, or project file | [Configuration reference](configuration-reference.md) |
+| Fix a target that will not connect | [Troubleshooting checklist](#troubleshooting-checklist) |
+| Sign in to a subscription or OAuth provider | [Auth](#auth) |
+
+The rest of this page is ordered from setup to reference. Deep mechanics sit in
+collapsed sections; the tables stay open.
+
 ---
 
 ## Directory locations
@@ -145,19 +159,23 @@ Configure puts common actions first. **All controls in this section** opens the
 complete shared catalog, grouped by purpose and searchable by name or settings
 path. Each control explains its meaning, current value, shipped default, and
 when changes take effect. Both interfaces validate edits against the existing
-settings schema. Collections such as keybinding overrides, remote nodes, and
-rosters accept JSON; Connections and Fleet also retain their guided actions.
-Library remote confirmation remains owned by the library's trust flow.
-Advanced opens the validated full-file editor and diagnostics; the TUI links to
-those commands. The launcher retains a Diagnostics shortcut, and
-`configure --section diagnostics` still opens that screen directly.
+settings schema.
+
+Collections such as keybinding overrides, remote nodes, and rosters accept JSON;
+Connections and Fleet also retain their guided actions. Library remote confirmation
+remains owned by the library's trust flow. Advanced opens the validated full-file
+editor and diagnostics; the TUI links to those commands. The launcher retains a
+Diagnostics shortcut, and `configure --section diagnostics` still opens that screen
+directly.
 
 Escape returns to the parent menu, which remembers the selected row. Common
 actions save when accepted; the complete catalog asks you to review and save
 each edit. Leaving another field does not undo previously saved settings. Clear
-a model override or list by deleting its prefilled text before accepting it. The full target wizard instead saves at
-**Save target** after review. Pasted keys wait for Save; browser sign-in stores
-credentials when sign-in succeeds. Optional delegation review follows Save.
+a model override or list by deleting its prefilled text before accepting it.
+
+The full target wizard instead saves at **Save target** after review. Pasted keys
+wait for Save; browser sign-in stores credentials when sign-in succeeds. Optional
+delegation review follows Save.
 
 Open a section directly, or open the full editor:
 
@@ -180,12 +198,16 @@ saves for live controls and identifies changes that require a restart.
 Clio can explain these settings herself: ask “What can you do without asking?”
 or “What are my worker limits?” Her `context(scope="settings")` tool reads the
 running session's effective configuration, including overrides, and returns
-specific `/settings` and configure commands. Every response includes the chat and fleet default routes, configured profiles and agent bindings, and target runtime IDs; these are configuration facts, not backend health checks. Multiword searches rank partial matches. It reports configured ceilings,
-not remaining spending or call counts. It omits credentials, endpoint URLs,
-external-agent commands, and arbitrary free-form values. This tool is read-only;
-Clio guides you through changes and does not raise permissions or budgets to
-work around a denial. Workers without an authoritative settings snapshot say
-so instead of assuming the parent's settings.
+specific `/settings` and configure commands.
+
+Every response includes the chat and fleet default routes, configured profiles and
+agent bindings, and target runtime IDs; these are configuration facts, not backend
+health checks. Multiword searches rank partial matches. It reports configured
+ceilings, not remaining spending or call counts. It omits credentials, endpoint
+URLs, external-agent commands, and arbitrary free-form values. This tool is
+read-only; Clio guides you through changes and does not raise permissions or
+budgets to work around a denial. Workers without an authoritative settings
+snapshot say so instead of assuming the parent's settings.
 
 The shipped `auto-edit` level allows workspace edits, recognized checks, and
 routine delegation. Unfamiliar commands, reads outside the permitted workspace
@@ -195,12 +217,12 @@ continues. Choose `escalate` when you want supported worker runtimes to ask you,
 with a timeout and explicit fallback. `full-auto` skips autonomy approvals but
 still passes through the safety policy. No level disables hard safety blocks.
 
-Approved project settings and session
-choices can override them; use `clio-coder config inspect` to see the active
-sources. Without a terminal, `--section` prints its values and exits; `--json`
-and `--list` inspect settings and runtimes without initializing an installation.
-Dumb terminals retain the numbered prompt fallback; Quick Connect requires a
-regular interactive terminal. Use explicit flags for unattended target setup.
+Approved project settings and session choices can override them; use
+`clio-coder config inspect` to see the active sources. Without a terminal,
+`--section` prints its values and exits; `--json` and `--list` inspect settings
+and runtimes without initializing an installation. Dumb terminals retain the
+numbered prompt fallback; Quick Connect requires a regular interactive terminal.
+Use explicit flags for unattended target setup.
 
 Start one local runtime and register exactly one target first. Clio integrates with popular local inference engines:
 - **[LM Studio](https://lmstudio.ai):** A desktop application to run LLMs locally. Target runtime ID: `lmstudio`.
@@ -289,9 +311,10 @@ Terminology used in code and receipts:
 | Background target | Optional proactive-memory model target. Unset means deterministic rules-only memory. |
 | Worker target | Fleet dispatch target. HTTP/native engine-backed, or one of the sanctioned subscription worker runtimes such as `claude-sdk`, `claude-code`, or `antigravity-code`. |
 
-This abbreviated example uses the current version-2 information architecture.
-The [settings inventory](#settings-inventory) below lists every accepted leaf
-and its shipped default.
+This abbreviated example illustrates the version-2 schema organization across targets, chat, fleet, context, safety, interface, and integrations. The [settings inventory](#settings-inventory) below details every accepted leaf key and its shipped default.
+
+<details>
+<summary>A complete annotated `settings.yaml`</summary>
 
 ```yaml
 version: 2
@@ -374,6 +397,8 @@ integrations:
     commitAttribution: true
 ```
 
+</details>
+
 Target capability overrides may include `chat`, `tools`, `toolCallFormat`, `reasoning`, `thinkingFormat`, `structuredOutputs`, `vision`, `audio`, `embeddings`, `rerank`, `fim`, `contextWindow`, and `maxTokens`.
 
 ### LiteLLM gateways
@@ -393,7 +418,7 @@ targets:
   - id: ai-gateway
     runtime: litellm
     url: http://gateway.example:4000
-    defaultModel: dynamo/qwen3.8-27b
+    defaultModel: node-1/qwen3.8-27b
     auth:
       apiKeyEnvVar: CLIO_AI_GATEWAY_KEY
     litellm:
@@ -410,26 +435,36 @@ Clio adds the `clio-coder` request tag and forwards its stable session id by
 default. Explicit `x-litellm-*` headers on the target or request take
 precedence. Set `sendSessionId: false` when the gateway must not correlate calls.
 The timeout values and `numRetries` become LiteLLM request headers and override
-the proxy's defaults only for this target. Clio disables the OpenAI SDK's
-client-side retry layer on LiteLLM requests. A failed interactive LiteLLM call
-also bypasses Clio's transient retry ladder even when `chat.retry` is enabled:
-the provider error names the selected route and tells the operator to choose a
-different one with `/model`. Configure `numRetries: 0` and no server fallback
-maps when `node/model` is a placement guarantee. Context-overflow compaction is
-still a local correction, not a route substitution.
+the proxy's defaults only for this target.
 
-When the gateway reports these fields, Clio records LiteLLM's selected model group, physical model,
-sanitized upstream host, fallback/retry counts, and proxy timing in the session
-and worker receipt. A nonzero fallback or retry is also announced in the live
-transcript, making server-policy drift visible. Self-describing physical routes
-are summarized in probe diagnostics instead of expanding into a giant list of
-tautological mappings. If a genuine alias has multiple deployments, discovered
-capabilities are the conservative intersection and numerical limits are the
-smallest limits published by every deployment, so routing cannot select a
-weaker backend than Clio planned for. If `/v1/model/info` omits a capability,
-Clio does not invent it; that includes structured-output support.
+Clio disables the OpenAI SDK's client-side retry layer on LiteLLM requests. A
+failed interactive LiteLLM call also bypasses Clio's transient retry ladder even
+when `chat.retry` is enabled: the provider error names the selected route and tells
+the operator to choose a different one with `/model`. Configure `numRetries: 0`
+and no server fallback maps when `node/model` is a placement guarantee.
+Context-overflow compaction is still a local correction, not a route substitution.
 
-Upstream `model_info.runtime` declarations may identify the thinking-control dialect of a routed model. Clio accepts only recognized declarations shared by every deployment of that alias; unknown or mixed declarations remain unguessed. A resolved LM Studio dialect uses its explicit off effort, while llama.cpp uses template controls. This metadata does not turn the target into a native management endpoint: LiteLLM continues to own authentication, routing, loading and eviction. Thinking off is a request to the selected runtime/model, not evidence that the server complied or that every route has been live-validated.
+When the gateway reports these fields, Clio records LiteLLM's selected model
+group, physical model, sanitized upstream host, fallback/retry counts, and proxy
+timing in the session and worker receipt. A nonzero fallback or retry is also
+announced in the live transcript, making server-policy drift visible.
+Self-describing physical routes are summarized in probe diagnostics instead of
+expanding into a giant list of tautological mappings.
+
+If a genuine alias has multiple deployments, discovered capabilities are the
+conservative intersection and numerical limits are the smallest limits published
+by every deployment, so routing cannot select a weaker backend than Clio planned
+for. If `/v1/model/info` omits a capability, Clio does not invent it; that includes
+structured-output support.
+
+Upstream `model_info.runtime` declarations may identify the thinking-control
+dialect of a routed model. Clio accepts only recognized declarations shared by
+every deployment of that alias; unknown or mixed declarations remain unguessed.
+A resolved LM Studio dialect uses its explicit off effort, while llama.cpp uses
+template controls. This metadata does not turn the target into a native management
+endpoint: LiteLLM continues to own authentication, routing, loading and eviction.
+Thinking off is a request to the selected runtime/model, not evidence that the
+server complied or that every route has been live-validated.
 
 ### Current user and machine awareness
 
@@ -473,7 +508,17 @@ failure. Authentication or invalid-option errors do not authorize eviction.
 
 `maxConcurrentRequests` is a per-target integer of at least 1, validated with the rest of the target block, and it is the operator's override for how many requests the inference endpoint behind that target can serve at once. It is not a settings-file default and has no shipped value, so it does not appear in the settings inventory below.
 
-Set it only when discovery is wrong. Clio resolves the limit in this order: this override; then a `parallelSlots` count cached on the target's probe result; then a persisted discovery result that is still fresh and matches the runtime; then one slot for any other `local-native` runtime; then no invented endpoint bound for a cloud runtime, LiteLLM, vLLM, or SGLang. llama.cpp discovery reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one; Ollama exposes no native API slot count, so Clio conservatively reports one. Set `maxConcurrentRequests` explicitly when the daemon supports more; the client process’s `OLLAMA_NUM_PARALLEL` does not describe the server.
+Set it only when discovery is wrong. Clio resolves the limit in this order:
+
+1. this override;
+2. a `parallelSlots` count cached on the target's probe result;
+3. a persisted discovery result that is still fresh and matches the runtime;
+4. one slot for any other `local-native` runtime;
+5. no invented endpoint bound at all for a cloud runtime, LiteLLM, vLLM, or SGLang.
+
+Per-runtime discovery differs. llama.cpp reads `total_slots` from the router's `/props`, falls back to the selected worker's `/props?model=<id>` when the router reports none, and falls back again to the `--parallel` argv on the selected `/v1/models` entry. LM Studio reads `config.parallel` off the loaded instance and otherwise reports one.
+
+Ollama exposes no native API slot count, so Clio conservatively reports one. Set `maxConcurrentRequests` explicitly when the daemon supports more; the client process’s `OLLAMA_NUM_PARALLEL` does not describe the server.
 
 The limit is keyed on the endpoint rather than the target, so two targets pointed at the same normalized URL share it. Raising it above what the server will actually serve does not create capacity; it removes the refusal that would have told you the server was full. See [capacity-and-scheduling.md](../architecture/capacity-and-scheduling.md) for the admission model and the exact denial text.
 
@@ -578,8 +623,12 @@ use the native REST API, with `GET /api/v1/models` as the preferred catalog
 Leave `lmstudio.load` absent to preserve LM Studio's just-in-time loading behavior. Clio then observes
 residency but sends no explicit load request. When `lmstudio.load` is present and the selected model
 is unloaded, Clio calls `POST /api/v1/models/load` with `echo_load_config: true`; LM Studio documents
-the load operation at <https://lmstudio.ai/docs/developer/rest/load>. Clio sends only fields that the
-target explicitly configured:
+the load operation at <https://lmstudio.ai/docs/developer/rest/load>.
+
+<details>
+<summary>Which settings key maps to which LM Studio load and chat field</summary>
+
+Clio sends only fields that the target explicitly configured:
 
 | Settings key | REST load field |
 | --- | --- |
@@ -589,6 +638,16 @@ target explicitly configured:
 | `numExperts` | `num_experts` |
 | `offloadKvCacheToGpu` | `offload_kv_cache_to_gpu` |
 
+The request settings map as follows:
+
+| Settings key | Chat request behavior |
+| --- | --- |
+| `ttlSeconds` | Sends `ttl`, using LM Studio's auto-eviction TTL (<https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>). |
+| `draftModel` | Sends `draft_model` on the OpenAI-compatible chat request (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). |
+| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` outranks the thinking dial but is still clamped to the efforts the model advertises (a model reporting only `[off, on]` receives `low`); `auto` maps the active Clio thinking level. |
+
+</details>
+
 Loaded instances are addressed by their instance ids when Clio calls
 `POST /api/v1/models/unload` (<https://lmstudio.ai/docs/developer/rest/unload>). Clio records the
 instance id returned by each successful load in this process and refuses to unload every other
@@ -597,14 +656,6 @@ observe-only. Model selection remains permissive: `defaultModel` and `wireModels
 the model key or one of its loaded instance ids. The probe reports both forms and exposes each
 instance's echoed load configuration from the native model listing
 (<https://lmstudio.ai/docs/developer/rest/list>).
-
-The request settings map as follows:
-
-| Settings key | Chat request behavior |
-| --- | --- |
-| `ttlSeconds` | Sends `ttl`, using LM Studio's auto-eviction TTL (<https://lmstudio.ai/docs/developer/core/ttl-and-auto-evict>). |
-| `draftModel` | Sends `draft_model` on the OpenAI-compatible chat request (<https://lmstudio.ai/docs/developer/openai-compat/chat-completions>). |
-| `reasoning` | `off` sends `reasoning_effort: none`; `on` sends `low`; a literal `low`, `medium`, or `high` outranks the thinking dial but is still clamped to the efforts the model advertises (a model reporting only `[off, on]` receives `low`); `auto` maps the active Clio thinking level. |
 
 Clio maps the active thinking level through the model family's runtime resolver map. If the model family specifies an explicit effort map (such as mapping `max` to `xhigh`), Clio sends that exact effort; otherwise it falls back to the default `off` to `none`, `minimal`/`low` to `low`, `medium` to `medium`, and `high`/`xhigh`/`max` to `high`. For model families that declare a `none` or `always-on` reasoning mechanism, the `reasoning_effort` field is omitted. A model reporting only `[off,on]` clamps every
 non-off level to `low`. Clio uses only `reasoning_effort` on LM Studio's documented chat surface
@@ -620,7 +671,12 @@ LM Studio can require bearer authentication for its HTTP APIs
 
 A model id on an LM Studio target is resolved against that host's loaded instances. A key with a loaded instance is never sent bare (which would JIT-load a second copy). An instance id reported loaded by two configured LM Studio targets on different hosts is an LM Link peer projection. When a bare model key is requested and multiple instances of it are loaded, Clio selects an instance in this order: the target's configured `defaultModel`, then an instance not cross-listed by another configured LM Studio target, and finally the first loaded instance. This behavior tracks issue #113.
 
-When the selected instance is also loaded on a peer, a request may be answered by that peer (#185). Clio separates the requested model id, the response observation, and the model id used for accounting. Every new assistant ledger entry carries `responseModelIdObservation` in one of these explicit shapes:
+When the selected instance is also loaded on a peer, a request may be answered by that peer (#185). Clio separates the requested model id, the response observation, and the model id used for accounting.
+
+<details>
+<summary>The four `responseModelIdObservation` states and what each attributes cost to</summary>
+
+Every new assistant ledger entry carries `responseModelIdObservation` in one of these explicit shapes:
 
 | State | Meaning | Accounting attribution |
 | --- | --- | --- |
@@ -629,8 +685,14 @@ When the selected instance is also loaded on a peer, a request may be answered b
 | `{ "state": "not-observed" }` | This provider path did not expose response model-id presence to the stream tap. | A differing `responseModel` when available, otherwise the requested model id. |
 | `{ "state": "legacy-difference-only", "differingModelId": "<id>" }` or the same shape with `null` | The ledger predates #193 and recorded only whether the response `model` differed from the request. This state is produced while reading historical rows; new rows do not write it. | The historical differing id when available, otherwise the requested model id. |
 
-The adapter retains `responseModel` as the differing response id because providers outside the stream tap still supply that fact. `clio-coder usage report` emits `attributedModelId`, `requestedModelIds`, and `responseModelIdObservationCounts`. Its text table and the `/cost` overlay use the labels `attributed model`, `requested model ids`, and `response model id observation`; requested ids are printed as ids rather than as `same`. The footer's last-turn line uses `response model id observation <state>`, with the id after `reported` or a historical `legacy difference-only` state. Dispatch receipt `upstreamResponses` entries carry `requestedModelId`, `responseModelIdObservation`, `differingResponseModelId`, and `providerResponseId`. The peer warning is said once per process per distinct fact (target, requested id, resolved instance, peer set), not once per turn.
+</details>
 
+The adapter retains `responseModel` as the differing response id because providers outside the stream tap still supply that fact. `clio-coder usage report` emits `attributedModelId`, `requestedModelIds`, and `responseModelIdObservationCounts`. Its text table and the `/cost` overlay use the labels `attributed model`, `requested model ids`, and `response model id observation`; requested ids are printed as ids rather than as `same`.
+
+The footer's last-turn line uses `response model id observation <state>`, with the id after `reported` or a historical `legacy difference-only` state. Dispatch receipt `upstreamResponses` entries carry `requestedModelId`, `responseModelIdObservation`, `differingResponseModelId`, and `providerResponseId`. The peer warning is said once per process per distinct fact (target, requested id, resolved instance, peer set), not once per turn.
+
+
+### What LM Studio owns rather than Clio
 
 Prompt-template overrides, system prompts, GPU-offload ratios, KV-cache quantization, parallel slots,
 context checkpoints, and speculative-decoding variants are not writable through this Clio settings
@@ -639,6 +701,8 @@ block. Set them in LM Studio's My Models load settings or with `lms load`; the C
 <https://lmstudio.ai/docs/typescript/api-reference/llm-load-model-config>. Clio reads back the load
 configuration that `GET /api/v1/models` exposes instead of pretending it applied settings the REST
 load endpoint did not accept (<https://lmstudio.ai/docs/developer/rest/list>).
+
+### Output, tool-result, and retry budgets
 
 `chat.maxOutputTokens` is a global output budget requested for every turn. Its
 default `0` uses each model's known maximum-output cap, still clamped to the
@@ -690,20 +754,25 @@ Agent automation is separately shadowed. Each
 `{agentId, executionRole}` pair. An `agent: auto` request may change agents only
 for a listed pair whose readiness report passes.
 
-Version 2 places numeric backstops beside the behavior they govern.
-`safety.limits.chatToolCallsPerTurn` (default `60`) is the main-agent soft
-tool-call budget; the hard interrupt ceiling remains 15 calls above it.
-`fleet.limits.toolCallsPerRun` (default `150`) is the independent lifetime cap
-for one worker and can only narrow a recipe budget. `fleet.history.maxRuns`
-(default `1000`) bounds durable dispatch history.
-`safety.limits.readBytesPerCall` (default `51200`) bounds one read, while
-`safety.limits.observationBytesPerTurn` (default `196608`) is the shared
-per-turn observation pool. `fleet.limits.internalRunTimeoutMs` (default
-`900000`) bounds an internal generator dispatch. These settings are the only
-operator-facing policy paths for the limits and refresh with the effective
-session view.
+Version 2 places numeric backstops beside the behavior they govern:
 
-Agent recipe budgets define a normal admitted-call phase inside `workerToolCallCap`; they do not replace it. A declared phase boundary is clamped down to the cap, and when the two are equal the last call may complete and the graceful synthesis transition happens without requiring an over-cap call. The recipe's `readReserve` is the tail of that phase. It admits canonical `read` plus whatever mutation tools the agent was actually granted, because the reserve exists to end broad discovery rather than to stop an agent from delivering: a writer whose product is files has to be able to write them in its last calls. An agent with no mutation tools keeps a read-only reserve and the request-level `require_tool(read)` lock. The reserve becomes zero when `read` is absent from the admitted schema surface, and never installs a nonexistent read requirement. Calls the reserve refuses are steering rather than work: they neither run nor spend the cap, and a model that keeps calling discovery tools there reaches the same bounded synthesis lockout a spent budget ends in.
+| Key | Default | What it bounds |
+| --- | --- | --- |
+| `safety.limits.chatToolCallsPerTurn` | `60` | The main agent's soft tool-call budget. The hard interrupt ceiling stays 15 calls above it. |
+| `fleet.limits.toolCallsPerRun` | `150` | One worker's independent lifetime cap. It can only narrow a recipe budget. |
+| `fleet.limits.internalRunTimeoutMs` | `900000` | One internal generator dispatch. |
+| `fleet.history.maxRuns` | `1000` | Durable dispatch history. |
+| `safety.limits.readBytesPerCall` | `51200` | One read. |
+| `safety.limits.observationBytesPerTurn` | `196608` | The shared per-turn observation pool. |
+
+These are the only operator-facing policy paths for those limits, and they
+refresh with the effective session view.
+
+Agent recipe budgets define a normal admitted-call phase inside `workerToolCallCap`; they do not replace it. A declared phase boundary is clamped down to the cap, and when the two are equal the last call may complete and the graceful synthesis transition happens without requiring an over-cap call.
+
+The recipe's `readReserve` is the tail of that phase. It admits canonical `read` plus whatever mutation tools the agent was actually granted, because the reserve exists to end broad discovery rather than to stop an agent from delivering: a writer whose product is files has to be able to write them in its last calls. An agent with no mutation tools keeps a read-only reserve and the request-level `require_tool(read)` lock.
+
+The reserve becomes zero when `read` is absent from the admitted schema surface, and never installs a nonexistent read requirement. Calls the reserve refuses are steering rather than work: they neither run nor spend the cap, and a model that keeps calling discovery tools there reaches the same bounded synthesis lockout a spent budget ends in.
 
 ### Local model co-residency and scouts
 
@@ -718,8 +787,13 @@ slower even though the target still responds.
 For llama.cpp router targets, Clio observes `/v1/models` and `/props`. It can
 tell which models are loaded and whether the resident count is within the
 router's `max_instances`, so an allowed two-model setup is reported as an
-informational co-residency notice. A model reporting a `sleeping` state counts as resident, because the router wakes it on the next inference request. Clio's residency manager never evicts a resident model when the requested replacement model is not in the router's catalog. The router response does not expose free
-VRAM or per-model loaded footprint, so Clio cannot prove the loaded set fits.
+informational co-residency notice. A model reporting a `sleeping` state counts
+as resident, because the router wakes it on the next inference request, and
+Clio's residency manager never evicts a resident model when the requested
+replacement is not in the router's catalog.
+
+The router response does not expose free VRAM or per-model loaded footprint, so
+Clio cannot prove the loaded set fits.
 Use host tools such as `nvidia-smi`, `rocm-smi`, Vulkan memory telemetry, or
 the runtime's own dashboard to confirm headroom after loading the main coding
 model and the scout model. Lower `--ctx-size`, KV cache precision, parallel
@@ -782,9 +856,11 @@ install metadata, and records fleet preflight results. It validates
 `settings.yaml` directly against the current schema but never rewrites removed
 keys or migrates an old settings shape. Any unknown or retired key remains a
 validation error on that doctor run.
+
 Doctor reports no dispatch breaker state, because the breaker lives in the
-memory of the session that dispatches and a doctor process never dispatches;
-see the targets rows in `/settings` inside the session instead.
+memory of the session that dispatches and a doctor process never dispatches. See
+the targets rows in `/settings` inside the session instead.
+
 Registered `clio-coder upgrade` migrations are the narrow exception. Upgrade
 moves a version-1 or unversioned settings document into the version-2 areas,
 records the migration, and keeps the byte-exact original as
@@ -941,7 +1017,9 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `context.memory.maxOutputTokens` | `2000` | integer ≥ 1 | next turn |
 | `context.memory.timeoutMs` | `60000` | integer ≥ 1 | next turn |
 
-The compaction and memory controls serve different roles. An unset `context.compaction.model` uses active chat; an explicit model must uniquely resolve to an available eligible summary route or fail visibly. `context.compaction.systemPrompt` is a nonempty UTF-8 prompt file, at most 65,536 bytes, read at compaction time and resolved relative to the session workspace. Configure `context.memory.target` and `context.memory.model` to opt into model-based memory; unset roles remain rules-only. Memory prefers its dedicated route and can use active chat when that route is unavailable and request capacity permits. Known dedicated saturation skips the step rather than initiating failover; neither routing choice edits saved settings.
+The compaction and memory controls serve different roles. An unset `context.compaction.model` uses active chat; an explicit model must uniquely resolve to an available eligible summary route or fail visibly. `context.compaction.systemPrompt` is a nonempty UTF-8 prompt file, at most 65,536 bytes, read at compaction time and resolved relative to the session workspace.
+
+Configure `context.memory.target` and `context.memory.model` to opt into model-based memory; unset roles remain rules-only. Memory prefers its dedicated route and can use active chat when that route is unavailable and request capacity permits. Known dedicated saturation skips the step rather than initiating failover; neither routing choice edits saved settings.
 
 ### Safety
 
@@ -1258,31 +1336,44 @@ clio-coder targets rename <old> <new>
 The `clio-coder targets` listing shows no breaker column, because the dispatch breaker lives in the memory of the session that dispatches and the listing process never dispatches. Inside a session, each `/settings` targets row shows its routes' breaker state: an open route takes over the health cell with its remaining cooldown (`○ open 42s`), a route whose probe is in flight shows `◐ probing`, and the row's detail line lists one phrase per route, such as `qwen open 42s after target-transient` or `coder 1 failure (target-overloaded)` for a closed route that has failed below the threshold.
 
 `clio-coder targets --probe` checks reachability and model metadata without
-requesting generation. Add `--reasoning` for a generating reasoning check, or
-`--tools` for a generating tool-call check. These checks can load models and
-consume resources. Declared capabilities alone are not live verification;
-reasoning generation that produces no reasoning, errors, or times out is
-inconclusive.
+requesting generation. Two optional flags add generating checks, which cost
+tokens and can load a cold model, so they run only when asked:
+
+| Flag | What it does | Timeout |
+| --- | --- | --- |
+| `--probe` | Reachability and model metadata. No generation. | 5s HTTP |
+| `--probe --reasoning` | Generating reasoning check. | 5s HTTP |
+| `--probe --tools` | Generating tool-call check through the engine stream path. | 120s, set by `--tools-timeout <seconds>` |
+
+Declared capabilities alone are not live verification. Reasoning generation that
+produces no reasoning, errors, or times out is inconclusive. `--target <id>`
+probes one target; SDK and subprocess runtimes report as skipped because they do
+not stream through the engine.
+
+<details>
+<summary>What the tool probe sends, what counts as a pass, and what it leaves loaded</summary>
+
 `clio-coder targets --probe --tools` sends one small request with a single
 typed tool through the same engine stream path a chat turn uses, against the
 chat model when the target is the chat target and the target's default model
-otherwise. It never picks another model. The check passes only when the
-response streamed in more than one frame, carried a call to the probe tool, and
-the call's arguments parsed as JSON and matched the tool schema. It has its own
-generation timeout of 120 seconds, long enough for a cold load of a large local
-model; `--tools-timeout <seconds>` changes it. Plain `--probe` keeps its
-five-second HTTP timeout. The result appears in the notes column as
-`tools verified (<model>, <ms>)` or `tools failed (<model>): <reason>`, and as
-`toolProbe` in `--json`. A verified probe marks `tools` true for that model;
-runtime resolution then reports the provenance as `toolsVerification`, and a
-failed probe adds a `tools-probe-failed` warning to the next turn or dispatch
-on that model. The result lives only in the running process. The tool probe
-generates tokens and can load a cold model, so it runs only when asked. A model
-the probe loaded and pinned on a local server such as Ollama is released before
-the command returns, whether the probe passed, failed, or was cancelled. A model
-that was already resident before the probe is left loaded. With `--target <id>`
-it probes just that target. SDK and subprocess runtimes are
-reported as skipped because they do not stream through the engine.
+otherwise. It never picks another model.
+
+The check passes only when the response streamed in more than one frame, carried
+a call to the probe tool, and the call's arguments parsed as JSON and matched the
+tool schema.
+
+The result appears in the notes column as `tools verified (<model>, <ms>)` or
+`tools failed (<model>): <reason>`, and as `toolProbe` in `--json`. A verified
+probe marks `tools` true for that model and runtime resolution then reports the
+provenance as `toolsVerification`; a failed probe adds a `tools-probe-failed`
+warning to the next turn or dispatch on that model. The result lives only in the
+running process.
+
+A model the probe loaded and pinned on a local server such as Ollama is released
+before the command returns, whether the probe passed, failed, or was cancelled. A
+model that was already resident before the probe is left loaded.
+
+</details>
 
 `clio-coder targets use <id>` sets the orchestrator target. It refuses any target whose runtime is not a registered HTTP/native runtime because the selected target must be valid for chat.
 
@@ -1290,15 +1381,17 @@ Without `--fleet-target` the default fleet target follows the orchestrator, whic
 
 ### Target-Profile Subcommands
 
-The command `clio-coder targets profile` supports several subcommands to manage fleet worker profiles and agent bindings:
+`clio-coder targets profile` manages fleet worker profiles and agent bindings:
 
-- **list**: Show configured fleet profiles. Use `clio-coder targets profile list [--json]` to output details in JSON format.
-- **set**: Create or update a named fleet profile. Use `clio-coder targets profile set <name> <id> [--model <id>] [--thinking <level>]`; the compatibility form `clio-coder targets profile <name> <id> ...` is also accepted.
-- **remove**: Remove a profile from settings. Use `clio-coder targets profile remove <name> [--force]`. The `--force` flag is required if the profile has active agent bindings.
-- **rename**: Rename a fleet profile. Use `clio-coder targets profile rename <old> <new>`. Active agent bindings are updated to point to the new profile name automatically.
-- **bind**: Bind an agent to a fleet profile. Use `clio-coder targets profile bind <agentId> <profileName>`. Active ACP delegation agents are rejected.
-- **unbind**: Unbind an agent from its profile. Use `clio-coder targets profile unbind <agentId>`.
-- **bindings**: List active agent-to-profile bindings. Use `clio-coder targets profile bindings [--json]` to output details in JSON format.
+| Command | Effect |
+| --- | --- |
+| `targets profile list [--json]` | Show configured fleet profiles. |
+| `targets profile set <name> <id> [--model <id>] [--thinking <level>]` | Create or update a named profile. The older `targets profile <name> <id> ...` form is still accepted. |
+| `targets profile remove <name> [--force]` | Remove a profile. `--force` is required when the profile has active agent bindings. |
+| `targets profile rename <old> <new>` | Rename a profile. Active bindings follow the new name automatically. |
+| `targets profile bind <agentId> <profileName>` | Bind a native agent to a profile. Active ACP delegation agents are rejected. |
+| `targets profile unbind <agentId>` | Remove an agent's binding. |
+| `targets profile bindings [--json]` | List active agent-to-profile bindings. |
 
 Inside the TUI, `/settings targets` opens the operational target console.
 Targets render with `HEALTH`, `ID`, `ROLES`, `RUNTIME`, and `LATENCY`, plus a
@@ -1316,6 +1409,9 @@ Target status resolution tracks provenance explicitly in `TargetStatus.contextWi
 
 When a probed target reports no context window, Clio uses the runtime descriptor default as an unverified guess. In `clio-coder targets` text output, this renders as `ctx <N> (unverified runtime default)`. In JSON output, `contextWindowProvenance` is set to `"runtime-default"`. During target creation via `clio-coder configure`, Clio emits a warning: `warning: the target reported no context window; Clio will use the runtime default as a guess. Set one with --context-window.`. This design ensures that a number the operator never chose and the server never claimed will not read like a verified capability.
 
+<details>
+<summary>How each runtime's probe resolves a window, and the Ollama cold-model cap</summary>
+
 `capabilities.contextWindow` declares an existing serving limit; it does not
 resize the server or override a smaller observed limit. One-run context limits
 likewise cap Clio’s planning budget, not the server’s allocation. Slot count does
@@ -1327,11 +1423,16 @@ A runtime that reports the window a resident model is loaded at (LM Studio, and 
 
 An `ollama` probe reads the model maximum from `/api/show` for the target's default model, using `model_info["<architecture>.context_length"]` capped by any `num_ctx` baked into the Modelfile. When `/api/tags` rows carry `details.context_length`, as newer Ollama releases do, those maxima are recorded for every listed model. Ollama 0.18 does not report it there. When no model is resident, Clio plans against the smaller of that maximum and 131,072 tokens, because Ollama opens a cold model at `OLLAMA_CONTEXT_LENGTH` or its server default and no API reports that window before load. The text output names both, as in `ctx 131072 (cold; model max 262144)`; a model whose maximum is below the cap shows its maximum alone. Once `/api/ps` reports the model loaded, its serving window replaces the cold figure. Set `ollama.numCtx` to plan against a window Clio requests rather than one it infers; it applies whether or not the model is resident.
 
+</details>
+
 ---
 
 ## Local Model Quirks
 
 Local models often require specific engine configurations to perform optimally. Clio parses local model quirks from catalog entries and applies them during target execution. Keep target inventory in `settings.yaml` (`wireModels`, `defaultModel`, URL/auth), and keep per-model semantics in catalog YAML. For local experiments, use `$CLIO_CODER_CONFIG_DIR/model-catalog.d` or `.clio-coder/model-catalog.d`; promote entries into the bundled source catalog only after the model family is verified for broader Clio use.
+
+<details>
+<summary>Every quirk field: KV-cache quantization, sampling, and thinking mechanisms</summary>
 
 ### 1. KV-Cache Quantization
 You can optimize the GPU memory usage of the key and value caches for local inference engines. Quirks parameters include:
@@ -1354,6 +1455,7 @@ Local models use different mechanisms to control and parse reasoning steps. The 
 - `always-on`: The model emits chain-of-thought tokens unconditionally.
 - `none`: The model does not support thinking or reasoning states.
 
+</details>
 
 ### Local reasoning-token budgets
 
@@ -1504,6 +1606,9 @@ own environment/default. Targets reload on the next turn, including when the
 id and model stay the same. The active conversation survives the runtime refresh.
 There are no duplicate model, recipe or fleet retention knobs.
 
+<details>
+<summary>Per-API cache retention policy and how each one was verified</summary>
+
 | API/deployment | Effective policy and current verification |
 | --- | --- |
 | Native OpenAI Responses, older supported models | Pi's model compatibility flags select `24h` for `long`. `none` omits controls; it does not universally disable automatic caching. Payload fixtures cover this path. |
@@ -1515,10 +1620,15 @@ There are no duplicate model, recipe or fleet retention knobs.
 | Claude Agent SDK, subscription/OAuth and other harnesses | Harness-specific transport and usage remain intact. Native Pi controls and direct API prices are not promises about another harness. |
 | Gemini explicit cache objects, Bedrock/platform cache administration | No new object lifecycle or administration is added. Existing Pi/provider support remains responsible for supported passive observations and requests. |
 
+</details>
+
 For a direct llama.cpp **already loaded** worker at the audited commit, an
 operator can opt into a bounded pilot. Use the worker's actual `build_info`,
 exact model alias and endpoint; the values below are examples, not deployment
 measurements:
+
+<details>
+<summary>A pinned llama.cpp server configuration for reproducible prompt reuse</summary>
 
 ```yaml
 chat:
@@ -1541,6 +1651,14 @@ targets:
         cooldownMs: 60000
 ```
 
+</details>
+
+Warming only runs against a deployment Clio could inspect and bind, and every
+refusal is recorded rather than retried. The rules below are the whole gate.
+
+<details>
+<summary>Deployment discovery, gateway binding, warm bounds, and admission checks</summary>
+
 Discovery uses GET requests with a two-second total deadline and refuses
 redirects. The control endpoint receives no inferred credentials. An authenticated
 control endpoint therefore remains unavailable to this initial reader. For a
@@ -1561,9 +1679,12 @@ validated on the configured gateway. No gateway credentials are forwarded to
 native discovery.
 
 The warm owns one request and at most one newer pending trigger. Pending work
-expires after 30 seconds. The default bound is 8192 estimated input tokens and
-a 30-second client deadline, with a 60-second cooldown; configured deadlines
-cannot exceed two minutes. Context transforms run before the input estimate.
+expires after 30 seconds. The default bound is 8192 estimated input tokens
+(`cache.warm.maxInputTokens`) and a 30-second client deadline
+(`cache.warm.maxDurationMs`), with a 60-second cooldown; configured deadlines
+cannot exceed two minutes. The separate LM Studio startup wake that
+`cache.warm.startup` enables is not the exact-prefix warm and is clamped to 256
+input tokens regardless of the configured bound. Context transforms run before the input estimate.
 The one-token output and dummy suffix do not enter the conversation. The warm
 uses observe-only residency and `autoload=false` on native llama requests, so
 it cannot use the ordinary turn's implicit administrative authority.
@@ -1584,6 +1705,8 @@ as `deployment-unbound`, `model-not-loaded`, `deployment-build-mismatch`,
 `vllm-scheduler-unverified`, `cooldown` and `expired`. These records contain no
 prompt payloads. Diagnostic payload capture remains a separate explicit opt-in.
 
+</details>
+
 Turn off speculative work with `chat.prewarm: false`. Remove `cache.deployment`
 to return an individual target to passive operation. `cache.retention: none`
 selects the API's supported cache-off request policy and also refuses Clio
@@ -1597,11 +1720,17 @@ accounting, but the worker's context guard and payload hooks must be included
 in any future headless warm composition. There is no main-to-worker cache
 transfer based on ancestry.
 
+Automated warming is opt-in. The historical measurements below illustrate why
+faster first-token timing alone does not establish lower total work or cost.
+
+<details>
+<summary>The dated 2026-09-11 TTFT run these settings were validated against</summary>
+
 ### Validation status for this change
 
-Live validation on 2026-09-11 exercised mini's `ornith1.5-35b-moe` on
-llama.cpp (`b1-c841aee`) and dynamo's `qwen3.8-27b` on LM Studio, first directly
-and then through blade's LiteLLM 1.98.0. The selected models were allowed to
+Historical validation on 2026-09-11 exercised an example MoE model on llama.cpp
+(`b1-c841aee`) and a 27B model on LM Studio, first directly and then through an
+intermediate LiteLLM 1.98.0 gateway host. The selected models were allowed to
 wake/load for inference; no serving configuration or administrative API was
 changed. The same native models and thinking-off intent were retained.
 
@@ -1611,13 +1740,13 @@ exactly `OK`. Median client TTFT was:
 
 | Route | New prefix | Repeated prefix | After a separate warm |
 | --- | ---: | ---: | ---: |
-| Mini native | 1,691 ms | 183 ms | 163 ms |
-| Dynamo native | 1,255 ms | 156 ms | 155 ms |
-| Mini through LiteLLM | 1,706 ms | 196 ms | 173 ms |
-| Dynamo through LiteLLM | 1,259 ms | 163 ms | 162 ms |
+| llama.cpp (MoE) native | 1,691 ms | 183 ms | 163 ms |
+| LM Studio (27B) native | 1,255 ms | 156 ms | 155 ms |
+| llama.cpp through LiteLLM | 1,706 ms | 196 ms | 173 ms |
+| LM Studio through LiteLLM | 1,259 ms | 163 ms | 162 ms |
 
-Mini reported roughly 2,834 cached tokens directly and 2,837 through the
-gateway after warming. Dynamo's OpenAI-compatible responses did not expose a
+llama.cpp reported roughly 2,834 cached tokens directly and 2,837 through the
+gateway after warming. LM Studio's OpenAI-compatible responses did not expose a
 cache-read breakdown; their normalized zero must not be presented as measured
 cache misses. Its timing improvement is an observation, not a per-request
 cache-token measurement. Gateway response metadata identified the expected
@@ -1631,20 +1760,20 @@ reduction alone is not a total-work improvement. An idle-time or foreground
 contention benefit requires its own controlled measurement before rollout.
 
 Four full Clio main-agent CLI runs also completed with no tool calls and
-matching native/gateway outputs per model: mini returned `OK.`, dynamo `OK`.
-The punctuation means mini did not meet a literal exact-`OK` instruction in
+matching native/gateway outputs per model: llama.cpp returned `OK.`, LM Studio `OK`.
+The punctuation means llama.cpp did not meet a literal exact-`OK` instruction in
 those full-prompt smoke runs; it is not hidden by the transport success. The
 engine workload above enforced the exact output separately.
 
 Four custom-worker CLI runs then returned exactly `OK`, with zero tool calls
 and succeeded outcomes. Each emitted receipt matched its persisted receipt and
-passed Clio's integrity verifier against its persisted run envelope. The mini
+passed Clio's integrity verifier against its persisted run envelope. The llama.cpp
 worker through LiteLLM reported 719 cache-read tokens in that verified receipt.
 These checks establish transport and accounting continuity; the synthetic
 worker's task quality was not independently graded.
 
 The first exploratory driver omitted the public capability update that
-production applies after model synthesis. That made dynamo through LiteLLM
+production applies after model synthesis. That made LM Studio through LiteLLM
 spend its output budget on thinking. Those samples were preserved and marked
 invalid for semantic comparisons; the reported rerun includes the existing
 public update and checks visible output. This was a driver error, not a newly
@@ -1666,3 +1795,5 @@ The run does not establish replica affinity guarantees, eviction/TTL behavior,
 foreign-traffic fairness, paid-provider savings, or a complete deployment pin
 for every model binary/tokenizer. Those limits prevent a general performance
 claim or enabling automatic gateway/worker warming.
+
+</details>
