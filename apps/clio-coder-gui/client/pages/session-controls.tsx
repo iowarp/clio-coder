@@ -1,66 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import type { PermissionDecision } from "../../contracts/permissions.js";
+// Session controls keep the label form and the safe-settings panel.
+//
+// The approval cards, the turn cancellation and the fleet dump that used to live here have moved:
+// approvals to `client/chat/Approval.tsx`, which anchors the decision to the call it gates and owns
+// the announcement and the keyboard; Stop to the composer, which is where the operator's hands are;
+// and the fleet feed to `client/chat/FleetStrip.tsx`, which folds the append-only event list into
+// one row per run instead of printing every event as JSON.
+
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import type { Client } from "../api/client.js";
-import { formatTime } from "../api/clock.js";
 
-export function PermissionCards({ client, session }: { client: Client; session: SessionSnapshot }) {
-	const answer = useMutation({
-		mutationFn: ({ id, decision }: { id: string; decision: PermissionDecision }) =>
-			client.call(routes.permission, { params: { id: session.id, permissionId: id }, query: {}, body: { decision } }),
-	});
-	return (
-		<div className="permission-cards">
-			{session.permissions
-				.filter((permission) => permission.status === "pending" || permission.status === "escalated")
-				.map((permission) => (
-					<article key={permission.id} className="permission-card" aria-label="Permission request">
-						<p className="eyebrow">{permission.status === "escalated" ? "Approval still waiting" : "Approval needed"}</p>
-						<h2>{permission.title}</h2>
-						<p>Review the tool input and locations in the conversation before allowing this action.</p>
-						<p>If unanswered, this turn stops at {formatTime(permission.expiresAt)}.</p>
-						<div className="control-actions">
-							<button
-								className="primary"
-								type="button"
-								disabled={answer.isPending}
-								onClick={() => answer.mutate({ id: permission.id, decision: "allow-once" })}
-							>
-								Allow once
-							</button>
-							<button
-								type="button"
-								disabled={answer.isPending}
-								onClick={() => answer.mutate({ id: permission.id, decision: "reject" })}
-							>
-								Reject
-							</button>
-						</div>
-					</article>
-				))}
-			{answer.error ? <p role="alert">{answer.error.message}</p> : null}
-		</div>
-	);
-}
-export function CancelTurn({ client, session }: { client: Client; session: SessionSnapshot }) {
-	const turn = session.turns.at(-1);
-	const cancel = useMutation({
-		mutationFn: () =>
-			client.call(routes.cancelTurn, { params: { id: session.id, turnId: turn?.id ?? "" }, query: {}, body: {} }),
-	});
-	return turn?.status === "running" ? (
-		<div className="control-actions">
-			<button type="button" disabled={cancel.isPending} onClick={() => cancel.mutate()}>
-				{cancel.isPending ? "Cancelling…" : "Cancel turn"}
-			</button>
-			{cancel.error ? <p role="alert">{cancel.error.message}</p> : null}
-		</div>
-	) : null;
-}
 export function DeleteSession({ client, id, workspaceId }: { client: Client; id: string; workspaceId: string }) {
 	const queries = useQueryClient(),
 		navigate = useNavigate();
@@ -268,20 +221,4 @@ export function SessionControls({ client, session }: { client: Client; session: 
 			) : null}
 		</details>
 	);
-}
-export function FleetStrip({ session }: { session: SessionSnapshot }) {
-	return session.fleet.length ? (
-		<details className="fleet-strip" open>
-			<summary>Fleet activity · {session.fleet.length} recent facts</summary>
-			<ol>
-				{session.fleet.map((item) => (
-					<li key={item.id}>
-						<strong>{item.fact.type.replace("fleet.", "").replace("evidence.ready", "Evidence ready")}</strong>
-						<span>{formatTime(item.at)}</span>
-						<pre className="trace-json">{JSON.stringify(item.fact.payload, null, 2)}</pre>
-					</li>
-				))}
-			</ol>
-		</details>
-	) : null;
 }

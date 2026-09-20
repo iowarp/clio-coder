@@ -1,0 +1,423 @@
+/* The conversation. Colour comes only from client/design/tokens.css; every status also carries a
+   glyph and a word through StatusMark, so meaning survives a greyscale screenshot. */
+
+.chat-transcript {
+	position: relative;
+	overflow-y: auto;
+	overscroll-behavior: contain;
+	/* A bounded region is what lets the transcript scroll while the composer stays reachable. */
+	max-height: min(68vh, 900px);
+	padding-right: var(--space-2);
+	margin: var(--space-6) 0;
+	border-block: 1px solid var(--line);
+}
+.chat-transcript__content {
+	display: grid;
+	gap: var(--space-8);
+	padding-block: var(--space-5);
+}
+
+.chat-turn {
+	display: grid;
+	gap: var(--space-4);
+	min-width: 0;
+}
+
+/* A grid item's automatic minimum size is its min-content width, so a card holding a long command
+   or a wide diff refuses to shrink and pushes the whole page sideways on a phone. Every level of
+   the transcript's nesting opts out, which is what lets each card's own `overflow-x: auto` do the
+   scrolling instead of the document. */
+.chat-transcript__content > *,
+.chat-turn > *,
+.chat-request > *,
+.chat-response > *,
+.chat-response__body > *,
+.activity > *,
+.activity__rows > *,
+.activity__row > *,
+.approval-card > *,
+.approval-card__actions > *,
+.approval-preview > *,
+.tool-card > *,
+.fleet-strip > * {
+	min-width: 0;
+}
+/* A chip row, a headline and a fact are prose, not code: they wrap rather than scroll. */
+.approval-card__chips,
+.approval-card__title,
+.approval-card__facts li,
+.approval-preview__value,
+.tool-card__headline {
+	overflow-wrap: anywhere;
+	min-width: 0;
+}
+/* A status pill is `white-space: nowrap` so a two-word state never splits. In the transcript it also
+   carries a detail, which can be a whole sentence or a path, so here the pill wraps instead of
+   deciding how wide the page is. */
+.conversation .status-mark {
+	flex-wrap: wrap;
+	white-space: normal;
+	overflow-wrap: anywhere;
+	min-width: 0;
+}
+/* A disclosure summary is not a scroll container and has to wrap instead. */
+.activity__row summary,
+.chat-response__body summary {
+	overflow-wrap: anywhere;
+}
+.chat-turn.is-replay {
+	opacity: 0.92;
+}
+
+/* Only the request is a card. Model prose stays unboxed so it reads as a document. */
+.chat-request {
+	background: var(--accent-soft);
+	border: 1px solid var(--line-strong);
+	border-left: 2px solid var(--accent);
+	border-radius: var(--radius-md);
+	padding: var(--space-4) var(--space-5);
+	min-width: 0;
+}
+.chat-request__meta,
+.chat-response__meta {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-3);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	font-variant-numeric: tabular-nums;
+}
+.chat-request__who,
+.chat-response__who {
+	font-weight: 600;
+	color: var(--ink-strong);
+	font-size: var(--text-meta);
+}
+.chat-request__replay {
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-pill);
+	padding: 1px var(--space-2);
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-instrument);
+	font-size: var(--text-instrument);
+}
+.chat-request__prompt {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: var(--leading-reading);
+	font-size: var(--text-body);
+	margin-top: var(--space-2);
+}
+/* A stated absence is not the operator's words and must not be read as them. */
+.chat-request__prompt.is-missing {
+	color: var(--ink-subtle);
+	font-style: italic;
+}
+
+.chat-response {
+	display: grid;
+	gap: var(--space-3);
+	border-left: 2px solid var(--accent);
+	padding-left: var(--space-5);
+	min-width: 0;
+}
+.chat-response__body {
+	display: grid;
+	gap: var(--space-4);
+	min-width: 0;
+}
+.chat-response__placeholder {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.chat-response__footer {
+	min-height: 20px;
+}
+
+.live-chip {
+	display: inline-flex;
+	align-items: baseline;
+	gap: var(--space-2);
+}
+.live-chip[data-state="waiting"],
+.live-chip[data-state="stopping"] {
+	font-weight: 600;
+}
+
+/* Reported reasoning is provenance, not prose, and stays behind a disclosure. */
+.reasoning {
+	color: var(--reason-fg);
+	background: var(--reason-tint);
+	border-left: 2px solid var(--reason-line);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	font-size: var(--text-meta);
+	padding: var(--space-2) var(--space-4);
+}
+.reasoning__summary {
+	cursor: pointer;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+}
+.reasoning__label {
+	font-weight: 600;
+	color: var(--ink);
+}
+.reasoning__preview {
+	color: var(--reason-fg);
+	overflow-wrap: anywhere;
+}
+.reasoning__source {
+	margin-left: auto;
+	font-size: var(--text-instrument);
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-instrument);
+	/* --ink-subtle clears 4.5:1 on the page ground but not on the reasoning tint. */
+	color: var(--ink-muted);
+}
+
+/* `CopyButton` is shared with the code block, where it sits on a fixed dark paper and carries fixed
+   light ink to match. Reused in the transcript it lands on the page ground, where that ink is
+   invisible, so the transcript restates it in tokens that follow the theme. */
+.message-actions .code-block__copy {
+	min-height: auto;
+	border: 1px solid var(--line);
+	border-radius: var(--radius-xs);
+	padding: var(--space-1) var(--space-2);
+	background: transparent;
+	color: var(--ink-muted);
+	font: inherit;
+	font-size: var(--text-exact);
+	cursor: pointer;
+}
+.message-actions .code-block__copy:hover {
+	color: var(--ink);
+	border-color: var(--line-strong);
+}
+.message-actions .code-block__copy.is-copied {
+	color: var(--status-success-fg);
+}
+.message-actions .code-block__copy.is-failed {
+	color: var(--status-fail-fg);
+}
+
+.reasoning__body {
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: var(--leading-body);
+	margin-top: var(--space-3);
+	color: var(--ink);
+}
+
+/* The activity group: one line closed, the per-tool cards open. */
+.activity {
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--surface-sunken);
+	padding: var(--space-2) var(--space-3);
+}
+.activity--warning {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+}
+.activity--error {
+	border-color: var(--status-fail-line);
+	background: var(--status-fail-tint);
+}
+.activity--action {
+	border-color: var(--action-line);
+	background: var(--action-tint);
+}
+.activity__summary {
+	cursor: pointer;
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	min-width: 0;
+}
+.activity__glyph {
+	font-family: var(--font-mono);
+	color: var(--ink-muted);
+}
+.activity__label {
+	font-weight: 600;
+	color: var(--ink);
+	white-space: nowrap;
+}
+.activity__current {
+	color: var(--ink-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	min-width: 0;
+}
+.activity__count {
+	margin-left: auto;
+	font-variant-numeric: tabular-nums;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	padding-left: var(--space-2);
+}
+.activity__rows {
+	list-style: none;
+	margin: var(--space-3) 0 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-3);
+}
+.activity__row {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+}
+.activity__rowhead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.activity__kind {
+	font-family: var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: var(--tracking-instrument);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.activity__agent {
+	border: 1px dashed var(--line-strong);
+	border-radius: var(--radius-pill);
+	padding: 0 var(--space-2);
+}
+.activity__elapsed {
+	font-variant-numeric: tabular-nums;
+	margin-left: auto;
+}
+.activity__notice {
+	font-size: var(--text-meta);
+	color: var(--ink);
+	overflow-wrap: anywhere;
+}
+
+/* Health facts rendered at the point in the conversation they happened. */
+.turn-health,
+.session-health__rows {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+}
+.turn-health li {
+	border-left: 2px solid var(--line-strong);
+	padding-left: var(--space-3);
+}
+
+/* Session chrome: the standing context warning and the provider strip. */
+.context-banner {
+	border: 1px solid var(--status-warn-line);
+	background: var(--status-warn-tint);
+	color: var(--status-warn-fg);
+	border-radius: var(--radius-md);
+	padding: var(--space-3) var(--space-4);
+	margin-block: var(--space-4);
+	font-size: var(--text-meta);
+}
+.session-health {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+	align-items: baseline;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+
+.chat-empty {
+	padding: var(--space-12) 0;
+	display: grid;
+	gap: var(--space-3);
+	justify-items: start;
+}
+.chat-empty__glyph {
+	font-size: 40px;
+	color: var(--ink-subtle);
+	line-height: 1;
+}
+.chat-empty h2 {
+	font-family: var(--font-editorial);
+	font-size: 27px;
+	color: var(--ink);
+	font-weight: 400;
+}
+.chat-empty__starters {
+	display: grid;
+	gap: var(--space-2);
+	justify-items: start;
+}
+.chat-empty__starters button {
+	text-align: left;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--surface);
+	color: var(--ink);
+	padding: var(--space-2) var(--space-4);
+	font: inherit;
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+.chat-empty__starters button:hover {
+	background: var(--accent-soft);
+}
+
+@media (max-width: 640px) {
+	/* The region stays a scroll container at every width. Letting the page grow instead would both
+	   defeat `useFollowLatest`, which measures a scroller, and leave the composer moving under the
+	   operator's thumb for as long as a turn streams. */
+	.chat-transcript {
+		max-height: 60vh;
+	}
+	.chat-response {
+		padding-left: var(--space-3);
+	}
+}
+
+/* Two corrections the components could only be measured for once they were mounted in a page.
+   They belong in approval.css and tool-cards.css and should be folded back into them; they are
+   here because those files belong to other tracks and this one does not edit across that line. */
+
+/* The chord hint inherits the muted ink that is correct beside a quiet button and unreadable
+   inside the filled primary one. */
+.approval-card .primary .approval-card__chord {
+	color: var(--on-accent);
+}
+
+/* The same shared CopyButton as above, this time on the tool card's sunken ground. */
+.tool-card .code-block__copy,
+.diff .code-block__copy {
+	min-height: auto;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-xs);
+	padding: var(--space-1) var(--space-2);
+	background: transparent;
+	color: var(--ink-muted);
+	font: inherit;
+	font-size: var(--text-exact);
+	cursor: pointer;
+}
+.tool-card .code-block__copy:hover,
+.diff .code-block__copy:hover {
+	color: var(--ink);
+}
+.tool-card .code-block__copy.is-copied,
+.diff .code-block__copy.is-copied {
+	color: var(--status-success-fg);
+}
+.tool-card .code-block__copy.is-failed,
+.diff .code-block__copy.is-failed {
+	color: var(--status-fail-fg);
+}

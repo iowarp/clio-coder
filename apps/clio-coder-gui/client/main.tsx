@@ -4,7 +4,7 @@ import { createBrowserRouter, RouterProvider } from "react-router";
 import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
-import { reportProblem } from "./design/problems.js";
+import { reportProblem } from "./design/notifications.js";
 import { Docs } from "./pages/docs.js";
 import { EvidenceDetail, EvidencePage } from "./pages/evidence.js";
 import { FleetDetail, FleetPage } from "./pages/fleet.js";

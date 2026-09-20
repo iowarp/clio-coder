@@ -1,13 +1,32 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
-import type { TimelineItem } from "../../contracts/sessions.js";
+import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { formatTime, formatTokens } from "../api/clock.js";
+import { clock, formatTime, formatTokens } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
-import { MarkdownContent } from "../render/Markdown.js";
-import { CancelTurn, DeleteSession, FleetStrip, PermissionCards, SessionControls } from "./session-controls.js";
+import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
+import { ChatTurnView } from "../chat/ChatTurn.js";
+import { Composer, fillComposer } from "../chat/Composer.js";
+import {
+	CONTEXT_WARNING_LABEL,
+	EMPTY_EYEBROW,
+	EMPTY_GLYPH,
+	EMPTY_HEADING,
+	PROVIDER_UNREPORTED,
+	placeHealthRows,
+	STARTER_PROMPTS,
+	TRUNCATION_NOTE,
+} from "../chat/chat-turn.js";
+import { FleetStrip } from "../chat/FleetStrip.js";
+import { type HealthRow, summarizeHealth } from "../chat/health.js";
+import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { StatusMark } from "../design/status.js";
+import { JumpToLatest } from "../render/FollowLatest.js";
+import { useFollowLatest } from "../render/follow-latest.js";
+import { DeleteSession, SessionControls } from "./session-controls.js";
+import "../chat/chat-turn.css";
 export function Workspaces({ client }: { client: Client }) {
 	const navigate = useNavigate(),
 		queries = useQueryClient(),
@@ -145,69 +164,82 @@ export function Sessions({ client }: { client: Client }) {
 		</section>
 	);
 }
-function Timeline({ item }: { item: TimelineItem }) {
-	const attribution = item.provenance
-		?.map((agent) => `${agent.agentId}${agent.runId ? ` / ${agent.runId}` : ""}`)
-		.join(", ");
-	if (item.kind === "thought")
-		return (
-			<details className="chat-thought">
-				<summary>
-					Reasoning{attribution ? ` · ${attribution}` : ""}
-					{item.origin === "replay" ? " · replay" : ""}
-				</summary>
-				<p>{item.text}</p>
-			</details>
-		);
-	return (
-		<article className={`chat-message ${item.kind}`}>
-			<div className="chat-message-label">
-				<strong>
-					{item.kind === "user"
-						? "You"
-						: item.kind === "tool"
-							? (item.title ?? "Tool")
-							: item.kind === "notice"
-								? "Session notice"
-								: "Clio Coder"}
-				</strong>
-				<span>
-					{attribution ?? (item.kind === "user" ? "" : "Attribution not recorded")}
-					{item.origin === "replay" ? " · replay" : ""}
-				</span>
-			</div>
-			{item.kind === "text" ? (
-				<MarkdownContent source={item.text} complete={item.status !== "in_progress" && item.status !== "pending"} />
-			) : (
-				<p>{item.text}</p>
-			)}
-			{item.kind === "tool" ? (
-				<>
-					<span className="trace-badge">
-						{item.toolKind} · {item.status}
-					</span>
-					{item.locations?.map((location) => (
-						<p key={`${location.path}:${location.line}`}>
-							{location.path}
-							{location.line == null ? "" : `:${location.line + 1}`}
-						</p>
-					))}
-					<details>
-						<summary>Tool input and result</summary>
-						<pre className="trace-json">{JSON.stringify({ input: item.rawInput, output: item.rawOutput }, null, 2)}</pre>
-					</details>
-				</>
-			) : null}
-		</article>
-	);
-}
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
 	return <SessionView key={id} client={client} id={id} />;
 }
+
+/**
+ * One shared second for the whole conversation. It ticks only while something is live, and it reads
+ * the server-adopted clock rather than `Date.now()`, so an elapsed figure cannot disagree with the
+ * server by the connection's clock offset.
+ */
+function useSecond(active: boolean): number {
+	const [now, setNow] = useState(() => clock.now());
+	useEffect(() => {
+		if (!active) return;
+		setNow(clock.now());
+		const timer = setInterval(() => setNow(clock.now()), 1000);
+		return () => clearInterval(timer);
+	}, [active]);
+	return active ? now : 0;
+}
+
+const NO_ROWS: readonly HealthRow[] = [];
+
+function EmptyTranscript({ sessionId }: { sessionId: string }) {
+	return (
+		<div className="chat-empty">
+			<span className="chat-empty__glyph" aria-hidden="true">
+				{EMPTY_GLYPH}
+			</span>
+			<p className="eyebrow">{EMPTY_EYEBROW}</p>
+			<h2>{EMPTY_HEADING}</h2>
+			<div className="chat-empty__starters">
+				{STARTER_PROMPTS.map((prompt) => (
+					<button key={prompt} type="button" onClick={() => fillComposer(sessionId, prompt)}>
+						{prompt}
+					</button>
+				))}
+			</div>
+		</div>
+	);
+}
+
+function SessionHealth({ session }: { session: SessionSnapshot }) {
+	const summary = useMemo(() => summarizeHealth(session.health), [session.health]);
+	const providers = summary.providers;
+	const unknown = summary.unknown;
+	return (
+		<>
+			{summary.contextWarning ? (
+				<p className="context-banner" role="status">
+					<strong>{CONTEXT_WARNING_LABEL}</strong> {summary.contextWarning.detail ?? summary.contextWarning.label}
+				</p>
+			) : null}
+			<div className="session-health">
+				{providers.length === 0 ? (
+					<StatusMark tone="unverified" label={PROVIDER_UNREPORTED} />
+				) : (
+					providers.map((row) => (
+						<StatusMark
+							key={row.id}
+							tone={row.tone}
+							label={row.label}
+							{...(row.detail === null ? {} : { detail: row.detail })}
+						/>
+					))
+				)}
+				{unknown.map((row) => (
+					<StatusMark key={row.id} tone={row.tone} label={row.label} />
+				))}
+			</div>
+		</>
+	);
+}
+
 function SessionView({ client, id }: { client: Client; id: string }) {
-	const [text, setText] = useState(""),
-		queries = useQueryClient();
+	const queries = useQueryClient();
 	const input = { params: { id }, query: {}, body: {} };
 	const session = useQuery({
 		queryKey: ["session", id],
@@ -216,9 +248,11 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			return sessionBuffer(id).snapshot(snapshot) ?? snapshot;
 		},
 	});
-	const prompt = useMutation({
-		mutationFn: () => client.call(routes.turn, { ...input, body: { text } }),
-		onSuccess: () => setText(""),
+	const workspaceId = session.data?.workspaceId ?? "";
+	const workspace = useQuery({
+		queryKey: ["workspace", workspaceId],
+		queryFn: () => client.call(routes.workspace, { params: { id: workspaceId }, query: {}, body: {} }),
+		enabled: workspaceId !== "",
 	});
 	const close = useMutation({
 		mutationFn: () => client.call(routes.closeSession, input),
@@ -228,6 +262,23 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			void queries.invalidateQueries({ queryKey: ["session-history", snapshot.workspaceId] });
 		},
 	});
+	const scroll = useRef<HTMLDivElement | null>(null);
+	const previousTurns = useRef<readonly ChatTurn[]>([]);
+	const snapshot = session.data;
+	const statuses = useMemo(() => turnStatuses(snapshot?.turns ?? []), [snapshot?.turns]);
+	const turns = useMemo(() => {
+		const next = groupTurns(snapshot?.timeline ?? [], statuses, previousTurns.current);
+		previousTurns.current = next;
+		return next;
+	}, [snapshot?.timeline, statuses]);
+	const notices = useMemo(() => {
+		const health = summarizeHealth(snapshot?.health ?? []);
+		const rows = [health.compaction, health.toolBudget].filter((row): row is HealthRow => row !== null);
+		return placeHealthRows(rows, snapshot?.turns ?? []);
+	}, [snapshot?.health, snapshot?.turns]);
+	const running = snapshot?.turns.at(-1)?.status === "running";
+	const now = useSecond(running || (snapshot?.permissions.some((item) => item.status === "pending") ?? false));
+	const follow = useFollowLatest(scroll, true, snapshot?.timeline);
 	if (session.error)
 		return (
 			<div role="alert">
@@ -236,10 +287,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 				<Link to="/sessions">Open a workspace</Link>
 			</div>
 		);
-	if (!session.data) return <p>Loading session…</p>;
-	const snapshot = session.data,
-		turn = snapshot.turns.at(-1),
-		busy = turn?.status === "running";
+	if (!snapshot) return <p>Loading session…</p>;
+	const turn = snapshot.turns.at(-1);
+	const pending = pendingPermission(snapshot) ?? null;
+	const workspaceRoot = workspace.data?.path;
 	return (
 		<section className="conversation">
 			<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>← Workspace sessions</Link>
@@ -255,58 +306,61 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			<p className="session-status" role="status">
 				{snapshot.recoveredOrphan ? "Recovered after server interruption · " : ""}
 				{snapshot.state}
-				{busy ? " · Clio Coder is working…" : ""}
+				{running ? " · Clio Coder is working…" : ""}
 			</p>
+			<SessionHealth session={snapshot} />
 			<SessionControls client={client} session={snapshot} />
-			<CancelTurn client={client} session={snapshot} />
-			<PermissionCards client={client} session={snapshot} />
+			<ApprovalBanner client={client} session={snapshot} />
 			<FleetStrip session={snapshot} />
-			{snapshot.timelineTruncated ? (
-				<p className="trace-warning">
-					Earlier conversation content was omitted from this view to keep it bounded. Clio retains its own session history.
-				</p>
-			) : null}
-			<div className="chat-timeline">
-				{snapshot.timeline.map((item) => (
-					<Timeline key={item.id} item={item} />
-				))}
-				{snapshot.timeline.length === 0 ? <p className="chat-empty">What would you like to work on?</p> : null}
+			{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
+			<div className="chat-transcript" ref={scroll}>
+				<div className="chat-transcript__content">
+					{notices.leading.length > 0 ? (
+						<ul className="turn-health">
+							{notices.leading.map((row) => (
+								<li key={row.id}>
+									<StatusMark tone={row.tone} label={row.label} {...(row.detail === null ? {} : { detail: row.detail })} />
+								</li>
+							))}
+						</ul>
+					) : null}
+					{turns.map((item) => (
+						<ChatTurnView
+							key={item.turnId}
+							turn={item}
+							row={snapshot.turns.find((row) => row.id === item.turnId)}
+							client={client}
+							session={snapshot}
+							pending={pending}
+							pendingPermissionId={pending?.id ?? null}
+							nowMs={item.settled ? 0 : now}
+							stopping={false}
+							notices={notices.after.get(item.turnId) ?? NO_ROWS}
+							workspaceRoot={workspaceRoot}
+						/>
+					))}
+					{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
+				</div>
+			</div>
+			{/* `.jump-anchor` is the positioned, zero-height parent the pill is laid out against. Without
+			    it the pill resolves against the viewport and pushes the document sideways. */}
+			<div className="jump-anchor">
+				<JumpToLatest follow={follow} />
 			</div>
 			{turn?.usage ? (
 				<p className="chat-usage">
-					Input {formatTokens(turn.usage.input)} · Output {formatTokens(turn.usage.output)} · Cache read{" "}
+					Latest turn · Input {formatTokens(turn.usage.input)} · Output {formatTokens(turn.usage.output)} · Cache read{" "}
 					{formatTokens(turn.usage.cacheRead)} · Cache write {formatTokens(turn.usage.cacheWrite)} · Reasoning{" "}
 					{formatTokens(turn.usage.reasoning)}
 				</p>
 			) : null}
-			{turn?.problem || prompt.error || close.error ? (
-				<p role="alert">{turn?.problem?.detail ?? prompt.error?.message ?? close.error?.message}</p>
-			) : null}
-			<form
-				className="session-composer"
-				onSubmit={(event) => {
-					event.preventDefault();
-					prompt.mutate();
-				}}
-			>
-				<label htmlFor="prompt">Message Clio Coder</label>
-				<textarea
-					id="prompt"
-					value={text}
-					onChange={(event) => setText(event.target.value)}
-					rows={4}
-					maxLength={32000}
-					disabled={busy || snapshot.state !== "open"}
-					placeholder="Describe the change or investigation…"
-				/>
-				<button
-					className="primary"
-					type="submit"
-					disabled={busy || prompt.isPending || !text.trim() || snapshot.state !== "open"}
-				>
-					{busy ? "Working…" : "Send message"}
-				</button>
-			</form>
+			{close.error ? <p role="alert">{close.error.message}</p> : null}
+			<Composer
+				client={client}
+				sessionId={snapshot.id}
+				sessionState={snapshot.state}
+				runningTurnId={turn?.status === "running" ? turn.id : null}
+			/>
 		</section>
 	);
 }

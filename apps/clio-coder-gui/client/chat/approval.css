@@ -1,0 +1,269 @@
+/* The approval card and the fleet strip. Every value comes from client/design/tokens.css; a raw
+   hex here is a bug, because a raw hex cannot follow the theme. Status meaning never rides on
+   colour alone either: each row carries a StatusMark, and the add/delete sides of a proposed edit
+   carry a `+`/`−` marker as well as a tint. */
+
+/* ---- the banner ------------------------------------------------------------------------- */
+
+/* Pinned above the scrolling transcript and never inside it. It is not focus-trapping: the
+   operator has to be able to keep reading while an approval waits. */
+.approval-banner {
+	position: sticky;
+	top: var(--space-2);
+	z-index: 2;
+	margin-block: var(--space-4);
+}
+
+/* ---- the card -------------------------------------------------------------------------- */
+
+.approval-card {
+	display: grid;
+	gap: var(--space-3);
+	padding: var(--space-5);
+	border: 1px solid var(--action-line);
+	border-radius: var(--radius-md);
+	background: var(--action-tint);
+	color: var(--ink);
+	box-shadow: var(--shadow-raised);
+}
+.approval-card--anchored {
+	box-shadow: var(--shadow-none);
+	margin-block: var(--space-3);
+}
+/* Escalation is a state, not a timeout, so it changes the card's own boundary rather than only a
+   word in the eyebrow. */
+.approval-card[data-escalated="true"] {
+	border-color: var(--status-fail-line);
+	border-left-width: var(--space-1);
+}
+.approval-card__eyebrow {
+	margin: 0;
+	font-size: var(--text-instrument);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+}
+.approval-card__title {
+	margin: 0;
+	font-size: var(--text-h3);
+	line-height: var(--leading-tight);
+	overflow-wrap: anywhere;
+}
+.approval-card__chips {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: center;
+	margin: 0;
+	font-size: var(--text-exact);
+}
+.approval-chip {
+	padding: 2px var(--space-2);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-pill);
+	color: var(--ink-muted);
+}
+.approval-card__facts {
+	display: grid;
+	gap: var(--space-1);
+	margin: 0;
+	padding-left: var(--space-5);
+	font-size: var(--text-meta);
+	line-height: var(--leading-body);
+}
+.approval-card__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+	align-items: center;
+}
+.approval-card__chord {
+	margin-left: var(--space-2);
+	font-size: var(--text-instrument);
+	letter-spacing: var(--tracking-instrument);
+	color: var(--ink-muted);
+}
+.approval-card__hint {
+	margin: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+
+/* ---- the agent's own classification ------------------------------------------------------ */
+
+.approval-decision {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+	font-size: var(--text-meta);
+}
+.approval-decision > div {
+	display: grid;
+	grid-template-columns: 10rem minmax(0, 1fr);
+	gap: var(--space-3);
+}
+.approval-decision dt {
+	color: var(--ink-muted);
+}
+.approval-decision dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+/* ---- the concrete thing being approved --------------------------------------------------- */
+
+.approval-preview {
+	display: grid;
+	gap: var(--space-2);
+	padding: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+}
+.approval-preview__label {
+	margin: 0;
+	font-size: var(--text-instrument);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+}
+.approval-preview__note {
+	margin: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.approval-preview__value {
+	margin: 0;
+	font-size: var(--text-meta);
+	overflow-wrap: anywhere;
+}
+.approval-preview__code,
+.approval-proposed__side {
+	margin: 0;
+	padding: var(--space-3);
+	overflow-x: auto;
+	white-space: pre;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	line-height: var(--leading-body);
+	color: var(--code-ink);
+	background: var(--code-paper);
+	border-radius: var(--radius-xs);
+}
+
+/* The proposed edit. This is not the diff surface: it is the intent read back off `rawInput`
+   before anything has been applied, which is why both sides are shown whole. */
+.approval-proposed {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: var(--space-2);
+}
+.approval-proposed__side {
+	border-left: var(--space-1) solid var(--line-strong);
+}
+.approval-proposed__side[data-side="del"] {
+	border-left-color: var(--status-fail-line);
+}
+.approval-proposed__side[data-side="add"] {
+	border-left-color: var(--status-success-line);
+}
+/* The marker, not the tint, is what carries the meaning in greyscale. */
+.approval-proposed__side::before {
+	display: block;
+	margin-bottom: var(--space-1);
+	font-size: var(--text-instrument);
+	letter-spacing: var(--tracking-instrument);
+	color: var(--code-gutter);
+	user-select: none;
+	content: "− REMOVED";
+}
+.approval-proposed__side[data-side="add"]::before {
+	content: "+ ADDED";
+}
+
+@media (max-width: 640px) {
+	.approval-proposed {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.approval-decision > div {
+		grid-template-columns: minmax(0, 1fr);
+		gap: 0;
+	}
+}
+
+/* ---- the fleet strip --------------------------------------------------------------------- */
+
+/* The `.fleet-strip` shell in client/styles.css still dresses the card, and two of its rules were
+   written for the old one-row-per-event list. They are reset here rather than edited there. */
+.fleet-strip--runs .fleet-runs {
+	display: grid;
+	gap: var(--space-2);
+	margin: var(--space-3) 0 0;
+	padding-left: 0;
+	list-style: none;
+}
+.fleet-strip--runs .fleet-runs li > span {
+	margin-left: 0;
+	font-size: inherit;
+}
+.fleet-strip__count {
+	margin-left: var(--space-2);
+	padding: 0 var(--space-2);
+	border-radius: var(--radius-pill);
+	background: var(--surface-sunken);
+	font-size: var(--text-instrument);
+	color: var(--ink-muted);
+}
+.fleet-strip__filter {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-3);
+	align-items: center;
+	font-size: var(--text-exact);
+}
+.fleet-strip__filter p {
+	margin: 0;
+	color: var(--ink-muted);
+}
+.fleet-strip__filter button[aria-pressed="true"] {
+	border-color: var(--accent);
+	background: var(--accent-soft);
+}
+.fleet-run {
+	display: grid;
+	grid-template-columns: 1.5rem 10rem minmax(0, 1fr) auto;
+	gap: var(--space-3);
+	align-items: baseline;
+	padding-block: var(--space-2);
+	border-top: 1px solid var(--line);
+	font-size: var(--text-meta);
+}
+.fleet-runs--notices .fleet-run {
+	grid-template-columns: 10rem minmax(0, 1fr) auto;
+}
+.fleet-run__glyph {
+	font-family: var(--font-mono);
+	color: var(--ink-muted);
+}
+.fleet-run__agent {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	overflow-wrap: anywhere;
+}
+.fleet-run__task {
+	display: grid;
+	gap: 2px;
+	overflow-wrap: anywhere;
+}
+.fleet-run__note {
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+
+@media (max-width: 760px) {
+	.fleet-run,
+	.fleet-runs--notices .fleet-run {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-1);
+	}
+}

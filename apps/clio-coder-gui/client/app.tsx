@@ -1,17 +1,35 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
-import { NavLink, Outlet } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router";
 import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import { type Client, emptyInput } from "./api/client.js";
 import { subscribe } from "./api/events.js";
 import { MobileNavigation, Navigation, RouteFocus, ThemeToggle } from "./design/navigation.js";
-import { ProblemToasts } from "./design/problems.js";
+import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
 import { AppPreferences } from "./design/pwa.js";
+import { CommandPalette } from "./interaction/CommandPalette.js";
+import { appCommands } from "./interaction/commands.js";
+import { HelpDialog } from "./interaction/HelpDialog.js";
+import { useLayersActive, useShortcut } from "./interaction/use-shortcut.js";
+
+/** `/sessions/:id` and nothing else. The palette's session rows exist only on a conversation. */
+function sessionIdFrom(pathname: string): string | null {
+	const match = /^\/sessions\/([^/]+)$/.exec(pathname);
+	return match?.[1] ?? null;
+}
 
 export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
+	const navigate = useNavigate();
+	const location = useLocation();
 	const [connection, setConnection] = useState("Connecting…");
+	const [paletteOpen, setPaletteOpen] = useState(false);
+	const [helpOpen, setHelpOpen] = useState(false);
+	const notices = useNotices();
+	// A dialog or the palette claims a keyboard layer. While one is claimed, the page behind it must
+	// not be reachable by Tab either, or the focus order silently leaves the thing that has focus.
+	const layered = useLayersActive();
 	const meta = useQuery({
 		queryKey: ["meta"],
 		queryFn: () => client.call(routes.meta, emptyInput),
@@ -20,6 +38,54 @@ export function App({ client }: { client: Client }) {
 	useEffect(() => {
 		if (client.token) return subscribe(client.token, queries, setConnection);
 	}, [client, queries]);
+
+	const sessionId = sessionIdFrom(location.pathname);
+	// `enabled: false` reads the cache the conversation already filled and re-renders when it
+	// changes, without this component ever fetching a session of its own.
+	const session = useQuery({
+		queryKey: ["session", sessionId ?? ""],
+		queryFn: () => client.call(routes.session, { params: { id: sessionId ?? "" }, query: {}, body: {} }),
+		enabled: false,
+	});
+	const snapshot = sessionId === null ? undefined : session.data;
+	const lastTurn = snapshot?.turns.at(-1);
+	const runningTurnId = lastTurn?.status === "running" ? lastTurn.id : null;
+
+	useShortcut("palette", () => setPaletteOpen(true));
+	useShortcut("help", () => setHelpOpen(true));
+
+	const commands = useMemo(
+		() =>
+			appCommands(
+				{
+					sessionId,
+					runningTurnId,
+					sessionOpen: snapshot?.state === "open",
+					hasNotices: notices.length > 0,
+				},
+				{
+					navigate: (path) => void navigate(path),
+					openHelp: () => setHelpOpen(true),
+					dismissNotices: dismissAll,
+					cancelTurn: (turnId) => {
+						if (sessionId === null) return;
+						void client.call(routes.cancelTurn, {
+							params: { id: sessionId, turnId },
+							query: {},
+							body: {},
+						});
+					},
+					closeSession: () => {
+						if (sessionId === null) return;
+						void client
+							.call(routes.closeSession, { params: { id: sessionId }, query: {}, body: {} })
+							.then(() => queries.invalidateQueries({ queryKey: ["session", sessionId] }));
+					},
+				},
+			),
+		[client, navigate, notices.length, queries, runningTurnId, sessionId, snapshot?.state],
+	);
+
 	return (
 		<div className="shell">
 			<RouteFocus />
@@ -41,7 +107,7 @@ export function App({ client }: { client: Client }) {
 					<MobileNavigation />
 				</div>
 			</header>
-			<div className="workspace">
+			<div className="workspace" inert={layered}>
 				<aside className="desktop-navigation">
 					<Navigation />
 				</aside>
@@ -72,7 +138,10 @@ export function App({ client }: { client: Client }) {
 				</main>
 			</div>
 
-			<ProblemToasts />
+			<CommandPalette open={paletteOpen} commands={commands} onClose={() => setPaletteOpen(false)} />
+			<HelpDialog open={helpOpen} onClose={() => setHelpOpen(false)} />
+			<LiveRegions />
+			<NoticeToasts />
 		</div>
 	);
 }
