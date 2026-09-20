@@ -46,7 +46,7 @@ import {
 	SteerRequest,
 	SteerResult,
 } from "./steering.js";
-import { Interop, SystemReport } from "./system.js";
+import { Interop, InteropQuery, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
 import { CliTargets, Routing, TargetAdd, TargetRuntimes } from "./targets-cli.js";
 import { Install, Tools } from "./toolchain.js";
@@ -108,8 +108,9 @@ export const routes = {
 		...get,
 		path: "/api/workspaces/:id/interop",
 		params: operationParams,
+		query: InteropQuery,
 		response: Interop,
-		summary: "All registered external agents and bounded resource discovery",
+		summary: "All registered external agents and bounded resource discovery; probe=versions runs each --version",
 	}),
 	library: defineRoute({
 		...get,

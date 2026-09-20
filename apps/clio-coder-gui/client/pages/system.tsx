@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { useRef } from "react";
 import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -12,6 +13,7 @@ import {
 	interopSummary,
 	orderedAgents,
 	presenceMark,
+	versionText,
 	wiringMark,
 	wiringSentence,
 } from "./interop-model.js";
@@ -107,10 +109,18 @@ export function SystemPage({ client }: { client: Client }) {
 }
 export function InteropPage({ client }: { client: Client }) {
 	const selection = useWorkspaceSelection(client);
+	// Opening the page never runs a foreign executable. Only the button asks for the version probe,
+	// and the flag is spent by the read it started so a background refetch goes back to files only.
+	const probe = useRef(false);
 	const report = useQuery({
 		queryKey: ["interop", selection.id],
 		enabled: !!selection.id,
-		queryFn: () => client.call(routes.interop, { ...emptyInput, params: { id: selection.id } }),
+		refetchOnWindowFocus: false,
+		queryFn: () => {
+			const query = probe.current ? { probe: "versions" as const } : {};
+			probe.current = false;
+			return client.call(routes.interop, { ...emptyInput, params: { id: selection.id }, query });
+		},
 	});
 	return (
 		<section>
@@ -121,13 +131,20 @@ export function InteropPage({ client }: { client: Client }) {
 				Which coding agents are on this machine, and how far each one is wired as a delegation peer. Presence does not grant
 				an agent permission to work.
 			</p>
-			<button type="button" disabled={!selection.id || report.isFetching} onClick={() => void report.refetch()}>
-				{report.isFetching ? "Detecting agents…" : "Detect again"}
+			<button
+				type="button"
+				disabled={!selection.id || report.isFetching}
+				onClick={() => {
+					probe.current = true;
+					void report.refetch();
+				}}
+			>
+				{report.isFetching ? "Detecting agents…" : "Detect again and probe versions"}
 			</button>
 			{!selection.id && !selection.workspaces.isPending && (
 				<PanelEmpty>{emptyState.unread("external agent inventory")}</PanelEmpty>
 			)}
-			{selection.id && report.isPending && <p>Checking installed agents and their versions…</p>}
+			{selection.id && report.isPending && <p>Reading installed agents…</p>}
 			{report.error && <p role="alert">{report.error.message}</p>}
 			{report.data && (
 				<>
@@ -154,7 +171,7 @@ export function InteropPage({ client }: { client: Client }) {
 									<dl className="facts">
 										<div className="fact">
 											<dt>Version</dt>
-											<dd data-tone={agent.version ? undefined : "absent"}>{agent.version ?? "Not reported"}</dd>
+											<dd data-tone={agent.version ? undefined : "absent"}>{versionText(agent)}</dd>
 										</div>
 										<div className="fact">
 											<dt>ACP adapter</dt>

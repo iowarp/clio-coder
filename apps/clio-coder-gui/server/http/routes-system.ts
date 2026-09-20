@@ -5,5 +5,5 @@ import type { SystemService } from "../services/system.js";
 import { register } from "./validate.js";
 export function systemRoutes(app: Hono, hub: EventHub, system: SystemService) {
 	register(app, hub, routes.system, () => system.report());
-	register(app, hub, routes.interop, ({ params }) => system.interop(params.id));
+	register(app, hub, routes.interop, ({ params, query }) => system.interop(params.id, query.probe === "versions"));
 }

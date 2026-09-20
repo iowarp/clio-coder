@@ -23,7 +23,9 @@ serveWorker(async (call) => {
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "system.read" || call.method === "interop.read") {
 		const { inspectSystem, inspectInterop } = await import("../clio/adapters/system.js");
-		return call.method === "system.read" ? inspectSystem() : inspectInterop(call.params.cwd, settings.fixture);
+		return call.method === "system.read"
+			? inspectSystem()
+			: inspectInterop(call.params.cwd, call.params.probe, settings.fixture);
 	}
 	if (call.method === "library.read") {
 		const { readLibrary } = await import("../clio/adapters/library.js");

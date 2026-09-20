@@ -180,7 +180,7 @@
 		"/api/workspaces/{id}/interop": {
 			"get": {
 				"operationId": "interop",
-				"summary": "All registered external agents and bounded resource discovery",
+				"summary": "All registered external agents and bounded resource discovery; probe=versions runs each --version",
 				"security": [
 					{
 						"bearer": []
@@ -194,6 +194,15 @@
 						"schema": {
 							"type": "string",
 							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "probe",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string",
+							"const": "versions"
 						}
 					}
 				],
@@ -220,6 +229,7 @@
 													"presence",
 													"binary",
 													"version",
+													"versionSource",
 													"installDir",
 													"adapter",
 													"decision",
@@ -270,6 +280,21 @@
 														"anyOf": [
 															{
 																"type": "string"
+															},
+															{
+																"type": "null"
+															}
+														]
+													},
+													"versionSource": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "probed"
+															},
+															{
+																"type": "string",
+																"const": "recorded"
 															},
 															{
 																"type": "null"

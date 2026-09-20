@@ -62,7 +62,7 @@ Every page now opens with a `PanelHeading` from the `PANELS` registry and closes
 
 Deliberate differences from the retired workbench:
 
-- **The interop read probes versions.** The workbench read ran no foreign executable and showed the last version Clio Coder recorded. This application runs one bounded `<bin> --version` per installed agent inside a scratch home, and `tests/system-http.test.ts` holds it to that. The panel's boundary sentence says so; the workbench's sentence would be false here.
+- **The interop read probes versions only when asked.** Opening `/system/interop` reads files and runs nothing, as the workbench did, and shows the last version Clio Coder recorded. The "Detect again and probe versions" button sends `?probe=versions`, which runs one bounded `<bin> --version` per installed agent inside a scratch home. Each version says which of the two it is (`versionSource`), and `tests/system-http.test.ts` holds both halves.
 - **Wiring has a fifth and a sixth word.** Besides configured, not-ACP, proposed and decided, the wire carries `not-offered` (an ACP kind with no executable to wire and no standing answer) and `unknown` (the settings that decide wiring could not be read). Neither may collapse into one of the four.
 - **Two skill footer flags are not on the wire.** "Has an upstream" is derived from `origin.kind === "remote"`. "Installed by a dispatched worker" has no counterpart in `LibraryResource` and is not shown.
 - **The entry source line shows the path as the wire gives it.** `ConfigEntry.sourcePath` is absolute in this application, which is local by construction, so there is no project-relative form to prefer. The `"project root"` and `` `${scope} scope` `` rules hold.

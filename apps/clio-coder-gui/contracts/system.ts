@@ -40,6 +40,8 @@ export const SystemReport = Type.Object(
 	},
 	closed,
 );
+/** `?probe=versions` is the only way this read runs a foreign executable, and only its `--version`. */
+export const InteropQuery = Type.Object({ probe: Type.Optional(Type.Literal("versions")) }, closed);
 export type InteropWiring = Static<typeof InteropWiring>;
 export const Interop = Type.Object(
 	{
@@ -53,6 +55,8 @@ export const Interop = Type.Object(
 					presence,
 					binary: nullable,
 					version: nullable,
+					/** `probed` ran `--version` for this read; `recorded` is the last version Clio Coder wrote down. */
+					versionSource: Type.Union([Type.Literal("probed"), Type.Literal("recorded"), Type.Null()]),
 					installDir: nullable,
 					adapter: Type.Union([presence, Type.Null()]),
 					decision: Type.Union([Type.Literal("accepted"), Type.Literal("declined"), Type.Null()]),

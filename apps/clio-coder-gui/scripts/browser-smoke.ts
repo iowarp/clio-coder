@@ -432,6 +432,9 @@ try {
 		await check("interop-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByText("Would be offered", { exact: true }).waitFor();
+		// Opening the page ran nothing. The probe is an explicit act, and the page survives it.
+		await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).click();
+		await page.getByRole("button", { name: "Detect again and probe versions", exact: true }).waitFor();
 		await check("interop");
 		if (width === 1600 || width === 390)
 			await page.screenshot({ path: join(output, `interop-${width}.png`), fullPage: true });
