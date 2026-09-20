@@ -37,6 +37,7 @@ type Indexed = { path: string; title: string; markdown: string; headings: string
 /** Reading text for a result: the first match in prose, without link, code or heading syntax. */
 function excerptOf(markdown: string, terms: readonly string[]) {
 	const plain = markdown
+		.replace(/<\/?(?:details|summary)(?:\s[^>]*)?>/gi, " ")
 		.replace(/^```.*$/gm, " ")
 		.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
 		.replace(/^#{1,6}\s+/gm, "")
