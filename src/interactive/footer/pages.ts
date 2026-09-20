@@ -263,7 +263,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const context = `${ledger ? renderContextMeterBar(ledger, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
 	const rightWidth = Math.min(Math.floor(w * 0.48), visibleWidth(context));
 	const identityRoom = Math.max(8, w - rightWidth - visibleWidth(thinking) - visibleWidth(activity) - 10);
-	const left = `${theme.fg("muted", fitIdentityLabel(identity, identityRoom))} · ${thinking}  ${activity}`;
+	const left = `${activity}  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))} · ${thinking}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)

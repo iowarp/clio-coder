@@ -479,7 +479,7 @@ from the active branch. It retains settled and superseded values from
 operator supersede a decision or enter a correction. A correction is submitted
 to the model as an ordinary operator turn after the durable snapshot changes.
 
-The compact footer stays at two rows: target/model, thinking, current work and context
+The compact footer stays at two rows: current work, target/model, thinking and context
 occupancy, then shortcut hints with throughput and the dashboard shortcut. Normal
 editor rails have no MESSAGE/FOLLOW-UP labels, model labels, or send/newline hints.
 Footer shortcuts rotate every twelve seconds through small groups of currently bound
