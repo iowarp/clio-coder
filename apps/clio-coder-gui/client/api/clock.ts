@@ -30,6 +30,16 @@ export function formatTime(value: string | null | undefined) {
 	const instant = value ? new Date(value) : new Date(Number.NaN);
 	return Number.isFinite(instant.valueOf()) ? `${date.format(instant)} ${time.format(instant)}` : "not recorded";
 }
+/**
+ * A window boundary is a day, not an instant; the clock digits in it are noise. A value that is
+ * already a day is returned as it was sent: `new Date("2026-08-21")` is UTC midnight, and rendering
+ * that in a local zone behind UTC moves the window a day into the past.
+ */
+export function formatDay(value: string | null | undefined) {
+	if (value && /^\d{4}-\d{2}-\d{2}$/.test(value)) return value;
+	const instant = value ? new Date(value) : new Date(Number.NaN);
+	return Number.isFinite(instant.valueOf()) ? date.format(instant) : "not recorded";
+}
 export function formatDuration(value: number) {
 	const ms = Math.max(0, value || 0);
 	return ms < 1000

@@ -4,8 +4,12 @@ import { Link, useParams } from "react-router";
 import { routes } from "../../../contracts/routes.js";
 import type { TraceEvent } from "../../../contracts/traces.js";
 import type { Client } from "../../api/client.js";
-import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
+import { clock, formatTime } from "../../api/clock.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../../design/panel.js";
+import { emptyState, PANELS } from "../../design/panel-model.js";
+import { StatusMark } from "../../design/status.js";
 import { CostPanel, EventRow, Facts, Gates, Json, parseJson, ReceiptPanel, Waterfall } from "./panels.js";
+import { histogram, orderedPhases, runTone, runTotals } from "./trace-model.js";
 export function TraceRunPage({ client }: { client: Client }) {
 	const { runId = "" } = useParams();
 	return <Run key={runId} client={client} runId={runId} />;
@@ -87,9 +91,12 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			</div>
 		);
 	if (!detail.data || !events.data) return <p>Loading run…</p>;
-	const { run, phases, gates, processes, envelopes, receipt } = detail.data,
+	const { run, gates, processes, envelopes, receipt } = detail.data,
+		phases = orderedPhases(detail.data.phases),
 		phase = phases.find((item) => item.phase_id === selected) ?? phases[0],
-		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id);
+		phaseEvents = events.data.filter((event) => !phase || event.phase_id === phase.phase_id),
+		eventKinds = histogram(events.data.map((event) => event.type)),
+		processKinds = histogram(processes.map((process) => process.kind));
 	return (
 		<section className="trace-run-detail">
 			<Link to="/traces">← Trace history</Link>
@@ -98,20 +105,25 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 			</p>
 			<h1>{run.request ?? run.run_id}</h1>
 			<div className="trace-event-head">
-				<span className={`trace-badge ${run.status}`}>{run.status}</span>
+				<StatusMark tone={runTone(run.status)} label={run.status} />
 				<span role="status">{live}</span>
 			</div>
+			<PanelHeading panel={PANELS.traceRun} />
+			<ul className="trace-totals">
+				{runTotals(run, now).map((total) => (
+					<li key={total.label}>
+						<span>{total.label}</span>
+						<strong>{total.value}</strong>
+					</li>
+				))}
+			</ul>
 			<Facts
 				entries={[
 					["Agent", run.agent],
 					["Model", run.model],
 					["Target", run.target],
-					["Runtime", run.runtime],
 					["Node", run.node],
 					["Started", formatTime(run.started_at)],
-					["Duration", formatDuration((run.ended_at ? Date.parse(run.ended_at) : now) - Date.parse(run.started_at))],
-					["Tokens", formatTokens(run.total_tokens)],
-					["Spend", formatCost(run.total_cost_usd)],
 				]}
 			/>
 			<Waterfall run={run} phases={phases} events={events.data} selected={phase?.phase_id ?? null} select={select} />
@@ -134,13 +146,39 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 				</>
 			) : null}
 			<section className="trace-panel">
+				<h2>How many of each kind</h2>
+				<div className="trace-histograms">
+					{[
+						{ title: "Events", data: eventKinds, subject: "event" },
+						{ title: "Processes", data: processKinds, subject: "process" },
+					].map(({ title, data, subject }) => (
+						<div key={title}>
+							<h3>{title}</h3>
+							{!data.rows.length && <PanelEmpty>{emptyState.emptyStore(subject, "for this run")}</PanelEmpty>}
+							<ul className="trace-histogram">
+								{data.rows.map((row) => (
+									<li key={row.label}>
+										<span>{row.label}</span>
+										<span className="trace-histogram__track" aria-hidden="true">
+											<i style={{ width: `${Math.round(row.share * 100)}%` }} />
+										</span>
+										<strong>{row.count.toLocaleString("en-US")}</strong>
+									</li>
+								))}
+							</ul>
+							{data.omitted && <p className="panel-note">{data.omitted}</p>}
+						</div>
+					))}
+				</div>
+			</section>
+			<section className="trace-panel">
 				<h2>
 					Event log <small>({phaseEvents.length})</small>
 				</h2>
 				{phaseEvents.map((event) => (
 					<EventRow key={event.rowid} event={event} start={run.started_at} />
 				))}
-				{!phaseEvents.length ? <p>No events recorded for this phase.</p> : null}
+				{!phaseEvents.length ? <PanelEmpty>{emptyState.emptyStore("event", "for this phase")}</PanelEmpty> : null}
 			</section>
 			<Gates gates={gates.filter((gate) => !phase || gate.phase_id === phase.phase_id)} />
 			<section className="trace-panel">
@@ -164,7 +202,7 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						/>
 					</article>
 				))}
-				{!processes.length ? <p>No processes recorded.</p> : null}
+				{!processes.length ? <PanelEmpty>{emptyState.emptyStore("process", "for this run")}</PanelEmpty> : null}
 			</section>
 			<section className="trace-panel">
 				<h2>Envelopes</h2>
@@ -176,9 +214,10 @@ function Run({ client, runId }: { client: Client; runId: string }) {
 						<Json value={parseJson(envelope.payload_json)} />
 					</details>
 				))}
-				{!envelopes.length ? <p>No envelopes recorded.</p> : null}
+				{!envelopes.length ? <PanelEmpty>{emptyState.emptyStore("envelope", "for this run")}</PanelEmpty> : null}
 			</section>
 			<ReceiptPanel data={receipt} full={full} loadFull={() => setFull(true)} />
+			<Boundary panel={PANELS.traceRun} />
 		</section>
 	);
 }

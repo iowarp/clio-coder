@@ -4,6 +4,9 @@ import { routes } from "../../contracts/routes.js";
 import type { TargetAdd } from "../../contracts/targets-cli.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
+import { reportedCount } from "../design/facts-model.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { emptyState, PANELS } from "../design/panel-model.js";
 import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 import { AddConnection } from "./target-onboarding.js";
 
@@ -44,8 +47,14 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		operation.data?.status === "running";
 	return (
 		<section>
-			<p className="eyebrow">Configuration / {view === "targets" ? "Model endpoints" : "Offline inventories"}</p>
-			<h1>{view === "targets" ? "Targets" : "Models and routing"}</h1>
+			{view === "targets" ? (
+				<>
+					<p className="eyebrow">Configuration / Model endpoints</p>
+					<h1>Targets</h1>
+				</>
+			) : (
+				<PanelHeading panel={PANELS.routing} level={1} />
+			)}
 			<WorkspacePicker selection={selection} />
 			<ConfigurationTabs id={id} active={view} />
 			{view === "targets" ? (
@@ -123,10 +132,10 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 					{routing.error && <p role="alert">{routing.error.message}</p>}
 					{routing.data && (
 						<>
-							{routing.data.truncated && <p>A collection exceeds 2,000 rows; its first 2,000 are shown.</p>}
+							{routing.data.truncated && <PanelEmpty>{emptyState.bounded("rows", "Later")}</PanelEmpty>}
 							<h2>Models · {routing.data.models.length}</h2>
 							<p>Capability marks: C chat, T tools, R reasoning, V vision, E embeddings, K rerank, F fill in the middle.</p>
-							{!routing.data.models.length && <p>No cached models.</p>}
+							{!routing.data.models.length && <PanelEmpty>{emptyState.emptyStore("cached model")}</PanelEmpty>}
 							<dl className="settings-list">
 								{routing.data.models.map((row) => (
 									<div key={`${row.target}:${row.id}`}>
@@ -140,14 +149,14 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										<dd>
 											<code>{row.capabilities}</code> · {row.state}
 											<br />
-											Context: {row.context ?? "unreported"} · Output: {row.maxOutputTokens ?? "unreported"}
+											Context: {reportedCount(row.context)} · Output: {reportedCount(row.maxOutputTokens)}
 										</dd>
 										<dd />
 									</div>
 								))}
 							</dl>
 							<h2>Profiles · {routing.data.profiles.length}</h2>
-							{!routing.data.profiles.length && <p>No fleet profiles configured.</p>}
+							{!routing.data.profiles.length && <PanelEmpty>{emptyState.emptyStore("fleet profile")}</PanelEmpty>}
 							<dl className="settings-list">
 								{routing.data.profiles.map((row) => (
 									<div key={row.name}>
@@ -160,7 +169,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 								))}
 							</dl>
 							<h2>Agent bindings · {routing.data.bindings.length}</h2>
-							{!routing.data.bindings.length && <p>No agent bindings configured.</p>}
+							{!routing.data.bindings.length && <PanelEmpty>{emptyState.emptyStore("agent binding")}</PanelEmpty>}
 							<dl className="settings-list">
 								{routing.data.bindings.map((row) => (
 									<div key={row.agentId}>
@@ -172,6 +181,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 									</div>
 								))}
 							</dl>
+							<Boundary panel={PANELS.routing} />
 						</>
 					)}
 				</>
