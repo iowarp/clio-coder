@@ -1185,3 +1185,24 @@ nav a.active .icon {
 		align-items: start;
 	}
 }
+
+/* Reconnect */
+.reconnect {
+	max-width: 42rem;
+}
+.reconnect label {
+	display: block;
+	margin: var(--space-5) 0 var(--space-2);
+	font-weight: 700;
+}
+.reconnect__command {
+	display: inline;
+	padding: 0;
+	background: none;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+}
+.reconnect__problem {
+	color: var(--status-fail-fg);
+	font-size: 14px;
+}

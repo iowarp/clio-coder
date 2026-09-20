@@ -525,12 +525,38 @@ try {
 		assert.match(await toast.innerText(), /validation/);
 		assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);
 		await check("problem-toast");
+		// A stale token must not brick the app: the shell says what happened, stops reconnecting, and a
+		// pasted launch link brings the same tab back.
+		await page.goto(`${origin}/#token=${"stale".repeat(8)}`);
+		await page.reload();
+		await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
+		await page.locator('.connection[title="Not connected"]').waitFor();
+		if ((await page.locator(".notice-region .notice").count()) > 0)
+			throw new Error("A refused token raised toasts on top of the reconnect panel.");
+		await page.getByLabel("Launch link or token", { exact: true }).fill("not a link");
+		await page.getByText("That text holds no launch token.", { exact: true }).waitFor();
+		await check("reconnect");
+		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `reconnect-${width}.png`) });
+		// test-token is shorter than a bare token may be, so it is pasted as the link the server prints.
+		await page.getByLabel("Launch link or token", { exact: true }).fill(`[clio-coder:gui] ${origin}/#token=test-token`);
+		await page.getByRole("button", { name: "Connect this browser", exact: true }).click();
+		await page.locator('.connection[data-connected="true"]').waitFor();
+		await page
+			.getByRole("heading", { name: "This browser is no longer connected", exact: true })
+			.waitFor({ state: "detached" });
 		await context.close();
 	}
 	assert.deepEqual(errors, []);
 	assert.deepEqual(failures, []);
+	// A refused stream must stop, not reconnect forever: EventSource retries on its own otherwise.
+	assert.ok(statuses.filter((item) => item.path === "/api/events" && item.status === 401).length <= 3);
 	assert.deepEqual(
-		statuses.filter((item) => !(item.path === "/api/workspaces" && item.status === 422)),
+		statuses.filter(
+			(item) =>
+				!(item.path === "/api/workspaces" && item.status === 422) &&
+				// The stale-token step: one refused read and at most one refused stream per width.
+				!(item.status === 401 && (item.path === "/api/meta" || item.path === "/api/events")),
+		),
 		[],
 	);
 	success = true;
