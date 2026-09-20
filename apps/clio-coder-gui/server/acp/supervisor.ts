@@ -11,6 +11,18 @@ import {
 	type Turn,
 } from "../../contracts/sessions.js";
 import { Autonomy, type AutonomyLevel, SafeSettings, type SafeSettingsPatch } from "../../contracts/settings-safe.js";
+import {
+	CommandCatalog,
+	type CommandRequest,
+	CommandResult,
+	type DispatchSteerRequest,
+	DispatchSteerResult,
+	InterruptResult,
+	QueueCleared,
+	QueueSnapshot,
+	type SteerRequest,
+	SteerResult,
+} from "../../contracts/steering.js";
 import { SessionTargets, TargetProbe } from "../../contracts/targets.js";
 import { childRunning, startAcpChild } from "../process-policy.js";
 import type { EventHub } from "../services/event-hub.js";
@@ -21,6 +33,23 @@ import { type ChildRow, ChildrenFile } from "./children-file.js";
 import { AcpClient, acpProblem, record } from "./client.js";
 import { fleetEvent } from "./fleet-events.js";
 import { Permissions, type PermissionTimers } from "./permissions.js";
+
+/**
+ * The text of an ACP tool-call content array, or undefined when the frame
+ * carries none. Only `{type:"content", content:{type:"text"}}` entries are
+ * read: a diff or a terminal entry is structure, not a progress snapshot, and
+ * flattening one into a string would show a client something it cannot act on.
+ */
+function toolProgressText(content: unknown): string | undefined {
+	if (!Array.isArray(content)) return undefined;
+	const parts = content.flatMap((value) => {
+		const entry = record(value);
+		if (entry.type !== "content") return [];
+		const inner = record(entry.content);
+		return inner.type === "text" && typeof inner.text === "string" ? [inner.text] : [];
+	});
+	return parts.length === 0 ? undefined : parts.join("");
+}
 
 type Entry = {
 	id: string;
@@ -173,9 +202,22 @@ export class Supervisor {
 			});
 			transport.onNotification("clio-coder/event", (params) => {
 				try {
-					const { type, item } = fleetEvent(params, owned.id, owned.eventSequence);
-					owned.eventSequence = item.sourceSequence;
-					this.publish({ type, payload: { resource: owned.id, revision: this.revision(owned.id), item } });
+					const projected = fleetEvent(params, owned.id, owned.eventSequence);
+					// The sequence advances even for a dropped kind, so a later frame
+					// is still checked against the newest number this session saw
+					// rather than against the last one that happened to project.
+					owned.eventSequence = projected.sequence;
+					if (projected.type === null) {
+						console.error(`[clio-coder:gui] dropped an unrecognized clio-coder/event kind on session ${owned.id}`);
+						return;
+					}
+					// The type and the schema the item was checked against both come
+					// from the same `ACP_TO_WEB_EVENT` row, so the pairing cannot
+					// disagree; TypeScript just cannot see that across the call.
+					this.publish({
+						type: projected.type,
+						payload: { resource: owned.id, revision: this.revision(owned.id), item: projected.item },
+					} as SessionDelta);
 				} catch (error) {
 					this.failTurn(owned, acpProblem(error));
 					this.retireDetached(owned);
@@ -339,11 +381,29 @@ export class Supervisor {
 					})
 					.slice(0, 64);
 			if (update.rawInput) item.rawInput = this.raw(update.rawInput);
-			if (update.rawOutput || update.content) item.rawOutput = this.raw(update.rawOutput ?? { content: update.content });
+			// A tool-progress frame is non-terminal and its content is the whole
+			// output so far, so it REPLACES the partial text rather than appending.
+			// The terminal frame drops it: from then on `rawOutput` is the answer,
+			// and leaving a stale snapshot beside it would show two versions of the
+			// same output in the same row.
+			const settled = item.status === "completed" || item.status === "failed";
+			const partial = settled ? undefined : toolProgressText(update.content);
+			if (partial !== undefined) item.partialOutput = boundedText(partial, 16384);
+			else delete item.partialOutput;
+			if (update.rawOutput) item.rawOutput = this.raw(update.rawOutput);
+			else if (settled && update.content) item.rawOutput = this.raw({ content: update.content });
 			this.publish({ type: "turn.tool", payload: { resource: entry.id, revision: this.revision(entry.id), item } });
 			return;
 		}
-		throw new AppProblem("upstream_acp", "ACP update type is unsupported.");
+		// A `sessionUpdate` kind this build does not know is a newer engine, not a
+		// broken one: the spec's union grows, and the day it does, throwing here
+		// would take `failTurn` -> `retireDetached` and kill a live session's
+		// child mid-turn over a frame the UI would not have drawn anyway. Drop it
+		// and say so. Note the sharp line: a MALFORMED frame of a kind this method
+		// does handle (a chunk that is not text, a tool call with no id) still
+		// throws above, because there continuing means projecting something no
+		// contract describes.
+		console.error(`[clio-coder:gui] dropped an unrecognized ACP sessionUpdate kind on session ${entry.id}`);
 	}
 	private raw(value: unknown) {
 		const text = JSON.stringify(value);
@@ -418,6 +478,73 @@ export class Supervisor {
 	}
 	autonomy(id: string, level?: Static<typeof AutonomyLevel>) {
 		return this.projected(id, "clio-coder/session/autonomy", { sessionId: id, ...(level ? { level } : {}) }, Autonomy);
+	}
+	capabilities(id: string) {
+		return this.active(id).client.capabilities;
+	}
+	/**
+	 * A namespaced method an older engine never announced is refused here rather
+	 * than sent: an unknown method comes back as a JSON-RPC error that would be
+	 * reported as an upstream fault, when the truth is that this peer does not
+	 * have the feature.
+	 */
+	private steering(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.steering)
+			throw new AppProblem("conflict", "This Clio build does not expose mid-turn steering.");
+		return entry;
+	}
+	steer(id: string, body: Static<typeof SteerRequest>) {
+		this.steering(id);
+		return this.projected(id, "clio-coder/session/steer", { sessionId: id, ...body }, SteerResult);
+	}
+	queue(id: string) {
+		this.steering(id);
+		return this.projected(id, "clio-coder/session/queue", { sessionId: id }, QueueSnapshot);
+	}
+	clearQueue(id: string) {
+		this.steering(id);
+		return this.projected(id, "clio-coder/session/queue_clear", { sessionId: id }, QueueCleared);
+	}
+	interrupt(id: string, reason?: string) {
+		this.steering(id);
+		return this.projected(
+			id,
+			"clio-coder/session/interrupt",
+			{ sessionId: id, ...(reason ? { reason } : {}) },
+			InterruptResult,
+		);
+	}
+	steerDispatchRun(id: string, body: Static<typeof DispatchSteerRequest>) {
+		const entry = this.steering(id);
+		if (!entry.client.capabilities.steering?.dispatch)
+			throw new AppProblem("conflict", "This Clio build has no fleet to steer.");
+		// `cancel` carries no operator text and the engine refuses one, so the
+		// message is dropped here rather than sent to be refused.
+		const { runId, action, message } = body;
+		return this.projected(
+			id,
+			"clio-coder/dispatch/steer",
+			{ sessionId: id, runId, action, ...(action === "guide" && message ? { message } : {}) },
+			DispatchSteerResult,
+		);
+	}
+	commands(id: string) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.commands)
+			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
+		return this.projected(id, "clio-coder/commands/list", {}, CommandCatalog);
+	}
+	invokeCommand(id: string, body: Static<typeof CommandRequest>) {
+		const entry = this.active(id);
+		if (!entry.client.capabilities.commands)
+			throw new AppProblem("conflict", "This Clio build exposes no operator commands.");
+		return this.projected(
+			id,
+			"clio-coder/commands/invoke",
+			{ sessionId: id, command: body.command, ...(body.argv ? { argv: body.argv } : {}) },
+			CommandResult,
+		);
 	}
 	async ledgerCommand(workspaceId: string, id: string, action: "label" | "delete", label?: string) {
 		if (label !== undefined && Buffer.byteLength(label) > 256)

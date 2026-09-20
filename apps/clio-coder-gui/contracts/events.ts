@@ -25,6 +25,14 @@ export const Event = Type.Union([
 	Type.Object({ ...base, type: Type.Literal("fleet.completed"), payload: SessionDeltas["fleet.completed"] }),
 	Type.Object({ ...base, type: Type.Literal("fleet.failed"), payload: SessionDeltas["fleet.failed"] }),
 	Type.Object({ ...base, type: Type.Literal("evidence.ready"), payload: SessionDeltas["evidence.ready"] }),
+	Type.Object({ ...base, type: Type.Literal("health.compacted"), payload: SessionDeltas["health.compacted"] }),
+	Type.Object({
+		...base,
+		type: Type.Literal("health.contextWarning"),
+		payload: SessionDeltas["health.contextWarning"],
+	}),
+	Type.Object({ ...base, type: Type.Literal("health.toolBudget"), payload: SessionDeltas["health.toolBudget"] }),
+	Type.Object({ ...base, type: Type.Literal("health.provider"), payload: SessionDeltas["health.provider"] }),
 	Type.Object({ ...base, type: Type.Literal("session.changed"), payload: SessionDeltas["session.changed"] }),
 
 	Type.Object({ ...base, type: Type.Literal("hello"), payload: Type.Object(cursor) }),

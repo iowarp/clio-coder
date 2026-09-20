@@ -182,8 +182,10 @@ import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { ToolchainDomainModule } from "../domains/toolchain/index.js";
+import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
 import { activeUserTaskAcceptance } from "../domains/user-tasks/active-acceptance.js";
 import { createUserTasksStore } from "../domains/user-tasks/store.js";
+import { acpCommandControl } from "../engine/acp/commands.js";
 import { type AcpSafeSettingsPatch, type AcpSafeSettingsSnapshot, serveClioAcpAgent } from "../engine/acp/server.js";
 import { createStdioServerTransport } from "../engine/acp/transport.js";
 import { completeEngineText, type EngineTextCompletionResult } from "../engine/ai.js";
@@ -2310,10 +2312,76 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						}
 					: {}),
 				providers,
+				// The fleet controls `clio-coder/dispatch/steer` reaches. The server
+				// takes the two operations by structure, never the whole contract, so
+				// no ACP client can enqueue or route dispatch work through it.
+				dispatch: {
+					steer: (runId, text) => {
+						dispatch.steer(runId, text);
+					},
+					abort: (runId) => {
+						dispatch.abort(runId);
+					},
+					snapshot: () => dispatch.snapshot(),
+				},
 				settings: {
 					read: readAcpSafeSettings,
 					commit: commitAcpSafeSettings,
 				},
+				// The operator-command host. Only the members the thirteen
+				// allowlisted commands actually reach are passed; every TUI-only
+				// member stays absent, which is what makes the registry take its
+				// documented non-TUI fallback instead of trying to draw an overlay.
+				//
+				// A command that submits a user turn (`/share`, `/oracle`,
+				// `/skill <name>`, `/tasks hand`) is refused by the server while a
+				// prompt is active. Outside one, the turn is persisted to the ledger
+				// and replayed on the next `session/load`, but it emits no live
+				// `session/update`: ACP v1 has no channel for agent content outside a
+				// prompt, the same constraint recorded above for routing notices.
+				...(dispatch && providers
+					? {
+							commands: acpCommandControl({
+								dispatch,
+								bus,
+								providers,
+								cwd: process.cwd(),
+								// Narrowed exactly as `interactive-slash-runtime.ts` narrows it:
+								// the store's `note` parameter has no command-line spelling, and
+								// a handoff is attributed to the session that asked for it.
+								userTasks: {
+									add: (title: string, acceptance?: UserTaskAcceptance) => userTasks.add(title, undefined, acceptance),
+									hand: (id: string) => userTasks.hand(id, chat.getSessionId() ?? undefined),
+									done: (id: string) => userTasks.done(id),
+									drop: (id: string) => userTasks.drop(id),
+								},
+								getDecisionBoard: () => decisionBoard.snapshot(),
+								isTurnInFlight: () => chat.isStreaming(),
+								seedTaskMemory: seedCurrentTaskMemoryFromHandoff,
+								...(agents ? { getAgentRoleFacts: agentRoleFactsResolver((id: string) => agents.getSpec(id)) } : {}),
+								...(config ? { getWorkerRosters: () => config.get().fleet.rosters } : {}),
+								...(resources
+									? {
+											parsePendingSkillRequests: (text: string, commandCwd?: string) =>
+												resources.parsePendingSkillRequests(text, commandCwd ?? process.cwd()),
+										}
+									: {}),
+								submitTurn: (text, submitOptions) => {
+									void chat
+										.submit(
+											text,
+											submitOptions.pendingSkillRequests === undefined
+												? {}
+												: { pendingSkillRequests: [...submitOptions.pendingSkillRequests] },
+										)
+										.catch(() => undefined);
+								},
+								submitOperatorNote: (text) => {
+									void chat.submit(text).catch(() => undefined);
+								},
+							}),
+						}
+					: {}),
 				toolRegistry,
 				bus,
 				autonomy: resolveBaselineAutonomy,

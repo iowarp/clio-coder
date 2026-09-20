@@ -1,4 +1,5 @@
 import { type Static, type TSchema, Type } from "typebox";
+import { AgentCapabilities } from "./capabilities.js";
 import { Empty, Id } from "./common.js";
 import { DocPage, DocsSearch, DocsTree } from "./docs.js";
 import { EventCursor } from "./events.js";
@@ -21,6 +22,19 @@ import { EvalDetail, EvalPage, UsageReport } from "./reports.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
+import {
+	CommandCatalog,
+	CommandRequest,
+	CommandResult,
+	DispatchSteerRequest,
+	DispatchSteerResult,
+	InterruptRequest,
+	InterruptResult,
+	QueueCleared,
+	QueueSnapshot,
+	SteerRequest,
+	SteerResult,
+} from "./steering.js";
 import { Interop, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
 import { CliTargets, Routing } from "./targets-cli.js";
@@ -296,6 +310,75 @@ export const routes = {
 		params: Type.Object({ id: Id, turnId: Id }, { additionalProperties: false }),
 		response: Empty,
 		summary: "Cancel the specified active turn",
+	}),
+	// Mid-turn interaction. Every one of these rides a namespaced ACP method that
+	// is additive to protocolVersion 1, so a session opened against an engine
+	// that announced no `steering` capability answers 409 rather than 404: the
+	// route exists, this peer just cannot serve it.
+	sessionCapabilities: defineRoute({
+		...get,
+		path: "/api/sessions/:id/capabilities",
+		params: operationParams,
+		response: AgentCapabilities,
+		summary: "What the ACP agent announced at initialize",
+	}),
+	steerSession: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/steer",
+		params: operationParams,
+		body: SteerRequest,
+		response: SteerResult,
+		summary: "Queue operator guidance on the running turn",
+	}),
+	sessionQueue: defineRoute({
+		...get,
+		path: "/api/sessions/:id/queue",
+		params: operationParams,
+		response: QueueSnapshot,
+		summary: "Steering and follow-up texts waiting on the engine",
+	}),
+	clearSessionQueue: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/queue/clear",
+		params: operationParams,
+		response: QueueCleared,
+		summary: "Drain both queues and hand the texts back to re-send",
+	}),
+	interruptSession: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/interrupt",
+		params: operationParams,
+		body: InterruptRequest,
+		response: InterruptResult,
+		summary: "Cancel the running turn, or report why it cannot be",
+	}),
+	steerDispatchRun: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/dispatch/steer",
+		params: operationParams,
+		body: DispatchSteerRequest,
+		response: DispatchSteerResult,
+		summary: "Queue guidance on, or abort, one running worker",
+	}),
+	sessionCommands: defineRoute({
+		...get,
+		path: "/api/sessions/:id/commands",
+		params: operationParams,
+		response: CommandCatalog,
+		summary: "The operator commands this agent exposes, with their grammar",
+	}),
+	invokeSessionCommand: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/sessions/:id/commands",
+		params: operationParams,
+		body: CommandRequest,
+		response: CommandResult,
+		summary: "Run one exposed operator command",
 	}),
 	sessionSettings: defineRoute({
 		...get,

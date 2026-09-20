@@ -95,6 +95,16 @@ const fleet = () => {
 			"accountability.evidenceReady",
 			{ runId: "run-1", evidenceId: "evidence-1", firstPassSuccess: true, findingCount: 2, tags: ["fixture"] },
 		],
+		["compaction.end", { trigger: "threshold" }],
+		["context.warning", { warning: "Context window is 85% full." }],
+		[
+			"safety.toolBudgetExceeded",
+			{ tool: "bash", callsThisTurn: 41, softBudget: 40, hardCeiling: 60, interrupted: false },
+		],
+		["provider.health", { targetId: "fixture", status: "degraded", available: true, latencyMs: 5 }],
+		// Not in ACP_TO_WEB_EVENT. A newer engine's kind must be dropped, not kill
+		// the session, so every fleet-scenario test exercises that path too.
+		["future.unknownKind", { anything: true }],
 	])
 		send({
 			method: "clio-coder/event",
@@ -122,7 +132,7 @@ async function handle(frame) {
 		switch (frame.method) {
 			case "initialize": {
 				const kinds = frame.params?.clientCapabilities?._meta?.["clio-coder/events"]?.kinds;
-				if (!Array.isArray(kinds) || kinds.length !== 7) throw Error("event_opt_in");
+				if (!Array.isArray(kinds) || kinds.length !== 11) throw Error("event_opt_in");
 				const rows = JSON.parse(readFileSync(join(process.env.CLIO_CODER_STATE_DIR, "gui/children.json"), "utf8"));
 				if (!rows.some((row) => row.pid === process.pid && row.ownerPid === process.ppid))
 					throw Error("not_recorded_before_initialize");
@@ -181,6 +191,14 @@ async function handle(frame) {
 						}
 					}
 					update({ sessionUpdate: "agent_thought_chunk", content: { type: "text", text: "Check the fixture." } });
+					// A `sessionUpdate` kind this app has never heard of is a newer engine,
+					// not a broken one, so every ordinary turn carries one and still has to
+					// settle. Its sibling below is the sharp line: a MALFORMED frame of a
+					// kind the app DOES handle stays fatal, because continuing there means
+					// drawing a shape no contract describes.
+					update({ sessionUpdate: "future_unknown_kind", anything: true });
+					if (scenario === "malformed-update")
+						update({ sessionUpdate: "agent_message_chunk", content: { type: "image", data: "not-text" } });
 					if (scenario === "tool") {
 						update({
 							sessionUpdate: "tool_call",

@@ -22,6 +22,33 @@ export function sessionRoutes(
 			supervisor.cancel(params.id, params.turnId),
 		),
 	);
+	register(app, hub, routes.sessionCapabilities, ({ params }) => supervisor.capabilities(params.id));
+	// Steering, interrupt and command invocation all mutate one live turn, so
+	// each is keyed per session in the command ledger: a double-submitted steer
+	// must queue once, not twice. The queue read is a plain GET.
+	register(app, hub, routes.steerSession, ({ params, body }, context) =>
+		commands.run(`steer:${params.id}`, idempotencyKey(context), body, () => supervisor.steer(params.id, body)),
+	);
+	register(app, hub, routes.sessionQueue, ({ params }) => supervisor.queue(params.id));
+	register(app, hub, routes.clearSessionQueue, ({ params }, context) =>
+		commands.run(`queue.clear:${params.id}`, idempotencyKey(context), {}, () => supervisor.clearQueue(params.id)),
+	);
+	register(app, hub, routes.interruptSession, ({ params, body }, context) =>
+		commands.run(`interrupt:${params.id}`, idempotencyKey(context), body, () =>
+			supervisor.interrupt(params.id, body.reason),
+		),
+	);
+	register(app, hub, routes.steerDispatchRun, ({ params, body }, context) =>
+		commands.run(`dispatch.steer:${params.id}:${body.runId}`, idempotencyKey(context), body, () =>
+			supervisor.steerDispatchRun(params.id, body),
+		),
+	);
+	register(app, hub, routes.sessionCommands, ({ params }) => supervisor.commands(params.id));
+	register(app, hub, routes.invokeSessionCommand, ({ params, body }, context) =>
+		commands.run(`command:${params.id}:${body.command}`, idempotencyKey(context), body, () =>
+			supervisor.invokeCommand(params.id, body),
+		),
+	);
 	register(app, hub, routes.sessionSettings, ({ params }) => supervisor.settings(params.id));
 	register(app, hub, routes.patchSessionSettings, ({ params, body }, context) =>
 		commands.run(`settings:${params.id}`, idempotencyKey(context), body, () => supervisor.settings(params.id, body)),

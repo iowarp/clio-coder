@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import { Id, Problem } from "./common.js";
-import { FleetItem } from "./fleet-events.js";
+import { FleetItem, HealthItem } from "./fleet-events.js";
 import { Permission } from "./permissions.js";
 
 const closed = { additionalProperties: false };
@@ -77,6 +77,18 @@ export const TimelineItem = Type.Object(
 		),
 		rawInput: Type.Optional(Type.Record(string, Type.Unknown())),
 		rawOutput: Type.Optional(Type.Record(string, Type.Unknown())),
+		/**
+		 * The running tool's newest CUMULATIVE output snapshot, present only while
+		 * the call is open and dropped the moment its terminal frame lands.
+		 *
+		 * It is deliberately not folded into `rawOutput`. `rawOutput` is the tool's
+		 * final structured result and is what the raw inspector renders; a progress
+		 * snapshot is neither final nor structured, and writing it there would make
+		 * a running call indistinguishable from a finished one and force the
+		 * inspector to re-walk a content array several times a second. A flat,
+		 * bounded string is replaced in O(1), which is the shape a live pane wants.
+		 */
+		partialOutput: Type.Optional(Type.String({ maxLength: 32768 })),
 		provenance: Type.Optional(Provenance),
 	},
 	closed,
@@ -122,6 +134,9 @@ export const SessionSnapshot = Type.Object(
 		label: nullableString,
 		permissions: Type.Array(Permission, { maxItems: 32 }),
 		fleet: Type.Array(FleetItem, { maxItems: 128 }),
+		// Session health, bounded far tighter than the fleet feed: a context
+		// meter and a footer status read the newest of each kind, not a history.
+		health: Type.Array(HealthItem, { maxItems: 32 }),
 	},
 	closed,
 );
@@ -133,6 +148,7 @@ const textPayload = Type.Object(
 );
 const permissionPayload = Type.Object({ ...base, permission: Permission }, closed);
 const fleetPayload = Type.Object({ ...base, item: FleetItem }, closed);
+const healthPayload = Type.Object({ ...base, item: HealthItem }, closed);
 export const SessionDeltas = {
 	"turn.started": Type.Object({ ...base, turn: Turn }, closed),
 	"turn.text": textPayload,
@@ -161,12 +177,22 @@ export const SessionDeltas = {
 	"fleet.completed": fleetPayload,
 	"fleet.failed": fleetPayload,
 	"evidence.ready": fleetPayload,
+	"health.compacted": healthPayload,
+	"health.contextWarning": healthPayload,
+	"health.toolBudget": healthPayload,
+	"health.provider": healthPayload,
 	"session.labelled": Type.Object({ ...base, label: nullableString }, closed),
 	"session.changed": Type.Object({ ...base, state: SessionState, recoveredOrphan: Type.Boolean() }, closed),
 };
 export type SessionDelta = {
 	[K in keyof typeof SessionDeltas]: { type: K; payload: Static<(typeof SessionDeltas)[K]> };
 }[keyof typeof SessionDeltas];
+/**
+ * The `clio-coder/event` kinds this app opts into at `initialize`. Each is the
+ * engine's own `BusChannels` value, never a renamed alias, so the wire frame
+ * names its producer. The engine intersects this list with its own allowlist,
+ * so a kind listed here that it does not forward costs nothing.
+ */
 export const ACP_EVENT_KINDS = [
 	"safety.loopBlocked",
 	"dispatch.enqueued",
@@ -175,4 +201,8 @@ export const ACP_EVENT_KINDS = [
 	"dispatch.completed",
 	"dispatch.failed",
 	"accountability.evidenceReady",
+	"compaction.end",
+	"context.warning",
+	"safety.toolBudgetExceeded",
+	"provider.health",
 ] as const;

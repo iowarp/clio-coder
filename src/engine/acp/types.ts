@@ -15,6 +15,30 @@ export const ACP_SESSION_META_KEY = "clio-coder/session";
  * client that does not read it sees exactly the frames it saw before.
  */
 export const ACP_AGENT_META_KEY = "clio-coder/agent";
+/**
+ * Opt-in key for non-terminal `tool_call_update` frames carrying a running
+ * tool's cumulative output. It is an opt-in and not a default because a client
+ * that renders every frame it receives without collapsing repeated updates for
+ * one call would redraw the whole tool segment several times a second.
+ */
+export const ACP_TOOL_PROGRESS_META_KEY = "clio-coder/toolProgress";
+/**
+ * Decision facts attached to `session/request_permission`. The server already
+ * classifies the ask to pick the option labels; without this the tier, the
+ * consequence, and the reversibility it computed are discarded and a client is
+ * left re-deriving them from a tool name.
+ */
+export const ACP_DECISION_META_KEY = "clio-coder/decision";
+/**
+ * Operator-command catalog and invocation. The names live here, in the leaf
+ * that holds every other wire constant, rather than beside the projection in
+ * `./commands.js`: that module value-imports the whole slash registry, and the
+ * ACP server may not drag the registry's closure into the Stage 0 chunk budget
+ * just to know what a method is called (rule6, tests/boundaries).
+ */
+export const ACP_COMMANDS_META_KEY = "clio-coder/commands";
+export const ACP_COMMANDS_LIST_METHOD = "clio-coder/commands/list";
+export const ACP_COMMANDS_INVOKE_METHOD = "clio-coder/commands/invoke";
 
 /**
  * Wire bounds for one prompt turn (CONTRACT C001 §3). A client renders every
@@ -30,6 +54,40 @@ export const ACP_AGENT_META_KEY = "clio-coder/agent";
 export const ACP_MAX_STRING_BYTES = 4096;
 export const ACP_MAX_RAW_RECORD_BYTES = 32768;
 export const ACP_MAX_CHUNK_BYTES = 16384;
+
+/**
+ * The one raw-record string the generic 4 KiB cap actively harmed. `edit` and
+ * `write` put a rendered unified diff on `details.diff`, already capped by the
+ * engine's own `MAX_DIFF_BYTES` (32 KiB, `src/tools/edit-diff.ts`). At four
+ * context lines and roughly 60 bytes a line, 4 KiB is about 65 diff lines, so a
+ * multi-hunk refactor arrived cut mid-hunk and a client could not tell a
+ * truncated hunk from a hunk that ended there.
+ *
+ * It sits below {@link ACP_MAX_RAW_RECORD_BYTES} rather than at it because the
+ * record cap elides the WHOLE record when it trips: a diff sized at exactly the
+ * record bound would serialize past it once JSON escaping and the rest of the
+ * result are counted, and the client would have received `{truncated:true}`
+ * instead of the 4 KiB it used to get. The reserve is one
+ * {@link ACP_MAX_STRING_BYTES} budget for everything else in the record.
+ */
+export const ACP_MAX_RAW_DIFF_BYTES = ACP_MAX_RAW_RECORD_BYTES - ACP_MAX_STRING_BYTES;
+
+/**
+ * Per-call ceiling on non-terminal tool-progress frames. The tool's own
+ * throttle bounds the rate, not the total: a build that prints for ten minutes
+ * is a bounded stream of unbounded length, and a client holding per-call state
+ * has to be told where the stream stops.
+ */
+export const ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL = 64;
+
+/**
+ * Floor between two progress frames for one call, on top of the 100 ms throttle
+ * `src/core/bash-exec.ts` already applies upstream. The upstream throttle is a
+ * rendering budget for a terminal that redraws in place; a JSON-RPC peer pays
+ * serialization and a full segment re-render per frame, so the wire gets its
+ * own, slower floor.
+ */
+export const ACP_MIN_TOOL_PROGRESS_INTERVAL_MS = 250;
 
 /**
  * Upper bound on a `toolCallId` this server puts on the wire, in UTF-8 bytes

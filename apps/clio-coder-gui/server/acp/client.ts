@@ -1,11 +1,55 @@
-import { Type } from "typebox";
+import { type Static, type TSchema, Type } from "typebox";
 import { Value } from "typebox/value";
+import {
+	type AgentCapabilities,
+	CommandsCapability,
+	DecisionCapability,
+	EMPTY_CAPABILITIES,
+	EventsCapability,
+	SessionCapability,
+	SteeringCapability,
+	ToolProgressCapability,
+} from "../../contracts/capabilities.js";
 import { Id } from "../../contracts/common.js";
 import { ACP_EVENT_KINDS, Usage } from "../../contracts/sessions.js";
 import { type AcpJsonRpcTransport, AcpProtocolError, AcpTimeoutError } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
 
 const Initialize = Type.Object({ protocolVersion: Type.Literal(1) });
+/**
+ * Capabilities are read leniently on purpose. The protocol version is the one
+ * hard gate; everything under `agentCapabilities._meta` is an extension this
+ * app may or may not find, and a key it cannot parse means that feature is off,
+ * never that the session is unusable. `Value.Clean` drops what the schema does
+ * not name, so a newer engine's extra fields cost nothing here.
+ */
+function optional<S extends TSchema>(schema: S, value: unknown): Static<S> | undefined {
+	if (value === undefined) return undefined;
+	const projected = Value.Clean(schema, structuredClone(value));
+	return Value.Check(schema, projected) ? (projected as Static<S>) : undefined;
+}
+function readCapabilities(result: unknown): AgentCapabilities {
+	const capabilities = record(record(result).agentCapabilities);
+	const meta = record(capabilities._meta);
+	return {
+		loadSession: capabilities.loadSession === true,
+		mediatedTools: meta["clio-coder/tools"] === "mediated",
+		...maybe("session", optional(SessionCapability, meta["clio-coder/session"])),
+		...maybe("settings", optional(Settings, meta["clio-coder/settings"])),
+		...maybe("targets", optional(Targets, meta["clio-coder/targets"])),
+		...maybe("steering", optional(SteeringCapability, meta["clio-coder/steering"])),
+		...maybe("commands", optional(CommandsCapability, meta["clio-coder/commands"])),
+		...maybe("toolProgress", optional(ToolProgressCapability, meta["clio-coder/toolProgress"])),
+		...maybe("decision", optional(DecisionCapability, meta["clio-coder/decision"])),
+		...maybe("events", optional(EventsCapability, meta["clio-coder/events"])),
+	};
+}
+const closed = { additionalProperties: false };
+const Settings = Type.Object({ get_safe: Type.Boolean(), patch_safe: Type.Boolean() }, closed);
+const Targets = Type.Object({ list: Type.Boolean(), probe: Type.Boolean() }, closed);
+function maybe<K extends string, V>(key: K, value: V | undefined) {
+	return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
+}
 const NewSession = Type.Object({ sessionId: Id });
 const PromptResult = Type.Object({
 	stopReason: Type.Union([
@@ -53,6 +97,8 @@ export class AcpClient {
 			throw acpProblem(error);
 		}
 	}
+	/** What the agent announced at initialize. Empty until {@link initialize} returns. */
+	capabilities: AgentCapabilities = EMPTY_CAPABILITIES;
 	async initialize() {
 		const result = await this.request<unknown>("initialize", {
 			protocolVersion: 1,
@@ -60,11 +106,19 @@ export class AcpClient {
 			clientCapabilities: {
 				fs: { readTextFile: false, writeTextFile: false },
 				terminal: false,
-				_meta: { "clio-coder/events": { version: 1, kinds: [...ACP_EVENT_KINDS] } },
+				_meta: {
+					"clio-coder/events": { version: 1, kinds: [...ACP_EVENT_KINDS] },
+					// Opting in turns on non-terminal `tool_call_update` frames whose
+					// content is the tool's CUMULATIVE output. The projection replaces
+					// the running row's partial text rather than appending, which is
+					// the whole reason the stream is an opt-in.
+					"clio-coder/toolProgress": { version: 1 },
+				},
 			},
 		});
 		if (!Value.Check(Initialize, result))
 			throw new AppProblem("upstream_acp", "Clio ACP returned an invalid initialize response.");
+		this.capabilities = readCapabilities(result);
 	}
 	async open(cwd: string, sessionId?: string) {
 		const result = await this.request<unknown>(sessionId ? "session/load" : "session/new", {
