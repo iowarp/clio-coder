@@ -65,6 +65,11 @@ describe("clio_docs and clio_library", () => {
 		const docs = createClioDocsTool();
 		const corpus = listDocsCorpus();
 		ok(corpus.ok, corpus.ok ? "" : corpus.message);
+		if (corpus.ok) {
+			const followUp = (corpus.payload as { followUp: string }).followUp;
+			ok(followUp.includes('gateway(op="call", capability="clio_docs"'), followUp);
+			ok(!followUp.includes("scope=docs"), followUp);
+		}
 		const listed = await docs.run({}, {});
 		if (listed.kind !== "ok") throw new Error(listed.message);
 		if (!corpus.ok) return;
@@ -74,6 +79,11 @@ describe("clio_docs and clio_library", () => {
 
 		const search = searchDocs("gateway", 3);
 		ok(search.ok, search.ok ? "" : search.message);
+		if (search.ok) {
+			const followUp = (search.payload as { followUp: string }).followUp;
+			ok(followUp.includes('gateway(op="call", capability="clio_docs"'), followUp);
+			ok(!followUp.includes("scope=docs"), followUp);
+		}
 		const searched = await docs.run({ query: "gateway", limit: 3 }, {});
 		if (searched.kind !== "ok" || !search.ok) throw new Error(JSON.stringify(searched));
 		strictEqual(searched.output, JSON.stringify(search.payload));
@@ -81,6 +91,81 @@ describe("clio_docs and clio_library", () => {
 		const legacy = runDocsScope({ query: "gateway", limit: 3 }, reserveObservation(16 * 1024), undefined);
 		if (legacy.kind !== "ok") throw new Error(legacy.message);
 		strictEqual(searched.output, legacy.output);
+	});
+
+	it("ranks current guidance ahead of historical plans while keeping explicit history searchable", () => {
+		for (const query of [
+			"How do I configure a different model for workers?",
+			"In v0.5.0, how do I configure a different model for workers?",
+		]) {
+			const workerQuery = searchDocs(query, 5);
+			ok(workerQuery.ok, workerQuery.ok ? "" : workerQuery.message);
+			if (!workerQuery.ok) return;
+			const workerResults = (workerQuery.payload as { results: Array<{ file: string }> }).results;
+			ok(
+				!workerResults.slice(0, 3).some((result) => result.file === "docs/process/configure-tree-proposal.md"),
+				JSON.stringify(workerResults),
+			);
+			ok(
+				workerResults.some((result) => result.file === "docs/guide/configuration-and-targets.md"),
+				JSON.stringify(workerResults),
+			);
+		}
+
+		const defaultsQuery = searchDocs(
+			"What are the default chat settings for thinking and prewarm, and when does prewarming run?",
+			5,
+		);
+		ok(defaultsQuery.ok, defaultsQuery.ok ? "" : defaultsQuery.message);
+		if (!defaultsQuery.ok) return;
+		const defaultsResults = (defaultsQuery.payload as { results: Array<{ file: string }> }).results;
+		strictEqual(defaultsResults[0]?.file, "docs/guide/configuration-reference.md");
+		ok(!defaultsResults.some((result) => result.file.startsWith("docs/gui/")), JSON.stringify(defaultsResults));
+
+		const historyQuery = searchDocs("What did the historical configure tree proposal say about worker models?", 5);
+		ok(historyQuery.ok, historyQuery.ok ? "" : historyQuery.message);
+		if (!historyQuery.ok) return;
+		const historyResults = (historyQuery.payload as { results: Array<{ file: string }> }).results;
+		strictEqual(historyResults[0]?.file, "docs/process/configure-tree-proposal.md");
+	});
+
+	it("returns heading anchors that match the docs renderer, including duplicates and Unicode", () => {
+		const punctuation = searchDocs("Welcome Launchpad Session Header", 12);
+		ok(punctuation.ok, punctuation.ok ? "" : punctuation.message);
+		if (!punctuation.ok) return;
+		const punctuationResult = (
+			punctuation.payload as { results: Array<{ file: string; heading: string; anchor: string }> }
+		).results.find(
+			(result) =>
+				result.file === "docs/architecture/tui-design.md" && result.heading === "5.1 Welcome Launchpad & Session Header",
+		);
+		strictEqual(punctuationResult?.anchor, "#51-welcome-launchpad--session-header");
+
+		const unicode = searchDocs("19 Origin Glyphs", 12);
+		ok(unicode.ok, unicode.ok ? "" : unicode.message);
+		if (!unicode.ok) return;
+		const unicodeResult = (
+			unicode.payload as { results: Array<{ file: string; heading: string; anchor: string }> }
+		).results.find(
+			(result) => result.file === "docs/guide/glossary.md" && result.heading === "19. Origin Glyphs (`◇`/`◆`)",
+		);
+		strictEqual(unicodeResult?.anchor, "#19-origin-glyphs-");
+
+		const duplicate = searchDocs("include_tree context limit scope settings", 12);
+		ok(duplicate.ok, duplicate.ok ? "" : duplicate.message);
+		if (!duplicate.ok) return;
+		const duplicateResult = (
+			duplicate.payload as { results: Array<{ file: string; heading: string; anchor: string }> }
+		).results.find((result) => result.file === "docs/guide/configuration-reference.md" && result.heading === "`context`");
+		strictEqual(duplicateResult?.anchor, "#context-1");
+
+		const firstDuplicate = searchDocs("context CLI setting", 12);
+		ok(firstDuplicate.ok, firstDuplicate.ok ? "" : firstDuplicate.message);
+		if (!firstDuplicate.ok) return;
+		const firstDuplicateResult = (
+			firstDuplicate.payload as { results: Array<{ file: string; heading: string; anchor: string }> }
+		).results.find((result) => result.file === "docs/guide/configuration-reference.md" && result.heading === "`context`");
+		strictEqual(firstDuplicateResult?.anchor, "#context");
 	});
 
 	it("refuses the library read on a worker registry exactly as the context scope did", async () => {

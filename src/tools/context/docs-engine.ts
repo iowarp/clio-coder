@@ -3,9 +3,9 @@ import { basename, join, relative, resolve } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 
 // Deterministic, dependency-free retrieval over Clio's bundled human docs,
-// serving context(scope=docs). This intentionally avoids embeddings or network
-// calls so docs retrieval works in a packaged offline CLI, but it is still
-// richer than grep: it builds a section index with heading hierarchy, line
+// serving the `clio_docs` gateway capability. It intentionally avoids
+// embeddings or network calls so retrieval works in a packaged offline CLI.
+// It is still richer than grep: it builds a section index with heading hierarchy, line
 // ranges, light stemming, controlled Clio vocabulary aliases, phrase boosts,
 // and BM25-style body scoring.
 
@@ -22,6 +22,12 @@ const PHRASE_BODY_BOOST = 3.0;
 const PHRASE_HEADING_BOOST = 7.0;
 const COVERAGE_BOOST = 4.0;
 const EXPANDED_TERM_WEIGHT = 0.45;
+const NONCURRENT_REFERENCE_WEIGHT = 0.25;
+
+const NONCURRENT_REFERENCE_PATH =
+	/^docs\/(?:history\/|gui\/(?!readme\.md$)|process\/[^/]*(?:proposal|audit-v\d|battletest-\d{4})[^/]*\.md$)/iu;
+const EXPLICIT_NONCURRENT_INTENT =
+	/\b(?:histor(?:y|ical|ic)|archives?|archived|proposal|proposed|blueprints?|design|spec(?:ification)?s?|roadmaps?|audits?|legacy|previous|older|old)\b/iu;
 
 const STOP_WORDS = new Set([
 	"a",
@@ -199,8 +205,16 @@ function unique<T>(items: ReadonlyArray<T>): T[] {
 	return [...new Set(items)];
 }
 
-function slugify(heading: string): string {
-	return normalizeText(heading).replace(/\s+/g, "-") || "section";
+function slugify(heading: string, counts: Map<string, number>): string {
+	const base = heading
+		.replace(/<[^>]*>/g, "")
+		.replace(/[`*_~]/g, "")
+		.toLowerCase()
+		.replace(/[^\p{L}\p{N}_\s-]/gu, "")
+		.replace(/\s/g, "-");
+	const count = counts.get(base) ?? 0;
+	counts.set(base, count + 1);
+	return count > 0 ? `${base}-${count}` : base;
 }
 
 function titleFromFile(name: string): string {
@@ -227,6 +241,7 @@ function parseSections(file: string, markdown: string): RawSection[] {
 	let buffer: string[] = [];
 	let inFence = false;
 	const stack: Array<{ level: number; text: string }> = [];
+	const headingCounts = new Map<string, number>();
 
 	const breadcrumbFor = (): string => {
 		const parts = stack.map((entry) => entry.text);
@@ -243,7 +258,7 @@ function parseSections(file: string, markdown: string): RawSection[] {
 				heading,
 				breadcrumb: breadcrumbFor(),
 				level,
-				anchor: heading === "(overview)" ? "" : `#${slugify(heading)}`,
+				anchor: heading === "(overview)" ? "" : `#${slugify(heading, headingCounts)}`,
 				startLine: headingLine,
 				bodyStartLine,
 				endLine: Math.max(headingLine, endLine),
@@ -469,6 +484,21 @@ function scoreSection(index: DocsIndex, section: IndexedSection, plan: QueryPlan
 	};
 }
 
+/**
+ * Keep historical records and GUI design blueprints searchable, but let current
+ * operator guidance lead ordinary self-help queries. Their paths and names are
+ * the status markers already used by the docs tree; an explicit history/design
+ * query removes the demotion so those documents remain directly retrievable.
+ */
+function prioritizeCurrentGuidance(entry: ScoredSection, query: string): ScoredSection {
+	if (!NONCURRENT_REFERENCE_PATH.test(entry.section.file) || EXPLICIT_NONCURRENT_INTENT.test(query)) return entry;
+	return {
+		...entry,
+		score: entry.score * NONCURRENT_REFERENCE_WEIGHT,
+		signals: unique(["historical/design reference demotion", ...entry.signals]).slice(0, 6),
+	};
+}
+
 function cleanSnippet(text: string): string {
 	return text
 		.replace(/^\s{0,3}#{1,6}\s+/gm, "")
@@ -560,7 +590,7 @@ function resultPayload(index: DocsIndex, plan: QueryPlan, scored: ReadonlyArray<
 		results,
 		followUp:
 			results.length > 0
-				? "Cited files are Clio's bundled docs: read them from the installed documentation path named in your prompt, never by searching the workspace for them. For more depth, run another context scope=docs query with more specific terms."
+				? 'Cited files are Clio\'s bundled docs: read them from the installed documentation path named in your prompt, never by searching the workspace for them. For more depth, call gateway(op="call", capability="clio_docs", args={query:"<more specific terms>"}).'
 				: "Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 }
@@ -572,9 +602,8 @@ export type DocsCorpusOutcome =
 /**
  * List the bundled-docs corpus without running a query: the file set plus the
  * doc/section counts a successful search already carries under `corpus`. This
- * is what the model wants when it sends `scope=docs` with no query — an index
- * to pick a search term from — and it saves the wasted round the old
- * `requires query` error forced. Bounded: the corpus is a handful of files.
+ * lets the model inspect the corpus through `clio_docs` with no query before
+ * choosing a search term. Bounded: the corpus is a handful of files.
  */
 export function listDocsCorpus(): DocsCorpusOutcome {
 	const loaded = loadDocsIndex();
@@ -589,7 +618,7 @@ export function listDocsCorpus(): DocsCorpusOutcome {
 			excludes: ["docs/html/**"],
 		},
 		followUp:
-			"Pass query=<terms> to search these bundled docs; they ship with Clio and are not workspace files. " +
+			'Call gateway(op="call", capability="clio_docs", args={query:"<terms>"}) to search these bundled docs; omit query to list the corpus. They ship with Clio and are not workspace files. ' +
 			"Try Clio vocabulary such as target, autonomy, dispatch, evidence, middleware, context, validation, install, or model catalog.",
 	};
 	return { ok: true, payload, fileCount: index.files.length };
@@ -620,7 +649,10 @@ export function searchDocs(query: string, limitArg: unknown): DocsSearchOutcome 
 	if (!loaded.ok) return { ok: false, message: loaded.message };
 	const limit = clampDocsLimit(limitArg);
 	const ranked = loaded.index.sections
-		.map((section) => scoreSection(loaded.index, section, plan))
+		.map((section) => {
+			const scored = scoreSection(loaded.index, section, plan);
+			return scored === null ? null : prioritizeCurrentGuidance(scored, query);
+		})
 		.filter((entry): entry is ScoredSection => entry !== null)
 		.sort(
 			(a, b) =>
