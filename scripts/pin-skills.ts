@@ -429,7 +429,7 @@ function renderIndex(entries: ReadonlyArray<CatalogEntry>): string {
 /** biome's configured line width, which decides whether a JSON array stays on one line. */
 const BIOME_FORMAT = (() => {
 	try {
-		const config = JSON.parse(readFileSync(path.join(repoRoot, "biome.json"), "utf8")) as {
+		const config = JSON.parse(readFileSync(path.resolve(import.meta.dirname, "../biome.json"), "utf8")) as {
 			formatter?: { lineWidth?: number; indentWidth?: number };
 		};
 		return { lineWidth: config.formatter?.lineWidth ?? 80, indentWidth: config.formatter?.indentWidth ?? 2 };
@@ -565,7 +565,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.a
 	const checkMode = argv.includes("--check");
 	const dirFlagIndex = argv.indexOf("--dir");
 	const dir = dirFlagIndex >= 0 && argv[dirFlagIndex + 1] ? (argv[dirFlagIndex + 1] as string) : undefined;
-	const result = pinSkillsCatalog({ catalogDir: dir, check: checkMode });
+	const result = pinSkillsCatalog({ ...(dir ? { catalogDir: dir } : {}), check: checkMode });
 
 	if (result.errors.length > 0) {
 		for (const error of result.errors) process.stderr.write(`pin-skills: ${error}\n`);

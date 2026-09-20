@@ -31,7 +31,9 @@ const report = JSON.parse(
 		stdio: ["ignore", "pipe", "ignore"],
 	}),
 ) as Array<{ files: Array<{ path: string }> }>;
-const packed = new Set(report[0].files.map((file) => file.path));
+const packedReport = report[0];
+if (!packedReport) throw new Error("npm pack returned no package report");
+const packed = new Set(packedReport.files.map((file) => file.path));
 
 const profile = detectProjectProfile(root);
 const codewiki = await buildCodewiki(

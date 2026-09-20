@@ -3,7 +3,7 @@
 	"name": "Local experiment status",
 	"version": "1.0.0",
 	"description": "Inspect a local experiment record; default data is explicitly synthetic.",
-	"compatibility": { "clio": ">=0.4.7" },
+	"compatibility": { "clio": ">=0.5.0" },
 	"runtime": {
 		"api": 1,
 		"entrypoint": "extension.mjs",

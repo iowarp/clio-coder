@@ -2,9 +2,7 @@
 
 These installable examples use the harness extension lifecycle, separately from
 library recipes. They require a Clio build containing operator runtime API v1.
-The manifests retain the current package compatibility minimum, 0.4.7; use this
-implementation or a later release that includes it (the original 0.4.7 release
-predates the runtime field).
+The examples require Clio Coder 0.5.0 or later; their manifests enforce that minimum.
 
 From the repository root:
 

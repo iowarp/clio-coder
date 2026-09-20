@@ -55,7 +55,6 @@
 		"src/**",
 		"library/**",
 		".claude-plugin/marketplace.json",
-		"evals/**",
 		"docs/**/*.md",
 		"README.md",
 		"CHANGELOG.md",
@@ -83,7 +82,7 @@
 		"pretest": "test -f dist/cli/index.js || pnpm run build",
 		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/contracts/*.test.ts tests/smoke/acp-boundary.test.ts tests/smoke/real-binary-boot.test.ts tests/smoke/process-lifecycle.test.ts",
 		"test:gui": "pnpm --filter @iowarp/clio-coder-gui test",
-		"ci": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:gui",
+		"ci": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:maintenance && pnpm run test:gui",
 		"ci:release": "node scripts/release-candidate.mjs qualify",
 		"install:local": "bash scripts/install-local.sh",
 		"smoke:real-home": "bash scripts/smoke-real-home.sh",
@@ -95,7 +94,9 @@
 		"test:full": "node --import tsx --import ./tests/harness/tmp-root.ts --test tests/contracts/*.test.ts tests/extended/*.test.ts tests/smoke/*.test.ts tests/extended-smoke/*.test.ts",
 		"test:package": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/smoke/installed-package.test.ts tests/smoke/native-call-timing.test.ts",
 		"release:preflight": "node scripts/release-candidate.mjs preflight",
-		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full"
+		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
+		"evals:check": "node --import tsx scripts/check-evals.ts",
+		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts tests/extended/eval-tool-surface-model.test.ts"
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186"

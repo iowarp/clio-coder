@@ -977,6 +977,36 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			const disabledRun = await run(bin, ["extensions", "run", "lab-status", "dashboard"], libraryProject, libraryEnv);
 			strictEqual(disabledRun.code, 1, disabledRun.stderr);
 			strictEqual(disabledRun.stdout, "");
+			const measurementsInstall = await run(
+				bin,
+				["extensions", "install", join(packageRoot, "examples/extensions/measurements"), "--project", "--json"],
+				libraryProject,
+				libraryEnv,
+			);
+			strictEqual(measurementsInstall.code, 0, measurementsInstall.stderr);
+			const workerChunks = emittedFilesContaining(packageRoot, "function createWorkerToolRegistry(");
+			strictEqual(workerChunks.size, 1);
+			const workerChunk = [...workerChunks][0];
+			ok(workerChunk);
+			const measurementProbe = join(work, "installed-measurements.mjs");
+			writeFileSync(
+				measurementProbe,
+				`
+				import assert from "node:assert/strict";
+				import { pathToFileURL } from "node:url";
+				const { createWorkerToolRegistry } = await import(pathToFileURL(process.argv[2]).href);
+				const registry = createWorkerToolRegistry(undefined, undefined, undefined, undefined, "full-auto");
+				const result = await registry.invoke({ tool: "extension_measurements__summarize", args: { values: [1,2,3], units: "seconds" } });
+				assert.equal(result.kind, "ok", JSON.stringify(result));
+				assert.equal(result.result.kind, "ok", JSON.stringify(result));
+				const summary = JSON.parse(result.result.output);
+				assert.equal(summary.mean, 2);
+				assert.equal(summary.sampleStandardDeviation, 1);
+				assert.equal(summary.units, "seconds");
+			`,
+			);
+			const measurementRun = await run(measurementProbe, [workerChunk], libraryProject, libraryEnv);
+			strictEqual(measurementRun.code, 0, measurementRun.stderr);
 			const recipesAfterExtension = (await libraryJson(["library", "recipes", "materio"])) as { resources: unknown[] };
 			// Observation timestamps vary; recipe identity, ownership and availability do not.
 			deepStrictEqual(recipesAfterExtension.resources, recipesBeforeExtension.resources);

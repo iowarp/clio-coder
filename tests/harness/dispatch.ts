@@ -18,10 +18,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDispatchBundle } from "../../src/domains/dispatch/extension.js";
 import type { RunReceiptReproducibility } from "../../src/domains/dispatch/types.js";
-import { compileWorker } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
-import { customizationFragments } from "../../src/domains/prompts/extension.js";
-import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
+import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import type { SafetyPolicyMetadata } from "../../src/domains/safety/policy-engine.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "./scratch-env.js";
 
@@ -49,27 +47,12 @@ export function makeDispatchBundle(
 	ctx: Parameters<typeof createDispatchBundle>[0],
 	options: Parameters<typeof createDispatchBundle>[1] = {},
 ): ReturnType<typeof createDispatchBundle> {
-	const promptTable = loadFragments();
+	const production = createPromptsBundle(ctx).contract;
+	production.reload();
 	const prompts: PromptsContract = {
-		inputEpoch: () => "test:0",
-		compileSessionPrompt: async () => {
-			throw new Error("dispatch test harness does not compile session prompts");
-		},
-		// Routes through the real customizationFragments (not a canned stub) so
-		// a dispatch test that plants .clio-coder/rules/** or a profile.yaml
-		// under req.cwd exercises the same rule-selection and operator-profile
-		// logic production dispatch does, and receipt.rulesApplied /
-		// receipt.operatorProfileApplied are trustworthy in these tests.
-		compileWorkerPrompt: async (input) => {
-			const customization = customizationFragments(customizationCwd(input.cwd), input.workingContextPaths ?? []);
-			const compiled = compileWorker(promptTable, { ...input, additionalFragments: customization.fragments });
-			return {
-				...compiled,
-				rulesApplied: customization.activeRuleIds,
-				operatorProfileApplied: customization.operatorProfileApplied,
-			};
-		},
-		reload() {},
+		...production,
+		// Preserve test isolation while using production compilation and provenance.
+		compileWorkerPrompt: (input) => production.compileWorkerPrompt({ ...input, cwd: customizationCwd(input.cwd) }),
 	};
 	const context = {
 		bus: ctx.bus,

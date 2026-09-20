@@ -2,14 +2,9 @@
 /**
  * Source and doc drift checks, run from `pnpm run lint`.
  *
- * Every check here used to be a `tests/contracts/*.test.ts` file that read
- * source text, docs, README, config, or workflow YAML off disk and asserted
- * on its structure. None of them exercised product code, so `node --test`
- * was the wrong host: it paid full per-file startup and coverage overhead
- * for a check that is really one process reading the tree once. This file
- * is that one process. Every assertion below has a comment naming the test
- * it replaced and the incident, where the original did, so the history isn't
- * lost in the move.
+ * Runs static drift checks, production validators and isolated installer/boundary
+ * fixtures in one process. Temporary fixtures are cleaned up. No model requests
+ * or real user installations belong in this gate.
  */
 
 import { execFileSync, spawn } from "node:child_process";
@@ -1045,6 +1040,9 @@ function gitIgnored(paths: ReadonlyArray<string>): Set<string> {
 function checkPackaging(): void {
 	const manifest = JSON.parse(readRoot("scripts/release-manifest.json")) as ReleaseManifest;
 	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
+	for (const prefix of ["evals", "patches", "scripts", "tests"]) {
+		if (shippedBy(packageFiles, `${prefix}/probe.ts`)) fail("packaging", `${prefix}/ is checkout-only`);
+	}
 
 	const missingFiles = manifest.requiredFiles.filter((file) => !shippedBy(packageFiles, file));
 	if (missingFiles.length > 0) {
@@ -1345,8 +1343,8 @@ function checkDocsSource(): void {
 }
 
 // ---------------------------------------------------------------------------
-// pi-surface: a normal lint run does not pay to build the full Pi declaration
-// graph. A dependency version mismatch activates scripts/pi-surface-diff.ts,
+// pi-surface: every lint run compares the consumed Pi declaration graph,
+// including local patches at the same version, using scripts/pi-surface-diff.ts,
 // which fails when a symbol imported by Clio changed or disappeared and reports
 // new exports as review input.
 // ---------------------------------------------------------------------------
@@ -1356,17 +1354,7 @@ function checkPiSurface(): void {
 		fail("pi-surface", "docs/pi-surface.json must exist");
 		return;
 	}
-	const snapshot = JSON.parse(readFileSync(snapshotPath, "utf8")) as {
-		packages?: Record<string, { version?: string }>;
-	};
-	const packageNames = ["@earendil-works/pi-ai", "@earendil-works/pi-agent-core", "@earendil-works/pi-tui"];
-	const changed = packageNames.filter((packageName) => {
-		const installed = JSON.parse(
-			readFileSync(join(root, "node_modules", ...packageName.split("/"), "package.json"), "utf8"),
-		) as { version: string };
-		return snapshot.packages?.[packageName]?.version !== installed.version;
-	});
-	if (changed.length === 0) return;
+	// Local patches can change the consumed API without changing the package version.
 	try {
 		const output = execFileSync(process.execPath, ["--import", "tsx", join(root, "scripts", "pi-surface-diff.ts")], {
 			cwd: root,
@@ -1379,9 +1367,7 @@ function checkPiSurface(): void {
 		const output = `${result.stdout?.toString() ?? ""}${result.stderr?.toString() ?? ""}`.trim();
 		fail(
 			"pi-surface",
-			output.length > 0
-				? output.replaceAll("\n", "\n  ")
-				: (result.message ?? `surface check failed for ${changed.join(", ")}`),
+			output.length > 0 ? output.replaceAll("\n", "\n  ") : (result.message ?? "Pi surface check failed"),
 		);
 	}
 }
@@ -1392,6 +1378,13 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
 	["library-pin", checkLibraryPin],
+	[
+		"eval-suites",
+		async () => {
+			const result = await runProcess("node", ["--import", "tsx", "scripts/check-evals.ts"], {});
+			if (result.status !== 0) fail("eval-suites", result.output.trim());
+		},
+	],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],
