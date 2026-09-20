@@ -874,6 +874,1042 @@
 				}
 			}
 		},
+		"/api/workspaces/{id}/library/plans": {
+			"post": {
+				"operationId": "libraryPlan",
+				"summary": "Stage one reviewed library lifecycle plan; writes nothing",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"required": ["operation", "ref"],
+								"properties": {
+									"operation": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "install"
+											},
+											{
+												"type": "string",
+												"const": "update"
+											},
+											{
+												"type": "string",
+												"const": "enable"
+											},
+											{
+												"type": "string",
+												"const": "disable"
+											},
+											{
+												"type": "string",
+												"const": "remove"
+											}
+										]
+									},
+									"ref": {
+										"type": "string",
+										"pattern": "^(skill|agent|prompt|fleet|plugin):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+									},
+									"scope": {
+										"anyOf": [
+											{
+												"type": "string",
+												"const": "user"
+											},
+											{
+												"type": "string",
+												"const": "project"
+											}
+										]
+									},
+									"force": {
+										"type": "boolean"
+									},
+									"withRequirements": {
+										"type": "boolean"
+									}
+								},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["id", "createdAt", "expiresAt", "operation", "applicable", "steps", "diagnostics"],
+									"properties": {
+										"id": {
+											"type": "string",
+											"pattern": "^[a-f0-9]{16}$"
+										},
+										"createdAt": {
+											"type": "string"
+										},
+										"expiresAt": {
+											"type": "string"
+										},
+										"operation": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "install"
+												},
+												{
+													"type": "string",
+													"const": "update"
+												},
+												{
+													"type": "string",
+													"const": "enable"
+												},
+												{
+													"type": "string",
+													"const": "disable"
+												},
+												{
+													"type": "string",
+													"const": "remove"
+												}
+											]
+										},
+										"applicable": {
+											"type": "boolean"
+										},
+										"steps": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": [
+													"operation",
+													"identity",
+													"destination",
+													"dependencies",
+													"dependents",
+													"fallbackNote",
+													"recovery"
+												],
+												"properties": {
+													"operation": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "install"
+															},
+															{
+																"type": "string",
+																"const": "update"
+															},
+															{
+																"type": "string",
+																"const": "enable"
+															},
+															{
+																"type": "string",
+																"const": "disable"
+															},
+															{
+																"type": "string",
+																"const": "remove"
+															}
+														]
+													},
+													"identity": {
+														"type": "object",
+														"required": ["ref", "kind", "name", "scope"],
+														"properties": {
+															"ref": {
+																"type": "string"
+															},
+															"kind": {
+																"type": "string"
+															},
+															"name": {
+																"type": "string"
+															},
+															"scope": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "user"
+																	},
+																	{
+																		"type": "string",
+																		"const": "project"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"destination": {
+														"type": "string"
+													},
+													"source": {
+														"type": "object",
+														"required": ["sourceUrl", "sha256", "staged"],
+														"properties": {
+															"sourceUrl": {
+																"type": "string"
+															},
+															"sha256": {
+																"type": "string"
+															},
+															"staged": {
+																"type": "boolean"
+															}
+														},
+														"additionalProperties": false
+													},
+													"content": {
+														"type": "object",
+														"required": ["valid", "resources", "diagnostics"],
+														"properties": {
+															"valid": {
+																"type": "boolean"
+															},
+															"resources": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["kind", "name", "valid"],
+																	"properties": {
+																		"kind": {
+																			"type": "string"
+																		},
+																		"name": {
+																			"type": "string"
+																		},
+																		"valid": {
+																			"type": "boolean"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"diagnostics": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															}
+														},
+														"additionalProperties": false
+													},
+													"dependencies": {
+														"type": "object",
+														"required": ["requires", "missing", "inactive"],
+														"properties": {
+															"requires": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"missing": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															},
+															"inactive": {
+																"type": "array",
+																"items": {
+																	"type": "string"
+																}
+															}
+														},
+														"additionalProperties": false
+													},
+													"dependents": {
+														"type": "object",
+														"required": ["newlyBroken", "preexisting"],
+														"properties": {
+															"newlyBroken": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["ref", "scope", "missing"],
+																	"properties": {
+																		"ref": {
+																			"type": "string"
+																		},
+																		"scope": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "user"
+																				},
+																				{
+																					"type": "string",
+																					"const": "project"
+																				}
+																			]
+																		},
+																		"missing": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"preexisting": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["ref", "scope", "missing"],
+																	"properties": {
+																		"ref": {
+																			"type": "string"
+																		},
+																		"scope": {
+																			"anyOf": [
+																				{
+																					"type": "string",
+																					"const": "user"
+																				},
+																				{
+																					"type": "string",
+																					"const": "project"
+																				}
+																			]
+																		},
+																		"missing": {
+																			"type": "array",
+																			"items": {
+																				"type": "string"
+																			}
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															}
+														},
+														"additionalProperties": false
+													},
+													"effectiveAfter": {
+														"type": "object",
+														"required": ["scope", "loadable", "state"],
+														"properties": {
+															"scope": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "user"
+																	},
+																	{
+																		"type": "string",
+																		"const": "project"
+																	}
+																]
+															},
+															"loadable": {
+																"type": "boolean"
+															},
+															"state": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"fallbackNote": {
+														"type": "string"
+													},
+													"recovery": {
+														"type": "string"
+													},
+													"refusal": {
+														"type": "string"
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"diagnostics": {
+											"type": "array",
+											"items": {
+												"type": "string"
+											}
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/library/plans/{planId}/apply": {
+			"post": {
+				"operationId": "libraryPlanApply",
+				"summary": "Apply the exact plan that was reviewed and report per-package outcomes",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "planId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-f0-9]{16}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["planId", "committed", "failed", "unattempted", "outcomes", "refresh"],
+									"properties": {
+										"planId": {
+											"type": "string"
+										},
+										"committed": {
+											"type": "integer"
+										},
+										"failed": {
+											"type": "integer"
+										},
+										"unattempted": {
+											"type": "integer"
+										},
+										"outcomes": {
+											"type": "array",
+											"items": {
+												"type": "object",
+												"required": ["status", "operation", "identity", "diagnostics"],
+												"properties": {
+													"status": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "committed"
+															},
+															{
+																"type": "string",
+																"const": "failed"
+															},
+															{
+																"type": "string",
+																"const": "unattempted"
+															}
+														]
+													},
+													"operation": {
+														"anyOf": [
+															{
+																"type": "string",
+																"const": "install"
+															},
+															{
+																"type": "string",
+																"const": "update"
+															},
+															{
+																"type": "string",
+																"const": "enable"
+															},
+															{
+																"type": "string",
+																"const": "disable"
+															},
+															{
+																"type": "string",
+																"const": "remove"
+															}
+														]
+													},
+													"identity": {
+														"type": "object",
+														"required": ["ref", "kind", "name", "scope"],
+														"properties": {
+															"ref": {
+																"type": "string"
+															},
+															"kind": {
+																"type": "string"
+															},
+															"name": {
+																"type": "string"
+															},
+															"scope": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "user"
+																	},
+																	{
+																		"type": "string",
+																		"const": "project"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"verification": {
+														"type": "object",
+														"required": ["evidence", "tree", "record", "resources", "effective"],
+														"properties": {
+															"evidence": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "pre-refresh"
+																	},
+																	{
+																		"type": "string",
+																		"const": "post-refresh"
+																	}
+																]
+															},
+															"tree": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "present"
+																	},
+																	{
+																		"type": "string",
+																		"const": "absent"
+																	},
+																	{
+																		"type": "string",
+																		"const": "changed"
+																	}
+																]
+															},
+															"record": {
+																"anyOf": [
+																	{
+																		"type": "string",
+																		"const": "recorded"
+																	},
+																	{
+																		"type": "string",
+																		"const": "absent"
+																	},
+																	{
+																		"type": "string",
+																		"const": "unreadable"
+																	}
+																]
+															},
+															"copy": {
+																"type": "string"
+															},
+															"resources": {
+																"type": "array",
+																"items": {
+																	"type": "object",
+																	"required": ["kind", "name", "available"],
+																	"properties": {
+																		"kind": {
+																			"type": "string"
+																		},
+																		"name": {
+																			"type": "string"
+																		},
+																		"available": {
+																			"type": "boolean"
+																		},
+																		"reason": {
+																			"type": "string"
+																		}
+																	},
+																	"additionalProperties": false
+																}
+															},
+															"effective": {
+																"anyOf": [
+																	{
+																		"type": "object",
+																		"required": ["scope", "loadable"],
+																		"properties": {
+																			"scope": {
+																				"anyOf": [
+																					{
+																						"type": "string",
+																						"const": "user"
+																					},
+																					{
+																						"type": "string",
+																						"const": "project"
+																					}
+																				]
+																			},
+																			"loadable": {
+																				"type": "boolean"
+																			}
+																		},
+																		"additionalProperties": false
+																	},
+																	{
+																		"type": "null"
+																	}
+																]
+															}
+														},
+														"additionalProperties": false
+													},
+													"recovery": {
+														"type": "object",
+														"properties": {
+															"packageBackup": {
+																"type": "string"
+															},
+															"stateBackup": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													},
+													"diagnostics": {
+														"type": "array",
+														"items": {
+															"type": "string"
+														}
+													},
+													"error": {
+														"type": "object",
+														"required": ["code", "message", "next"],
+														"properties": {
+															"code": {
+																"type": "string"
+															},
+															"message": {
+																"type": "string"
+															},
+															"next": {
+																"type": "string"
+															}
+														},
+														"additionalProperties": false
+													}
+												},
+												"additionalProperties": false
+											}
+										},
+										"refresh": {
+											"type": "object",
+											"required": ["status", "reason"],
+											"properties": {
+												"status": {
+													"type": "string",
+													"const": "not-applicable"
+												},
+												"reason": {
+													"type": "string"
+												}
+											},
+											"additionalProperties": false
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/api/workspaces/{id}/library/plans/{planId}": {
+			"delete": {
+				"operationId": "libraryPlanRelease",
+				"summary": "Cancel a staged plan and release its sources",
+				"security": [
+					{
+						"bearer": []
+					}
+				],
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
+						}
+					},
+					{
+						"name": "planId",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"pattern": "^[a-f0-9]{16}$"
+						}
+					},
+					{
+						"name": "Idempotency-Key",
+						"in": "header",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"minLength": 1,
+							"maxLength": 128
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object",
+								"properties": {},
+								"additionalProperties": false
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Success",
+						"content": {
+							"application/json": {
+								"schema": {
+									"type": "object",
+									"required": ["released"],
+									"properties": {
+										"released": {
+											"type": "boolean"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						},
+						"headers": {
+							"X-Clio-Epoch": {
+								"schema": {
+									"type": "string"
+								},
+								"description": "Server epoch"
+							},
+							"X-Clio-Seq": {
+								"schema": {
+									"type": "integer"
+								},
+								"description": "Sequence before assembling the snapshot"
+							}
+						}
+					},
+					"default": {
+						"description": "Problem",
+						"content": {
+							"application/problem+json": {
+								"schema": {
+									"type": "object",
+									"required": ["type", "title", "status", "detail", "code", "instance"],
+									"properties": {
+										"type": {
+											"type": "string"
+										},
+										"title": {
+											"type": "string"
+										},
+										"status": {
+											"type": "integer"
+										},
+										"detail": {
+											"type": "string"
+										},
+										"code": {
+											"anyOf": [
+												{
+													"type": "string",
+													"const": "validation"
+												},
+												{
+													"type": "string",
+													"const": "unauthorized"
+												},
+												{
+													"type": "string",
+													"const": "not_found"
+												},
+												{
+													"type": "string",
+													"const": "conflict"
+												},
+												{
+													"type": "string",
+													"const": "unsupported"
+												},
+												{
+													"type": "string",
+													"const": "unavailable"
+												},
+												{
+													"type": "string",
+													"const": "upstream_acp"
+												},
+												{
+													"type": "string",
+													"const": "operation_failed"
+												},
+												{
+													"type": "string",
+													"const": "internal"
+												}
+											]
+										},
+										"instance": {
+											"type": "string"
+										}
+									},
+									"additionalProperties": false
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/api/workspaces/{id}/library/extensions": {
 			"get": {
 				"operationId": "libraryExtensions",

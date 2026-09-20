@@ -277,9 +277,47 @@ try {
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("usage");
 		await navigate("Library");
+		// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
+		const offer = page.getByRole("listitem", { name: "skill:archify", exact: true });
+		await offer.waitFor();
+		await check("library-catalog");
+		await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).click();
+		const review = page.getByRole("dialog", { name: "Install skill:archify", exact: true });
+		await review.getByText("This is exactly what will be applied. Nothing has been written yet.").waitFor();
+		await review.getByText("Staged and verified").waitFor();
+		await check("library-plan");
+		await review.getByRole("button", { name: "Apply this change", exact: true }).click();
+		await review.getByText("The files are on disk and the install record matches.").waitFor();
+		await review.getByText("Open conversations have not reloaded.").waitFor();
+		await check("library-applied");
+		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `library-applied-${width}.png`) });
+		await review.getByRole("button", { name: "Done", exact: true }).click();
+		await offer.locator(".status-mark", { hasText: "Ready" }).waitFor();
+		// A second user install is no longer offered; the project scope still is.
+		if (await offer.getByRole("button", { name: "Install skill:archify for me", exact: true }).count())
+			throw new Error("An installed user copy still offers a user install.");
+		await offer.getByRole("button", { name: "Install skill:archify in this project", exact: true }).waitFor();
+		await page.getByRole("button", { name: /^Installed only · [1-9]/ }).click();
+		await check("library-installed");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `library-installed-${width}.png`), fullPage: true });
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await check("library-installed-dark");
+		if (width === 1600) await page.screenshot({ path: join(output, "library-installed-dark.png"), fullPage: true });
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await offer.getByRole("button", { name: "Remove the user copy of skill:archify", exact: true }).click();
+		const removal = page.getByRole("dialog", { name: "Remove skill:archify", exact: true });
+		await removal.getByRole("button", { name: "Apply this change", exact: true }).click();
+		await removal.getByText("The files and the install record are gone.").waitFor();
+		await removal.getByRole("button", { name: "Done", exact: true }).click();
+		await page.getByText("No packages match.").waitFor();
+		await page
+			.getByRole("navigation", { name: "Library collections" })
+			.getByRole("button", { name: /^Skills · [1-9]/ })
+			.click();
 		await page.getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
 		await check("library-skills");
-		for (const collection of ["Agents", "Prompts", "Fleets", "Plugins", "Extensions", "Verifiers"]) {
+		for (const collection of ["Agents", "Prompts", "Fleets", "Extensions", "Verifiers"]) {
 			await page.getByRole("button", { name: new RegExp(`^${collection} · [1-9]`) }).click();
 			await page.locator(".config-entries article").first().waitFor();
 			await check(`library-${collection.toLowerCase()}`);

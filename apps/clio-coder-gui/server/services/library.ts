@@ -1,6 +1,13 @@
 import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { LibraryAgents, LibraryVerifiers } from "../../contracts/library.js";
+import {
+	LibraryAgents,
+	LibraryApplyResult,
+	LibraryPlan,
+	LibraryPlanReleased,
+	type LibraryPlanRequest,
+	LibraryVerifiers,
+} from "../../contracts/library.js";
 import type { WorkerHost } from "../worker/host.js";
 import type { CliRunner } from "./cli-runner.js";
 import { AppProblem } from "./problem.js";
@@ -16,7 +23,27 @@ export class LibraryService {
 		private readonly reads: WorkerHost,
 		private readonly runner: CliRunner,
 		private readonly workspaces: WorkspaceService,
+		private readonly ops: WorkerHost,
 	) {}
+	/** Staging may clone a pinned GitHub tree, which the root transport bounds at 120 s. */
+	async plan(workspaceId: string, request: Static<typeof LibraryPlanRequest>) {
+		const workspace = await this.workspaces.get(workspaceId);
+		return checked(
+			LibraryPlan,
+			await this.ops.call("library.plan", { cwd: workspace.path, request }, { deadlineMs: 150_000 }),
+		);
+	}
+	async apply(workspaceId: string, planId: string) {
+		const workspace = await this.workspaces.get(workspaceId);
+		return checked(
+			LibraryApplyResult,
+			await this.ops.call("library.apply", { cwd: workspace.path, planId }, { deadlineMs: 60_000 }),
+		);
+	}
+	async release(workspaceId: string, planId: string) {
+		const workspace = await this.workspaces.get(workspaceId);
+		return checked(LibraryPlanReleased, await this.ops.call("library.release", { cwd: workspace.path, planId }));
+	}
 	async read<S extends TSchema>(workspaceId: string, kind: "inventory" | "extensions", schema: S) {
 		const workspace = await this.workspaces.get(workspaceId);
 		return checked(schema, await this.reads.call("library.read", { kind, cwd: workspace.path }, { deadlineMs: 20_000 }));

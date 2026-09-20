@@ -2,6 +2,7 @@
 // the declared Escape binding and restore focus to whatever opened them.
 
 import { type ReactNode, type RefObject, useId, useRef } from "react";
+import { createPortal } from "react-dom";
 import { Icon } from "../design/icons.js";
 import "./interaction.css";
 import { useFocusTrap } from "./use-focus-trap.js";
@@ -28,7 +29,9 @@ export function Dialog({
 	useShortcutLayer("dialog", true);
 	useFocusTrap(container, true, initialFocus);
 	useShortcut("escape", onClose);
-	return (
+	// Portaled to the body: the shell marks the page behind a layer `inert`, which would otherwise
+	// disable a dialog opened from inside a page.
+	return createPortal(
 		// biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is presentational; Escape and the close button are the keyboard paths.
 		<div
 			className="dialog-backdrop"
@@ -59,7 +62,8 @@ export function Dialog({
 				</div>
 				<div className="dialog__body">{children}</div>
 			</div>
-		</div>
+		</div>,
+		document.body,
 	);
 }
 

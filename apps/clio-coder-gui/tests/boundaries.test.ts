@@ -20,6 +20,7 @@ const adapters = new Set([
 	"src/domains/interop/index.ts",
 	"src/domains/lifecycle/doctor.ts",
 	"src/domains/resources/library-inventory.ts",
+	"src/domains/resources/library-actions.ts",
 	"src/domains/extensions/manager.ts",
 	"src/domains/eval/inventory.ts",
 	"src/domains/eval/artifacts/store.ts",

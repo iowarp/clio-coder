@@ -14,7 +14,17 @@ import {
 	FleetRootDetail,
 	FleetRoots,
 } from "./fleet.js";
-import { LibraryAgents, LibraryExtensions, LibraryInventory, LibraryVerifiers } from "./library.js";
+import {
+	LibraryAgents,
+	LibraryApplyResult,
+	LibraryExtensions,
+	LibraryInventory,
+	LibraryPlan,
+	LibraryPlanParams,
+	LibraryPlanReleased,
+	LibraryPlanRequest,
+	LibraryVerifiers,
+} from "./library.js";
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
@@ -106,6 +116,32 @@ export const routes = {
 		params: operationParams,
 		response: LibraryInventory,
 		summary: "Canonical library packages, installed copies and recipe resources",
+	}),
+	libraryPlan: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/workspaces/:id/library/plans",
+		params: operationParams,
+		body: LibraryPlanRequest,
+		response: LibraryPlan,
+		summary: "Stage one reviewed library lifecycle plan; writes nothing",
+	}),
+	libraryPlanApply: defineRoute({
+		...post,
+		status: 200,
+		path: "/api/workspaces/:id/library/plans/:planId/apply",
+		params: LibraryPlanParams,
+		response: LibraryApplyResult,
+		summary: "Apply the exact plan that was reviewed and report per-package outcomes",
+	}),
+	libraryPlanRelease: defineRoute({
+		...post,
+		method: "DELETE",
+		status: 200,
+		path: "/api/workspaces/:id/library/plans/:planId",
+		params: LibraryPlanParams,
+		response: LibraryPlanReleased,
+		summary: "Cancel a staged plan and release its sources",
 	}),
 	libraryExtensions: defineRoute({
 		...get,

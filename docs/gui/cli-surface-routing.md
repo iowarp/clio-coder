@@ -28,7 +28,7 @@ Keep that promise. When a command family is added to `src/cli/index.ts`, add a r
 | 18 | `trace` | runs/phases/tail/procs/sql/ui | Bounded trace explorer; **never expose arbitrary SQL as the default non-engineer path.** |
 | 19 | `extensions` | list/discover/install/enable/disable/remove, scopes, JSON | Installed inventory wired; reviewed lifecycle mutations remain absent. |
 | 20 | `skills` | list/search/inspect/validate/install/update/sync/eval | Installed inventory wired; deeper inspection and reviewed lifecycle mutations remain absent. |
-| 21 | `library` | list/search/add/use/sync/push/remote confirm | Available-resource inventory wired; use and lifecycle mutations remain absent. |
+| 21 | `library` | list/search/add/use/sync/push/remote confirm | Inventory and the reviewed lifecycle (install, update, enable, disable, remove) are wired for catalog refs. Import, register, pin, drift, sync and push remain terminal operations. |
 | 22 | `verifiers` | discover/author/validate/dry-run/add/edit/rename/remove | Typed discovery is absent; the GUI names this boundary and does not scrape formatted output. |
 | 23 | `docs` | topic server, no-open | The desktop app carries its own searchable reference (views, keys, vocabulary); Clio Coder topic docs stay external. |
 | 24 | `dev components` | list/snapshot/diff | Developer instrument, not core GUI. |
@@ -116,6 +116,18 @@ One library of packages: plugin, skill, agent, prompt, fleet.
 5. **`library drift`** is the "is my installed copy still what the catalog says" read — a natural per-row badge.
 6. **`library import` from a GitHub tree URL is the one network-reaching read on this surface**, and it never activates hooks, MCP, LSP or scripts. Say so at the point of import; that sentence is the whole trust story.
 7. The network kill switch is the setting `integrations.library.sync` (see the settings artifact), and sync additionally refuses until `integrations.library.confirmedRemote` equals `integrations.library.remote`.
+
+**What the app ships (v0.5.0):**
+
+The Library page opens on a Catalog collection built from `packages` in `GET /api/workspaces/:id/library`, which is `discoverLibrary` joined with every installed copy. The earlier page filtered that list to `kind === "plugin"`, so 34 of the 35 bundled rows never appeared. Both scopes show on every row with the copy's state, and an install is offered only for the scope that has no copy.
+
+Mutations cross through three routes. `POST /api/workspaces/:id/library/plans` stages a plan and writes nothing. `POST …/plans/:planId/apply` commits that exact plan. `DELETE …/plans/:planId` releases it. The adapter `server/clio/adapters/library-lifecycle.ts` calls `planLibraryLifecycle` and `applyLibraryLifecycle` in the single ops lane and holds staged plans in memory for ten minutes, eight at most. A plan applies once; a second apply, an expired plan, or a plan from another workspace answers 404 and the page plans again.
+
+The request body admits only `kind:name` refs. Root resolution tries a local path before the catalog, so the adapter also refuses a ref that names an existing path under the workspace. Paths and GitHub URLs therefore never originate in the browser, and `force` is accepted by the contract but has no control on the page yet.
+
+The outcome view reports disk and recipe admission per package, and always states that open conversations have not reloaded. The web server holds no agent session, so `refresh` is `not-applicable` by construction; the page tells the operator to run `/library reload` or start a new conversation. Consuming `plugins.reloaded` to confirm the reload remains open.
+
+`Dialog` now portals to `document.body`. The shell marks `.workspace` inert while any layer is claimed, which disabled the first dialog ever opened from inside a page.
 
 ### Expanded — rows whose subcommand lists grew
 
