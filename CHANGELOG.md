@@ -8,6 +8,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 - Prepare the v0.5.0 public launch with a shorter product README, current contributor and security guidance, a roadmap that separates plans from shipped behavior, and consistent package/repository metadata. Earlier changelog entries record development history; their settings and commands are not a substitute for the current reference.
 - Update and review the shipped Markdown against the implementation, with browser documentation rendered from the same versioned files. Keep the terminal as the primary coding interface and identify the wider graphical app as an early preview.
+- Prefer current guides over historical proposals in ordinary `clio_docs` searches, retain explicit historical lookup, align citation anchors with the browser renderer, and point follow-up queries to the current gateway capability.
 
 ### engine, prompts, and long sessions
 
@@ -29,6 +30,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### graphical application
 
+- Let `clio-coder docs [topic]` open a reusable local documentation server and return control to the terminal. Add `--foreground` for a private terminal-owned server and `--stop` for the temporary docs server; an idle server exits after the last browser page closes. An installed background application remains a separate lifecycle.
+- Polish documentation navigation, search, page outlines, and Markdown links. Keep the expanded sidebar and add an icon-only rail with a collapse button, a keyboard shortcut, and a saved browser preference. Replace heavy native scrollbars with slim themed scrollbars.
 - Bundle the local graphical application. `clio-coder gui` starts a server bound to 127.0.0.1 and prints a private launch link; `--open` opens it in your browser. It reads the same configuration, sessions, traces, evidence and documentation as the CLI and the terminal interface, and `clio-coder docs [topic]` opens the shipped documentation in it. This is a first version: conversation, sessions, traces, fleet and dispatch history, evidence, evals, usage, the library, settings and targets, toolchain, system health and other coding agents.
 - Every inspector states whose data it shows and what it may do to it, distinguishes a store that was never created from one that is empty, says what a bounded list dropped, and closes by naming what stays on the machine. Opening a page never runs another coding agent's executable; a version probe is an explicit button.
 - `clio-coder uninstall` reports graphical background or desktop files it cannot verify, instead of failing, when run from a checkout whose application bundle has not been built.

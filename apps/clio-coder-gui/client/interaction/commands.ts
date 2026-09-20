@@ -74,6 +74,7 @@ export interface CommandSituation {
 export interface CommandHandlers {
 	navigate(path: string): void;
 	openHelp(): void;
+	toggleSidebar(): void;
 	dismissNotices(): void;
 	cancelTurn(turnId: string): void;
 	closeSession(): void;
@@ -132,6 +133,15 @@ export function appCommands(situation: CommandSituation, handlers: CommandHandle
 		binding: "help",
 		available: true,
 		run: handlers.openHelp,
+	});
+	commands.push({
+		id: "app.sidebar",
+		title: "Collapse or expand the sidebar",
+		group: "App",
+		keywords: ["navigation", "rail", "menu", "hide", "show"],
+		binding: "sidebar",
+		available: true,
+		run: handlers.toggleSidebar,
 	});
 	commands.push({
 		id: "app.dismiss-notices",

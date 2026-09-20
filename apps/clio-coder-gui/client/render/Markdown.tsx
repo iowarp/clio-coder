@@ -516,8 +516,12 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 		}
 		case "hr":
 			return <hr />;
-		case "html":
-			return <p className="md-html">{(token as Tokens.HTML).text}</p>;
+		case "html": {
+			const html = (token as Tokens.HTML).text;
+			// A shipped page may open with a centred logo for its Git host. It is decoration, and as text it reads as broken markup.
+			if (document && DECORATIVE_IMAGE.test(html)) return null;
+			return <p className="md-html">{html}</p>;
+		}
 		case "checkbox":
 			// Task items carry their checkbox as a block-level token before the text.
 			return <InlineToken token={token} />;
@@ -607,6 +611,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 });
 
 const NO_TOKENS: readonly MarkdownToken[] = [];
+const DECORATIVE_IMAGE = /^\s*<(p|div)\b[^>]*>\s*<img\b[^>]*>\s*<\/\1>\s*$/i;
 
 function CodeViewport({ children }: { children: ReactNode }) {
 	return (

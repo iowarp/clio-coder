@@ -110,7 +110,8 @@ export function CostPanel({ phase }: { phase: TracePhase }) {
 	return (
 		<section className="trace-panel">
 			<h2>Tokens & spend</h2>
-			<div className="table-scroll">
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it. */}
+			<section className="table-scroll" tabIndex={0} aria-label="Tokens and spend table">
 				<table className="trace-table">
 					<thead>
 						<tr>
@@ -137,7 +138,7 @@ export function CostPanel({ phase }: { phase: TracePhase }) {
 						))}
 					</tbody>
 				</table>
-			</div>
+			</section>
 			<p>
 				Context: {formatTokens(phase.context_tokens)} / {formatTokens(phase.context_window)}
 			</p>
@@ -248,7 +249,8 @@ export function ReceiptPanel({
 					<div>
 						<h3>Tools</h3>
 						{Array.isArray(r.toolStats) ? (
-							<div className="table-scroll">
+							// biome-ignore lint/a11y/noNoninteractiveTabindex: A table wider than its column scrolls, and a scrolling region must take focus so the keyboard can move it.
+							<section className="table-scroll" tabIndex={0} aria-label="Tool statistics table">
 								<table className="trace-table">
 									<thead>
 										<tr>
@@ -271,7 +273,7 @@ export function ReceiptPanel({
 										})}
 									</tbody>
 								</table>
-							</div>
+							</section>
 						) : null}
 						<Facts entries={Object.entries(object(r.toolActivity))} />
 					</div>

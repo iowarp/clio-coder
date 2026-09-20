@@ -117,6 +117,14 @@ export const KEYBINDINGS = {
 		action: "Open the keyboard and vocabulary reference",
 		where: "Anywhere except inside a dialog",
 	},
+	sidebar: {
+		id: "sidebar",
+		key: "\\",
+		modifiers: ["primary"],
+		scope: "global",
+		action: "Collapse or expand the sidebar",
+		where: "Anywhere except inside a dialog. The sidebar has a button too",
+	},
 	cancelTurn: {
 		id: "cancelTurn",
 		key: ".",

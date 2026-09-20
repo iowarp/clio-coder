@@ -20,10 +20,14 @@ docs/
 ├── guide/          Operator and user workflows
 ├── architecture/   Runtime contracts and design
 ├── process/        Development, validation, and release practice
+├── gui/            Early GUI preview and browser docs
 └── history/        Dated records that are not current guidance
 ```
 
-For the v0.5.0 candidate, start with the [release notes](../CHANGELOG.md),
+For the v0.5.0 launch, Clio Coder is first and foremost a terminal coding agent.
+Browser documentation and workspace inspection are provided via an early GUI
+preview (`clio-coder docs [topic]`, `clio-coder gui [--open]`), explicitly without
+claiming production GUI parity. Start with the [release notes](../CHANGELOG.md),
 [configuration and target guide](guide/configuration-and-targets.md), and
 [pre-release checks](process/release-cut-checklist.md#working-tree-pre-release-checks).
 The current guides describe the working implementation, not a promise that the
@@ -76,6 +80,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
+| Early GUI preview: browser docs, REST routes, boundaries, and parity roadmap | [GUI Reference](gui/README.md) |
 
 ## Safety, evidence, and reproducibility
 
@@ -128,10 +133,7 @@ validation, reference data, or human scientific judgment.
 | Correct render, startup, import-graph, and streaming measurements | [Performance Methodology](process/performance-methodology.md) |
 | Falsifiable change manifests and `clio-coder evolve` | [Evolution](process/evolution.md) |
 
-Reviewable reference suites ship under [`evals/`](../evals/). They are explicit
-operator measurements, not hidden CI steps. Private prompts, credentials,
-endpoints, raw campaign artifacts, and proprietary datasets belong outside the
-repository.
+Reviewable reference suites are available in the source checkout under [`evals/`](../evals/) (omitted from the published package tarball). They are explicit operator measurements, not hidden CI steps. Private prompts, credentials, endpoints, raw campaign artifacts, and proprietary datasets belong outside the repository.
 
 ## Architecture and contributing
 
@@ -213,15 +215,21 @@ root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
 Do not duplicate the `docs/` segment, and do not resolve a citation against the
 workspace. Omitting `query` lists the corpus instead of searching it.
 
-**The web documentation.** `clio-coder docs` opens the documentation map in the
-Clio Coder web app. `clio-coder docs safety` opens the safety guide. It resolves
-content from the installed package, independent of your current project, and
-reuses this installation's background app when configured. Otherwise it starts
-a foreground loopback server; press Ctrl+C to stop. `--no-open` prints the private
-launch link without opening a browser. The command never installs a service.
+**The web documentation.** `clio-coder docs` opens the documentation map in your
+browser, and `clio-coder docs safety` opens the safety guide. It resolves content
+from the installed package, independent of your current project. If you installed
+the background app, it uses that. Otherwise it starts a loopback server that keeps
+running after the command returns, so the terminal is free, and reuses that server
+on the next call. The server stops on `clio-coder docs --stop`, or by itself 15
+minutes after the last page closes. `--no-open` prints the private launch link
+without opening a browser, and `--foreground` serves privately in the terminal
+until Ctrl+C. The command never installs a service.
 
 ## Reading in the application
 
+Clio Coder is designed primarily as a terminal coding agent; the bundled web
+application is an early preview for browsing documentation, reviewing sessions,
+and inspecting workspace telemetry, rather than claiming production GUI parity.
 The GUI renders these Markdown sources directly with the application's theme,
 syntax highlighting, copy controls, tables and diagrams. Navigation groups come
 from this map, search indexes the same pages, and each page's outline is generated

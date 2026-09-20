@@ -1,9 +1,27 @@
-# Clio Coder web
+# Clio Coder graphical application
 
-Clio Coder 0.4.8 exposes `clio-coder web --open`. Root `pnpm run build`
-builds the client and all three server entries together. Run `clio-coder web --help`
-for foreground, Linux background/PWA, and desktop-launcher commands.
-The source commands below remain useful for development.
+Clio Coder 0.5.0 ships this application as an early preview. The default build
+bundles it, and it runs through the installed CLI:
+
+```sh
+clio-coder docs [topic]      # documentation in your browser, served in the background
+clio-coder docs --stop       # stop that documentation server
+clio-coder gui [--open]      # the full application, served in this terminal until Ctrl+C
+clio-coder gui background install|status|start|open|stop|uninstall   # Linux with a systemd user session
+clio-coder gui launcher install|status|uninstall                      # Linux desktop entry
+```
+
+`clio-coder docs` starts a loopback server that outlives the command, reuses it on
+the next call, and stops it after 15 minutes without an open page or on `--stop`.
+It reads the Markdown shipped in the package, so your current directory and model
+connection do not matter. `--no-open` prints the private launch link, and
+`--foreground` serves privately in the terminal instead. With a background app
+installed, `docs` uses that. It installs no service. Foreground `gui` and `docs` run
+on Linux and macOS, and browser opening is automatic on those two; on Windows open the
+printed link yourself. Background installation, the login service and the desktop
+launcher need Linux with systemd. `clio-coder gui --help` lists every flag. Root
+`pnpm run build` builds the client and all three server entries together, and the
+source commands below remain useful for development.
 
 The UI uses the original Clio logo, cream and pastel forest themes, a compact
 header, and no footer. The ellipsis control opens app preferences for version,
@@ -67,10 +85,10 @@ remain subject to the backend's rejection.
 ```sh
 pnpm --filter @iowarp/clio-coder-gui verify
 pnpm --filter @iowarp/clio-coder-gui openapi
-pnpm run test:web
+pnpm run test:gui
 ```
 
-`verify` checks server and browser TypeScript, root Biome rules, the app's Node
+`verify` checks server and browser TypeScript, the app's own Biome config, the app's Node
 tests, the Vite build, and the Chrome/Axe browser smoke. Tests prohibit uninjected fetches and use isolated
 homes. OpenAPI generation uses the same route table as the handlers and typed
 client; tests reject semantic drift in the checked-in JSON.
@@ -90,11 +108,19 @@ fragment, moved into the tab's session storage, and removed from the address bar
 API requests require bearer authentication; EventSource uses the same token in
 its query because it cannot set an Authorization header. Host and Origin are
 checked; static files have realpath containment and a content security policy.
-Choose **Docs** for the shipped reference tree and local search. Markdown page
-links stay inside the app. Pages and outlines are generated from the packaged Markdown.
-Blueprint pages run in a sandboxed origin with the active app theme and cannot
-read the app token. The documentation index refreshes on server
-restart. Unavailable source references are shown as text with an explanation.
+Choose **Docs** for the shipped reference tree and local search. Search runs as you
+type over titles, headings and text, ranks whole-word matches first, and `/` focuses
+it. Markdown page links stay inside the app, each page has an outline and
+previous and next links along the curated map, and the reader keeps a comfortable
+line length. Pages and outlines are generated from the packaged Markdown, there
+is no separate HTML source and no sandboxed page. The documentation index refreshes
+on server restart. Unavailable source references are shown as text with an
+explanation.
+
+The desktop sidebar collapses to an icon rail with its button or `Ctrl` or `Cmd` plus
+`\`. The choice is remembered in this browser, every destination keeps its name for
+assistive technology and shows it as a tooltip on hover and focus, and the mobile
+navigation drawer is unchanged.
 
 Choose **Settings** to inspect a workspace’s effective settings and their origin
 layers, or **Why** to inspect customization sources, trust, precedence, and reload
@@ -130,7 +156,7 @@ timeline to 2 MiB / 2,048 items, and turn summaries to 128. Permissions retain 3
 cards and fleet activity 128 facts; pending client deltas share the 8 MiB / 4,096
 entry bound. The server retains 16 closed session snapshots plus active sessions.
 
-Recent workspaces and child ownership records live under `<state>/web/`.
+Recent workspaces and child ownership records live under `<state>/gui/`.
 On restart, only a recorded ACP child with a matching birth token and a proven
 dead owner can be terminated. Other live servers sharing the state directory
 retain their children. Reconciliation never edits Clio session ledgers.
@@ -304,7 +330,7 @@ service, and normal CLI, TUI and headless invocations remain independent.
 
 The default address is `http://127.0.0.1:4317`. Installation accepts `--port`,
 `--directory <absolute private directory>` and `--prefix <absolute XDG data directory>`.
-The default private directory is `<Clio state>/web/background`. Repeated installation
+The default private directory is `<Clio state>/gui/background`. Repeated installation
 preserves the existing origin and credential. A busy port fails explicitly;
 it never silently moves an installed app to another address. The configuration
 pins the four Clio folders, package root, Node/loader/entry paths and PATH.
@@ -346,8 +372,8 @@ service and desktop entry and removes them before deleting Clio state; a failed
 stop or ownership check aborts the state purge. The default state directory and
 default desktop entry are discovery points, including a custom service directory
 referenced by that desktop entry. Fully custom installations outside both locations
-must use `web background uninstall --directory <path>` or `web launcher uninstall
---prefix <path>` before root removal. Browser-installed PWAs remain managed by the
+must use `clio-coder gui background uninstall --directory <path>` or `clio-coder gui launcher
+uninstall --prefix <path>` before root removal. Browser-installed PWAs remain managed by the
 browser. The on-demand and background launchers use the same native
 entry; uninstall the owned old launch mode before installing the other one.
 The source setup must be reinstalled if its checkout or Node installation moves.
@@ -385,12 +411,12 @@ pnpm run test:file -- tests/smoke/installed-package.test.ts
 pnpm run ci:release
 ```
 
-The lazy CLI command pins the package root before importing the web entry and
+The lazy CLI command pins the package root before importing the application entry and
 calls `main()` once. Importing that entry alone starts no listener. The installed
 smoke packs and installs the actual artifact in an isolated prefix, proves `tsx`
 is unavailable, checks all three entry/root identities, exercises both workers,
 REST/SSE and a canonical CLI bridge, serves the PWA recovery assets, and checks
-clean shutdown. V8 coverage verifies that help/version paths load no web server.
+clean shutdown. V8 coverage verifies that help/version paths load no application server.
 The runtime diagnostic route remains authenticated and test-only.
 
 The S10 rehearsal demonstrated the package-root hazard before root integration;

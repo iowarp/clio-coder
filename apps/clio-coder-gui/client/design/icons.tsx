@@ -13,6 +13,7 @@ const paths = {
 	sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5",
 	moon: "M20.8 13A9 9 0 0 1 11 3.2 9 9 0 1 0 20.8 13Z",
 	menu: "M4 6h16M4 12h16M4 18h16",
+	sidebar: "M4 4h16v16H4zM9 4v16",
 	close: "m6 6 12 12M6 18 18 6",
 	more: "M5 11v2m7-2v2m7-2v2",
 	// Status glyphs mirror client/design/status.tsx: shape, never hue alone.

@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -12,6 +12,29 @@ function docsRoute(path: string, hash = ""): string {
 	return `/docs/${path.split("/").map(encodeURIComponent).join("/")}${hash}`;
 }
 
+const WIDE_RAIL = "(min-width: 1600px)";
+const SEARCH_DELAY_MS = 250;
+
+/** Wraps each matched query term so a result shows why it matched. */
+function Highlighted({ text, terms }: { text: string; terms: readonly string[] }) {
+	if (!terms.length) return <>{text}</>;
+	const pattern = new RegExp(`\\b(${terms.map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+	let offset = 0;
+	// split() with one capture group puts every match at an odd index; the running offset is a stable key.
+	const parts = text.split(pattern).map((part, index) => {
+		const piece = { part, hit: index % 2 === 1, at: offset };
+		offset += part.length;
+		return piece;
+	});
+	return (
+		<>
+			{parts.map(({ part, hit, at }) =>
+				hit ? <mark key={`hit${at}`}>{part}</mark> : <Fragment key={`text${at}`}>{part}</Fragment>,
+			)}
+		</>
+	);
+}
+
 export function Docs({ client }: { client: Client }) {
 	const path = useParams()["*"] || "README.md";
 	const location = useLocation();
@@ -19,6 +42,8 @@ export function Docs({ client }: { client: Client }) {
 	const [query, setQuery] = useState("");
 	const [search, setSearch] = useState("");
 	const [browse, setBrowse] = useState(() => window.matchMedia("(min-width: 1100px)").matches);
+	const [rail, setRail] = useState(() => window.matchMedia(WIDE_RAIL).matches);
+	const searchInput = useRef<HTMLInputElement>(null);
 	const tree = useQuery({
 		queryKey: ["docs-tree"],
 		queryFn: () => client.call(routes.docsTree, emptyInput),
@@ -45,6 +70,34 @@ export function Docs({ client }: { client: Client }) {
 		return () => media.removeEventListener("change", update);
 	}, []);
 	useEffect(() => {
+		const media = window.matchMedia(WIDE_RAIL);
+		const update = () => setRail(media.matches);
+		media.addEventListener("change", update);
+		return () => media.removeEventListener("change", update);
+	}, []);
+	// Typing searches after a short pause; Enter and the button search at once.
+	useEffect(() => {
+		const text = query.trim();
+		if (text.length < 2) {
+			if (!text) setSearch("");
+			return;
+		}
+		const timer = setTimeout(() => setSearch(text), SEARCH_DELAY_MS);
+		return () => clearTimeout(timer);
+	}, [query]);
+	useEffect(() => {
+		const focusSearch = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) return;
+			if (target?.closest("input, textarea, select, [contenteditable]")) return;
+			event.preventDefault();
+			searchInput.current?.focus();
+			searchInput.current?.select();
+		};
+		window.addEventListener("keydown", focusSearch);
+		return () => window.removeEventListener("keydown", focusSearch);
+	}, []);
+	useEffect(() => {
 		if (!page.data) return;
 		let id: string;
 		try {
@@ -54,11 +107,21 @@ export function Docs({ client }: { client: Client }) {
 		}
 		const frame = requestAnimationFrame(() => {
 			if (id) document.getElementById(id)?.scrollIntoView();
-			else document.querySelector(".docs-page")?.scrollIntoView({ block: "start" });
+			else document.querySelector(".docs-heading")?.scrollIntoView({ block: "start" });
 		});
 		return () => cancelAnimationFrame(frame);
 	}, [page.data, location.hash]);
 	const headings = page.data?.headings.filter((row) => row.depth === 2 || row.depth === 3) ?? [];
+	const terms = useMemo(() => [...new Set(search.toLowerCase().split(/\s+/).filter(Boolean))], [search]);
+	// Reading order is the curated map, so previous and next follow it.
+	const sequence = useMemo(() => {
+		const seen = new Map<string, string>();
+		for (const group of tree.data?.groups ?? []) for (const row of group.pages) seen.set(row.path, row.title);
+		return [...seen].map(([entryPath, title]) => ({ path: entryPath, title }));
+	}, [tree.data]);
+	const position = sequence.findIndex((row) => row.path === path);
+	const previous = position > 0 ? sequence[position - 1] : undefined;
+	const next = position >= 0 ? sequence[position + 1] : undefined;
 	return (
 		<section className="docs">
 			<header className="docs-heading">
@@ -75,8 +138,16 @@ export function Docs({ client }: { client: Client }) {
 						<input
 							id="docs-query"
 							type="search"
-							placeholder="Find a guide, command, or setting…"
+							ref={searchInput}
+							placeholder="Guide, command, or setting…"
+							aria-keyshortcuts="/"
 							value={query}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") {
+									setQuery("");
+									setSearch("");
+								}
+							}}
 							maxLength={200}
 							onChange={(event) => setQuery(event.target.value)}
 						/>
@@ -87,8 +158,16 @@ export function Docs({ client }: { client: Client }) {
 			{search && (
 				<section className="docs-results" aria-label="Search results">
 					<div className="actions">
-						<h2>Results for “{search}”</h2>
-						<button type="button" onClick={() => setSearch("")}>
+						<h2>
+							Results for “{search}”{results.data ? <span className="docs-result-count"> · {results.data.length}</span> : null}
+						</h2>
+						<button
+							type="button"
+							onClick={() => {
+								setQuery("");
+								setSearch("");
+							}}
+						>
 							Close search
 						</button>
 					</div>
@@ -103,9 +182,12 @@ export function Docs({ client }: { client: Client }) {
 							{results.data.map((row) => (
 								<li key={row.path}>
 									<Link onClick={openPage} to={docsRoute(row.path)}>
-										{row.title}
+										<Highlighted text={row.title} terms={terms} />
 									</Link>
-									<p>{row.excerpt}</p>
+									<span className="docs-result-path">{row.path}</span>
+									<p>
+										<Highlighted text={row.excerpt} terms={terms} />
+									</p>
 								</li>
 							))}
 						</ul>
@@ -122,7 +204,7 @@ export function Docs({ client }: { client: Client }) {
 							onClick={openPage}
 							to="/docs"
 						>
-							Start here
+							Documentation map
 						</Link>
 						{tree.error ? (
 							<p role="alert">{tree.error.message}</p>
@@ -179,7 +261,7 @@ export function Docs({ client }: { client: Client }) {
 							<p className="docs-path">{page.data.path}</p>
 							{headings.length > 0 && (
 								<nav className="docs-outline" aria-label="On this page">
-									<details>
+									<details open={rail || undefined} key={`${path}:${rail}`}>
 										<summary>On this page</summary>
 										<ol>
 											{headings.map((row) => (
@@ -198,6 +280,24 @@ export function Docs({ client }: { client: Client }) {
 								documentLinks={page.data.links}
 								onDocumentNavigate={openDocument}
 							/>
+							{(previous || next) && (
+								<nav className="docs-pager" aria-label="Previous and next document">
+									{previous ? (
+										<Link rel="prev" to={docsRoute(previous.path)}>
+											<span>Previous</span>
+											{previous.title}
+										</Link>
+									) : (
+										<span />
+									)}
+									{next && (
+										<Link rel="next" to={docsRoute(next.path)}>
+											<span>Next</span>
+											{next.title}
+										</Link>
+									)}
+								</nav>
+							)}
 						</>
 					)}
 				</article>

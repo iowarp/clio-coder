@@ -45,6 +45,18 @@ test("the keybinding table declares one chord per scope and never a bare printab
 		if (scope !== "global") for (const chord of chords) assert.ok(!globals.has(chord), `${chord} collides with global`);
 });
 
+test("the sidebar chord is Ctrl or Cmd plus backslash and reaches no dialog or input binding", () => {
+	assert.ok(matchesKeybinding(KEYBINDINGS.sidebar, press("\\", { ctrlKey: true })));
+	assert.ok(matchesKeybinding(KEYBINDINGS.sidebar, press("\\", { metaKey: true })));
+	assert.ok(!matchesKeybinding(KEYBINDINGS.sidebar, press("\\")));
+	assert.ok(
+		!matchesKeybinding(KEYBINDINGS.sidebar, press("\\", { ctrlKey: true, altKey: true })),
+		"AltGr layouts type it",
+	);
+	assert.equal(formatKeybinding(KEYBINDINGS.sidebar), "Ctrl or Cmd + \\");
+	assert.equal(KEYBINDINGS.sidebar.scope, "global");
+});
+
 test("the matcher is exact: every listed modifier held and no unlisted one", () => {
 	assert.ok(matchesKeybinding(KEYBINDINGS.send, press("Enter", { ctrlKey: true })));
 	assert.ok(matchesKeybinding(KEYBINDINGS.send, press("Enter", { metaKey: true })));

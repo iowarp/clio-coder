@@ -240,6 +240,7 @@ const handlers = () => {
 		handlers: {
 			navigate: (path: string) => calls.push(`navigate ${path}`),
 			openHelp: () => calls.push("help"),
+			toggleSidebar: () => calls.push("sidebar"),
 			dismissNotices: () => calls.push("dismiss"),
 			cancelTurn: (turnId: string) => calls.push(`cancel ${turnId}`),
 			closeSession: () => calls.push("close"),

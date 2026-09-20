@@ -126,6 +126,7 @@
 	/* ---- shell metrics --------------------------------------------------- */
 	--masthead-height: 58px;
 	--rail-width: 204px;
+	--rail-collapsed-width: 68px;
 	--reading-measure: 72ch;
 	--conversation-max: 1000px;
 

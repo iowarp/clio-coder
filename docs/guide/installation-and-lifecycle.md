@@ -2,10 +2,8 @@
 
 Clio Coder installs from the npm registry as `@iowarp/clio-coder` using npm,
 pnpm, or Bun, or from a source checkout using the pinned pnpm workflow. The
-[README installation guide](../../README.md#install) covers global installs,
-cached runners (npm exec/npx, pnpm dlx, bunx, and Yarn dlx), release tarballs,
-and manager-specific update and removal commands. All routes require Node.js
-`>=22.19.0`, including installations managed by Bun.
+[README quick start](../../README.md#get-started) covers installing and first
+run. All routes require Node.js `>=22.19.0`, including installations managed by Bun.
 
 Repository development uses pnpm 10.34.5 and `pnpm-lock.yaml`. Registry
 consumers install the built package and do not need the repository toolchain.
@@ -129,6 +127,7 @@ The core files are created automatically during the first run. `credentials.yaml
 | **Config** | `credentials.yaml.lock` | Lockfile used during credentials updates to prevent file corruption. | Ephemeral | Auto-removed. |
 | **State** | `install.json` | Install metadata: Clio version, node, platform, `installedAt` (written once at first install) or `repairedAt` (when metadata is reconstructed over a preexisting config, data, or state root), `upgradedAt` and `upgradedFrom` (stamped on a version change), and `noticedVersion` (the version whose one-time upgrade notice the interactive launch has shown). | Writer/umask default | Removed by uninstall / `reset --state`. |
 | **State** | `migrations.json` | Log of successfully applied schema/state migrations. | Writer/umask default | Removed by uninstall / `reset --state`. |
+| **State** | `gui/docs-server.json`, `gui/docs-server.log` | The record and log of the background documentation server started by `clio-coder docs`. The record holds the private launch token, so it is written with mode 0600. | 0600 record | Removed by uninstall / `reset --state`; `clio-coder docs --stop` removes the record. The log stays until the next launch or purge. |
 | **Data** | `memory/records.json` | Long-term learning memories (up to 500 records) proposed/approved from runs. | Writer/umask default | Removed by uninstall / `reset --data`. |
 | **Data** | `tools/<id>/<version>/` | One pinned external program Clio downloaded on request (`clio-coder tools install <id>`), with its upstream license text and a `clio-install.json` recording url, sha256, platform and install time. Binaries `0o755`, documents `0o644`. Only the pinned version is kept: a successful install prunes the versions it supersedes. | `0o755` dir | `clio-coder tools remove <id>` deletes every version of one tool; removed by uninstall / `reset --data`. |
 | **State** | `audit/YYYY-MM-DD.jsonl` | Daily safety audit logs showing allowed/blocked tool actions. | Writer/umask default | Removed by uninstall / `reset --state`. |
