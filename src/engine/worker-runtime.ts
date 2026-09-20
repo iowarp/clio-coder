@@ -61,9 +61,10 @@ import {
 	type KnowledgeBase,
 	type KnowledgeBaseHit,
 } from "../domains/providers/types/knowledge-base.js";
-import type { ActionClass } from "../domains/safety/action-classifier.js";
+import type { ActionClass, ClassifierCall } from "../domains/safety/action-classifier.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { describeCallTarget } from "../domains/safety/call-target.js";
+import type { SafetyDecision } from "../domains/safety/contract.js";
 import { createProtectedArtifactsRegistration } from "../domains/safety/protected-artifacts-registration.js";
 import { createRunEffectsRecorder } from "../domains/safety/run-effects.js";
 import { resolveAgentTools, type ToolTelemetry } from "../tools/agent-tools.js";
@@ -99,6 +100,19 @@ import { patchWorkerRequestPayload, supportsNamedToolChoice } from "./provider-p
 import type { AgentEvent, AgentMessage, EngineModel } from "./types.js";
 import type { ClioWorkerEvent } from "./worker-events.js";
 import { createWorkerSafety, createWorkerToolRegistry, INTERNAL_HELPER_RESULT_TOOL } from "./worker-tools.js";
+
+/** Exact call and enforced permission conditions; never reuse an answer across asking axes. */
+export function workerPermissionCacheKey(call: ClassifierCall, decision: SafetyDecision, axis: string): string {
+	return canonicalJson({
+		tool: call.tool,
+		args: call.args ?? {},
+		axis,
+		actionClass: decision.classification.actionClass,
+		policyReason: decision.policy?.reasonCode,
+		policySource: decision.policy?.policySource,
+		policyHash: decision.policy?.policyHash,
+	});
+}
 
 export interface WorkerRunInput {
 	sessionId?: string;
@@ -1061,20 +1075,22 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		requestId: string;
 		tool: string;
 		actionClass: ActionClass;
-		/** Identity of the parked call (tool plus canonical args) for the answered-escalation memory. */
+		/** Identity of the exact call and permission conditions for the answered-escalation memory. */
 		callKey: string;
 		timer: ReturnType<typeof setTimeout>;
 	}
 	let activeEscalation: ActiveEscalation | null = null;
-	// Answered escalations, keyed by the exact call. A worker that re-issues
+	// Answered escalations, keyed by the exact call and permission conditions. A worker that re-issues
 	// the identical call after the operator already decided it gets the same
 	// answer without a new card: a live coder re-asked one bash approval eight
 	// times after its edits were done, and each approval only bought the next
 	// identical card (#79). The memory is per run and per exact (tool, args)
-	// tuple; a different command is a new decision.
-	const answeredEscalations = new Map<string, { decision: "approve" | "deny"; requestId: string }>();
-	const escalationCallKey = (tool: string, args: Record<string, unknown> | undefined): string =>
-		`${tool}\u0000${canonicalJson(args ?? {})}`;
+	// tuple and asking axis/classification; a different command or safety-net
+	// requirement is a new decision. Denials have the same bounded identity.
+	const answeredEscalations = new Map<
+		string,
+		{ decision: "approve" | "deny"; requestId: string; source: "operator" | "timeout" }
+	>();
 	const clearActiveEscalation = (): void => {
 		if (activeEscalation) {
 			clearTimeout(activeEscalation.timer);
@@ -1095,7 +1111,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		const active = activeEscalation;
 		if (!active || active.requestId !== requestId) return false;
 		clearActiveEscalation();
-		answeredEscalations.set(active.callKey, { decision, requestId });
+		answeredEscalations.set(active.callKey, { decision, requestId, source });
 		if (decision === "approve") {
 			emit({
 				type: "clio_coder_permission_resolved",
@@ -1170,13 +1186,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	const unsubscribePermission = registry.onPermissionRequired((call, decision, meta) => {
 		const actionClass = decision.classification.actionClass;
 		if (escalationConfig) {
-			const callKey = escalationCallKey(call.tool, call.args);
+			const callKey = workerPermissionCacheKey(call, decision, meta.axis);
 			const remembered = answeredEscalations.get(callKey);
 			if (remembered !== undefined) {
 				const approved = remembered.decision === "approve";
 				const reason = approved
-					? `operator approved an identical ${call.tool} call earlier in this run (request ${remembered.requestId}); the answer stands without a new prompt`
-					: `permission denied by operator: an identical ${call.tool} call was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
+					? `operator approved an identical ${call.tool} call under the same permission conditions earlier in this run (request ${remembered.requestId}); the answer stands without a new prompt`
+					: `permission denied by ${remembered.source === "timeout" ? "escalation timeout fallback" : "operator"}: an identical ${call.tool} call under the same permission conditions was already denied earlier in this run (request ${remembered.requestId}); the answer stands, so do not repeat this call`;
 				emit({
 					type: "clio_coder_permission_resolved",
 					payload: {

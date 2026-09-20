@@ -12,6 +12,21 @@ import { BASH_DEFAULT_RESULT_DISPOSITION, bashOutputCapResult, bashTool } from "
 import { shapeToolResult } from "../../src/tools/result-shaping.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
+it("preserves pipeline failure in Bash receipts unless the caller explicitly disables pipefail", async () => {
+	for (const [command, exitCode] of [
+		["(printf 'fixture failure\\n' >&2; exit 7) 2>&1 | tail -30", 7],
+		["printf 'fixture success\\n' | tail -30", 0],
+		["(exit 7) | (exit 9)", 9],
+		["set +o pipefail; (printf 'intentional last-stage status\\n'; exit 7) | tail -30", 0],
+	] as const) {
+		const result = await bashTool.run({ command, timeout_ms: 2000 });
+		strictEqual(result.kind, exitCode === 0 ? "ok" : "error", command);
+		strictEqual(result.details?.exitCode, exitCode, command);
+		strictEqual(result.details?.outcome, exitCode === 0 ? "success" : "nonzero", command);
+		if (exitCode === 7 && result.kind === "error") match(result.message, /fixture failure/);
+	}
+});
+
 it("stops a child at the Bash cap and preserves partial output and recovery instructions", async () => {
 	const env = await isolateClioEnv("clio-bash-cap-");
 	try {

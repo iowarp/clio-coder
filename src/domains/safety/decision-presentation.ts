@@ -173,6 +173,9 @@ function authorizationCopy(facts: TrustedDecisionFacts): string {
 	}
 	const tool = facts.tool ?? "the presented tool";
 	const actionClass = facts.actionClass ?? "unknown";
+	if (facts.origin.kind === "worker") {
+		return `Approval authorizes this ${actionClass} call to ${tool} and identical calls under the same permission conditions for this worker run. Each call still passes the safety net. The autonomy level does not change.`;
+	}
 	if (tool === "ask_user" && facts.exposure === "outward") {
 		return "Approval opens this one outward-decision interview. It does not publish or send anything by itself.";
 	}
@@ -194,7 +197,7 @@ function consequenceCopy(facts: TrustedDecisionFacts, tier: DecisionTier): strin
 		case "system":
 			return "The call can change state outside the workspace or state the classifier cannot safely bound.";
 		case "worker":
-			return "A dispatched worker is parked. Your answer returns only to that run's exact request.";
+			return "A dispatched worker is parked. This run remembers your answer for the same tool, arguments, approval axis, and safety classification; other runs are unaffected.";
 	}
 }
 
@@ -234,7 +237,7 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 			: tier === "safety-net"
 				? "Approve guarded action once"
 				: tier === "worker"
-					? "Approve worker request once"
+					? "Approve matching calls in this worker run"
 					: tier === "outward"
 						? "Approve outward decision once"
 						: "Approve workspace action once";
@@ -246,9 +249,19 @@ function requiredActions(facts: TrustedDecisionFacts, tier: DecisionTier): Reado
 		{
 			id: "approve-once",
 			label: approveLabel,
-			consequence: "Runs only the presented request and does not change the autonomy level.",
+			consequence:
+				facts.origin.kind === "worker"
+					? "Runs this request and remembers approval for identical calls under the same permission conditions in this worker run."
+					: "Runs only the presented request and does not change the autonomy level.",
 		},
-		{ id: "deny", label: "Deny this request", consequence: "Denies only the presented request and advances the queue." },
+		{
+			id: "deny",
+			label: "Deny this request",
+			consequence:
+				facts.origin.kind === "worker"
+					? "Denies this request and remembers denial for identical calls under the same permission conditions in this worker run."
+					: "Denies only the presented request and advances the queue.",
+		},
 		{ id: "stop", label: "Deny and stop", consequence: stopConsequence },
 	];
 }

@@ -12,6 +12,8 @@ import {
 } from "../../src/domains/dispatch/worker-protocol.js";
 import { mergeCapabilities } from "../../src/domains/providers/capabilities.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/types/capability-flags.js";
+import type { SafetyDecision } from "../../src/domains/safety/contract.js";
+import { workerPermissionCacheKey } from "../../src/engine/worker-runtime.js";
 import { projectWorkerEventForStdout } from "../../src/worker/event-projection.js";
 import {
 	canonicalJson,
@@ -48,6 +50,45 @@ function recipe() {
 }
 
 describe("worker boundary", () => {
+	it("reuses permission answers only for the exact call and unchanged permission conditions", () => {
+		const call = { tool: "bash", args: { command: "custom-check", cwd: "/repo" } };
+		const decision: SafetyDecision = {
+			kind: "ask",
+			classification: { actionClass: "execute", reasons: [] },
+			rejection: { short: "approval required", detail: "", hints: [] },
+		};
+		const key = workerPermissionCacheKey(call, decision, "autonomy:auto-edit");
+		for (const answer of ["approve", "deny"] as const) {
+			const remembered = new Map([[key, answer]]);
+			strictEqual(
+				remembered.get(
+					workerPermissionCacheKey(
+						{ tool: "bash", args: { cwd: "/repo", command: "custom-check" } },
+						decision,
+						"autonomy:auto-edit",
+					),
+				),
+				answer,
+			);
+			for (const changed of [
+				workerPermissionCacheKey(call, decision, "net:project-verifier-confirm"),
+				workerPermissionCacheKey(call, decision, "autonomy:suggest"),
+				workerPermissionCacheKey(
+					call,
+					{ ...decision, classification: { actionClass: "system_modify", reasons: [] } },
+					"autonomy:auto-edit",
+				),
+				workerPermissionCacheKey(
+					{ ...call, args: { ...call.args, command: "other-check" } },
+					decision,
+					"autonomy:auto-edit",
+				),
+				workerPermissionCacheKey({ ...call, args: { ...call.args, cwd: "/other" } }, decision, "autonomy:auto-edit"),
+			])
+				strictEqual(remembered.has(changed), false);
+		}
+	});
+
 	it("parses a strict recipe and admits only a compatible tool envelope", () => {
 		const spec = normalizeAgentSpec(recipe());
 		strictEqual(spec.capabilityClass, "verification");
