@@ -143,9 +143,13 @@ function stageZeroRoot(
 	editor: ClioEditor,
 	pending: Component,
 	shutdownArmed: () => boolean,
+	keybindings: ClioKeybindingManager,
 ): Component {
 	const theme = clioTheme();
-	const heading = createBootWelcome(settings, submitKeyLabel);
+	const heading = createBootWelcome(settings, submitKeyLabel, (action) => {
+		const key = keybindings.isDisabled(action) ? undefined : keybindings.getKeys(action)[0];
+		return key ? formatKeyLabel(key, "") : null;
+	});
 	const footer: Component = {
 		render: () =>
 			shutdownArmed() ? [theme.fg("warning", "Ctrl+C again to exit · typed input will be recovered")] : [""],
@@ -220,6 +224,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		editor,
 		pendingPanel,
 		() => shutdownArmed,
+		keybindings,
 	);
 	const host = new RootHost(stage0);
 

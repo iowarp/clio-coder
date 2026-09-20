@@ -9,10 +9,10 @@ interface TokenColor {
 
 const TOKENS: Record<ClioToken, TokenColor> = {
 	// The composer rails alone own the neon intensity tier.
-	editor: { rgb: [64, 255, 222], xterm: 86 },
+	editor: { rgb: [64, 255, 191], xterm: 85 },
 	editorDanger: { rgb: [255, 80, 88], xterm: 203 },
 	editorAction: { rgb: [255, 171, 69], xterm: 215 },
-	accent: { rgb: [83, 177, 164], xterm: 73 },
+	accent: { rgb: [83, 177, 150], xterm: 72 },
 	accentDeep: { rgb: [62, 147, 137], xterm: 66 },
 	tool: { rgb: [111, 173, 165], xterm: 109 },
 	agent: { rgb: [207, 144, 91], xterm: 173 },
