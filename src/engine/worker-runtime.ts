@@ -36,6 +36,7 @@ import {
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	type ResultContract,
 	resultContractRepairMessages,
+	resultContractRepairUserMessage,
 	resultContractShape,
 	type StructuredHelperResult,
 	validateResultContract,
@@ -335,7 +336,13 @@ function taskMessage(task: string): AgentMessage {
 
 function promptMessagesForWorker(input: WorkerRunInput): AgentMessage[] {
 	const messages = (input.dynamicPromptMessages ?? []).map(promptMessage);
-	messages.push(taskMessage(input.task));
+	messages.push(
+		taskMessage(
+			input.contextSeed
+				? `# Your worker assignment\nYou are already the dispatched ${input.agentId} worker. The preceding conversation is inherited background; its requests to dispatch a worker were addressed to the parent. Carry out the assignment below, preserving safety and operator scope constraints. Do not dispatch yourself again.\n\n${input.task}`
+				: input.task,
+		),
+	);
 	return messages;
 }
 
@@ -903,12 +910,13 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				process.stderr.write(
 					"[worker] synthesis lock: reply was tool-call markup only; re-prompting once for the required final format\n",
 				);
-				for (const message of lockedSynthesisRepromptMessages(
+				const directive = lockedSynthesisRepromptMessages(
 					lockedSynthesisReprompts,
 					{ provider: model.provider, api: model.api, model: model.id },
 					input.resultContract ? resultContractShape(input.resultContract) : undefined,
-				)) {
-					agent.followUp(message as unknown as AgentMessage);
+				).find((message) => message.role === "toolResult");
+				if (directive?.role === "toolResult") {
+					agent.followUp({ role: "user", content: directive.content, timestamp: Date.now() } as AgentMessage);
 				}
 			}
 		}
@@ -981,23 +989,24 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 						(workerBudget.mode === "advisory" || resultContractRevisionActive) && !synthesisToolLock;
 					// Legacy enforced budgets need preauthorized growth to retain repair tools.
 					if (!revisionToolsAvailable) synthesisToolLock = true;
-					// Delivered as a paired tool exchange, never a user turn. Templates
+					// Active revision retains the paired tool exchange. Final-only
+					// repair starts a fresh user turn to break local tool-call fixation. Templates
 					// that key history rendering off the last `user` message re-render
 					// every earlier assistant turn when one is appended mid-run, which
 					// invalidates the whole prompt cache: Nemotron reprocessed 11,352
 					// tokens for this directive as `user` against 407 for the same
 					// bytes as a tool result (#55). The synthetic assistant call gives
 					// the result a real tool_call_id for strict endpoints (#62).
-					const repair = resultContractRepairMessages(
-						{
-							contract,
-							reason: violation,
-							attempt: resultContractRepairsQueued,
-							anchors: observedReadAnchors(),
-							...(revisionToolsAvailable ? { toolsAvailable: true } : {}),
-						},
-						{ provider: model.provider, api: model.api, model: model.id },
-					);
+					const repairInput = {
+						contract,
+						reason: violation,
+						attempt: resultContractRepairsQueued,
+						anchors: observedReadAnchors(),
+						toolsAvailable: revisionToolsAvailable,
+					};
+					const repair = revisionToolsAvailable
+						? resultContractRepairMessages(repairInput, { provider: model.provider, api: model.api, model: model.id })
+						: [resultContractRepairUserMessage(repairInput)];
 					for (const message of repair) agent.followUp(message as unknown as AgentMessage);
 				} else if (workerBoundFailure === null) {
 					workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${violation}`;

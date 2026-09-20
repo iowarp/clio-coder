@@ -207,6 +207,20 @@ export function receiptEvidenceLabels(
 		...documenterDeliveryLabels(receipt),
 		`evidence_verification=${verification.state}/${verification.basis}`,
 		`host_verification=${receipt.hostVerification?.status ?? "not_requested"}`,
+		...(receipt.hostVerification?.checks.length
+			? [
+					`Host check evidence is separate from the worker report: ${receipt.hostVerification.checks
+						.map((check) => {
+							const source = check.memo
+								? "reused prior host result"
+								: receipt.hostVerification?.strategy === "batch-settled"
+									? "executed after the worker batch"
+									: "executed after the worker";
+							return `${JSON.stringify(check.check)} (${source}; exit ${check.exitCode})`;
+						})
+						.join(", ")}.`,
+				]
+			: []),
 		...(responseModelIdObservation ? [responseModelIdObservation] : []),
 		...(gatewayRouting ? [gatewayRouting] : []),
 		...budget,

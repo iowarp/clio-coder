@@ -102,6 +102,8 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 				);
 			if (mode === "fork") ok(!JSON.stringify(result.messages).includes("PARENT_CONSTRAINT_42"));
 			if (mode === "fork") {
+				match(request, /Your worker assignment/);
+				match(request, /requests to dispatch a worker were addressed to the parent/);
 				const reviewed = tool.prepareAdmissionArguments({
 					agent: "researcher",
 					task: "Inspect the result.",

@@ -88,6 +88,22 @@ Regression coverage includes `engine-transcript`, `engine-lifecycle`,
 uses a local HTTP server and compares serialized request prefixes after system
 and tool changes; provider-payload capture tests stop before any network I/O.
 
+### Dispatch schema compatibility found during live verification
+
+Pi 0.86.1's non-strict Anthropic tool serializer retains the root `properties`
+and `required` fields but omits root `$defs`. Clio previously referenced shared
+intent, budget, and worker-context definitions from those properties. The wire
+therefore contained unresolved references, and Haiku/Sonnet supplied JSON strings
+where dispatch required objects. Clio now inlines those nested schemas in its
+own tool declaration. A regression captures Pi's actual Anthropic payload before
+network I/O and validates both single and batched dispatch arguments against it.
+
+The duplication adds prompt tokens; it avoids a provider rewrite or another SDK
+patch. Enabling strict sampling globally would change model compatibility and is
+not equivalent to repairing the existing non-strict path. Once upstream preserves
+root definitions on that path, shared references can be reconsidered with the
+same wire regression. No upstream issue is claimed here.
+
 ## Earlier 0.85.1 integration
 
 

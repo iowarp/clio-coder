@@ -1939,6 +1939,15 @@ function resultContractRepairMessage(input: ResultContractRepairInput): string {
 	return lines.join("\n");
 }
 
+/** A final-only repair retires the tool-exchange pattern, even at a prefix-cache cost. */
+export function resultContractRepairUserMessage(input: ResultContractRepairInput) {
+	return {
+		role: "user",
+		content: [{ type: "text", text: resultContractRepairMessage(input) }],
+		timestamp: Date.now(),
+	} as const;
+}
+
 /** Name of the synthetic tool call that carries a repair round. */
 export const RESULT_CONTRACT_REPAIR_TOOL = "result_contract";
 
