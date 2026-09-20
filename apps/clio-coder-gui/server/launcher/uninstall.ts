@@ -16,7 +16,7 @@ export interface WebUninstallPlan {
 }
 
 /** Root lifecycle uses the same manifests and removers as the app's own commands. */
-export async function prepareWebUninstall(
+export async function prepareGuiUninstall(
 	options: WebUninstallOptions,
 	control = controlService,
 ): Promise<WebUninstallPlan> {
@@ -47,7 +47,7 @@ export async function prepareWebUninstall(
 		items,
 		remove: async () => {
 			// Revalidate immediately before mutation. The caller may have waited for confirmation.
-			const current = await prepareWebUninstall(options, control);
+			const current = await prepareGuiUninstall(options, control);
 			if (JSON.stringify(current.items) !== JSON.stringify(items))
 				throw new Error("Web installation changed during confirmation; run uninstall again.");
 			for (const plan of backgrounds) await plan.remove();
