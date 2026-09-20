@@ -23,6 +23,7 @@ const HOT_RELOAD_FIELDS = new Set<string>([
 	"safety.autonomy",
 	"chat.modelPicker",
 	"interface.outputDetail",
+	"interface.demo",
 	"interface.smoothStreaming",
 	"interface.panes.notifications",
 	"integrations.git.commitAttribution",

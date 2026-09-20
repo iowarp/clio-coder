@@ -81,6 +81,7 @@ Usage:
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
   clio-coder docs [topic]         open documentation in the web app (--no-open to print the launch link)
   clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
+  clio-coder --demo|--no-demo      enable or disable interactive guidance for this session
   clio-coder --help, -h           this message
   clio-coder --help --all         this message plus every command under 'clio-coder dev'
 `;
@@ -158,6 +159,7 @@ async function main(argv: string[]): Promise<number> {
 		noSkills,
 		skillPaths,
 		panes,
+		demo,
 		autonomy,
 		rest,
 		error: globalFlagError,
@@ -187,6 +189,10 @@ async function main(argv: string[]): Promise<number> {
 		...(skillPaths.length > 0 ? { skillPaths } : {}),
 		...(panes === undefined ? {} : { panes }),
 	};
+	if (demo !== undefined && subcommand) {
+		printError("--demo and --no-demo apply to interactive sessions only; start clio-coder without a subcommand.");
+		return 2;
+	}
 	if (autonomy !== undefined && subcommand) {
 		// Silently dropping a safety level would be worse than refusing it.
 		printError(
@@ -197,7 +203,11 @@ async function main(argv: string[]): Promise<number> {
 	if (!subcommand) {
 		await enableBootCompileCache();
 		const { runClioCommand } = await import("./clio.js");
-		return runClioCommand({ ...bootOptions, ...(autonomy === undefined ? {} : { autonomy }) });
+		return runClioCommand({
+			...bootOptions,
+			...(demo === undefined ? {} : { demo }),
+			...(autonomy === undefined ? {} : { autonomy }),
+		});
 	}
 
 	return dispatch(subcommand, subArgs, bootOptions);

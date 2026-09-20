@@ -275,10 +275,12 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					notice.level === "error" ? "error" : notice.level === "warning" ? "warning" : "muted",
 					`• ${clean(notice.text)}`,
 				)
-			: theme.fg(
-					"dim",
-					`${clean(state.workspace.cwd)}  ·  ${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`,
-				);
+			: state.demoHint
+				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
+				: theme.fg(
+						"dim",
+						`${clean(state.workspace.cwd)}  ·  ${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`,
+					);
 	const hint = theme.fg("muted", `${state.session.throughput ? `${state.session.throughput}  ·  ` : ""}${key}`);
 	return [
 		fit(pair(left, context, rightWidth)),

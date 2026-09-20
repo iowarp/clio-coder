@@ -76,6 +76,7 @@ export function parseFlags(argv: string[]): { flags: Set<string>; positional: st
 }
 
 export interface GlobalCliFlags {
+	demo?: boolean;
 	apiKey?: string;
 	noContextFiles: boolean;
 	noSkills: boolean;
@@ -147,6 +148,7 @@ export function extractGlobalFlags(
 	let apiKey: string | undefined;
 	let noContextFiles = false;
 	let noSkills = false;
+	let demo: boolean | undefined;
 	let panes: "with" | "without" | undefined;
 	let autonomy: AutonomyLevel | undefined;
 	const skillPaths: string[] = [];
@@ -175,6 +177,10 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--no-context-files" || arg === "-nc") {
 			noContextFiles = true;
+			continue;
+		}
+		if (arg === "--demo" || arg === "--no-demo") {
+			demo = arg === "--demo";
 			continue;
 		}
 		if (arg === "--no-skills") {
@@ -240,5 +246,6 @@ export function extractGlobalFlags(
 		...(apiKey === undefined ? {} : { apiKey }),
 		...(panes === undefined ? {} : { panes }),
 		...(autonomy === undefined ? {} : { autonomy }),
+		...(demo === undefined ? {} : { demo }),
 	};
 }

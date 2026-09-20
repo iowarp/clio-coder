@@ -1842,6 +1842,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 		else {
 			const ui = raw.interface;
 			issues.unknownKeys("interface", ui, [
+				"demo",
 				"outputDetail",
 				"smoothStreaming",
 				"mode",
@@ -1851,7 +1852,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"panes",
 				"keybindings",
 			]);
-			for (const key of ["terminalProgress", "desktopNotifications"] as const) {
+			for (const key of ["terminalProgress", "desktopNotifications", "demo"] as const) {
 				if (!(key in ui)) continue;
 				const parsed = expectBoolean(issues, `interface.${key}`, ui[key]);
 				if (parsed !== undefined) (settings.interface as unknown as Record<string, unknown>)[key] = parsed;

@@ -1842,6 +1842,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const sessionOverrides: SessionOverrides = new Map(
 		startupAutonomy === undefined ? [] : [["safety.autonomy", startupAutonomy]],
 	);
+	if (options.demo !== undefined) sessionOverrides.set("interface.demo", options.demo);
 	// The effective view is derived by deep-cloning the saved snapshot, and it
 	// is read on the tool-admission hot path (every call resolves autonomy
 	// through it). Memoize on the two things it depends on: the config
@@ -2133,6 +2134,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	const chat = createChatLoop({
+		interactiveGuidance: !options.headless && !options.acp,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
 		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
 		registerPrewarmEndpointSlot: (runtime) => {

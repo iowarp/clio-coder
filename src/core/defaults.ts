@@ -256,6 +256,8 @@ export type FullscreenScrollbar = "hidden" | "auto" | "always";
 export type SmoothStreaming = "off" | "auto" | "on";
 
 export interface InterfaceSettings {
+	/** Interactive onboarding persona and contextual footer tips. */
+	demo: boolean;
 	terminalProgress: boolean;
 	/** Output style: Compact, Standard, or Detailed bounded previews. */
 	outputDetail: OutputStyle;
@@ -563,6 +565,7 @@ export const DEFAULT_SETTINGS = {
 		review: { enabled: false } as ReviewSettings,
 	} as SafetySettings,
 	interface: {
+		demo: true,
 		terminalProgress: false,
 		outputDetail: "standard",
 		mode: "regular",
@@ -706,6 +709,8 @@ safety:
     enabled: false
 
 interface:
+  # Friendly onboarding guidance; disable for a quiet experience.
+  demo: true
   outputDetail: standard
   smoothStreaming: auto
   mode: regular

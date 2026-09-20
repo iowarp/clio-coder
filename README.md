@@ -54,6 +54,8 @@ clio-coder configure
 clio-coder
 ```
 
+Interactive sessions include **Demo guidance** by default: occasional task-related suggestions and brief contextual footer tips. For a quieter session, use `clio-coder --no-demo`, or turn off `interface.demo` under Appearance in `/settings`. `clio-coder --demo` enables it for one session. Guidance never launches demonstrations automatically.
+
 In the configuration launcher, choose **Quick Connect**:
 
 1. **Paste your endpoint URL.** For example, `localhost:1234` for LM Studio,

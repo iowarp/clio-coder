@@ -10,6 +10,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Enable interactive Demo guidance by default, with `--demo`/`--no-demo` session overrides and a shared `interface.demo` setting. Add a restrained onboarding persona and expiring contextual footer tips; preserve the two-line footer, user keybindings, permissions, and quiet headless/worker prompts.
+
 - Add live local-machine telemetry to Status: CPU/RAM meters, process RSS, Linux network and whole-disk rates, supported GPU sysfs counters, ready MCP connections, and active plugins. Distinguish WSL/local metrics, Clio cost ceilings, and unavailable provider quotas; sampling does not launch MCP servers or contact inference endpoints.
 
 - Redesign the compact footer and paged dashboard: live agent activity, a shared `/context` multicolor occupancy grid, and detailed session/project/harness status. Keep measured usage separate from configured limits and retain responsive width and height bounds.
