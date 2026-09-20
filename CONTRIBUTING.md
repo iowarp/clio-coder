@@ -121,6 +121,24 @@ feat(cli): add a target inspection option
 Keep subjects at most 72 characters. Never commit credentials, local config,
 generated `dist/`, temporary reports, or copied testing repositories.
 
+### Write documentation for both readers and the browser
+
+The package ships `docs/` to people in the graphical app and to Clio through
+`clio_docs`. Keep commands, defaults, and behavior grounded in the owning source.
+Mark historical designs and measurements as historical; they are not promises
+about the current build or another model.
+
+Lead guides with the task and the common path. Keep lookup tables easy to scan.
+Put lengthy implementation explanations and worked examples in native Markdown
+`<details>` sections with a specific, sentence-case `<summary>`; leave a blank
+line before and after the Markdown body. Preserve existing heading anchors.
+The browser opens enclosing sections when a reader follows a heading link.
+
+Review the rendered page at desktop and narrow widths. Check that section names
+help someone decide what to open, tables remain readable, and links land on the
+intended heading. A passing test or link checker does not establish that the
+prose is accurate or pleasant to read.
+
 ### Branch and release ownership
 
 The canonical repository keeps `main` as its product branch. Contributors push
