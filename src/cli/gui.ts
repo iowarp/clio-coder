@@ -52,18 +52,39 @@ export async function runGuiCommand(args: string[]): Promise<number> {
 }
 
 /** Separate packaged entry; inspection never starts a listener or opens a browser. */
-export async function prepareGuiUninstall(options: { stateDir: string; desktopPrefix: string }): Promise<{
+export interface GuiUninstallPlan {
 	items: Array<{ label: string; path: string }>;
+	/**
+	 * Graphical-application files this build can see and cannot remove, because it
+	 * carries no application bundle to verify their ownership or stop their service.
+	 * Uninstall reports them and leaves them, together with the state they depend on.
+	 */
+	unmanaged: Array<{ label: string; path: string }>;
 	remove(): Promise<void>;
-}> {
+}
+
+/** The command that removes what `unmanaged` lists, from a build that includes the application. */
+export const GUI_UNINSTALL_ADVICE = {
+	lead: "To remove them, run from a build that includes the graphical application:",
+	command: "clio-coder gui background uninstall && clio-coder gui launcher uninstall",
+} as const;
+
+export async function prepareGuiUninstall(options: {
+	stateDir: string;
+	desktopPrefix: string;
+	packageRoot?: string;
+}): Promise<GuiUninstallPlan> {
 	// Most CLI-only installs have no web lifecycle files. Keep that path lazy,
 	// including checkouts whose optional web bundle has not been built yet.
 	const paths = [
-		join(options.stateDir, "gui/background"),
-		join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop"),
-		join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop.owner.json"),
+		{ label: "Graphical background service", path: join(options.stateDir, "gui/background") },
+		{ label: "Desktop launcher", path: join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop") },
+		{
+			label: "Desktop launcher ownership record",
+			path: join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop.owner.json"),
+		},
 	];
-	const present = paths.some((path) => {
+	const present = paths.filter(({ path }) => {
 		try {
 			lstatSync(path);
 			return true;
@@ -72,15 +93,21 @@ export async function prepareGuiUninstall(options: { stateDir: string; desktopPr
 			throw error;
 		}
 	});
-	if (!present)
+	if (!present.length)
 		return {
 			items: [],
+			unmanaged: [],
 			remove: async () => {
 				if ((await prepareGuiUninstall(options)).items.length)
 					throw new Error("A web installation appeared during confirmation; run uninstall again.");
 			},
 		};
-	const packageRoot = resolvePackageRoot();
-	const server = await import(pathToFileURL(join(packageRoot, "dist/gui/server.js")).href);
-	return server.prepareGuiUninstall({ ...options, packageRoot });
+	const packageRoot = options.packageRoot ?? resolvePackageRoot();
+	const entry = join(packageRoot, "dist/gui/server.js");
+	// A terminal-only build has no bundle. Deleting these files blind could strand a running systemd
+	// unit or remove a launcher another installation owns, so they are reported and left alone.
+	if (!existsSync(entry)) return { items: [], unmanaged: present, remove: async () => {} };
+	const server = await import(pathToFileURL(entry).href);
+	const plan = await server.prepareGuiUninstall({ ...options, packageRoot });
+	return { ...plan, unmanaged: [] };
 }
