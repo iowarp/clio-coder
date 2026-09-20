@@ -12,6 +12,7 @@ import { type ClioTheme, type ClioToken, clioTheme, GLYPH } from "./theme/index.
 export const CONTEXT_CATEGORY_TOKEN: Readonly<Record<ContextLedgerCategory, ClioToken>> = {
 	system: "info",
 	tools: "warning",
+	toolResults: "tool",
 	agents: "reason",
 	skills: "success",
 	memory: "error",

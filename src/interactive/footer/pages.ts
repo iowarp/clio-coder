@@ -209,7 +209,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 		...wrapTextWithAnsi(
 			theme.fg(
 				"dim",
-				`${ledger.measured ? "Usage anchored to provider measurements" : "Estimated usage"} · window source: ${ledger.contextWindowSource ?? "unknown"}`,
+				`${ledger.measured ? "Provider-anchored total; category splits estimated" : "Estimated usage"} · window source: ${ledger.contextWindowSource ?? "unknown"}`,
 			),
 			width,
 		),

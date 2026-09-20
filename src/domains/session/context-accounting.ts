@@ -56,6 +56,7 @@ export interface ContextSnapshot {
 	categories: {
 		system: number;
 		tools: number;
+		toolResults?: number;
 		agents: number;
 		skills: number;
 		memory: number;
@@ -381,6 +382,7 @@ function buildSnapshotCategories(inputs: {
 	const raw: {
 		system: number;
 		tools: number;
+		toolResults: number;
 		agents: number;
 		skills: number;
 		memory: number;
@@ -390,6 +392,7 @@ function buildSnapshotCategories(inputs: {
 	} = {
 		system: 0,
 		tools: 0,
+		toolResults: 0,
 		agents: 0,
 		skills: 0,
 		memory: 0,
@@ -414,7 +417,9 @@ function buildSnapshotCategories(inputs: {
 
 	if (inputs.messages) {
 		for (const msg of inputs.messages) {
-			raw.messages += estimateAgentMessageTokens(msg as MessageTokenEstimateInput);
+			const message = msg as MessageTokenEstimateInput;
+			const bucket = message.role === "toolResult" ? "toolResults" : "messages";
+			raw[bucket] += estimateAgentMessageTokens(message);
 		}
 	}
 
@@ -432,6 +437,7 @@ function buildSnapshotCategories(inputs: {
 	return {
 		system: raw.system,
 		tools: raw.tools,
+		toolResults: raw.toolResults,
 		agents: raw.agents,
 		skills: raw.skills,
 		memory: raw.memory,
@@ -463,7 +469,16 @@ export interface CaptureContextSnapshotInput {
 	toolSignature?: string | undefined;
 }
 
-const SNAPSHOT_SPLIT_KEYS = ["system", "tools", "agents", "skills", "memory", "project", "messages"] as const;
+const SNAPSHOT_SPLIT_KEYS = [
+	"system",
+	"tools",
+	"agents",
+	"skills",
+	"memory",
+	"project",
+	"messages",
+	"toolResults",
+] as const;
 
 function estimatedSplitSources(): Record<string, "estimated" | "exact" | "reconciled"> {
 	const splits: Record<string, "estimated" | "exact" | "reconciled"> = {};
@@ -561,33 +576,28 @@ export function reconcileSnapshot(snapshot: ContextSnapshot, usage: Usage): Cont
 	}
 
 	const keys = SNAPSHOT_SPLIT_KEYS;
-	const currentCategories = { ...snapshot.categories };
-	const sum = keys.reduce((s, k) => s + (currentCategories[k] ?? 0), 0);
 
-	let normalized: Record<string, number>;
-	if (sum === 0) {
-		normalized = keys.reduce(
-			(acc, k) => {
-				acc[k] = k === "messages" ? exactInput : 0;
-				return acc;
-			},
-			{} as Record<string, number>,
-		);
-	} else {
-		normalized = {};
-		let newSum = 0;
-		for (const key of keys) {
-			const val = currentCategories[key] ?? 0;
-			const norm = Math.round((val / sum) * exactInput);
-			normalized[key] = norm;
-			newSum += norm;
-		}
-		const diff = exactInput - newSum;
-		if (diff !== 0) {
-			const largestKey = keys.reduce((a, b) => ((normalized[a] ?? 0) >= (normalized[b] ?? 0) ? a : b));
-			normalized[largestKey] = (normalized[largestKey] ?? 0) + diff;
-		}
+	// Provider totals do not measure individual categories. Keep the compiled
+	// prefix estimates stable as conversation grows; never assign result growth
+	// to tool definitions. If the measured prompt is smaller than the prefix
+	// estimate, proportionally cap that estimate to the available total.
+	const normalized: Record<string, number> = {};
+	const staticKeys = keys.filter((key) => key !== "messages" && key !== "toolResults");
+	const staticSum = staticKeys.reduce((sum, key) => sum + (snapshot.categories[key] ?? 0), 0);
+	const scale = staticSum > exactInput ? exactInput / staticSum : 1;
+	let prefix = 0;
+	for (const key of staticKeys) {
+		normalized[key] = Math.floor((snapshot.categories[key] ?? 0) * scale);
+		prefix += normalized[key] ?? 0;
 	}
+	const remaining = exactInput - prefix;
+	const resultEstimate = snapshot.categories.toolResults ?? 0;
+	const conversationEstimate = resultEstimate + snapshot.categories.messages;
+	const conversationScale = conversationEstimate > remaining ? remaining / conversationEstimate : 1;
+	normalized.toolResults = Math.floor(resultEstimate * conversationScale);
+	// Includes unclassified provider framing / tokenizer differences; this is
+	// a residual, not a claim that the provider measured message categories.
+	normalized.messages = remaining - normalized.toolResults;
 
 	const updatedCategories = {
 		...snapshot.categories,
@@ -609,7 +619,7 @@ export function reconcileSnapshot(snapshot: ContextSnapshot, usage: Usage): Cont
 
 	const splitsSources = keys.reduce(
 		(acc, k) => {
-			acc[k] = "reconciled";
+			acc[k] = k === "messages" ? "reconciled" : "estimated";
 			return acc;
 		},
 		{} as Record<string, "estimated" | "exact" | "reconciled">,

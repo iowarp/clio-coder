@@ -631,6 +631,7 @@ function sourceState(theme: ClioTheme, facts: ContextEngineFacts): string | null
 const CONTEXT_SHORT_LABEL: Readonly<Record<ContextLedgerCategory, string>> = {
 	system: "sys",
 	tools: "tools",
+	toolResults: "results",
 	agents: "agt",
 	skills: "skl",
 	memory: "mem",
@@ -663,6 +664,12 @@ function ledgerChatChips(theme: ClioTheme, ledger: ContextLedger): string {
 	const chat = ledger.groups.find((group) => group.category === "messages")?.tokens ?? 0;
 	return joinChips(theme, [
 		theme.fg("accent", `chat ${formatFooterTokens(chat)}`),
+		ledger.groups.some((group) => group.category === "toolResults")
+			? theme.fg(
+					"tool",
+					`results ${formatFooterTokens(ledger.groups.find((group) => group.category === "toolResults")?.tokens ?? 0)}`,
+				)
+			: null,
 		ledger.reserveTokens > 0 ? theme.fg("dim", `rsv ${formatFooterTokens(ledger.reserveTokens)}`) : null,
 		ledger.contextWindow > 0
 			? theme.style("frame", `free ${formatFooterTokens(ledger.freeTokens)}`, { dim: true })

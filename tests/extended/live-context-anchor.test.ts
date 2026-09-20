@@ -105,6 +105,23 @@ describe("live measured context anchor", () => {
 		});
 		return { state, runtime, settings, context, summaries: () => summaries };
 	}
+
+	it("refreshes tool-result decomposition each API call without inflating definitions or counting output twice", () => {
+		const f = fixture();
+		f.context.setCurrentSnapshot(f.context.captureRuntimeContextSnapshot(f.runtime, "turn", 0.85));
+		f.context.reconcileUsage(usage(20000, 61));
+		const before = f.context.contextLedger();
+		const definitions = before.groups.find((group) => group.category === "tools")?.tokens;
+		f.runtime.agent.state.messages.push(result("read result ".repeat(4000)), assistant(usage(35000, 100)));
+		f.context.reconcileUsage(usage(35000, 100));
+		const after = f.context.contextLedger();
+		strictEqual(after.groups.find((group) => group.category === "tools")?.tokens, definitions);
+		ok((after.groups.find((group) => group.category === "toolResults")?.tokens ?? 0) > 10000);
+		strictEqual(after.usedTokens, 35100);
+		strictEqual(after.groups.find((group) => group.category === "streaming")?.tokens, 100);
+		strictEqual(after.toolCount, 1);
+	});
+
 	it("counts the measured schema once and avoids the reproduced false pressure without losing pending or trailing text", async () => {
 		const f = fixture();
 		f.context.reconcileUsage(usage());

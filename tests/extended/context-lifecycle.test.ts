@@ -17,6 +17,7 @@ import {
 	getLatestContextSnapshot,
 	lastLoadedContextWindow,
 	reconcileSnapshot,
+	snapshotInputTokens,
 } from "../../src/domains/session/context-accounting.js";
 import type { SessionMeta } from "../../src/domains/session/contract.js";
 import type { Usage } from "../../src/engine/types.js";
@@ -88,6 +89,50 @@ describe("contracts/context lifecycle", () => {
 		strictEqual(reconciled.categories.streaming, 25);
 		strictEqual(reconciled.sources.total, "reconciled");
 		strictEqual(reconciled.divergenceRatio, Math.round(((estimateTokens + 550) / estimateTokens) * 1000) / 1000);
+	});
+
+	it("keeps fixed prompt estimates stable across growing provider totals and separates tool results", () => {
+		const initial = snapshot("turn-tools", "configured", 100000);
+		initial.categories.toolResults = 800;
+		const usage = (input: number) => ({ input, output: 25, cacheRead: 0, cacheWrite: 0 }) as Usage;
+		const first = reconcileSnapshot(initial, usage(2000));
+		const next = reconcileSnapshot(first, usage(6000));
+		strictEqual(next.categories.tools, initial.categories.tools);
+		strictEqual(next.categories.system, initial.categories.system);
+		strictEqual(next.categories.toolResults, 800);
+		strictEqual(snapshotInputTokens(next), 6000);
+		strictEqual(next.categories.streaming, 25);
+		strictEqual(next.sources.splits.tools, "estimated");
+		strictEqual(next.categories.messages - first.categories.messages, 4000);
+		const small = reconcileSnapshot(initial, usage(1));
+		strictEqual(snapshotInputTokens(small), 1);
+		ok(Object.values(small.categories).every((value) => value >= 0));
+		const legacy = structuredClone(initial);
+		delete legacy.categories.toolResults;
+		strictEqual(snapshotInputTokens(reconcileSnapshot(legacy, usage(2000))), 2000);
+	});
+
+	it("classifies tool-result messages independently of schemas and ordinary messages", () => {
+		const captured = captureContextSnapshot({
+			sessionId: "s",
+			turnId: "t",
+			providerId: "p",
+			runtimeId: "r",
+			modelId: "m",
+			systemPrompt: "fixed",
+			activeToolSchemas: [{ name: "read", description: "fixed schema" }],
+			conversationMessages: [
+				{ role: "user", content: "hello" },
+				{ role: "toolResult", toolCallId: "call", toolName: "read", content: [{ type: "text", text: "x".repeat(4000) }] },
+			],
+			desiredContextWindow: 100000,
+			effectiveContextWindow: 100000,
+			contextWindowSource: "configured",
+			compactionThreshold: 0.9,
+		});
+		ok((captured.categories.toolResults ?? 0) >= 1000);
+		ok(captured.categories.tools < 100);
+		ok(captured.categories.messages < 100);
 	});
 
 	it("refreshes the index while preserving handbook-generation provenance", async () => {
