@@ -495,7 +495,7 @@ async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: s
 		const results = (await search.json()) as { path: string; excerpt: string }[];
 		strictEqual(results[0]?.path, "architecture/safety-model.md", "search ranks the page named for the query first");
 		ok(
-			results.every((row) => !/[`#|]/u.test(row.excerpt)),
+			results.every((row) => !/[`|]|^#{1,6}\s|<\/?(?:details|summary)/mu.test(row.excerpt)),
 			"search excerpts are reading text, not Markdown",
 		);
 

@@ -183,7 +183,7 @@ test("docs search: whole-term ranking and excerpts that read as prose", async ()
 	await mkdir(join(fixture.path, "docs"), { recursive: true });
 	await writeFile(
 		join(fixture.path, "docs/store.md"),
-		"# Trace store\n\nThe **trace store** is a `SQLite` mirror. See [the guide](guide.md).\n\n## Retention\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n",
+		"# Trace store\n\nThe **trace store** is a `SQLite` mirror. See [the guide](guide.md). Award #24.\n\n<details>\n<summary>Folded reference</summary>\n\n## Retention\n\n| a | b |\n| --- | --- |\n| 1 | 2 |\n\n</details>\n",
 	);
 	await writeFile(
 		join(fixture.path, "docs/restore.md"),
@@ -201,7 +201,11 @@ test("docs search: whole-term ranking and excerpts that read as prose", async ()
 		);
 		const [top] = found;
 		assert.match(top?.excerpt ?? "", /trace store is a SQLite mirror\. See the guide\./);
-		assert.doesNotMatch(top?.excerpt ?? "", /[*`#|\]]|\(guide\.md\)/);
+		assert.doesNotMatch(top?.excerpt ?? "", /[*`|\]]|\(guide\.md\)|<\/?(?:details|summary)/);
+		assert.match(top?.excerpt ?? "", /Award #24\./, "literal hash punctuation is reading text");
+		const folded = (await search("folded reference"))[0];
+		assert.match(folded?.excerpt ?? "", /Folded reference/);
+		assert.doesNotMatch(folded?.excerpt ?? "", /<\/?(?:details|summary)/);
 		assert.deepEqual(
 			(await search("recovery retention")).map((row) => row.path),
 			["restore.md", "store.md"],
