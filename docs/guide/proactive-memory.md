@@ -13,6 +13,16 @@ tier is opt-in through the independent `context.memory.target` and
 do not change, and disabling `context.memory.enabled` removes observation, bank
 writes, model resolution, reminders, handoff offers, and handoff seeding.
 
+## Inspect or configure memory
+
+| You want to… | Use |
+| --- | --- |
+| Inspect the bank and recent memory steps | `/memory` |
+| Select a background model or change memory controls | `/settings` → **Context & Memory** |
+| Review recorded cost | `/cost` or `clio-coder usage report` |
+| Look up the default values and routing example | [Operator setup](#operator-setup) |
+| Understand what survives a handoff | [Handoff continuity](#handoff-continuity) |
+
 ## Architecture
 
 ```mermaid
@@ -400,7 +410,7 @@ trajectory text.
 
 `/settings` exposes controls for every key above, with shorter operator-facing
 row labels. The saved background-memory target is the Memory target row in
-Settings → Orchestrator, independent of the chat target and the fleet default. A
+Settings → Context & Memory, independent of the chat target and the fleet default. A
 running session owns its routing snapshot; the saved selection becomes the
 default for new sessions.
 

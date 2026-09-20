@@ -152,8 +152,8 @@ export type DurableCompactionSettings = Omit<CompactionSettings, "excludeLastTur
  *   - policy: candidate selection rule set.
  *   - target: used/window ratio an applied event batches down to.
  *   - protectLastTurns: recent user turns whose observations are never evicted.
- *   - minEvictableTokens: results below this estimate are never evicted; the
- *     marker would cost more than it saves.
+ *   - minEvictableTokens: protect smaller results from low-yield eviction.
+ *     The engine separately rejects replacements that save no tokens.
  */
 export type WorkingSetPolicyId = "age-horizon" | "structural-v1";
 
