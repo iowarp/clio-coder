@@ -3,6 +3,7 @@ import { ToolNames } from "../../core/tool-names.js";
 import { isProjectVerifierCheckId, isVerificationScriptName } from "../../core/verification-scripts.js";
 import { effectiveToolCall } from "../../tools/surface.js";
 import { type DeclaredCheckSourceRef, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "../../tools/verify/catalog.js";
+import { validateTrustStatus } from "../evidence/trust-status.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
 import {
 	detectValidationCommand,
@@ -573,8 +574,9 @@ function dispatchReceiptEvidence(
  * (`{mode, runIds, receiptCount, failedCount, runs:[{runId, agentId, exitCode}]}`
  * where exit codes live per-run) as well as the legacy single-run shape
  * (`{exitCode, runId, agentId}`). A batch counts only when it has at least one
- * run and every run exited cleanly, so a partially-failed dispatch never poses
- * as validation evidence.
+ * run and every run exited cleanly. Current results must also carry verified
+ * integrity and validated evidence on their canonical trust axes, so failed or
+ * ungrounded checks never become validation evidence through process success.
  */
 function passedDispatchReceiptSummary(
 	details: Record<string, unknown>,
@@ -582,7 +584,7 @@ function passedDispatchReceiptSummary(
 ): string | null {
 	if (Array.isArray(details.runs)) {
 		const runs = details.runs.map(asRecord);
-		if (runs.length === 0 || runs.some((run) => run === null || run.exitCode !== 0)) return null;
+		if (runs.length === 0 || runs.some((run) => run === null || !passedDispatchRun(run))) return null;
 		if (typeof details.failedCount === "number" && details.failedCount !== 0) return null;
 		const first = runs[0];
 		const runId = typeof first?.runId === "string" && first.runId.length > 0 ? first.runId : "unknown";
@@ -590,12 +592,25 @@ function passedDispatchReceiptSummary(
 		const extra = runs.length > 1 ? ` (+${runs.length - 1} more)` : "";
 		return `dispatch receipt passed: run ${runId} agent ${agentId}${extra}`;
 	}
-	if (details.exitCode === 0) {
+	if (passedDispatchRun(details)) {
 		const runId = typeof details.runId === "string" && details.runId.length > 0 ? details.runId : "unknown";
 		const agentId = dispatchReceiptAgentId(typeof details.agentId === "string" ? details.agentId : undefined, candidate);
 		return `dispatch receipt passed: run ${runId} agent ${agentId}`;
 	}
 	return null;
+}
+
+function passedDispatchRun(run: Record<string, unknown>): boolean {
+	if (run.exitCode !== 0) return false;
+	// Historical results predate canonical trust status. For current results,
+	// a clean process exit cannot overrule failed, absent, or ungrounded validation.
+	if (!("trustStatus" in run)) return true;
+	const trust = validateTrustStatus(run.trustStatus);
+	return (
+		trust.ok &&
+		trust.status.artifactIntegrity.state === "verified" &&
+		trust.status.validationGrounding.state === "validated"
+	);
 }
 
 /** Prefer the receipt's own agent id, then the dispatch call's, then unknown. */
