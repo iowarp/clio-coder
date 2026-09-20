@@ -15,7 +15,11 @@ import {
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { registerLibraryPackage } from "../../src/domains/resources/library.js";
-import { loadSkills, parsePendingSkillRequests } from "../../src/domains/resources/skills/loader.js";
+import {
+	type LoadSkillsInput,
+	loadSkills,
+	parsePendingSkillRequests,
+} from "../../src/domains/resources/skills/loader.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
@@ -122,6 +126,29 @@ describe("skill tool surface lifetime", () => {
 	afterEach(() => {
 		explicitPaths = [];
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+	});
+
+	it("distinguishes compatibility discoveries from Clio skills in the model inventory", async () => {
+		const root = scratchRoot();
+		writeNarrowingSkill(join(root, "foreign"), "peer-review", []);
+		writeNarrowingSkill(join(root, "native"), "local-review", []);
+		const context = createContextTool({
+			getCwd: () => root,
+			skillMarketplace: false,
+			getSkillLoaderOptions: (): LoadSkillsInput => ({
+				roots: [
+					{ path: join(root, "foreign"), scope: "user", source: "codex", trusted: true },
+					{ path: join(root, "native"), scope: "user", source: "clio-coder", trusted: true },
+				],
+			}),
+		});
+		const result = await context.run({ scope: "skills" }, {});
+		strictEqual(result.kind, "ok");
+		if (result.kind !== "ok") throw new Error("inventory failed");
+		match(result.output, /Clio skills .*\n- local-review \(source: clio-coder/);
+		match(result.output, /Discovered skills .*not Clio library installations/);
+		match(result.output, /peer-review \(source: codex; scope: user; file:/);
+		strictEqual(result.output.includes("Installed:"), false);
 	});
 
 	it("lets the shipped coding-standards workflow record a scoped finish limitation", async () => {

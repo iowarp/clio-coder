@@ -6,6 +6,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### library
 
+- Distinguish Clio-local/plugin skills from shared, other-agent, and explicit-path discoveries in model-facing inventory. Include source, scope, and discovered file paths; stop reporting the combined available count as Clio installations.
+
 - Fix `/skill` installation through the active profile and add project-scope installation. Keep bundled packages available without automatic installation. Report damaged copies accurately across all package kinds and provide explicit repair guidance with recovery backups. Allow operator-approved canonical library commands through bash while preserving direct instruction-file protections and package integrity validation.
 
 ### configuration and terminal

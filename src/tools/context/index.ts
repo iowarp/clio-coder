@@ -308,14 +308,26 @@ function renderSkillsList(
 	// line literal models act on; a second copy up here cost every listing
 	// call the same sentences again.
 	const lines = ["Available skills.", ""];
-	if (skills.length > 0) {
-		lines.push("Installed:");
-		for (const skill of skills) {
-			lines.push(`- ${skill.name} (${skill.scope}): ${skill.description}`);
-		}
-	} else {
-		lines.push("Installed: none.");
+
+	const native = skills.filter((skill) => skill.source === "clio-coder" || skill.source === "plugin");
+	const discovered = skills.filter((skill) => skill.source !== "clio-coder" && skill.source !== "plugin");
+	lines.push("Clio skills (local/plugin roots):");
+	if (native.length === 0) lines.push("- none");
+	for (const skill of native) {
+		lines.push(`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`);
 	}
+	if (discovered.length > 0) {
+		lines.push("", "Discovered skills (shared, other-agent, or explicit roots; not Clio library installations):");
+		for (const skill of discovered) {
+			lines.push(
+				`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}; file: ${skill.filePath}): ${skill.description}`,
+			);
+		}
+		lines.push(
+			"These skills are available through compatibility discovery. Preserve their source when describing the inventory; discovery does not mean Clio installed or copied them.",
+		);
+	}
+
 	if (marketplace.length > 0) {
 		// Installable rows are suggested exactly like installed ones: the
 		// operator's /skill <name> prompts to install before it runs, so the
@@ -396,7 +408,7 @@ function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Reco
 	if (installed === 0 && installable === 0) return { ...snap };
 	return {
 		...snap,
-		skills: `Skills: ${installed} installed, ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill <name> to the operator; load only on operator request.`,
+		skills: `Skills: ${installed} available across Clio and compatibility roots (not a Clio installation count), ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill <name> to the operator; load only on operator request.`,
 	};
 }
 
