@@ -42,12 +42,13 @@ scratch path has expired.
 | BT-07: shipped coding skills blocked verification | `fix-issue` and `ship` admit `verify`; package versions and all library/skill digest indexes were updated together. Compatibility-discovery tests now reflect the already-committed explicit-import policy. |
 | BT-09: empty stream blamed an unrelated notice | Headless failure now identifies an ended provider stream without an assistant response or terminal result. It does not claim that a thinking-level notice caused the failure. |
 | BT-10: forked workers followed the parent's dispatch request | Fork assignment messages explicitly distinguish inherited background from the current worker assignment. Worker guidance preserves operator constraints. Luna, Haiku and Mini all admitted a real fork and produced passing verifier reports. |
-| BT-11: final synthesis repeated tool-shaped output | Final-only contract repair uses a new user directive to break the tool-exchange pattern; active revision retains the paired exchange and its cache behavior. Locked markup reprompt uses the same terminal-direction approach. Repair/synthesis regressions pass. The new fork fixtures did not exhaust repair; this does not establish that every long-form worker can finish. |
+| BT-11: final synthesis repeated tool-shaped output | Final-only contract repair uses a new user directive to break the tool-exchange pattern; active revision retains the paired exchange and its cache behavior. Locked markup reprompt uses the same terminal-direction approach. Repair/synthesis regressions pass. The new fork fixtures did not exhaust repair. A separate accepted-result/capture mismatch was subsequently reproduced and fixed, as described below. |
 | BT-12: interruption lost completed grades | Atomically checkpoint results after each case, with explicit incomplete/completed status. A real CLI suite was terminated during case two: case one's passing grade survived and no finished artifact was produced. |
 | New: read-only `code_nav` wrote project files | Reconcile a bounded in-memory snapshot using the existing codewiki worker, without taking a writer lease or persisting `.clio-coder/codewiki.json`/`state.json`. Freshness checks and a real no-edit run prove zero workspace changes. |
 | New: bounded console output corrupted grader evidence | Stream complete runner stdout to a private capture before grading; retain it separately from bounded console excerpts. Fail closed at 64 MiB. Drop opaque Pi replay signatures from the presentation JSON stream only, retaining canonical session data. The previously failing Luna scout pipeline passed with complete event capture. |
 | New: board follow-up hid an already delivered proposal | Proposal grading checks delivered assistant text across the turn while retaining final board-state and tool-scope assertions. Mini's original compliant stream passes regrading; the violating Haiku stream still fails. A later fresh Mini run independently violated scope and remains failed. |
 | New: parent confused host checks with worker claims | Dispatch output now explains each separate host check and whether it executed or reused evidence. Luna originally denied that a recorded host check existed; the live follow-up correctly distinguished the worker check and the separate host execution. |
+| New: accepted Scout report disappeared before sealing | Worker validation accepted reports larger than the parent’s 8 KiB capture limit; the parent silently discarded them. Structured helpers now share a 32 KiB acceptance/capture ceiling, including canonicalized salvage. A live Scout report of 9,519 bytes now seals intact with passing conformance/quality. Oversized reports are rejected while worker repair remains possible. |
 
 BT-02 remains an inconclusive interaction observation: the original conditional
 prompt during generation was ambiguous. Earlier unconditional replacement and
@@ -55,11 +56,11 @@ queued-prompt controls passed. No speculative input-routing change was made.
 
 ## Real model evidence
 
-This campaign contains 37 graded attempts across successive candidates:
+This campaign contains 38 graded attempts across successive candidates:
 
 | Route | Graded attempts | Raw passes | Raw failures |
 | --- | ---: | ---: | ---: |
-| Luna | 25 | 13 | 12 |
+| Luna | 26 | 13 | 13 |
 | Haiku | 5 | 3 | 2 |
 | Mini Qwopus | 7 | 4 | 3 |
 
@@ -109,15 +110,17 @@ output-label fix it correctly reported both executions. See
    loosening task equality. The new Coder run preserved the task and produced
    a conforming 1,016-word report, but used basename-only citations for three
    nested source files, failing the full-path citation requirement. The new
-   Scout run (`2es91b4wog6c`) failed with `result_contract_exhausted`, missing
-   final output after 12 successful read/grep calls. Its parent reported the
-   failure honestly. The cause of that missing terminal result remains open;
-   do not attribute it to provider failure or exhausted repair rounds without
-   the missing event-level evidence.
-4. **Terminal repair is not universally proven.** The synthesis change and
-   focused regressions pass, and the former fork failure now succeeds on all
-   routes. The long Scout failure prevents a broader claim that all worker
-   terminal-output problems are solved.
+   Scout run (`2es91b4wog6c`) failed with missing final output after 12
+   successful read/grep calls. Investigation reproduced the accepted-result/
+   capture-size mismatch, and the corrected rerun (`1hz4db3f2xaj`) successfully
+   sealed a 9,519-byte, 1,167-word structured report. That new report passes
+   conformance and quality, but still fails the corpus's per-source structured
+   citation requirement: `tests/test_coefs.py` appears in prose citations, not
+   as a finding's `path`. This is distinct from losing the terminal report.
+4. **Synthesis evidence remains bounded.** Forked verifiers and the corrected
+   long Scout now return intact results, and repair regressions pass. These
+   cases do not establish universal model adherence or successful completion
+   of every report requested in prose.
 
 No further model jobs were left running. No new model calls are needed to
 inspect the preserved evidence.
@@ -129,7 +132,9 @@ inspect the preserved evidence.
 - Full root contract/smoke gate: 1,099 passed, one skipped, zero failed.
 - Focused worker/context, codewiki, eval capture, headless and keyboard batch:
   109 passed. Skill/import batch: 27 passed. Repair/result-contract batch:
-  36 passed. Host-evidence/batch-settlement batch: 30 passed. Additional schema
+  36 passed. Host-evidence/batch-settlement batch: 30 passed. The helper-size,
+  native terminal-handoff and source-explanation batch passed all 33 checks;
+  its exact-boundary follow-up also passed. Additional schema
   wire, provider-boundary and changed-case checks passed. Counts overlap and
   must not be added into one unique-test total.
 - All 25 eval suites validate through the production loader.
@@ -149,3 +154,5 @@ being maintained by the concurrent GUI agent.
 - `07e9e245`: operator scope, ready-skill policy and verification permissions.
 - `91ecd5ab`: complete eval evidence, checkpoints and grading corrections.
 - `12de54a8`: retain the existing prompt byte budget with inline schemas.
+- `72bf2ece`: align helper acceptance and receipt capture limits, including
+  canonicalized salvage at the boundary.
