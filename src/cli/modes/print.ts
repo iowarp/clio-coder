@@ -328,6 +328,9 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 			(plane === "observe" || plane === "retrieve" || plane === "execute" || plane === "mutate")
 		) {
 			stats.unresolvedBlocks.delete(action);
+			// Native observation can replace denied shell execution for a read-only
+			// task. It cannot recover a blocked write or other privileged action.
+			if (plane === "observe" || plane === "retrieve") stats.unresolvedBlocks.delete("execute");
 		}
 	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
@@ -804,10 +807,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 		stderrMessage = failureMessage;
 		if (mode === "text" && result.text.length > 0) stdoutMessage = result.text;
 	} else if (result.text.length === 0 && !result.sawTerminatingToolResult) {
-		const failureMessage =
-			result.lastNotice !== null
-				? `clio-coder run: no assistant response (${result.lastNotice})`
-				: "clio-coder run: no assistant response";
+		const failureMessage = "clio-coder run: provider stream ended without an assistant response or terminal tool result";
 		terminal = { exitCode: 1, outcome: "failed", status: "failed", failureMessage };
 		stderrMessage = failureMessage;
 	} else {

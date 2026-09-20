@@ -107,8 +107,9 @@ a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
 is not. Only the main agent's own write-class calls count as writes: an
 artifact report, bash, and dispatch work do not. A later successful read or
-command can recover a block of the same action class; bookkeeping and reports
-cannot. An unresolved blocked run with no successful write exits 1 with outcome
+command can recover a block of the same action class. Native observation can
+also replace blocked shell execution; it cannot recover a blocked write.
+Bookkeeping and reports cannot recover blocks. An unresolved blocked run with no successful write exits 1 with outcome
 "failed" and outcomeDetail "noop".
 A successful limitation call also fails, with outcomeDetail "limitation".
 --fail-on-noop additionally fails runs whose tools all failed without a block.
