@@ -6,7 +6,7 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
-import { prepareGuiUninstall } from "./gui.js";
+import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
@@ -388,6 +388,15 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		},
 	];
 	for (const item of web.items) items.push({ ...item, status: "remove", detail: "verified app ownership" });
+	for (const item of web.unmanaged)
+		items.push({ ...item, status: "skip", detail: "this build has no graphical application to remove it with" });
+	// The background service reads its configuration from state/gui. Deleting that would strand the
+	// service with nothing left to uninstall it by, so state/gui stays whenever anything is unmanaged.
+	const keepGuiState = web.unmanaged.length > 0 && existsSync(join(dirs.state, "gui"));
+	if (keepGuiState) {
+		const state = items.find((item) => item.label === "State");
+		if (state) state.detail = "sessions, audit, receipts; gui is kept";
+	}
 
 	// A login file is reported, never edited; see detectShellRcEdits.
 	for (const file of shellEdits) {
@@ -395,6 +404,12 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 
 	presenter.listItems("The following will be removed", items);
+	if (web.unmanaged.length > 0) {
+		presenter.warn(
+			`Graphical application files stay in place${keepGuiState ? `, with ${shortenPath(join(dirs.state, "gui"))}` : ""}`,
+		);
+		presenter.commandAdvice(GUI_UNINSTALL_ADVICE.lead, GUI_UNINSTALL_ADVICE.command);
+	}
 
 	const projectInv = projectContextInventory(dirs.state);
 	if (projectInv.dirs.length > 0) {
@@ -459,9 +474,14 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 
 	if (stateSize.exists) {
-		const failure = removePath("state", dirs.state, false);
-		if (failure) failures.push(failure);
-		else presenter.completedStep("Removed State");
+		const targets = keepGuiState
+			? readdirSync(dirs.state)
+					.filter((name) => name !== "gui")
+					.map((name) => join(dirs.state, name))
+			: [dirs.state];
+		const failed = targets.flatMap((path) => removePath("state", path, false) ?? []);
+		failures.push(...failed);
+		if (!failed.length) presenter.completedStep(keepGuiState ? "Removed State, except gui" : "Removed State");
 	}
 
 	// Only a symlink into this installation is ever unlinked. Reporting the
