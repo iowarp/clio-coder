@@ -146,7 +146,7 @@ describe("skill tool surface lifetime", () => {
 		strictEqual(result.kind, "ok");
 		if (result.kind !== "ok") throw new Error("inventory failed");
 		match(result.output, /Clio skills .*\n- local-review \(source: clio-coder/);
-		match(result.output, /Discovered skills .*not Clio library installations/);
+		match(result.output, /Discovered skills .*discovery does not establish installation ownership/);
 		match(result.output, /peer-review \(source: codex; scope: user; file:/);
 		strictEqual(result.output.includes("Installed:"), false);
 	});
