@@ -1,6 +1,7 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, relative, resolve, sep } from "node:path";
 import type { Hono } from "hono";
+import { isPagePath } from "../../contracts/pages.js";
 import { AppProblem } from "../services/problem.js";
 
 export function staticClient(app: Hono, directory: string, pwa = false) {
@@ -13,31 +14,7 @@ export function staticClient(app: Hono, directory: string, pwa = false) {
 			["/manifest.webmanifest", "/sw.js", "/offline.html", "/offline.js", "/offline.css"].includes(context.req.path)
 		)
 			throw new AppProblem("not_found", "Installable app assets require background mode.");
-		const path =
-			context.req.path === "/" ||
-			context.req.path.startsWith("/docs/") ||
-			[
-				"/toolchain",
-				"/fleet",
-				"/system",
-				"/system/interop",
-				"/library",
-				"/evals",
-				"/usage",
-				"/evidence",
-				"/traces",
-				"/sessions",
-				"/docs",
-				"/settings",
-				"/settings/why",
-				"/settings/targets",
-				"/settings/routing",
-			].includes(context.req.path) ||
-			/^\/(traces|sessions|fleet|evidence|evals)\/[^/]+$/.test(context.req.path) ||
-			/^\/fleet\/dispatches\/[^/]+$/.test(context.req.path) ||
-			/^\/workspaces\/[^/]+\/sessions$/.test(context.req.path)
-				? "index.html"
-				: decodeURIComponent(context.req.path).slice(1);
+		const path = isPagePath(context.req.path) ? "index.html" : decodeURIComponent(context.req.path).slice(1);
 		let file: string;
 		try {
 			file = await realpath(resolve(root, path));
