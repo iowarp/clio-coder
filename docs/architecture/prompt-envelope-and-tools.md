@@ -222,7 +222,7 @@ For aggregate cost and token facts across sessions, use `clio-coder usage report
 
 ## Self-documentation retrieval
 
-`gateway(op="call", capability="clio_docs", args={query: ...})` is the model-facing companion to `clio-coder docs`, which opens the human documentation in the unified web app. The app renders the bundled Markdown corpus directly, with generated navigation and heading outlines. The clio_docs capability indexes that same corpus for agents. It is deterministic and offline: no embeddings service, network call, or filesystem write is needed.
+`gateway(op="call", capability="clio_docs", args={query: ...})` indexes the bundled Markdown corpus for agents. People read the same files directly; the rendered reading view belongs to the graphical application, which this release does not ship, so `clio-coder docs` names the shipped Markdown directory instead. The capability is deterministic and offline: no embeddings service, network call, or filesystem write is needed.
 
 The search index splits markdown into heading-delimited sections, records heading breadcrumbs and line ranges, and ranks results with light stemming, controlled Clio vocabulary aliases, phrase boosts, and BM25-style body scoring. The tool returns compact JSON containing corpus metadata, normalized and expanded query terms, and ranked hits with `file`, `heading`, `breadcrumb`, `anchor`, section `lines`, `snippetLines`, a bounded `snippet`, `matchedTerms`, `signals`, `coverage`, and `score`. `limit` defaults to 5 sections and caps at 12. The per-file filter the pre-consolidation docs tool accepted was dropped; narrow with more specific query terms instead. Even an empty result is valid JSON with empty arrays and a populated `next` continuation.
 

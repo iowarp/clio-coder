@@ -122,6 +122,11 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add `/doctor` to the TUI, which renders the same findings in-session as one notice at the level of its worst row. `/doctor deep` runs the deep checks against the session's targets and autonomy.
 - Report Slurm through the clio-kit MCP server: whether `clio-kit` is on PATH and ships the Slurm server, which `mcp.yaml` declares it and its trust, and whether `sbatch` and `squeue` exist. Informational only.
 
+### graphical application
+
+- This release ships the terminal product: CLI, TUI, headless runs, and ACP. The graphical application is no longer bundled, so the package carries no `dist/gui`, no web client, and none of the application's dependencies. It keeps being developed in `apps/clio-coder-gui` and is built only with `CLIO_CODER_BUILD_GUI=1`. `clio-coder gui` reports that the application is not included in this build and exits 2.
+- `clio-coder docs` opened its pages in that application. Until it ships, the command names the documentation directory inside the installed package and exits 2. The Markdown still ships, and `gateway(op="call", capability="clio_docs")` still searches it, so Clio answers documentation questions in a session.
+
 ## 0.4.9 - 2026-09-17
 
 ### read
