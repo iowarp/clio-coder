@@ -244,6 +244,39 @@ try {
 		await check("sessions");
 		const workspaceUrl = page.url();
 		await navigate("Settings");
+		// The write surface: a select saves through the engine, a project-set value refuses, a destructive
+		// change needs its named confirmation.
+		const setting = (path: string) => page.locator(".setting-control", { has: page.getByText(path, { exact: true }) });
+		await page.getByRole("heading", { name: "Chat", exact: true }).waitFor();
+		const thinking = setting("chat.thinkingLevel");
+		const level = (await thinking.getByRole("combobox").inputValue()) === "low" ? "high" : "low";
+		await thinking.getByRole("combobox").selectOption(level);
+		await thinking.getByRole("button", { name: "Save", exact: true }).click();
+		await thinking.getByRole("status").getByText("Used by the next relevant request").waitFor();
+		await check("settings-saved");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `settings-controls-${width}.png`), fullPage: true });
+		await page.getByRole("button", { name: /^Permissions & Limits · / }).click();
+		await setting("safety.autonomy").getByText("Set by the project layer").waitFor();
+		if (await setting("safety.autonomy").getByRole("combobox").count())
+			throw new Error("A project-set value still offers an editor.");
+		await page.getByRole("button", { name: /^Fleet · / }).click();
+		const history = setting("fleet.history.maxRuns");
+		await history.getByRole("spinbutton").fill(width === 1600 ? "900" : width === 1050 ? "800" : "700");
+		if (!(await history.getByRole("button", { name: "Save", exact: true }).isDisabled()))
+			throw new Error("A destructive setting saved without its confirmation.");
+		await history.getByRole("checkbox").check();
+		await check("settings-confirm");
+		if (width === 1600) await page.screenshot({ path: join(output, "settings-confirm.png"), fullPage: true });
+		await history.getByRole("button", { name: "Save", exact: true }).click();
+		await history.getByRole("status").waitFor();
+		await page.getByLabel("Find a setting", { exact: true }).fill("no-such-setting-anywhere");
+		await page.getByText("No settings match.", { exact: true }).waitFor();
+		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
+		await page.getByLabel("Find a setting", { exact: true }).fill("retry");
+		await check("settings-controls-dark");
+		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByRole("link", { name: "Effective values", exact: true }).click();
 		await page.getByLabel("Filter settings", { exact: true }).fill("chat.model");
 		await page.getByText("fixture-local-model", { exact: true }).waitFor();
 		await check("settings-inspection");

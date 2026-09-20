@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { SettingsControlsView } from "./settings-controls.js";
 import "./settings.css";
 
 export function useWorkspaceSelection(client: Client) {
@@ -35,14 +36,14 @@ export function WorkspacePicker({ selection }: { selection: ReturnType<typeof us
 	);
 }
 
-export function SettingsPage({ client, view }: { client: Client; view: "settings" | "why" }) {
+export function SettingsPage({ client, view }: { client: Client; view: "settings" | "effective" | "why" }) {
 	const selection = useWorkspaceSelection(client);
 	const { id } = selection;
 	const [filter, setFilter] = useState("");
 	const settings = useQuery({
 		queryKey: ["workspace-settings", id],
 		queryFn: () => client.call(routes.workspaceSettings, { ...emptyInput, params: { id } }),
-		enabled: !!id && view === "settings",
+		enabled: !!id && view === "effective",
 	});
 	const graph = useQuery({
 		queryKey: ["config-graph", id],
@@ -51,11 +52,17 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 	});
 	return (
 		<section>
-			<p className="eyebrow">Configuration / {view === "settings" ? "Effective values" : "Sources and precedence"}</p>
-			<h1>{view === "settings" ? "Effective settings" : "Why Clio behaves this way"}</h1>
+			<p className="eyebrow">
+				Configuration /{" "}
+				{view === "settings" ? "Your settings" : view === "effective" ? "Effective values" : "Sources and precedence"}
+			</p>
+			<h1>
+				{view === "settings" ? "Settings" : view === "effective" ? "Effective settings" : "Why Clio behaves this way"}
+			</h1>
 			<WorkspacePicker selection={selection} />
 			<ConfigurationTabs id={id} active={view} />
-			{view === "settings" &&
+			{view === "settings" && id && <SettingsControlsView key={id} client={client} workspaceId={id} />}
+			{view === "effective" &&
 				id &&
 				(settings.isPending ? (
 					<p>Reading effective settings…</p>
@@ -180,11 +187,18 @@ export function SettingsPage({ client, view }: { client: Client; view: "settings
 	);
 }
 
-export function ConfigurationTabs({ id, active }: { id: string; active: "settings" | "why" | "targets" | "routing" }) {
+export function ConfigurationTabs({
+	id,
+	active,
+}: {
+	id: string;
+	active: "settings" | "effective" | "why" | "targets" | "routing";
+}) {
 	return (
 		<nav className="settings-tabs" aria-label="Configuration views">
 			{[
 				{ key: "settings", label: "Settings", path: "/settings" },
+				{ key: "effective", label: "Effective values", path: "/settings/effective" },
 				{ key: "why", label: "Why", path: "/settings/why" },
 				{ key: "targets", label: "Targets", path: "/settings/targets" },
 				{ key: "routing", label: "Routing", path: "/settings/routing" },

@@ -63,7 +63,7 @@ export async function harness(
 	await supervisor.reconcile();
 	const sessions = new SessionService(supervisor, workspaces, reads);
 	const cli = new CliRunner(env);
-	const settingsService = new SettingsService(reads, workspaces);
+	const settingsService = new SettingsService(reads, workspaces, ops);
 	const app = createApp({
 		token: "test-token",
 		origin: options.origin ?? (() => "http://127.0.0.1:4317"),

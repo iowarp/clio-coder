@@ -31,6 +31,7 @@ import { PermissionDecision } from "./permissions.js";
 import { EvalDetail, EvalPage, UsageReport } from "./reports.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
+import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
 import {
 	CommandCatalog,
@@ -302,6 +303,23 @@ export const routes = {
 		params: operationParams,
 		response: SettingsReport,
 		summary: "Effective settings and each leaf's origin layer",
+	}),
+	settingsControls: defineRoute({
+		...get,
+		path: "/api/workspaces/:id/settings/controls",
+		params: operationParams,
+		response: SettingsControls,
+		summary: "The engine's setting controls with the app's write policy, timing and origin",
+	}),
+	writeSetting: defineRoute({
+		...post,
+		method: "PATCH",
+		status: 200,
+		path: "/api/workspaces/:id/settings/controls",
+		params: operationParams,
+		body: SettingWrite,
+		response: SettingWritten,
+		summary: "Write one allowlisted setting to the user layer through the engine's cross-field validation",
 	}),
 	configGraph: defineRoute({
 		...get,

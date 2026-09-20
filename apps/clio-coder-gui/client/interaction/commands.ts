@@ -55,6 +55,7 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Usage report", path: "/usage", keywords: ["tokens", "cost", "spend"] },
 	{ label: "Targets", path: "/settings/targets", keywords: ["providers", "models"] },
 	{ label: "Routing", path: "/settings/routing", keywords: ["profiles", "bindings", "offline"] },
+	{ label: "Effective settings", path: "/settings/effective", keywords: ["values", "layers", "origin"] },
 	{ label: "Why these settings", path: "/settings/why", keywords: ["provenance", "source"] },
 	{ label: "Interop", path: "/system/interop", keywords: ["agents", "mcp", "external"] },
 ];

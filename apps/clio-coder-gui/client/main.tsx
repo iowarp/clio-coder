@@ -49,6 +49,7 @@ const router = createBrowserRouter([
 			{ path: "/settings/targets", element: <TargetsPage client={client} view="targets" /> },
 			{ path: "/settings/routing", element: <TargetsPage client={client} view="routing" /> },
 			{ path: "/settings", element: <SettingsPage client={client} view="settings" /> },
+			{ path: "/settings/effective", element: <SettingsPage client={client} view="effective" /> },
 			{ path: "/settings/why", element: <SettingsPage client={client} view="why" /> },
 			{ path: "/docs/*", element: <Docs client={client} /> },
 			{ path: "/sessions", element: <Workspaces client={client} /> },
