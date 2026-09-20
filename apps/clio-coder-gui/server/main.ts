@@ -32,7 +32,7 @@ import { WorkspaceService } from "./services/workspaces.js";
 import { AppFiles } from "./state/files.js";
 import { WorkerHost } from "./worker/host.js";
 
-export { prepareWebUninstall } from "./launcher/uninstall.js";
+export { prepareGuiUninstall } from "./launcher/uninstall.js";
 
 declare const __CLIO_GUI_BUNDLED__: boolean;
 const bundled = typeof __CLIO_GUI_BUNDLED__ !== "undefined" && __CLIO_GUI_BUNDLED__;

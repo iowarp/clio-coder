@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { installBackground } from "../server/launcher/background.js";
 import { backgroundPaths, newBackgroundConfig } from "../server/launcher/background-config.js";
 import { installLauncher, launcherStatus } from "../server/launcher/install.js";
-import { prepareWebUninstall } from "../server/launcher/uninstall.js";
+import { prepareGuiUninstall } from "../server/launcher/uninstall.js";
 
 const launch = {
 	node: process.execPath,
@@ -36,7 +36,7 @@ test("root cleanup previews without mutation and stops the owned service before 
 	await installBackground(directory, config, control, async () => {});
 	const options = { stateDir, desktopPrefix, packageRoot: config.packageRoot };
 	const start = calls.length;
-	const plan = await prepareWebUninstall(options, control);
+	const plan = await prepareGuiUninstall(options, control);
 	assert.deepEqual(
 		plan.items.map((item) => item.label),
 		["Background service", "Desktop launcher"],
@@ -54,7 +54,7 @@ test("root cleanup previews without mutation and stops the owned service before 
 	await plan.remove();
 	assert.equal((await launcherStatus(desktopPrefix)).status, "absent");
 	await assert.rejects(readFile(files.manifest), { code: "ENOENT" });
-	assert.deepEqual((await prepareWebUninstall(options, control)).items, []);
+	assert.deepEqual((await prepareGuiUninstall(options, control)).items, []);
 });
 
 test("root cleanup preserves changed and foreign desktop entries, and discovers a custom background directory", async (t) => {
@@ -68,17 +68,17 @@ test("root cleanup preserves changed and foreign desktop entries, and discovers 
 	const desktop = await launcherStatus(desktopPrefix),
 		entry = await readFile(desktop.entry, "utf8");
 	await writeFile(desktop.entry, `${entry}# custom\n`);
-	await assert.rejects(prepareWebUninstall(options), /ownership/);
+	await assert.rejects(prepareGuiUninstall(options), /ownership/);
 	await writeFile(desktop.entry, entry);
-	await assert.rejects(prepareWebUninstall({ ...options, packageRoot: root }), /another installation/);
-	await (await prepareWebUninstall(options)).remove();
+	await assert.rejects(prepareGuiUninstall({ ...options, packageRoot: root }), /another installation/);
+	await (await prepareGuiUninstall(options)).remove();
 	await installBackground(
 		directory,
 		config,
 		async () => "",
 		async () => {},
 	);
-	const plan = await prepareWebUninstall(options, async () => "");
+	const plan = await prepareGuiUninstall(options, async () => "");
 	assert.ok(plan.items.some((item) => item.path === directory));
 	await plan.remove();
 	assert.equal((await launcherStatus(desktopPrefix)).status, "absent");
