@@ -352,7 +352,7 @@ function beyondEndOfFile(offset: number, totalLines: number, file: ReadFileIdent
 			`read: offset ${offset} is beyond end of file (${totalLines} lines total). The file ends at line ` +
 			`${totalLines} and has no further content; do not page past it or re-read the tail. A read covering ` +
 			`line ${totalLines} has already returned everything.`,
-		details: { file },
+		details: { file, code: "read_past_eof", totalLines },
 	};
 }
 

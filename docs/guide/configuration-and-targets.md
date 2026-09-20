@@ -1122,7 +1122,11 @@ supported configuration. Clio does not currently expose an ACP model selector.
 Antigravity's `antigravity-code` runtime is a separate subprocess integration;
 detection of the `agy` executable does not register an ACP delegation recipe.
 An ACP integration needs a verified ACP entry point or adapter, not merely a
-CLI that supports stream-JSON output.
+CLI that supports stream-JSON output. This describes Clio's current integration;
+it does not establish that every Antigravity version or third-party adapter lacks ACP.
+The `world-knowledge` shadow agent remains internal-dispatch-only, even when bound
+to an Antigravity target/profile: ask Clio to use it; do not invoke it with `/run`
+or `/delegate`.
 
 ### 5. Antigravity CLI — Experimental Local Delegation (Worker-Only)
 

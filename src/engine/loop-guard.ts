@@ -641,6 +641,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * differently answered call resets it.
 	 */
 	const stagnationByTurn = new Map<string, { reducedFingerprint: string; resultFingerprint: string; streak: number }>();
+	const eofByTurn = new Map<string, { identity: string; streak: number }>();
 	// Actual returned line coverage, not requested limits. File stamps retire old
 	// coverage after external changes; successful writes/edits clear it as well.
 	const readCoverage = new Map<string, { bytes: number; mtimeMs: number; ranges: Array<[number, number]> }>();
@@ -1035,6 +1036,53 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		);
 	};
 
+	// Read's typed EOF result proves that changing offsets cannot reveal more
+	// content in this file version. Error strings contain offsets and therefore
+	// cannot use the byte-identical successful-result detector.
+	const readEofEffects = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
+		const turnKey = input.turnId ?? NO_TURN_BUCKET;
+		const details = input.toolResultDetails;
+		const file = details?.file as { bytes?: unknown; mtimeMs?: unknown } | undefined;
+		if (
+			input.toolName !== ToolNames.Read ||
+			input.metadata?.resultKind !== "error" ||
+			details?.code !== "read_past_eof" ||
+			typeof input.toolArgs?.path !== "string" ||
+			typeof file?.bytes !== "number" ||
+			!Number.isFinite(file.bytes) ||
+			typeof file.mtimeMs !== "number" ||
+			!Number.isFinite(file.mtimeMs) ||
+			typeof details.totalLines !== "number" ||
+			!Number.isSafeInteger(details.totalLines) ||
+			details.totalLines < 0
+		) {
+			eofByTurn.delete(turnKey);
+			return [];
+		}
+		let path: string;
+		try {
+			path = resolveReadPath(input.toolArgs.path);
+		} catch {
+			eofByTurn.delete(turnKey);
+			return [];
+		}
+		const identity = JSON.stringify([path, file.bytes, file.mtimeMs, details.totalLines]);
+		const previous = eofByTurn.get(turnKey);
+		const streak = previous?.identity === identity ? previous.streak + 1 : 1;
+		if (!eofByTurn.has(turnKey) && eofByTurn.size >= LOOP_GUARD_TURN_LIMIT) {
+			const oldest = eofByTurn.keys().next().value;
+			if (oldest !== undefined) eofByTurn.delete(oldest);
+		}
+		eofByTurn.set(turnKey, { identity, streak });
+		if (streak < 2 || lockoutByTurn.has(turnKey)) return [];
+		const reason = `loop detected: ${streak} consecutive reads went past the end of the same unchanged file. Changing offset or limit cannot reveal more content. Reuse the evidence already returned and synthesize the answer.`;
+		return blockAsLoop(input, turnKey, ToolNames.Read, streak, reason, options.now?.() ?? Date.now()).map((effect) =>
+			effect.kind === "block_tool"
+				? { kind: "annotate_tool_result" as const, message: effect.reason, severity: "warn" as const }
+				: effect,
+		);
+	};
+
 	return {
 		id: LOOP_GUARD_REGISTRATION_ID,
 		description:
@@ -1077,7 +1125,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (input.hook === "after_tool") {
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
-				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input)];
+				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input), ...readEofEffects(input)];
 				if (
 					options.toolBudgetAdvisory &&
 					!advisoryEmitted &&

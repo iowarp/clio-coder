@@ -303,3 +303,57 @@ describe("read coverage stagnation", () => {
 		}
 	});
 });
+
+describe("changing-offset EOF loops", () => {
+	it("uses real read errors to warn on the second EOF and lock on the third, regardless of offset", async () => {
+		const root = mkdtempSync(join(tmpdir(), "clio-eof-loop-"));
+		try {
+			const path = join(root, "source.ts");
+			writeFileSync(path, "one\ntwo\n");
+			const f = coverageGuard();
+			for (const [index, offset] of [1655, 1695, 1735].entries()) {
+				const result = await readTool.run({ path, offset, limit: 40 });
+				ok(result.kind === "error");
+				strictEqual(result.details?.code, "read_past_eof");
+				const effects = f.guard.evaluate({
+					hook: "after_tool",
+					turnId: "eof",
+					toolName: ToolNames.Read,
+					toolArgs: { path, offset, limit: 40 },
+					metadata: { resultKind: result.kind },
+					toolResultDetails: result.details,
+				});
+				strictEqual(
+					effects.some((e) => e.kind === "annotate_tool_result"),
+					index > 0,
+				);
+			}
+			strictEqual(f.locks(), 1);
+			ok(f.guard.evaluate(before("eof", ToolNames.Grep, "fresh")).some((e) => e.kind === "block_tool"));
+			strictEqual(f.guard.evaluate(before("next-turn", ToolNames.Grep, "fresh")).length, 0);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("does not combine different files, changed versions, other errors, successful reads or nested results", () => {
+		const f = coverageGuard();
+		const eof = (path = "a.ts", mtimeMs = 1): MiddlewareHookInput => ({
+			hook: "after_tool",
+			turnId: "eof",
+			toolName: ToolNames.Read,
+			toolArgs: { path, offset: 100 },
+			metadata: { resultKind: "error" },
+			toolResultDetails: { code: "read_past_eof", totalLines: 2, file: { bytes: 8, mtimeMs } },
+		});
+		for (let i = 0; i < 5; i++) {
+			f.guard.evaluate(eof("a.ts", i));
+			f.guard.evaluate(eof("b.ts", i));
+			f.guard.evaluate({ ...eof("b.ts", i), metadata: { resultKind: "error", nested: true } });
+			f.guard.evaluate({ ...eof(), toolResultDetails: { code: "permission_denied" } });
+			f.guard.evaluate(eof());
+			f.guard.evaluate(afterOk("eof", ToolNames.Read));
+		}
+		strictEqual(f.locks(), 0);
+	});
+});

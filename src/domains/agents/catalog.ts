@@ -116,7 +116,7 @@ export function renderFleetPromptSection(input: ReadonlyArray<AgentSpec>): strin
 		// Dispatchable, but never a `/run` suggestion: they are plumbing.
 		lines.push(
 			"",
-			"Shadow helpers for your internal work (dispatch-only; use detach:true for independent background work):",
+			"Shadow helpers for your internal work (dispatch-only; never suggest operator /run or /delegate for these IDs, even with --target or a profile; use detach:true for independent background work):",
 			...shadowSpecs.map(fleetPromptLine),
 		);
 	}
