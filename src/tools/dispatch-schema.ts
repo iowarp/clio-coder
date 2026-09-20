@@ -73,8 +73,7 @@ const DispatchBudgetSchema = Type.Object(
 	},
 	{
 		additionalProperties: false,
-		description:
-			"Advisory tool-call counts; may exceed recipe recommendations and never stop work. retryRevision estimates a retry/revision.",
+		description: "Advisory call counts, never a hard stop. retryRevision estimates a retry.",
 	},
 );
 
@@ -111,7 +110,7 @@ const DispatchIntentSchema = Type.Object(
 	{
 		additionalProperties: false,
 		description:
-			"Required on every dispatch: repository-relative paths select project rules and worker context; omission falls back to task-text paths. verification names checks from package scripts or .clio-coder/verifiers.yaml. Per-task fields override batch defaults. Parallel writers need disjoint write_roots; expected_outputs does not restrict access.",
+			"Required paths and check IDs. Per-task values override defaults. Parallel write_roots must be disjoint; expected_outputs does not confine access.",
 	},
 );
 
@@ -149,7 +148,7 @@ const WorkerContextSchema = Type.Union(
 		),
 	],
 	{
-		description: `Parent context: isolated (default), fork (native history, never silently truncated), or splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<call-id> or message:<index> in the current snapshot. Per-task overrides allowed.`,
+		description: `Parent history: isolated (default), fork (full native transcript), splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<id> or message:<index>. Per-task overrides allowed.`,
 	},
 );
 export function buildDispatchParameters(composition: DispatchSchemaComposition = FULL_DISPATCH_SCHEMA_COMPOSITION) {
