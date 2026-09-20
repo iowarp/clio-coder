@@ -18,6 +18,30 @@ import {
 
 const legacyOptionRemoved: "listSkills" extends keyof SlashAutocompleteOptions ? false : true = true;
 
+test("context init exposes its runtime flags and rejects conflicting writes before dispatch", async () => {
+	deepStrictEqual(parseSlashCommand("/context init --heuristic --preview --include-global"), {
+		kind: "init",
+		options: { heuristic: true, preview: true, includeGlobalImports: true },
+	});
+	deepStrictEqual(parseSlashCommand("/context init --rewrite"), {
+		kind: "init",
+		options: { rewriteClioMd: true, applyClioMd: true },
+	});
+	for (const flag of ["--adopt", "--apply", "--rewrite"]) {
+		strictEqual(parseSlashCommand(`/context init --propose ${flag}`).kind, "usage-error");
+	}
+	strictEqual(parseSlashCommand("/context init --unknown").kind, "usage-error");
+	const provider = createSlashCommandAutocompleteProvider({ fdPath: null });
+	const line = "/context init --heu";
+	const suggestions = await provider.getSuggestions([line], 0, line.length, {
+		signal: new AbortController().signal,
+	});
+	deepStrictEqual(
+		suggestions?.items.map((item) => item.value),
+		["--heuristic"],
+	);
+});
+
 test("dynamic slash slots read current source values and replace the argument", async () => {
 	ok(legacyOptionRemoved);
 	const catalog = {

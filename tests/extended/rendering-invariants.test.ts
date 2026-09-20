@@ -8,18 +8,22 @@ import {
 	WORKER_ACTION_TRAIL_LIMIT,
 	WORKER_TOOL_NAME_LIMIT,
 } from "../../src/domains/observability/worker-progress.js";
+import { buildContextLedger } from "../../src/domains/session/context-ledger.js";
 import type { WorkerRunEntry } from "../../src/domains/session/index.js";
 import {
+	type Component,
 	InstrumentedTuiAltScreen,
 	ScrollView,
 	stripTerminalSequences,
 	type Terminal,
 	Text,
+	type TUI,
 	TuiAltScreen,
 	VStack,
 	visibleWidth,
 } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
@@ -29,7 +33,7 @@ import {
 	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
-import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
+import { clioTheme, formatContextPercent, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { workerEntriesFromRunEntries, workerRunEntryFields } from "../../src/interactive/worker-replay.js";
 import {
@@ -407,6 +411,54 @@ class RenderingTerminal implements Terminal {
 }
 
 describe("Pi TUI compatibility", () => {
+	it("keeps context legend percentages on their row through frame resizing and refresh", () => {
+		let frame!: Component;
+		let onEvent!: (event: { type: string }) => void;
+		let messageTokens = 1000;
+		const ledger = () =>
+			buildContextLedger({
+				provider: "fixture",
+				model: "fixture",
+				contextWindow: 32768,
+				systemPromptTokens: 1200,
+				toolSchemaTokens: 800,
+				messageTokens,
+				compactionThreshold: 0.9,
+				compactionAuto: true,
+			});
+		const tui = {
+			showOverlay: (component: Component) => {
+				frame = component;
+				return { hide() {} };
+			},
+			requestRender() {},
+		} as unknown as TUI;
+		const handle = openContextOverlay(tui, ledger, {
+			chat: {
+				isStreaming: () => false,
+				onEvent: (handler) => {
+					onEvent = handler;
+					return () => {};
+				},
+			},
+		});
+		try {
+			for (const width of [86, 86, 60, 40, 86]) {
+				const rows = frame.render(width);
+				ok(rows.every((row) => visibleWidth(row) <= width));
+				const plain = rows.map(stripTerminalSequences);
+				for (const group of ledger().meter) {
+					const row = plain.find((line) => line.includes(group.label.slice(0, 6)));
+					ok(row?.includes(formatContextPercent(group.percent)), `${width}: ${group.label}\n${plain.join("\n")}`);
+				}
+				messageTokens += 1000;
+				onEvent({ type: "message_end" });
+			}
+		} finally {
+			handle.hide();
+		}
+	});
+
 	it("keeps framed bounds live through visibility, resize, and removal", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);

@@ -2667,6 +2667,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						const bootstrapOptions = bootstrapInputFromInitOptions(options);
 						await contextDomain.runBootstrap({
 							cwd: process.cwd(),
+							...(runIo ? { io: runIo } : {}),
 							confirmGitignore: () => true,
 							adopt: options.adopt === true,
 							...bootstrapOptions,
@@ -2694,25 +2695,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								: {}),
 						});
 					},
-					onContextClear: async (options: { all?: boolean; confirmed?: boolean; confirmedAll?: boolean }) => {
+					onContextClear: async (options: { all?: boolean; confirmed?: boolean; confirmedAll?: boolean }, runIo?: RunIo) => {
 						await contextDomain.runContextClear({
 							cwd: process.cwd(),
 							all: options.all === true,
-							io: {
-								stdout: (s) => process.stdout.write(s),
-								stderr: (s) => process.stderr.write(s),
-							},
+							...(runIo ? { io: runIo } : {}),
 							confirmContext: () => options.confirmed === true,
 							confirmAll: () => options.confirmedAll === true,
 						});
 					},
-					onContextRefresh: async () => {
+					onContextRefresh: async (runIo?: RunIo) => {
 						await contextDomain.runContextRefresh({
 							cwd: process.cwd(),
-							io: {
-								stdout: (s) => process.stdout.write(s),
-								stderr: (s) => process.stderr.write(s),
-							},
+							...(runIo ? { io: runIo } : {}),
 						});
 					},
 				}
