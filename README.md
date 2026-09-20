@@ -1,51 +1,53 @@
 <p align="center">
   <picture>
     <source srcset="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.webp" type="image/webp" />
-    <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.png" alt="Clio Coder, the coding agent in IOWarp's CLIO ecosystem of agentic science" width="100%" />
+    <img src="https://raw.githubusercontent.com/iowarp/clio-coder/main/assets/banner.png" alt="Clio Coder — IOWarp's terminal coding agent for scientific software" width="100%" />
   </picture>
 </p>
 
 <h1 align="center">Clio Coder</h1>
 
-<p align="center"><strong>The coding agent for the people who maintain the code that science runs on.</strong><br />Your models. Your machines. Work you can inspect.</p>
-
 <p align="center">
-  <a href="https://github.com/iowarp/clio-coder/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/tag/iowarp/clio-coder?sort=semver&label=release&color=00d4db&style=flat-square" /></a>
-  <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?label=npm&color=cb3837&style=flat-square" /></a>
-  <a href="https://github.com/iowarp/clio-coder/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/iowarp/clio-coder/ci.yml?branch=main&label=ci&style=flat-square" /></a>
-  <a href="#install"><img alt="Node >=22.19" src="https://img.shields.io/badge/node-%3E%3D22.19-147366?style=flat-square" /></a>
-  <a href="LICENSE"><img alt="License Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
-  <a href="https://iowarp.ai"><img alt="IOWarp CLIO" src="https://img.shields.io/badge/IOWarp-CLIO-00d4db?style=flat-square" /></a>
-  <a href="https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318"><img alt="NSF #2411318" src="https://img.shields.io/badge/NSF-%232411318-241131?style=flat-square" /></a>
+  <strong>The coding agent for the people who maintain the code that science runs on.</strong><br />
+  Your models. Your machines. Work you can inspect.
 </p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/@iowarp/clio-coder"><img alt="npm version" src="https://img.shields.io/npm/v/%40iowarp%2Fclio-coder?color=00a6ad&style=flat-square" /></a>
+  <a href="https://github.com/iowarp/clio-coder/actions/workflows/ci.yml"><img alt="CI status" src="https://img.shields.io/github/actions/workflow/status/iowarp/clio-coder/ci.yml?branch=main&label=CI&style=flat-square" /></a>
+  <a href="#get-started"><img alt="Node.js 22.19 or newer" src="https://img.shields.io/badge/Node.js-%E2%89%A522.19-147366?style=flat-square" /></a>
+  <a href="LICENSE"><img alt="Apache-2.0 license" src="https://img.shields.io/badge/license-Apache--2.0-241131?style=flat-square" /></a>
+  <a href="https://iowarp.ai"><img alt="Part of IOWarp" src="https://img.shields.io/badge/IOWarp-CLIO-00a6ad?style=flat-square" /></a>
+</p>
 
 <p align="center">
   <a href="#get-started">Get started</a> ·
-  <a href="#built-for-scientific-software">Why Clio?</a> ·
-  <a href="docs/README.md">Documentation</a> ·
-  <a href="https://github.com/iowarp/clio-coder/issues">Feedback</a>
+  <a href="#what-you-can-do">Capabilities</a> ·
+  <a href="#choose-your-models">Models</a> ·
+  <a href="#documentation-you-can-ask-about">Documentation</a> ·
+  <a href="#contribute">Contribute</a>
 </p>
 
-Clio Coder is an open-source coding agent that runs in your terminal. Ask it to
-explain a repository, investigate a failing test, or help implement a change. It
-reads the project, works with your tools, and shows you what it did.
+Clio Coder is an open-source agent for working in real repositories from your
+terminal. Explain a codebase, investigate a failing test, implement a change, or
+coordinate several workers. Follow the tool calls, inspect the diff, and check
+the evidence behind the result.
 
-Built for scientific software and high-performance computing (HPC), Clio works
-with the code researchers maintain every day: simulation kernels, numerical
-libraries, data pipelines, and mixed-language projects. Use a model on your
-workstation, connect to your lab's gateway, or bring a cloud API.
+Built for scientific software and high-performance computing, Clio works with
+simulation kernels, numerical libraries, data pipelines, and everyday software
+engineering. Connect a model on your workstation, your institution's gateway,
+or a cloud service. Start with one conversation; add workers and specialized
+workflows when the task calls for them.
 
-**Experimental, and actively developed.** Keep your work in version control and
-review generated changes. Clio helps with the engineering; scientific validation
-still needs your expertise. See [release notes](CHANGELOG.md) for current changes.
+**v0.5.0 brings Clio to its public launch:** the terminal is the primary working
+interface, and the bundled browser app provides documentation and an early
+preview of the wider graphical experience. Clio is pre-1.0 software. Review
+changes and validate scientific results with your own reference checks.
 
 ## Get started
 
-You need **Node.js 22.19 or newer** on Linux or macOS, and a model to talk to:
-a local inference server such as Ollama or LM Studio, your lab's gateway, or a
-cloud API. A local server usually needs no key. A gateway or cloud API gives you
-one, and Quick Connect asks for it. Windows support is currently best effort.
+You need **Node.js 22.19 or newer** and a model service. Linux and macOS are the
+primary terminal platforms; Windows support is best effort.
 
 ```bash
 npm install -g @iowarp/clio-coder
@@ -54,342 +56,198 @@ clio-coder configure
 clio-coder
 ```
 
-Interactive sessions include **Demo guidance** by default: relevant capability suggestions during real project work and brief contextual footer tips. For a quieter session, use `clio-coder --no-demo`, or turn off `interface.demo` under Appearance in `/settings`. `clio-coder --demo` enables it for one session. Guidance never launches demonstrations automatically.
+Choose **Quick Connect** in the configuration launcher. Paste your endpoint,
+provide credentials if required, select a model, and review the connection.
+For example, LM Studio commonly listens at `localhost:1234` and Ollama at
+`localhost:11434`. For subscription sign-in or other provider-specific setup,
+use **Settings → Connections**.
 
-In the configuration launcher, choose **Quick Connect**:
+Then give Clio a concrete task:
 
-1. **Paste your endpoint URL.** For example, `localhost:1234` for LM Studio,
-   `localhost:11434` for Ollama, or your lab gateway's URL.
-2. **Supply a key and choose a model when asked.** A keyless LM Studio or Ollama
-   server with one model skips both questions. Type to search longer model lists.
-3. **Review and Connect.** You're ready to start a session.
+> Explain how this repository builds and tests its solver. Find the main entry
+> points and suggest one small, useful verification task before changing code.
 
-Clio uses [recommended defaults](docs/guide/configuration-and-targets.md#recommended-defaults):
-workspace edits and recognized checks without repeated approval, workers sized to
-the host, a $5 tracked session budget, and a regular terminal interface. Unfamiliar
-commands ask; workers deny calls that need approval and can continue permitted work.
-Usage without known pricing cannot be bounded by the dollar ceiling. Other settings can wait. Escape goes
-back during setup; `clio-coder configure --settings` opens the full menu.
-Configure and `/settings` use the same categories and control catalog. Ask Clio
-“What can you do without asking me?” to get an explanation of her current settings.
+The default **auto-edit** mode allows workspace edits and recognized test
+commands. Other commands and protected operations may ask for approval.
+[Configure permissions and limits](docs/guide/configuration-and-targets.md)
+when you need a different balance.
 
-`clio-coder` opens the **terminal interface (TUI)**: an interactive chat that
-shows tool calls and diffs as they happen. The same command is the **CLI** for
-setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
-it. An optional local **browser app** over the same runtime is described under
-[Optional browser app](#optional-browser-app). The first session does not need it.
+<details>
+<summary><strong>Installation options</strong></summary>
 
-**New in 0.5.0:** `read`, `ls`, `grep`, and `find` ask before they leave the
-workspace below `full-auto`, and bash admission follows `cd`, links, and
-run-time expansions. Dispatch sizes its worker pool from the host, opens and
-probes route breakers, and recovers crashed task worktrees. `doctor` gains HPC
-toolchain rows, `--deep`, a live tool-call probe, and an in-session `/doctor`.
-Slurm arrives through the clio-kit MCP server, and headless runs seal no-op
-results. Configure and `/settings` share a searchable control catalog, and Clio
-can explain effective settings without exposing credentials. Local-provider
-requests gain cancellation and residency fixes; LiteLLM discovery respects the
-key’s inference catalog. Routine diagnostics use the TUI notice area. Plain
-`targets --probe` reads metadata; `--reasoning` and `--tools` explicitly opt into
-generating checks. See the [changelog](CHANGELOG.md) for release details and
-[Install](#install) for source builds and other package managers.
-
-## Built for scientific software
-
-| What matters | How Clio helps |
+| Use case | Command |
 | --- | --- |
-| **Your models and infrastructure** | Connect local inference, institutional gateways, or cloud APIs. Use different models for different jobs when you need to. |
-| **Understanding the project** | Keep project guidance and a searchable code index alongside the repository, so long sessions have a useful starting point. |
-| **Multi-agent work** | Delegate focused tasks to coding, testing, and review agents. Start on one machine; configure workers over SSH for larger workflows. |
-| **Work you can check** | Inspect edits, tool activity, usage, and recorded run results. Keep reference tests and scientific checks in the loop. |
-
-You can start with one model and one conversation. Distributed workers,
-additional tools, and elaborate workflows are optional.
-
-Try a first request:
-
-> Explain how this repository builds and tests its numerical solver. Identify
-> the main entry points and suggest a small verification task before changing code.
-
-## A first session
-
-Run `clio-coder` inside your project and describe the task in plain language.
-Tool calls appear as they run, and edits appear as diffs.
-
-| Want to… | Use… |
-| --- | --- |
-| Find commands | `/help` |
-| Change models or settings | `/settings` |
-| Browse reusable recipes | `Alt+L` or `/library` |
-| Check context use or cost | `/context`, `/cost` |
-| Include a project file | Type `@` and choose a path |
-| See delegated tasks | `/tasks` |
-| Leave the session | `/quit` |
-
-<details>
-<summary><strong>More session controls and shortcuts</strong></summary>
-
-| Want to… | Use… |
-| --- | --- |
-| Run a shell command | `! command` |
-| Run a private shell command excluded from model context | `!! command` |
-| Ask a side question | `/btw <question>` |
-| Request a read-only second opinion | `/oracle <question>` |
-| Delegate a focused task | `/run tester "Run the parser tests and explain any failure."` |
-| Branch or resume a conversation | `/tree`, `/fork`, `/resume`, `/new` |
-| Carry current state into a fresh session | `/handoff <goal>` |
-| Open a Library category | `/skills`, `/agents`, `/prompts` |
-| Load a specialized skill | `/skill <name>` |
-| Export the transcript | `/export` |
-
-Enter steers an active turn; `Ctrl+Q` queues a follow-up; Escape cancels.
-Pasted multiline text beginning with `!` or `!!` is treated as prompt text.
-Private shell output remains visible to you but is excluded from model replay
-and compaction. See [Commands and Modes](docs/guide/commands-and-modes.md).
-
-</details>
-
-## Choose where models run
-
-Start with the model service you already have. Clio supports local engines
-including **Ollama, LM Studio, llama.cpp, vLLM, SGLang, and Lemonade**; lab
-services such as **LiteLLM gateways and Argonne ALCF inference**; and cloud
-providers including **OpenAI, Anthropic, Google, and OpenRouter**.
-
-Quick Connect handles discoverable HTTP endpoints. For subscription sign-in,
-AWS credentials, or manual model setup, use **Settings → Connections**.
-The [connection guide](docs/guide/configuration-and-targets.md) covers each route.
-
-<details>
-<summary><strong>Provider coverage, separate worker models, and scripted setup</strong></summary>
-
-A saved connection is called a **target**. Chat uses one target; workers may
-share it or use their own.
-
-| Connection family | Supported routes |
-| --- | --- |
-| Local inference | llama.cpp, LM Studio, Ollama, vLLM, SGLang, Lemonade |
-| Compatible APIs | OpenAI-compatible and Anthropic-compatible endpoints; LiteLLM |
-| Cloud APIs | OpenAI, Anthropic, Google, Groq, Mistral, DeepSeek, OpenRouter, Amazon Bedrock |
-| Institutional gateways | Argonne ALCF Sophia and Metis through Globus OAuth |
-| Subscriptions | ChatGPT through `openai-codex`; Claude through `anthropic-max` |
-| Worker integrations | Claude SDK, Claude Code, experimental Antigravity delegation, and configured ACP agents |
-
-To script setup, use the model ID advertised by your server:
-
-```bash
-clio-coder configure \
-  --id local-lmstudio \
-  --runtime lmstudio \
-  --url http://127.0.0.1:1234 \
-  --model your-model-id \
-  --set-orchestrator \
-  --set-fleet-default
-clio-coder targets --probe
-```
-
-Models differ in tool calling, reasoning, context capacity, and hardware needs.
-Start with the measured notes in the [Model Catalog](docs/architecture/model-catalog.md).
-Subscription integrations depend on the vendor's current terms and sign-in
-support. See the [ALCF guide](docs/architecture/alcf-provider.md) for institutional access.
-
-Advanced settings can route memory, compaction, and worker profiles separately.
-Without a separate memory route, memory stays rules-only; compaction uses the
-chat model. A LiteLLM gateway retains control of physical backend routing.
-
-</details>
-
-## Grow into larger workflows
-
-Clio can help with everyday development or coordinate several agents across a
-research workflow. Add structure when it helps your project.
-
-<details>
-<summary><strong>Project guidance, code navigation, and reusable skills</strong></summary>
-
-`CLIO-CODER.md` is your editable project handbook. Clio can draft it from the
-repository and adopt guidance from existing agent instruction files. A code
-index helps locate files and symbols; skills provide focused procedures when
-needed.
-
-```bash
-clio-coder context init
-clio-coder context index
-clio-coder context
-```
-
-Generated project state lives under `.clio-coder/`. During longer work, Clio
-manages which observations stay in the model's context while retaining durable
-history. Skill installation and promotion require operator approval.
-
-Read about [project context](docs/architecture/context-engine.md),
-[working sets](docs/architecture/context-working-set.md),
-[memory](docs/guide/proactive-memory.md), and
-[skills](docs/guide/skills-marketplace.md). For an architecture map,
-`clio-coder context map` produces a seed that the optional `archify` skill can render.
-
-</details>
-
-<details>
-<summary><strong>Domain plugins and materials research</strong></summary>
-
-Install a complete workflow with its prompts, agents, skills, scripts and references:
-
-```bash
-clio-coder library search
-clio-coder library install plugin:materio --user
-```
-
-In a new session, start with `/materio:help` or
-`/materio:identify-research`. The workflow progresses through
-supplied-paper literature review, lab feasibility, research tasks, verified
-execution, and a text handoff to WTF-P for paper planning. Researchers retain
-control of assumptions and scientific decisions.
-
-Clio uses shadow helpers for repository reconnaissance, provenance, and research.
-Eligible native helpers return validated typed results directly to the main agent;
-independent work can run in the background while the conversation continues.
-The terminal notice area shows helper activity, and full run receipts remain
-available when you need to inspect the evidence.
-
-The [Library](library/README.md) bundles skills, agent recipes, prompts, fleets,
-and plugins with Clio-Coder. It verifies complete package pins and supports
-previews, updates, removal and drift checks. Its portable skills can also be
-installed in Claude Code and discovered by Codex; Clio-Coder can review and
-import supported packages from those hosts. The [interop guide](docs/guide/interop.md)
-documents the measured formats and their limits. [Plugin usage](docs/guide/plugins.md),
-[package authoring](docs/guide/authoring-plugins.md), and
-[harness extensions](docs/guide/harness-extensions.md) describe the plugin and
-harness-extension contracts. WTF-P installs as a plugin with `clio-coder library
-install`; remove an older extension copy with `clio-coder extensions remove wtfp`.
-
-</details>
-
-<details>
-<summary><strong>Multi-agent workflows and workers over SSH</strong></summary>
-
-Give workers focused assignments with defined tools, file scopes, and budgets.
-Reviewers and judges remain read-only. For a repeatable build-and-test workflow:
-
-```bash
-clio-coder fleet new validation-pass --from build-test
-clio-coder fleet validate validation-pass
-clio-coder fleet graph validation-pass
-clio-coder fleet run validation-pass
-```
-
-A fleet describes the steps, dependencies, and review gates. Declared SSH nodes
-can run the same worker protocol, with explicit placement and capacity. Shared
-workspaces must have the same absolute path on each node; `localhost` refers
-to the node running the worker. Start with one worker before expanding.
-
-See [Fleet Dispatch](docs/guide/fleet-dispatch.md) and the
-[Fleet Demo Runbook](docs/process/fleet-demo-runbook.md).
-
-</details>
-
-<details>
-<summary><strong>Automation, editor connections, and recorded results</strong></summary>
-
-```bash
-clio-coder run "Summarize this repository's entry points."
-clio-coder run "<task>" --json
-clio-coder run "<task>" --agent coder
-clio-coder acp
-```
-
-Headless text mode writes the final answer to stdout and diagnostics to stderr.
-`--json` emits JSONL events. `acp` connects editor hosts through the Agent Client
-Protocol. Interactive approval prompts cannot be answered headlessly; worker
-requests that need permission are denied by default.
-
-Inspect recorded runs with:
-
-```bash
-clio-coder evidence list
-clio-coder evidence inspect <evidence-id>
-clio-coder trace phases <run-id>
-clio-coder usage report
-```
-
-See [output and exit codes](docs/guide/exit-codes-and-output.md),
-[ACP](docs/architecture/acp.md), and [Observability](docs/architecture/observability.md).
-
-</details>
-
-## Safety and scientific validation
-
-Clio lets you choose how much authority to give it. The default allows workspace
-edits and requires approval for unrecognized commands. Read-only and more
-autonomous modes are available; the safety policy applies at every level.
-Workers cannot gain more authority than the session that launched them.
-
-Recorded tool activity and run results help you review the work. They do not
-establish scientific correctness. Validate numerical results, inspect changes,
-and use your project's reference tests. Usage estimates depend on available
-pricing and telemetry; the tracked session budget is not a provider billing cap.
-
-Read the [Safety Model](docs/architecture/safety-model.md) and
-[Scientific Validation](docs/process/scientific-validation.md) for the boundaries.
-
-## Install
-
-The npm-backed bootstrap installer checks prerequisites and guides you through
-terminal setup:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/iowarp/clio-coder/main/scripts/install.sh | bash
-```
-
-To preview it from a source checkout, run `bash scripts/install.sh --dry-run`.
-The installer targets Linux and macOS (on Windows, use the npm command above),
-requires Node.js 22.19+ and npm, and installs under
-`$HOME/.local` without sudo or shell-profile edits. It checks for
-conflicting launchers, prints PATH guidance, and runs Clio's post-install migrations.
-It opens no browser and enables no background service automatically. Its next-step
-instructions follow the commands supported by the version actually installed.
-
-Options include `--version <tag-or-version>`, `--prefix <directory>`,
-`--omit-optional`, and `--dry-run`; pass them to a downloaded script using
-`bash -s -- <options>`. A source-checkout symlink is preserved unless you explicitly
-select `--force`. If you enabled the background service, run `clio-coder gui background uninstall`
-before removing the package. Remove an install at the default prefix with
-`npm uninstall -g --prefix "$HOME/.local" @iowarp/clio-coder`.
-
-The npm command in [Get started](#get-started) is the shortest path. Other
-package managers install the same CLI; Node.js is required for all of them.
-
-<details>
-<summary><strong>Other package managers and the optional Claude SDK</strong></summary>
-
-| Package manager | Install |
-| --- | --- |
-| pnpm | `pnpm add -g @iowarp/clio-coder` |
-| Bun | `bun add -g @iowarp/clio-coder` |
-| Yarn Classic | `yarn global add @iowarp/clio-coder` |
-
-Without a global install, use `npx --yes @iowarp/clio-coder@latest`,
-`pnpm dlx @iowarp/clio-coder@latest`, or `bunx @iowarp/clio-coder@latest`.
-Modern Yarn supports `yarn dlx -p @iowarp/clio-coder@latest clio-coder`.
-Keep Node on `PATH`; Bun manages installation but the CLI runs on Node.
-
-The optional Claude Agent SDK includes a large platform-specific binary.
-Only the `claude-sdk` worker runtime needs it. To skip it:
-
-```bash
-npm install -g @iowarp/clio-coder --omit=optional
-```
-
-For pnpm use `--no-optional`; for Bun use `--omit=optional`. Reinstall with
-optional dependencies enabled if you need the SDK later. Release `.tgz` files
-can also be installed with your package manager. See
+| Install with pnpm | `pnpm add -g @iowarp/clio-coder` |
+| Try without a global install | `npx --yes @iowarp/clio-coder@latest` |
+| Omit the optional Claude SDK worker dependency | `npm install -g @iowarp/clio-coder --omit=optional` |
+| Check your installation | `clio-coder doctor` |
+
+Node.js is still required when another package manager performs the install.
+The optional Claude Agent SDK includes a platform-specific binary; ordinary
+chat and native workers do not require it.
+
+For the bootstrap installer, source builds, upgrades, and removal, see
 [Installation and Lifecycle](docs/guide/installation-and-lifecycle.md).
 
 </details>
 
-<details>
-<summary><strong>Build from source</strong></summary>
+## What you can do
 
-From source, the latest stable release uses the pinned pnpm workflow:
+| Workflow | What Clio provides | Learn more |
+| --- | --- | --- |
+| **Understand a repository** | File and symbol navigation, a project handbook, bounded search, and a structural code index. | [Project context](docs/architecture/context-engine.md) |
+| **Make and verify changes** | File edits and diffs, shell execution, declared checks, numerical comparisons, and performance budgets. | [Tools](docs/guide/tool-usage.md) |
+| **Delegate focused work** | Coding, testing, review, and research recipes; separate worker models; bounded assignments and recorded results. | [Workers and fleets](docs/guide/fleet-dispatch.md) |
+| **Keep long tasks moving** | Context accounting, compaction, task memory, durable conversation history, and fork/resume navigation. | [Memory](docs/guide/proactive-memory.md) |
+| **Add domain knowledge** | Operator-activated skills, prompt templates, plugins, harness extensions, and local MCP tool servers. | [Library](library/README.md) |
+| **Inspect what happened** | Tool activity, usage, traces, decisions, evidence, and worker receipts. | [Observability](docs/architecture/observability.md) |
+
+These capabilities work together. A worker result is a lead you can inspect;
+a successful command is evidence of that command's outcome; neither substitutes
+for scientific validation.
+
+### Work in the terminal
+
+The TUI keeps the conversation, tool activity, diffs, and permission decisions
+in one place. Its footer shows the active model and context use; dashboards
+provide more detail without taking over the conversation.
+
+| Want to… | Use… |
+| --- | --- |
+| Find commands and shortcuts | `/help` |
+| Choose a model or change settings | `/model`, `/settings` |
+| Attach a project file | Type `@` and choose a path |
+| Inspect context, memory, or cost | `/context`, `/memory`, `/cost` |
+| Browse skills and recipes | `/library` or `Alt+L` |
+| Inspect workers | `Alt+W` |
+| Manage the task board | `/tasks` |
+| Branch or recover a conversation | `/tree`, `/fork`, `/resume` |
+| Leave the session | `/quit` |
+
+With the default bindings, **Enter** steers an active turn, **Ctrl+Q** queues a
+follow-up, and **Escape** interrupts. Permission cards provide separate **Deny**
+and **Stop** actions. For the main agent, deny skips the displayed invocation;
+stop ends the turn. Worker cards explain when identical calls in the same run
+can reuse a permission decision.
+
+Clio includes contextual guidance by default. Use `clio-coder --no-demo` for a
+quieter session, or change `interface.demo` in `/settings`. Guidance does not
+automatically run demonstrations. See the full
+[command and shortcut reference](docs/guide/commands-and-modes.md).
+
+### Start small, then delegate
+
+Give the main agent a bounded change and its acceptance criteria:
+
+> Add a regression for the boundary case, make the smallest fix, and run the
+> relevant checks. Keep the public API unchanged. Do not commit or push.
+
+When an independent second pass would help, run a worker explicitly:
+
+```text
+/run verifier Review the current diff and run the relevant existing checks. Do not edit files.
+```
+
+Configure a different worker model under **Settings → Fleet**, or build
+repeatable multi-step workflows with fleets. Local workers are enough to get
+started; [SSH placement](docs/guide/fleet-dispatch.md) is optional.
+
+### Use the same harness in automation
+
+```bash
+clio-coder run --autonomy read-only "Summarize this repository's entry points."
+clio-coder run --json "Investigate the failing parser test and report the evidence."
+clio-coder acp
+```
+
+Headless text mode writes the final answer to stdout and diagnostics to stderr;
+`--json` emits JSONL events. ACP connects compatible editor hosts. Headless runs
+cannot answer interactive permission prompts. See
+[output and exit codes](docs/guide/exit-codes-and-output.md) and
+[ACP integration](docs/architecture/acp.md).
+
+## Choose your models
+
+A saved connection is a **target**. Chat, workers, and optional model-assisted
+memory can use different targets and models.
+
+| Where the model runs | Examples |
+| --- | --- |
+| **Your workstation or server** | Ollama, LM Studio, llama.cpp, vLLM, SGLang, Lemonade |
+| **A gateway or compatible API** | LiteLLM, OpenAI-compatible and Anthropic-compatible endpoints |
+| **Cloud APIs** | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock |
+| **Subscription sign-in** | ChatGPT through `openai-codex`; Claude through `anthropic-max` |
+| **Institutional inference** | Argonne ALCF Sophia and Metis through Globus OAuth |
+
+Model capabilities vary. Check tool calling, context capacity, and reasoning
+support for the route you choose. Subscription integrations depend on vendor
+sign-in support and terms; a gateway controls its own backend placement.
+
+The [connection guide](docs/guide/configuration-and-targets.md) covers setup,
+and the [model catalog](docs/architecture/model-catalog.md) explains measured
+capabilities and runtime differences. Without a separate memory route, task
+memory uses rules rather than another model.
+
+## Documentation you can ask about
+
+**Ask Clio how to use or extend Clio.** Her documentation, prompt fragments,
+agent recipes, and source ship with the package. The harness directs questions
+about its own features to the installed documentation, so Clio can look up the
+version you are actually running instead of guessing from your project's files.
+
+Try: “How do I use a different model for workers?” or “What can you do without
+asking me?” Treat her answer as an explanation you can check against the linked
+guide and effective settings.
+
+Read the same documentation in your browser:
+
+```bash
+clio-coder docs
+clio-coder docs safety
+```
+
+The browser app renders the bundled Markdown with navigation and page outlines.
+It runs locally and is also the preview home for Clio's graphical features.
+The terminal remains the primary coding interface for this release.
+See [browser app documentation](docs/gui/README.md) for launch and lifecycle details.
+
+| Looking for… | Start here |
+| --- | --- |
+| A map of the documentation | [Documentation index](docs/README.md) |
+| First connection and effective settings | [Configuration and targets](docs/guide/configuration-and-targets.md) |
+| Commands and keyboard controls | [Commands and modes](docs/guide/commands-and-modes.md) |
+| Connection or installation trouble | [Troubleshooting](docs/guide/troubleshooting.md) |
+| Scientific checks and measurements | [Scientific validation](docs/process/scientific-validation.md) |
+| How to extend the harness | [Extensions](docs/guide/harness-extensions.md) and [plugins](docs/guide/authoring-plugins.md) |
+
+## Choose authority, keep the evidence
+
+Clio offers **read-only**, **suggest**, **auto-edit** (the default), and
+**full-auto** modes. Full-auto removes routine autonomy prompts; it does not
+disable safety-net checks, protected-path rules, or explicit task constraints.
+Workers remain bounded by the authority and scope of their assignment.
+
+Clio is **not a general operating-system sandbox**. Tool admission, receipts,
+and validation help you supervise work; they cannot establish scientific
+correctness or make arbitrary shell programs safe. The tracked dollar budget
+also depends on available usage and pricing data and is not a provider billing cap.
+
+Read the [safety model](docs/architecture/safety-model.md), use reference tests,
+and review changes before delivery. Report security problems privately through
+[SECURITY.md](SECURITY.md).
+
+## Install
+
+The npm command in [Get started](#get-started) is the shortest path. The
+[installation guide](docs/guide/installation-and-lifecycle.md) also covers the
+bootstrap installer, upgrades, selective resets, and removal.
+
+<details>
+<summary><strong>Build and install a published release from source</strong></summary>
+
+From source, pin the release you intend to run. The following selects v0.5.0
+once its release tag is published; for development before the tag, use the
+[contributor checkout instructions](CONTRIBUTING.md#set-up-a-checkout).
 
 ```bash
 git clone --branch v0.5.0 https://github.com/iowarp/clio-coder.git
@@ -401,25 +259,19 @@ hash -r
 "$HOME/.local/bin/clio-coder" --version
 ```
 
-The installer resolves dependencies, builds, and links the CLI into
+The installer resolves dependencies, builds, and links the launcher into
 `${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}`. If Corepack is unavailable, install
-pnpm with `npm install -g pnpm@10.34.5`. Use `--dry-run` to preview installation,
-`--skip-deps` after syncing dependencies, or
-`bash scripts/install-local.sh --skip-deps --no-build` for an existing build.
+pnpm with `npm install -g pnpm@10.34.5`. Preview with
+`bash scripts/install-local.sh --dry-run`.
 
 Run `command -v clio-coder` to check which launcher your shell reaches. After
-changing `PATH`, use `hash -r` in Bash or `rehash` in Zsh.
-
-For development without a launcher, run `pnpm install --frozen-lockfile`,
-`pnpm run build`, and `node dist/cli/index.js`. `pnpm run dev` rebuilds on edits;
-restart Clio to load the new build.
+changing `PATH`, use `hash -r` in Bash or `rehash` in Zsh. An older global
+installation can otherwise shadow the launcher you just installed.
 
 </details>
 
 <details>
-<summary><strong>Update, repair, reset, or uninstall</strong></summary>
-
-Use the package manager that installed Clio. For npm:
+<summary><strong>Update or remove an npm installation</strong></summary>
 
 ```bash
 npm install -g @iowarp/clio-coder@latest
@@ -427,136 +279,49 @@ clio-coder upgrade --post-install
 clio-coder doctor
 ```
 
-For source installs, update your checkout and rerun `pnpm run install:local`.
-`clio-coder doctor` checks local health without modifying files;
-`doctor --fix` repairs the structures and permissions it supports.
-`clio-coder configure --edit` validates settings edits and can repair malformed YAML.
-
-To remove the npm package, use `npm uninstall -g @iowarp/clio-coder`.
-Removing the package preserves Clio's user data. For a deliberate data purge,
-preview `clio-coder uninstall --dry-run`; `uninstall --remove-binary` also
-removes a local source launcher. It stops and disables the owned web background service
-before deleting its state and removes its desktop entry. Ownership conflicts or a
-failed service stop preserve Clio state and report the problem. Per-project files
-are preserved.
-
-`clio-coder reset --help` lists selective reset options. Use `--dry-run` before
-a reset. The [lifecycle guide](docs/guide/installation-and-lifecycle.md) explains
-exactly which settings, credentials, and session directories each option affects.
+`npm uninstall -g @iowarp/clio-coder` removes the package and preserves user data.
+If you installed the optional background app service, remove it with
+`clio-coder gui background uninstall` before removing the package. For a deliberate
+Clio data purge, first inspect `clio-coder uninstall --dry-run`; see the
+[lifecycle guide](docs/guide/installation-and-lifecycle.md) for exact scope.
 
 </details>
 
-## Optional browser app
+## Contribute
 
-The terminal is the primary interface. Clio Coder also packages a local browser
-app over the same runtime, projects, configuration, and model targets:
+A difficult build, an unreliable connection, or a workflow that takes too much
+babysitting makes a useful bug report. Include your Clio and Node versions,
+reproduction steps, and relevant `clio-coder doctor` output. Remove credentials
+and sensitive project data.
 
-```bash
-clio-coder gui --open
-```
+- [Report an issue or suggest an improvement](https://github.com/iowarp/clio-coder/issues)
+- [Set up a development checkout](CONTRIBUTING.md)
+- [Read the release notes](CHANGELOG.md) and [roadmap](ROADMAP.md)
+- [Contribute a skill or workflow](library/README.md)
 
-It prints a private launch link and opens your default browser only when asked.
-The server binds to `127.0.0.1`, and its Traces page reads the trace database
-without modifying it. On Linux with a systemd user session,
-`clio-coder gui background install --open` keeps the app available after login
-and lets you install it from the browser as a PWA; `gui background status`,
-`stop`, and `uninstall` manage that service. Other platforms can run the
-foreground app while its server is running. The background service has been
-verified on Linux only; macOS and Windows have not been exercised. Development
-details are in [`apps/clio-coder-gui/README.md`](apps/clio-coder-gui/README.md).
+Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
-## Help and documentation
-
-The guides under [`docs/`](docs/README.md) are Markdown, ship with the package,
-and need no browser. To discover commands, use `clio-coder --help` (`--help
---all` includes developer tools) and `/help` inside a session.
-`clio-coder docs [topic]` opens the same guides in the browser app; for example,
-`clio-coder docs safety` opens the safety guide, and `--no-open` prints the
-private launch link instead of opening a browser.
-
-If setup fails, start with `clio-coder doctor` and
-`clio-coder configure --section diagnostics`.
-
-| Looking for… | Start here |
-| --- | --- |
-| Setup, settings, and connections | [Configuration guide](docs/guide/configuration-and-targets.md) |
-| Commands and keyboard shortcuts | [Commands and Modes](docs/guide/commands-and-modes.md) |
-| Installation or connection problems | [Troubleshooting](docs/guide/troubleshooting.md) |
-| Scientific checks and measurements | [Scientific Validation](docs/process/scientific-validation.md) |
-| Architecture and advanced workflows | [Documentation index](docs/README.md) |
-
-When opening an issue, include Clio and Node versions, the relevant doctor
-output, and steps to reproduce. Remove credentials and sensitive project data.
-
-## Contributing
-
-Experiences from real research projects are especially useful: a difficult
-build, an unreliable model connection, or a workflow that needs better support.
-Read [CONTRIBUTING.md](CONTRIBUTING.md) for setup and review expectations.
-Report security issues through [SECURITY.md](SECURITY.md).
-
-<details>
-<summary><strong>Developer commands and guidance for coding agents</strong></summary>
-
-```bash
-corepack enable pnpm
-pnpm install --frozen-lockfile
-pnpm run dev          # rebuild on source changes
-pnpm run ci           # types, lint, build, tests
-pnpm run ci:release   # includes package and distribution checks
-```
-
-Local imports end in `.js`; tests use `node:test`. Run a focused test with
-`pnpm run test:file tests/contracts/<name>.test.ts`. Model-dependent evaluations
-under `evals/` are explicit operator runs, separate from deterministic CI.
-
-For agents entering this repository: read `CONTRIBUTING.md`, the local
-`CLIO-CODER.md` when present, and the owning subsystem's documentation. Use
-focused source reads; treat the schema and behavior contracts as authoritative.
-Update conflicting documentation with the code and run the appropriate checks.
-
-Start with [Architecture](docs/architecture/architecture.md),
-[Tool Usage](docs/guide/tool-usage.md), and
-[Worker Dispatch](docs/architecture/worker-dispatch-mechanics.md).
-
-</details>
-
-## Acknowledgements
+## Built by IOWarp, on open source
 
 Clio Coder is developed by the [Gnosis Research Center](https://grc.iit.edu) at
 [Illinois Tech](https://www.iit.edu), in collaboration with the University of
 Utah, as part of [IOWarp](https://iowarp.ai). The IOWarp CLIO architecture is
 supported by the National Science Foundation under
-[Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318),
-2024–2029. Principal Investigator: Dr. Xian-He Sun; Co-Principal Investigators:
-Dr. Anthony Kougkas, Dr. Jake Hochhalter, and Dr. Vivek Srikumar.
+[Award #2411318](https://www.nsf.gov/awardsearch/showAward?AWD_ID=2411318).
 
-This experiment builds on generous work across the open-source and AI communities:
+Clio builds on [Earendil Works' Pi framework](https://github.com/earendil-works/pi),
+the [Agent Client Protocol](https://agentclientprotocol.com), and the work of
+open-source runtime, terminal, compiler, model-serving, and scientific-tool
+communities. Optional Claude SDK workers use Anthropic's Claude Agent SDK.
+See [NOTICE](NOTICE) for component acknowledgements and distributed notices.
 
-- **Agent foundations:** [Earendil Works' Pi framework](https://github.com/earendil-works/pi),
-  [Anthropic's Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-typescript),
-  and the [Agent Client Protocol](https://agentclientprotocol.com).
-- **Models and infrastructure:** OpenAI, Anthropic, Google, and the other model
-  providers; Ollama, LM Studio, llama.cpp, vLLM, SGLang, Lemonade, and LiteLLM;
-  and Argonne ALCF and Globus for institutional inference access.
-- **The software underneath:** Node.js, Microsoft's TypeScript and node-pty,
-  Tree-sitter, Meta's React, Deno, Vite, esbuild, Biome, and the maintainers of
-  our parsing, rendering, and image libraries.
-- **Optional terminal tools:** [Herdr](https://herdr.dev),
-  [Yazi](https://yazi-rs.github.io), and [croc](https://github.com/schollz/croc).
-
-Clio uses some of these directly and connects to others through optional
-integrations. Exact packages are recorded in [package.json](package.json) and
-the workspace manifests; component notices are in [NOTICE](NOTICE).
-
-CLIO means **Context Layer for Input/Output**; the name also recalls the Greek
-muse of history. Explore the wider ecosystem:
+CLIO means **Context Layer for Input/Output**. Explore the wider ecosystem:
 [clio-core](https://github.com/iowarp/clio-core) for data and context storage,
 and [clio-kit](https://github.com/iowarp/clio-kit) for scientific tool servers.
 
 ---
 
 <p align="center">
-  Apache-2.0 · <a href="LICENSE">License</a> · <a href="NOTICE">Notices</a><br />
+  <strong>Clio Coder</strong> · Apache-2.0 · <a href="LICENSE">License</a> · <a href="NOTICE">Notices</a><br />
   <sub>Built for the people who maintain the code that science runs on.</sub>
 </p>

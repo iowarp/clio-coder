@@ -533,7 +533,7 @@ function buildWelcomeDashboardLines(
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
 		field("Permissions", theme.fg(stats.autonomy === "full-auto" ? "warning" : "muted", stats.autonomy)),
-		"",
+		theme.fg("dim", "Ask Clio how to use or extend her."),
 		theme.fg("dim", "Targets"),
 		theme.fg("muted", stats.targets),
 		theme.fg("dim", "Fleet"),
