@@ -186,7 +186,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 					// First-substantive-turn signal for once-per-session reminders:
 					// a fresh session's opening turn has an empty conversation.
-					conversationMessages: agentRuntime.agent.state.messages.length,
+					conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system").length,
 					pendingSkillRequests: pendingSkillRequestCount,
 				},
 			};

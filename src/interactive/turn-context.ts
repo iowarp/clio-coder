@@ -1,3 +1,4 @@
+import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
 /**
  * Turn context ownership: the session-prompt compile cache, context-snapshot
  * accounting, prompt-cache honesty, and compaction. `runAutoCompact` is the
@@ -208,7 +209,7 @@ export interface TurnContext {
 		signal?: AbortSignal,
 	): Promise<
 		| {
-				context: { systemPrompt: string; messages: AgentMessage[]; tools: AgentRuntime["agent"]["state"]["tools"] };
+				context: { messages: AgentMessage[]; tools: AgentRuntime["agent"]["state"]["tools"] };
 				model: AgentRuntime["agent"]["state"]["model"];
 				thinkingLevel: AgentRuntime["agent"]["state"]["thinkingLevel"];
 		  }
@@ -429,7 +430,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			runtimeId: agentRuntime.runtimeId,
 			modelId: agentRuntime.wireModelId,
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
-			conversationMessages: agentRuntime.agent.state.messages,
+			conversationMessages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
 			activeToolSchemas: agentRuntime.agent.state.tools,
 			desiredContextWindow: details.desiredContextWindow,
 			effectiveContextWindow: details.effectiveContextWindow,
@@ -447,7 +448,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const liveStreamingOutputTokens = (): number => {
 		if (!state.runtime) return 0;
 		if (state.streaming) {
-			const messages = state.runtime.agent.state.messages;
+			const messages = state.runtime.agent.state.messages.filter((message) => message.role !== "system");
 			const lastMsg = messages[messages.length - 1] as { role?: string; payload?: unknown; content?: unknown } | undefined;
 			if (lastMsg && lastMsg.role === "assistant") {
 				return ceilChars(contentChars(lastMsg.payload ?? lastMsg.content));
@@ -584,7 +585,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const reconciledHistoryTokens = (agentRuntime: AgentRuntime): number | null => {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
-		const messages = agentRuntime.agent.state.messages;
+		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
 		if (
 			anchor.runtime !== agentRuntime ||
 			anchor.model !== agentRuntime.agent.state.model ||
@@ -611,7 +612,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
-			messages: agentRuntime.agent.state.messages,
+			messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
 			tools: agentRuntime.agent.state.tools,
 			...(pendingUserText !== undefined ? { pendingUserText } : {}),
 		};
@@ -663,15 +664,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		reconciledAnchor = {
 			...reconciledAnchor,
 			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
-			anchoredMessages: [...agentRuntime.agent.state.messages],
+			anchoredMessages: [...agentRuntime.agent.state.messages.filter((message) => message.role !== "system")],
 		};
 	};
 
 	const refreshAgentMessagesFromSession = (agentRuntime: AgentRuntime): ReadonlyArray<SessionEntry> => {
 		const refreshedEntries = deps.readSessionEntries?.() ?? [];
-		agentRuntime.agent.state.messages = buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
-			...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
-		});
+		replaceEngineMessages(
+			agentRuntime.agent,
+			buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
+				...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+			}),
+		);
 		state.replayedContextMessages = [];
 		return refreshedEntries;
 	};
@@ -771,7 +775,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								entries: deps.readSessionEntries(),
 								context: {
 									systemPrompt: agentRuntime.agent.state.systemPrompt,
-									messages: agentRuntime.agent.state.messages,
+									messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
 									tools: agentRuntime.agent.state.tools,
 									model: agentRuntime.agent.state.model,
 									thinkingLevel: agentRuntime.agent.state.thinkingLevel,
@@ -1126,14 +1130,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	};
 
 	const toolResultTail = (agentRuntime: AgentRuntime): boolean => {
-		const messages = agentRuntime.agent.state.messages;
+		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
 		const tail = messages[messages.length - 1] as AgentMessage | undefined;
 		return !!tail && typeof tail === "object" && tail !== null && "role" in tail && tail.role === "toolResult";
 	};
 
 	const continuationContextUpdate = (agentRuntime: AgentRuntime) => ({
 		context: {
-			systemPrompt: agentRuntime.agent.state.systemPrompt,
 			messages: [...agentRuntime.agent.state.messages],
 			tools: [...agentRuntime.agent.state.tools],
 		},
@@ -1170,7 +1173,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// same messages, which is why it is folded in here.
 				reconciledAnchor = {
 					tokens: promptTokens + (usage.output || 0),
-					anchoredMessages: [...runtime.agent.state.messages],
+					anchoredMessages: [...runtime.agent.state.messages.filter((message) => message.role !== "system")],
 					runtime,
 					model: runtime.agent.state.model,
 					modelKey: anchorModelKey(runtime),
@@ -1185,7 +1188,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
 			if (runtime) {
-				const messages = runtime.agent.state.messages;
+				const messages = runtime.agent.state.messages.filter((message) => message.role !== "system");
 				// The just-completed response is output, not part of its own prompt.
 				const promptMessages = messages.at(-1)?.role === "assistant" ? messages.slice(0, -1) : messages;
 				currentContextSnapshot = captureRuntimeContextSnapshot(
@@ -1299,7 +1302,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				const previousHash = sessionPromptHash ?? lastRecordedPromptHash();
 				const changed = agentRuntime.agent.state.systemPrompt !== result.systemPrompt;
 				if (changed) {
-					agentRuntime.agent.state.systemPrompt = result.systemPrompt;
+					setEngineSystemPrompt(agentRuntime.agent, result.systemPrompt);
 					pendingPromptLogEntry = {
 						version: PROMPT_MANIFEST_VERSION,
 						at: new Date().toISOString(),
@@ -1524,7 +1527,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				input,
 				cacheRead,
 				cacheWrite,
-				backendVerdict: backendCacheVerdict(input, cacheRead, backend),
+				backendVerdict: backendCacheVerdict(input, cacheRead, backend, usage.cacheReadReported),
 			};
 			if (backend !== undefined) promptCache.backend = { ...backend };
 			if (nextAssistantColdReasons.length > 0) {

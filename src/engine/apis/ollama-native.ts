@@ -30,6 +30,7 @@ import {
 import { ollamaModelIds } from "../../domains/providers/runtimes/common/ollama-model-ids.js";
 import type { LocalModelQuirks, SamplingProfile } from "../../domains/providers/types/local-model-quirks.js";
 import { calculateEngineCost } from "../ai.js";
+import { resolvedRequestContext } from "../context.js";
 import { createGemmaChannelFilter, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { createSentinelStripper } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream } from "./degraded-inference.js";
@@ -408,7 +409,7 @@ function emitToolCall(raw: OllamaToolCall, output: AssistantMessage, stream: Ass
 		type: "toolCall",
 		id: randomUUID(),
 		name: raw.function?.name ?? "",
-		arguments: args,
+		arguments: args as ToolCall["arguments"],
 	};
 	output.content.push(toolCall);
 	const idx = output.content.length - 1;
@@ -655,7 +656,8 @@ function stripReasoning(options: SimpleStreamOptions | undefined): StreamOptions
 
 export const ollamaNativeApiProvider: EngineApiProvider<"ollama-native"> = {
 	api: "ollama-native",
-	stream: (model, context, options) => runStream(model, context, options, fallbackThinkingLevel(model)),
+	stream: (model, context, options) =>
+		runStream(model, resolvedRequestContext(context), options, fallbackThinkingLevel(model)),
 	streamSimple: (model, context, options?: SimpleStreamOptions) =>
-		runStream(model, context, stripReasoning(options), thinkingLevelFromSimple(options)),
+		runStream(model, resolvedRequestContext(context), stripReasoning(options), thinkingLevelFromSimple(options)),
 };

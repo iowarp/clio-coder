@@ -4,8 +4,9 @@ import type { MiddlewareContract } from "../../src/domains/middleware/contract.j
 import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime.js";
 import { buildOpenTasksMessage, createTaskNudgeRegistration } from "../../src/domains/middleware/task-nudge.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
-import type { MiddlewareEffect } from "../../src/domains/middleware/types.js";
+import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import { createTurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
 
@@ -74,4 +75,26 @@ test("deduplicating model text preserves hard-block effects and distinct reminde
 		middleware.flushPendingReminders(),
 		"<system-reminder>\nsame finding\n\ndifferent finding\n</system-reminder>",
 	);
+});
+
+test("a Pi system baseline does not make the first substantive turn look like existing conversation", () => {
+	const counts: unknown[] = [];
+	const { agent } = createEngineAgent({ initialState: { systemPrompt: "session policy" } });
+	const runtime = { agent, wireModelId: "fixture" } as AgentRuntime;
+	const middleware = createTurnMiddleware({
+		state: createTurnState("off"),
+		middleware: {
+			runHook: (input: MiddlewareHookInput) => {
+				counts.push(input.metadata?.conversationMessages);
+				return { effects: [], ruleIds: [] };
+			},
+		} as unknown as MiddlewareContract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		emitNotice: () => {},
+		emitFooterNotice: () => {},
+	});
+	middleware.fireTurnStart(runtime, "inspect source");
+	agent.state.messages.push({ role: "user", content: "inspect source", timestamp: 1 });
+	middleware.fireTurnStart(runtime, "continue");
+	deepStrictEqual(counts, [0, 1]);
 });

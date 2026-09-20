@@ -671,7 +671,12 @@ describe("smoke/installed package", { concurrency: false }, () => {
 			 const ordinary = require.resolve("@earendil-works/pi-tui");
 			 const stock = await import(pathToFileURL(ordinary).href);
 			 assert.equal(stock.TuiAltScreen.prototype.setApplicationInputPolicy, undefined);
-			 assert.ok(existsSync(join(dirname(ordinary), "..", "native", "darwin", "prebuilds", "darwin-arm64", "darwin-modifiers.node")));
+			 for (const platform of ["darwin", "linux", "win32"]) {
+			  for (const arch of ["arm64", "x64"]) {
+			   const filename = platform + "-platform" + (platform === "linux" ? "-x11" : "") + ".node";
+			   assert.ok(existsSync(join(dirname(ordinary), "..", "native", platform, "prebuilds", platform + "-" + arch, filename)), filename + " " + arch);
+			  }
+			 }
 			 const noop = () => {};
 			 let ingress = noop;
 			 const terminal = { columns: 80, rows: 24, kittyProtocolActive: false, start: fn => ingress = fn, stop: noop, write: noop, moveBy: noop, hideCursor: noop, showCursor: noop, clearLine: noop, clearFromCursor: noop, clearScreen: noop, setTitle: noop, setProgress: noop };

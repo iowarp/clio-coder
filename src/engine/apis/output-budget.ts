@@ -1,6 +1,7 @@
 import type { Api, Context, Model, StreamOptions } from "@earendil-works/pi-ai";
 import { CLIO_MIN_MAX_OUTPUT_TOKENS } from "../../core/context-floor.js";
 import { ceilChars, estimateAgentMessageTokens, toolSchemaChars } from "../../domains/session/context-accounting.js";
+import { resolvedRequestContext } from "../context.js";
 
 const CONTEXT_BUDGET_SAFETY_TOKENS = 1024;
 /**
@@ -66,7 +67,8 @@ function clampOutputToRemainingContext(ceiling: number, contextWindow: number, i
 	return Math.min(ceiling, available);
 }
 
-export function estimateInputTokensFromContext(context: Context): number {
+export function estimateInputTokensFromContext(input: Context): number {
+	const context = resolvedRequestContext(input);
 	const system = context.systemPrompt ? ceilChars(context.systemPrompt.length) : 0;
 	const messages = context.messages.reduce((sum, msg) => sum + estimateAgentMessageTokens(msg), 0);
 	const tools = (context.tools ?? []).reduce((sum, tool) => sum + ceilChars(toolSchemaChars(tool)), 0);

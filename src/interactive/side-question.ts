@@ -196,7 +196,9 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	const context = {
 		systemPrompt: input.systemPrompt,
 		messages: [
-			...input.messages,
+			// Pi 0.86 stores prompt/tool declarations in history. This tool-free
+			// round has its own prompt and must not inherit those declarations.
+			...input.messages.filter((message) => message.role !== "system"),
 			{ role: "user", content: [{ type: "text", text: input.userText }], timestamp: Date.now() },
 		],
 	};

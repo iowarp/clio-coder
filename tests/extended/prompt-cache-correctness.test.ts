@@ -1,13 +1,12 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { Type } from "typebox";
-
 import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import { toolSignatureFromState } from "../../src/interactive/chat-loop-messages.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
@@ -353,14 +352,14 @@ describe("main compiled-prompt cache identity", () => {
 				capabilityDecisions: { tools: true },
 				contextWindowDetails: { effectiveContextWindow: 32_768, contextWindowSource: "loaded" },
 			},
-			agent: {
-				state: {
+			agent: createEngineAgent({
+				initialState: {
 					systemPrompt: "",
 					thinkingLevel: "off",
 					messages: [],
 					tools: [],
 				},
-			},
+			}).agent,
 		};
 		const context = createTurnContext({
 			state,

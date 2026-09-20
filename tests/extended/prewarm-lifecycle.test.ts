@@ -21,18 +21,27 @@ function fixture() {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = true;
 	settings.chat.target = "local";
+	settings.chat.model = "fixture";
 	const target = { id: "local", runtime: "llamacpp", url: "https://fixture.invalid" };
 	const model = llamacpp.synthesizeModel(target, "fixture", null);
 	const { agent } = createEngineAgent({ initialState: { model, thinkingLevel: "off" } });
 	const runtime = { agent, targetId: target.id, runtimeId: target.runtime, wireModelId: model.id } as AgentRuntime;
 	const rounds: Array<{ input: PrewarmRoundInput; finish: (value: PrewarmRoundResult) => void }> = [];
+	let started!: () => void;
+	const roundStarted = new Promise<void>((resolve) => {
+		started = resolve;
+	});
 	let reservations = 0;
 	let recorded = 0;
 	let visible = 0;
 	const warm = createTurnPrewarm({
 		state: createTurnState("off"),
 		getSettings: () => settings,
-		providers: { getTarget: () => target, getRuntime: () => llamacpp } as unknown as ProvidersContract,
+		providers: {
+			getTarget: () => target,
+			getRuntime: () => llamacpp,
+			auth: { resolveForTarget: async () => ({ apiKey: "fixture" }) },
+		} as unknown as ProvidersContract,
 		context: {
 			ensureSessionPrompt: async () => {},
 			notePrewarm: () => {
@@ -68,9 +77,10 @@ function fixture() {
 		runPrewarm: (input) =>
 			new Promise((finish) => {
 				rounds.push({ input, finish });
+				started();
 			}),
 	});
-	return { warm, rounds, counts: () => ({ reservations, recorded, visible }) };
+	return { warm, rounds, roundStarted, counts: () => ({ reservations, recorded, visible }) };
 }
 
 const completed: PrewarmRoundResult = {
@@ -85,7 +95,7 @@ test("detached warming retains ownership and collapses repeated triggers to one 
 	const f = fixture();
 	try {
 		f.warm.schedule("session-start");
-		await delay(10);
+		await f.roundStarted;
 		strictEqual(f.rounds.length, 1);
 		for (let i = 0; i < 10; i += 1) {
 			f.warm.schedule("resume");
@@ -108,7 +118,7 @@ test("detached warming retains ownership and collapses repeated triggers to one 
 test("shutdown aborts detached work and forbids later schedules without releasing its reservation early", async () => {
 	const f = fixture();
 	f.warm.schedule("resume");
-	await delay(10);
+	await f.roundStarted;
 	f.warm.cancel();
 	f.warm.dispose();
 	strictEqual(f.rounds[0]?.input.signal?.aborted, true);

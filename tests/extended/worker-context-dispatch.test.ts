@@ -23,7 +23,10 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 for (const mode of ["isolated", "fork", "splice"] as const) {
 	test(`production dispatch and native HTTP worker deliver ${mode} context exactly once`, async () => {
 		const env = await isolateClioEnv("clio-coder-worker-context-dispatch-");
-		const parent: AgentMessage[] = [{ role: "user", content: "PARENT_CONSTRAINT_42", timestamp: 1 }];
+		const parent: AgentMessage[] = [
+			{ role: "system", content: "PARENT_ONLY_SYSTEM_POLICY", timestamp: 0 },
+			{ role: "user", content: "PARENT_CONSTRAINT_42", timestamp: 1 },
+		];
 		let captures = 0;
 		const fixture = await startGatewayThinkingFixture("lm-studio", "zbook/ornith-1.5-35b-a3b", async () => {
 			parent.push({ role: "user", content: "LATER_PARENT_TURN", timestamp: 2 });
@@ -90,6 +93,8 @@ for (const mode of ["isolated", "fork", "splice"] as const) {
 			const request = JSON.stringify(fixture.requests[0]);
 			equal(request.split("PARENT_CONSTRAINT_42").length - 1, mode === "isolated" ? 0 : 1);
 			ok(!request.includes("LATER_PARENT_TURN"));
+			ok(!request.includes("PARENT_ONLY_SYSTEM_POLICY"));
+			equal(result.messages[0]?.role, "user", "worker output starts after the prompt/tool baseline and inherited history");
 			if (mode === "fork")
 				ok(
 					!JSON.stringify(events).includes("PARENT_CONSTRAINT_42"),

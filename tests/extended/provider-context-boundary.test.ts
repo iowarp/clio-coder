@@ -4,7 +4,12 @@ import { describe, it } from "node:test";
 import { serializeConversation } from "../../src/domains/session/compaction/branch-summary.js";
 import { estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import type { BashExecutionEntry } from "../../src/domains/session/entries.js";
-import { streamSimple } from "../../src/engine/ai.js";
+import {
+	engineRetryDelayMs,
+	isEngineContextOverflow,
+	isEngineRetryableAssistantError,
+	streamSimple,
+} from "../../src/engine/ai.js";
 import { findEngineEnvKeys, getEngineEnvApiKey } from "../../src/engine/env-api-keys.js";
 import type { AgentMessage, EngineModel } from "../../src/engine/types.js";
 import { assistantSessionPayload } from "../../src/interactive/chat-loop-messages.js";
@@ -149,4 +154,60 @@ describe("Pi provider metadata across Clio persistence", () => {
 		deepStrictEqual(findEngineEnvKeys("qwen-token-plan-individual", env), ["QWEN_TOKEN_PLAN_API_KEY"]);
 		strictEqual(getEngineEnvApiKey("qwen-token-plan-individual", env), "fixture-key");
 	});
+});
+
+it("inherits Pi 0.86.1 overflow, transient-error classification and Meta environment keys", () => {
+	strictEqual(isEngineContextOverflow("prompt too long"), true);
+	strictEqual(isEngineRetryableAssistantError("520 unknown error"), true);
+	strictEqual(isEngineRetryableAssistantError("503 Service Unavailable"), true);
+	strictEqual(isEngineRetryableAssistantError("insufficient_quota"), false);
+	deepStrictEqual(
+		[1, 2, 3, 1024].map((attempt) => engineRetryDelayMs(2000, 60000, attempt)),
+		[2000, 4000, 8000, 60000],
+	);
+	deepStrictEqual(findEngineEnvKeys("meta", { META_API_KEY: "fixture" }), ["META_API_KEY"]);
+	strictEqual(getEngineEnvApiKey("meta", { META_API_KEY: "fixture" }), "fixture");
+});
+
+it("preserves mid-conversation system messages through Clio's native completions adapter", async () => {
+	const { registerClioApiProviders } = await import("../../src/engine/apis/index.js");
+	registerClioApiProviders();
+	const model: EngineModel = {
+		id: "fixture",
+		name: "fixture",
+		api: "openai-completions",
+		provider: "fixture",
+		baseUrl: "https://provider.invalid",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 32768,
+		maxTokens: 4096,
+		compat: { supportsMidConvoSystemMessages: true },
+	};
+	let payload: { messages: Array<{ role: string; content: string }> } | undefined;
+	const events = streamSimple(
+		model,
+		{
+			messages: [
+				{ role: "system", content: "base policy", timestamp: 0 },
+				{ role: "user", content: "task", timestamp: 1 },
+				{ role: "system", content: "updated policy", timestamp: 2 },
+				{ role: "user", content: "continue", timestamp: 3 },
+			],
+		},
+		{
+			apiKey: "fixture",
+			onPayload(value) {
+				payload = value as typeof payload;
+				throw new Error("captured before network");
+			},
+		},
+	);
+	await events.result();
+	ok(payload);
+	deepStrictEqual(
+		payload.messages.filter(({ role }) => role === "system").map(({ content }) => content),
+		["base policy", "updated policy"],
+	);
 });

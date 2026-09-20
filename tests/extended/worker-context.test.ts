@@ -384,3 +384,24 @@ test("provider usage reconciliation stays stable after eviction and disabled evi
 		/automatic eviction disabled/,
 	);
 });
+
+test("worker snapshots exclude parent system prompts and declarations without charging interruption counts", () => {
+	const conversation = history();
+	const snapshot = captureWorkerContext(source, [
+		{ role: "system", content: "parent-only policy", timestamp: 0 },
+		...conversation.slice(0, 1),
+		{
+			role: "system",
+			content: "parent update",
+			toolsAdded: [{ name: "parent-only", description: "private", parameters: { type: "object" } }],
+			timestamp: 1,
+		},
+		...conversation.slice(1),
+	]);
+	deepStrictEqual(snapshot, captureWorkerContext(source, conversation));
+	const seed = selectWorkerContext(snapshot, { mode: "fork" });
+	equal(
+		seededWorkerMessages(seed).some((message) => message.role === "system"),
+		false,
+	);
+});

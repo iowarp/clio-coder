@@ -10,7 +10,7 @@
  *
  * This module is the pure building block for the Clio equivalent. It:
  *   1. Declares the RetrySettings shape and sensible defaults.
- *   2. Routes generic provider classification through pi-ai 0.84's
+ *   2. Routes generic provider classification through pi-ai 0.86.1's
  *      `isRetryableAssistantError`, retaining only Clio's local-model delta.
  *   3. Computes the backoff delay for a given attempt (`computeRetryDelayMs`)
  *      with the cap the settings declare; callers schedule the wait.
@@ -18,7 +18,7 @@
  *      and cancel a pending retry on `Esc` without coupling to a specific
  *      timer abstraction.
  *
- * No I/O. The only engine dependency is the classifier re-exported by
+ * No I/O. The engine dependencies are the classifier and backoff re-exported by
  * `src/engine/ai.ts`. The chat-loop wiring (which decides whether an
  * agent_end with stopReason "error" triggers a retry) lives in
  * `src/interactive/chat-loop.ts` and consumes this module; keeping the two
@@ -28,7 +28,7 @@
 
 import { performance } from "node:perf_hooks";
 import type { RetrySettings } from "../../core/defaults.js";
-import { isEngineRetryableAssistantError } from "../../engine/ai.js";
+import { engineRetryDelayMs, isEngineRetryableAssistantError } from "../../engine/ai.js";
 
 export type { RetrySettings } from "../../core/defaults.js";
 
@@ -103,9 +103,7 @@ export function computeRetryDelayMs(
 	errorMessage?: string | null,
 ): number {
 	const safeAttempt = Math.max(1, Math.floor(attempt));
-	const raw = settings.baseDelayMs * 2 ** (safeAttempt - 1);
-	const base =
-		!Number.isFinite(raw) || raw <= 0 ? Math.max(0, settings.baseDelayMs) : Math.min(raw, settings.maxDelayMs);
+	const base = engineRetryDelayMs(settings.baseDelayMs, settings.maxDelayMs, safeAttempt);
 	// A model load does not finish faster because the retry schedule was
 	// written for a rate limit. `maxDelayMs` still caps it, so an operator who
 	// wants short waits keeps them.

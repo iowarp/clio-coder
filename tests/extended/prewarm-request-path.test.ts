@@ -43,8 +43,13 @@ test("warm and real agent requests share transforms, ordered tools, payload repl
 			},
 			getApiKey: () => "fixture",
 			transformContext: async (messages) => {
-				const selected = messages.slice(1);
-				const first = selected[0];
+				const selected = messages.filter((message) => !(message.role === "user" && message.content === "evicted"));
+				const system = selected[0];
+				if (system?.role === "system") {
+					system.content = "Transformed authorized instructions.";
+					system.sections = { policy: "Keep source private." };
+				}
+				const first = selected.find((message) => message.role === "user");
 				if (first?.role === "user") first.content = "transformed retained context";
 				return selected;
 			},
@@ -59,6 +64,8 @@ test("warm and real agent requests share transforms, ordered tools, payload repl
 				return streamSimple(currentModel, context, options);
 			},
 		});
+		// A changed executable loadout must be declared before transforms in both paths.
+		agent.state.tools = agent.state.tools.map((tool) => ({ ...tool, description: "Updated authorized paths." }));
 		const convert = agent.convertToLlm;
 		let conversions = 0;
 		agent.convertToLlm = async (messages) => {
@@ -67,8 +74,8 @@ test("warm and real agent requests share transforms, ordered tools, payload repl
 		};
 		const warm = await runPrewarmRound({ model, state: agent.state, agent, apiKey: "fixture" });
 		strictEqual(warm.errorMessage, null);
-		strictEqual(agent.state.messages.length, 2, "warm output never enters history");
-		strictEqual((agent.state.messages[1] as { content: string }).content, "retained", "warm transforms own a copy");
+		strictEqual(agent.state.messages.length, 3, "warm output never enters history");
+		strictEqual((agent.state.messages[2] as { content: string }).content, "retained", "warm transforms own a copy");
 		await agent.prompt("Actual task suffix");
 		strictEqual(conversions, 2);
 		deepStrictEqual(sessionIds, ["actual-session-resource", "actual-session-resource"]);
@@ -77,6 +84,9 @@ test("warm and real agent requests share transforms, ordered tools, payload repl
 		ok(warmed && actual);
 		deepStrictEqual((warmed.messages as unknown[]).slice(0, -1), (actual.messages as unknown[]).slice(0, -1));
 		deepStrictEqual(warmed.tools, actual.tools);
+		ok(JSON.stringify(warmed.messages).includes("Transformed authorized instructions."));
+		ok(JSON.stringify(warmed.messages).includes("Keep source private."));
+		ok(JSON.stringify(warmed.tools).includes("Updated authorized paths."));
 		strictEqual(warmed.tool_choice, actual.tool_choice);
 		strictEqual(warmed.reasoning_effort, actual.reasoning_effort);
 		strictEqual(warmed.max_tokens ?? warmed.max_completion_tokens, 1);

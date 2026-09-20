@@ -9,6 +9,7 @@ import {
 } from "../../src/domains/session/compaction/compact.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import { resolvedRequestContext } from "../../src/engine/context.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
@@ -109,7 +110,7 @@ describe("compaction checkpoint format and semantic replay", () => {
 			ok(model);
 			provider.setResponses([
 				(context, _options, _state, resolved) => {
-					strictEqual(context.systemPrompt, COMPACTION_SYSTEM_PROMPT);
+					strictEqual(resolvedRequestContext(context).systemPrompt, COMPACTION_SYSTEM_PROMPT);
 					const prompt = JSON.stringify(context.messages);
 					ok(prompt.includes(JSON.stringify(COMPACTION_USER_PROMPT_TEMPLATE).slice(1, -1)));
 					ok(prompt.includes("FOXTROT"));

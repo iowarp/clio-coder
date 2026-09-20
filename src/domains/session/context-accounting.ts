@@ -249,7 +249,10 @@ export function estimateAgentMessageTokens(message: MessageTokenEstimateInput): 
 export function estimateAgentContextBreakdown(input: AgentContextEstimateInput): ContextUsageBreakdown {
 	return {
 		systemPromptTokens: input.systemPrompt ? ceilChars(input.systemPrompt.length) : 0,
-		messageTokens: input.messages.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0),
+		messageTokens: input.messages.reduce(
+			(sum, message) => sum + (message.role === "system" ? 0 : estimateAgentMessageTokens(message)),
+			0,
+		),
 		pendingUserTokens: input.pendingUserText ? ceilChars(input.pendingUserText.length) : 0,
 		toolSchemaTokens: (input.tools ?? []).reduce<number>((sum, tool) => sum + ceilChars(toolSchemaChars(tool)), 0),
 	};
@@ -264,7 +267,7 @@ export function estimateAgentContextTokens(input: AgentContextEstimateInput): nu
 	if (!usage) return projection;
 	const trailingTokens = input.messages
 		.slice(usage.index + 1)
-		.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
+		.reduce((sum, message) => sum + (message.role === "system" ? 0 : estimateAgentMessageTokens(message)), 0);
 	const anchored = usage.tokens + trailingTokens + breakdown.pendingUserTokens + breakdown.toolSchemaTokens;
 	return Math.max(projection, anchored);
 }

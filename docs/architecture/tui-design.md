@@ -491,7 +491,7 @@ memory ID, and leave approval to the separate reviewed memory lifecycle.
 
 ## Keyboard engine compatibility
 
-Clio pins pi-tui 0.85.1 with a tracked pnpm patch for one pre-viewport input
+Clio pins pi-tui 0.86.1 with a tracked pnpm patch for one pre-viewport input
 policy, public existing search focus/operations, and semantic Editor/Input
 edits, including atomic Input clear with native undo and kill-ring preservation. Production consumes these only through src/engine. The patch adds no
 renderer, decoder or search implementation. Published dist bundles patched

@@ -1,3 +1,4 @@
+import { resolvedRequestContext } from "../engine/context.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
  * live-agent construction and model hot-swap, thinking-level reconciliation,
@@ -492,14 +493,15 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
 		const handle = deps.createAgent({
-			streamFn: (currentModel, currentContext, options) =>
-				engineStreamSimple(
+			transcriptStreamFn: (currentModel, currentContext, options) => {
+				if (!state.synthesisToolLock) return engineStreamSimple(currentModel, currentContext, options);
+				const request = resolvedRequestContext(currentContext);
+				return engineStreamSimple(
 					currentModel,
-					state.synthesisToolLock
-						? { ...currentContext, systemPrompt: lockedSynthesisSystemPrompt(currentContext.systemPrompt ?? "") }
-						: currentContext,
+					{ ...request, systemPrompt: lockedSynthesisSystemPrompt(request.systemPrompt ?? "") },
 					options,
-				),
+				);
+			},
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
 				model,
