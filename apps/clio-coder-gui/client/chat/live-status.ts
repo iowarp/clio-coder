@@ -74,6 +74,7 @@ export function liveStatus(
 	row: Turn | undefined,
 	pending: Permission | null,
 	stopping = false,
+	liveWorkers = 0,
 ): LiveStatus {
 	if (row !== undefined && row.status !== "running") {
 		if (row.status === "failed") return { state: "failed", label: "Failed", detail: row.problem?.detail ?? null };
@@ -84,6 +85,14 @@ export function liveStatus(
 	if (stopping) return { state: "stopping", label: "Stopping", detail: null };
 	if (pending !== null && pending.turnId === turn.turnId)
 		return { state: "waiting", label: "Waiting for your approval", detail: pending.title };
+	// A dispatched worker can run for minutes while the orchestrator's own timeline stays silent.
+	// Saying "Starting" through that is the one thing this line must never do.
+	if (liveWorkers > 0)
+		return {
+			state: "acting",
+			label: liveWorkers === 1 ? "Waiting on 1 worker" : `Waiting on ${liveWorkers} workers`,
+			detail: null,
+		};
 	const last = turn.items.at(-1);
 	if (last === undefined || last.kind === "user") return { state: "starting", label: "Starting", detail: null };
 	if (last.kind === "tool" && last.status === "in_progress")

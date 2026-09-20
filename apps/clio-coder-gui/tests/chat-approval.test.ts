@@ -31,8 +31,11 @@ import {
 	fleetRunTitle,
 	fleetSummaryLabel,
 	foldFleetRuns,
+	guidanceReady,
 	isLiveRun,
 	presentFleetFact,
+	STEER_REFUSALS,
+	steerOutcome,
 } from "../client/chat/fleet-facts.js";
 import type { Permission } from "../contracts/permissions.js";
 
@@ -414,4 +417,44 @@ test("the loop guard and evidence facts are reported as notices rather than drop
 	);
 	assert.match(notices[0]?.presentation.summary ?? "", /locked the tool out/);
 	assert.equal(notices[1]?.presentation.tone, "success");
+});
+
+// `accepted` means the engine queued the request on the worker's stdin. Neither sentence may
+// claim the worker read it or that the run has already stopped.
+test("an accepted steer says queued or requested, never delivered or stopped", () => {
+	const guide = steerOutcome("guide", { accepted: true });
+	assert.equal(guide.tone, "success");
+	assert.match(guide.message, /queued/i);
+	assert.doesNotMatch(guide.message, /delivered|received/i);
+	const cancel = steerOutcome("cancel", { accepted: true });
+	assert.match(cancel.message, /requested/i);
+	assert.doesNotMatch(cancel.message, /\bstopped\b/i);
+});
+
+// The reason vocabulary is the engine's (`dispatchSteerReason` in src/engine/acp/server.ts).
+test("every engine refusal reason reads as a sentence, and an unknown one is printed as reported", () => {
+	for (const reason of [
+		"dispatch-unavailable",
+		"fleet-unavailable",
+		"run-not-active",
+		"cancel-failed",
+		"empty-message",
+		"steering-unsupported",
+		"no-input-channel",
+		"input-closed",
+		"run-terminating",
+		"steer-failed",
+	]) {
+		const outcome = steerOutcome("guide", { accepted: false, reason });
+		assert.equal(outcome.tone, "warn");
+		assert.equal(outcome.message, STEER_REFUSALS[reason]);
+		assert.match(outcome.message, /\.$/);
+	}
+	assert.match(steerOutcome("guide", { accepted: false, reason: "quota-exceeded" }).message, /quota-exceeded/);
+	assert.equal(steerOutcome("cancel", { accepted: false }).message, STEER_REFUSALS["steer-failed"]);
+});
+
+test("whitespace is not guidance", () => {
+	assert.equal(guidanceReady("  \n\t"), false);
+	assert.equal(guidanceReady(" read the README "), true);
 });

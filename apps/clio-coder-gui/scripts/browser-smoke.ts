@@ -58,6 +58,7 @@ const failures: string[] = [],
 		[];
 const statuses: { path: string; status: number }[] = [];
 let success = false;
+let failedPage: { screenshot(options: { path: string; fullPage: boolean }): Promise<unknown> } | null = null;
 try {
 	for (const width of [1600, 1050, 390]) {
 		const context = await browser.newContext({ viewport: { width, height: 1050 }, reducedMotion: "reduce" });
@@ -70,6 +71,7 @@ try {
 			}
 		});
 		const page = await context.newPage();
+		failedPage = page;
 		page.setDefaultTimeout(15000);
 		page.on("pageerror", (error) => errors.push(error.message));
 		page.on("requestfailed", (request) => {
@@ -366,6 +368,54 @@ try {
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
 		await page.getByText("Tool executed.", { exact: true }).waitFor();
+		// A settled group collapses, so open it the way an operator would before reading the card.
+		await page.locator(".activity__summary").last().click();
+		const applied = page.locator(".diff.is-applied").last();
+		await applied.waitFor();
+		assert.match(await applied.innerText(), /applied/i);
+		assert.match(await applied.innerText(), /approved/);
+		// A refusal settles as a FAILED call. The card must keep the refused change on screen and
+		// say who turned it down, which a bare status cannot.
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write it again.");
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByRole("button", { name: "Reject", exact: true }).first().click();
+		await page.getByText("Permission rejected.", { exact: true }).waitFor();
+		const refused = page.locator(".diff.is-rejected").last();
+		await refused.waitFor();
+		assert.match(await refused.innerText(), /not applied · you rejected this/i);
+		assert.match(await refused.innerText(), /Nothing was written/);
+		assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
+		await check("permission-rejected");
+		if (width === 1600) await page.screenshot({ path: join(output, "permission-rejected.png"), fullPage: true });
+		// Dispatch steering. The fixture holds one live worker until it is stopped, so both write
+		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByRole("button", { name: "Guide scout", exact: true }).click();
+		await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
+		await page.getByRole("button", { name: "Send guidance", exact: true }).click();
+		await page.getByText("Guidance queued. The worker reads it at its next step.", { exact: true }).waitFor();
+		await check("fleet-steer");
+		if (width === 1600) await page.screenshot({ path: join(output, "fleet-steer.png"), fullPage: true });
+		// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
+		// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Then summarise it.");
+		await page.getByLabel("After this turn", { exact: true }).check();
+		await page.locator(".composer__submit").click();
+		await page.locator(".composer__queue-row").getByText("Then summarise it.", { exact: true }).waitFor();
+		await check("composer-queue");
+		if (width === 1600) await page.screenshot({ path: join(output, "composer-queue.png"), fullPage: true });
+		await page.getByRole("button", { name: "Take them back", exact: true }).click();
+		await page.waitForFunction(
+			() => (document.querySelector(".composer__field") as HTMLTextAreaElement | null)?.value === "Then summarise it.",
+		);
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
+		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
+		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
+		await page.getByRole("button", { name: "Stop scout", exact: true }).click();
+		await page.getByRole("button", { name: "Stop run", exact: true }).click();
+		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
+		assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
@@ -391,6 +441,8 @@ try {
 	);
 	success = true;
 } finally {
+	// The last thing on screen is usually the whole diagnosis of a timed-out locator.
+	if (!success) await failedPage?.screenshot({ path: join(output, "failure.png"), fullPage: false }).catch(() => {});
 	const report = {
 		output,
 		success,

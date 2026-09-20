@@ -62,10 +62,13 @@ export interface ChatTurnProps {
 	/** Health facts that happened during this turn, rendered where they happened. */
 	readonly notices: readonly HealthRow[];
 	readonly workspaceRoot: string | undefined;
+	/** Dispatched runs still in flight. Zero for a settled turn, so it never re-renders one. */
+	readonly liveWorkers: number;
 }
 
 function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	if (previous.row !== next.row) return false;
+	if (previous.liveWorkers !== next.liveWorkers) return false;
 	if (previous.notices !== next.notices) return false;
 	if (previous.stopping !== next.stopping) return false;
 	// The only part of the session a turn reads that it does not already hold. `applySessionDelta`
@@ -122,8 +125,9 @@ export const ChatTurnView = memo(function ChatTurnView({
 	stopping,
 	notices,
 	workspaceRoot,
+	liveWorkers,
 }: ChatTurnProps) {
-	const status = liveStatus(turn, row, pending, stopping);
+	const status = liveStatus(turn, row, pending, stopping, liveWorkers);
 	const live = isLive(status) && !turn.settled;
 	const request = requestView(turn);
 	const author = responseAuthor(turn);

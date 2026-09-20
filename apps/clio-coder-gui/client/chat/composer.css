@@ -54,10 +54,18 @@
 }
 .composer__mode {
 	display: inline-flex;
+	flex: none;
 	align-items: center;
 	gap: var(--space-2);
 	font-size: var(--text-meta);
 	color: var(--ink);
+	white-space: nowrap;
+}
+/* The global field rule stretches every input; a radio must stay its own size. */
+.composer__mode input {
+	flex: none;
+	inline-size: auto;
+	margin: 0;
 }
 .composer__mode-lands {
 	flex: 1 1 24ch;

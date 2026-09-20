@@ -583,12 +583,9 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 				status: item.status,
 				isError: wire.isError,
 			});
-			note = diff.note;
-			if (diff.diff !== null) {
-				facts.push({ label: "added", value: String(diff.diff.adds), tone: "success" });
-				facts.push({ label: "removed", value: String(diff.diff.dels), tone: "fail" });
-				if (diff.diff.truncated) facts.push({ label: "diff", value: "cut short by a cap", tone: "warn" });
-			}
+			// The diff panel prints its own note and +/- counts. Repeating them as card facts said
+			// everything twice and painted "removed 0" as a failure.
+			if (diff.diff?.truncated === true) facts.push({ label: "diff", value: "cut short by a cap", tone: "warn" });
 			break;
 		case "terminal":
 			facts.push(...terminalFacts(wire.details));

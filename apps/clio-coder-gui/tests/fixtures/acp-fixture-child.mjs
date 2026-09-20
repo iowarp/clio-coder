@@ -29,10 +29,37 @@ const update = (
 ) => send({ method: "session/update", params: { sessionId, update: value, ...(meta ? { _meta: meta } : {}) } });
 const text = (value) => update({ sessionUpdate: "agent_message_chunk", content: { type: "text", text: value } });
 const usage = { input: 11, output: 12, cacheRead: 13, cacheWrite: 14, reasoning: 15, totalTokens: 50, costUsd: 0.001 };
+let writeCalls = 0;
+// Settled frames mirror src/engine/acp/server.ts: `content` carries the result
+// text and `rawOutput` is `{result, isError}`. A refusal is a FAILED call worded
+// by src/tools/registry.ts, and an applied write carries `details.diff` in the
+// numbered-row format of src/tools/edit-diff.ts.
+const REFUSED_TEXT =
+	"write blocked: write was not approved\nThis call was denied; no approval is pending.\nDo not retry the same call.";
+const APPLIED_DIFF = "-1 draft\n+1 approved";
+const settledWrite = (toolCallId, executed) => {
+	const body = executed ? "Wrote 8 bytes to fixture.txt" : REFUSED_TEXT;
+	return {
+		sessionUpdate: "tool_call_update",
+		toolCallId,
+		title: "write",
+		kind: "edit",
+		status: executed ? "completed" : "failed",
+		content: [{ type: "content", content: { type: "text", text: body } }],
+		rawOutput: {
+			result: {
+				content: [{ type: "text", text: body }],
+				...(executed ? { details: { diff: APPLIED_DIFF, firstChangedLine: 1 } } : {}),
+			},
+			isError: !executed,
+		},
+	};
+};
 const permission = async () => {
+	const toolCallId = `write-${++writeCalls}`;
 	const toolCall = {
 		sessionUpdate: "tool_call",
-		toolCallId: "write-1",
+		toolCallId,
 		title: "Write fixture",
 		kind: "edit",
 		status: "pending",
@@ -57,8 +84,73 @@ const permission = async () => {
 	const result = await promise;
 	const executed = result?.outcome?.optionId === "allow";
 	log({ permission: result, toolExecuted: executed });
-	update({ sessionUpdate: "tool_call_update", toolCallId: "write-1", status: executed ? "completed" : "failed" });
+	update(settledWrite(toolCallId, executed));
 	if (!cancelled) text(executed ? "Tool executed." : "Permission rejected.");
+};
+const event = (kind, payload, terminal = false) =>
+	send({
+		method: "clio-coder/event",
+		params: {
+			version: 1,
+			workspaceInstanceId: "fixture",
+			sessionId,
+			turnId: null,
+			sequence: ++eventSequence,
+			kind,
+			terminal,
+			payload,
+		},
+	});
+// The smoke scenario announces the steering surface the real engine does, so the composer's
+// steer/queue/interrupt controls and the fleet strip's Guide/Stop are exercised in a browser.
+// Every other scenario stays a v1 peer, which is what keeps the 409 degradation tested.
+const STEERING =
+	scenario === "markdown" || scenario === "steer"
+		? {
+				version: 1,
+				main: true,
+				dispatch: true,
+				modes: ["next-slot", "end-of-turn"],
+				interrupt: true,
+				methods: {
+					steer: "clio-coder/session/steer",
+					queue: "clio-coder/session/queue",
+					clear: "clio-coder/session/queue_clear",
+					interrupt: "clio-coder/session/interrupt",
+					dispatch: "clio-coder/dispatch/steer",
+				},
+			}
+		: null;
+const queues = { steer: [], followUp: [] };
+/** runId -> resolve. A held worker settles when it is stopped or the turn is cancelled. */
+const liveRuns = new Map();
+let liveRunCount = 0;
+const heldWorker = async () => {
+	const runId = `run-live-${++liveRunCount}`;
+	const identity = {
+		runId,
+		agentId: "scout",
+		taskPreview: "Survey the fixture",
+		node: null,
+		origin: "tool",
+		attempt: 1,
+	};
+	event("dispatch.enqueued", identity);
+	event("dispatch.started", identity);
+	const stopped = await new Promise((resolve) => liveRuns.set(runId, resolve));
+	liveRuns.delete(runId);
+	event(
+		"dispatch.failed",
+		{
+			runId,
+			agentId: "scout",
+			outcome: "cancelled",
+			reason: stopped ? "operator_cancel" : "turn_cancelled",
+			durationMs: 25,
+		},
+		true,
+	);
+	if (!cancelled) text("The worker was stopped.");
 };
 const fleet = () => {
 	const identity = {
@@ -139,7 +231,10 @@ async function handle(frame) {
 				result = {
 					protocolVersion: 1,
 					agentInfo: { name: "fixture", version: "1" },
-					agentCapabilities: { loadSession: true },
+					agentCapabilities: {
+						loadSession: true,
+						...(STEERING ? { _meta: { "clio-coder/steering": STEERING } } : {}),
+					},
 				};
 				break;
 			}
@@ -165,10 +260,13 @@ async function handle(frame) {
 						? "permission"
 						: scenario === "markdown" && promptText.includes("[stream]")
 							? "loop"
-							: scenario;
+							: STEERING && promptText.includes("[fleet]")
+								? "held-worker"
+								: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (turnScenario.startsWith("permission")) await permission();
+				else if (turnScenario === "held-worker") await heldWorker();
 				else if (turnScenario === "slow") {
 					while (!cancelled) await delay(100);
 				} else if (turnScenario === "loop") {
@@ -227,8 +325,37 @@ async function handle(frame) {
 				result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
 				break;
 			}
+			case "clio-coder/session/steer": {
+				const followUp = frame.params.mode === "end-of-turn";
+				(followUp ? queues.followUp : queues.steer).push(frame.params.text);
+				result = { accepted: true, queue: followUp ? "follow-up" : "steer" };
+				break;
+			}
+			case "clio-coder/session/queue":
+				result = queues;
+				break;
+			case "clio-coder/session/queue_clear":
+				result = { restored: [...queues.steer.splice(0), ...queues.followUp.splice(0)] };
+				break;
+			case "clio-coder/session/interrupt":
+				result = { cancelled: false, refusal: "A dispatched worker is attached; stop the turn instead." };
+				break;
+			case "clio-coder/dispatch/steer": {
+				const { runId, action } = frame.params;
+				const settle = liveRuns.get(runId);
+				if (settle === undefined) result = { accepted: false, reason: "run-not-active" };
+				else if (action === "cancel") {
+					settle(true);
+					result = { accepted: true };
+				} else {
+					event("dispatch.progress", { runId, agentId: "scout", progressCount: 1, truncated: false });
+					result = { accepted: true };
+				}
+				break;
+			}
 			case "session/cancel":
 				cancelled = true;
+				for (const settle of liveRuns.values()) settle(false);
 				for (const resolve of pending.values()) resolve({ outcome: { outcome: "cancelled" } });
 				pending.clear();
 				break;

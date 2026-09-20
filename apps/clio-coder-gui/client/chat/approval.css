@@ -267,3 +267,41 @@
 		gap: var(--space-1);
 	}
 }
+
+/* Per-run steering. It sits on its own grid row so a long refusal sentence never squeezes the task. */
+.fleet-steer {
+	grid-column: 1 / -1;
+	display: grid;
+	gap: var(--space-2);
+	justify-items: start;
+}
+.fleet-steer__form {
+	display: grid;
+	gap: var(--space-2);
+	inline-size: 100%;
+}
+.fleet-steer__form textarea {
+	inline-size: 100%;
+	font: inherit;
+}
+.fleet-steer__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: center;
+}
+/* A sentence, not a status pill: the tone rides on the rule, the words stay ink. */
+.fleet-steer__outcome {
+	margin: 0;
+	padding-inline-start: var(--space-2);
+	border-inline-start: 2px solid var(--line-strong);
+}
+.fleet-steer__outcome[data-tone="success"] {
+	border-inline-start-color: var(--status-success-line);
+}
+.fleet-steer__outcome[data-tone="warn"] {
+	border-inline-start-color: var(--status-warn-line);
+}
+.fleet-steer__outcome[data-tone="fail"] {
+	border-inline-start-color: var(--status-fail-line);
+}

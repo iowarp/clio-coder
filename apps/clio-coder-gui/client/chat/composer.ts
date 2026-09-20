@@ -250,10 +250,12 @@ export function submitIntent(draft: Draft, situation: ComposerSituation): Submit
 }
 
 /** The label the submit control carries, which is also the promise it makes. */
-export function submitLabel(intent: SubmitIntent, situation: ComposerSituation): string {
+export function submitLabel(intent: SubmitIntent, situation: ComposerSituation, mode?: SteerMode): string {
 	if (intent.kind === "steer") return intent.mode === "next-slot" ? "Send now" : "Queue for after";
 	if (intent.kind === "prompt") return "Send";
-	return situation.turnRunning && situation.steering.steer ? "Send now" : "Send";
+	// A blocked button (empty draft) still names what the chosen delivery mode would do.
+	if (!(situation.turnRunning && situation.steering.steer)) return "Send";
+	return mode === "end-of-turn" ? "Queue for after" : "Send now";
 }
 
 // ---------------------------------------------------------------------------
