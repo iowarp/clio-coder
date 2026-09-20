@@ -553,6 +553,8 @@ export interface CreateChatLoopDeps {
 	 * that an unattended run never spends. Defaults to true.
 	 */
 	isLatencySurface?: () => boolean;
+	/** An editor draft already owns the next foreground request. */
+	isPrewarmBusy?: () => boolean;
 	/** The session pre-warm round. Injectable for the same reason `runSideQuestion` is. */
 	runPrewarm?: typeof runPrewarmRound;
 	/**
@@ -910,11 +912,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		| { ok: true; runtime: AgentRuntime; apiKey: string | undefined }
 		| { ok: false; reason: string };
 
-	const prepareOutOfTurnRound = async (inFlightRefusal: string, signal?: AbortSignal): Promise<OutOfTurnPreparation> => {
+	const prepareOutOfTurnRound = async (
+		inFlightRefusal: string,
+		signal?: AbortSignal,
+		silent = false,
+	): Promise<OutOfTurnPreparation> => {
 		if (state.streaming) return { ok: false, reason: inFlightRefusal };
 		let agentRuntime: AgentRuntime | null;
 		try {
-			agentRuntime = turnRuntime.ensureRuntime();
+			agentRuntime = turnRuntime.ensureRuntime({ silent });
 		} catch (err) {
 			return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 		}
@@ -1028,13 +1034,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		bus: deps.bus,
 		...(deps.session ? { session: deps.session } : {}),
 		isLatencySurface: () => deps.isLatencySurface?.() !== false,
-		isTurnActive: () => turnActive,
+		isTurnActive: () => turnActive || deps.isPrewarmBusy?.() === true,
 		hasActiveDispatch: () => (deps.hasActiveDispatch ?? deps.hasAttachedDispatch)?.() === true,
 		prepareRuntime: async (signal) => {
 			// The same probe a submit awaits, so the pre-warm resolves the model the
 			// next turn will resolve rather than a stale catalog entry.
-			await turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
-			return prepareOutOfTurnRound("a turn is in flight", signal);
+			await turnRuntime.ensureLiveCapabilitiesForSelectedModel({ silent: true }).catch(() => {});
+			return prepareOutOfTurnRound("a turn is in flight", signal, true);
 		},
 		applySessionTools: (runtime) => {
 			runtime.agent.state.tools = resolveSessionTools(

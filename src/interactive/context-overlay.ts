@@ -231,7 +231,7 @@ function renderContextLedgerLines(
 	if (ledger.promptCache) {
 		const cache = ledger.promptCache;
 		const shell = cache.shellReused ? "shell reused" : "shell recompiled";
-		const backendCacheReadsUnknown = cache.backend?.cachedTokens === null;
+		const backendCacheReadsUnknown = cache.backendVerdict === "unknown" || cache.backend?.cachedTokens === null;
 		const backend = backendCacheReadsUnknown
 			? "server does not report cache reads"
 			: cache.backendVerdict === "hot" || cache.backendVerdict === "partial"

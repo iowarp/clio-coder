@@ -53,6 +53,8 @@ export interface PrewarmRoundInput {
 	signal?: AbortSignal;
 	/** Admission bound on the engine's input estimate, after context selection. */
 	maxInputTokens?: number;
+	/** Recheck foreground ownership after asynchronous context transforms. */
+	canSend?: () => boolean;
 	/** Public Pi preparation hooks of the eventual caller. No tools or agent loop are executed. */
 	agent?: Pick<
 		Agent,
@@ -156,6 +158,16 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 		}
 	}
 
+	if (metadata?.runtimeId === "litellm") {
+		const onPayload = input.agent?.onPayload;
+		options.onPayload = async (payload: unknown, currentModel: EngineModel) => {
+			const patched = (await onPayload?.(payload, currentModel)) ?? payload;
+			// Warming is authorized for the verified local route only. A gateway
+			// must not turn an unavailable local model into a billed fallback.
+			return { ...(patched as Record<string, unknown>), num_retries: 0, disable_fallbacks: true };
+		};
+	}
+
 	const send = input.streamFn ?? input.agent?.streamFunction ?? streamSimple;
 	const startedAt = performance.now();
 	let firstDeltaAt: number | null = null;
@@ -180,6 +192,9 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 		} as Parameters<typeof streamSimple>[1];
 		if (input.maxInputTokens !== undefined && estimateInputTokensFromContext(context) > input.maxInputTokens) {
 			throw new Error("pre-warm input estimate exceeds its token budget");
+		}
+		if (input.canSend?.() === false) {
+			return { aborted: true, usage: null, backend: null, timing: { ttftMs: null, apiMs: elapsed() }, errorMessage: null };
 		}
 		const events = await send(
 			model,

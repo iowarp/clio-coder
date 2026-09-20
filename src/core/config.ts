@@ -663,8 +663,13 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 				if (!isPlainObject(binding)) issues.add(bindingPath, "expected a map");
 				else {
 					issues.unknownKeys(bindingPath, binding, ["backend", "controlUrl", "model", "build", "gatewayDeploymentId"]);
-					const backend = expectEnum(issues, `${bindingPath}.backend`, binding.backend, ["llamacpp", "vllm"] as const);
+					const backend = expectEnum(issues, `${bindingPath}.backend`, binding.backend, [
+						"llamacpp",
+						"vllm",
+						"lmstudio",
+					] as const);
 					for (const key of ["controlUrl", "model", "build"] as const) {
+						if (key === "build" && backend === "lmstudio" && binding[key] === undefined) continue;
 						if (typeof binding[key] !== "string" || !binding[key].trim())
 							issues.add(`${bindingPath}.${key}`, "expected a nonempty string");
 					}
@@ -686,13 +691,13 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 						backend &&
 						typeof binding.controlUrl === "string" &&
 						typeof binding.model === "string" &&
-						typeof binding.build === "string"
+						(typeof binding.build === "string" || backend === "lmstudio")
 					) {
 						target.cache.deployment = {
 							backend,
 							controlUrl: binding.controlUrl,
 							model: binding.model,
-							build: binding.build,
+							...(typeof binding.build === "string" ? { build: binding.build } : {}),
 							...(typeof binding.gatewayDeploymentId === "string" ? { gatewayDeploymentId: binding.gatewayDeploymentId } : {}),
 						};
 					}
@@ -701,8 +706,17 @@ function validateTarget(issues: Issues, path: string, value: unknown): ClioSetti
 			if ("warm" in value.cache) {
 				if (!isPlainObject(value.cache.warm)) issues.add(`${path}.cache.warm`, "expected a map");
 				else {
-					issues.unknownKeys(`${path}.cache.warm`, value.cache.warm, ["maxInputTokens", "maxDurationMs", "cooldownMs"]);
+					issues.unknownKeys(`${path}.cache.warm`, value.cache.warm, [
+						"startup",
+						"maxInputTokens",
+						"maxDurationMs",
+						"cooldownMs",
+					]);
 					target.cache.warm = {};
+					if ("startup" in value.cache.warm) {
+						const startup = expectBoolean(issues, `${path}.cache.warm.startup`, value.cache.warm.startup);
+						if (startup !== undefined) target.cache.warm.startup = startup;
+					}
 					for (const key of ["maxInputTokens", "maxDurationMs", "cooldownMs"] as const) {
 						const bound = value.cache.warm[key];
 						if (bound === undefined) continue;

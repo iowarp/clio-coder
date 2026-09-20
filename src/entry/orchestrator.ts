@@ -2204,6 +2204,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// never submits at all, so neither has latency to buy; the ACP surface has
 		// an operator on the other end of the client and keeps it.
 		isLatencySurface: () => interactive || acpMode,
+		isPrewarmBusy: () => Boolean(options.terminalLease?.editor.getText().trim()),
 	});
 
 	// Coordinated shutdown (SIGINT/SIGTERM, TUI quit) must abort any in-flight

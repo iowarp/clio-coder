@@ -142,8 +142,8 @@ export interface TurnRuntimeDeps {
 }
 
 export interface TurnRuntime {
-	ensureRuntime(): AgentRuntime | null;
-	ensureLiveCapabilitiesForSelectedModel(): Promise<void>;
+	ensureRuntime(options?: { silent?: boolean }): AgentRuntime | null;
+	ensureLiveCapabilitiesForSelectedModel(options?: { silent?: boolean }): Promise<void>;
 	cleanupSessionResources(sessionId: string | undefined): void;
 	/**
 	 * Install on the session tool surface so admission verdicts reach the panel.
@@ -266,7 +266,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	const TARGET_PROBE_TTL_MS = 5 * 60 * 1000;
 	let lastTargetProbe: { key: string; at: number } | null = null;
 	const targetProbesInFlight = new Map<string, Promise<void>>();
-	const ensureLiveCapabilitiesForSelectedModel = async (): Promise<void> => {
+	const ensureLiveCapabilitiesForSelectedModel = async (options?: { silent?: boolean }): Promise<void> => {
 		const settings = deps.getSettings();
 		const targetId = settings.chat.target?.trim();
 		const wireModelId = settings.chat.model?.trim();
@@ -291,7 +291,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			} catch {
 				// Fall back to the last known target state.
 			}
-			announceColdModel(status, targetId, wireModelId);
+			if (!options?.silent) announceColdModel(status, targetId, wireModelId);
 		})();
 		targetProbesInFlight.set(key, probe);
 		try {
@@ -399,7 +399,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// A target id/model names the selection, not its current URL, auth, pricing
 	// or cache policy. Keep the constructed descriptor identity across calls.
 	let runtimeTargetSettings: string | null = null;
-	const ensureRuntime = (): AgentRuntime | null => {
+	const ensureRuntime = (options?: { silent?: boolean }): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
 		const targetSettings = JSON.stringify(target.target);
@@ -407,7 +407,8 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		// Preflight and the wire budget share the session's effective settings,
 		// including overrides that never reach the saved providers snapshot.
 		setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
-		context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
+		if (!options?.silent)
+			context.emitContextWindowWarningTransition(target.runtimeResolution?.contextWindowDetails?.warning ?? null);
 		if (!deps.knownTargets().has(target.target.id)) {
 			throw new TurnAdmissionError(
 				`[Clio Coder] orchestrator target=${target.target.id} unknown. Run \`clio-coder targets\` to see configured targets.`,
@@ -439,7 +440,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				state.runtime.agent.state.thinkingLevel = desiredLevel;
 			}
 			state.runtime.runtimeResolution = runtimeResolution;
-			emitThinkingClampNotice(runtimeResolution);
+			if (!options?.silent) emitThinkingClampNotice(runtimeResolution);
 			return state.runtime;
 		}
 
@@ -464,7 +465,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			const effectiveThinkingLevel = target.runtimeResolution.effectiveThinkingLevel;
 			state.runtime.agent.state.thinkingLevel = effectiveThinkingLevel;
 			state.runtime.runtimeResolution = target.runtimeResolution;
-			emitThinkingClampNotice(target.runtimeResolution);
+			if (!options?.silent) emitThinkingClampNotice(target.runtimeResolution);
 			persistence.appendModelChangeEntry(target);
 			ensureReasoningProbe(target);
 			return state.runtime;
@@ -556,7 +557,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			wireModelId: target.wireModelId,
 			runtimeResolution: target.runtimeResolution,
 		};
-		emitThinkingClampNotice(target.runtimeResolution);
+		if (!options?.silent) emitThinkingClampNotice(target.runtimeResolution);
 
 		// Stall watchdog. `agent_start` arms a timer for `retry.streamStallMs`;
 		// every later engine event counts as progress and pushes the deadline
@@ -945,7 +946,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 					const input = typeof usage.input === "number" ? usage.input : 0;
 					const cacheRead = typeof usage.cacheRead === "number" ? usage.cacheRead : 0;
 					const backendTimings = (enrichedEvent.message as { backendTimings?: BackendCompletionTimings }).backendTimings;
-					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, backendTimings);
+					runFirstCallVerdict = backendCacheVerdict(input, cacheRead, backendTimings, usage.cacheReadReported);
 				}
 				if (usage) {
 					context.reconcileUsage(usage);

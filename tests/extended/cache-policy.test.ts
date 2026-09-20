@@ -104,10 +104,11 @@ test("generic gateways do not inherit hosted retention and direct llama honors c
 test("deployment bindings and warm bounds are strict settings with no implicit administration", () => {
 	const cache = {
 		deployment: { backend: "llamacpp", controlUrl: "http://127.0.0.1:8080", model: "model", build: "b1-c841aee" },
-		warm: { maxInputTokens: 4096, maxDurationMs: 10000, cooldownMs: 60000 },
+		warm: { startup: true, maxInputTokens: 4096, maxDurationMs: 10000, cooldownMs: 60000 },
 	};
 	const parse = (value: unknown) =>
 		validateSettings({ version: 2, targets: [{ id: "local", runtime: "llamacpp", cache: value }] });
+	ok(parse({ ...cache, warm: { startup: "yes" } }).issues.length > 0);
 	const valid = parse(cache);
 	deepStrictEqual(valid.issues, []);
 	deepStrictEqual(valid.settings.targets[0]?.cache, cache);

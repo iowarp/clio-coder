@@ -36,7 +36,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { enableCompileCache } from "node:module";
+import { enableCompileCache, flushCompileCache } from "node:module";
 import { join } from "node:path";
 import { resolveClioDirs } from "./xdg.js";
 
@@ -156,4 +156,14 @@ export function deleteInjectedCompileCacheFrom(env: NodeJS.ProcessEnv): void {
 		Reflect.deleteProperty(env, "NODE_COMPILE_CACHE");
 	}
 	Reflect.deleteProperty(env, INJECTED_COMPILE_CACHE_ENV);
+}
+
+/** Publish compiled modules while the parent is alive, before a worker needs them. */
+export function publishClioCompileCache(): void {
+	if (processCompileCache.directory() === null) return;
+	try {
+		flushCompileCache();
+	} catch {
+		// Bytecode reuse is optional; never change dispatch or shutdown behavior.
+	}
 }

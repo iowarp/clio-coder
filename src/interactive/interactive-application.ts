@@ -19,6 +19,7 @@ import { openDetachedBatchViews } from "../domains/middleware/index.js";
 import type { MuxContract } from "../domains/mux/index.js";
 import type { PanesOperations, PanesWatchController } from "../domains/mux/operations.js";
 import type { ObservabilityContract } from "../domains/observability/index.js";
+import { appendOutOfTurnUsageRow } from "../domains/observability/out-of-turn-usage.js";
 import type { ProvidersContract, ThinkingLevel } from "../domains/providers/index.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { FleetNodeSnapshot } from "../domains/scheduling/cluster.js";
@@ -1377,6 +1378,84 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		if (!adopted) void applicationController.shutdown();
 	}
 
+	const startupAbort = new AbortController();
+	const startupWorkspace = process.cwd();
+	const startupSession = deps.session?.current() ?? null;
+	let startupTimer: ReturnType<typeof setTimeout> | undefined;
+	const prepareStartup = () => {
+		const startupConfiguration = JSON.stringify(deps.getSettings?.());
+		const isBusy = () =>
+			startupAbort.signal.aborted ||
+			process.cwd() !== startupWorkspace ||
+			JSON.stringify(deps.getSettings?.()) !== startupConfiguration ||
+			overlayLifecycle.getState() !== "closed" ||
+			editorSubmit.hasActiveEditorBash() ||
+			(deps.session?.current()?.id ?? null) !== (startupSession?.id ?? null) ||
+			editor.getText().length > 0 ||
+			deps.chat.isStreaming() ||
+			deps.chat.turnPreparation().phase !== "idle" ||
+			deps.dispatch.snapshot().running.length > 0;
+		if (isBusy()) return;
+		void deps.interop?.detect({ cwd: startupWorkspace }).catch(() => {});
+		const settings = deps.getSettings?.();
+		if (settings)
+			void import("./startup-background.js")
+				.then(({ prepareWorkerTargets }) =>
+					prepareWorkerTargets({
+						settings,
+						providers: deps.providers,
+						signal: startupAbort.signal,
+						isBusy,
+						recordWarm: (target, model, result) => {
+							const usage = result.usage;
+							if (usage)
+								deps.observability.recordTokens(
+									target,
+									model,
+									usage.totalTokens,
+									usage.cost.total,
+									{
+										input: usage.input,
+										output: usage.output,
+										cacheRead: usage.cacheRead,
+										cacheWrite: usage.cacheWrite,
+										apiCalls: 1,
+									},
+									"unknown",
+									undefined,
+									"prewarm",
+								);
+							appendOutOfTurnUsageRow(deps.stateDir, {
+								label: "prewarm",
+								sessionId: startupSession?.id ?? null,
+								repoIdentity: startupSession?.cwdHash ?? null,
+								timestamp: new Date().toISOString(),
+								target,
+								attributedModelId: model,
+								callOutcome: result.aborted ? "aborted" : result.errorMessage ? "error" : "success",
+								timing: { durationMs: result.timing.apiMs },
+								usage: {
+									input: usage?.input ?? null,
+									output: usage?.output ?? null,
+									cacheRead: usage?.cacheRead ?? null,
+									cacheWrite: usage?.cacheWrite ?? null,
+									reasoning: null,
+									totalTokens: usage?.totalTokens ?? null,
+									costUsd: usage?.cost.total ?? null,
+									costProvenance: "unknown",
+								},
+							});
+						},
+					}),
+				)
+				.catch(() => {});
+	};
+	void shell.nextCommittedFrame().then((frame) => {
+		if (frame === null || startupAbort.signal.aborted) return;
+		startupTimer = setTimeout(prepareStartup, 1000);
+		startupTimer.unref();
+	});
+
 	removeDiagnosticSink = installDiagnosticSink((text, level) => {
 		const message = text.trim();
 		if (message) notify(level, message, `diagnostic:${message}`);
@@ -1384,6 +1463,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	try {
 		return await applicationController.run;
 	} finally {
+		clearTimeout(startupTimer);
+		startupAbort.abort();
 		removeDiagnosticSink();
 	}
 }

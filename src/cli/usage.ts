@@ -746,7 +746,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		process.stdout.write(
 			indent(
 				formatColumns([
-					["session", "uncached prefill", "hot/partial/cold/small"],
+					["session", "uncached prefill", "hot/partial/cold/small/unknown"],
 					...cacheSessions.map((session) => [
 						session.sessionId,
 						session.promptCache.uncachedPrefillTokens === null ? "n/a" : String(session.promptCache.uncachedPrefillTokens),
@@ -755,6 +755,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 							session.promptCache.verdictCounts.partial,
 							session.promptCache.verdictCounts.cold,
 							session.promptCache.verdictCounts.small,
+							session.promptCache.verdictCounts.unknown,
 						].join("/"),
 					]),
 				]),

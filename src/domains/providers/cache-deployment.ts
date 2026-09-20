@@ -1,10 +1,11 @@
+import { lookup } from "node:dns/promises";
 import { canonicalEndpointUrl } from "../../core/endpoint-key.js";
 import type { TargetDescriptor } from "./types/target-descriptor.js";
 
 /** Fresh observations, not a persisted cache handle or permission to administer a server. */
 export interface CacheDeploymentObservation {
 	observedAt: number;
-	backend: "llamacpp" | "vllm" | "unknown";
+	backend: "llamacpp" | "vllm" | "lmstudio" | "unknown";
 	model: string;
 	build: string | null;
 	/** Absent server epoch stays unknown; Clio never invents one from a build number. */
@@ -111,6 +112,35 @@ export async function observeCacheDeployment(
 				reason: observation.build === binding.build ? "vllm-scheduler-unverified" : "deployment-build-mismatch",
 			};
 		}
+		if (binding.backend === "lmstudio") {
+			// An explicit binding is still not permission to warm an Internet endpoint.
+			const addresses = await lookup(control.hostname.replace(/^\[|\]$/g, ""), { all: true });
+			if (addresses.length === 0 || addresses.some(({ address }) => !isLocalAddress(address)))
+				return { ...observation, reason: "warming-requires-local-deployment" };
+			const catalog = record(await get(`${root}/api/v1/models`));
+			const selected = Array.isArray(catalog.models)
+				? catalog.models
+						.map(record)
+						.find(
+							(row) =>
+								row.key === binding.model ||
+								(Array.isArray(row.loaded_instances) &&
+									row.loaded_instances.some((instance) => record(instance).id === binding.model)),
+						)
+				: undefined;
+			if (selected?.type !== "llm") return { ...observation, reason: "deployment-model-mismatch" };
+			const instances = Array.isArray(selected.loaded_instances) ? selected.loaded_instances.map(record) : [];
+			if (instances.length === 0) return { ...observation, reason: "model-not-loaded" };
+			// LM Studio has no public slot-idleness API. Require spare configured
+			// parallelism and opt-in; local endpoint leases are checked by the caller.
+			if (
+				instances.length !== 1 ||
+				Number(record(instances[0]?.config).parallel) < 2 ||
+				!Number.isFinite(Number(record(instances[0]?.config).parallel))
+			)
+				return { ...observation, reason: "endpoint-capacity-unverified" };
+			return { ...observation, warm: "bounded", reason: "loaded-local-deployment" };
+		}
 		let props = record(await get(`${root}/props`));
 		const router = props.role === "router";
 		if (router) {
@@ -124,7 +154,7 @@ export async function observeCacheDeployment(
 		}
 		observation.build = typeof props.build_info === "string" ? props.build_info : null;
 		if (observation.build !== binding.build) return { ...observation, reason: "deployment-build-mismatch" };
-		if (!observation.build.endsWith("-c841aee"))
+		if (!observation.build?.endsWith("-c841aee"))
 			return { ...observation, reason: "deployment-cache-protocol-unverified" };
 		if (props.is_sleeping !== false) return { ...observation, reason: "model-not-loaded" };
 		if (typeof props.model_alias === "string" && props.model_alias !== binding.model)
@@ -144,4 +174,17 @@ export async function observeCacheDeployment(
 	} catch {
 		return { ...observation, reason: options.signal?.aborted ? "superseded" : "deployment-unavailable" };
 	}
+}
+
+function isLocalAddress(address: string): boolean {
+	if (address === "::1" || /^(fc|fd)[0-9a-f]{2}:/i.test(address)) return true;
+	const parts = address.split(".").map(Number);
+	if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return false;
+	const second = parts[1];
+	return (
+		parts[0] === 127 ||
+		parts[0] === 10 ||
+		(parts[0] === 192 && parts[1] === 168) ||
+		(parts[0] === 172 && second !== undefined && second >= 16 && second <= 31)
+	);
 }
