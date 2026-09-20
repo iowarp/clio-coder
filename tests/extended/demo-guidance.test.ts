@@ -70,3 +70,20 @@ test("footer tips expire, have cooldown, respect custom keys, and do not repeat"
 	match(hints({ ...input, now: 180_000, contextBusy: true }) ?? "", /\/context/);
 	strictEqual(hints({ ...input, now: 240_000, contextBusy: true }), null);
 });
+
+test("a live tip follows current eligibility and keybindings without a late welcome", () => {
+	const hints = createDemoHints();
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: true,
+		toolsUsed: false,
+		contextBusy: false,
+		dashboardKey: "alt+u",
+	};
+	match(hints(input) ?? "", /alt\+u/);
+	match(hints({ ...input, now: 100, dashboardKey: "ctrl+x" }) ?? "", /ctrl\+x/);
+	strictEqual(hints({ ...input, now: 200, agentActive: false }), null);
+	strictEqual(hints({ ...input, now: 60_000, agentActive: false }), null);
+});
