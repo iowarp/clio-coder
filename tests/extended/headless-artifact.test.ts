@@ -60,9 +60,48 @@ const toolMessage: ChatLoopEvent = {
 	},
 };
 
+function blockedThenRead(actionClass: "execute" | "write"): ChatLoopEvent[] {
+	return [
+		{
+			type: "tool_execution_end",
+			toolName: actionClass === "write" ? "edit" : "bash",
+			toolCallId: "denied",
+			isError: true,
+			outcome: "blocked",
+			actionClass,
+			decision: "blocked",
+			result: { content: [{ type: "text", text: "denied" }], details: {} },
+		} as ChatLoopEvent,
+		{
+			type: "tool_execution_end",
+			toolName: "read",
+			toolCallId: "recovery",
+			isError: false,
+			outcome: "ok",
+			actionClass: "read",
+			result: { content: [{ type: "text", text: "three lines" }], details: {} },
+		} as ChatLoopEvent,
+		assistant("stop", [{ type: "text", text: "The file contains three lines." }]),
+	];
+}
+
 // Event-fold coverage, not a provider/eval reproduction. Unlike the original
 // local diagnostic, this exercises real receipt persistence and integrity too.
 for (const scenario of [
+	{
+		name: "native read recovers denied shell observation",
+		events: blockedThenRead("execute"),
+		code: 0,
+		outcome: "succeeded",
+		calls: 1,
+	},
+	{
+		name: "unrelated read cannot recover denied edit",
+		events: blockedThenRead("write"),
+		code: 1,
+		outcome: "failed",
+		calls: 1,
+	},
 	{
 		name: "empty terminal output exhaustion retains its specific cause",
 		events: [assistant("length")],
