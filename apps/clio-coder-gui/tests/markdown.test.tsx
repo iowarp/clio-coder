@@ -1,6 +1,7 @@
-import { deepEqual, equal, match, ok } from "node:assert/strict";
+import { deepEqual, doesNotMatch, equal, match, ok } from "node:assert/strict";
 import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { openEnclosingDetails, type RevealTarget } from "../client/render/details.js";
 import { Blocks, CodeBlock, decodeEntities, MarkdownContent, MermaidBlock } from "../client/render/Markdown.js";
 import {
 	codeLanguage,
@@ -253,4 +254,114 @@ test("block rendering tolerates unknown token shapes instead of crashing the tra
 		<Blocks tokens={[{ type: "mystery", raw: "??" } as never, { type: "space", raw: "\n" } as never]} settled />,
 	);
 	match(html, /<p>\?\?<\/p>/u);
+});
+
+function renderDocument(source: string): string {
+	return renderToStaticMarkup(<MarkdownContent source={source} complete documentLinks={{}} />);
+}
+
+const SECTION = [
+	"<details>",
+	"<summary>More about **caching**</summary>",
+	"",
+	"## Inside heading",
+	"",
+	"| a | b |",
+	"| --- | --- |",
+	"| 1 | 2 |",
+	"",
+	"```ts",
+	"const x = 1;",
+	"```",
+	"",
+	"</details>",
+	"",
+	"After.",
+].join("\n");
+
+test("documents fold <details> into a native section with its Markdown intact", () => {
+	const html = renderDocument(SECTION);
+	match(html, /<details class="md-details"><summary>More about \*\*caching\*\*<\/summary>/);
+	match(html, /<div class="md-details__body">/);
+	match(html, /<h3[^>]*id="inside-heading"[^>]*>Inside heading<\/h3>/);
+	match(html, /<table>/);
+	match(html, /const/);
+	// The section closes before the paragraph that follows it.
+	ok(html.indexOf("</details>") < html.indexOf("After."), "the closing tag ends the section");
+	ok(!html.includes("&lt;details"), "no tag is shown as text");
+});
+
+test("a section is open only when the source says so, and nests", () => {
+	equal(
+		renderDocument("<details>\n<summary>A</summary>\n\nx\n\n</details>").includes('<details class="md-details" open'),
+		false,
+	);
+	match(
+		renderDocument("<details open>\n<summary>A</summary>\n\nx\n\n</details>"),
+		/<details class="md-details" open="">/,
+	);
+	const nested = renderDocument(
+		"<details>\n<summary>Outer</summary>\n\n<details>\n<summary>Inner</summary>\n\ndeep\n\n</details>\n\nouter tail\n\n</details>\n\nafter",
+	);
+	equal(nested.match(/<details /g)?.length, 2);
+	ok(
+		nested.indexOf("deep") < nested.indexOf("outer tail") &&
+			nested.indexOf("outer tail") < nested.lastIndexOf("</details>"),
+	);
+	ok(nested.indexOf("</details>", nested.indexOf("outer tail")) < nested.indexOf("after"), "after sits outside both");
+	// GitHub runs an unclosed section to the end of the file.
+	match(
+		renderDocument("<details>\n<summary>Open ended</summary>\n\nstill inside"),
+		/<details class="md-details"><summary>Open ended<\/summary>[\s\S]*still inside/,
+	);
+});
+
+test("only the section survives: attributes, script and other raw HTML never reach the page", () => {
+	const html = renderDocument(
+		'<details class="x" style="position:fixed" onclick="alert(1)" id="steal">\n<summary><img src=x onerror="alert(1)">Label &amp; <b>bold</b></summary>\n\nbody\n\n</details>',
+	);
+	match(html, /<details class="md-details"><summary>Label &amp; bold<\/summary>/);
+	for (const forbidden of [/onclick/, /onerror/, /style=/, /id="steal"/, /<img/, /<b>/, /<script/i])
+		doesNotMatch(html, forbidden);
+	const script = renderDocument("<details>\n<summary>x</summary>\n\n<script>alert(1)</script>\n\n</details>");
+	doesNotMatch(script, /<script/i);
+	match(renderDocument("<details>\n\ntext\n\n</details>"), /<summary>Details<\/summary>/);
+	// The whole section may sit in one HTML block, as on one line of source.
+	match(
+		renderDocument("<details><summary>One line</summary>tucked in</details>"),
+		/<summary>One line<\/summary>[\s\S]*tucked in/,
+	);
+});
+
+test("outside documents the same HTML stays text", () => {
+	const html = renderToStaticMarkup(<MarkdownContent source={SECTION} complete />);
+	doesNotMatch(html, /<details/);
+	match(html, /&lt;details&gt;/);
+});
+
+test("a link to a heading inside collapsed sections opens every section around it", () => {
+	interface Node extends RevealTarget {
+		open?: boolean;
+	}
+	const node = (tagName: string, parentElement: Node | null, open?: boolean): Node =>
+		open === undefined ? { tagName, parentElement } : { tagName, parentElement, open };
+	const page = node("DIV", null);
+	const outer = node("DETAILS", page, false);
+	const inner = node("details", outer, false);
+	const alreadyOpen = node("DETAILS", inner, true);
+	const heading = node("H3", alreadyOpen);
+	equal(openEnclosingDetails(heading), 2);
+	equal(outer.open && inner.open, true);
+	equal(openEnclosingDetails(heading), 0, "nothing left to open");
+	equal(openEnclosingDetails(null), 0);
+	// A section that is itself the target stays as the reader left it.
+	const closed = node("DETAILS", page, false);
+	equal(openEnclosingDetails(closed), 0);
+	equal(closed.open, false);
+});
+
+test("a table sits in a scroll wrapper that is a plain, unfocused block until it measures as overflowing", () => {
+	const html = renderDocument("| a | b |\n| --- | --- |\n| 1 | 2 |\n");
+	match(html, /<div class="md-table"><table>/);
+	doesNotMatch(html, /tabindex|role="region"/i, "a table that fits adds no Tab stop or landmark");
 });

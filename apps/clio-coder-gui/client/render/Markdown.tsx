@@ -14,6 +14,7 @@ import { documentHeadings } from "../../contracts/docs-headings.js";
 
 const { createContext, memo, useContext, useEffect, useMemo, useRef, useState } = React;
 
+import { type BlockNode, groupDetails, isDetails, summaryText } from "./details.js";
 import { type HighlightToken, highlightCode } from "./highlight.js";
 import {
 	codeLanguage,
@@ -488,7 +489,7 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 		case "table": {
 			const table = token as Tokens.Table;
 			return (
-				<div className="md-table">
+				<TableViewport>
 					<table>
 						<thead>
 							<tr>
@@ -511,7 +512,7 @@ function Block({ token, settled }: { token: MarkdownToken; settled: boolean }): 
 							))}
 						</tbody>
 					</table>
-				</div>
+				</TableViewport>
 			);
 		}
 		case "hr":
@@ -546,14 +547,30 @@ export const Blocks = memo(function Blocks({
 	tokens: readonly MarkdownToken[];
 	settled: boolean;
 }) {
+	// Collapsible sections are a reading feature of documents. In a conversation the same HTML stays text.
+	const inDocument = useContext(DocumentContext) !== null;
+	const nodes = useMemo<readonly BlockNode[]>(() => (inDocument ? groupDetails(tokens) : tokens), [inDocument, tokens]);
+	return <BlockNodes nodes={nodes} settled={settled} />;
+});
+
+function BlockNodes({ nodes, settled }: { nodes: readonly BlockNode[]; settled: boolean }) {
 	return (
 		<>
-			{tokens.map((token) => (
-				<Block token={token} settled={settled} key={tokenKey(token)} />
-			))}
+			{nodes.map((node) =>
+				isDetails(node) ? (
+					<details className="md-details" open={node.open || undefined} key={tokenKey(node.key)}>
+						<summary>{decodeEntities(summaryText(node.summary))}</summary>
+						<div className="md-details__body">
+							<BlockNodes nodes={node.children} settled={settled} />
+						</div>
+					</details>
+				) : (
+					<Block token={node} settled={settled} key={tokenKey(node)} />
+				),
+			)}
 		</>
 	);
-});
+}
 
 interface MarkdownContentProps {
 	readonly documentLinks?: Readonly<Record<string, string | null>>;
@@ -612,6 +629,33 @@ export const MarkdownContent = memo(function MarkdownContent({
 
 const NO_TOKENS: readonly MarkdownToken[] = [];
 const DECORATIVE_IMAGE = /^\s*<(p|div)\b[^>]*>\s*<img\b[^>]*>\s*<\/\1>\s*$/i;
+
+/**
+ * A table wider than its column scrolls inside this wrapper. A scrolling region has to take focus
+ * so the keyboard can move it, but a table that fits should not add a Tab stop, so focus and the
+ * label follow the measured overflow. Sections that are closed measure zero and update on opening.
+ */
+function TableViewport({ children }: { children: ReactNode }) {
+	const wrapper = useRef<HTMLDivElement>(null);
+	const [scrolls, setScrolls] = useState(false);
+	useEffect(() => {
+		const element = wrapper.current;
+		if (!element) return;
+		const measure = () => setScrolls(element.scrollWidth > element.clientWidth + 1);
+		measure();
+		const observer = new ResizeObserver(measure);
+		observer.observe(element);
+		if (element.firstElementChild) observer.observe(element.firstElementChild);
+		return () => observer.disconnect();
+	}, []);
+	// Name and focus the scroll container without adding a page landmark for every table.
+	const scrolling = scrolls ? ({ tabIndex: 0, role: "group", "aria-label": "Scrollable table" } as const) : {};
+	return (
+		<div className="md-table" ref={wrapper} {...scrolling}>
+			{children}
+		</div>
+	);
+}
 
 function CodeViewport({ children }: { children: ReactNode }) {
 	return (

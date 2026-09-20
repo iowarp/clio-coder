@@ -115,6 +115,13 @@
 .markdown th {
 	background: var(--inset);
 }
+/* A column keeps its words whole. The document sets overflow-wrap: anywhere so long paths cannot
+   push the page wide, but inside a table that lets the layout shrink a label column to one
+   character. Where the columns cannot fit, the table's own wrapper scrolls sideways. */
+.markdown .md-table :is(th, td, code, a) {
+	overflow-wrap: normal;
+	word-break: normal;
+}
 .code-block,
 .diagram {
 	min-width: 0;
@@ -249,4 +256,61 @@
 .code-block pre:focus-visible,
 .diagram pre:focus-visible {
 	outline-offset: -3px;
+}
+
+/* Collapsible sections from <details> in shipped documents: long detail stays one click away. */
+.markdown .md-details {
+	/* The page-level details style is small and muted; a document section reads like the text around it. */
+	margin: 0.85em 0 0;
+	font-size: inherit;
+	color: var(--ink);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+}
+.markdown .md-details > summary {
+	display: flex;
+	align-items: center;
+	gap: 0.7em;
+	padding: 0.65em 1em;
+	cursor: pointer;
+	font-weight: 600;
+	list-style: none;
+}
+.markdown .md-details > summary::-webkit-details-marker {
+	display: none;
+}
+.markdown .md-details > summary::before {
+	content: "";
+	flex: none;
+	width: 0.45em;
+	height: 0.45em;
+	border-right: 2px solid var(--ink-muted);
+	border-bottom: 2px solid var(--ink-muted);
+	transform: rotate(-45deg);
+	transition: transform var(--motion-fast) var(--ease-standard);
+}
+.markdown .md-details[open] > summary::before {
+	transform: rotate(45deg);
+}
+.markdown .md-details > summary::after {
+	content: "Show";
+	margin-left: auto;
+	font: 400 11px var(--font-mono);
+	text-transform: uppercase;
+	letter-spacing: 0.05em;
+	color: var(--ink-muted);
+}
+.markdown .md-details[open] > summary::after {
+	content: "Hide";
+}
+.markdown .md-details > summary:hover {
+	background: var(--surface-sunken);
+}
+.markdown .md-details__body {
+	padding: 0.3em 1em 1em;
+	border-top: 1px solid var(--line);
+}
+.markdown .md-details__body > * + * {
+	margin-top: 0.85em;
 }
