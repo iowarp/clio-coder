@@ -1184,6 +1184,22 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (!currentContextSnapshot) return;
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
+			if (runtime) {
+				const messages = runtime.agent.state.messages;
+				// The just-completed response is output, not part of its own prompt.
+				const promptMessages = messages.at(-1)?.role === "assistant" ? messages.slice(0, -1) : messages;
+				currentContextSnapshot = captureRuntimeContextSnapshot(
+					runtime,
+					currentContextSnapshot.turnId,
+					deps.getSettings().context.compaction?.threshold ?? null,
+					{
+						conversationMessages: promptMessages,
+						promptSegments: currentContextSnapshot.promptSegments,
+						promptHash: currentContextSnapshot.promptHash,
+						toolSignature: currentContextSnapshot.toolSignature,
+					},
+				);
+			}
 			currentContextSnapshot = reconcileSnapshot(currentContextSnapshot, usage);
 			snapshotPersistPending = true;
 		},
@@ -1397,7 +1413,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + liveStreamingOutputTokens();
 			const breakdown: ContextUsageBreakdown = {
 				systemPromptTokens: currentContextSnapshot.categories.system,
-				messageTokens: currentContextSnapshot.categories.messages,
+				messageTokens: currentContextSnapshot.categories.messages + (currentContextSnapshot.categories.toolResults ?? 0),
 				pendingUserTokens: pendingTokens,
 				toolSchemaTokens: currentContextSnapshot.categories.tools,
 			};
@@ -1453,6 +1469,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				// the live agent state after a session resume.
 				toolCount: currentContextSnapshot.activeToolSchemas?.length ?? liveToolCount,
 				messageTokens: currentContextSnapshot.categories.messages,
+				toolResultTokens: currentContextSnapshot.categories.toolResults ?? 0,
 				agentsTokens: currentContextSnapshot.categories.agents,
 				skillsTokens: currentContextSnapshot.categories.skills,
 				memoryTokens: currentContextSnapshot.categories.memory,

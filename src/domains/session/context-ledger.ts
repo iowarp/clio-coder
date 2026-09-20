@@ -12,8 +12,8 @@
  *  - the decomposed estimate (sum of every category we can name), and
  *  - the live anchored total (provider-measured usage when one exists).
  * When the measured total exceeds the decomposition, the delta is attributed
- * to Messages — the only category that grows turn over turn — mirroring the
- * proportional reconciliation the footer bar already performs.
+ * to Messages as an unclassified conversation/framing residual. Tool-result
+ * estimates are tracked separately; provider totals do not measure category splits.
  */
 
 import type { BackendCacheVerdict, BackendCompletionTimings } from "../../core/cache-telemetry.js";
@@ -24,6 +24,7 @@ import { DEFAULT_COMPACTION_THRESHOLD } from "./compaction/auto.js";
 export type ContextLedgerCategory =
 	| "system"
 	| "tools"
+	| "toolResults"
 	| "agents"
 	| "skills"
 	| "memory"
@@ -58,6 +59,8 @@ export interface BuildContextLedgerInput {
 	systemPromptTokens?: number;
 	/** Serialized active tool-schema token estimate (the JSON the provider sees). */
 	toolSchemaTokens?: number;
+	/** Conversation tool-result content, separate from schemas. */
+	toolResultTokens?: number;
 	/** Number of active tool schemas this turn. */
 	toolCount?: number;
 	/** Conversation message token estimate. */
@@ -236,6 +239,7 @@ const SEGMENT_CATEGORY: Readonly<Record<string, ContextLedgerCategory>> = {
 export const CONTEXT_CATEGORY_LABEL: Readonly<Record<ContextLedgerCategory, string>> = {
 	system: "System prompt",
 	tools: "Tool definitions",
+	toolResults: "Tool results",
 	agents: "Agent fleet",
 	skills: "Skills",
 	memory: "Memory",
@@ -244,7 +248,7 @@ export const CONTEXT_CATEGORY_LABEL: Readonly<Record<ContextLedgerCategory, stri
 	pending: "Pending input",
 	reserve: "Autocompact reserve",
 	free: "Free space",
-	streaming: "Streaming output",
+	streaming: "Assistant output",
 };
 
 /** Display order for the content categories and the meter. */
@@ -256,6 +260,7 @@ const CONTENT_ORDER: ReadonlyArray<ContextLedgerCategory> = [
 	"memory",
 	"project",
 	"messages",
+	"toolResults",
 	"pending",
 	"streaming",
 ];
@@ -288,6 +293,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 	const raw: Record<ContextLedgerCategory, number> = {
 		system: 0,
 		tools: 0,
+		toolResults: 0,
 		agents: 0,
 		skills: 0,
 		memory: 0,
@@ -309,6 +315,7 @@ export function buildContextLedger(input: BuildContextLedgerInput): ContextLedge
 	}
 	raw.tools += finiteNonNegative(input.toolSchemaTokens);
 	raw.messages += finiteNonNegative(input.messageTokens);
+	raw.toolResults += finiteNonNegative(input.toolResultTokens);
 	raw.pending += finiteNonNegative(input.pendingTokens);
 	raw.streaming += finiteNonNegative(input.streamingTokens);
 	raw.agents += finiteNonNegative(input.agentsTokens);

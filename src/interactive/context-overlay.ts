@@ -187,7 +187,7 @@ function renderContextLedgerLines(
 	lines.push("");
 
 	if (ledger.contextWindow > 0) {
-		const source = ledger.measured ? "measured" : "≈ estimated";
+		const source = ledger.measured ? "provider-anchored total · estimated splits" : "≈ estimated";
 		// `196,608 (786,432 / 4 slots)`: a llama.cpp window that is one slot's
 		// share of the server's KV budget names the split, because the bare
 		// number reads as the whole server and the meter is measured against
