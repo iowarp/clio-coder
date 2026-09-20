@@ -1,7 +1,9 @@
+import type { Static } from "typebox";
 import type { Problem } from "../../contracts/common.js";
 import type { DocsRequest } from "../../contracts/docs.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
+import type { LibraryPlanRequest } from "../../contracts/library.js";
 import type { EvalRequest } from "../../contracts/reports.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
@@ -35,6 +37,9 @@ export interface Methods {
 	"traces.read": { params: TraceRequest; result: unknown };
 	"tools.list": { params: Record<string, never>; result: { rows: RawTool[]; threadId: number } };
 	"tools.install": { params: { id: string; force: boolean }; result: { id: string; message: string } };
+	"library.plan": { params: { cwd: string; request: Static<typeof LibraryPlanRequest> }; result: unknown };
+	"library.apply": { params: { cwd: string; planId: string }; result: unknown };
+	"library.release": { params: { cwd: string; planId: string }; result: unknown };
 	"tools.remove": { params: { id: string }; result: { id: string; message: string } };
 }
 export type Method = keyof Methods;

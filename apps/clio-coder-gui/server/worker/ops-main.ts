@@ -1,4 +1,5 @@
 import { workerData } from "node:worker_threads";
+import { libraryLifecycleAdapter } from "../clio/adapters/library-lifecycle.js";
 import { runtimeInfo } from "../clio/adapters/runtime.js";
 import { toolchainAdapter, toolDownloader } from "../clio/adapters/toolchain.js";
 import { restrictNetwork } from "../network-policy.js";
@@ -14,9 +15,13 @@ const fixture =
 		? await import("../../tests/fixtures/toolchain.js")
 		: undefined;
 const adapter = toolchainAdapter(fixture?.fixtureOptions(settings) ?? { fetcher: toolDownloader(download) });
+const library = libraryLifecycleAdapter();
 serveWorker((call, progress) => {
 	if (call.method === "runtime.info" && process.env.NODE_ENV === "test") return runtimeInfo(import.meta.url);
 	if (call.method === "tools.install") return adapter.install(call.params.id, call.params.force, progress);
 	if (call.method === "tools.remove") return adapter.remove(call.params.id);
+	if (call.method === "library.plan") return library.plan(call.params.cwd, call.params.request);
+	if (call.method === "library.apply") return library.apply(call.params.cwd, call.params.planId);
+	if (call.method === "library.release") return library.release(call.params.cwd, call.params.planId);
 	throw new AppProblem("unsupported", "Method is not available in the ops worker.");
 });

@@ -2,24 +2,26 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { LibraryCatalog } from "./library-catalog.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
-const collections = ["Agents", "Skills", "Prompts", "Fleets", "Plugins", "Extensions", "Verifiers"] as const;
+const collections = ["Catalog", "Agents", "Skills", "Prompts", "Fleets", "Extensions", "Verifiers"] as const;
 type Collection = (typeof collections)[number];
 type Entry = { id: string; name: string; description: string; state: string; detail: unknown };
 const purpose: Record<Collection, string> = {
+	Catalog:
+		"Every package Clio can install, and every copy already installed, for you or for this project. Each change is planned first, shown to you, and only then applied.",
 	Agents: "Specialists Clio can assign work to. Their specifications describe the tools, skills and limits they use.",
 	Skills: "Reusable instructions that guide Clio through a task.",
 	Prompts: "Saved starting points for conversations and common tasks.",
 	Fleets: "Saved workflows that coordinate several steps or specialists.",
-	Plugins: "Packages that provide recipes. Being listed in the catalog does not mean a package is installed.",
 	Extensions: "Installed packages that add executable capabilities. Admission state shows whether Clio can load them.",
 	Verifiers: "Checks Clio discovered for this workspace. Viewing this list does not run them.",
 };
 export function LibraryPage({ client }: { client: Client }) {
 	const selection = useWorkspaceSelection(client),
 		{ id } = selection;
-	const [active, setActive] = useState<Collection>("Skills"),
+	const [active, setActive] = useState<Collection>("Catalog"),
 		[filter, setFilter] = useState(""),
 		[limit, setLimit] = useState(40);
 	const inventory = useQuery({
@@ -52,7 +54,7 @@ export function LibraryPage({ client }: { client: Client }) {
 				state: `${row.availability} · ${row.source.class}`,
 				detail: row,
 			}));
-	const entries: Record<Collection, Entry[]> = {
+	const entries: Record<Exclude<Collection, "Catalog">, Entry[]> = {
 		Agents: (agents.data?.agents ?? []).map((row) => ({
 			id: row.id,
 			name: row.name,
@@ -63,15 +65,6 @@ export function LibraryPage({ client }: { client: Client }) {
 		Skills: resourceEntries("skill"),
 		Prompts: resourceEntries("prompt"),
 		Fleets: resourceEntries("fleet"),
-		Plugins: (inventory.data?.packages ?? [])
-			.filter((row) => row.kind === "plugin")
-			.map((row) => ({
-				id: row.ref,
-				name: row.name,
-				description: row.description,
-				state: row.copies.length ? `${row.copies.length} installed copies` : "Available in catalog",
-				detail: { ...row, installedCopies: inventory.data?.copies.filter((copy) => copy.ref === row.ref) },
-			})),
 		Extensions: (extensions.data?.extensions ?? []).map((row) => ({
 			id: `${row.id}:${row.scope}`,
 			name: row.name,
@@ -99,9 +92,11 @@ export function LibraryPage({ client }: { client: Client }) {
 	};
 	const source =
 		active === "Agents" ? agents : active === "Extensions" ? extensions : active === "Verifiers" ? verifiers : inventory;
-	const visible = entries[active].filter((row) =>
+	const visible = (active === "Catalog" ? [] : entries[active]).filter((row) =>
 		`${row.name} ${row.description}`.toLowerCase().includes(filter.trim().toLowerCase()),
 	);
+	const count = (name: Collection) =>
+		name === "Catalog" ? (inventory.data?.packages.length ?? 0) : entries[name].length;
 	return (
 		<section>
 			<p className="eyebrow">Capabilities / Your library</p>
@@ -120,7 +115,7 @@ export function LibraryPage({ client }: { client: Client }) {
 							setLimit(40);
 						}}
 					>
-						{name} · {entries[name].length}
+						{name} · {count(name)}
 					</button>
 				))}
 			</nav>
@@ -159,7 +154,10 @@ export function LibraryPage({ client }: { client: Client }) {
 					{!!verifiers.data.diagnosticCount && <p>{verifiers.data.diagnosticCount} discovery diagnostics were reported.</p>}
 				</>
 			)}
-			{source.data && !visible.length && (
+			{active === "Catalog" && inventory.data && (
+				<LibraryCatalog client={client} workspaceId={id} packages={inventory.data.packages} filter={filter} />
+			)}
+			{active !== "Catalog" && source.data && !visible.length && (
 				<p>{filter ? "No matches. Try a different search." : `No ${active.toLowerCase()} reported for this workspace.`}</p>
 			)}
 			<div className="config-entries">

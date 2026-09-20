@@ -11,6 +11,7 @@ Extracted from `apps/workbench/HARNESS_COVERAGE.md`. Items 1-8 are historical re
    - *Live:* `/api/workspaces/:id/config-graph`. The question it answers is the right framing for the whole settings area; keep it as the page's stated purpose.
 
 3. **Capability atlas — partially implemented.** Fixed read-only adapters project Agents, installed Skills, installed Extensions, and Library resources into **independently fallible, bounded collections** with search, provenance, trust, precedence, and budget facts. The Verifiers tab deliberately remains an interface-boundary explanation until Clio Coder publishes a typed listing; **the GUI does not scrape its formatted authoring preview.**
+   - *Now:* the Library page opens on a Catalog of every package kind with both scopes per row, and install, update, enable, disable and remove run as plan, review, apply. See `cli-surface-routing.md`, "What the app ships".
    - *Status:* `verifiers inspect --json` landed, so the Verifiers tab can become real. "Independently fallible" is the property to preserve.
 
 4. **Offline model and worker routing inventory — implemented.** Settings can explicitly inspect bounded model capabilities, token limits, reported residency, worker profiles, and agent bindings. **The three fixed JSON reads run in parallel and fail independently.** The GUI does not probe endpoints, expose provider configuration, or **treat cached/offline facts as health**; authoring and live routing still require typed operations and events.
