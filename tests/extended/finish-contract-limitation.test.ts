@@ -2,6 +2,7 @@ import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { finishContractEvidenceTags } from "../../src/domains/evidence/finish-contract-map.js";
+import { composeTrustStatus } from "../../src/domains/evidence/trust-status.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { builtin } from "../../src/tools/builtin-tool-catalog.js";
 import { limitationTool } from "../../src/tools/limitation.js";
@@ -124,6 +125,66 @@ describe("finish contract: the limitation receipt replaces the prose regex", () 
 			];
 			const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
 			strictEqual(assessment.reason, isError ? "unvalidated_mutation" : "validation_evidence");
+		}
+	});
+
+	it("requires verified and validated canonical dispatch evidence, not just a zero exit code", () => {
+		const trusted = composeTrustStatus({
+			artifactIntegrity: {
+				state: "verified",
+				source: { kind: "receipt_integrity_verification", id: "run-1" },
+				authority: { kind: "clio", id: "receipt-integrity" },
+				artifacts: [],
+			},
+			validationGrounding: {
+				state: "validated",
+				source: { kind: "run_receipt", id: "run-1" },
+				authority: { kind: "validator", id: "receipt-quality" },
+				artifacts: [],
+			},
+		});
+		const run = { runId: "run-1", agentId: "verifier", exitCode: 0, trustStatus: trusted };
+		const failed = {
+			...run,
+			trustStatus: { ...trusted, validationGrounding: { ...trusted.validationGrounding, state: "failed" } },
+		};
+		const candidates: Array<{ details: Record<string, unknown>; passed: boolean }> = [
+			{ details: run, passed: true },
+			{ details: { runs: [run], failedCount: 0 }, passed: true },
+			{ details: failed, passed: false },
+			{ details: { runs: [run, failed], failedCount: 0 }, passed: false },
+			{ details: { ...run, trustStatus: null }, passed: false },
+			{ details: { ...run, trustStatus: composeTrustStatus() }, passed: false },
+			{
+				details: {
+					...run,
+					trustStatus: { ...trusted, validationGrounding: { ...trusted.validationGrounding, state: "ungrounded" } },
+				},
+				passed: false,
+			},
+			{
+				details: {
+					...run,
+					trustStatus: { ...trusted, artifactIntegrity: { ...trusted.artifactIntegrity, state: "failed" } },
+				},
+				passed: false,
+			},
+			// Preserve compatibility for historical ledgers without canonical trust fields.
+			{ details: { runId: "old", agentId: "verifier", exitCode: 0 }, passed: true },
+		];
+		for (const { details, passed } of candidates) {
+			const entries = [
+				...mutationWindow(),
+				toolCall("dispatch-1", ToolNames.Dispatch, { agent_id: "verifier", task: "Verify the edit" }),
+				{
+					kind: "message",
+					role: "tool_result",
+					payload: { toolName: "dispatch", toolCallId: "dispatch-1", result: { details } },
+				},
+				assistantMessage("assistant-1", "Review finished."),
+			];
+			const assessment = assessFinishContract({ sessionEntries: entries, assistantTurnId: "assistant-1" });
+			strictEqual(assessment.reason, passed ? "validation_evidence" : "unvalidated_mutation", JSON.stringify(details));
 		}
 	});
 
