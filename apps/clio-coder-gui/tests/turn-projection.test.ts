@@ -2,9 +2,53 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import { routes } from "../contracts/routes.js";
-import { SessionBuffer } from "../contracts/session-projection.js";
-import { type SessionDelta, SessionDeltas } from "../contracts/sessions.js";
+import { applySessionDelta, emptySession, encodeMeter, SessionBuffer } from "../contracts/session-projection.js";
+import { type SessionDelta, SessionDeltas, type SessionSnapshot, type TimelineItem } from "../contracts/sessions.js";
 import { harness, json } from "./harness/app.js";
+
+const CHUNK = "0123456789 ";
+function streamed(count: number, text = CHUNK) {
+	let revision = 0;
+	let snapshot = applySessionDelta(emptySession("session", "workspace"), {
+		type: "turn.started",
+		payload: {
+			resource: "session",
+			revision: ++revision,
+			turn: {
+				id: "turn",
+				prompt: "",
+				origin: "live",
+				status: "running",
+				startedAt: null,
+				finishedAt: null,
+				stopReason: null,
+				usage: null,
+				problem: null,
+			},
+		},
+	});
+	const before = encodeMeter.bytes;
+	for (let index = 0; index < count; index++)
+		snapshot = applySessionDelta(snapshot, {
+			type: "turn.text",
+			payload: { resource: "session", revision: ++revision, turnId: "turn", text, origin: "live" },
+		});
+	return { snapshot, encoded: encodeMeter.bytes - before };
+}
+function toolDelta(snapshot: SessionSnapshot, revision: number, index: number): SessionDelta {
+	const item: TimelineItem = {
+		id: `turn:tool:${index}`,
+		turnId: "turn",
+		sequence: 0,
+		kind: "tool",
+		text: `Tool ${index}`,
+		status: "completed",
+		origin: "live",
+		title: `Tool ${index}`,
+		toolCallId: `${index}`,
+	};
+	return { type: "turn.tool", payload: { resource: snapshot.id, revision, item } };
+}
 
 test("held GET snapshot replays newer deltas exactly once; a newer assembled snapshot covers already delivered deltas", {
 	timeout: 10000,
@@ -72,4 +116,41 @@ test("tool updates preserve locations and raw input while coalescing one card wi
 	assert.deepEqual(tools[0]?.rawInput, { path: "README.md" });
 	assert.deepEqual(tools[0]?.rawOutput, { result: "Fixture documentation" });
 	assert.equal(tools[0]?.provenance?.[0]?.agentId, "orchestrator");
+});
+
+test("retention accounting stays linear: quadrupling the deltas must not quadruple the encoded bytes per delta", () => {
+	const small = streamed(500),
+		large = streamed(2000);
+	assert.equal(large.snapshot.timeline.length, 1);
+	assert.equal(large.snapshot.timeline[0]?.text, CHUNK.repeat(2000));
+	assert.equal(large.snapshot.timelineTruncated, false);
+	// Recompute-from-scratch accounting encoded the whole timeline per delta, so 4x the deltas cost ~16x the bytes.
+	assert.ok(
+		large.encoded < small.encoded * 6,
+		`Encoded ${small.encoded} bytes for 500 deltas and ${large.encoded} for 2000.`,
+	);
+	assert.ok(
+		large.encoded < 2000 * CHUNK.length * 8,
+		`Encoded ${large.encoded} bytes to project ${2000 * CHUNK.length} bytes of text.`,
+	);
+});
+
+test("a run past its byte limit keeps the marker, drops later appends, and flags the snapshot", () => {
+	const { snapshot } = streamed(1200, "x".repeat(64));
+	const run = snapshot.timeline[0];
+	assert.equal(snapshot.timelineTruncated, true);
+	assert.ok(run?.text.endsWith("\n[… stream truncated …]"));
+	assert.equal(new TextEncoder().encode(run?.text).byteLength, 65536);
+	assert.equal(streamed(2400, "x".repeat(64)).snapshot.timeline[0]?.text, run?.text);
+});
+
+test("the oldest timeline entries are dropped once the entry bound is passed", () => {
+	let snapshot = emptySession("session", "workspace"),
+		revision = 0;
+	for (let index = 0; index < 2100; index++)
+		snapshot = applySessionDelta(snapshot, toolDelta(snapshot, ++revision, index));
+	assert.equal(snapshot.timeline.length, 2048);
+	assert.equal(snapshot.timelineTruncated, true);
+	assert.equal(snapshot.timeline[0]?.id, "turn:tool:52");
+	assert.equal(snapshot.timeline.at(-1)?.id, "turn:tool:2099");
 });

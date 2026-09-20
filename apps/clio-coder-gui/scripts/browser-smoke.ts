@@ -91,7 +91,7 @@ try {
 			await page.waitForFunction(
 				() =>
 					getComputedStyle(document.body).color ===
-					(document.documentElement.dataset.theme === "dark" ? "rgb(226, 230, 216)" : "rgb(46, 62, 52)"),
+					(document.documentElement.dataset.theme === "dark" ? "rgb(227, 231, 217)" : "rgb(31, 43, 36)"),
 			);
 			await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
 			const builder = new AxeBuilder({ page });

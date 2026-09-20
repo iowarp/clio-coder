@@ -41,7 +41,7 @@ async function waitUntil(check: () => boolean) {
 	throw new Error("Timed out waiting for a turn.");
 }
 
-test("workspace and session routes stream one complete turn with five usage fields and command idempotency", {
+test("workspace and session routes stream one complete turn with recorded usage and cost and command idempotency", {
 	timeout: 20000,
 }, async (t) => {
 	const h = await harness();
@@ -87,6 +87,7 @@ test("workspace and session routes stream one complete turn with five usage fiel
 		cacheRead: 13,
 		cacheWrite: 14,
 		reasoning: 15,
+		costUsd: 0.001,
 	});
 	const turnEvents = events.filter((event) => event.type.startsWith("turn."));
 	assert.equal(turnEvents[0]?.type, "turn.started");

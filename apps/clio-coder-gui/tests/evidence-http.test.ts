@@ -39,7 +39,9 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 			(await json(await h.request("/api/evidence/evidence-000"), EvidenceDetail)).projection,
 			"historical_format",
 		);
-		assert.equal((await h.request("/api/evidence/missing")).status, 404);
+		// An id this host never served is refused, not looked up: 404 would claim a
+		// search that did not happen. tests/artifact-window.test.ts owns that rule.
+		assert.equal((await h.request("/api/evidence/missing")).status, 403);
 		for (const query of ["limit=0", "limit=101", "cursor=broken"])
 			assert.equal((await h.request(`/api/evidence?${query}`)).status, 422);
 		await writeFile(join(h.home.path, "outside.json"), '{"leak":true}');
@@ -56,6 +58,9 @@ test("real CLI builds evidence once per key, follows typed storage, and rechecks
 	try {
 		const seeded = await seedEvidence(h.home.path, h.home.env);
 		const workspace = await h.workspaces.open(h.home.path);
+		// The operator reaches a build from the dispatch list; that listing is what
+		// makes the run id referenceable at all.
+		await h.request("/api/fleet/dispatches");
 		const path = `/api/workspaces/${workspace.id}/evidence/${seeded.runId}/build`;
 		const accepted = await json(await h.post(path, {}, "build-once"), Accepted);
 		assert.deepEqual(await json(await h.post(path, {}, "build-once"), Accepted), accepted);

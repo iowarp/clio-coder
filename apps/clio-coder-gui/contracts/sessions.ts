@@ -34,6 +34,8 @@ export const Usage = Type.Object(
 		cacheRead: Type.Integer({ minimum: 0 }),
 		cacheWrite: Type.Integer({ minimum: 0 }),
 		reasoning: Type.Integer({ minimum: 0 }),
+		// Clio reports its own cost; the contract has to admit it or Value.Clean drops it before a turn records it.
+		costUsd: Type.Optional(Type.Number({ minimum: 0 })),
 	},
 	closed,
 );

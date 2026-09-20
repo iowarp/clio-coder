@@ -24,6 +24,11 @@ export class EvidenceService {
 		if (!Value.Check(schema, value)) throw new AppProblem("unavailable", "Evidence returned an invalid projection.");
 		return value;
 	}
+	/**
+	 * `runId` reaches a child process argv, so it must already be an id this host
+	 * served: the route admits it against the ArtifactWindow and passes the
+	 * admitted value. Nothing here re-derives it from the request.
+	 */
 	async execute(workspaceId: string, runId: string, action: "build" | "verify", key: string) {
 		const workspace = await this.workspaces.get(workspaceId);
 		return this.operations.create({

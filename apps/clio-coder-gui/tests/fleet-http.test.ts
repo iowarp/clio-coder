@@ -43,7 +43,10 @@ test("fleet REST: every durable root paginates once beyond 64 entries, corrupt r
 			(await json(await h.request("/api/fleet/receipts/member-two"), FleetReceipt)).receipt?.runId,
 			"member-two",
 		);
-		assert.equal((await json(await h.request("/api/fleet/receipts/escape"), FleetReceipt)).receipt, null);
+		// "escape" is in no listing, so the served-id window refuses it before the
+		// adapter runs; the symlink containment is asserted where it now lives.
+		assert.equal((await h.request("/api/fleet/receipts/escape")).status, 403);
+		assert.deepEqual(await h.reads.call("fleet.read", { kind: "receipt", id: "escape" }), { receipt: null });
 		assert.equal((await h.request("/api/fleet/runs/missing")).status, 404);
 		for (const query of ["limit=0", "limit=1.5", "limit=101", "cursor=broken"])
 			assert.equal((await h.request(`/api/fleet/runs?${query}`)).status, 422);

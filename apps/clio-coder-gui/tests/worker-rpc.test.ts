@@ -43,6 +43,34 @@ test("worker exit fails pending reads and the next call restarts the worker", as
 	assert.equal((await worker.call("tools.list", {})).rows.length, 3);
 });
 
+test("warm read lanes overlap, so one slow adapter no longer holds the next read", async (t) => {
+	const home = await scratchHome();
+	t.after(home.close);
+	const worker = new WorkerHost("reads", { fixture: true, readDelayMs: 120, readLanes: 2 }, home.env);
+	t.after(() => worker.close());
+	await Promise.all([worker.call("tools.list", {}), worker.call("tools.list", {})]);
+	assert.equal(worker.laneCount, 2);
+	const start = performance.now();
+	await Promise.all([worker.call("tools.list", {}), worker.call("tools.list", {})]);
+	const elapsed = performance.now() - start;
+	assert.ok(elapsed < 240, `Two warm lanes must overlap two 120 ms reads; observed ${elapsed} ms`);
+});
+
+test("a queued read spends its deadline on its own work, not on the call ahead of it", async (t) => {
+	const home = await scratchHome();
+	t.after(home.close);
+	const worker = new WorkerHost("reads", { fixture: true, readDelayMs: 300, readLanes: 1 }, home.env);
+	t.after(() => worker.close());
+	await worker.call("tools.list", {});
+	const blocker = worker.call("tools.list", {});
+	// 400 ms covers this call's own 300 ms of work but not the 300 ms the blocker
+	// still holds the lane for. Under enqueue-time accounting it returned 503 with
+	// most of its budget spent waiting rather than working.
+	const queued = worker.call("tools.list", {}, { deadlineMs: 400 });
+	assert.equal((await queued).rows.length, 3);
+	await blocker;
+});
+
 test("HTTP read deadline returns an unavailable problem while the adapter completes", async (t) => {
 	const h = await harness({ readDelayMs: 100, readDeadlineMs: 20 });
 	t.after(h.close);
