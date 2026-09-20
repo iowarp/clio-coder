@@ -26,6 +26,19 @@ describe("codewiki global freshness", () => {
 	});
 	afterEach(() => isolated.restore());
 
+	it("read-only navigation builds and refreshes without creating workspace artifacts", async () => {
+		const cwd = isolated.dir;
+		writeFileSync(join(cwd, "a.ts"), "export const before = 1;\n");
+		const first = await loadCodewikiForTool(cwd, { readOnly: true });
+		ok(first.ok);
+		ok(first.codewiki.symbols.some((symbol) => symbol.name === "before"));
+		writeFileSync(join(cwd, "a.ts"), "export const afterChange = 2;\n");
+		const second = await loadCodewikiForTool(cwd, { readOnly: true });
+		ok(second.ok);
+		ok(second.codewiki.symbols.some((symbol) => symbol.name === "afterChange"));
+		strictEqual(existsSync(join(cwd, ".clio-coder")), false);
+	});
+
 	it("resolves Python relative depth, package initializers, and local absolute imports", async () => {
 		const cwd = isolated.dir;
 		const sources = {
