@@ -41,6 +41,7 @@ import {
 	rule,
 	screenTitle,
 } from "../theme/index.js";
+import { createDemoHints } from "./demo-hints.js";
 import {
 	formatNotificationBadge,
 	formatNotificationPanel,
@@ -126,6 +127,7 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	demoHint?: string | null;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
 	costCeilingUsd?: number;
@@ -357,6 +359,7 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
 
 export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboardPanel {
 	const view = new Text("", 0, 0);
+	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
 	let frame = 0;
 	let dashboardMode: FooterDashboardMode = "compact";
@@ -465,6 +468,20 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				taskBoard: deps.getTaskBoard?.() ?? null,
 				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
+			demoHint: demoHints({
+				enabled: settings?.interface.demo === true,
+				now: now(),
+				quiet:
+					dashboardMode !== "compact" ||
+					compactionActive ||
+					["tool_blocked", "retrying", "stuck"].includes(status?.phase ?? "") ||
+					(status?.activeTools ?? []).some((tool) => tool.toolName === "ask_user") ||
+					(deps.getNotifications?.() ?? []).some((n) => n.expiresAt === null || n.expiresAt > now()),
+				agentActive: dispatch.some((row) => row.status === "running"),
+				toolsUsed: Object.values(tools.tools).some((count) => count > 0),
+				contextBusy: (contextLedger?.usedTokens ?? 0) > (contextLedger?.contextWindow ?? Infinity) * 0.4,
+				dashboardKey: getKeybindings().getKeys("clio-coder.status.toggle").join("/") || "Dashboard",
+			}),
 			notices: deps.getNotifications?.() ?? [],
 			status: status ?? {
 				phase: "idle",

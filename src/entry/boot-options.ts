@@ -33,6 +33,8 @@ export interface HeadlessRunDeadline {
 }
 
 export interface BootOptions {
+	/** Interactive demo guidance override for this session. */
+	demo?: boolean;
 	apiKey?: string;
 	noContextFiles?: boolean;
 	noSkills?: boolean;

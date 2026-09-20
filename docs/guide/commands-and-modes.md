@@ -9,6 +9,14 @@ Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
 `src/domains/dispatch/**`, `src/tools/registry.ts`, and the current test suite.
 For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see [exit-codes-and-output.md](exit-codes-and-output.md).
 
+## Demo guidance
+
+Interactive sessions enable friendly onboarding by default (`interface.demo: true`). Clio occasionally suggests a relevant next step after answering your request; she should respect declined suggestions and keep urgent work focused. Demonstrations still require a user request and use ordinary permissions. Headless runs and workers do not receive the demo persona.
+
+Use `clio-coder --no-demo` for a quiet session, `clio-coder --demo` to enable guidance for one session, or **Appearance → Display & keyboard → Demo guidance** in `/settings` or configure to change the saved preference. Session flags do not rewrite settings. Footer tips change live; the persona updates on the next turn. Asking Clio to stop suggestions affects her conversational guidance; the setting controls footer tips too.
+
+The compact footer remains two lines. A small Tip appears for about ten seconds, no more than once a minute, with each topic shown once per session: welcome/help, active agent inspection, tool-result inspection, and context composition above 40% occupancy. Shortcuts use your current bindings. Notices, blocked tools, retries, interviews, and expanded dashboards suppress tips. No extra model calls or idle demonstrations are scheduled.
+
 ## CLI Commands
 
 | Command | Purpose |

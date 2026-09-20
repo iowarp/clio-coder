@@ -7,6 +7,7 @@ import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
 import { type AutonomyLevel, isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
 import { ceilChars } from "../session/context-accounting.js";
+import { DEMO_GUIDANCE } from "./demo-guidance.js";
 import type { FragmentTable, LoadedFragment } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
 import type { ProjectPreloadClass } from "./preload.js";
@@ -27,6 +28,7 @@ export interface ToolPromptHint {
 }
 
 export interface SessionPromptInputs {
+	demo?: boolean;
 	provider?: string | null;
 	model?: string | null;
 	contextWindow?: number | null;
@@ -642,7 +644,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	const legacy = inputs.sectionOrder === "legacy-0.3.8";
 	const rendered = new Map<string, string>([
 		["identity", identityBody],
-		["operating-contract", operatingContract.body],
+		["operating-contract", [operatingContract.body, session.demo ? DEMO_GUIDANCE : ""].filter(Boolean).join("\n\n")],
 		["delegation", delegation?.body ?? ""],
 		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", skillActivation) ?? ""],
 		["safety", renderSafetySection(safety, autonomyLevel)],

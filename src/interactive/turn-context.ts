@@ -101,6 +101,7 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 export interface TurnContextDeps {
+	interactiveGuidance?: boolean;
 	state: ChatTurnState;
 	getSettings: () => Readonly<ClioSettings>;
 	providers: ProvidersContract;
@@ -1235,6 +1236,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				return hint ? [{ tool: name, hint }] : [];
 			});
 			const sessionInputs: SessionPromptInputs = {
+				demo: deps.interactiveGuidance === true && settings.interface.demo,
 				provider: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,
 				contextWindow,

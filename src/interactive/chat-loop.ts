@@ -398,6 +398,7 @@ export interface ChatLoop {
 }
 
 export interface CreateChatLoopDeps {
+	interactiveGuidance?: boolean;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
 	 * The same effective autonomy level registry admission resolves, so the
@@ -786,6 +787,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	}
 
 	const context = createTurnContext({
+		interactiveGuidance: deps.interactiveGuidance === true,
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,

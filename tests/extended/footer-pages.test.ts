@@ -338,3 +338,20 @@ test("compact notice borrows a row then expires without changing height", () => 
 	doesNotMatch(plain(after), /Worker finished/);
 	match(plain(after), /v050/);
 });
+
+test("demo tips borrow the compact footer row and yield to operational notices", () => {
+	const input = state();
+	input.notices = [];
+	input.demoHint = "Explore /help · guidance in /settings";
+	const rows = renderCompactDashboard(input, 80).map(stripTerminalSequences);
+	strictEqual(rows.length, 2);
+	match(rows[1] ?? "", /Tip.*Explore \/help/);
+	input.notices = [
+		{ id: "demo-priority", text: "Permission needed", level: "warning", key: null, addedAt: input.now, expiresAt: null },
+	];
+	match(plain(renderCompactDashboard(input, 80)), /Permission needed/);
+	doesNotMatch(plain(renderCompactDashboard(input, 80)), /Tip/);
+	input.notices = [];
+	input.demoHint = null;
+	doesNotMatch(renderCompactDashboard(input, 80).map(stripTerminalSequences).join("\n"), /Tip/);
+});

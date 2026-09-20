@@ -458,6 +458,10 @@ const OPTIONAL_STRINGS = new Set([
 	"context.compaction.systemPrompt",
 ]);
 const EXTRA_HELP: Record<string, [string, string]> = {
+	"interface.demo": [
+		"Demo guidance",
+		"Friendly interactive onboarding and brief contextual footer tips. On by default. Tips update live; conversational guidance changes on the next turn. No automatic demonstrations or permission changes.",
+	],
 	"integrations.externalAgents.entries": [
 		"External agent entries",
 		"Configure custom ACP agents as a JSON array, including their command, arguments, and governance overrides. These commands execute when you connect; only configure agents you trust. Use the guided External agents action for known integrations.",
