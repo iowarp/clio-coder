@@ -15,6 +15,9 @@ Requirements:
 
 - Node.js **22.19 or newer**.
 - **pnpm 10.34.5**, pinned by `packageManager`, and npm for package-install checks.
+- **ripgrep** (`rg`) and **fd** (`fd` or `fdfind`) on `PATH` for the native search
+  contracts and tool benchmarks. On Ubuntu: `sudo apt-get install ripgrep fd-find`.
+  Clio can run without them, but its fallback searches do not apply `.gitignore`.
 - Linux or macOS for the primary development workflow. Windows support is best effort;
   CI separately checks its subprocess boundaries.
 
