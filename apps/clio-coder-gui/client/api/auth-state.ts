@@ -12,6 +12,17 @@ export function markTokenRejected() {
 	for (const listener of listeners) listener();
 }
 export const tokenRejected = () => rejected;
+/** Runs once when the token is refused, or at once if it already was. Returns the unsubscribe. */
+export function onTokenRejected(listener: () => void) {
+	if (rejected) {
+		listener();
+		return () => {};
+	}
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+}
 export function useTokenRejected() {
 	return useSyncExternalStore(
 		(listener) => {
