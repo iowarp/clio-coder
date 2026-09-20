@@ -5,6 +5,7 @@
  * nudge. Owns every `deps.middleware` interaction of the loop.
  */
 
+import { turnAllowsContinuation } from "../core/turn-constraints.js";
 import {
 	MIDDLEWARE_HOOK_TEXT_MAX_CHARS,
 	type MiddlewareContract,
@@ -183,6 +184,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					promptChars: promptText.length,
 					queued: false,
 					requestContinuation,
+					turnMode: state.currentTurnConstraints?.mode ?? "",
 					activeToolNames: toolNamesFromAgentState(agentRuntime.agent.state.tools).join(","),
 					// First-substantive-turn signal for once-per-session reminders:
 					// a fresh session's opening turn has an empty conversation.
@@ -215,6 +217,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				turnToolCalls: state.turnToolCalls,
 				turnToolNames: state.turnToolNames.join(","),
 				sharedWorkerNote: state.turnSharedWorkerNote,
+				turnMode: state.currentTurnConstraints?.mode ?? "",
 			};
 			if (terminalToolResult !== undefined) {
 				metadata.terminalToolResult = true;
@@ -242,7 +245,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
 					continue;
 				}
-				if (effect.kind === "request_continuation") {
+				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
 					applyRequestContinuation(effect.message);
 				}
 			}

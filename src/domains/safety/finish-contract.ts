@@ -14,7 +14,7 @@ import {
 import type { Rigor } from "./rigor.js";
 
 export const FINISH_CONTRACT_ADVISORY_MESSAGE =
-	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Run a verification command or call limitation with the scope and reason.";
+	"[Clio Coder] finish-contract advisory: you changed files this turn without recording validation evidence or a limitation receipt. Report the change as unverified. Run checks only within the operator's authorized scope; this advisory does not authorize tests, scripts, or additional tools.";
 
 /**
  * The recent-window cap (entries since the last user message). Exported so a

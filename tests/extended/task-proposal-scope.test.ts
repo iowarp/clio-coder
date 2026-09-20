@@ -19,6 +19,62 @@ const turnEnd: MiddlewareHookInput = {
 };
 
 describe("proposal-only task continuation (#365)", () => {
+	it("records a blocked proposal atomically, replays it, and does not nudge", async () => {
+		const entries: unknown[] = [];
+		const board = createTaskBoardStore({
+			getSessionId: () => "proposal",
+			readEntries: () => entries,
+			appendEntry: (entry) =>
+				entries.push({ ...entry, turnId: `entry-${entries.length}`, timestamp: "2026-09-20T00:00:00Z" }),
+		});
+		const tool = createTasksTool({ board });
+		const result = await tool.run({
+			action: "plan",
+			title: "Proposed change",
+			tasks: ["Write test", "Implement"],
+			initialStatus: "blocked",
+			note: "Awaiting operator decision",
+		});
+		strictEqual(result.kind, "ok");
+		strictEqual(entries.length, 1);
+		board.invalidate();
+		deepStrictEqual(
+			board.snapshot()?.tasks.map((task) => [task.status, task.reason]),
+			[
+				["blocked", "Awaiting operator decision"],
+				["blocked", "Awaiting operator decision"],
+			],
+		);
+		deepStrictEqual(createTaskNudgeRegistration({ getBoard: () => board.snapshot() }).evaluate(turnEnd), []);
+		const before = board.snapshot();
+		strictEqual((await tool.run({ action: "add", tasks: ["Missing reason"], initialStatus: "blocked" })).kind, "error");
+		deepStrictEqual(board.snapshot(), before);
+	});
+
+	it("host proposal scope parks new tasks even if the model omits the initial status", async () => {
+		const board = createTaskBoardStore();
+		const tool = createTasksTool({ board });
+		strictEqual(
+			(
+				await tool.run(
+					{ action: "plan", title: "Proposal", tasks: ["Implement"] },
+					{ turnConstraints: { mode: "proposal" } },
+				)
+			).kind,
+			"ok",
+		);
+		strictEqual(board.snapshot()?.tasks[0]?.status, "blocked");
+		// A stale board from earlier work must not induce execution in a proposal turn.
+		await tool.run({ action: "add", tasks: ["Earlier authorized work"] });
+		deepStrictEqual(
+			createTaskNudgeRegistration({ getBoard: () => board.snapshot() }).evaluate({
+				...turnEnd,
+				metadata: { ...turnEnd.metadata, turnMode: "proposal" },
+			}),
+			[],
+		);
+	});
+
 	it("teaches scope and separate skill decisions in the task prompt and entry points", () => {
 		const tool = createTasksTool({ board: createTaskBoardStore() });
 		match(tool.description, /self-created plan.*not.*authorization/i);

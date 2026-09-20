@@ -2,6 +2,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import type { ProtectedModelRef, ResidencyRole } from "../core/residency-protection.js";
 import { assertValidResponseSchema, runtimeSpeaksResponseSchemaDialect } from "../core/response-schema.js";
 import type { ToolName } from "../core/tool-names.js";
+import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import type { ResultContract } from "../domains/agents/result-contract.js";
 import type { AgentProduct } from "../domains/agents/spec.js";
 import type { WorkerContextSeed } from "../domains/context/worker/contract.js";
@@ -72,6 +73,7 @@ export interface WorkerBudget {
 }
 
 interface WorkerSpecFields {
+	turnConstraints?: TurnConstraints;
 	/**
 	 * sha256 of the immutable settings snapshot this dispatch was admitted
 	 * under. The worker echoes it in its announcement so the orchestrator can
@@ -703,6 +705,7 @@ export function parseWorkerSpec(value: unknown): WorkerSpec {
 	if (spec.noSkills !== undefined && typeof spec.noSkills !== "boolean") {
 		throw new Error("WorkerSpec.noSkills must be a boolean");
 	}
+	if (spec.turnConstraints !== undefined) snapshotTurnConstraints(spec.turnConstraints as TurnConstraints);
 	if (spec.skillPaths !== undefined) {
 		readStringArray(spec.skillPaths, "WorkerSpec.skillPaths");
 	}

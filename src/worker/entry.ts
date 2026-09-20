@@ -204,6 +204,7 @@ async function main(): Promise<number> {
 		allowedTools: spec.allowedTools,
 		budget: spec.budget,
 		...(spec.noSkills !== undefined ? { noSkills: spec.noSkills } : {}),
+		...(spec.turnConstraints !== undefined ? { turnConstraints: spec.turnConstraints } : {}),
 		...(spec.skillPaths !== undefined ? { skillPaths: [...spec.skillPaths] } : {}),
 		...(spec.agentSkills !== undefined ? { agentSkills: [...spec.agentSkills] } : {}),
 		...(spec.trustProjectCompatRoots !== undefined ? { trustProjectCompatRoots: spec.trustProjectCompatRoots } : {}),

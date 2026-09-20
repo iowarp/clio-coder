@@ -1,4 +1,5 @@
 import type { SafeEventBus } from "../../core/event-bus.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import type { DeclaredCheckKind } from "../../tools/verify/catalog.js";
 import type { NumericTolerance } from "../../tools/verify/numeric.js";
 import type { PerfBudgetSpec } from "../../tools/verify/perf.js";
@@ -33,6 +34,8 @@ export interface ResolvedVerificationCheck {
 }
 
 export interface DispatchRequest extends JobSpec {
+	/** Inherited host policy, outside the model-authored JobSpec. */
+	turnConstraints?: TurnConstraints;
 	/** Host-captured conversation seed; never accepted from model arguments. */
 	contextSeed?: WorkerContextSeed;
 	/** Coordinator-owned result contract override for a fleet plan step. */
@@ -123,6 +126,7 @@ export interface DispatchAdmissionObserver {
 
 /** Invocation-owned admission bounds; never serialized into model-authored requests. */
 export interface DispatchPreparationOptions {
+	turnConstraints?: TurnConstraints;
 	/** Host ancestry for publication; kept separate from logical assignment/retry identity. */
 	hostRun?: { readonly runId: string; readonly lineage: Readonly<RunLineage> };
 	signal?: AbortSignal;

@@ -29,6 +29,7 @@ import {
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../core/skill-activation.js";
+import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import {
 	createMiddlewareToolChoiceControl,
@@ -203,6 +204,8 @@ export type ChatLoopEvent =
 	| ToolApprovalStateEvent;
 
 export interface ChatSubmitOptions {
+	/** Explicit host-owned task scope; never parsed from the prompt text. */
+	constraints?: TurnConstraints;
 	/** Presentation only; never part of the model message or persisted text. */
 	display?: { text: string; note: string };
 	/** Host-owned run identity, scoped to this submit and its internal continuations. */
@@ -300,6 +303,7 @@ export type SideQuestionOutcome =
 
 export interface ChatLoop {
 	submit(text: string, options?: ChatSubmitOptions): Promise<void>;
+	currentTurnConstraints?(): TurnConstraints | undefined;
 	steer(text: string): boolean;
 	queueFollowUp(text: string): boolean;
 	/**
@@ -516,6 +520,7 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: () => string;
+	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
 	/**
@@ -756,6 +761,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const turnId = state.activeUserTurnId ?? state.lastTurnId;
 		if (turnId) options.turnId = turnId;
 		if (state.currentPendingSkillPolicy) options.pendingSkillPolicy = state.currentPendingSkillPolicy;
+		if (state.currentTurnConstraints) options.turnConstraints = state.currentTurnConstraints;
 		if (state.currentAskUserPolicy) options.askUserPolicy = state.currentAskUserPolicy;
 		return options;
 	};
@@ -803,6 +809,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
 		getMemorySection: deps.getMemorySection,
+		getReadySkillCount: deps.getReadySkillCount,
 		middleware,
 		emitNotice,
 	});
@@ -1111,6 +1118,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					}
 				}
 				if (!interrupted) {
+					if (options.constraints !== undefined) {
+						emitAdmissionNotice(
+							"A submission with explicit task constraints must start a fresh turn; wait for settlement or interrupt the active run.",
+							"constrained-turn-in-flight",
+						);
+						return;
+					}
 					const hasImages = options.images !== undefined && options.images.length > 0;
 					if (!hasImages && trimmed.length > 0 && state.runtime) {
 						// Enter while streaming means "correct it now": the engine
@@ -1130,6 +1144,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				}
 			}
 
+			state.currentTurnConstraints =
+				options.requestContinuation === true ? state.currentTurnConstraints : snapshotTurnConstraints(options.constraints);
 			const previousRunSnapshot = state.lastRunSnapshot;
 			let agentRuntime: AgentRuntime | null;
 			try {
@@ -1155,7 +1171,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
 			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
-			const pendingSkillRequests = options.pendingSkillRequests ?? [];
+			const pendingSkillRequests =
+				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
@@ -1163,7 +1180,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// armed surface is what this turn runs under.
 			const pendingSkillPolicy = withModelSkillActivation(
 				createPendingSkillToolPolicy(pendingSkillRequests) ?? state.activeSkillSurface,
-				modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
+				state.currentTurnConstraints?.skills !== "disabled" &&
+					modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
 			);
 			// What was already loaded when this turn started, so the settle-time
 			// notice names the skills this turn activated and not the ones a
@@ -1561,11 +1579,13 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		contextUsage: () => context.contextUsage(),
+		currentTurnConstraints: () => state.currentTurnConstraints,
 		contextLedger: () => context.contextLedger(),
 		whenSettled: () => activeSubmit,
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			state.currentTurnConstraints = undefined;
 			if (state.runtime) {
 				state.runtime.agent.abort();
 				(state.runtime.agent as { clearAllQueues?: () => void } | undefined)?.clearAllQueues?.();
@@ -1749,6 +1769,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// released at admission, not settlement, so steering stays immediate.
 	let admissionTail: Promise<void> | null = null;
 	api.submit = (text, options = {}) => {
+		const constraints = snapshotTurnConstraints(options.constraints);
+		options = { ...options, ...(constraints === undefined ? {} : { constraints }) };
 		// Capture before admission can await. Internal resubmits inherit the
 		// async scope; every independent public submit explicitly starts its own.
 		const hostRun = options.hostRun === undefined ? undefined : structuredClone(options.hostRun);

@@ -8,6 +8,7 @@ import {
 	type SessionPromptInputs,
 } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
+import { sha256 } from "../../src/domains/prompts/hash.js";
 
 /**
  * The compiled main prompt is a cache prefix: every backend Clio targets
@@ -238,5 +239,71 @@ describe("compiled main prompt: surface-gated sections", () => {
 		ok(!ids.includes("project-context"));
 		const expected = SESSION_PROMPT_SECTION_ORDER.filter((id) => id !== "memory" && id !== "project-context");
 		deepStrictEqual(ids.slice(0, expected.length), [...expected]);
+	});
+});
+
+describe("typed prompt layers", () => {
+	it("keeps the exact constitutional UTF-8 prefix through scope, tool, memory and runtime changes", () => {
+		const baseline = compile(table, compileInputs());
+		const prefix = baseline.stablePrefix;
+		ok(prefix);
+		const bytes = Buffer.from(baseline.systemPrompt).subarray(0, prefix.bytes);
+		strictEqual(sha256(bytes.toString("utf8")), prefix.hash);
+		for (const variant of [
+			{ turnConstraints: { mode: "answer", allowedTools: [] } },
+			{ turnConstraints: { mode: "proposal", delegation: "forbidden" } },
+			{ turnConstraints: { mode: "change" }, readySkillCount: 0 },
+			{ providerSupportsTools: false, toolNames: [] },
+			{ memorySection: "# Memory\n\n- newly approved fact", contextWindow: 65_536 },
+		] satisfies Partial<SessionPromptInputs>[]) {
+			const compiled = compile(table, compileInputs(variant));
+			deepStrictEqual(compiled.stablePrefix, prefix);
+			deepStrictEqual(Buffer.from(compiled.systemPrompt).subarray(0, prefix.bytes), bytes);
+			ok(compiled.systemPromptHash !== baseline.systemPromptHash);
+		}
+	});
+
+	it("renders narrow answers and proposals without implementation or discovery pressure", () => {
+		const answer = compile(table, compileInputs({ turnConstraints: { mode: "answer", allowedTools: [] } }));
+		const proposal = compile(
+			table,
+			compileInputs({ turnConstraints: { mode: "proposal", delegation: "forbidden", skills: "disabled" } }),
+		);
+		const change = compile(table, compileInputs({ turnConstraints: { mode: "change" } }));
+		for (const prompt of [answer, proposal]) {
+			for (const id of ["delegation", "fleet", "skills"]) ok(!prompt.sections.some((s) => s.id === id));
+			ok(!prompt.systemPrompt.includes("validate relevant claims with"));
+			ok(!prompt.systemPrompt.includes("Declare the board before the first edit."));
+			strictEqual(prompt.sections.at(-1)?.id, "turn-scope");
+			ok(Buffer.byteLength(prompt.systemPrompt) < Buffer.byteLength(change.systemPrompt));
+		}
+		ok(answer.systemPrompt.endsWith("Use no tools for this turn."));
+		ok(proposal.systemPrompt.includes("Leave implementation blocked pending authorization"));
+		ok(change.systemPrompt.includes("For authorized file changes, validate relevant claims"));
+	});
+
+	it("does not advertise denied gateway capabilities or ready skills that do not exist", () => {
+		const prompt = compile(
+			table,
+			compileInputs({
+				turnConstraints: { allowedTools: ["read", "git", "context"], delegation: "forbidden" },
+				readySkillCount: 0,
+			}),
+		);
+		ok(!prompt.sections.some((s) => s.id === "skills"));
+		ok(!prompt.systemPrompt.includes('capability="clio_docs"'));
+		ok(!prompt.systemPrompt.includes('capability="clio_library"'));
+		ok(!prompt.systemPrompt.includes("Load a requested skill first."));
+		ok(prompt.systemPrompt.includes('capability="git"'));
+		// Attached inventory is factual even if a caller supplies an older broad schema surface.
+		ok(prompt.systemPrompt.includes("Direct tools: `ask_user`"));
+	});
+
+	it("changes only the runtime tail when the effective context window changes", () => {
+		const before = compile(table, compileInputs());
+		const after = compile(table, compileInputs({ contextWindow: 65_536 }));
+		const runtimeAt = before.systemPrompt.indexOf("# Runtime");
+		ok(runtimeAt > (before.stablePrefix?.bytes ?? 0));
+		strictEqual(before.systemPrompt.slice(0, runtimeAt), after.systemPrompt.slice(0, runtimeAt));
 	});
 });

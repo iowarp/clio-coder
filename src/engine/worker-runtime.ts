@@ -153,6 +153,7 @@ export interface WorkerRunInput {
 	protectedArtifactState?: WorkerProtectedArtifactState;
 	signal?: AbortSignal;
 	noSkills?: boolean;
+	turnConstraints?: import("../core/turn-constraints.js").TurnConstraints;
 	skillPaths?: ReadonlyArray<string>;
 	/** Recipe-bound skill names; context(scope=skills) admits exactly these for the run. */
 	agentSkills?: ReadonlyArray<string>;
@@ -653,12 +654,14 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	};
 	const tools = resolveAgentTools({
 		registry,
+		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		telemetry,
 		allowedTools: activeWorkerTools,
 		agentId: input.agentId,
 		task: input.task,
 		includeInteractiveTools: false,
 		invokeOptions: () => ({
+			...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
 			supportsImages: model.input.includes("image"),

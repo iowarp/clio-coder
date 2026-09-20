@@ -115,14 +115,25 @@ function taskTitlesArg(args: Record<string, unknown>): string[] {
 }
 
 function mutationFromArgs(action: TasksAction, args: Record<string, unknown>): TaskBoardMutation | { error: string } {
+	const initialStatus = args.initialStatus;
+	if (initialStatus !== undefined && initialStatus !== "pending" && initialStatus !== "blocked") {
+		return { error: "tasks: initialStatus must be pending or blocked" };
+	}
+	if (initialStatus !== undefined && action !== "plan" && action !== "add") {
+		return { error: "tasks: initialStatus applies only to plan and add" };
+	}
+	const initial: { initialStatus?: "pending" | "blocked"; reason?: string } = {
+		...(initialStatus ? { initialStatus } : {}),
+		...(initialStatus === "blocked" ? { reason: stringArg(args, "note") ?? "" } : {}),
+	};
 	switch (action) {
 		case "plan": {
 			const title = stringArg(args, "title");
 			if (!title) return { error: 'tasks: plan requires title (the board name), e.g. title="Fix the flaky test"' };
-			return { op: "plan", title, tasks: taskTitlesArg(args) };
+			return { op: "plan", title, tasks: taskTitlesArg(args), ...initial };
 		}
 		case "add":
-			return { op: "add", tasks: taskTitlesArg(args) };
+			return { op: "add", tasks: taskTitlesArg(args), ...initial };
 		case "pick":
 			return { error: "pick is resolved from the durable operator task inbox" };
 		case "start":
@@ -163,16 +174,20 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
 			"done completes a task (started or still pending) and requires note as the " +
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
-			"For an operator handoff, pick the intended uN before work and use its returned linked tN; CLI hand alone does not pick it. " +
-			"Never pick unrelated inbox tasks. Before claiming operator completion, list and confirm the linked board row is completed " +
-			"and the durable operator status is done with the same session/board link; report those IDs and actual states. " +
+			"For operator handoff, pick the intended uN and use its linked tN; CLI hand does not pick it. Never pick unrelated tasks. " +
+			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
-			"For proposal-only work, block deferred implementation with note naming the pending operator decision, or drop it; " +
+			"For proposal-only work, plan/add with initialStatus=blocked and note naming the pending operator decision; " +
 			"wait for an explicit operator go-ahead before start or implementation. A skill-install choice does not grant that go-ahead.",
 		parameters: Type.Object({
 			action: StringEnum(TASKS_ACTIONS, { description: "Board action." }),
 			title: Type.Optional(Type.String({ description: "Board title (plan)." })),
 			tasks: Type.Optional(Type.Array(Type.String(), { description: "Task titles (plan, add)." })),
+			initialStatus: Type.Optional(
+				StringEnum(["pending", "blocked"], {
+					description: "Initial state for plan/add; use blocked plus note for proposals awaiting a decision.",
+				}),
+			),
 			id: Type.Optional(Type.String({ description: 'Task id like "t2", or operator id "u2" for pick.' })),
 			note: Type.Optional(
 				Type.String({ description: "Evidence of completion (required for done) or the reason (block, drop)." }),
@@ -199,7 +214,14 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			}
 			return prepared;
 		},
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
+			if (options?.turnConstraints?.mode === "proposal" && (args.action === "plan" || args.action === "add")) {
+				args = {
+					...args,
+					initialStatus: "blocked",
+					note: stringArg(args, "note") ?? "Awaiting the operator's decision on this proposal.",
+				};
+			}
 			const action = typeof args.action === "string" ? args.action : "";
 			if (!(TASKS_ACTIONS as ReadonlyArray<string>).includes(action)) {
 				return { kind: "error", message: `tasks: action must be one of ${TASKS_ACTIONS.join(", ")}; got '${action}'` };

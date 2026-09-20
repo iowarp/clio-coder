@@ -21,6 +21,7 @@ import type { TSchema } from "typebox";
 import { type SkillActivation, skillActivationFromToolDetails } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
 import { ToolNames } from "../core/tool-names.js";
+import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { type CallActionDescriptor, describeCallAction } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -102,6 +103,7 @@ export interface ToolFinishEvent {
 
 export interface ResolveAgentToolsInput {
 	registry: ToolRegistry;
+	turnConstraints?: TurnConstraints;
 	allowedTools?: ReadonlyArray<ToolName>;
 	toolProfile?: ToolProfileName;
 	agentId?: string;
@@ -396,7 +398,14 @@ export function resolveAgentTools(input: ResolveAgentToolsInput): AgentTool[] {
 		if (spec && toolSpecPlacement(spec) === "direct") specs.push(spec);
 	}
 	specs.sort((a, b) => a.name.localeCompare(b.name));
-	return specs.map((spec) => toAgentTool(spec, input.registry, input.telemetry, input.invokeOptions));
+	// Bind the same immutable ceiling to execution as to schema selection.
+	// Hiding a schema alone does not protect a retained tool handle or nested call.
+	const invokeOptions = () => ({
+		...input.invokeOptions?.(),
+		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
+		...(input.allowedTools ? { allowedTools: input.allowedTools } : {}),
+	});
+	return specs.map((spec) => toAgentTool(spec, input.registry, input.telemetry, invokeOptions));
 }
 
 /**
@@ -424,6 +433,7 @@ export function effectiveToolNames(input: Omit<ResolveAgentToolsInput, "telemetr
 	const includeInteractiveTools = input.includeInteractiveTools !== false;
 	const names: ToolName[] = [];
 	for (const name of new Set(toolIds)) {
+		if (!turnAllowsTool(input.turnConstraints, name)) continue;
 		// Orchestrator-only tools. Workers resolve their full surface once at
 		// admission, so neither operator interviews nor self-activation apply.
 		if (!includeInteractiveTools && name === ToolNames.AskUser) continue;
@@ -480,6 +490,8 @@ export function resolveSessionTools(
 ): AgentTool[] {
 	if (!toolRegistry || runtime.runtimeResolution.capabilityDecisions.tools !== true) return [];
 	const input: ResolveAgentToolsInput = { registry: toolRegistry };
+	const constraints = invokeOptions?.().turnConstraints;
+	if (constraints) input.turnConstraints = constraints;
 	input.invokeOptions = () => ({
 		...invokeOptions?.(),
 		supportsImages: runtime.runtimeResolution.capabilityDecisions.vision === true,

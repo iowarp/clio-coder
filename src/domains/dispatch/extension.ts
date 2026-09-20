@@ -36,6 +36,7 @@ import {
 import { isSkillActivation, type SkillActivation } from "../../core/skill-activation.js";
 import { rawDurationMs } from "../../core/timers.js";
 import { isBuiltinToolName, isHarnessExtensionToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
+import { snapshotTurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import {
 	type AcpDelegationRunHandle,
 	type AcpDelegationRunInput,
@@ -1738,6 +1739,33 @@ function deniedToolNames(req: DispatchRequest): ReadonlySet<string> {
 	return new Set(req.denyTools.map((tool) => tool.trim().toLowerCase()));
 }
 
+function assertTurnConstraintCompatibility(
+	req: DispatchRequest,
+	tools: ReadonlyArray<string>,
+	mediated: boolean,
+): void {
+	const constraints = req.turnConstraints;
+	if (!constraints) return;
+	if (!turnAllowsTool(constraints, "dispatch"))
+		throw new Error("dispatch: forbidden by the parent task's explicit scope");
+	if (!mediated && (constraints.allowedTools !== undefined || constraints.skills === "disabled")) {
+		throw new Error(
+			"dispatch: this external runtime cannot enforce the parent task's tool/skill constraints; use a native worker",
+		);
+	}
+	const outside = tools.filter((name) => !turnAllowsTool(constraints, name));
+	if (outside.length > 0)
+		throw new Error(
+			`dispatch: worker tool surface exceeds the parent task's explicit scope: ${outside.join(", ")}. Select a narrower recipe or tool profile.`,
+		);
+	if ((req.resolvedVerification?.length ?? 0) > 0 && !turnAllowsTool(constraints, "verify")) {
+		throw new Error("dispatch: host verification is outside the parent task's explicit tool scope");
+	}
+	if (req.worktree === true && !turnAllowsTool(constraints, "write")) {
+		throw new Error("dispatch: worktree creation requires write in the parent task's explicit tool scope");
+	}
+}
+
 function assertPostRuntimeToolCompatibility(
 	agentId: string,
 	spec: ReturnType<typeof normalizeAgentSpec>,
@@ -2079,6 +2107,7 @@ function buildDispatchWorkerSpec(input: DispatchWorkerSpecInput, config?: Config
 	}
 	if (input.apiKey) spec.apiKey = input.apiKey;
 	if (input.req.noSkills !== undefined) spec.noSkills = input.req.noSkills;
+	if (input.req.turnConstraints !== undefined) spec.turnConstraints = input.req.turnConstraints;
 	const skillPaths = [...(input.req.skillPaths ?? []), ...(input.recipe?.boundSkillPaths ?? [])];
 	if (skillPaths.length > 0) spec.skillPaths = [...new Set(skillPaths)];
 	const recipeSkills = (input.recipe?.skills ?? []).map((name) => name.trim()).filter((name) => name.length > 0);
@@ -3938,6 +3967,7 @@ export function createDispatchBundle(
 			req,
 		);
 		assertPostRuntimeToolCompatibility(req.agentId, spec, effectiveTools, target, pathScope.writeBoundaries.length > 0);
+		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		const effectiveAdmission: DispatchAdmissionStage = {
 			...admission,
 			allowedTools: effectiveTools,
@@ -3947,6 +3977,7 @@ export function createDispatchBundle(
 		const hasBoundSkills =
 			hasCanonicalContext && recipe.skills !== undefined && recipe.skills.length > 0 && req.noSkills !== true;
 		const compiledWorkerPrompt = await prompts.compileWorkerPrompt({
+			...(req.turnConstraints ? { turnConstraints: req.turnConstraints } : {}),
 			autonomy: effectiveAutonomy,
 			providerSupportsTools: target.runtime.kind === "subprocess" ? null : targetToolCapability(target),
 			toolNames: effectiveTools,
@@ -5029,6 +5060,7 @@ export function createDispatchBundle(
 		};
 		if (req.delegationAgentId) {
 			assertPlannedNodeIdentity(req, { id: "local", kind: "local" });
+			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
@@ -6434,6 +6466,12 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
+		const constraints = snapshotTurnConstraints(preparation?.turnConstraints ?? req.turnConstraints);
+		if (constraints) {
+			req = { ...req, turnConstraints: constraints, ...(constraints.skills === "disabled" ? { noSkills: true } : {}) };
+			// Validate before creating worktrees or acquiring writer/capacity leases.
+			previewFixed(req);
+		}
 		let prepared =
 			preparation?.deadlineAt === undefined
 				? req
@@ -6566,6 +6604,7 @@ export function createDispatchBundle(
 
 		if (req.delegationAgentId) {
 			const protectedArtifactState = getProtectedArtifactState();
+			assertTurnConstraintCompatibility(req, [], false);
 			assertProtectedArtifactsEnforceable("acp-delegation", false, protectedArtifactState);
 			if (req.responseSchema !== undefined) {
 				throw new UnsupportedResponseSchemaError(
@@ -6641,6 +6680,7 @@ export function createDispatchBundle(
 			target,
 			pathScope.writeBoundaries.length > 0,
 		);
+		assertTurnConstraintCompatibility(req, effectiveTools, target.runtime.kind === "http");
 		assertRuntimeCanHonorWorkerPermissionMode(target.runtime, settings?.fleet.permissions.mode ?? "deny");
 		assertResponseSchemaEnforceable(target.runtime, target.modelCapabilities, req.responseSchema, effectiveTools.length);
 		assertWriteRootsEnforceable(target.runtime, pathScope.writeBoundaries);

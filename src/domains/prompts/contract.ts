@@ -38,9 +38,9 @@ export interface PromptsContract {
 	inputEpoch(): string;
 
 	/**
-	 * Compile the session system prompt. Called once per session (and again
-	 * only on explicit, logged events: model/target change, autonomy-level
-	 * change, fragment reload, explicit context operation, session switch).
+	 * Compile the layered system prompt when its complete typed input identity
+	 * changes, including turn scope and ready-skill inventory as well as model,
+	 * autonomy, context and fragment changes. Identical inputs reuse the result.
 	 * Compiler-owned disk inputs are selected from the session snapshot even when
 	 * another identity input causes a recompile.
 	 */

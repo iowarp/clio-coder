@@ -1,6 +1,7 @@
 /** Type-only boot contract kept outside the heavyweight orchestrator graph. */
 
 import type { ClioSettings } from "../core/config.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { ThinkingLevel } from "../domains/providers/index.js";
 import type { AutonomyLevel } from "../domains/safety/index.js";
 import type { AcpJsonRpcPeerTransport, StdioServerTransportOptions } from "../engine/acp/transport.js";
@@ -49,6 +50,7 @@ export interface BootOptions {
 	autonomy?: AutonomyLevel;
 	headless?: {
 		prompt: string;
+		constraints?: TurnConstraints;
 		images?: ReadonlyArray<ImageContent>;
 		workingContextPaths?: ReadonlyArray<string>;
 		mode?: "text" | "json";

@@ -122,6 +122,7 @@ export interface TurnContextDeps {
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: (() => string) | undefined;
+	getReadySkillCount?: (() => number) | undefined;
 	middleware: TurnMiddleware;
 	emitNotice: (text: string) => void;
 }
@@ -1255,6 +1256,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				return hint ? [{ tool: name, hint }] : [];
 			});
 			const sessionInputs: SessionPromptInputs = {
+				...(state.currentTurnConstraints ? { turnConstraints: state.currentTurnConstraints } : {}),
+				...(deps.getReadySkillCount ? { readySkillCount: deps.getReadySkillCount() } : {}),
 				demo: deps.interactiveGuidance === true && settings.interface.demo,
 				provider: agentRuntime.targetId,
 				model: agentRuntime.wireModelId,

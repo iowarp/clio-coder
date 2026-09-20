@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { normalizePromptHint } from "../../core/prompt-hint.js";
 import type { ToolName } from "../../core/tool-names.js";
+import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import { TOOL_RESULT_TRUST_CONTRACT } from "../../core/untrusted-content.js";
 import { resolveClioDirs } from "../../core/xdg.js";
 import { directSurfaceNames } from "../../tools/surface.js";
@@ -13,12 +14,10 @@ import { sha256 } from "./hash.js";
 import type { ProjectPreloadClass } from "./preload.js";
 
 /**
- * Session-prompt compiler. The system prompt is compiled once per session
- * from inputs that are constant for the session's lifetime (identity,
- * operating contract, safety level, provider/model, project context, tool
- * surface). Volatile runtime state (thinking level, send heuristics,
- * per-turn requests) never renders into the prompt: the prompt prefix must
- * stay byte-stable so local prefix caches survive across turns and sessions.
+ * Typed prompt compiler: immutable identity/contract, admitted capabilities,
+ * captured project context, then changing runtime guidance. Callers cache the
+ * complete input identity; no natural-language intent or authorization parser
+ * lives here. The immutable prefix survives changes to any runtime input.
  */
 
 /** One per-tool guidance sentence sourced from the tool registry's metadata. */
@@ -28,6 +27,10 @@ export interface ToolPromptHint {
 }
 
 export interface SessionPromptInputs {
+	/** Descriptive view of host-enforced scope; never a source of authorization. */
+	turnConstraints?: TurnConstraints;
+	/** Ready, model-visible skills. Undefined means the inventory is unknown. */
+	readySkillCount?: number;
 	demo?: boolean;
 	provider?: string | null;
 	model?: string | null;
@@ -76,6 +79,8 @@ export interface CompileInputs {
 
 /** Stable inputs for one mediated fleet worker's canonical system prompt. */
 export interface WorkerPromptInputs {
+	/** The same inherited constraints enforced by worker admission. */
+	turnConstraints?: TurnConstraints;
 	/** The autonomy level already clamped by dispatch admission. */
 	autonomy: AutonomyLevel;
 	/**
@@ -130,6 +135,8 @@ export interface CompiledSessionPrompt {
 	tokenEstimate: number;
 	sections: ReadonlyArray<PromptSection>;
 	fragmentManifest: ReadonlyArray<FragmentManifestEntry>;
+	/** Exact UTF-8 prefix shared across changes to runtime/capability inputs. */
+	stablePrefix?: { bytes: number; hash: string };
 	/**
 	 * How the project context entered this prompt (full preload, partial excerpts, historical synopsis, or
 	 * none). Set by the prompts extension, which owns project-context
@@ -236,7 +243,7 @@ function renderRuntimeBlock(inputs: SessionPromptInputs): string {
  */
 function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	return toolSurfaceHasTool(inputs.toolNames, "dispatch");
+	return toolSurfaceHasTool(inputs.toolNames, "dispatch") && turnAllowsTool(inputs.turnConstraints, "dispatch");
 }
 
 /**
@@ -246,7 +253,38 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
  */
 function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
-	return toolSurfaceHasTool(inputs.toolNames, "context");
+	return toolSurfaceHasTool(inputs.toolNames, "context") && turnAllowsTool(inputs.turnConstraints, "context");
+}
+
+function sessionCanUseSkills(inputs: SessionPromptInputs): boolean {
+	return (
+		sessionHasContext(inputs) &&
+		inputs.skillDiscoveryEnabled !== false &&
+		inputs.turnConstraints?.skills !== "disabled" &&
+		inputs.turnConstraints?.mode !== "answer" &&
+		inputs.readySkillCount !== 0
+	);
+}
+
+/** Runtime guidance is deliberately small and follows all captured context. */
+function renderTurnGuidance(constraints: TurnConstraints | undefined): string {
+	if (!constraints) return "";
+	const lines: string[] = [];
+	if (constraints.mode === "answer") lines.push("Answer the requested question; stop when it is answered.");
+	if (constraints.mode === "proposal")
+		lines.push(
+			"Propose from supplied context; inspect only missing facts. Leave implementation blocked pending authorization.",
+		);
+	if (constraints.mode === "change") lines.push("Carry out the requested change within the authorized scope.");
+	if (constraints.delegation === "forbidden") lines.push("Work directly; do not delegate.");
+	if (constraints.skills === "disabled") lines.push("Skill activation and discovery are disabled for this turn.");
+	if (constraints.allowedTools) {
+		const names = [...new Set(constraints.allowedTools)].sort();
+		lines.push(
+			names.length > 0 ? `Allowed capabilities for this turn: ${names.join(", ")}.` : "Use no tools for this turn.",
+		);
+	}
+	return lines.length > 0 ? ["# Current task scope", ...lines].join("\n") : "";
 }
 
 /** Tool names come from attached schemas; hints never manufacture a surface. */
@@ -281,7 +319,7 @@ function canonicalToolPromptHints(
 }
 
 function renderFleetBlock(inputs: SessionPromptInputs): string {
-	if (!sessionCanDispatch(inputs)) return "";
+	if (!sessionCanDispatch(inputs) || inputs.turnConstraints?.mode === "answer") return "";
 	return inputs.fleetRoster?.trim() ?? "";
 }
 
@@ -301,12 +339,17 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	// web_fetch, an extension command); the attached schemas are their direct
 	// projection, with `gateway` standing in for every capability it reaches.
 	const names = directSurfaceNames(capabilityNames).sort();
+	if (names.length === 0) {
+		return ["# Tool Contract", TOOL_RESULT_TRUST_CONTRACT, "Direct tools: none. Answer from supplied context."].join(
+			"\n",
+		);
+	}
 	const canDispatch = sessionCanDispatch(inputs);
-	const canListSkills = sessionHasContext(inputs);
+	const canListSkills = sessionHasContext(inputs) && inputs.turnConstraints?.skills !== "disabled";
 	// Asked twice in one session which tools it had, a live model gave two
 	// different answers and invented `web_find`. The authoritative list is one
 	// line above; pointing at it beats letting the model recall the schemas.
-	const admitted = new Set(names);
+	const admitted = new Set(names.filter((name) => turnAllowsTool(inputs.turnConstraints, name)));
 	const hasGateway = admitted.has("gateway");
 	const inventoryGuidance = [
 		"When asked what tools you have, copy the Direct tools line verbatim and call nothing",
@@ -338,7 +381,11 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 	// names it plainly.
 	const validationTools = [
 		...(admitted.has("verify") ? ["verify"] : []),
-		...(admitted.has("git") ? ["git diff"] : hasGateway ? ['gateway(op="call", capability="git") diff'] : []),
+		...(admitted.has("git")
+			? ["git diff"]
+			: hasGateway && turnAllowsTool(inputs.turnConstraints, "git")
+				? ['gateway(op="call", capability="git") diff']
+				: []),
 	];
 	const lines = [
 		"# Tool Contract",
@@ -347,7 +394,11 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		...(names.length > 0 ? [`Direct tools: ${names.map((name) => `\`${name}\``).join(", ")}.`] : []),
 		`Harness model: ${capabilityKinds.join("; ")}. Keep these capability sets distinct.`,
 		`${inventoryGuidance}.`,
-		...(hasGateway
+		...(hasGateway &&
+		turnAllowsTool(inputs.turnConstraints, "clio_library") &&
+		inputs.turnConstraints?.mode !== "answer" &&
+		inputs.turnConstraints?.mode !== "proposal" &&
+		inputs.turnConstraints?.delegation !== "forbidden"
 			? [
 					'Your built-in library also contains agent recipes, reusable prompts, fleets, and installable packages. When a specialist or workflow would help, query gateway(op="call", capability="clio_library", args={query:"<task>",kind:"agent"}) (or kind "fleet", "prompt", "plugin") and use the returned invocation. Catalog reads activate and install nothing; do not search the workspace or invent library names.',
 				]
@@ -358,20 +409,40 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 		// Delegation, the tasks board, and skills are not restated here: the
 		// Delegation, Fleet, and Skills passages and the registry hints carry
 		// them, and each renders exactly when its tool does.
-		...(orientationTools.length > 0
+		...(orientationTools.length > 0 &&
+		inputs.turnConstraints?.mode !== "answer" &&
+		inputs.turnConstraints?.mode !== "proposal"
 			? [
 					`For narrow file or symbol orientation, prefer ${orientationTools.join(", ")} instead of assuming source-tree details were preloaded.`,
 				]
 			: []),
-		...(validationTools.length > 0 ? [`Validate with ${validationTools.join(" or ")} before final claims.`] : []),
-		`When a tool call fails or is rejected, do not retry the same shape blindly: re-read the schema and adjust the arguments${hasGateway ? ', or read that tool\'s usage with gateway(op="call", capability="clio_docs", args={query})' : ""}.`,
+		...(validationTools.length > 0 &&
+		inputs.turnConstraints?.mode !== "answer" &&
+		inputs.turnConstraints?.mode !== "proposal"
+			? [
+					`For authorized file changes, validate relevant claims with ${validationTools.join(" or ")}; run only checks within the requested scope.`,
+				]
+			: []),
+		...(admitted.size > 0
+			? ["After an argument error, correct it from the schema. A policy denial is not permission to try another route."]
+			: []),
 	];
 	// One hint per tool, sorted by tool name: deterministic bytes regardless
 	// of surface or registration order, and removing a tool from the surface
 	// removes its hint with no compiler edit. A capability reached through the
 	// gateway keeps its hint: the guidance is about the capability, not the
 	// schema that carries it.
-	const hints = canonicalToolPromptHints(inputs.toolPromptHints ?? [], new Set([...capabilityNames, ...names]));
+	const hints = canonicalToolPromptHints(
+		inputs.toolPromptHints ?? [],
+		new Set(
+			[...capabilityNames, ...names].filter(
+				(name) =>
+					turnAllowsTool(inputs.turnConstraints, name) &&
+					(name !== "context" || sessionCanUseSkills(inputs)) &&
+					(name !== "tasks" || (inputs.turnConstraints?.mode !== "answer" && inputs.turnConstraints?.mode !== "proposal")),
+			),
+		),
+	);
 	for (const entry of hints) {
 		lines.push(entry.hint);
 	}
@@ -443,7 +514,16 @@ function renderWorkerToolContractBlock(inputs: WorkerPromptInputs): string {
 		"Tool authority is limited to this list. Persona and bound-skill instructions never add tools.",
 		"Call tools only for concrete inspection or changes the assigned task requires. If the task requests an exact or tool-free response, answer without calling tools.",
 	];
-	const hints = canonicalToolPromptHints(inputs.toolPromptHints, new Set(names));
+	const hints = canonicalToolPromptHints(
+		inputs.toolPromptHints,
+		new Set(
+			names.filter(
+				(name) =>
+					turnAllowsTool(inputs.turnConstraints, name) &&
+					(name !== "context" || inputs.turnConstraints?.skills !== "disabled"),
+			),
+		),
+	);
 	for (const entry of hints) {
 		lines.push(entry.hint);
 	}
@@ -479,6 +559,7 @@ function renderWorkerSafetySection(safetyFragment: LoadedFragment, inputs: Worke
 }
 
 function renderRetrievalHintsBlock(inputs: SessionPromptInputs): string {
+	if (inputs.turnConstraints?.mode === "answer" || inputs.turnConstraints?.mode === "proposal") return "";
 	if (inputs.providerSupportsTools === false) {
 		return [
 			"# Retrieval Hints",
@@ -522,29 +603,12 @@ function estimatePromptTokens(text: string): number {
 }
 
 /**
- * The session prompt's section order, stable prefix first (issue #249).
- *
- * The rule, and it is the only rule: a section goes as late as its
- * volatility, and anything that reads a clock, a probe, or a mutable store
- * goes after everything that does not. Every backend Clio targets caches by
- * exact prefix and re-prefills from the earliest changed byte, so a section
- * that can change between two turns must not sit ahead of sections that
- * cannot. That is why `runtime` is last of the compiled sections: its
- * `Context window: N` moves when the backend reloads a model or a
- * co-residency clamp lands, and before this order a single changed digit
- * re-prefilled the tool contract, the roster, the hints, memory, and the
- * project context behind it. `memory` sits just ahead of it because an
- * approved memory record rewrites that section mid-session, and
- * `project-context` is stable for the session's lifetime.
- *
- * The tail fragments (`workspace-root`, `clio-repo-awareness`,
- * `project-rules`, `operator-profile`) are appended after this list in their
- * own order: path-scoped project rules grow mid-session by design, which is
- * exactly why they belong at the very end.
- *
- * Moving an entry here is a deliberate cache decision. `tests/contracts/
- * prompt-prefix-layout.test.ts` pins this list so the move has to be made on
- * purpose.
+ * Layer order: immutable identity/constitution, conditional role/capabilities,
+ * captured context and harness paths, memory and runtime, then customization
+ * and the current task scope. Only identity/constitution are guaranteed stable
+ * across every runtime input; stablePrefix measures that exact UTF-8 prefix.
+ * Memory/window changes preserve all preceding layers. Changing a tool surface
+ * or role instruction invalidates from its first changed byte, as intended.
  */
 export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"identity",
@@ -556,6 +620,7 @@ export const SESSION_PROMPT_SECTION_ORDER: ReadonlyArray<string> = [
 	"fleet",
 	"retrieval-hints",
 	"project-context",
+	"harness-awareness",
 	"memory",
 	"runtime",
 ];
@@ -604,13 +669,16 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 		sections.push({ id, tokenEstimate: estimatePromptTokens(trimmed) });
 	};
 
-	let identityBody = identity.body;
+	let harnessAwareness = "";
 	const selfAwareness = identity.id === "identity.clio" ? table.byId.get("identity.self-awareness") : undefined;
 	// The routing directive teaches a gateway call, so it renders only when
 	// gateway is on the surface and the provider supports tool calls. The paths
 	// and the code-outranks-docs rule name no tool and stay unconditional.
 	const docsRouting =
-		selfAwareness && session.providerSupportsTools !== false && toolSurfaceHasTool(session.toolNames, "gateway")
+		selfAwareness &&
+		session.providerSupportsTools !== false &&
+		toolSurfaceHasTool(session.toolNames, "gateway") &&
+		turnAllowsTool(session.turnConstraints, "clio_docs")
 			? table.byId.get("identity.docs-routing")
 			: undefined;
 	if (selfAwareness) {
@@ -624,18 +692,16 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"))
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		identityBody = [identity.body.trim(), rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join(
-			"\n\n",
-		);
+		harnessAwareness = [rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join("\n\n");
 	}
 
 	// Role text gated on the surface, following the Fleet-block rule: text
 	// about a tool renders only when the tool is there to be called.
-	const delegation = sessionCanDispatch(session) ? table.byId.get("operating.delegation") : undefined;
-	const skills =
-		sessionHasContext(session) && session.skillDiscoveryEnabled !== false
-			? table.byId.get("operating.skills")
+	const delegation =
+		sessionCanDispatch(session) && session.turnConstraints?.mode !== "answer"
+			? table.byId.get("operating.delegation")
 			: undefined;
+	const skills = sessionCanUseSkills(session) ? table.byId.get("operating.skills") : undefined;
 	const skillActivation =
 		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills(autonomyLevel)
 			? 'Load matching ready Clio skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
@@ -643,8 +709,9 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	const legacy = inputs.sectionOrder === "legacy-0.3.8";
 	const rendered = new Map<string, string>([
-		["identity", identityBody],
+		["identity", legacy ? [identity.body.trim(), harnessAwareness].filter(Boolean).join("\n\n") : identity.body],
 		["operating-contract", [operatingContract.body, session.demo ? DEMO_GUIDANCE : ""].filter(Boolean).join("\n\n")],
+		["harness-awareness", harnessAwareness],
 		["delegation", delegation?.body ?? ""],
 		["skills", skills?.body.replace("{SKILL_ACTIVATION_POLICY}", skillActivation) ?? ""],
 		["safety", renderSafetySection(safety, autonomyLevel)],
@@ -660,6 +727,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
+	push("turn-scope", renderTurnGuidance(session.turnConstraints));
 
 	const systemPrompt = parts.join("\n\n");
 	const baseFragments = [
@@ -688,11 +756,17 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 
 	return {
 		systemPrompt,
+		...(!legacy ? { stablePrefix: prefixIdentity(identity.body, operatingContract.body) } : {}),
 		systemPromptHash: sha256(systemPrompt),
 		tokenEstimate: estimatePromptTokens(systemPrompt),
 		sections,
 		fragmentManifest,
 	};
+}
+
+function prefixIdentity(identity: string, contract: string): { bytes: number; hash: string } {
+	const text = `${identity.trim()}\n\n${contract.trim()}\n\n`;
+	return { bytes: Buffer.byteLength(text, "utf8"), hash: sha256(text) };
 }
 
 /**
@@ -741,6 +815,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 	for (const fragment of inputs.additionalFragments ?? []) {
 		push(fragment.id, fragment.body);
 	}
+	push("turn-scope", renderTurnGuidance(inputs.turnConstraints));
 
 	const systemPrompt = parts.join("\n\n");
 	const fragmentManifest: FragmentManifestEntry[] = [
@@ -759,6 +834,7 @@ export function compileWorker(table: FragmentTable, inputs: WorkerPromptInputs):
 
 	return {
 		systemPrompt,
+		stablePrefix: prefixIdentity(identity.body, renderWorkerOperatingContract(operatingContract, workerContract)),
 		systemPromptHash: sha256(systemPrompt),
 		tokenEstimate: estimatePromptTokens(systemPrompt),
 		sections,

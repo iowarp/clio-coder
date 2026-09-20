@@ -1,7 +1,7 @@
 import { deepStrictEqual, match, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
-
 import { ALL_TOOL_NAMES, type ToolName, ToolNames } from "../../src/core/tool-names.js";
+import type { TurnConstraints } from "../../src/core/turn-constraints.js";
 import { renderFleetPromptSection } from "../../src/domains/agents/catalog.js";
 import { discoverAgentRecipes } from "../../src/domains/agents/registry.js";
 import { normalizeAgentSpec } from "../../src/domains/agents/spec.js";
@@ -70,6 +70,7 @@ function persona(body: string, id = "matrix"): RenderedPromptFragment {
 }
 
 function workerPrompt(input: {
+	turnConstraints?: TurnConstraints;
 	autonomy?: AutonomyLevel;
 	providerSupportsTools?: boolean | null;
 	hasContext: boolean;
@@ -83,6 +84,7 @@ function workerPrompt(input: {
 	const role = input.hasBoundSkills ? "bound-worker" : "worker";
 	const providerSupportsTools = input.providerSupportsTools === undefined ? true : input.providerSupportsTools;
 	return compileWorker(table, {
+		...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 		autonomy: input.autonomy ?? "auto-edit",
 		providerSupportsTools,
 		toolNames,
@@ -135,6 +137,7 @@ describe("compact prompt contracts", () => {
 					"tool-contract",
 					"fleet",
 					"retrieval-hints",
+					"harness-awareness",
 					"runtime",
 				],
 			);
@@ -282,4 +285,24 @@ describe("compact prompt contracts", () => {
 			strictEqual(compiled.systemPrompt.includes("source=clio"), false);
 		}
 	});
+});
+
+it("worker scope changes leave its constitutional prefix and assigned-task role stable", () => {
+	const base = workerPrompt({ hasContext: true, hasBoundSkills: false });
+	const scoped = workerPrompt({
+		hasContext: true,
+		hasBoundSkills: false,
+		turnConstraints: { mode: "answer", allowedTools: [], skills: "disabled" },
+	});
+	deepStrictEqual(scoped.stablePrefix, base.stablePrefix);
+	strictEqual(
+		scoped.systemPrompt.slice(0, scoped.systemPrompt.indexOf("# Tool Contract")),
+		base.systemPrompt.slice(0, base.systemPrompt.indexOf("# Tool Contract")),
+	);
+	strictEqual(scoped.sections.at(-1)?.id, "turn-scope");
+	strictEqual(scoped.systemPrompt.endsWith("Use no tools for this turn."), true);
+	strictEqual(
+		scoped.sections.some((section) => section.id === "delegation" || section.id === "skills"),
+		false,
+	);
 });

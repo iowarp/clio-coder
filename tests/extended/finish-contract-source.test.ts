@@ -119,6 +119,24 @@ it("accepts a catalog's declared subdirectory and distinguishes another workspac
 			{ kind: "message", role: "tool_call", payload: { name: "write", toolCallId: "write", args: writeArgs } },
 			{ kind: "message", role: "tool_result", payload: { toolName: "write", toolCallId: "write", result: writeResult } },
 		];
+		const scopeBound = createFinishContractRegistration({
+			readSessionEntries: () => entries,
+			resolveRigor: () => "high",
+			readActiveAcceptance: () => acceptance,
+			getTurnConstraints: () => ({ allowedTools: ["read", "edit"] }),
+		});
+		const scopedEffects = await scopeBound.evaluate({
+			hook: "turn_end",
+			text: "Changed the file; validation was not authorized.",
+			metadata: { activeToolNames: "read,edit" },
+		});
+		deepStrictEqual(
+			scopedEffects.map((effect) => effect.kind),
+			["inject_reminder"],
+		);
+		ok(scopedEffects[0]?.kind === "inject_reminder");
+		match(scopedEffects[0].message, /unverified/);
+		ok(!scopedEffects[0].message.includes("Run a verification command"));
 		const hook = createFinishContractRegistration({
 			readSessionEntries: () => entries,
 			resolveRigor: () => "high",

@@ -62,9 +62,15 @@ export interface TaskBoardCounts {
 	open: number;
 }
 
+interface TaskBoardInitialState {
+	/** A proposal can be recorded without briefly creating runnable work. */
+	initialStatus?: "pending" | "blocked";
+	reason?: string;
+}
+
 export type TaskBoardMutation =
-	| { op: "plan"; title: string; tasks: ReadonlyArray<string> }
-	| { op: "add"; tasks: ReadonlyArray<string> }
+	| ({ op: "plan"; title: string; tasks: ReadonlyArray<string> } & TaskBoardInitialState)
+	| ({ op: "add"; tasks: ReadonlyArray<string> } & TaskBoardInitialState)
 	| { op: "pick"; title: string; userTaskId: string; verification?: ReadonlyArray<{ check: string; timeoutMs: number }> }
 	| { op: "start"; id: string }
 	| { op: "done"; id: string; evidence: string }
@@ -358,6 +364,13 @@ function applyMutation(
 	board: TaskBoardSnapshot | null,
 	mutation: TaskBoardMutation,
 ): { board: TaskBoardSnapshot; notes: string[] } | { error: string } {
+	if (
+		(mutation.op === "plan" || mutation.op === "add") &&
+		mutation.initialStatus === "blocked" &&
+		!mutation.reason?.trim()
+	) {
+		return { error: "blocked tasks require a reason naming the pending decision or dependency" };
+	}
 	if (mutation.op === "plan") {
 		const titles = normalizeTitles(mutation.tasks);
 		if (mutation.title.trim().length === 0) return { error: "plan requires a non-empty title" };
@@ -379,7 +392,8 @@ function applyMutation(
 					...titles.map((title, index) => ({
 						id: `t${start + index}`,
 						title,
-						status: "pending" as const,
+						status: mutation.initialStatus ?? "pending",
+						...(mutation.initialStatus === "blocked" ? { reason: (mutation.reason ?? "").trim() } : {}),
 						origin: "agent" as const,
 					})),
 				],
@@ -438,7 +452,8 @@ function applyMutation(
 		const added = titles.map((title, index) => ({
 			id: `t${start + index}`,
 			title,
-			status: "pending" as const,
+			status: mutation.initialStatus ?? "pending",
+			...(mutation.initialStatus === "blocked" ? { reason: (mutation.reason ?? "").trim() } : {}),
 			origin: "agent" as const,
 		}));
 		return { board: { ...board, tasks: [...board.tasks, ...added] }, notes: [] };
