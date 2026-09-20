@@ -17,8 +17,14 @@ against the current `src/` where the original had gone stale.
 | [`delivery-order.md`](delivery-order.md) | Delivery sequence and the work that cannot be done inside the GUI |
 | [`performance-baseline.md`](performance-baseline.md) | Measured rendering evidence and the v0.5.0 regression budgets |
 | [`inspector-presentation.md`](inspector-presentation.md) | What the retired inspectors showed and in what order |
+| [`chat-rendering-spec.md`](chat-rendering-spec.md) | The conversation view and inspector blueprint, 17 artifacts with destination paths |
 
 The settings table is the load-bearing one. It records that the workbench's original
 table named 27 v1 keys that schema v2 retired, and that `SETTING_CONTROLS` in
 `src/core/settings-controls.ts` already machine-generates the leaf registry, so the
 GUI derives its form from the schema rather than transcribing paths by hand.
+
+The chat specification is the implementation blueprint for the conversation view.
+It carries the turn-grouping model, the per-tool-kind card taxonomy, diff and
+approval rendering, and the closed label vocabularies the inspectors need, each
+artifact addressed to the file it belongs in.
