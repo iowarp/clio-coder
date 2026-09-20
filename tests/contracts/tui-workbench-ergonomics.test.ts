@@ -78,7 +78,7 @@ test("abbreviated identities retain variant suffixes and complete graphemes", ()
 });
 
 for (const width of widths) {
-	test(`composer preserves variant identity, modes and draft at ${width} columns`, () => {
+	test(`composer keeps normal rails clean and preserves exceptional modes and draft at ${width} columns`, () => {
 		let streaming = false;
 		let approval = false;
 		let preparation: "idle" | "preparing" | "compacting" = "idle";
@@ -92,12 +92,12 @@ for (const width of widths) {
 		});
 		let rows = editor.render(width);
 		bounded(rows, width);
-		assert.match(plain(rows), /MESSAGE.*q6/u);
-		if (width >= 44) assert.match(plain(rows), /MESSAGE.*blad.*qwopus.*q6/u);
+		assert.doesNotMatch(plain(rows), /MESSAGE|blade-gateway|q6|newline/u);
+
 		streaming = true;
-		assert.match(plain(editor.render(width)), /FOLLOW-UP/u);
+		assert.doesNotMatch(plain(editor.render(width)), /FOLLOW-UP/u);
 		editor.setText("Research 研究 é");
-		assert.match(plain(editor.render(width)), /STEER.*q6/u);
+		assert.doesNotMatch(plain(editor.render(width)), /STEER|q6/u);
 		approval = true;
 		rows = editor.render(width);
 		bounded(rows, width);

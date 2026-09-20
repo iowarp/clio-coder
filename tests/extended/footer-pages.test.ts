@@ -6,6 +6,7 @@ import { buildContextLedger } from "../../src/domains/session/context-ledger.js"
 import { getKeybindings, setKeybindings, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid } from "../../src/interactive/context-meter.js";
 import { buildFooterDashboard, type FooterDashboardRenderState } from "../../src/interactive/footer/dashboard.js";
+import { footerKeyHint } from "../../src/interactive/footer/key-hints.js";
 import { DASHBOARD_PAGES, renderCompactDashboard, renderDashboardPage } from "../../src/interactive/footer/pages.js";
 import { createKeybindingManager } from "../../src/interactive/keybinding-manager.js";
 import {
@@ -228,7 +229,7 @@ test("Activity retains fast tool actions between calls and shows live worker out
 	match(render(), /Live response · provisional/);
 });
 
-test("compact footer exposes activity, headroom and workspace in two bounded dynamic rows", () => {
+test("compact footer exposes activity, headroom and inference identity in two bounded dynamic rows", () => {
 	for (const width of [40, 80, 160]) {
 		const rows = renderCompactDashboard(state(), width);
 		strictEqual(rows.length, 2);
@@ -240,7 +241,7 @@ test("compact footer exposes activity, headroom and workspace in two bounded dyn
 
 	match(text, /262.1k/);
 	match(text, /alt\+u|Dashboard/);
-	match(text, /v050/);
+	match(text, /think/);
 	doesNotMatch(text, /auto-edit|70k processed|standard/);
 });
 
@@ -336,7 +337,7 @@ test("compact notice borrows a row then expires without changing height", () => 
 	const after = renderCompactDashboard(snapshot, 100);
 	strictEqual(after.length, 2);
 	doesNotMatch(plain(after), /Worker finished/);
-	match(plain(after), /v050/);
+	match(plain(after), /newline|send|Library|Model|Thinking|queue|Dashboard/i);
 });
 
 test("demo tips borrow the compact footer row and yield to operational notices", () => {
@@ -354,4 +355,28 @@ test("demo tips borrow the compact footer row and yield to operational notices",
 	input.notices = [];
 	input.demoHint = null;
 	doesNotMatch(renderCompactDashboard(input, 80).map(stripTerminalSequences).join("\n"), /Tip/);
+});
+
+test("footer hints resolve remapped bindings and omit unbound actions", () => {
+	const previous = getKeybindings();
+	createKeybindingManager({
+		...DEFAULT_SETTINGS,
+		interface: {
+			...DEFAULT_SETTINGS.interface,
+			keybindings: {
+				"clio-coder.model.select": "ctrl+m",
+				"clio-coder.library.toggle": [],
+			},
+		},
+	});
+	try {
+		const hints = Array.from({ length: 40 }, (_, i) => footerKeyHint(i * 12000)).join("\n");
+		match(hints, /ctrl\+m Model picker/);
+		doesNotMatch(hints, /alt\+m|alt\+l|Library/);
+		match(hints, /newline/);
+		match(hints, /Thinking effort/);
+		match(hints, /Send after the active run/);
+	} finally {
+		setKeybindings(previous);
+	}
 });

@@ -8,7 +8,9 @@ import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivi
 import { formatFooterTokens } from "../footer-panel.js";
 import { previewRows } from "../renderers/preview.js";
 import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
+import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
+import { footerKeyHint } from "./key-hints.js";
 import { activityQuadrant, contextQuadrant, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
@@ -254,10 +256,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status)).length;
 	const phase = state.agent.statusText ?? "Ready";
-	const left = `${theme.fg("accent", phase)}${workers ? theme.fg("agent", `  ·  ${workers} active`) : ""}`;
+	const activity = `${theme.fg("accent", phase)}${workers ? theme.fg("agent", ` · ${workers} active`) : ""}`;
+	const identity = clean(state.session.target ?? "No model selected");
+	const thinking = theme.fg("reason", `think ${clean(state.session.thinking ?? "off")}`);
 	const usage = `${formatFooterTokens(ledger?.usedTokens ?? state.context.used ?? 0)} / ${(ledger?.contextWindow ?? state.context.contextWindow) ? formatFooterTokens(ledger?.contextWindow ?? state.context.contextWindow ?? 0) : "?"}`;
 	const context = `${ledger ? renderContextMeterBar(ledger, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
 	const rightWidth = Math.min(Math.floor(w * 0.48), visibleWidth(context));
+	const identityRoom = Math.max(8, w - rightWidth - visibleWidth(thinking) - visibleWidth(activity) - 10);
+	const left = `${theme.fg("muted", fitIdentityLabel(identity, identityRoom))} · ${thinking}  ${activity}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)
@@ -279,7 +285,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
 				: theme.fg(
 						"dim",
-						`${clean(state.workspace.cwd)}  ·  ${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`,
+						footerKeyHint(state.now, w < 80) ??
+							`${clean(state.workspace.cwd)} · ${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`,
 					);
 	const hint = theme.fg("muted", `${state.session.throughput ? `${state.session.throughput}  ·  ` : ""}${key}`);
 	return [
@@ -434,8 +441,17 @@ export function renderDashboardPage(
 			? theme.style("agent", ` ${index + 1} ${name.toUpperCase()} `, { bold: true, underline: true })
 			: theme.fg("dim", ` ${index + 1} ${name} `),
 	);
+
+	const tabText = `${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`;
+	const identityRoom = safeWidth - visibleWidth(tabText) - 4;
+	const identity = `${clean(state.session.target ?? "No model selected")} · think ${clean(state.session.thinking ?? "off")}`;
 	const heading = [
-		truncateToWidth(`${theme.style("accent", ">C_", { bold: true })} ${tabs.join(" ")}`, safeWidth, "…", true),
+		truncateToWidth(
+			identityRoom >= 20 ? `${tabText}    ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : tabText,
+			safeWidth,
+			"…",
+			true,
+		),
 	];
 	const next = page === "Status" ? "close" : DASHBOARD_PAGES[DASHBOARD_PAGES.indexOf(page) + 1];
 	const hint = truncateToWidth(
