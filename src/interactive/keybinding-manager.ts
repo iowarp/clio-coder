@@ -571,3 +571,13 @@ export function createKeybindingManagerForTesting(
 ): ClioKeybindingManager {
 	return buildManager(overrides, env, false);
 }
+
+/** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */
+export function formatKeyLabel(keyId: string | undefined, fallback = "unbound"): string {
+	if (!keyId || keyId.length === 0) return fallback;
+	return keyId
+		.split("+")
+		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
+		.join("+");
+}
+

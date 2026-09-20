@@ -1,3 +1,4 @@
+import { formatKeyLabel } from "./keybinding-manager.js";
 import { performance } from "node:perf_hooks";
 import type { ClioSettings } from "../core/config.js";
 import { DEFAULT_SETTINGS } from "../core/defaults.js";
@@ -189,15 +190,6 @@ const DEFAULT_FACTORIES: InteractivePresentationFactories = {
 	createIo: createCommandOutputRunIo,
 	buildLayout,
 };
-
-/** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */
-function formatKeyLabel(keyId: string | undefined, fallback = "unbound"): string {
-	if (!keyId || keyId.length === 0) return fallback;
-	return keyId
-		.split("+")
-		.map((segment) => (segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1)))
-		.join("+");
-}
 
 function willEnterSteerActiveWork(deps: InteractivePresentationDeps, text: string): boolean {
 	const trimmed = text.trim();

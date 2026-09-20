@@ -22,7 +22,7 @@ Before the final candidate is committed, use the existing development commands:
 
 ```bash
 pnpm run ci
-pnpm --filter @iowarp/clio-coder-web typecheck
+pnpm --filter @iowarp/clio-coder-gui typecheck
 node scripts/check-release.mjs
 pnpm run test:package
 ```
@@ -131,7 +131,7 @@ work is proven on canonical main. Published tags are immutable.
 pnpm run test:file -- tests/extended/<file>.test.ts
 pnpm run test:full
 pnpm run test:web:full
-pnpm --filter @iowarp/clio-coder-web verify
+pnpm --filter @iowarp/clio-coder-gui verify
 pnpm run smoke:real-home -- --target <configured-target-id> --strict
 ```
 

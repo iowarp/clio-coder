@@ -6,10 +6,10 @@ import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
 import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
+import { prepareGuiUninstall } from "./gui.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
-import { prepareWebUninstall } from "./web.js";
 
 const HELP = `clio-coder uninstall [--remove-binary] [--keep-config] [--keep-data] [--dry-run] [--force] [--json]
 
@@ -19,7 +19,7 @@ Per-project \`.clio-coder/\` directories sit outside those roots and are never
 removed here. Every project Clio has run in is recorded in the session metadata,
 so the real run and --dry-run both list them and name the command that clears one.
 Shell startup files are reported, never edited.
-Owned web background services are stopped and disabled before their state is
+Owned graphical background services are stopped and disabled before their state is
 removed; their desktop launchers are removed using the app's ownership manifests.
 
 Flags:
@@ -334,13 +334,13 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	const linkSize = measurePath(linkPath);
 	const launcher = classifyLauncher(linkPath);
 	const shellEdits = detectShellRcEdits();
-	let web: Awaited<ReturnType<typeof prepareWebUninstall>>;
+	let web: Awaited<ReturnType<typeof prepareGuiUninstall>>;
 	try {
 		const desktopPrefix =
 			process.env.XDG_DATA_HOME && isAbsolute(process.env.XDG_DATA_HOME)
 				? process.env.XDG_DATA_HOME
 				: join(homedir(), ".local/share");
-		web = await prepareWebUninstall({ stateDir: dirs.state, desktopPrefix });
+		web = await prepareGuiUninstall({ stateDir: dirs.state, desktopPrefix });
 	} catch (error) {
 		presenter.fail(error instanceof Error ? error.message : "Web installation ownership could not be checked.");
 		presenter.finish();
@@ -434,7 +434,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		for (const item of web.items) presenter.completedStep(`Removed ${item.label}`);
 	} catch (error) {
 		presenter.fail(
-			error instanceof Error ? error.message : "Could not stop the web installation; Clio state was preserved.",
+			error instanceof Error ? error.message : "Could not stop the graphical installation; Clio state was preserved.",
 		);
 		presenter.finish();
 		return 1;

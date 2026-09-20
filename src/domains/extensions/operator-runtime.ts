@@ -36,6 +36,7 @@ export interface OperatorReloadResult {
 	status: "committed" | "deferred" | "rejected";
 	generation: number;
 	message: string;
+	degraded?: number;
 }
 export interface OperatorRuntimeOptions {
 	/** Captured from the existing registry, never inferred from runtime activation. */
@@ -45,7 +46,7 @@ export interface OperatorRuntimeOptions {
 	isIdle(): boolean;
 	list?: (cwd: string) => InstalledExtension[];
 	onChange?: () => void;
-	onReload?: (result: OperatorReloadResult) => void;
+	onReload?: (result: OperatorReloadResult, reason: "startup" | "reload" | "session-change") => void;
 	/** Synchronous paired snapshot/hook commit. Runtimes have a separate readiness clock. */
 	commitHooks?: () => { status: string; generation: number; reason?: string };
 	/** Explicit headless invocation starts only its selected owner. */
@@ -294,7 +295,13 @@ export class OperatorExtensionRuntime {
 			result = {
 				status: "committed",
 				generation: next,
-				message: `operator generation ${next}: ${ready} ready, ${degraded} degraded; tool schemas remain frozen${hooks ? `; hooks/snapshot generation ${hooks.generation}` : ""}`,
+				degraded,
+				message:
+					degraded > 0
+						? `Extensions: ${degraded} failed to start; ${ready} ready. Open /extensions to inspect.`
+						: ready > 0
+							? `Extensions reloaded: ${ready} ready.`
+							: "Extensions reloaded. No runtime extensions enabled.",
 			};
 		} catch (error) {
 			for (const process of new Set([...this.processes.values(), ...staged.values()])) {
@@ -304,12 +311,12 @@ export class OperatorExtensionRuntime {
 			result = {
 				status: this.generation === next ? "committed" : "rejected",
 				generation: this.generation,
-				message: `${this.generation === next ? "operator generation committed but degraded: " : ""}${error instanceof Error ? error.message : String(error)}`,
+				message: `${this.generation === next ? "Extensions reloaded with errors: " : "Extension reload failed: "}${error instanceof Error ? error.message : String(error)}`,
 			};
 		}
 		this.changed();
 		try {
-			this.options.onReload?.(result);
+			this.options.onReload?.(result, reason);
 		} catch {
 			/* Reporting follows settlement. */
 		}

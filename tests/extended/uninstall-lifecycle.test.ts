@@ -2,9 +2,8 @@ import { match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, lstatSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-
+import { runGuiCommand } from "../../src/cli/gui.js";
 import { runUninstallCommand } from "../../src/cli/uninstall.js";
-import { runWebCommand } from "../../src/cli/web.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
 const home = () => createLifecycleHome("clio-coder-test-uninstall-");
@@ -20,7 +19,7 @@ describe("contracts/uninstall-lifecycle", () => {
 		try {
 			const prefix = join(temp.root, ".local/share");
 			const entry = join(prefix, "applications/io.iowarp.ClioCoder.desktop");
-			strictEqual((await runInHome(temp, () => runWebCommand(["launcher", "install", "--prefix", prefix]))).code, 0);
+			strictEqual((await runInHome(temp, () => runGuiCommand(["launcher", "install", "--prefix", prefix]))).code, 0);
 			const preview = await runInHome(temp, () => runUninstallCommand(["--dry-run"]));
 			strictEqual(preview.code, 0);
 			match(preview.stdout, /Desktop launcher/);

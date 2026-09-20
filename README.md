@@ -351,7 +351,7 @@ instructions follow the commands supported by the version actually installed.
 Options include `--version <tag-or-version>`, `--prefix <directory>`,
 `--omit-optional`, and `--dry-run`; pass them to a downloaded script using
 `bash -s -- <options>`. A source-checkout symlink is preserved unless you explicitly
-select `--force`. If you enabled the background service, run `clio-coder web background uninstall`
+select `--force`. If you enabled the background service, run `clio-coder gui background uninstall`
 before removing the package. Remove an install at the default prefix with
 `npm uninstall -g --prefix "$HOME/.local" @iowarp/clio-coder`.
 
@@ -452,21 +452,18 @@ The terminal is the primary interface. Clio Coder also packages a local browser
 app over the same runtime, projects, configuration, and model targets:
 
 ```bash
-clio-coder web --open
+clio-coder gui --open
 ```
 
 It prints a private launch link and opens your default browser only when asked.
 The server binds to `127.0.0.1`, and its Traces page reads the trace database
 without modifying it. On Linux with a systemd user session,
-`clio-coder web background install --open` keeps the app available after login
-and lets you install it from the browser as a PWA; `web background status`,
+`clio-coder gui background install --open` keeps the app available after login
+and lets you install it from the browser as a PWA; `gui background status`,
 `stop`, and `uninstall` manage that service. Other platforms can run the
 foreground app while its server is running. The background service has been
 verified on Linux only; macOS and Windows have not been exercised. Development
-details are in [`apps/clio-coder-web/README.md`](apps/clio-coder-web/README.md).
-
-`apps/workbench/` remains as reference source for future GUI work. It is excluded
-from workspace installation, recursive builds, publication, and product gates.
+details are in [`apps/clio-coder-gui/README.md`](apps/clio-coder-gui/README.md).
 
 ## Help and documentation
 

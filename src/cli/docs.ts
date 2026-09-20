@@ -2,11 +2,11 @@ import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { printError } from "./argv.js";
-import { runWebCommand } from "./web.js";
+import { runGuiCommand } from "./gui.js";
 
 const HELP = `clio-coder docs [topic] [--no-open]
 
-Open the documentation in the Clio Coder web app. Pages, navigation and outlines
+Open the documentation in the Clio Coder graphical app. Pages, navigation and outlines
 are rendered from the same Markdown reference shipped with Clio.
 
 Arguments:
@@ -19,7 +19,7 @@ Flags:
   --help, -h   this message.
 
 Reuses your installed background app when available. Otherwise starts a local
-foreground web server on 127.0.0.1; press Ctrl+C to stop it. No background service
+foreground server on 127.0.0.1; press Ctrl+C to stop it. No background service
 is installed by this command. Your current directory does not affect the docs.
 `;
 
@@ -83,7 +83,7 @@ export async function runDocsCommand(args: readonly string[] = []): Promise<numb
 			);
 			return 2;
 		}
-		return runWebCommand(["--path", path, "--reuse-background", args.includes("--no-open") ? "--no-open" : "--open"]);
+		return runGuiCommand(["--path", path, "--reuse-background", args.includes("--no-open") ? "--no-open" : "--open"]);
 	} catch (error) {
 		printError(error instanceof Error ? error.message : "Could not open the documentation.");
 		return 1;
