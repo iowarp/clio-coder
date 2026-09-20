@@ -3,6 +3,8 @@ import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
 import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
 import { Facts as RecordFacts } from "../../design/facts.js";
+import { humanizeKey } from "../../design/facts-model.js";
+import { StatusMark } from "../../design/status.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -16,6 +18,7 @@ export function parseJson(value: string | null) {
 export function Json({ value }: { value: unknown }) {
 	return <RecordFacts value={value} empty="Nothing was recorded for this field." />;
 }
+/** Keys reach this from the wire as often as from a caller's own words, so both read as words. */
 export function Facts({ entries }: { entries: [string, unknown][] }) {
 	return (
 		<dl className="trace-facts">
@@ -23,7 +26,7 @@ export function Facts({ entries }: { entries: [string, unknown][] }) {
 				.filter(([, value]) => value != null && value !== "")
 				.map(([key, value]) => (
 					<Fragment key={key}>
-						<dt>{key}</dt>
+						<dt>{humanizeKey(key)}</dt>
 						<dd>{typeof value === "object" ? <RecordFacts value={value} /> : String(value)}</dd>
 					</Fragment>
 				))}
@@ -176,8 +179,7 @@ export function Gates({ gates }: { gates: Static<typeof TraceGate>[] }) {
 			{gates.map((gate) => (
 				<article className="trace-event" key={gate.id}>
 					<h3>
-						{gate.gate}{" "}
-						<span className={`trace-badge ${gate.passed ? "success" : "fail"}`}>{gate.passed ? "passed" : "failed"}</span>
+						{gate.gate} <StatusMark tone={gate.passed ? "success" : "fail"} label={gate.passed ? "passed" : "failed"} />
 					</h3>
 					<p>
 						Attempt {gate.attempt} · {formatTime(gate.created_at)}

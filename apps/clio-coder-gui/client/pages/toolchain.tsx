@@ -3,6 +3,10 @@ import { useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { emptyState, PANELS } from "../design/panel-model.js";
+import { StatusMark } from "../design/status.js";
+import { toolCandidateNote, toolResolution } from "./toolchain-model.js";
 
 function Failure({ error }: { error: Error }) {
 	return (
@@ -32,15 +36,16 @@ export function Toolchain({ client }: { client: Client }) {
 		operation.data?.status === "queued";
 	return (
 		<>
-			<div className="page-heading">
-				<div>
-					<p className="eyebrow">Environment / 02</p>
-					<h1>
+			<PanelHeading
+				panel={PANELS.toolchain}
+				level={1}
+				title={
+					<>
 						Toolchain<span className="period">.</span>
-					</h1>
-				</div>
-				<span className="count">{tools.data?.length ?? "—"} pinned tools</span>
-			</div>
+					</>
+				}
+				action={<span className="count">{tools.data?.length ?? "—"} pinned tools</span>}
+			/>
 			<p className="intro">Know what runs. Keep the tools you need close at hand.</p>
 			<div className="section-rule">
 				<span>TOOL / PINNED VERSION</span>
@@ -48,58 +53,57 @@ export function Toolchain({ client }: { client: Client }) {
 			</div>
 			{tools.isPending && <p>Resolving tools…</p>}
 			{tools.error && <Failure error={tools.error} />}
+			{tools.data && !tools.data.length && <PanelEmpty>{emptyState.emptyStore("pinned tool")}</PanelEmpty>}
 			<div className="tools">
-				{tools.data?.map((tool, index) => (
-					<article className="tool" key={tool.id} aria-label={tool.id}>
-						<div className="tool-identity">
-							<span className="tool-number">0{index + 1}</span>
-							<div>
-								<h2>
-									{tool.id}
-									<span className="version">{tool.version}</span>
-								</h2>
-								<p>{tool.summary}</p>
-								<small>
-									{tool.license} · {tool.platform ?? "Unsupported platform"}
-								</small>
+				{tools.data?.map((tool, index) => {
+					const candidate = toolCandidateNote(tool);
+					return (
+						<article className="tool" key={tool.id} aria-label={tool.id}>
+							<div className="tool-identity">
+								<span className="tool-number">0{index + 1}</span>
+								<div>
+									<h2>
+										{tool.id}
+										<span className="version">{tool.version}</span>
+									</h2>
+									<p>{tool.summary}</p>
+									<small>
+										{tool.license} · {tool.platform ?? "Unsupported platform"}
+									</small>
+								</div>
 							</div>
-						</div>
-						<div className="tool-resolution">
-							<span className={`badge ${tool.resolution.source === "none" ? "absent" : "ready"}`}>
-								{tool.resolution.source === "none"
-									? "Not resolved"
-									: tool.resolution.source === "path"
-										? "On PATH"
-										: "Vendored"}
-							</span>
-							<p>{tool.resolution.description}</p>
-							<details>
-								<summary>Installation path</summary>
-								<code>{tool.installDir}</code>
-							</details>
-							<div className="actions">
-								<button
-									type="button"
-									className="primary"
-									disabled={busy || !tool.supported}
-									onClick={() => action.mutate({ id: tool.id, kind: "install" })}
-								>
-									{tool.installed ? "Check installation" : "Install pinned version"} <span aria-hidden="true">↓</span>
-								</button>
-								{tool.installed && (
+							<div className="tool-resolution">
+								<StatusMark {...toolResolution(tool)} />
+								<p>{tool.resolution.description}</p>
+								{candidate && <p className="panel-note">{candidate}</p>}
+								<details>
+									<summary>Installation path</summary>
+									<code>{tool.installDir}</code>
+								</details>
+								<div className="actions">
 									<button
 										type="button"
-										className="secondary"
-										disabled={busy}
-										onClick={() => action.mutate({ id: tool.id, kind: "remove" })}
+										className="primary"
+										disabled={busy || !tool.supported}
+										onClick={() => action.mutate({ id: tool.id, kind: "install" })}
 									>
-										Remove vendored copy
+										{tool.installed ? "Check installation" : "Install pinned version"} <span aria-hidden="true">↓</span>
 									</button>
-								)}
+									{tool.installed && (
+										<button
+											type="button"
+											className="secondary"
+											disabled={busy}
+											onClick={() => action.mutate({ id: tool.id, kind: "remove" })}
+										>
+											Remove vendored copy
+										</button>
+									)}
+								</div>
 							</div>
-						</div>
-					</article>
-				))}
+						</article>
+					);
+				})}
 			</div>
 			{action.error && <Failure error={action.error} />}
 			{operation.error && <Failure error={operation.error} />}
@@ -123,10 +127,7 @@ export function Toolchain({ client }: { client: Client }) {
 					{operation.data.status === "failed" && <Failure error={new ApiProblem(operation.data.problem)} />}
 				</section>
 			)}
-			<p className="footnote">
-				Clio uses a compatible PATH copy first, then the vendored pin. Removing a vendored copy leaves your PATH
-				installation in place.
-			</p>
+			<Boundary panel={PANELS.toolchain} />
 		</>
 	);
 }

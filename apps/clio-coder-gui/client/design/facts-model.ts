@@ -12,6 +12,9 @@ export type Fact =
 
 export const FACT_LIMITS = { depth: 4, keys: 40, items: 24, text: 600 } as const;
 
+/** `ids` is a plural, not an acronym, so it keeps its lowercase s. */
+const ACRONYM_FORMS: Record<string, string> = { ids: "IDs" };
+
 const ACRONYMS = new Set([
 	"id",
 	"ids",
@@ -38,7 +41,10 @@ export function humanizeKey(key: string): string {
 		.filter(Boolean)
 		// The value already carries these units ("1m 1s", "$0.00"), so the label drops them.
 		.filter((word, index, all) => !(index === all.length - 1 && all.length > 1 && /^(ms|usd)$/i.test(word)))
-		.map((word) => (ACRONYMS.has(word.toLowerCase()) ? word.toUpperCase() : word.toLowerCase()));
+		.map((word) => {
+			const lower = word.toLowerCase();
+			return ACRONYM_FORMS[lower] ?? (ACRONYMS.has(lower) ? word.toUpperCase() : lower);
+		});
 	const first = words[0];
 	if (!first) return key;
 	return [
@@ -113,6 +119,14 @@ function factFor(label: string, key: string, value: unknown, depth: number): Fac
 	const nested = factsOf(value, {}, depth + 1);
 	return { kind: "group", label, facts: nested.facts, omitted: nested.omitted };
 }
+
+/**
+ * A capability figure an offline inventory may not carry, such as a context window or an output
+ * ceiling. Zero is not a capability, so a zero reads as "Not reported" rather than as a limit of
+ * none. Measurements are the opposite case and belong in `scalarText`, where zero reads as zero.
+ */
+export const reportedCount = (value: number | null | undefined): string =>
+	typeof value === "number" && Number.isFinite(value) && value > 0 ? value.toLocaleString("en-US") : "Not reported";
 
 /** The sentence for a bound that dropped something. `noun` is singular. */
 export const omittedSentence = (omitted: number, noun: string) =>

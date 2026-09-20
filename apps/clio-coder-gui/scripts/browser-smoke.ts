@@ -179,6 +179,8 @@ try {
 		await navigate("Toolchain");
 		await page.getByRole("article", { name: "herdr", exact: true }).waitFor();
 		await check("toolchain");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `toolchain-${width}.png`), fullPage: true });
 		await navigate("Traces");
 		await page.locator('a[href="/traces/run-0000"]').waitFor();
 		await check("traces");
@@ -186,6 +188,8 @@ try {
 		await page.getByRole("heading", { name: "Inspect fixture 0", exact: true }).waitFor();
 		await page.getByText("Fixture workspace", { exact: false }).first().waitFor({ state: "attached" });
 		await check("trace-run");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
 		await navigate("Fleet");
 		await page.getByRole("heading", { name: "fixture-council", exact: true }).waitFor();
 		await check("fleet");
@@ -341,13 +345,20 @@ try {
 		await page.getByRole("link", { name: "Routing", exact: true }).click();
 		await page.getByRole("heading", { name: /^Agent bindings ·/ }).waitFor();
 		await check("routing");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `routing-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("routing-dark");
 		await page.goto(`${origin}/usage`);
-		await page.getByRole("heading", { name: "Recorded facts", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "Token composition", exact: true }).waitFor();
+		// The five bars compare fields with one another, which is the one thing a reader can get
+		// wrong by looking; the caveat is part of the panel, not a footnote that can drift away.
+		await page.getByText("they are not additive percentages", { exact: false }).waitFor();
 		await check("usage-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await check("usage");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `usage-${width}.png`), fullPage: true });
 		await navigate("Library");
 		// The catalog is the landing collection: plan, review, apply, then remove, all against the bundled index.
 		const offer = page.getByRole("listitem", { name: "skill:archify", exact: true });

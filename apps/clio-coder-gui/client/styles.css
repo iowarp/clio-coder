@@ -850,6 +850,62 @@ nav a.active .icon {
 	font-size: var(--text-display);
 	overflow-wrap: anywhere;
 }
+/* The run's four totals, and how many events and processes there were of each kind. */
+.trace-totals {
+	list-style: none;
+	margin: var(--space-4) 0 0;
+	padding: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-6);
+}
+.trace-totals li {
+	display: grid;
+	gap: 2px;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.trace-totals strong {
+	font-family: var(--font-mono);
+	font-size: var(--text-body);
+	color: var(--ink);
+}
+.trace-histograms {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: var(--space-6);
+}
+.trace-histogram {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: grid;
+	gap: var(--space-2);
+}
+.trace-histogram li {
+	display: grid;
+	grid-template-columns: minmax(5rem, 9rem) minmax(0, 1fr) auto;
+	align-items: center;
+	gap: var(--space-3);
+	font-size: var(--text-meta);
+}
+.trace-histogram__track {
+	display: block;
+	height: 10px;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--surface-sunken);
+	overflow: hidden;
+}
+.trace-histogram__track > i {
+	display: block;
+	height: 100%;
+	min-width: 1px;
+	background: var(--status-neutral-fg);
+}
+.trace-histogram strong {
+	font-family: var(--font-mono);
+}
 
 /* Workspace and conversation */
 .workspace-open {

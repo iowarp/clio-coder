@@ -3,6 +3,8 @@ import { Link, useSearchParams } from "react-router";
 import { type Input, routes } from "../../../contracts/routes.js";
 import type { Client } from "../../api/client.js";
 import { formatCost, formatTime, formatTokens } from "../../api/clock.js";
+import { PanelEmpty } from "../../design/panel.js";
+import { emptyState } from "../../design/panel-model.js";
 export function TraceRuns({ client }: { client: Client }) {
 	const [search, setSearch] = useSearchParams();
 	const source = search.get("source"),
@@ -77,6 +79,7 @@ export function TraceRuns({ client }: { client: Client }) {
 			{availability.data?.available === false ? (
 				<div className="trace-panel">
 					<h2>No trace database available</h2>
+					<PanelEmpty>{emptyState.missingStore("execution trace")}</PanelEmpty>
 					<p>
 						Run a Clio session or dispatch to record execution history. An existing database must use the supported schema and
 						WAL mode.
@@ -105,7 +108,8 @@ export function TraceRuns({ client }: { client: Client }) {
 					</Link>
 				)),
 			)}
-			{runs.data?.pages[0]?.runs.length === 0 ? <p>No runs match these filters.</p> : null}
+			{runs.data?.pages[0]?.runs.length === 0 ? <PanelEmpty>No run matches these filters.</PanelEmpty> : null}
+			{runs.hasNextPage ? <PanelEmpty>{emptyState.bounded("runs")}</PanelEmpty> : null}
 			{runs.hasNextPage ? (
 				<button type="button" onClick={() => void runs.fetchNextPage()} disabled={runs.isFetchingNextPage}>
 					Load more runs

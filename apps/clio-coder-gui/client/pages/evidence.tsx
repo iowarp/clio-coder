@@ -5,6 +5,8 @@ import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
 import { Facts } from "../design/facts.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { emptyState, PANELS } from "../design/panel-model.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
@@ -109,8 +111,7 @@ export function EvidencePage({ client }: { client: Client }) {
 	});
 	return (
 		<section>
-			<p className="eyebrow">Results / Recorded evidence</p>
-			<h1>Evidence</h1>
+			<PanelHeading panel={PANELS.evidenceInventory} level={1} />
 			<p>
 				See what supports a result, what was checked, and what remains uncertain. Reports reflect the records available when
 				they were collected.
@@ -124,7 +125,9 @@ export function EvidencePage({ client }: { client: Client }) {
 			{inventory.isPending && <p>Reading evidence…</p>}
 			{inventory.error && <p role="alert">{inventory.error.message}</p>}
 			{inventory.data?.pages[0]?.items.length === 0 && (
-				<p>No evidence reports yet. Collect evidence from a completed dispatch run to get started.</p>
+				<PanelEmpty>
+					{emptyState.emptyStore("evidence bundle")} Collect evidence from a completed dispatch run to start one.
+				</PanelEmpty>
 			)}
 			<div className="config-entries">
 				{inventory.data?.pages
@@ -146,10 +149,14 @@ export function EvidencePage({ client }: { client: Client }) {
 					))}
 			</div>
 			{inventory.hasNextPage && (
-				<button type="button" disabled={inventory.isFetchingNextPage} onClick={() => void inventory.fetchNextPage()}>
-					Load more evidence
-				</button>
+				<>
+					<PanelEmpty>{emptyState.bounded("evidence bundles")}</PanelEmpty>
+					<button type="button" disabled={inventory.isFetchingNextPage} onClick={() => void inventory.fetchNextPage()}>
+						Load more evidence
+					</button>
+				</>
 			)}
+			<Boundary panel={PANELS.evidenceInventory} />
 		</section>
 	);
 }
@@ -163,7 +170,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 	return (
 		<section>
 			<Link to="/evidence">All evidence</Link>
-			<h1>Evidence · {id}</h1>
+			<PanelHeading panel={PANELS.evidenceBundle} level={1} title={`Evidence · ${id}`} />
 			{detail.isPending && <p>Reading report…</p>}
 			{detail.error && <p role="alert">{detail.error.message}</p>}
 			{data && (
@@ -173,14 +180,14 @@ export function EvidenceDetail({ client }: { client: Client }) {
 					</p>
 					<p>{verdictText[data.verdict]}</p>
 					{data.projection === "historical_format" && (
-						<p>
-							This historical report has no canonical trust record. Recheck its original receipt to learn its current
-							integrity.
-						</p>
+						<PanelEmpty>
+							{emptyState.predatesSchema("bundle", "trust projection", "axes")} Recheck its original receipt to learn its
+							current integrity.
+						</PanelEmpty>
 					)}
 					<EvidenceActions key={id} client={client} initialRun={data.overview.runIds[0] ?? ""} />
 					<h2>What was found</h2>
-					{!data.findings.length && <p>No findings were recorded.</p>}
+					{!data.findings.length && <PanelEmpty>{emptyState.emptyStore("finding", "in this bundle")}</PanelEmpty>}
 					{data.findings.map((finding) => (
 						<article className="trace-panel" key={finding.id}>
 							<h3>
@@ -190,7 +197,8 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							{finding.runId && <Link to={`/fleet/dispatches/${finding.runId}`}>{finding.runId}</Link>}
 						</article>
 					))}
-					<h2>Trust by run</h2>
+					<PanelHeading panel={PANELS.evidenceTrust} action={<span className="count">{data.runs.length}</span>} />
+					{!data.runs.length && <PanelEmpty>{emptyState.emptyStore("run", "in this bundle")}</PanelEmpty>}
 					{data.runs.map((run) => (
 						<article className="trace-panel" key={run.runId}>
 							<h3>
@@ -206,9 +214,10 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							</details>
 						</article>
 					))}
+					<Boundary panel={PANELS.evidenceTrust} />
 					<h2>Provenance</h2>
 					{!data.provenance.some((run) => run.lines.length) && (
-						<p>No provenance claims admitted by the recorded trust status.</p>
+						<PanelEmpty>No provenance claim is admitted by the recorded trust status.</PanelEmpty>
 					)}
 					{data.provenance
 						.filter((run) => run.lines.length)
@@ -222,14 +231,17 @@ export function EvidenceDetail({ client }: { client: Client }) {
 								</ul>
 							</article>
 						))}
-					<h2>Authenticated gate decisions</h2>
-					{!data.gateDecisions.length && <p>No authenticated gate decisions linked to this report.</p>}
+					<PanelHeading panel={PANELS.evidenceGates} action={<span className="count">{data.gateDecisions.length}</span>} />
+					{!data.gateDecisions.length && (
+						<PanelEmpty>{emptyState.emptyStore("authenticated gate decision", "against this bundle")}</PanelEmpty>
+					)}
 					{data.gateDecisions.map((gate, index) => (
 						<details key={String(gate.id ?? index)} className="trace-panel">
 							<summary>Decision {String(gate.id ?? index + 1)}</summary>
 							<Facts value={gate} order={["id", "decision", "verdict", "outcome", "reason", "decidedAt", "runId"]} />
 						</details>
 					))}
+					<Boundary panel={PANELS.evidenceGates} />
 					<details className="trace-panel">
 						<summary>Full report overview</summary>
 						<Facts
@@ -249,6 +261,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							hide={["version"]}
 						/>
 					</details>
+					<Boundary panel={PANELS.evidenceBundle} />
 				</>
 			)}
 		</section>
