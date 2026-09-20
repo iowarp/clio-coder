@@ -180,7 +180,7 @@ saves for live controls and identifies changes that require a restart.
 Clio can explain these settings herself: ask “What can you do without asking?”
 or “What are my worker limits?” Her `context(scope="settings")` tool reads the
 running session's effective configuration, including overrides, and returns
-specific `/settings` and configure commands. It reports configured ceilings,
+specific `/settings` and configure commands. Every response includes the chat and fleet default routes, configured profiles and agent bindings, and target runtime IDs; these are configuration facts, not backend health checks. Multiword searches rank partial matches. It reports configured ceilings,
 not remaining spending or call counts. It omits credentials, endpoint URLs,
 external-agent commands, and arbitrary free-form values. This tool is read-only;
 Clio guides you through changes and does not raise permissions or budgets to

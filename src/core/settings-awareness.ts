@@ -40,11 +40,24 @@ const SAFE_STRING_VALUES = new Set([
 export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", offset = 0, limit = 12) {
 	const area = resolveSettingsSection(query);
 	const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
-	const controls = SETTING_CONTROLS.filter((control) =>
-		area
-			? settingsSectionForPath(control.path) === area
-			: terms.every((term) => `${control.path} ${control.label} ${control.description}`.toLowerCase().includes(term)),
-	);
+
+	const controls = SETTING_CONTROLS.map((control, index) => {
+		const text = `${control.path} ${control.label} ${control.description}`.toLowerCase();
+		const score = terms.filter((term) => text.includes(term)).length;
+		return { control, index, score };
+	})
+		.filter(({ control, score }) =>
+			area ? settingsSectionForPath(control.path) === area : terms.length === 0 || score > 0,
+		)
+		.sort((a, b) => (area ? a.index - b.index : b.score - a.score || a.index - b.index))
+		.map(({ control }) => control);
+	const route = (value: ClioSettings["fleet"]["default"]) => ({
+		target: value.target ?? null,
+		model: value.model ?? null,
+		thinkingLevel: value.thinkingLevel,
+		...(value.node ? { node: value.node } : {}),
+	});
+
 	const rows = controls.slice(offset, offset + limit).map((control) => {
 		const disclose =
 			control.kind === "number" ||
@@ -65,6 +78,19 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 	});
 	return {
 		scope: "effective settings for the running session; includes its overrides",
+		routing: {
+			chat: route(settings.chat),
+			fleetDefault: route(settings.fleet.default),
+			profiles: Object.fromEntries(Object.entries(settings.fleet.profiles).map(([name, value]) => [name, route(value)])),
+			agentProfiles: { ...settings.fleet.agentProfiles },
+			targets: settings.targets.map((target) => ({
+				id: target.id,
+				runtime: target.runtime,
+				defaultModel: target.defaultModel ?? null,
+			})),
+			note:
+				"These are configured routes, not backend health or a guarantee of a particular dispatch. Shadow helpers use fleet routing; do not substitute the chat model for the fleet default. Agent/profile bindings, explicit requests, recipe requirements and admission can affect a run. Null means not explicitly configured, not inheritance from chat.",
+		},
 		posture: describeSettingsPosture(settings),
 		limits: {
 			sessionCostUsd: settings.safety.limits.sessionCostUsd,
@@ -74,7 +100,7 @@ export function settingsAwareness(settings: Readonly<ClioSettings>, query = "", 
 			concurrency: settings.fleet.concurrency,
 		},
 		note:
-			"These are configured ceilings, not remaining budgets. This read changes nothing. Guide the user to the listed UI controls; do not edit settings files or relax safety, trust, credentials, or spending limits to get past a denial. /settings supports session-only changes where available; configure saves global defaults.",
+			"Answer current-configuration questions from this live snapshot; documentation describes behavior, not this session’s configured values. For zero search matches, retry this settings scope with a short key or no query instead of reading whole guides. These are configured ceilings, not remaining budgets. This read changes nothing. Guide the user to the listed UI controls; do not edit settings files or relax safety, trust, credentials, or spending limits to get past a denial. /settings supports session-only changes where available; configure saves global defaults.",
 		rows,
 		total: controls.length,
 		nextOffset: offset + rows.length < controls.length ? offset + rows.length : null,

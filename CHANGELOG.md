@@ -12,6 +12,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Answer live model/fleet configuration questions with a safe routing snapshot, including profile bindings and target runtime IDs. Rank partial settings-search matches instead of requiring every query word in one control; preserve secret omission.
+
 - Simplify normal editor rails; move target/model/thinking to the footer and rotate resolved composer shortcuts below it. Keep the compact footer at two lines, preserve operational-notice priority, and retain permission controls and turn-preparation states.
 
 - Render in-session `/doctor` as a width-aware diagnostic report, with errors and warnings first, separate check labels and complete wrapped details. Preserve CLI output and diagnostic behavior.
