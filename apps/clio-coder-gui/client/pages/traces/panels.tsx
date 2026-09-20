@@ -2,6 +2,7 @@ import { Fragment } from "react";
 import type { Static } from "typebox";
 import type { TraceEvent, TraceGate, TracePhase, TraceReceipt, TraceRun } from "../../../contracts/traces.js";
 import { clock, formatCost, formatDuration, formatTime, formatTokens } from "../../api/clock.js";
+import { Facts as RecordFacts } from "../../design/facts.js";
 export function object(value: unknown): Record<string, unknown> {
 	return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
@@ -13,7 +14,7 @@ export function parseJson(value: string | null) {
 	}
 }
 export function Json({ value }: { value: unknown }) {
-	return <pre className="trace-json">{JSON.stringify(value, null, 2)}</pre>;
+	return <RecordFacts value={value} empty="Nothing was recorded for this field." />;
 }
 export function Facts({ entries }: { entries: [string, unknown][] }) {
 	return (
@@ -23,7 +24,7 @@ export function Facts({ entries }: { entries: [string, unknown][] }) {
 				.map(([key, value]) => (
 					<Fragment key={key}>
 						<dt>{key}</dt>
-						<dd>{typeof value === "object" ? JSON.stringify(value) : String(value)}</dd>
+						<dd>{typeof value === "object" ? <RecordFacts value={value} /> : String(value)}</dd>
 					</Fragment>
 				))}
 		</dl>

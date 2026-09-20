@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { Facts } from "../design/facts.js";
 import { LibraryCatalog } from "./library-catalog.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
@@ -168,7 +169,11 @@ export function LibraryPage({ client }: { client: Client }) {
 						<p>{row.state}</p>
 						<details>
 							<summary>Source and configuration</summary>
-							<pre className="fleet-receipt">{JSON.stringify(row.detail, null, 2)}</pre>
+							<Facts
+								value={row.detail}
+								order={["availability", "reason", "source", "owner", "origin", "path"]}
+								hide={["key", "name", "description"]}
+							/>
 						</details>
 					</article>
 				))}

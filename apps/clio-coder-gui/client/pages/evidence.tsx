@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { useOperation } from "../api/queries.js";
+import { Facts } from "../design/facts.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
@@ -198,7 +199,10 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							<p>{run.summary.text}</p>
 							<details>
 								<summary>Authorities and artifact references</summary>
-								<pre className="fleet-receipt">{JSON.stringify(run.status, null, 2)}</pre>
+								<Facts
+									value={run.status}
+									empty="This run recorded no trust status. That is a missing record, not a passing one."
+								/>
 							</details>
 						</article>
 					))}
@@ -223,12 +227,27 @@ export function EvidenceDetail({ client }: { client: Client }) {
 					{data.gateDecisions.map((gate, index) => (
 						<details key={String(gate.id ?? index)} className="trace-panel">
 							<summary>Decision {String(gate.id ?? index + 1)}</summary>
-							<pre className="fleet-receipt">{JSON.stringify(gate, null, 2)}</pre>
+							<Facts value={gate} order={["id", "decision", "verdict", "outcome", "reason", "decidedAt", "runId"]} />
 						</details>
 					))}
 					<details className="trace-panel">
 						<summary>Full report overview</summary>
-						<pre className="fleet-receipt">{JSON.stringify(data.overview, null, 2)}</pre>
+						<Facts
+							value={data.overview}
+							order={[
+								"source",
+								"generatedAt",
+								"statuses",
+								"startedAt",
+								"endedAt",
+								"totals",
+								"tasks",
+								"agentIds",
+								"targetIds",
+								"modelIds",
+							]}
+							hide={["version"]}
+						/>
 					</details>
 				</>
 			)}

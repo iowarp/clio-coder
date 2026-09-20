@@ -4,6 +4,7 @@ import type { Static } from "typebox";
 import type { EvalReport } from "../../contracts/reports.js";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { Facts } from "../design/facts.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 function ReportSummary({ report }: { report: Static<typeof EvalReport> }) {
@@ -103,15 +104,13 @@ export function EvalDetail({ client }: { client: Client }) {
 							{result.failureClass && <p>{result.failureClass}</p>}
 							<details>
 								<summary>Measurements and recorded verdicts</summary>
-								<pre className="fleet-receipt">{JSON.stringify(result, null, 2)}</pre>
+								<Facts value={result} order={["pass", "failureClass", "target", "repeatIndex"]} hide={["taskId"]} />
 							</details>
 						</article>
 					))}
 					<details className="trace-panel">
 						<summary>Report context and scenario totals</summary>
-						<pre className="fleet-receipt">
-							{JSON.stringify({ report: query.data.report, aggregates: query.data.aggregates }, null, 2)}
-						</pre>
+						<Facts value={{ report: query.data.report, aggregates: query.data.aggregates }} />
 					</details>
 				</>
 			)}
