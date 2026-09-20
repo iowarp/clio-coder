@@ -104,7 +104,7 @@ async function loadNavSource(
 	source: CodeNavSource,
 ): Promise<{ ok: true; loaded: LoadedNavSource } | { ok: false; message: string }> {
 	if (source === "clio") return loadClioCodewikiForTool();
-	const loaded = await loadCodewikiForTool();
+	const loaded = await loadCodewikiForTool(process.cwd(), { readOnly: true });
 	return loaded.ok
 		? { ok: true, loaded: { codewiki: loaded.codewiki, entryRoot: null } }
 		: { ok: false, message: loaded.message };

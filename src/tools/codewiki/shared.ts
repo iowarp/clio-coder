@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
+import { resolve } from "node:path";
 import { codewikiPath, readCodewiki } from "../../domains/context/codewiki/artifact.js";
-import { coordinateCodewikiWrite } from "../../domains/context/codewiki/coordinator.js";
+import { coordinateCodewikiWrite, reconcileCodewikiCandidate } from "../../domains/context/codewiki/coordinator.js";
 import type { Codewiki } from "../../domains/context/codewiki/schema.js";
 import { readClioState, writeClioState } from "../../domains/context/state.js";
 
@@ -17,6 +18,15 @@ interface CodewikiArtifactCacheEntry {
 	identity: CodewikiArtifactIdentity;
 	codewiki: Codewiki;
 }
+
+const transientCodewikis = new Map<
+	string,
+	{
+		codewiki: Codewiki;
+		fingerprint: import("../../domains/context/fingerprint.js").Fingerprint;
+		identity: CodewikiArtifactIdentity | null;
+	}
+>();
 
 const codewikiArtifactCache = new Map<string, CodewikiArtifactCacheEntry>();
 
@@ -68,8 +78,36 @@ function readCodewikiForTool(cwd: string): Codewiki | null {
 
 export async function loadCodewikiForTool(
 	cwd: string = process.cwd(),
+	options: { readOnly?: boolean } = {},
 ): Promise<{ ok: true; codewiki: Codewiki } | { ok: false; message: string }> {
 	try {
+		if (options.readOnly) {
+			const workspace = resolve(cwd);
+			const identity = codewikiArtifactIdentity(workspace);
+			const cached = transientCodewikis.get(workspace);
+			const sameDisk =
+				cached &&
+				(identity === null
+					? cached.identity === null
+					: cached.identity !== null && sameArtifactIdentity(identity, cached.identity));
+			const state = readClioState(workspace);
+			const current = sameDisk ? cached.codewiki : readCodewikiForTool(workspace);
+			const language = state?.projectType ?? current?.language;
+			const result = await reconcileCodewikiCandidate({
+				kind: "ensure",
+				cwd: workspace,
+				current,
+				previous: sameDisk ? cached.fingerprint : (state?.fingerprint ?? null),
+				...(language ? { language } : {}),
+			});
+			transientCodewikis.delete(workspace);
+			transientCodewikis.set(workspace, { codewiki: result.codewiki, fingerprint: result.fingerprint, identity });
+			while (transientCodewikis.size > CODEWIKI_ARTIFACT_CACHE_LIMIT) {
+				const oldest = transientCodewikis.keys().next().value;
+				if (oldest !== undefined) transientCodewikis.delete(oldest);
+			}
+			return { ok: true, codewiki: result.codewiki };
+		}
 		const generatedAt = new Date().toISOString();
 		const coordinated = await coordinateCodewikiWrite(
 			cwd,

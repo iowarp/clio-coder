@@ -198,6 +198,16 @@ export function coordinateCodewikiExclusive<T>(cwd: string, task: (workspace: st
 	return enqueueWorkspace(workspace, () => withStateFileLock(codewikiPath(workspace), () => task(workspace)));
 }
 
+/** Reconcile a read tool's private snapshot without a writer lease or workspace mutation. */
+export async function reconcileCodewikiCandidate(
+	request: Extract<CodewikiBuildWorkerRequest, { kind: "ensure" }> & { current: Codewiki | null },
+): Promise<CodewikiBuildWorkerResult> {
+	const outcome = await executeInWorker(request);
+	const codewiki = outcome.codewiki ?? request.current;
+	if (!codewiki) throw new Error("codewiki reconciliation returned no artifact");
+	return { codewiki, fingerprint: outcome.fingerprint, changed: outcome.changed };
+}
+
 /** Build a preview candidate in the worker without acquiring a writer lease or touching disk. */
 export async function buildCodewikiCandidate(
 	cwd: string,
