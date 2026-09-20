@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Value } from "typebox/value";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { streamSimple } from "../../src/engine/ai.js";
+import type { EngineModel } from "../../src/engine/types.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
 import {
 	buildDispatchParameters,
@@ -96,11 +98,46 @@ describe("dispatch schema composition", () => {
 		assert.equal(Object.keys(((full as unknown as Schema).properties.routing as unknown as Schema).properties).length, 7);
 	});
 
-	it("keeps the $defs the task objects reference in every composition", () => {
-		const schema = buildDispatchParameters({ council: false, compete: false, adaptiveRouting: false }) as unknown as {
-			$defs: Record<string, unknown>;
+	it("delivers nested dispatch objects through Pi's non-strict Anthropic wire schema", async () => {
+		const schema = buildDispatchParameters({ council: false, compete: false, adaptiveRouting: false });
+		const model: EngineModel = {
+			id: "claude-haiku-4-5",
+			name: "fixture",
+			api: "anthropic-messages",
+			provider: "anthropic",
+			baseUrl: "https://provider.invalid",
+			reasoning: false,
+			input: ["text"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 200000,
+			maxTokens: 4096,
 		};
-		assert.deepEqual(Object.keys(schema.$defs).sort(), ["budget", "intent", "workerContext"]);
+		let wire: typeof schema | undefined;
+		await streamSimple(
+			model,
+			{
+				messages: [{ role: "user", content: "dispatch a verifier", timestamp: 0 }],
+				tools: [{ name: "dispatch", description: "Dispatch a worker", parameters: schema }],
+			},
+			{
+				apiKey: "fixture",
+				onPayload(payload) {
+					wire = (payload as { tools: Array<{ input_schema: typeof schema }> }).tools[0]?.input_schema;
+					throw new Error("captured before network");
+				},
+			},
+		).result();
+		assert.ok(wire);
+		const task = {
+			task: "check",
+			context: { mode: "fork" },
+			intent: { relevant_paths: ["package.json"], verification: [{ check: "test" }] },
+			budget: { toolCalls: 3, readReserve: 1 },
+		};
+		assert.equal(Value.Check(wire, task), true);
+		assert.equal(Value.Check(wire, { tasks: [task] }), true);
+		assert.equal(Value.Check(wire, { ...task, context: JSON.stringify(task.context) }), false);
+		assert.equal(Value.Check(wire, { ...task, intent: JSON.stringify(task.intent) }), false);
 	});
 
 	it("does not refuse a hidden field a caller sends anyway", () => {

@@ -1,4 +1,4 @@
-import { type Static, Type } from "typebox";
+import { Type } from "typebox";
 import type { FleetSettings } from "../core/defaults.js";
 import { RESULT_SUMMARY_MAX_BYTES_CEILING } from "../domains/agents/result-contract.js";
 import { WORKER_CONTEXT_SPLICE_TOKENS } from "../domains/context/worker/contract.js";
@@ -89,11 +89,9 @@ const DispatchVerificationSchema = Type.Array(
 	{ maxItems: 8 },
 );
 
-// The intent and budget schemas are wanted at the top level and on every
-// task. Each is serialized once, under `$defs`, and referenced by JSON
-// pointer from both places; the per-task copies alone cost 371 tokens of
-// every first turn on the ornith tokenizer. TypeBox's validator and pi's
-// argument validator both resolve the pointer.
+// Keep nested schemas self-contained. Pi's non-strict Anthropic adapter carries
+// root properties/required but drops root $defs, leaving references unresolved.
+// Inline objects cost more prompt tokens but preserve the actual provider contract.
 const DispatchIntentSchema = Type.Object(
 	{
 		read_roots: Type.Optional(Type.Array(Type.String(), { maxItems: 32 })),
@@ -116,9 +114,6 @@ const DispatchIntentSchema = Type.Object(
 			"Required on every dispatch: repository-relative paths select project rules and worker context; omission falls back to task-text paths. verification names checks from package scripts or .clio-coder/verifiers.yaml. Per-task fields override batch defaults. Parallel writers need disjoint write_roots; expected_outputs does not restrict access.",
 	},
 );
-
-const IntentRef = Type.Unsafe<Static<typeof DispatchIntentSchema>>({ $ref: "#/$defs/intent" });
-const BudgetRef = Type.Unsafe<Static<typeof DispatchBudgetSchema>>({ $ref: "#/$defs/budget" });
 
 const MODE_DESCRIPTION: Record<"full" | "noCouncil" | "noCompete" | "neither", string> = {
 	full:
@@ -157,13 +152,6 @@ const WorkerContextSchema = Type.Union(
 		description: `Parent context: isolated (default), fork (native history, never silently truncated), or splice (selected text, default ${WORKER_CONTEXT_SPLICE_TOKENS} tokens). refs: tool:<call-id> or message:<index> in the current snapshot. Per-task overrides allowed.`,
 	},
 );
-const ContextRef = Type.Unsafe<Static<typeof WorkerContextSchema>>({ $ref: "#/$defs/workerContext" });
-const DISPATCH_DEFS = {
-	intent: DispatchIntentSchema,
-	budget: DispatchBudgetSchema,
-	workerContext: WorkerContextSchema,
-};
-
 export function buildDispatchParameters(composition: DispatchSchemaComposition = FULL_DISPATCH_SCHEMA_COMPOSITION) {
 	const modes = [
 		"parallel",
@@ -180,195 +168,190 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 				: composition.council
 					? MODE_DESCRIPTION.noCompete
 					: MODE_DESCRIPTION.neither;
-	return Type.Object(
-		{
-			list: Type.Optional(Type.Boolean({ description: "List the agent roster instead of dispatching." })),
-			from_scout: Type.Optional(
-				Type.Object(
-					{
-						run_id: Type.String({ description: "Terminal Scout run id." }),
-						receipt_digest: Type.String({ description: "Its sha256 receipt digest." }),
-					},
-					{
-						additionalProperties: false,
-						description: "Compile a Scout split result into one approval-gated dependency plan; use with no other argument.",
-					},
-				),
+	return Type.Object({
+		list: Type.Optional(Type.Boolean({ description: "List the agent roster instead of dispatching." })),
+		from_scout: Type.Optional(
+			Type.Object(
+				{
+					run_id: Type.String({ description: "Terminal Scout run id." }),
+					receipt_digest: Type.String({ description: "Its sha256 receipt digest." }),
+				},
+				{
+					additionalProperties: false,
+					description: "Compile a Scout split result into one approval-gated dependency plan; use with no other argument.",
+				},
 			),
-			task: Type.Optional(Type.String({ description: "One worker assignment. Use tasks for a batch." })),
-			tasks: Type.Optional(
-				Type.Array(
-					Type.Union([
-						Type.String(),
-						// A task carries only what varies per task. persona, tool_profile,
-						// cwd, and apply come from the batch defaults (admission still reads
-						// them when a caller sends them; the schema no longer spends the
-						// tokens advertising them twice).
-						Type.Object({
-							task: Type.String({ description: "The assignment, with expected output and constraints." }),
-							context: Type.Optional(ContextRef),
-							briefing: Type.Optional(
-								Type.String({ description: `Per-task parent context, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.` }),
-							),
-							agent: Type.Optional(
-								Type.String({
-									description:
-										"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch/default recipe.",
-								}),
-							),
-							budget: Type.Optional(BudgetRef),
-							target: Type.Optional(Type.String()),
-							model: Type.Optional(Type.String()),
-							node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
-							worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
-							intent: Type.Optional(IntentRef),
-							gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
-							result_summary_max_bytes: Type.Optional(
-								Type.Integer({
-									minimum: 1,
-									maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
-									description: "This task's inline summary allowance; mutation-report workers (coder, documenter) only.",
-								}),
-							),
-						}),
-					]),
-					{ description: "Batch of assignments; one string or object is wrapped." },
-				),
-			),
-			mode: Type.Optional(StringEnum(modes, { description: modeDescription })),
-			...(composition.council
-				? {
-						roster: Type.Optional(Type.String({ description: "Configured workers.rosters name (council)." })),
-						members: Type.Optional(
-							Type.Array(CouncilMemberSchema, { minItems: 2, maxItems: 5, description: "Explicit council members, 2 to 5." }),
+		),
+		task: Type.Optional(Type.String({ description: "One worker assignment. Use tasks for a batch." })),
+		tasks: Type.Optional(
+			Type.Array(
+				Type.Union([
+					Type.String(),
+					// A task carries only what varies per task. persona, tool_profile,
+					// cwd, and apply come from the batch defaults (admission still reads
+					// them when a caller sends them; the schema no longer spends the
+					// tokens advertising them twice).
+					Type.Object({
+						task: Type.String({ description: "The assignment, with expected output and constraints." }),
+						context: Type.Optional(WorkerContextSchema),
+						briefing: Type.Optional(
+							Type.String({ description: `Per-task parent context, max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.` }),
 						),
-						synthesis: Type.Optional(StringEnum(["none", "judge", "vote"] as const, { description: "Council synthesis." })),
-						rounds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3, description: "Council rounds." })),
-					}
-				: {}),
-			writers: Type.Optional(
-				Type.Literal(1, { description: "Serialize writer admission in task order while readers run concurrently." }),
-			),
-			worktree: Type.Optional(
-				Type.Literal(true, { description: "Run a singular writer task in an isolated git worktree." }),
-			),
-			apply: Type.Optional(
-				StringEnum(["merge", "preserve"], { description: "merge (default) or preserve the worktree branch." }),
-			),
-			detach: Type.Optional(
-				Type.Boolean({
-					description: "Return run ids immediately and collect with monitor before final synthesis. Parallel mode only.",
-				}),
-			),
-			review: Type.Optional(
-				Type.Union(
-					[
-						Type.Boolean(),
-						Type.Object({
-							reviewer: Type.Optional(
-								Type.String({ description: "Reviewer recipe id (default: the builder's agent, read-only)." }),
-							),
-							max_cycles: Type.Optional(
-								Type.Number({ description: "Review/revise cycles before an operator decision (default 2, max 4)." }),
-							),
-							node: Type.Optional(Type.String({ description: "Fleet node pin for the reviewer." })),
-							model: Type.Optional(Type.String({ description: "Model for the reviewer." })),
-							target: Type.Optional(Type.String({ description: "Target for the reviewer." })),
-						}),
-					],
-					{
-						description: "Read-only review of one task: pass, fail, or revise (re-run builder with findings).",
-					},
-				),
-			),
-			...(composition.compete
-				? {
-						candidates: Type.Optional(Type.Number({ description: "Compete candidates, 2 to 4 (default 2)." })),
-						judge: Type.Optional(
-							Type.Object(
-								{
-									agent: Type.Optional(Type.String({ description: "Judge recipe id (default: the builder's agent)." })),
-									model: Type.Optional(Type.String()),
-									target: Type.Optional(Type.String()),
-									node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),
-								},
-								{ description: "Read-only judge that ranks compete candidates." },
-							),
+						agent: Type.Optional(
+							Type.String({
+								description:
+									"Recipe id for this task: set scout/documenter explicitly in a mixed pipeline; names in task text do not select recipes, and omission inherits the batch/default recipe.",
+							}),
 						),
-						apply_winner: Type.Optional(
-							Type.Object(
-								{
-									branch: Type.String({ description: "Preserved winner branch: clio-coder/compete/<group>/<n>." }),
-									cwd: Type.Optional(Type.String({ description: "Repository root (default: current directory)." })),
-								},
-								{
-									description:
-										"Merge a preserved compete winner and clean up its group; supervised autonomy parks this for operator confirmation.",
-								},
-							),
+						budget: Type.Optional(DispatchBudgetSchema),
+						target: Type.Optional(Type.String()),
+						model: Type.Optional(Type.String()),
+						node: Type.Optional(Type.String({ description: "Fleet node pin: local or a fleet.nodes id." })),
+						worktree: Type.Optional(Type.Literal(true, { description: "Run this writer in an isolated git worktree." })),
+						intent: Type.Optional(DispatchIntentSchema),
+						gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
+						result_summary_max_bytes: Type.Optional(
+							Type.Integer({
+								minimum: 1,
+								maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
+								description: "This task's inline summary allowance; mutation-report workers (coder, documenter) only.",
+							}),
 						),
-					}
-				: {}),
-			agent: Type.Optional(
-				Type.String({
-					description: composition.council
-						? "Default recipe id for tasks without their own agent, or auto (default coder; researcher for council)."
-						: "Default recipe id for tasks without their own agent, or auto (default coder).",
-				}),
+					}),
+				]),
+				{ description: "Batch of assignments; one string or object is wrapped." },
 			),
-			context: Type.Optional(ContextRef),
-			briefing: Type.Optional(
-				Type.String({
-					description: `Parent context for task, or the shared default for tasks; never instructions. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
-				}),
+		),
+		mode: Type.Optional(StringEnum(modes, { description: modeDescription })),
+		...(composition.council
+			? {
+					roster: Type.Optional(Type.String({ description: "Configured workers.rosters name (council)." })),
+					members: Type.Optional(
+						Type.Array(CouncilMemberSchema, { minItems: 2, maxItems: 5, description: "Explicit council members, 2 to 5." }),
+					),
+					synthesis: Type.Optional(StringEnum(["none", "judge", "vote"] as const, { description: "Council synthesis." })),
+					rounds: Type.Optional(Type.Integer({ minimum: 1, maximum: 3, description: "Council rounds." })),
+				}
+			: {}),
+		writers: Type.Optional(
+			Type.Literal(1, { description: "Serialize writer admission in task order while readers run concurrently." }),
+		),
+		worktree: Type.Optional(
+			Type.Literal(true, { description: "Run a singular writer task in an isolated git worktree." }),
+		),
+		apply: Type.Optional(
+			StringEnum(["merge", "preserve"], { description: "merge (default) or preserve the worktree branch." }),
+		),
+		detach: Type.Optional(
+			Type.Boolean({
+				description: "Return run ids immediately and collect with monitor before final synthesis. Parallel mode only.",
+			}),
+		),
+		review: Type.Optional(
+			Type.Union(
+				[
+					Type.Boolean(),
+					Type.Object({
+						reviewer: Type.Optional(
+							Type.String({ description: "Reviewer recipe id (default: the builder's agent, read-only)." }),
+						),
+						max_cycles: Type.Optional(
+							Type.Number({ description: "Review/revise cycles before an operator decision (default 2, max 4)." }),
+						),
+						node: Type.Optional(Type.String({ description: "Fleet node pin for the reviewer." })),
+						model: Type.Optional(Type.String({ description: "Model for the reviewer." })),
+						target: Type.Optional(Type.String({ description: "Target for the reviewer." })),
+					}),
+				],
+				{
+					description: "Read-only review of one task: pass, fail, or revise (re-run builder with findings).",
+				},
 			),
-			intent: Type.Optional(IntentRef),
-			gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
-			persona: Type.Optional(Type.String({ description: "Default persona for the batch, max 8000 chars." })),
-			tool_profile: Type.Optional(StringEnum(TOOL_PROFILE_NAMES, { description: "Default worker tool profile." })),
-			budget: Type.Optional(BudgetRef),
-			target: Type.Optional(Type.String({ description: "Default target id (omit for the fleet default)." })),
-			model: Type.Optional(Type.String({ description: "Default model override." })),
-			node: Type.Optional(Type.String({ description: "Default fleet node pin (omit for automatic placement)." })),
-			routing: Type.Optional(
-				Type.Object(
-					{
-						...(composition.adaptiveRouting
-							? { posture: Type.Optional(StringEnum(["manual", "quality", "balanced", "latency", "economy"] as const)) }
-							: {}),
-						maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
-						deadlineMs: Type.Optional(Type.Integer({ exclusiveMinimum: 0 })),
-						...(composition.adaptiveRouting
-							? { minimumQuality: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })) }
-							: {}),
-						requiredCapabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
-						...(composition.adaptiveRouting
-							? {
-									locality: Type.Optional(StringEnum(["local-only", "prefer-local", "any"] as const)),
-									failover: Type.Optional(StringEnum(["none", "approved"] as const)),
-								}
-							: {}),
-					},
-					{
-						additionalProperties: false,
-						description: composition.adaptiveRouting
-							? "Advisory posture and hard routing bounds; exact target, model, and node pins stay manual."
-							: "Hard routing bounds: cost ceiling, deadline, and required model capabilities.",
-					},
-				),
+		),
+		...(composition.compete
+			? {
+					candidates: Type.Optional(Type.Number({ description: "Compete candidates, 2 to 4 (default 2)." })),
+					judge: Type.Optional(
+						Type.Object(
+							{
+								agent: Type.Optional(Type.String({ description: "Judge recipe id (default: the builder's agent)." })),
+								model: Type.Optional(Type.String()),
+								target: Type.Optional(Type.String()),
+								node: Type.Optional(Type.String({ description: "Fleet node pin for the judge." })),
+							},
+							{ description: "Read-only judge that ranks compete candidates." },
+						),
+					),
+					apply_winner: Type.Optional(
+						Type.Object(
+							{
+								branch: Type.String({ description: "Preserved winner branch: clio-coder/compete/<group>/<n>." }),
+								cwd: Type.Optional(Type.String({ description: "Repository root (default: current directory)." })),
+							},
+							{
+								description:
+									"Merge a preserved compete winner and clean up its group; supervised autonomy parks this for operator confirmation.",
+							},
+						),
+					),
+				}
+			: {}),
+		agent: Type.Optional(
+			Type.String({
+				description: composition.council
+					? "Default recipe id for tasks without their own agent, or auto (default coder; researcher for council)."
+					: "Default recipe id for tasks without their own agent, or auto (default coder).",
+			}),
+		),
+		context: Type.Optional(WorkerContextSchema),
+		briefing: Type.Optional(
+			Type.String({
+				description: `Parent context for task, or the shared default for tasks; never instructions. Max ${DISPATCH_BRIEFING_MAX_BYTES} UTF-8 bytes.`,
+			}),
+		),
+		intent: Type.Optional(DispatchIntentSchema),
+		gate: Type.Optional(Type.String({ description: "One declared check id, shorthand for intent.verification." })),
+		persona: Type.Optional(Type.String({ description: "Default persona for the batch, max 8000 chars." })),
+		tool_profile: Type.Optional(StringEnum(TOOL_PROFILE_NAMES, { description: "Default worker tool profile." })),
+		budget: Type.Optional(DispatchBudgetSchema),
+		target: Type.Optional(Type.String({ description: "Default target id (omit for the fleet default)." })),
+		model: Type.Optional(Type.String({ description: "Default model override." })),
+		node: Type.Optional(Type.String({ description: "Default fleet node pin (omit for automatic placement)." })),
+		routing: Type.Optional(
+			Type.Object(
+				{
+					...(composition.adaptiveRouting
+						? { posture: Type.Optional(StringEnum(["manual", "quality", "balanced", "latency", "economy"] as const)) }
+						: {}),
+					maxCostUsd: Type.Optional(Type.Number({ exclusiveMinimum: 0 })),
+					deadlineMs: Type.Optional(Type.Integer({ exclusiveMinimum: 0 })),
+					...(composition.adaptiveRouting ? { minimumQuality: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })) } : {}),
+					requiredCapabilities: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
+					...(composition.adaptiveRouting
+						? {
+								locality: Type.Optional(StringEnum(["local-only", "prefer-local", "any"] as const)),
+								failover: Type.Optional(StringEnum(["none", "approved"] as const)),
+							}
+						: {}),
+				},
+				{
+					additionalProperties: false,
+					description: composition.adaptiveRouting
+						? "Advisory posture and hard routing bounds; exact target, model, and node pins stay manual."
+						: "Hard routing bounds: cost ceiling, deadline, and required model capabilities.",
+				},
 			),
-			thinking_level: Type.Optional(StringEnum(THINKING_LEVELS)),
-			cwd: Type.Optional(Type.String({ description: "Default worker working directory." })),
-			timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
-			max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),
-			result_summary_max_bytes: Type.Optional(
-				Type.Integer({
-					minimum: 1,
-					maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
-					description: `Stored inline summary limit in UTF-8 bytes for mutation-report workers (coder, documenter); default 16384. Other steps ignore it. max_output_bytes separately limits the returned preview.`,
-				}),
-			),
-		},
-		{ $defs: DISPATCH_DEFS },
-	);
+		),
+		thinking_level: Type.Optional(StringEnum(THINKING_LEVELS)),
+		cwd: Type.Optional(Type.String({ description: "Default worker working directory." })),
+		timeout_ms: Type.Optional(Type.Number({ description: "Abort the dispatch after this many ms." })),
+		max_output_bytes: Type.Optional(Type.Number({ description: "Max summary bytes returned." })),
+		result_summary_max_bytes: Type.Optional(
+			Type.Integer({
+				minimum: 1,
+				maximum: RESULT_SUMMARY_MAX_BYTES_CEILING,
+				description: `Stored inline summary limit in UTF-8 bytes for mutation-report workers (coder, documenter); default 16384. Other steps ignore it. max_output_bytes separately limits the returned preview.`,
+			}),
+		),
+	});
 }

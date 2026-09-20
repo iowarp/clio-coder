@@ -1,7 +1,11 @@
 import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { verifyReceiptIntegrity, withReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { compactHelperResultLines, receiptHelperResult } from "../../src/tools/worker-evidence.js";
+import {
+	compactHelperResultLines,
+	receiptEvidenceLabels,
+	receiptHelperResult,
+} from "../../src/tools/worker-evidence.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 
 test("compact helper consumption preserves unmeasured quality and withholds failed or altered handoffs", () => {
@@ -55,4 +59,29 @@ test("compact helper consumption preserves unmeasured quality and withholds fail
 	}
 	const legacy = withReceiptIntegrity(draft, envelope);
 	strictEqual(receiptHelperResult(legacy, verifyReceiptIntegrity(legacy, envelope)), null);
+});
+
+test("host check labels distinguish actual execution from reused evidence and worker claims", () => {
+	const envelope = fixtureEnvelope("host-check-labels");
+	for (const memo of [false, true]) {
+		const receipt = withReceiptIntegrity(
+			{
+				...fixtureReceiptDraft(envelope),
+				hostVerification: {
+					status: "verified",
+					checks: [
+						{ check: "test", argv: ["npm", "test"], cwd: "/fixture", exitCode: 0, durationMs: 1, memo, outputTail: "pass" },
+					],
+				},
+			},
+			envelope,
+		);
+		const labels = receiptEvidenceLabels(
+			receipt,
+			{ state: "verified", basis: "validation-tool" },
+			verifyReceiptIntegrity(receipt, envelope),
+		).join("\n");
+		match(labels, /Host check evidence is separate from the worker report/);
+		match(labels, memo ? /reused prior host result; exit 0/ : /executed after the worker; exit 0/);
+	}
 });
