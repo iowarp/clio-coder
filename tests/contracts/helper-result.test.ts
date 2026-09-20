@@ -148,7 +148,20 @@ test("only admitted validated terminal events seal a helper result, retaining ca
 		...event,
 		payload: { ...payload, data: { ...payload.data, confirmedFacts: ["x".repeat(9000)] } },
 	});
-	strictEqual(oversized.snapshot(), undefined, "never persist structured data alongside truncated JSON");
+	strictEqual(oversized.snapshot()?.truncated, false, "a conforming report above 8 KiB must survive capture");
+	strictEqual((oversized.snapshot()?.structured?.data.confirmedFacts as string[])[0]?.length, 9000);
+	const tooLarge = { ...payload.data, confirmedFacts: ["x".repeat(32_768)] };
+	const rejected = validateStructuredHelperResult({ ...evidence, contract, data: tooLarge });
+	strictEqual(rejected.structured, null, "reject before the worker acknowledges a report the parent cannot retain");
+	ok(rejected.validation.reason?.includes("32768 UTF-8 bytes"));
+	const finding = { claim: "" };
+	const minimal = { findings: [finding] };
+	finding.claim = "x".repeat(32_768 - Buffer.byteLength(JSON.stringify(minimal)));
+	strictEqual(
+		validateStructuredHelperResult({ ...evidence, contract: { kind: "scout-report" }, data: minimal }).structured,
+		null,
+		"canonical salvage must also fit the capture ceiling",
+	);
 });
 
 test("existing receipt digest covers structured data while receipts without it remain valid", () => {

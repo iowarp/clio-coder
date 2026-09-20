@@ -14,6 +14,7 @@ import {
 	resultContractRepairMessages,
 	resultContractShape,
 	resultContractSourceId,
+	STRUCTURED_HELPER_RESULT_MAX_BYTES,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
 import {
@@ -215,7 +216,7 @@ it("resolves one applied contract from recipe default, task override, and topolo
 it("seals a conforming report larger than the receipt floor without truncation, and names the bound when it overflows", () => {
 	const output = report(EXPLANATION);
 	ok(Buffer.byteLength(output, "utf8") > WORKER_OUTPUT_MAX_BYTES, "the fixture must exceed the old receipt bound");
-	strictEqual(workerOutputCaptureBytes({ kind: "scout-report" }), WORKER_OUTPUT_MAX_BYTES);
+	strictEqual(workerOutputCaptureBytes({ kind: "scout-report" }), STRUCTURED_HELPER_RESULT_MAX_BYTES);
 	strictEqual(workerOutputCaptureBytes(null), WORKER_OUTPUT_MAX_BYTES);
 	strictEqual(workerOutputCaptureBytes(MUTATION), resultContractOutputBytes(MUTATION));
 	strictEqual(

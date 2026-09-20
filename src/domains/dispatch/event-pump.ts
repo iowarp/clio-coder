@@ -153,7 +153,7 @@ const WORKER_OUTPUT_TRUNCATION_MARKER = "\n[worker output truncated]";
  * allowance cannot be sealed in 8 KB, and clipping it produced a receipt whose
  * only readable fact was "result must be valid JSON" for a result that was
  * valid (#350). The contract's own whole-result bound wins when it is larger;
- * every other contract keeps the floor.
+ * structured helpers share their acceptance ceiling; other contracts keep the floor.
  */
 export function workerOutputCaptureBytes(contract: ResultContract | null | undefined): number {
 	return Math.max(WORKER_OUTPUT_MAX_BYTES, resultContractOutputBytes(contract) ?? 0);
@@ -231,7 +231,10 @@ function boundedOutput(state: RunReceiptOutput["state"], text: string, maxBytes:
  * run's own (`workerOutputCaptureBytes`), never below the module floor.
  */
 export function createWorkerOutputCapture(options: WorkerOutputCaptureOptions = {}): WorkerOutputCapture {
-	const maxBytes = Math.max(WORKER_OUTPUT_MAX_BYTES, Math.floor(options.maxBytes ?? WORKER_OUTPUT_MAX_BYTES));
+	const maxBytes = Math.max(
+		workerOutputCaptureBytes(options.helperResult?.contract),
+		Math.floor(options.maxBytes ?? WORKER_OUTPUT_MAX_BYTES),
+	);
 	let finalText: string | null = null;
 	let partialText = "";
 	let partialBytes = 0;
