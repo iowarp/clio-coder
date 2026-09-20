@@ -12,6 +12,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Detect consecutive past-EOF reads of an unchanged file even when offsets differ, then use the existing bounded synthesis lock. Clarify that shadow-agent routing does not authorize operator `/run` invocation and that undocumented integration rationale must not be presented as fact.
+
 - Give interactive loop lockout an explicit final-synthesis instruction and one bounded recovery for a markup-only answer. Keep tools disabled, deliver the recovery exchange atomically, preserve usable prose, and respect cancellation. Repeated model calls can still exhaust recovery; no result is fabricated.
 
 - Give the composer bold, state-aware rails: teal at rest, a bounded teal/orange activity highlight, and an orange permission pulse. Mark full-auto explicitly with editor-only red text/endcaps. Hold motion while a draft is present and honor reduced-motion/screen-reader settings; reuse the existing presentation ticker.
