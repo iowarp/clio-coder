@@ -108,7 +108,7 @@ for (const scope of ["user", "project"] as const) {
 			}
 			const listing = await context.run({ scope: "skills" });
 			ok(listing.kind === "ok");
-			match(listing.output, /herdr \(package\)/);
+			match(listing.output, /herdr \(source: plugin; scope: package\)/);
 			const activated = await context.run({ scope: "skills", name: "herdr" }, { pendingSkillPolicy: automaticPolicy() });
 			ok(activated.kind === "ok", JSON.stringify(activated));
 			strictEqual(skillActivationFromToolDetails(activated.details, "native-load")?.filePath, installedFile);
@@ -127,9 +127,10 @@ for (const scope of ["user", "project"] as const) {
 			strictEqual(skillActivationFromToolDetails(explicit.details, "slash-load")?.filePath, installedFile);
 			strictEqual(readFileSync(foreignFile, "utf8"), foreignBytes);
 
-			// Explicitly trusted project imports keep their normal override semantics.
+			// Trusting discovery roots alone does not import loose foreign skills.
 			const trusted = loadSkills({ cwd, trustProjectCompatRoots: true });
-			strictEqual(trusted.items.find((skill) => skill.name === "herdr")?.scope, "project");
+			strictEqual(trusted.items.find((skill) => skill.name === "herdr")?.scope, "package");
+			strictEqual(readFileSync(foreignFile, "utf8"), foreignBytes);
 		} finally {
 			clearPluginSnapshots();
 			env.restore();
@@ -154,7 +155,7 @@ it("explains a discovered but untrusted skill without claiming it is unknown or 
 			{ pendingSkillPolicy: automaticPolicy() },
 		);
 		ok(result.kind === "error");
-		match(result.message, /untrusted/);
+		match(result.message, /not imported into Clio/);
 		ok(!result.message.includes("unknown skill") && !result.message.includes("PRIVATE FOREIGN BODY"));
 		deepStrictEqual(
 			loadSkills({ cwd }).items.map((skill) => [skill.name, skill.trusted]),

@@ -7,7 +7,7 @@ triggers:
   - resolve the bug in issue
   - implement this tracker issue
   - fix a GitHub issue end to end
-version: 0.3.0
+version: 0.3.1
 license: Apache-2.0
 compatibility: git >=2.30.0, gh CLI >=2.0.0 (authenticated for issue viewing), POSIX-compatible shell
 allowed-tools:
@@ -17,6 +17,7 @@ allowed-tools:
   - ls
   - git
   - bash
+  - verify
   - context
   - code_nav
   - dispatch

@@ -12,6 +12,9 @@ then foreign imports need the trust-imports setting before use. Never call disco
 Never
 guess a skill or search the repository for one.
 {SKILL_ACTIVATION_POLICY}
+A declined installation (Not now or Cancel) settles the offer for this task: do not
+load the unavailable skill, offer it again, or install it. Continue within the requested
+scope using available tools. For proposal-only work, leave implementation tasks blocked.
 Install marketplace packages only when the operator requests or approves installation.
 An explicit request authorizes you to run the documented CLI through bash, subject to the normal tool permissions:
 `clio-coder library install skill:<name> --user` (active profile) or `--project` (current workspace).

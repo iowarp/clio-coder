@@ -426,9 +426,9 @@ entries:
       - resolve the bug in issue
       - implement this tracker issue
       - fix a GitHub issue end to end
-    version: 0.3.0
+    version: 0.3.1
     sourceUrl: skills/git/fix-issue
-    sha256: 1a2bae6bebcde3951e09d32d6abfc3bf85132da915b8e1c4295850fe9fc94b57
+    sha256: 2ac7dd53397fff8a12f829f3e9241c839c08e23dcf80d435c323add6b0cd03c2
     provides:
       - kind: skill
         name: fix-issue
@@ -770,9 +770,9 @@ entries:
       - commit and open the PR
       - push and open a pull request
       - get this up for review
-    version: 0.5.0
+    version: 0.5.1
     sourceUrl: skills/git/ship
-    sha256: a70df2c1f3546262557372ece5733722f6eb737b85ec92902fcc0b5cf94cc123
+    sha256: cb65a5b59d98ac2d6105a9aa52446c7e4a97c33a9a5a240d74f82f2447b56534
     provides:
       - kind: skill
         name: ship

@@ -40,16 +40,16 @@ skills:
     sha256: 65029c2d9d545728750c8a713f92035bd6bdbfa9874de442df72bd059846cb7a
   - name: fix-issue
     path: git/fix-issue
-    version: 0.3.0
-    sha256: 626e3aa8ca95bc603f2e0cdd2e7502aa96be85af6bfa92b635c39ef99d3845a5
+    version: 0.3.1
+    sha256: 0e3aa19b6214e03bf581d29b097f99a3e1110d4303a1598c8a996171b8606dc8
   - name: resolve-merge-conflicts
     path: git/resolve-merge-conflicts
     version: 0.4.0
     sha256: 901f482aa2231552d64a721e0d1c58dc8f211347543b5a91fd2ab3c7e413c11c
   - name: ship
     path: git/ship
-    version: 0.5.0
-    sha256: 4d626718fdb8b67cf3f22d09ac5a228e5c8103befa1295a672587a6605f038b1
+    version: 0.5.1
+    sha256: 07bc1acdf3506c7d8a720abe67144a32bb8e18132e080a3b9aaf66cba267876c
   - name: worktree-create
     path: git/worktree-create
     version: 0.6.0
