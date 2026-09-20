@@ -1,5 +1,5 @@
-import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import {
 	copyFileSync,
 	existsSync,
@@ -13,11 +13,14 @@ import {
 } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
+import { createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, relative, resolve, sep } from "node:path";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml } from "yaml";
+import { checkInstalledBrowser } from "../../apps/clio-coder-gui/tests/harness/installed-browser.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
 import { listFleetContracts } from "../../src/domains/agents/fleet-contract.js";
@@ -219,33 +222,132 @@ Compute the requested coefficient and report the value in one line.
 	}
 }
 
-/** The class declaration Hono's bundled build emits; the app's HTTP framework, not the CLI's. */
+/** 43 URL-safe characters, the exact shape the background configuration schema pins. */
+const GUI_TEST_TOKEN = "installed-gui-smoke-token-0123456789abcdefg";
 const HONO_MARKER = "var Hono = class";
 
+/** A `clio-coder gui` child: started from a foreign cwd, torn down with SIGTERM and a bounded SIGKILL fallback. */
+interface WebServer {
+	origin: string;
+	child: ChildProcess;
+	stdout: () => string;
+	stderr: () => string;
+	/** Returns the exit code and signal so the caller can assert a clean stop. */
+	close: () => Promise<{ code: number | null; signal: NodeJS.Signals | null }>;
+}
+
+async function startInstalledWeb(
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	readyPattern: RegExp,
+	command = "gui",
+): Promise<WebServer> {
+	const child = spawn(process.execPath, [bin, command, ...args], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
+	let stdout = "";
+	let stderr = "";
+	child.stdout?.setEncoding("utf8");
+	child.stderr?.setEncoding("utf8");
+	child.stdout?.on("data", (text: string) => {
+		stdout += text;
+	});
+	child.stderr?.on("data", (text: string) => {
+		stderr += text;
+	});
+	let spawnError: Error | undefined;
+	const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+		child.once("exit", (code, signal) => resolve({ code, signal }));
+		child.once("error", (error) => {
+			spawnError = error;
+			resolve({ code: null, signal: null });
+		});
+	});
+	const close = async () => {
+		if (!spawnError && child.exitCode === null && child.signalCode === null) {
+			child.kill("SIGTERM");
+			const fallback = setTimeout(() => child.kill("SIGKILL"), 10_000);
+			await exited;
+			clearTimeout(fallback);
+		}
+		return exited;
+	};
+	try {
+		const deadline = Date.now() + 10_000;
+		let found: RegExpMatchArray | null = null;
+		while (Date.now() < deadline) {
+			found = stdout.match(readyPattern);
+			if (found) break;
+			if (spawnError) throw spawnError;
+			if (child.exitCode !== null || child.signalCode !== null)
+				throw new Error(`installed graphical server exited before it was ready:\n${stdout}\n${stderr}`);
+			await delay(50);
+		}
+		ok(found, `installed graphical server did not print its launch line within 10s:\n${stdout}\n${stderr}`);
+		const url = found[0].match(/http:\/\/127\.0\.0\.1:\d+/u)?.[0];
+		ok(url, `ready line carries a loopback URL: ${found[0]}`);
+		return { origin: new URL(url).origin, child, stdout: () => stdout, stderr: () => stderr, close };
+	} catch (error) {
+		await close();
+		throw error;
+	}
+}
+
+function webRequest(origin: string, token: string | undefined, path: string, body?: unknown): Promise<Response> {
+	return fetch(`${origin}${path}`, {
+		method: body === undefined ? "GET" : "POST",
+		headers: {
+			...(token === undefined ? {} : { Authorization: `Bearer ${token}` }),
+			"Content-Type": "application/json",
+			"Idempotency-Key": crypto.randomUUID(),
+		},
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+		signal: AbortSignal.timeout(15_000),
+	});
+}
+
+/** Files the CLI evaluated for one invocation, from a fresh V8 coverage directory. */
+function filesLoadedBy(
+	bin: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv,
+	coverageDir: string,
+): Set<string> {
+	rmSync(coverageDir, { recursive: true, force: true });
+	mkdirSync(coverageDir, { recursive: true });
+	const result = execFileSync(process.execPath, [bin, ...args], {
+		cwd,
+		env: { ...env, NODE_V8_COVERAGE: coverageDir, NODE_DISABLE_COMPILE_CACHE: "1" },
+		encoding: "utf8",
+		timeout: 20_000,
+	});
+	ok(result.length > 0, `${args.join(" ")} printed nothing`);
+	return coveredFiles(coverageDir);
+}
+
 /**
- * The graphical application stays in apps/clio-coder-gui and this release does
- * not ship it. What the tarball has to show is the absence: no server, no
- * client, no application dependencies, no source tree, and a CLI that says so
- * plainly instead of failing on a missing module.
+ * R1: the packaged `clio-coder gui` runs from the installed prefix alone.
+ *
+ * Everything here goes through the installed CLI and plain HTTP; nothing imports
+ * the app's source modules, so the assertions hold for what npm shipped rather
+ * than for the checkout. A foreground server and one service-configuration
+ * server are started in turn; neither opens a browser or touches systemd.
  */
-async function assertGraphicalAppAbsent(packageRoot: string, bin: string, prefix: string, work: string): Promise<void> {
+async function assertInstalledWebApp(packageRoot: string, bin: string, prefix: string, work: string): Promise<void> {
+	strictEqual(GUI_TEST_TOKEN.length, 43, "the background configuration schema pins a 43-character token");
+	match(GUI_TEST_TOKEN, /^[\w-]+$/u);
+	const guiDist = join(packageRoot, "dist", "gui");
 	const foreign = join(work, "gui foreign project");
 	const home = join(work, "gui-home");
 	mkdirSync(foreign, { recursive: true });
 	const env: NodeJS.ProcessEnv = { ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" };
 
 	ok(!existsSync(join(packageRoot, "docs/html")), "retired HTML documentation must not ship");
-	ok(!existsSync(join(packageRoot, "apps")), "the source app tree does not ship");
-	ok(!existsSync(join(packageRoot, "dist", "gui")), "no graphical server, worker or client ships");
-	ok(!existsSync(join(packageRoot, "dist", "assets", "gui-notices")), "no graphical dependency notices ship");
-	strictEqual(
-		emittedFilesContaining(packageRoot, HONO_MARKER).size,
-		0,
-		"the application's HTTP framework is not bundled into the packed dist",
-	);
 
 	// The checkout's tsx loader must be unreachable from inside the install: a
 	// probe file under the prefix walks up through prefix/node_modules only.
+	ok(!existsSync(join(packageRoot, "apps")), "the source app tree does not ship");
 	const probe = join(prefix, "resolve-probe.mjs");
 	writeFileSync(
 		probe,
@@ -254,30 +356,230 @@ async function assertGraphicalAppAbsent(packageRoot: string, bin: string, prefix
 	const resolved = execFileSync(process.execPath, [probe], { cwd: prefix, env, encoding: "utf8", timeout: 20_000 });
 	strictEqual(resolved, "", "tsx must not resolve from the installed prefix");
 
-	const gui = await run(bin, ["gui", "--no-open"], foreign, env);
-	strictEqual(gui.code, 2, `gui without the application:\n${gui.stdout}\n${gui.stderr}`);
-	strictEqual(gui.stdout, "", "gui prints nothing on stdout");
-	match(gui.stderr, /The Clio Coder graphical application is not included in this build\./u);
+	// Importing the server entry is inert: no listener, no output.
+	const entry = join(guiDist, "server.js");
+	const imported = execFileSync(
+		process.execPath,
+		[
+			"--input-type=module",
+			"-e",
+			`const entry = await import(${JSON.stringify(pathToFileURL(entry).href)}); if (typeof entry.main !== "function") throw new Error("missing main");`,
+		],
+		{ cwd: foreign, env, encoding: "utf8", timeout: 20_000 },
+	);
+	strictEqual(imported, "", "importing dist/gui/server.js must not start a server");
 
-	const docs = await run(bin, ["docs", "safety"], foreign, env);
-	strictEqual(docs.code, 2, `docs without the application:\n${docs.stdout}\n${docs.stderr}`);
-	strictEqual(docs.stdout, "", "docs prints nothing on stdout");
-	match(docs.stderr, /not part of this release/u);
-	ok(docs.stderr.includes(join(packageRoot, "docs")), `docs names the shipped Markdown directory: ${docs.stderr}`);
-	ok(existsSync(join(packageRoot, "docs", "architecture", "safety-model.md")), "and that directory holds the guides");
+	const server = await startInstalledWeb(
+		bin,
+		["--no-open", "--port", "0", "--token", GUI_TEST_TOKEN],
+		foreign,
+		env,
+		/http:\/\/127\.0\.0\.1:\d+\/#token=[\w-]+/u,
+	);
+	try {
+		const { origin } = server;
+		match(server.stdout(), new RegExp(`/#token=${GUI_TEST_TOKEN}$`, "mu"), "the printed link carries the supplied token");
+		const request = (path: string, body?: unknown) => webRequest(origin, GUI_TEST_TOKEN, path, body);
 
-	// Both commands stay registered, and each one's help is still a zero-exit read.
-	for (const command of ["gui", "docs"]) {
-		const commandHelp = await run(bin, [command, "--help"], foreign, env);
-		strictEqual(commandHelp.code, 0, commandHelp.stderr);
-		ok(commandHelp.stdout.length > 0, `${command} --help prints its usage`);
+		strictEqual((await webRequest(origin, undefined, "/api/meta")).status, 401, "API requires the launch token");
+		const meta = (await (await request("/api/meta")).json()) as { clio: string; apiVersion: number; pwa: boolean };
+		strictEqual(meta.clio, JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")).version);
+		strictEqual(meta.apiVersion, 1);
+		strictEqual(meta.pwa, false, "a foreground server is not installable");
+
+		const runtimeResponse = await request("/api/_diagnostics/runtime");
+		strictEqual(runtimeResponse.status, 200);
+		const runtime = (await runtimeResponse.json()) as Record<
+			"server" | "reads" | "ops",
+			{ entry: string; packageRoot: string; execArgv: string[]; threadId?: number }
+		>;
+		for (const [kind, file] of [
+			["server", "server.js"],
+			["reads", "reads-worker.js"],
+			["ops", "ops-worker.js"],
+		] as const) {
+			strictEqual(runtime[kind].entry, pathToFileURL(join(guiDist, file)).href, `${kind} runs the emitted entry`);
+			strictEqual(runtime[kind].packageRoot, packageRoot, `${kind} resolves the installed package root`);
+			deepStrictEqual(
+				runtime[kind].execArgv.filter((arg) => arg === "--import" || arg.includes("tsx")),
+				[],
+				`${kind} runs without a loader`,
+			);
+		}
+		const threads = [runtime.reads.threadId, runtime.ops.threadId];
+		ok(
+			threads.every((id) => typeof id === "number" && id > 0),
+			`worker thread ids: ${threads.join(",")}`,
+		);
+		ok(threads[0] !== threads[1], "reads and ops are distinct worker threads");
+
+		await checkInstalledBrowser(origin, GUI_TEST_TOKEN);
+
+		const tools = await request("/api/toolchain/tools");
+		strictEqual(tools.status, 200);
+		strictEqual(((await tools.json()) as unknown[]).length, 3, "the reads worker lists the three pinned tools");
+
+		const removal = await request("/api/toolchain/tools/herdr/remove", {});
+		strictEqual(removal.status, 202);
+		const { operationId } = (await removal.json()) as { operationId: string };
+		let operation: { status: string } | undefined;
+		for (let attempt = 0; attempt < 100; attempt++) {
+			operation = (await (await request(`/api/operations/${operationId}`)).json()) as { status: string };
+			if (!["queued", "running"].includes(operation.status)) break;
+			await delay(50);
+		}
+		strictEqual(operation?.status, "succeeded", `ops worker removal on empty state: ${JSON.stringify(operation)}`);
+
+		const abort = new AbortController();
+		const events = await fetch(`${origin}/api/events`, {
+			headers: { Authorization: `Bearer ${GUI_TEST_TOKEN}` },
+			signal: abort.signal,
+		});
+		strictEqual(events.status, 200);
+		match(events.headers.get("content-type") ?? "", /text\/event-stream/u);
+		ok(events.body, "event stream has a body");
+		const reader = events.body.getReader();
+		const first = await Promise.race([reader.read(), delay(10_000).then(() => "timeout" as const)]);
+		ok(first !== "timeout", "the stream sends a hello event promptly");
+		match(new TextDecoder().decode(first.value), /^event: hello$/mu);
+		abort.abort();
+		await reader.cancel().catch(() => undefined);
+
+		const opened = await request("/api/workspaces", { path: foreign });
+		const openedText = await opened.text();
+		strictEqual(opened.status, 200, openedText);
+		const workspace = JSON.parse(openedText) as { id: string; path: string };
+		match(workspace.id, /^[a-f0-9]{32}$/u);
+		strictEqual(workspace.path, realpathSync(foreign));
+		const targets = await request(`/api/workspaces/${workspace.id}/targets`);
+		strictEqual(targets.status, 200, `targets through the installed CLI: ${await targets.text()}`);
+
+		const index = await request("/");
+		strictEqual(index.status, 200);
+		match(index.headers.get("content-type") ?? "", /^text\/html/u);
+		ok(!(await index.text()).includes('rel="manifest"'), "foreground index links no manifest");
+		const logo = await request("/clio-coder-logo.webp");
+		strictEqual(logo.status, 200);
+		strictEqual(logo.headers.get("content-type"), "image/webp");
+		strictEqual((await request("/manifest.webmanifest")).status, 404, "installable assets require background mode");
+	} finally {
+		const exit = await server.close();
+		deepStrictEqual(exit, { code: 0, signal: null }, `foreground server stops cleanly on SIGTERM:\n${server.stderr()}`);
 	}
 
-	// Neither is listed in the top-level help this release ships.
-	const help = await run(bin, ["--help"], foreign, env);
-	strictEqual(help.code, 0, help.stderr);
-	doesNotMatch(help.stdout, /^ *clio-coder gui\b/mu, "top-level help does not list the graphical application");
-	doesNotMatch(help.stdout, /^ *clio-coder docs\b/mu, "top-level help does not list the docs command");
+	// R3: the human docs command uses the same installed app from a foreign cwd.
+	const docs = await startInstalledWeb(
+		bin,
+		["safety", "--no-open"],
+		foreign,
+		env,
+		/http:\/\/127\.0\.0\.1:\d+\/docs\/architecture\/safety-model\.md#token=[\w-]+/u,
+		"docs",
+	);
+	try {
+		const token = /#token=([\w-]+)/u.exec(docs.stdout())?.[1];
+		ok(token, "docs prints an authenticated app launch link");
+		strictEqual((await webRequest(docs.origin, token, "/api/docs/blueprints")).status, 404);
+		const page = await webRequest(docs.origin, token, "/api/docs/page?path=architecture/safety-model.md");
+		strictEqual(page.status, 200);
+		const document = (await page.json()) as {
+			markdown: string;
+			links: Record<string, string>;
+			headings: { id: string; title: string }[];
+		};
+		strictEqual(document.markdown, readFileSync(join(packageRoot, "docs/architecture/safety-model.md"), "utf8"));
+		ok(document.headings.length > 0, "the installed Markdown generates its page outline");
+		ok(Object.values(document.links).every((link) => !link?.includes("blueprint")));
+		strictEqual((await webRequest(docs.origin, token, "/docs/architecture/safety-model.md")).status, 200);
+	} finally {
+		deepStrictEqual(await docs.close(), { code: 0, signal: null }, `docs server shuts down cleanly: ${docs.stderr()}`);
+	}
+
+	// Service-configuration mode: the same file a background install would write,
+	// consumed by the installed CLI directly. No systemd, no browser.
+	const serviceDir = join(work, "gui-service");
+	const serviceHome = join(work, "gui-service-home");
+	mkdirSync(serviceDir, { recursive: true, mode: 0o700 });
+	const roots = Object.fromEntries(
+		(["config", "data", "state", "cache"] as const).map((role) => {
+			const path = join(serviceHome, role);
+			mkdirSync(path, { recursive: true });
+			return [role, path];
+		}),
+	) as Record<"config" | "data" | "state" | "cache", string>;
+	const reserve = createTcpServer();
+	await new Promise<void>((resolve) => reserve.listen(0, "127.0.0.1", resolve));
+	const port = (reserve.address() as AddressInfo).port;
+	await new Promise<void>((resolve) => reserve.close(() => resolve()));
+	const configFile = join(serviceDir, "server.json");
+	writeFileSync(
+		configFile,
+		JSON.stringify({
+			v: 1,
+			port,
+			token: GUI_TEST_TOKEN,
+			roots,
+			packageRoot,
+			path: process.env.PATH ?? "",
+			launch: { node: process.execPath, entry },
+			desktopPrefix: serviceDir,
+		}),
+		{ mode: 0o600 },
+	);
+	const service = await startInstalledWeb(
+		bin,
+		["--persistent", configFile, "--no-open"],
+		foreign,
+		{ ...isolatedEnv(home), NODE_ENV: "test", NODE_OPTIONS: "", NODE_PATH: "" },
+		/Background app ready at http:\/\/127\.0\.0\.1:\d+/u,
+	);
+	try {
+		const { origin } = service;
+		strictEqual(origin, `http://127.0.0.1:${port}`, "the service listens on the configured port");
+		const request = (path: string) => webRequest(origin, GUI_TEST_TOKEN, path);
+		const meta = (await (await request("/api/meta")).json()) as { pwa: boolean };
+		strictEqual(meta.pwa, true, "service configuration enables the installable app");
+		const index = await request("/");
+		strictEqual(index.status, 200);
+		ok((await index.text()).includes('<link rel="manifest" href="/manifest.webmanifest">'));
+		const assets: Array<[string, RegExp]> = [
+			["/manifest.webmanifest", /^application\/manifest\+json/u],
+			["/sw.js", /^text\/javascript/u],
+			["/offline.html", /^text\/html/u],
+			["/offline.js", /^text\/javascript/u],
+			["/offline.css", /^text\/css/u],
+			["/icon-192.png", /^image\/png$/u],
+			["/icon-512.png", /^image\/png$/u],
+		];
+		for (const [path, type] of assets) {
+			const response = await request(path);
+			strictEqual(response.status, 200, `${path} is served in service mode`);
+			match(response.headers.get("content-type") ?? "", type, `${path} content type`);
+			if (!path.endsWith(".png")) ok(!(await response.text()).includes(GUI_TEST_TOKEN), `${path} carries no token`);
+		}
+		const manifest = (await (await request("/manifest.webmanifest")).json()) as {
+			start_url: string;
+			icons: Array<{ src: string }>;
+		};
+		strictEqual(manifest.start_url, "/");
+		deepStrictEqual(
+			manifest.icons.map((icon) => icon.src),
+			["/icon-192.png", "/icon-512.png"],
+		);
+	} finally {
+		const exit = await service.close();
+		deepStrictEqual(exit, { code: 0, signal: null }, `service server stops cleanly on SIGTERM:\n${service.stderr()}`);
+	}
+
+	// Ordinary CLI invocations never evaluate the graphical server or its bundled Hono.
+	const honoChunks = emittedFilesContaining(packageRoot, HONO_MARKER);
+	ok(honoChunks.size > 0, "the packed dist bundles Hono somewhere");
+	const coverage = join(work, "gui-coverage");
+	for (const args of [["--version"], ["--help"], ["gui", "--help"], ["docs", "--help"]]) {
+		const loaded = filesLoadedBy(bin, args, foreign, isolatedEnv(home), coverage);
+		const guiLoaded = [...loaded].filter((file) => file.startsWith(`${guiDist}${sep}`) || honoChunks.has(file));
+		deepStrictEqual(guiLoaded, [], `${args.join(" ")} must not load the graphical server: ${guiLoaded.join(", ")}`);
+	}
 }
 
 function coveredFiles(directory: string): Set<string> {
@@ -303,8 +605,8 @@ describe("smoke/installed package", { concurrency: false }, () => {
 	// pnpm's store does not warm npm's cache. Allow a cold consumer install
 	// with normal registry freshness checks after dependency upgrades;
 	// the CLI subprocesses below retain their separate 20-second timeout.
-	// The cold install, the packed-chunk probes and the library lifecycle below
-	// are what the budget carries; none of them starts a server.
+	// The graphical and docs checks below start three installed servers and run four
+	// coverage-traced CLI invocations, which is why the budget grew from 120s.
 	it("loads bundled library packages, agent recipes, and lazy codewiki from an installed package", {
 		timeout: 180_000,
 	}, async () => {
@@ -717,7 +1019,7 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				.types;
 			ok(existsSync(join(packageRoot, publicTypes)), "installed extension author types exist");
 			await assertInstalledReasoningReplay(bin, libraryProject, join(work, "replay-home"));
-			await assertGraphicalAppAbsent(packageRoot, bin, prefix, work);
+			await assertInstalledWebApp(packageRoot, bin, prefix, work);
 		} finally {
 			rmSync(work, { recursive: true, force: true });
 		}

@@ -213,23 +213,31 @@ root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
 Do not duplicate the `docs/` segment, and do not resolve a citation against the
 workspace. Omitting `query` lists the corpus instead of searching it.
 
-## Reading the documentation
+**The web documentation.** `clio-coder docs` opens the documentation map in the
+Clio Coder web app. `clio-coder docs safety` opens the safety guide. It resolves
+content from the installed package, independent of your current project, and
+reuses this installation's background app when configured. Otherwise it starts
+a foreground loopback server; press Ctrl+C to stop. `--no-open` prints the private
+launch link without opening a browser. The command never installs a service.
 
-These Markdown files are the reference. Read them in the repository, in the
-installed package, or through Clio herself: ask a documentation question in a
-session and she searches the same corpus and cites the page.
+## Reading in the application
 
-Rendered pages belong to the graphical application, which is developed in
-`apps/clio-coder-gui` and is not part of this release. `clio-coder docs` reports
-that and prints the directory the installed package keeps the Markdown in:
+The GUI renders these Markdown sources directly with the application's theme,
+syntax highlighting, copy controls, tables and diagrams. Navigation groups come
+from this map, search indexes the same pages, and each page's outline is generated
+from its headings. Internal references stay in the application.
+
+Edit the Markdown once to update both human and agent documentation. There is
+no separate HTML source tree, document server, or alternate reading view.
 
 ```bash
 clio-coder docs
+clio-coder docs safety
+clio-coder docs guide/configuration-reference.md --no-open
 ```
 
-Edit the Markdown once to update both human and agent documentation. There is
-no separate HTML source tree, document server, or alternate reading view, and
-reading documentation needs no model connection.
+The Markdown files remain the portable reference for the CLI, agents, editors,
+and repository readers. Opening documentation does not require a model connection.
 
 ## Writing documentation
 

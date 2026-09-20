@@ -26,10 +26,6 @@ node scripts/check-release.mjs
 pnpm run test:package
 ```
 
-The graphical application in `apps/clio-coder-gui` is not bundled by this release
-and none of these gates build or check it. It keeps its own gate, listed under
-optional development investigations below.
-
 Run relevant extended provider, configuration, and terminal checks when those
 surfaces changed. These working-tree results prepare a candidate; they do not
 create the publication qualification receipt. Do not invoke `ci:release` on a

@@ -4,6 +4,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.5.0 - 2026-09-18
 
+### graphical application
+
+- Bundle the local graphical application. `clio-coder gui` starts a server bound to 127.0.0.1 and prints a private launch link; `--open` opens it in your browser. It reads the same configuration, sessions, traces, evidence and documentation as the CLI and the terminal interface, and `clio-coder docs [topic]` opens the shipped documentation in it. This is a first version: conversation, sessions, traces, fleet and dispatch history, evidence, evals, usage, the library, settings and targets, toolchain, system health and other coding agents.
+- Every inspector states whose data it shows and what it may do to it, distinguishes a store that was never created from one that is empty, says what a bounded list dropped, and closes by naming what stays on the machine. Opening a page never runs another coding agent's executable; a version probe is an explicit button.
+- `clio-coder uninstall` reports graphical background or desktop files it cannot verify, instead of failing, when run from a checkout whose application bundle has not been built.
+
 ### library
 
 - Distinguish Clio-local/plugin skills from shared, other-agent, and explicit-path discoveries in model-facing inventory. Include source, scope, and discovered file paths; stop reporting the combined available count as Clio installations.
@@ -121,11 +127,6 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add `doctor --deep`, which runs the normal checks plus the live tool-call probe on every configured target (bounded by `--tools-timeout <seconds>`, default 120) and a dry run of the workspace validation contract that resolves each validator command on PATH and reports whether the policy engine would run it without an approval ask at the configured autonomy. The dry run executes nothing, and `--deep` composes with `--json`.
 - Add `/doctor` to the TUI, which renders the same findings in-session as one notice at the level of its worst row. `/doctor deep` runs the deep checks against the session's targets and autonomy.
 - Report Slurm through the clio-kit MCP server: whether `clio-kit` is on PATH and ships the Slurm server, which `mcp.yaml` declares it and its trust, and whether `sbatch` and `squeue` exist. Informational only.
-
-### graphical application
-
-- This release ships the terminal product: CLI, TUI, headless runs, and ACP. The graphical application is no longer bundled, so the package carries no `dist/gui`, no web client, and none of the application's dependencies. It keeps being developed in `apps/clio-coder-gui` and is built only with `CLIO_CODER_BUILD_GUI=1`. `clio-coder gui` reports that the application is not included in this build and exits 2.
-- `clio-coder docs` opened its pages in that application. Until it ships, the command names the documentation directory inside the installed package and exits 2. The Markdown still ships, and `gateway(op="call", capability="clio_docs")` still searches it, so Clio answers documentation questions in a session.
 
 ## 0.4.9 - 2026-09-17
 

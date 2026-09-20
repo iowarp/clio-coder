@@ -1,8 +1,6 @@
-import { ok, strictEqual } from "node:assert/strict";
-import { join } from "node:path";
+import { strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 import { docsTopicRoute, runDocsCommand } from "../../src/cli/docs.js";
-import { resolvePackageRoot } from "../../src/core/package-root.js";
 
 const pages = [
 	"README.md",
@@ -48,31 +46,9 @@ describe("contracts/docs canonical navigation", () => {
 			strictEqual(docsTopicRoute(topic, pages), undefined, topic);
 		strictEqual(docsTopicRoute("process/setup", pages), "/docs/process/setup.md");
 	});
-	it("says documentation pages need the graphical application and names the shipped Markdown", async () => {
-		const captured: string[] = [];
-		const stderr = process.stderr.write.bind(process.stderr);
-		const stdout = process.stdout.write.bind(process.stdout);
-		const capture = ((chunk: string) => {
-			captured.push(String(chunk));
-			return true;
-		}) as typeof process.stderr.write;
-		process.stderr.write = capture;
-		process.stdout.write = capture;
-		try {
-			for (const args of [[], ["safety"], ["--unexpected"], ["safety", "configuration"], ["../outside", "--no-open"]]) {
-				strictEqual(await runDocsCommand(args), 2, args.join(" "));
-			}
-			strictEqual(captured.length, 5, "each invocation reports once");
-			for (const line of captured) {
-				ok(line.includes("not part of this release"), line);
-				ok(line.includes(join(resolvePackageRoot(), "docs")), line);
-			}
-			captured.length = 0;
-			strictEqual(await runDocsCommand(["--help"]), 0);
-		} finally {
-			process.stderr.write = stderr;
-			process.stdout.write = stdout;
-		}
-		strictEqual(captured.length, 1, "--help prints its usage");
+	it("rejects invalid command input before a server or browser starts", async () => {
+		strictEqual(await runDocsCommand(["--unexpected"]), 2);
+		strictEqual(await runDocsCommand(["safety", "configuration"]), 2);
+		strictEqual(await runDocsCommand(["../outside", "--no-open"]), 2);
 	});
 });
