@@ -1114,6 +1114,16 @@ integrations:
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
+`/delegate [--share] <agent-id> <task>` does not accept `--model` in v0.5.0.
+`/run --model <id>` selects a model for a Clio fleet worker; it does not configure
+an external ACP session. External model selection depends on the adapter's own
+supported configuration. Clio does not currently expose an ACP model selector.
+
+Antigravity's `antigravity-code` runtime is a separate subprocess integration;
+detection of the `agy` executable does not register an ACP delegation recipe.
+An ACP integration needs a verified ACP entry point or adapter, not merely a
+CLI that supports stream-JSON output.
+
 ### 5. Antigravity CLI — Experimental Local Delegation (Worker-Only)
 
 The `antigravity-code` runtime is a local external delegation agent. It lets Clio ask an official Antigravity CLI (`agy`) installed and authenticated by the operator for research, world knowledge, a second opinion, or a bounded subtask. It is deliberately **not** a Gemini chat provider and can never become the Clio orchestrator.

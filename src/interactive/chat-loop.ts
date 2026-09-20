@@ -1,5 +1,6 @@
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
+import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
 /**
  * The chat loop: one turn's state machine.
  *
@@ -1364,6 +1365,24 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.currentAskUserPolicy = askUserPolicy;
 			try {
 				await queues.markPersistedUserEcho(runtimePromptText, () => agentRuntime.agent.prompt(runtimePromptText, images));
+				if (
+					state.synthesisToolLock &&
+					state.activeInterruptReason === null &&
+					isLockedSynthesisFallbackOnly(agentRuntime.agent.state.messages.at(-1))
+				) {
+					// Deliver the pair atomically. The normal follow-up queue drains one
+					// message at a time; queuing these separately creates an extra round
+					// with an unanswered synthetic tool call.
+					emitNotice("[Clio Coder] Recovering a final answer once; tools remain disabled.");
+					const model = agentRuntime.agent.state.model;
+					await agentRuntime.agent.prompt([
+						...lockedSynthesisRepromptMessages(1, {
+							provider: model.provider,
+							api: model.api,
+							model: model.id,
+						}),
+					]);
+				}
 				// pi-agent-core does NOT throw on provider failures:
 				// it pushes an assistant message with stopReason="error" and
 				// errorMessage="<provider text>" onto state.messages, sets
