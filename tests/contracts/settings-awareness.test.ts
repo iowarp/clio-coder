@@ -59,3 +59,32 @@ test("context reads the current snapshot each time and refuses to invent a worke
 	assert.equal(missing.kind, "error");
 	if (missing.kind === "error") assert.match(missing.message, /do not infer current limits from defaults/);
 });
+
+test("broad fleet questions expose live routing in one lookup without disclosing target secrets", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.target = "blade";
+	settings.chat.model = "dynamo/chat";
+	settings.fleet.default.target = "blade";
+	settings.fleet.default.model = "mini/worker";
+	settings.fleet.profiles.research = { target: "cloud", model: "research-model", thinkingLevel: "low" };
+	settings.fleet.agentProfiles.researcher = "research";
+	settings.targets = [
+		{ id: "blade", runtime: "litellm", url: "https://PRIVATE_ENDPOINT", auth: { apiKeyEnvVar: "PRIVATE_KEY" } },
+	];
+	const tool = createContextTool({ getSettings: () => settings });
+	const result = await tool.run({ scope: "settings", query: "fleet nodes targets models shadow agents dispatch" });
+	assert.equal(result.kind, "ok");
+	if (result.kind !== "ok") return;
+	assert.match(result.output, /mini\/worker/);
+	assert.match(result.output, /litellm/);
+	assert.doesNotMatch(result.output, /PRIVATE_/);
+	const snapshot = settingsAwareness(settings, "fleet nodes targets models shadow agents dispatch");
+	assert.ok(snapshot.rows.length > 0);
+	assert.equal(snapshot.routing.fleetDefault.model, "mini/worker");
+	assert.equal(snapshot.routing.agentProfiles.researcher, "research");
+	assert.equal(snapshot.routing.profiles.research?.model, "research-model");
+	settings.fleet.default.model = "changed-live";
+	assert.equal(settingsAwareness(settings, "unmatched-query").routing.fleetDefault.model, "changed-live");
+	settings.fleet.default.model = null;
+	assert.equal(settingsAwareness(settings).routing.fleetDefault.model, null);
+});
