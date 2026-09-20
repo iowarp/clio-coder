@@ -72,3 +72,51 @@ export const Routing = Type.Object(
 export type CliTargets = Static<typeof CliTargets>;
 export type TargetOperationResult = Static<typeof TargetOperationResult>;
 export type Routing = Static<typeof Routing>;
+
+/** How a runtime authenticates, in the CLI's own `configure --list` vocabulary. No credential ever crosses. */
+export const RuntimeAuthState = Type.Union([
+	Type.Literal("none"),
+	Type.Literal("login"),
+	Type.Literal("connected"),
+	Type.Literal("credential"),
+	Type.Literal("needs-key"),
+	Type.Literal("key-optional"),
+	Type.Literal("other"),
+]);
+export const TargetRuntimes = Type.Object(
+	{
+		runtimes: Type.Array(
+			Type.Object(
+				{
+					id: Id,
+					label: text,
+					group: text,
+					summary: text,
+					defaultModel: nullable,
+					modelHints: Type.Array(text, { maxItems: 60 }),
+					/** True when the model ids come from a provider catalog, so the engine refuses to guess one. */
+					modelRequired: Type.Boolean(),
+					supportsCustomUrl: Type.Boolean(),
+					auth: RuntimeAuthState,
+					targetCount: Type.Integer({ minimum: 0 }),
+				},
+				closed,
+			),
+			{ maxItems: 200 },
+		),
+	},
+	closed,
+);
+export const TargetAdd = Type.Object(
+	{
+		id: Id,
+		runtime: Id,
+		url: Type.Optional(Type.String({ maxLength: 2048, pattern: "^(https?|wss?)://[^\\s]+$" })),
+		model: Type.Optional(Type.String({ pattern: "^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$" })),
+		apiKeyEnv: Type.Optional(Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]{0,63}$" })),
+		useForChat: Type.Optional(Type.Boolean()),
+	},
+	closed,
+);
+export type TargetRuntimes = Static<typeof TargetRuntimes>;
+export type TargetAdd = Static<typeof TargetAdd>;

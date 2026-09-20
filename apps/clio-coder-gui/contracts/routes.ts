@@ -48,7 +48,7 @@ import {
 } from "./steering.js";
 import { Interop, SystemReport } from "./system.js";
 import { SessionTargets, TargetProbe } from "./targets.js";
-import { CliTargets, Routing } from "./targets-cli.js";
+import { CliTargets, Routing, TargetAdd, TargetRuntimes } from "./targets-cli.js";
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
@@ -289,6 +289,20 @@ export const routes = {
 		params: Type.Object({ id: Id, targetId: Id }, { additionalProperties: false }),
 		response: Accepted,
 		summary: "Use a target for chat and fleet through the CLI",
+	}),
+	targetRuntimes: defineRoute({
+		...get,
+		path: "/api/target-runtimes",
+		response: TargetRuntimes,
+		summary: "Runtimes a connection can be created for, with authentication state and no credential",
+	}),
+	targetsAdd: defineRoute({
+		...post,
+		path: "/api/workspaces/:id/targets",
+		params: operationParams,
+		body: TargetAdd,
+		response: Accepted,
+		summary: "Create a connection through the CLI's non-interactive configure; takes no credential",
 	}),
 	targetsRemove: defineRoute({
 		...post,

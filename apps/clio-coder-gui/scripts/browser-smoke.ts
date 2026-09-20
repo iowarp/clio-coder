@@ -294,7 +294,30 @@ try {
 		await page.getByRole("link", { name: "Targets", exact: true }).click();
 		await page.getByRole("article", { name: "fixture-target", exact: true }).waitFor();
 		await check("targets");
-		await page.getByRole("button", { name: "Use for chat & fleet", exact: true }).click();
+		// Onboarding: a catalog runtime refuses to save without a model, and a local endpoint saves
+		// through the real CLI with no key field anywhere on the form.
+		await page.getByRole("button", { name: "Add a connection", exact: true }).click();
+		const onboarding = page.getByRole("form", { name: "Add a connection", exact: true });
+		await onboarding.getByLabel("Runtime", { exact: true }).selectOption("anthropic");
+		await onboarding.getByText("so choose a model").waitFor();
+		if (!(await onboarding.getByRole("button", { name: "Save connection", exact: true }).isDisabled()))
+			throw new Error("A catalog runtime offered to save without a model.");
+		if (await onboarding.locator('input[type="password"]').count())
+			throw new Error("The onboarding form rendered a credential field.");
+		await onboarding.getByLabel("Runtime", { exact: true }).selectOption("openai-compat");
+		await onboarding.getByLabel("Connection id", { exact: true }).fill(`smoke-${width}`);
+		await onboarding.getByLabel("Endpoint URL", { exact: true }).fill("http://127.0.0.1:9");
+		await onboarding.getByLabel(/^Default model/).fill("smoke-model");
+		await check("targets-onboarding");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `targets-onboarding-${width}.png`), fullPage: true });
+		await onboarding.getByRole("button", { name: "Save connection", exact: true }).click();
+		await page.getByRole("article", { name: `smoke-${width}`, exact: true }).waitFor();
+		await page.getByText("could not verify model").waitFor();
+		await page
+			.getByRole("article", { name: "fixture-target", exact: true })
+			.getByRole("button", { name: "Use for chat & fleet", exact: true })
+			.click();
 		await page.getByRole("heading", { name: "Target operation · succeeded", exact: true }).waitFor();
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("targets-dark");
