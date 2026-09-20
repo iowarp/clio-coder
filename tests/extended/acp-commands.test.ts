@@ -8,6 +8,7 @@ import {
 	type AcpCommandDescriptor,
 	type AcpCommandHost,
 	acpCommandCatalog,
+	acpCommandControl,
 	invokeAcpCommand,
 } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
@@ -53,7 +54,7 @@ function refusalReason(call: () => unknown): string {
 	throw new Error("expected a refusal");
 }
 
-test("the catalog projects all thirteen allowlisted commands", () => {
+test("the catalog projects all thirteen allowlisted commands", async () => {
 	const catalog = acpCommandCatalog();
 	assert.equal(catalog.version, 1);
 	assert.equal(ACP_COMMAND_RULES.length, 13);
@@ -83,7 +84,7 @@ test("the catalog projects all thirteen allowlisted commands", () => {
 	}
 });
 
-test("the projection carries the real flag and positional grammar", () => {
+test("the projection carries the real flag and positional grammar", async () => {
 	const run = descriptor("run");
 	const flags = new Map((run.args.flags ?? []).map((flag) => [flag.name, flag]));
 	assert.deepEqual(flags.get("--agent-profile"), { name: "--agent-profile", takesValue: true, valueName: "profile" });
@@ -114,7 +115,7 @@ test("the projection carries the real flag and positional grammar", () => {
 	assert.deepEqual(add?.positionals, [{ name: "text", required: true, rest: true }]);
 });
 
-test("a hub command is projected as subcommands only, narrowed to the wire-shaped verbs", () => {
+test("a hub command is projected as subcommands only, narrowed to the wire-shaped verbs", async () => {
 	const context = descriptor("context");
 	assert.equal(context.requiresSubcommand, true);
 	assert.deepEqual(Object.keys(context.args.subcommands ?? {}).sort(), [
@@ -137,7 +138,7 @@ test("a hub command is projected as subcommands only, narrowed to the wire-shape
 	);
 });
 
-test("streams and injectsUserTurn mark exactly the commands that earn them", () => {
+test("streams and injectsUserTurn mark exactly the commands that earn them", async () => {
 	const catalog = acpCommandCatalog();
 	assert.deepEqual(
 		catalog.commands.filter((command) => command.streams === "dispatch").map((command) => command.name),
@@ -151,7 +152,7 @@ test("streams and injectsUserTurn mark exactly the commands that earn them", () 
 	assert.equal(descriptor("export").injectsUserTurn, undefined);
 });
 
-test("a command outside the allowlist is refused before anything is parsed", () => {
+test("a command outside the allowlist is refused before anything is parsed", async () => {
 	for (const name of ["quit", "help", "settings", "library", "fleet", "btw", "not-a-command", ""]) {
 		assert.equal(
 			refusalReason(() => invokeAcpCommand({ command: name, argv: [] }, host())),
@@ -164,7 +165,7 @@ test("a command outside the allowlist is refused before anything is parsed", () 
 	);
 });
 
-test("a TUI-bound command is refused by name rather than crashing on a missing keyboardActions", () => {
+test("a TUI-bound command is refused by name rather than crashing on a missing keyboardActions", async () => {
 	// `background`, `editor` and `interrupt` all dereference ctx.keyboardActions,
 	// which a headless context does not have.
 	for (const name of ["background", "editor", "interrupt"]) {
@@ -175,7 +176,7 @@ test("a TUI-bound command is refused by name rather than crashing on a missing k
 	}
 });
 
-test("argv is refused rather than escaped where the tokenizer would disagree with the client", () => {
+test("argv is refused rather than escaped where the tokenizer would disagree with the client", async () => {
 	assert.equal(
 		refusalReason(() => invokeAcpCommand({ command: "mcp", argv: ['"list"'] }, host())),
 		"argv_invalid",
@@ -199,18 +200,18 @@ test("argv is refused rather than escaped where the tokenizer would disagree wit
 	);
 });
 
-test("a headless invoke of a simple command returns its lines", () => {
-	const result = invokeAcpCommand({ command: "mcp", argv: ["list"] }, host());
+test("a headless invoke of a simple command returns its lines", async () => {
+	const result = await invokeAcpCommand({ command: "mcp", argv: ["list"] }, host());
 	assert.equal(result.level, "info");
 	assert.deepEqual(result.lines, ["mcp: none"]);
 
-	const bare = invokeAcpCommand({ command: "mcp", argv: [] }, host());
+	const bare = await invokeAcpCommand({ command: "mcp", argv: [] }, host());
 	assert.deepEqual(bare.lines, ["mcp: none"]);
 });
 
-test("export reaches the host, and says so when the host has no transcript", () => {
+test("export reaches the host, and says so when the host has no transcript", async () => {
 	const seen: Array<string | undefined> = [];
-	const wired = invokeAcpCommand(
+	const wired = await invokeAcpCommand(
 		{ command: "export", argv: ["out.md"] },
 		host({
 			exportTranscript: (path) => {
@@ -221,19 +222,19 @@ test("export reaches the host, and says so when the host has no transcript", () 
 	assert.deepEqual(seen, ["out.md"]);
 	assert.deepEqual(wired.lines, []);
 
-	const unwired = invokeAcpCommand({ command: "export", argv: [] }, host());
+	const unwired = await invokeAcpCommand({ command: "export", argv: [] }, host());
 	assert.equal(unwired.level, "error");
 	assert.match(unwired.lines.join("\n"), /export is not wired/u);
 });
 
-test("a usage error comes back as an error level with the registry's own usage line", () => {
-	const result = invokeAcpCommand({ command: "doctor", argv: ["shallow"] }, host());
+test("a usage error comes back as an error level with the registry's own usage line", async () => {
+	const result = await invokeAcpCommand({ command: "doctor", argv: ["shallow"] }, host());
 	assert.equal(result.level, "error");
 	assert.match(result.lines.join("\n"), /doctor accepts only deep/u);
 	assert.match(result.lines.join("\n"), /usage: \/doctor/u);
 });
 
-test("a dispatch command reports that it started, because its result is an event stream", () => {
+test("a dispatch command reports that it started, because its result is an event stream", async () => {
 	let requested = 0;
 	const pending = host({
 		// The run never settles inside this call; that is the point of the flag.
@@ -245,21 +246,21 @@ test("a dispatch command reports that it started, because its result is an event
 			},
 		} as unknown as AcpCommandHost["dispatch"],
 	});
-	const result = invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
+	const result = await invokeAcpCommand({ command: "delegate", argv: ["codex", "summarize the diff"] }, pending);
 	assert.equal(requested, 1);
 	assert.equal(result.level, "info");
 	assert.deepEqual(result.lines, ["delegate started; progress arrives as clio-coder/event dispatch kinds"]);
 });
 
-test("a command that is wired reports its own outcome instead of a started line", () => {
-	const shared = invokeAcpCommand(
+test("a command that is wired reports its own outcome instead of a started line", async () => {
+	const shared = await invokeAcpCommand(
 		{ command: "share", argv: [] },
 		host({ listWorkerRuns: () => [], submitOperatorNote: () => assert.fail("nothing to share") }),
 	);
 	assert.equal(shared.level, "error");
 	assert.match(shared.lines.join("\n"), /no finished \/run or \/delegate result to share yet/u);
 
-	const seeded = invokeAcpCommand(
+	const seeded = await invokeAcpCommand(
 		{ command: "memory", argv: ["seed"] },
 		host({ seedTaskMemory: () => ({ status: "disabled" }) }),
 	);
@@ -267,14 +268,14 @@ test("a command that is wired reports its own outcome instead of a started line"
 	assert.match(seeded.lines.join("\n"), /task memory is disabled/u);
 });
 
-test("/skill expands before submitting, and refuses when the expander is absent", () => {
+test("/skill expands before submitting, and refuses when the expander is absent", async () => {
 	assert.equal(
 		refusalReason(() => invokeAcpCommand({ command: "skill", argv: ["review"] }, host())),
 		"not_wired",
 	);
 
 	const submitted: Array<{ text: string; skills: ReadonlyArray<PendingSkillRequest> }> = [];
-	const result = invokeAcpCommand(
+	const result = await invokeAcpCommand(
 		{ command: "skill", argv: ["review", "check the diff"] },
 		host({
 			parsePendingSkillRequests: (text) => {
@@ -295,11 +296,14 @@ test("/skill expands before submitting, and refuses when the expander is absent"
 	assert.equal(submitted[0]?.skills[0]?.name, "review");
 
 	// `/skill off` clears the armed surface and submits nothing, so it needs no expander.
-	const cleared = invokeAcpCommand({ command: "skill", argv: ["off"] }, host({ clearSkillSurface: () => ["review"] }));
+	const cleared = await invokeAcpCommand(
+		{ command: "skill", argv: ["off"] },
+		host({ clearSkillSurface: () => ["review"] }),
+	);
 	assert.match(cleared.lines.join("\n"), /Skill tool surface cleared: review/u);
 });
 
-test("the announced capability names the two methods a client calls", () => {
+test("the announced capability names the two methods a client calls", async () => {
 	assert.deepEqual(
 		{ ...ACP_COMMANDS_CAPABILITY },
 		{
@@ -309,4 +313,52 @@ test("the announced capability names the two methods a client calls", () => {
 			count: 13,
 		},
 	);
+});
+
+test("host catalog advertises only wired commands and context operations", async () => {
+	const control = acpCommandControl(host({ runContextClear: () => {} }));
+	const catalog = control.catalog();
+	assert.deepEqual(
+		catalog.commands.map((command) => command.name),
+		["mcp", "run", "delegate", "context"],
+	);
+	assert.equal(control.capability.count, catalog.commands.length);
+	assert.deepEqual(Object.keys(catalog.commands.find((command) => command.name === "context")?.args.subcommands ?? {}), [
+		"reset",
+	]);
+	assert.equal(
+		refusalReason(() => control.invoke({ command: "export", argv: [] })),
+		"command_unavailable",
+	);
+	assert.equal(
+		refusalReason(() => control.invoke({ command: "context", argv: ["compact"] })),
+		"subcommand_not_exposed",
+	);
+});
+
+test("doctor returns completed asynchronous findings and contains failures", async () => {
+	const control = acpCommandControl(
+		host({
+			runDoctor: async ({ deep }) => {
+				await Promise.resolve();
+				assert.equal(deep, true);
+				return { level: "warn", text: "target unavailable\ncheck configuration" };
+			},
+		}),
+	);
+	assert.deepEqual(await control.invoke({ command: "doctor", argv: ["deep"] }), {
+		level: "warn",
+		lines: ["target unavailable", "check configuration"],
+	});
+	const failed = acpCommandControl(
+		host({
+			runDoctor: async () => {
+				throw new Error("probe failed");
+			},
+		}),
+	);
+	assert.deepEqual(await failed.invoke({ command: "doctor", argv: [] }), {
+		level: "error",
+		lines: ["doctor failed: probe failed"],
+	});
 });

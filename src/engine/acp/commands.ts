@@ -116,6 +116,38 @@ export const ACP_COMMAND_RULES: ReadonlyArray<AcpCommandRule> = [
 	{ name: "export" },
 ];
 
+/** Host capabilities required by each advertised operation. Grammar stays in the slash registry. */
+const COMMAND_REQUIREMENTS: Record<string, ReadonlyArray<keyof AcpCommandHost>> = {
+	doctor: ["runDoctor"],
+	share: ["listWorkerRuns", "submitOperatorNote"],
+	archive: ["exportShareArchive", "importShareArchive"],
+	oracle: ["oracleBriefing", "submitOperatorNote"],
+	council: ["runCouncilDispatch", "getWorkerRosters"],
+	skill: ["submitTurn", "parsePendingSkillRequests", "clearSkillSurface"],
+	tasks: ["userTasks", "submitTurn"],
+	memory: ["seedTaskMemory"],
+	export: ["exportTranscript"],
+};
+const CONTEXT_REQUIREMENTS: Record<string, keyof AcpCommandHost> = {
+	compact: "runCompact",
+	recall: "runContextRecall",
+	init: "runInit",
+	refresh: "runContextRefresh",
+	reset: "runContextClear",
+};
+function availableRules(host?: AcpCommandHost): ReadonlyArray<AcpCommandRule> {
+	if (!host) return ACP_COMMAND_RULES;
+	return ACP_COMMAND_RULES.flatMap((rule) => {
+		if (!(COMMAND_REQUIREMENTS[rule.name] ?? []).every((key) => host[key] !== undefined)) return [];
+		if (rule.name !== "context") return [rule];
+		const subcommands =
+			rule.subcommands?.filter(
+				(name) => CONTEXT_REQUIREMENTS[name] !== undefined && host[CONTEXT_REQUIREMENTS[name]] !== undefined,
+			) ?? [];
+		return subcommands.length ? [{ ...rule, subcommands }] : [];
+	});
+}
+
 const RULE_BY_NAME = new Map(ACP_COMMAND_RULES.map((rule) => [rule.name, rule]));
 
 /** A registry name in the allowlist that the registry does not own is a build mistake, not a runtime one. */
@@ -239,10 +271,10 @@ function projectArgs(spec: CommandArgsSpec | undefined, admitted?: ReadonlyArray
  * `commandReference()` rather than from a second table, because a hand-written
  * copy of 13 grammars drifts on the first flag anyone adds.
  */
-export function acpCommandCatalog(): AcpCommandCatalog {
+export function acpCommandCatalog(host?: AcpCommandHost): AcpCommandCatalog {
 	const reference = new Map(commandReference().map((entry) => [entry.name, entry]));
 	const commands: AcpCommandDescriptor[] = [];
-	for (const rule of ACP_COMMAND_RULES) {
+	for (const rule of availableRules(host)) {
 		const entry = reference.get(rule.name);
 		if (entry === undefined) continue;
 		const summaries: Record<string, string> = {};
@@ -253,7 +285,10 @@ export function acpCommandCatalog(): AcpCommandCatalog {
 		commands.push({
 			name: bounded(entry.name, ACP_MAX_COMMAND_NAME_BYTES),
 			summary: bounded(entry.description, ACP_MAX_COMMAND_TEXT_BYTES),
-			usage: bounded(entry.usage, ACP_MAX_COMMAND_TEXT_BYTES),
+			usage: bounded(
+				rule.subcommands ? `/${entry.name} <${rule.subcommands.join("|")}> …` : entry.usage,
+				ACP_MAX_COMMAND_TEXT_BYTES,
+			),
 			group: entry.group,
 			args: projectArgs(entry.args, rule.subcommands),
 			...(Object.keys(summaries).length > 0 ? { subcommandSummaries: summaries } : {}),
@@ -275,8 +310,8 @@ export function acpCommandCatalog(): AcpCommandCatalog {
  * Three members are required because the composition root always has them and
  * four commands dispatch through them. Everything else is optional in exactly
  * the way `SlashCommandContext` already declares it optional: an absent member
- * makes its command report that it is not wired, which is what the TUI does
- * too. The TUI-only members (`echoOperatorCommand`, `showReference`,
+ * omits its command from the bound ACP catalog and refuses wire invocation.
+ * Direct slash dispatch retains the TUI-style not-wired diagnostic. The TUI-only members (`echoOperatorCommand`, `showReference`,
  * `showDoctor`, `render`) are deliberately never supplied; each has a
  * documented non-TUI fallback in the registry.
  */
@@ -381,11 +416,13 @@ function parsedBelongsTo(parsed: SlashCommand, name: string, kinds: ReadonlyArra
 /**
  * Run one allowlisted command with no TUI behind it.
  *
- * Synchronous by construction. `/doctor` and the four dispatch commands hand
- * their work to a floating promise in the registry, so this returns what the
- * command said before it left, which for a dispatch is that it started.
+ * Doctor completes before replying. Dispatch commands acknowledge admission and
+ * keep reporting progress through their existing event stream.
  */
-export function invokeAcpCommand(request: { command: unknown; argv: unknown }, host: AcpCommandHost): AcpCommandResult {
+export function invokeAcpCommand(
+	request: { command: unknown; argv: unknown },
+	host: AcpCommandHost,
+): Promise<AcpCommandResult> {
 	if (typeof request.command !== "string") throw invalid("invalid_params", "command must be a string");
 	const rule = RULE_BY_NAME.get(request.command);
 	if (rule === undefined) throw invalid("command_not_exposed", "command is not exposed over ACP");
@@ -435,6 +472,25 @@ export function invokeAcpCommand(request: { command: unknown; argv: unknown }, h
 		push(text);
 	};
 
+	const finish = (): AcpCommandResult => {
+		if (truncated) lines.push(`…output truncated at ${ACP_MAX_COMMAND_RESULT_LINES} lines`);
+		return { level: NOTICE_LEVELS[rank] ?? "info", lines };
+	};
+	const runDoctor = host.runDoctor;
+	if (parsed.kind === "doctor" && runDoctor) {
+		return Promise.resolve()
+			.then(() => runDoctor({ deep: parsed.deep }))
+			.then(
+				(report) => {
+					notice(report.level, report.text);
+					return finish();
+				},
+				(error: unknown) => {
+					notice("error", `doctor failed: ${error instanceof Error ? error.message : String(error)}`);
+					return finish();
+				},
+			);
+	}
 	const ctx = headlessContext(host, notice, push);
 	const outcome = dispatchSlashCommand(parsed, ctx);
 	if (outcome === "rejected") rank = NOTICE_LEVELS.length - 1;
@@ -443,8 +499,7 @@ export function invokeAcpCommand(request: { command: unknown; argv: unknown }, h
 	if (rule.streams === "dispatch" && lines.length === 0 && outcome === "accepted") {
 		push(`${rule.name} started; progress arrives as clio-coder/event dispatch kinds`);
 	}
-	if (truncated) lines.push(`…output truncated at ${ACP_MAX_COMMAND_RESULT_LINES} lines`);
-	return { level: NOTICE_LEVELS[rank] ?? "info", lines };
+	return Promise.resolve(finish());
 }
 
 /**
@@ -574,7 +629,7 @@ export interface AcpCommandControl {
 	/** Pure and rebuilt per call, so the server memoizes it for a polling client. */
 	catalog(): AcpCommandCatalog;
 	/** Refusals throw {@link AcpRequestError} with the reason already attached. */
-	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult;
+	invoke(request: { command: unknown; argv: unknown }): AcpCommandResult | Promise<AcpCommandResult>;
 	/** True when this command name submits a user turn, which a live prompt owns. */
 	injectsUserTurn(command: unknown): boolean;
 	/** Announced verbatim under `clio-coder/commands`. */
@@ -584,9 +639,15 @@ export interface AcpCommandControl {
 /** Binds one host to the control the ACP server takes. */
 export function acpCommandControl(host: AcpCommandHost): AcpCommandControl {
 	return {
-		catalog: acpCommandCatalog,
-		invoke: (request) => invokeAcpCommand(request, host),
+		catalog: () => acpCommandCatalog(host),
+		invoke: (request) => {
+			const rule = availableRules(host).find((entry) => entry.name === request.command);
+			if (!rule) throw invalid("command_unavailable", "command is not available in this host");
+			if (rule.subcommands && (!Array.isArray(request.argv) || !rule.subcommands.includes(request.argv[0])))
+				throw invalid("subcommand_not_exposed", "subcommand is not available in this host");
+			return invokeAcpCommand(request, host);
+		},
 		injectsUserTurn: (command) => typeof command === "string" && RULE_BY_NAME.get(command)?.injectsUserTurn === true,
-		capability: ACP_COMMANDS_CAPABILITY,
+		capability: { ...ACP_COMMANDS_CAPABILITY, count: availableRules(host).length },
 	};
 }
