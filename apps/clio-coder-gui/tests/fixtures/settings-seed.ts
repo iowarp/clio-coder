@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildCustomizationGraph } from "../../../../src/cli/config-inspect.js";
 import { initializeClioHome } from "../../../../src/core/init.js";
+import { SETTING_CONTROLS } from "../../../../src/core/settings-controls.js";
 import { readLayeredSettings } from "../../../../src/core/settings-layers.js";
 import { captureProjectSurface, recordProjectSurfaceTrust } from "../../../../src/core/workspace-trust.js";
 import { openAuthStorage } from "../../../../src/domains/providers/auth/index.js";
@@ -74,6 +75,7 @@ const graph = buildCustomizationGraph(cwd);
 process.stdout.write(
 	JSON.stringify({
 		settingsKeys: keys(settings.settings).sort(),
+		controlPaths: SETTING_CONTROLS.map((control) => control.path).sort(),
 		categories: [...new Set(graph.entries.map((entry) => entry.category))].sort(),
 	}),
 );

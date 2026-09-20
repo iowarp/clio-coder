@@ -13,5 +13,5 @@ export async function seedSettings(cwd: string, env: NodeJS.ProcessEnv) {
 		],
 		{ env, timeout: 15_000, maxBuffer: 1024 * 1024 },
 	);
-	return JSON.parse(result.stdout) as { settingsKeys: string[]; categories: string[] };
+	return JSON.parse(result.stdout) as { settingsKeys: string[]; controlPaths: string[]; categories: string[] };
 }

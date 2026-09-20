@@ -238,3 +238,18 @@ The v1 table's blanket verdict was **not applicable**: "Progress, transcript ver
 - **HIDDEN:** `version`, `interface.smoothStreaming`, `interface.mode`, `interface.fullscreenScrollbar`, `interface.terminalProgress`, `interface.panes.*.ratio`, `interface.keybindings`.
 
 Every WRITABLE control goes through `applyControlValue`, which validates the whole proposed configuration, not the single field. Surface `SettingsValidationError.issues` as field-level errors.
+
+## 7. What the app ships (v0.5.0)
+
+`GET /api/workspaces/:id/settings/controls` returns one row per `SETTING_CONTROLS` entry minus the hidden set, each with its section and group from `settings-navigation.ts`, its timing from `settingsChangeKind`, its per-value help, its effective value in the text form `applyControlValue` parses, and the layer that set it. `PATCH` on the same path takes `{path, value, confirmed?}` and runs `updateLayeredSettings(cwd, (s) => applyControlValue(s, path, value))` in the ops lane, so every write is serial, lands in the user layer, and passes the engine's cross-field validation. The response lists every control whose value changed, which is how the page says that changing a connection also cleared its model. The adapter is `apps/clio-coder-gui/server/clio/adapters/settings-controls.ts`; its policy overlay names only the hidden, read-only, noted and confirmed paths. A test asserts the surface equals the registry minus the hidden set.
+
+Four departures from the table above, each deliberate:
+
+1. **Structured collections are read-only for now.** `fleet.profiles`, `fleet.rosters`, `fleet.agentProfiles`, `fleet.nodes`, `fleet.adaptiveRouting.agentRoles` and `integrations.externalAgents.entries` cross as an entry count with the reason that a guided editor does not exist yet. No JSON textarea ships. The guided editors remain open work.
+2. **`safety.review.*` is writable with a caveat, not disabled.** The switch is dead for conversations in this app and live for terminal sessions that share the same file. The row says exactly that. A disabled control would have stopped an operator from configuring the terminal from here for no safety gain.
+3. **A value set by a project, local project or command-line layer is read-only.** The write lands in the user layer, which those layers outrank, and `updateLayeredSettings` refuses such a write anyway. The row names the layer instead of offering an editor that answers 409.
+4. **Origin is the exact leaf's source.** `settingsSourceFor` walks up to parent objects, and a parent recorded as a project source does not set its absent children. Using it marked all of `chat.*` project-owned when one project file set `chat.model`.
+
+Confirmation is enforced by the server, not the page: `fleet.history.maxRuns`, `integrations.projectResources.trustProjectImports` and `integrations.runtimePlugins` answer 422 without `confirmed: true`, and the page shows the named consequence beside the checkbox.
+
+The earlier effective-values list moved to `/settings/effective`. Provider onboarding, the `Confirm remote` action and the GUI-local notification and shortcut preferences are not part of this change.

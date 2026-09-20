@@ -5,6 +5,7 @@ import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
 import type { EvalRequest } from "../../contracts/reports.js";
+import type { SettingWrite } from "../../contracts/settings-controls.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
 
@@ -31,6 +32,8 @@ export interface Methods {
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };
 	"settings.read": { params: { cwd: string }; result: unknown };
+	"settings.controls": { params: { cwd: string }; result: unknown };
+	"settings.write": { params: { cwd: string; write: SettingWrite }; result: unknown };
 	"config.graph": { params: { cwd: string }; result: unknown };
 	"docs.read": { params: DocsRequest; result: unknown };
 	"sessions.list": { params: { cwd: string }; result: unknown };

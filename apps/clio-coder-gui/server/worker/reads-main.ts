@@ -45,6 +45,10 @@ serveWorker(async (call) => {
 		const { inspectSettings } = await import("../clio/adapters/settings.js");
 		return inspectSettings(call.params.cwd);
 	}
+	if (call.method === "settings.controls") {
+		const { readSettingsControls } = await import("../clio/adapters/settings-controls.js");
+		return readSettingsControls(call.params.cwd);
+	}
 	if (call.method === "config.graph") {
 		if (settings.fixture && settings.fixtureGraphDelayMs)
 			Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, settings.fixtureGraphDelayMs);
