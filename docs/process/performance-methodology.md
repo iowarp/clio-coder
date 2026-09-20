@@ -446,9 +446,17 @@ latency.
 
 The instant-shell slice uses one `TerminalLease`; Stage 1 does not start a
 second terminal or reconstruct editor state. The built Stage 0 static closure
-is 5 JavaScript chunks and 90,654 bytes. Its regression limit is 6 chunks and
-110,000 bytes, and the closure must contain no orchestrator, provider, tool,
-codewiki, tree-sitter, or Pi implementation marker. The pre-Stage 0 target/auth
+is measured from the production esbuild metafile by
+`tests/contracts/instant-shell-import-graph.test.ts`, after `pnpm build`.
+With bundled Pi TUI 0.86.1, the measured baseline is 13 JavaScript chunks and
+666,307 bytes, including 152,325 bytes attributed to Clio source. The regression
+limits are 16 chunks, 700,000 total bytes, and 165,000 Clio source bytes.
+The separate Clio cap prevents the vendor bundle from masking application growth.
+The closure excludes the orchestrator, provider/agent engines, tools, workers,
+and tree-sitter; Pi's TUI implementation is intentionally bundled and counted.
+The former 5-chunk/90,654-byte measurement and 6-chunk/110,000-byte limit described
+an older build without bundled Pi TUI and had no corresponding artifact test.
+These are bundle-size gates, not a new wall-clock startup benchmark. The pre-Stage 0 target/auth
 check uses a data-only runtime manifest, checked against every canonical
 built-in descriptor, and a read-only credential-presence path; it evaluates no
 provider implementation or OAuth flow.

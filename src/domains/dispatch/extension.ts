@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
 import { WORKER_CONTEXT_PREAMBLE } from "../context/worker/select.js";
@@ -23,7 +24,7 @@ import { DEFAULT_SETTINGS, type DelegationToolGovernance } from "../../core/defa
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { gatewayRoutingObservationFromRecord } from "../../core/gateway-routing.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../../core/guardrails.js";
-import { readClioVersion, readPiMonoVersion } from "../../core/package-root.js";
+import { readClioVersion } from "../../core/package-root.js";
 import { canonicalizeExistingPath } from "../../core/path-canonical.js";
 import { protectedResidencyModels } from "../../core/residency-protection.js";
 import { responseModelIdObservationFromRecord } from "../../core/response-model-id.js";
