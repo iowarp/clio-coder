@@ -12,6 +12,8 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### configuration and terminal
 
+- Give interactive loop lockout an explicit final-synthesis instruction and one bounded recovery for a markup-only answer. Keep tools disabled, deliver the recovery exchange atomically, preserve usable prose, and respect cancellation. Repeated model calls can still exhaust recovery; no result is fabricated.
+
 - Give the composer bold, state-aware rails: teal at rest, a bounded teal/orange activity highlight, and an orange permission pulse. Mark full-auto explicitly with editor-only red text/endcaps. Hold motion while a draft is present and honor reduced-motion/screen-reader settings; reuse the existing presentation ticker.
 
 - Correct context reconciliation so growing conversation usage does not inflate fixed system-prompt or tool-definition estimates. Refresh per-call decomposition, separate tool results from definitions and messages, and label provider totals versus estimated category splits in the shared context views.

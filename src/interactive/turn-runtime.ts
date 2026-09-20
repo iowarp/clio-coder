@@ -25,8 +25,9 @@ import {
 import type { RetrySettings } from "../domains/session/retry.js";
 import type { createEngineAgent } from "../engine/agent.js";
 import { cleanupEngineSessionResources } from "../engine/ai.js";
+import { engineStreamSimple } from "../engine/api-registry.js";
 import { setGlobalDefaultMaxOutputTokens } from "../engine/apis/index.js";
-import { sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
+import { lockedSynthesisSystemPrompt, sanitizeLockedSynthesisMessage } from "../engine/loop-guard.js";
 import {
 	patchProviderThinkingPayload,
 	patchToolChoiceNamedPayload,
@@ -490,6 +491,14 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 		let apiCallStartedAt: number | null = null;
 		let apiCallFirstDeltaAt: number | null = null;
 		const handle = deps.createAgent({
+			streamFn: (currentModel, currentContext, options) =>
+				engineStreamSimple(
+					currentModel,
+					state.synthesisToolLock
+						? { ...currentContext, systemPrompt: lockedSynthesisSystemPrompt(currentContext.systemPrompt ?? "") }
+						: currentContext,
+					options,
+				),
 			initialState: {
 				systemPrompt: fallbackIdentityPrompt(),
 				model,
