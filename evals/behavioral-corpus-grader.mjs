@@ -91,18 +91,23 @@ async function runnerEvents() {
 	});
 }
 
-async function assistantText(events) {
+async function assistantText(events, includeEarlier = false) {
 	events ??= await runnerEvents();
 	let deltas = [];
 	let lastAssistantMessage = "";
+	const completed = [];
 	for (const event of events) {
 		if (event?.type === "text_delta" && typeof event.delta === "string") {
 			deltas.push(event.delta);
 		} else if (event?.type === "message_end") {
-			if (event.message?.role === "assistant") lastAssistantMessage = deltas.join("");
+			if (event.message?.role === "assistant") {
+				lastAssistantMessage = deltas.join("");
+				if (lastAssistantMessage) completed.push(lastAssistantMessage);
+			}
 			deltas = [];
 		}
 	}
+	if (includeEarlier) return [...completed, deltas.join("")].filter(Boolean).join("\n\n");
 	return deltas.length > 0 ? deltas.join("") : lastAssistantMessage;
 }
 
@@ -116,7 +121,9 @@ function assertCleanProposalFixture() {
 async function gradeProposal() {
 	assertCleanProposalFixture();
 	const events = await runnerEvents();
-	const assistant = await assistantText(events);
+	// A board-continuation may follow the delivered proposal. Grade its delivered
+	// content across the turn, while requiring the final board state below.
+	const assistant = await assistantText(events, true);
 	const terminal = events.findLast((event) => event.type === "message_end" && event.message?.role === "assistant");
 	assert.equal(terminal?.message?.stopReason, "stop", "proposal requires a settled final answer");
 	// This corpus permits only skill discovery and board bookkeeping. Inspect

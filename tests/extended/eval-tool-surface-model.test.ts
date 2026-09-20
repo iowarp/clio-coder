@@ -39,7 +39,11 @@ if (prompt.includes("final two lines")) call("read",{path:"evals/fixtures/tool-s
 else if (prompt.includes("two bash calls")) {
  call("bash",{command:"cd evals/fixtures/tool-surface/subdir && pwd"},process.cwd()+"/evals/fixtures/tool-surface/subdir");
  call("bash",{command:"pwd"},process.cwd()+(broken?"/evals/fixtures/tool-surface/subdir":""));
-} else call("web_fetch",{url:"file:///tool-surface-fixture"},broken?"unexpected success":"web_fetch: unsupported scheme file: (must be http or https)",!broken);
+} else {
+ console.log(JSON.stringify({type:"text_delta",delta:"x".repeat(30000)}));
+ call("gateway",{op:"call",capability:"web_fetch",args:{url:"file:///tool-surface-fixture"}},broken?"unexpected success":"web_fetch: unsupported scheme file: (must be http or https)",!broken);
+ console.log(JSON.stringify({type:"text_delta",delta:"x".repeat(300000)}));
+}
 `,
 			);
 			const artifact = await runEvalSuiteV2(loaded, { clioEntry });
@@ -47,7 +51,11 @@ else if (prompt.includes("two bash calls")) {
 			for (const result of artifact.results) {
 				assert.equal(result.pass, !broken, `${result.taskId}: ${JSON.stringify(result.artifacts)}`);
 				assert.equal(result.metrics["task.solved"], !broken);
-				assert.equal(result.behavioral?.outcome, broken ? "behavioral_failure" : "pass");
+				assert.equal(
+					result.behavioral?.outcome,
+					broken ? "behavioral_failure" : "pass",
+					JSON.stringify({ metrics: result.metrics, behavioral: result.behavioral }),
+				);
 				const tool = result.taskId === "read-tail" ? "read" : result.taskId === "bash-cwd-reset" ? "bash" : "web_fetch";
 				assert.equal(result.metrics[`tools.blocked.${tool}`], 0);
 				assert.equal(result.metrics[`tools.failed.${tool}`], tool === "web_fetch" && !broken ? 1 : 0);

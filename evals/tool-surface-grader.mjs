@@ -42,10 +42,14 @@ switch (process.argv[2]) {
 		break;
 	}
 	case "web-fetch-scheme": {
-		assert.equal(starts.length, 1);
-		assert.equal(starts[0].toolName, "web_fetch");
-		assert.equal(starts[0].args.url, "file:///tool-surface-fixture");
-		assert.match(output(starts[0]), /(?:unsupported|invalid|only)[\s\S]*(?:scheme|https?)/iu);
+		const calls = starts.filter((call) => !(call.toolName === "gateway" && ["find", "describe"].includes(call.args.op)));
+		assert.equal(calls.length, 1);
+		const call = calls[0];
+		const viaGateway = call.toolName === "gateway" && call.args.op === "call" && call.args.capability === "web_fetch";
+		assert.ok(call.toolName === "web_fetch" || viaGateway);
+		assert.equal((viaGateway ? call.args.args : call.args).url, "file:///tool-surface-fixture");
+		assert.equal(ends.find((end) => end.toolCallId === call.toolCallId)?.isError, true);
+		assert.match(output(call), /(?:unsupported|invalid|only)[\s\S]*(?:scheme|https?)/iu);
 		break;
 	}
 	default:

@@ -416,7 +416,7 @@ tasks:
       autonomy: full-auto
       prompt: >-
         Dispatch exactly one coder worker with this exact task:
-        Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.
+        <worker-task>Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.</worker-task>
         Keep my explicit recipe choice. Wait for its receipt and report its actual
         run ID, outcome, result conformance, and whether it delivered the requested
         content or stated a limitation. Do not launch another worker or edit files.
@@ -468,7 +468,7 @@ tasks:
       autonomy: full-auto
       prompt: >-
         Dispatch exactly one scout worker with this exact task:
-        Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.
+        <worker-task>Read only findiff/coefs.py, findiff/findiff.py, tests/test_accuracy.py and tests/test_coefs.py. Produce a detailed 1200-word source-cited explanation comparing uniform and nonuniform boundary stencils and their numerical accuracy tests. Do not edit any files.</worker-task>
         Keep my explicit recipe choice. Wait for its receipt and report its actual
         run ID, outcome, result conformance, and whether it delivered the requested
         content or stated a limitation. Do not launch another worker or edit files.

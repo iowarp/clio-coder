@@ -20,6 +20,7 @@ export async function runClioRunRunner(
 	target: EvalSuiteTargetV2,
 	env?: NodeJS.ProcessEnv,
 	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
+	onStdout?: (chunk: string) => void,
 ): Promise<EvalRunnerOutput> {
 	const prompt = runner.prompt ?? "";
 	// Spawned as an argv, not a shell line: the task timeout has to reach the
@@ -38,7 +39,7 @@ export async function runClioRunRunner(
 		...(runner.autonomy === undefined ? [] : ["--autonomy", runner.autonomy]),
 		prompt,
 	];
-	const result = await runShellCommand(args, cwd, runner.timeoutMs ?? timeoutMs, env);
+	const result = await runShellCommand(args, cwd, runner.timeoutMs ?? timeoutMs, env, onStdout);
 	// Usage is folded from the live stream, not from the bounded stdout
 	// artifact: a verbose run's `message_end` events do not survive truncation.
 	const tokens = result.usage;
@@ -158,7 +159,7 @@ export function toolBehaviorMetricEntriesFromJsonl(
 	cwd: string,
 	readObservation?: { allowedPaths: string[]; decoyPaths: string[] },
 ): Record<string, number> {
-	const starts = new Map<string, { tool: string; path: string | null }>();
+	const starts = new Map<string, { tool: string; path: string | null; capability?: string }>();
 	const readPaths = new Set<string>();
 	const executionEnds: BehavioralToolTerminal[] = [];
 	const canonicalFinishes: BehavioralToolTerminal[] = [];
@@ -180,7 +181,11 @@ export function toolBehaviorMetricEntriesFromJsonl(
 			const tool = stringField(event, "toolName");
 			if (callId === undefined || tool === undefined) continue;
 			const path = tool === "read" && isRecord(event.args) ? toolPath(event.args) : null;
-			starts.set(callId, { tool, path });
+			const capability =
+				tool === "gateway" && isRecord(event.args) && event.args.op === "call" && typeof event.args.capability === "string"
+					? event.args.capability
+					: undefined;
+			starts.set(callId, { tool, path, ...(capability ? { capability } : {}) });
 			if (path !== null) readPaths.add(normalizeObservedPath(cwd, path));
 			continue;
 		}
@@ -209,11 +214,17 @@ export function toolBehaviorMetricEntriesFromJsonl(
 	const failed = new Map<string, number>();
 	const blocked = new Map<string, number>();
 	for (const terminal of terminals) {
-		const tool = metricToolName(terminal.tool);
-		calls.set(tool, (calls.get(tool) ?? 0) + 1);
-		if (terminal.outcome === "ok") succeeded.set(tool, (succeeded.get(tool) ?? 0) + 1);
-		if (terminal.outcome === "blocked") blocked.set(tool, (blocked.get(tool) ?? 0) + 1);
-		if (terminal.outcome === "error") failed.set(tool, (failed.get(tool) ?? 0) + 1);
+		// A gateway invocation is one model call, with an additional capability
+		// attribution. Discovery/description never count as capability execution.
+		const capability = terminal.callId === null ? undefined : starts.get(terminal.callId)?.capability;
+		const names = new Set([terminal.tool, ...(capability ? [capability] : [])]);
+		for (const name of names) {
+			const tool = metricToolName(name);
+			calls.set(tool, (calls.get(tool) ?? 0) + 1);
+			if (terminal.outcome === "ok") succeeded.set(tool, (succeeded.get(tool) ?? 0) + 1);
+			if (terminal.outcome === "blocked") blocked.set(tool, (blocked.get(tool) ?? 0) + 1);
+			if (terminal.outcome === "error") failed.set(tool, (failed.get(tool) ?? 0) + 1);
+		}
 	}
 	const namedTools = new Set([...ALL_TOOL_NAMES, ...calls.keys()]);
 	const entries: Record<string, number> = { "tools.read.distinctPaths": readPaths.size };

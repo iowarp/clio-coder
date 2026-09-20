@@ -257,6 +257,7 @@ tasks:
         test: invoke web_fetch exactly once, report the rejection, and do not
         retry or use other tools. Do not edit files."
     verify:
+      allowNoop: true
       measure:
         - node evals/tool-surface-grader.mjs web-fetch-scheme
       protectedFiles:

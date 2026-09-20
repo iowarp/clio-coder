@@ -1,10 +1,11 @@
-import { constants } from "node:fs";
+import { closeSync, constants, openSync, writeSync } from "node:fs";
 import { lstat, mkdir, mkdtemp, open, readdir, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { namingCompatibilityEnvironment } from "../../../core/naming-compat.js";
+import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioDataDir } from "../../../core/xdg.js";
-import { isRedactedArtifactKey } from "../artifacts/redact.js";
+import { isRedactedArtifactKey, redactArtifactForStorage } from "../artifacts/redact.js";
 import { resolveMetricAssertion } from "../compare/thresholds.js";
 import { buildEvalExecutionEnvelopeV1, type EvalExecutionObservationV1 } from "../execution-provenance.js";
 import { aggregateEvalVerdicts } from "../metrics/aggregate.js";
@@ -88,12 +89,36 @@ export async function runEvalSuiteV2(
 	const servingObservations: EvalServingObservation[] = [];
 	const maxCostUsd = loaded.suite.matrix.maxCostUsd;
 	let spentUsd = 0;
-	for (const item of expandEvalMatrix(loaded.suite)) {
+	const matrix = expandEvalMatrix(loaded.suite);
+	// A separate checkpoint is explicitly incomplete, never mistaken for a
+	// finished suite artifact. Atomically retain grades before starting more work.
+	const checkpoint = (complete: boolean): void => {
+		safeResourceWrite(
+			resolve(clioDataDir(), "evals", evalId, "checkpoint.json"),
+			`${JSON.stringify(
+				redactArtifactForStorage({
+					version: 1,
+					evalId,
+					suite: { id: loaded.suite.suite.id, hash: loaded.hash },
+					status: complete ? "completed" : "running",
+					plannedRuns: matrix.length,
+					completedRuns: results.length,
+					results,
+				}),
+				null,
+				2,
+			)}\n`,
+			{ encoding: "utf8" },
+		);
+	};
+	checkpoint(false);
+	for (const item of matrix) {
 		// The cost ceiling bounds the whole matrix: once known receipt cost
 		// exceeds it, remaining items fail closed instead of running. A live
 		// suite can therefore never keep spending past its declared budget.
 		if (maxCostUsd !== undefined && spentUsd > maxCostUsd) {
 			results.push(budgetExhaustedResult(loaded, item.task, item.target, item.repeatIndex, spentUsd, maxCostUsd));
+			checkpoint(false);
 			continue;
 		}
 		const completed = await runMatrixItem(
@@ -109,8 +134,10 @@ export async function runEvalSuiteV2(
 		spentUsd += resultCostUsd(completed.result);
 		results.push(completed.result);
 		servingObservations.push(completed.serving);
+		checkpoint(false);
 	}
 	const serving = await evalServingConfiguration(loaded.suite.matrix.targets, servingObservations);
+	checkpoint(true);
 	return buildArtifact(loaded, evalId, results, options.clioEntry, serving);
 }
 
@@ -181,15 +208,21 @@ async function runMatrixItem(
 		if (!setup.pass) throw new EvalWorkspaceSetupError(setup.exitCode, setup.stderr);
 		if (task.workspace.kind !== "local" || freshWorkspace) recordPatchBaseline(workspace.dir);
 		const checkGraderIntegrity = await protectGraderFiles(workspace.dir, task.verify.protectedFiles ?? []);
-		const runner = await runTaskRunner(task, target, workspace.dir, clioEntry, {
-			CLIO_CODER_STATE_DIR: stateDir,
-			CLIO_CODER_ENTRY: clioEntry,
-		});
+		const runnerStdoutFile = resolve(stateDir, "eval-runner-output.jsonl");
+		const runner = await runTaskRunner(
+			task,
+			target,
+			workspace.dir,
+			clioEntry,
+			{
+				CLIO_CODER_STATE_DIR: stateDir,
+				CLIO_CODER_ENTRY: clioEntry,
+			},
+			runnerStdoutFile,
+		);
 		runnerEvidence = runner;
 		receipt = runner.receipt ?? null;
 		runnerWallTimeMs = runner.wallTimeMs;
-		const runnerStdoutFile = resolve(stateDir, "eval-runner-output.jsonl");
-		await writeFile(runnerStdoutFile, runner.stdout, { encoding: "utf8", mode: 0o600, flag: "wx" });
 		const patch = collectPatchMetrics(workspace.dir);
 		const receiptExitCode = runner.exitCode;
 		// Read after the runner returned and before the journal is removed: what
@@ -238,7 +271,7 @@ async function runMatrixItem(
 		const graderFailed = metrics["task.solved"] === false;
 		// A run that changed nothing it was allowed to change did not solve the
 		// task, even when the untouched workspace already satisfies the verifier.
-		const noop = noopReceipt?.noop === true;
+		const noop = noopReceipt?.noop === true && !(task.verify.allowNoop === true && metrics["task.solved"] === true);
 		const pass = runner.exitCode === 0 && !noop && verifier.pass && !graderFailed;
 		const failureClass = pass
 			? null
@@ -263,6 +296,8 @@ async function runMatrixItem(
 			metrics,
 			artifacts: {
 				...runner.artifacts,
+				...(measurement.stdout ? { measureStdout: measurement.stdout } : {}),
+				...(measurement.stderr ? { measureStderr: measurement.stderr } : {}),
 				workspace: workspace.dir,
 				...(verifier.stdout.length > 0 ? { verifierStdout: verifier.stdout } : {}),
 				...(verifier.stderr.length > 0 ? { verifierStderr: verifier.stderr } : {}),
@@ -433,12 +468,41 @@ async function runTaskRunner(
 	cwd: string,
 	clioEntry: string,
 	env: NodeJS.ProcessEnv,
+	stdoutFile: string,
 ): Promise<EvalRunnerOutput> {
-	if (task.runner.kind === "external-command") return runExternalCommandRunner(task.runner, cwd, task.timeoutMs, env);
-	if (task.runner.kind === "context-index") return runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target, env);
-	if (task.runner.kind === "context-init")
-		return runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
-	return runClioRunRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env, task.metrics.readObservation);
+	const fd = openSync(stdoutFile, "wx", 0o600);
+	let bytes = 0;
+	const capture = (chunk: string): void => {
+		const buffer = Buffer.from(chunk);
+		bytes += buffer.byteLength;
+		if (bytes > 64 * 1024 * 1024)
+			throw new Error("complete runner event stream exceeds 64 MiB; refusing an incomplete grade");
+		let offset = 0;
+		while (offset < buffer.length) offset += writeSync(fd, buffer, offset, buffer.length - offset);
+	};
+	try {
+		if (task.runner.kind === "external-command")
+			return await runExternalCommandRunner(task.runner, cwd, task.timeoutMs, env, capture);
+		if (task.runner.kind === "clio-coder-run")
+			return await runClioRunRunner(
+				task.runner,
+				cwd,
+				clioEntry,
+				task.timeoutMs,
+				target,
+				env,
+				task.metrics.readObservation,
+				capture,
+			);
+		const result =
+			task.runner.kind === "context-index"
+				? await runContextIndexRunner(cwd, clioEntry, task.timeoutMs, target, env)
+				: await runContextInitRunner(task.runner, cwd, clioEntry, task.timeoutMs, target, env);
+		capture(result.stdout);
+		return result;
+	} finally {
+		closeSync(fd);
+	}
 }
 
 /**
@@ -451,12 +515,19 @@ async function measureTaskOutcome(
 	task: LoadedEvalSuiteV2["suite"]["tasks"][number],
 	cwd: string,
 	env?: NodeJS.ProcessEnv,
-): Promise<{ metrics: Record<string, number | string | boolean>; executionObservation?: EvalExecutionObservationV1 }> {
+): Promise<{
+	metrics: Record<string, number | string | boolean | null>;
+	stdout?: string;
+	stderr?: string;
+	executionObservation?: EvalExecutionObservationV1;
+}> {
 	const commands = task.verify.measure ?? [];
 	if (commands.length === 0) return { metrics: {} };
 	const result = await runCommandVerifiers(commands, cwd, task.timeoutMs, env);
 	const behavioral = graderBehaviorMeasurement(result.stdout);
 	return {
+		stdout: result.stdout,
+		stderr: result.stderr,
 		metrics: {
 			"task.exitCode": result.exitCode,
 			"task.solved": result.exitCode === 0,
@@ -467,10 +538,10 @@ async function measureTaskOutcome(
 }
 
 function graderBehaviorMeasurement(stdout: string): {
-	metrics: Record<string, number | string | boolean>;
+	metrics: Record<string, number | string | boolean | null>;
 	executionObservation?: EvalExecutionObservationV1;
 } {
-	const metrics: Record<string, number | string | boolean> = {};
+	const metrics: Record<string, number | string | boolean | null> = {};
 	let executionObservation: EvalExecutionObservationV1 | undefined;
 	for (const line of stdout.split(/\r?\n/u)) {
 		if (line.trim().length === 0) continue;
@@ -500,7 +571,8 @@ const CUSTOM_MEASURE_METRIC_KEY = /^[A-Za-z0-9._-]{1,128}$/u;
 const SHA256_HEX = /^[0-9a-f]{64}$/u;
 
 /**
- * A grader may report the two legacy behavior keys and any key in the
+ * A grader may report the shipped proposal/memory/scope/explanation namespaces, the two
+ * legacy behavior keys, and any key in the
  * `custom.` namespace. The prefix is what keeps this safe: grader metrics are
  * spread last into the result, so an unprefixed key could overwrite
  * `task.solved`, `patch.*`, `tokens.*`, `receipt.*`, or `tools.*` and turn a
@@ -511,6 +583,9 @@ const SHA256_HEX = /^[0-9a-f]{64}$/u;
  */
 function isAdmittedMeasureMetricKey(key: string): boolean {
 	if (key === "claims.unsupported" || key === "completion.reported") return true;
+	// These bounded namespaces are emitted by the shipped behavioral graders.
+	if (/^(proposal|memory|scope|explanation)\.[A-Za-z0-9._-]{1,120}$/u.test(key) && !isRedactedArtifactKey(key))
+		return true;
 	if (!key.startsWith(CUSTOM_MEASURE_METRIC_PREFIX) || !CUSTOM_MEASURE_METRIC_KEY.test(key)) return false;
 	if (key === CUSTOM_MEASURE_METRIC_PREFIX || key === CUSTOM_DIGEST_METRIC_PREFIX) return false;
 	if (isRedactedArtifactKey(key)) {
@@ -522,14 +597,18 @@ function isAdmittedMeasureMetricKey(key: string): boolean {
 }
 
 /**
- * Measure values are finite numbers or booleans. The one exception is a key
+ * Measure values are finite numbers, booleans, or null for unmeasured facts. The one exception is a key
  * under `custom.digest.`, which carries only a lowercase hex SHA-256 string; that
  * is how a behavior digest reaches the sealed artifact. A value of any other
  * type or shape is dropped.
  */
-function isAdmittedMeasureMetricValue(key: string, value: unknown): value is number | string | boolean {
+function isAdmittedMeasureMetricValue(key: string, value: unknown): value is number | string | boolean | null {
 	if (key.startsWith(CUSTOM_DIGEST_METRIC_PREFIX)) return typeof value === "string" && SHA256_HEX.test(value);
-	return typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
+	return (
+		(value === null && /^(proposal|memory|scope|explanation)\./u.test(key)) ||
+		typeof value === "boolean" ||
+		(typeof value === "number" && Number.isFinite(value))
+	);
 }
 
 function parseExecutionObservation(value: Record<string, unknown>): EvalExecutionObservationV1 {
@@ -776,7 +855,14 @@ async function retainSessionLedgers(
 		const directory = await transcriptCaptureDirectory(destination);
 		if (runnerStdout) {
 			const path = resolve(directory, "runner-stdout.jsonl");
-			await writeFile(path, runnerStdout, { mode: 0o600, flag: "wx" });
+			let complete: Buffer | string;
+			try {
+				complete = await readOwnedLedger(stateDir, resolve(stateDir, "eval-runner-output.jsonl"));
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+				complete = runnerStdout;
+			}
+			await writeFile(path, complete, { mode: 0o600, flag: "wx" });
 			retained.runnerStdoutPath = path;
 		}
 		for (const [index, pathToLedger] of refs.entries()) {

@@ -230,6 +230,8 @@ export interface EvalRunnerV2 {
 }
 
 export interface EvalVerifyV2 {
+	/** Negative probes may intentionally do no work; requires a passing measure command. */
+	allowNoop?: boolean;
 	/** Workspace-relative grader code and dependencies that the runner must not change. */
 	protectedFiles?: string[];
 	commands?: string[];

@@ -76,6 +76,7 @@ export async function runExternalCommandRunner(
 	cwd: string,
 	timeoutMs: number,
 	env?: NodeJS.ProcessEnv,
+	onStdout?: (chunk: string) => void,
 ): Promise<EvalRunnerOutput> {
 	const runnerCommands = runner.commands ?? [];
 	const commands = runnerCommands.length > 0 ? runnerCommands : runner.command === undefined ? [] : [runner.command];
@@ -91,7 +92,7 @@ export async function runExternalCommandRunner(
 	let fleetLoops = EMPTY_FLEET_LOOP_OBSERVATION;
 	const ledgerEntries: SessionEntry[] = [];
 	for (const command of commands) {
-		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env);
+		const result = await runShellCommand(command, cwd, runner.timeoutMs ?? timeoutMs, env, onStdout);
 		stdout = appendLimited(stdout, result.stdout);
 		stderr = appendLimited(stderr, result.stderr);
 		wallTimeMs += result.wallTimeMs;
@@ -158,6 +159,7 @@ export function runShellCommand(
 	cwd: string,
 	timeoutMs: number,
 	env?: NodeJS.ProcessEnv,
+	onStdout?: (chunk: string) => void,
 ): Promise<ShellCommandResult> {
 	// `wallTimeMs` is published and compared across runs and machines, so it is
 	// measured on the monotonic clock: an NTP correction mid-suite would
@@ -171,6 +173,7 @@ export function runShellCommand(
 		const streamFold = createStreamInvariantFold();
 		const fleetLoopFold = createFleetLoopFold();
 		const callLedgerFold = createEvalCallLedgerFold();
+		let captureFailed = false;
 		let timedOut = false;
 		let settled = false;
 		// The overlay is additive: an eval item pins where Clio writes its
@@ -182,6 +185,18 @@ export function runShellCommand(
 		child.stdout.setEncoding("utf8");
 		child.stderr.setEncoding("utf8");
 		child.stdout.on("data", (chunk: string) => {
+			if (!captureFailed) {
+				try {
+					onStdout?.(chunk);
+				} catch (error) {
+					captureFailed = true;
+					stderr = appendLimited(
+						stderr,
+						`Eval event capture failed: ${error instanceof Error ? error.message : String(error)}`,
+					);
+					child.kill("SIGTERM");
+				}
+			}
 			stdout = appendLimited(stdout, chunk);
 			metricCapture.push(chunk);
 			usageFold.push(chunk);
@@ -203,7 +218,7 @@ export function runShellCommand(
 			clearTimeout(timer);
 			resolve({
 				command: commandLine,
-				exitCode,
+				exitCode: captureFailed ? 1 : exitCode,
 				stdout,
 				metricJsonl: metricCapture.finish(),
 				usage: usageFold.usage(),
@@ -309,7 +324,13 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 	const type = typeof event.type === "string" ? normalizeClioCoderEventType(event.type) : event.type;
 	if (type === "tool_execution_start") {
 		const toolName = stringField(event, "toolName");
-		if (toolName !== "dispatch" && toolName !== "code_nav" && toolName !== "read" && toolName !== "grep") {
+		if (
+			toolName !== "dispatch" &&
+			toolName !== "code_nav" &&
+			toolName !== "read" &&
+			toolName !== "grep" &&
+			toolName !== "gateway"
+		) {
 			return null;
 		}
 		return {
@@ -322,7 +343,11 @@ function compactMetricEvent(event: Record<string, unknown>): Record<string, unkn
 					? { args: boundedReadArgs(event.args) }
 					: toolName === "code_nav" && isRecord(event.args)
 						? { args: { mode: event.args.mode } }
-						: {}),
+						: toolName === "gateway" && isRecord(event.args)
+							? {
+									args: { op: stringField(event.args, "op"), capability: stringField(event.args, "capability")?.slice(0, 256) },
+								}
+							: {}),
 		};
 	}
 	if (type === "tool_execution_end") {
