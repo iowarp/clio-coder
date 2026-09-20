@@ -93,6 +93,9 @@ export type ResultContractQuality = "pass" | "fail" | "unmeasured";
 
 export { INTERNAL_HELPER_RESULT_KINDS } from "../../worker/protocol.js";
 export type InternalHelperResultKind = (typeof INTERNAL_HELPER_RESULT_KINDS)[number];
+/** Shared acceptance/capture ceiling: a worker may not accept a result the parent cannot retain. */
+export const STRUCTURED_HELPER_RESULT_MAX_BYTES = 32_768;
+
 export interface StructuredHelperResult {
 	version: 1;
 	kind: InternalHelperResultKind;
@@ -185,6 +188,9 @@ export function validateStructuredHelperResult(
 	} catch {
 		return reject("helper result must contain only JSON values");
 	}
+	if (Buffer.byteLength(output, "utf8") > STRUCTURED_HELPER_RESULT_MAX_BYTES) {
+		return reject(`helper result exceeds ${STRUCTURED_HELPER_RESULT_MAX_BYTES} UTF-8 bytes; shorten the result`);
+	}
 	const validation = validateResultContract({ ...input, output });
 	if (validation.conformance !== "pass") return { validation, structured: null };
 	let data = JSON.parse(output) as Record<string, unknown>;
@@ -197,6 +203,9 @@ export function validateStructuredHelperResult(
 			proposedSubtasks: [],
 		};
 	}
+	// Salvage adds canonical fields; its serialized result must fit too.
+	if (Buffer.byteLength(JSON.stringify(data), "utf8") > STRUCTURED_HELPER_RESULT_MAX_BYTES)
+		return reject(`helper result exceeds ${STRUCTURED_HELPER_RESULT_MAX_BYTES} UTF-8 bytes; shorten the result`);
 	return { validation, structured: { version: 1, kind: input.contract.kind as InternalHelperResultKind, data } };
 }
 
@@ -1306,7 +1315,10 @@ export function withResultSummaryAllowance(contract: ResultContract, maxSummaryB
  * validation with the bound named, never as a silently accepted fragment.
  */
 export function resultContractOutputBytes(contract: ResultContract | null | undefined): number | null {
-	if (contract === null || contract === undefined || contract.kind !== "mutation-report") return null;
+	if (contract === null || contract === undefined) return null;
+	if ((INTERNAL_HELPER_RESULT_KINDS as readonly string[]).includes(contract.kind))
+		return STRUCTURED_HELPER_RESULT_MAX_BYTES;
+	if (contract.kind !== "mutation-report") return null;
 	return (
 		2 * resultSummaryMaxBytes(contract) + 2 * RESULT_COMMIT_MESSAGE_MAX_BYTES + RESULT_OUTPUT_ENVELOPE_HEADROOM_BYTES
 	);

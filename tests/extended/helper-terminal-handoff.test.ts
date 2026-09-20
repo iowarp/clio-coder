@@ -16,8 +16,20 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const data = { findings: [{ claim: "No grounded evidence is available." }], needsSplit: false, proposedSubtasks: [] };
 const submit = (args: unknown = data) => ({ name: "clio_submit_result", arguments: JSON.stringify(args) });
+const longData = { ...data, findings: [{ claim: "Substantive finding. ".repeat(600) }] };
 const write = { name: "write", arguments: JSON.stringify({ path: "forbidden.txt", content: "must not execute" }) };
-const scenarios: Array<{ name: string; rounds: Array<Array<ReturnType<typeof submit>> | string>; code: number }> = [
+const scenarios: Array<{
+	name: string;
+	rounds: Array<Array<ReturnType<typeof submit>> | string>;
+	code: number;
+	expectedData?: typeof data;
+}> = [
+	{
+		name: "accepts a report larger than the old 8 KiB capture limit",
+		rounds: [[submit(longData)]],
+		code: 0,
+		expectedData: longData,
+	},
 	{ name: "validated JSON text fallback", rounds: [JSON.stringify(data)], code: 0 },
 	{ name: "prose never becomes structured evidence", rounds: ["Done.", "Done.", "Done."], code: 1 },
 	{ name: "accepted handoff terminates without prose round", rounds: [[submit()]], code: 0 },
@@ -115,7 +127,7 @@ for (const scenario of scenarios) {
 			const accepted = events.filter((event) => event.type === "clio_coder_helper_result");
 			strictEqual(accepted.length, scenario.code === 0 ? 1 : 0);
 			if (accepted[0]) {
-				deepStrictEqual(accepted[0].payload, { version: 1, kind: "scout-report", data });
+				deepStrictEqual(accepted[0].payload, { version: 1, kind: "scout-report", data: scenario.expectedData ?? data });
 				strictEqual(projectWorkerEventForStdout(accepted[0]), accepted[0]);
 				strictEqual(isReceiptBearingFrame(accepted[0]), true);
 			}
