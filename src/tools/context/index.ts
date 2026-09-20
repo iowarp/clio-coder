@@ -23,6 +23,8 @@ import {
 import {
 	checkSkillDrift,
 	discoverMarketplaceSkills,
+	installedSkillNames,
+	installedSkillPackages,
 	type LoadSkillsInput,
 	loadSkills,
 	type MarketplaceSkill,
@@ -282,7 +284,7 @@ function marketplaceRowsFor(
 	if (deps.getSkillLoaderOptions?.().disableDiscovery === true) return [];
 	const policy = options?.pendingSkillPolicy;
 	if (policy && policyIsRecipeBound(policy)) return [];
-	const installedNames = new Set(installed.map((skill) => skill.name));
+	const installedNames = installedSkillNames(installed, cwdFromDeps(deps));
 	try {
 		return discoverMarketplaceSkills({ cwd: cwdFromDeps(deps) }).skills.filter(
 			(entry) => !installedNames.has(entry.name),
@@ -297,11 +299,14 @@ function renderSkillsList(
 	marketplace: ReadonlyArray<MarketplaceSkill>,
 	marketplaceOffered: boolean,
 	modelActivation: boolean,
+	packages: ReturnType<typeof installedSkillPackages> = [],
 ): string {
-	if (skills.length === 0 && marketplace.length === 0) {
+	if (skills.length === 0 && marketplace.length === 0 && packages.length === 0) {
 		// A registry that never offers the marketplace (a worker) must not
 		// claim none is configured; it simply has nothing to list.
-		return marketplaceOffered ? "No skills are installed and no marketplace is configured." : "No skills are installed.";
+		return marketplaceOffered
+			? "No skills are available in Clio and no additional marketplace skills were found."
+			: "No skills are available in Clio.";
 	}
 	// The header names the listing and nothing more. The reply protocol is
 	// stated once, as the recency anchor at the bottom, because that is the
@@ -311,32 +316,41 @@ function renderSkillsList(
 
 	const native = skills.filter((skill) => skill.source === "clio-coder" || skill.source === "plugin");
 	const discovered = skills.filter((skill) => skill.source !== "clio-coder" && skill.source !== "plugin");
-	lines.push("Clio skills (local/plugin roots):");
+	lines.push(`Ready skills in Clio (${native.length}):`);
 	if (native.length === 0) lines.push("- none");
 	for (const skill of native) {
 		lines.push(`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`);
 	}
 	if (discovered.length > 0) {
-		lines.push(
-			"",
-			"Discovered skills (shared, other-agent, or explicit roots; discovery does not establish installation ownership):",
-		);
+		lines.push("", "Explicitly supplied session skills (not installed packages):");
 		for (const skill of discovered) {
 			lines.push(
 				`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}; file: ${skill.filePath}): ${skill.description}`,
 			);
 		}
 		lines.push(
-			"These skills are available through compatibility or explicit-path discovery. Preserve their source when describing the inventory; discovery does not mean Clio installed or copied them.",
+			"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean Clio installed or copied them.",
 		);
 	}
+
+	if (packages.length > 0) {
+		lines.push("", `Installed packages providing skills (${packages.length}):`);
+		for (const pkg of packages)
+			lines.push(
+				`- ${pkg.name} (scope: ${pkg.scope}; origin: ${pkg.origin === "catalog" ? "marketplace catalog" : pkg.origin}; state: ${pkg.state}; path: ${pkg.path})`,
+			);
+	}
+	lines.push(
+		"",
+		"Other-agent skill folders are discovery-only. Explicitly import into Clio before use; the trust-imports setting does not install or activate loose files.",
+	);
 
 	if (marketplace.length > 0) {
 		// Installable rows are suggested exactly like installed ones: the
 		// operator's /skill <name> prompts to install before it runs, so the
 		// model's move is the same suggest-and-wait. Only the body is out of
 		// reach until then, which is why the description is all that appears.
-		lines.push("", "Marketplace (not installed; /skill <name> offers to install):");
+		lines.push("", "Marketplace (additional skills available to install; /skill <name> offers to install):");
 		for (const entry of marketplace) {
 			const category = entry.category ? ` [${entry.category}]` : "";
 			lines.push(`- ${entry.name}${category}: ${entry.description}`);
@@ -347,15 +361,14 @@ function renderSkillsList(
 	lines.push(
 		"",
 		modelActivation
-			? `If one skill above matches the current task, load it now with context(scope="skills", name="<name>") and continue in the same turn; at this autonomy level you activate installed skills yourself and do not wait for the operator. Marketplace rows below are not installed and still need the operator. If none match, do not mention skills.`
+			? `If one skill above matches the current task, load it now with context(scope="skills", name="<name>") and continue in the same turn; at this autonomy level you activate installed skills yourself and do not wait for the operator. Marketplace additions still require operator approval. If none match, do not mention skills.`
 			: `If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose), then continue the task in the same turn without it; only the operator can run it. If none match, do not mention skills.`,
 	);
 	if (marketplace.length > 0) {
 		// The offer protocol mirrors the marketplace-offer middleware: fixed
-		// option labels so the harness recognizes the answer, and the model
-		// never performs an install itself.
+		// option labels so the harness recognizes and handles the answer.
 		lines.push(
-			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "${SKILL_INSTALL_OFFER_OPTION_PROJECT}", "${SKILL_INSTALL_OFFER_OPTION_USER}", "${SKILL_INSTALL_OFFER_OPTION_NOT_NOW}", "${SKILL_INSTALL_OFFER_OPTION_NEVER}". The harness handles the answer and any install; never install or load a skill yourself.`,
+			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "${SKILL_INSTALL_OFFER_OPTION_PROJECT}", "${SKILL_INSTALL_OFFER_OPTION_USER}", "${SKILL_INSTALL_OFFER_OPTION_NOT_NOW}", "${SKILL_INSTALL_OFFER_OPTION_NEVER}". The harness handles those exact offer options. An explicit operator request or approval also authorizes the documented library install CLI. After installation, refresh the inventory; distinguish installed from ready and report /library reload when required.`,
 		);
 	}
 	return lines.join("\n");
@@ -411,7 +424,7 @@ function withSkillsPointer(deps: ContextToolDeps, snap: WorkspaceSnapshot): Reco
 	if (installed === 0 && installable === 0) return { ...snap };
 	return {
 		...snap,
-		skills: `Skills: ${installed} available across Clio and compatibility roots (not a Clio installation count), ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill <name> to the operator; load only on operator request.`,
+		skills: `Skills: ${installed} available in Clio (ready workflows, not a marketplace installation count), ${installable} installable from the marketplace. If one matches this task, or the operator names a skill, list them with context(scope="skills") and suggest /skill <name> to the operator; load only on operator request.`,
 	};
 }
 
@@ -475,17 +488,26 @@ function runSkillsScope(
 		const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 		const visible = modelVisibleSkills(list.items);
 		const marketplace = marketplaceRowsFor(deps, list.items, options);
+		const packages =
+			deps.skillMarketplace === false || deps.getSkillLoaderOptions?.().disableDiscovery === true
+				? []
+				: installedSkillPackages(
+						list.items,
+						cwdFromDeps(deps),
+						deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
+					);
 		const rendered = renderSkillsList(
 			visible,
 			marketplace,
 			deps.skillMarketplace !== false,
 			options?.pendingSkillPolicy?.modelActivation === true,
+			packages,
 		);
 		// The catalog is bounded but not small: the whole listing must fit the
 		// per-call cap like any observation, and a cut list says so instead of
 		// silently dropping the marketplace tail.
 		const truncation = truncateHead(rendered, { maxBytes: reservation.callCapBytes, maxLines: Number.MAX_SAFE_INTEGER });
-		const total = visible.length + marketplace.length;
+		const total = visible.length + marketplace.length + packages.length;
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "entries",
@@ -495,7 +517,13 @@ function runSkillsScope(
 			totalCount: total,
 			truncated: truncation.truncated,
 			details: {
-				skills: visible.map((skill) => ({ name: skill.name, scope: skill.scope })),
+				skills: visible.map((skill) => ({
+					name: skill.name,
+					scope: skill.scope,
+					source: skill.source,
+					path: skill.filePath,
+				})),
+				installedPackages: packages,
 				marketplace: marketplace.map((entry) => ({
 					name: entry.name,
 					...(entry.category ? { category: entry.category } : {}),
@@ -514,15 +542,30 @@ function runSkillsScope(
 		visible.find((item) => item.name === name) ??
 		list.items.find((item) => item.name === name && operatorRequestedManualSkill(item, pendingRequest));
 	if (!skill) {
+		if (deps.skillMarketplace !== false && deps.getSkillLoaderOptions?.().disableDiscovery !== true) {
+			const installed = installedSkillPackages(
+				list.items,
+				cwdFromDeps(deps),
+				deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
+			).find((pkg) => pkg.names.includes(name));
+			if (installed && installed.state !== "ready")
+				return {
+					kind: "error",
+					message: `context: skill "${name}" is installed in ${installed.scope} scope but ${installed.state}. Inspect it in /library; do not reinstall it.`,
+				};
+		}
 		const unavailable = list.items.find((item) => item.name === name);
 		if (unavailable) {
 			return {
 				kind: "error",
 				message: unavailable.trusted
 					? `context: skill "${name}" requires explicit operator activation with /skill ${name}; it disables model invocation. Do not retry this load.`
-					: `context: skill "${name}" was discovered in an untrusted ${unavailable.source}/${unavailable.scope} source and cannot be activated. Open /library to inspect its source and trust or install a reviewed native package. Do not retry this load.`,
+					: unavailable.source === "plugin"
+						? `context: skill "${name}" is imported but untrusted. Review it in /library, then enable integrations.projectResources.trustProjectImports to use it. Do not retry this load.`
+						: `context: skill "${name}" is discovered in ${unavailable.source}/${unavailable.scope}, not imported into Clio. Use interop adopt or library import explicitly; the trust setting alone does not activate it. Do not retry this load.`,
 			};
 		}
+
 		// A marketplace entry is a skill that exists and is not installed. Saying
 		// "unknown skill" about it denies the operator a thing the listing just
 		// offered; name the state and the one move that changes it.

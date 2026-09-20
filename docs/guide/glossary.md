@@ -115,7 +115,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `ResourceSourceInfo` in `src/domains/resources/collision.ts`.
 
 ### 28. Trust Gate
-- **Definition**: A security boundary requiring explicit operator opt-in via `integrations.projectResources.trustProjectImports` before prompt templates or skills from project-scope foreign roots can execute or expand.
+- **Definition**: A security boundary requiring explicit operator opt-in via `integrations.projectResources.trustProjectImports` before explicitly imported foreign skills or prompt templates can be used at either scope. Loose compatibility roots remain discovery-only even when enabled.
 - **Owning Type**: `PromptTemplate` in `src/domains/resources/prompts/loader.ts`.
 
 ### 29. Fleet

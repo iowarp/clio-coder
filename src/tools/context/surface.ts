@@ -12,7 +12,7 @@ import type { ToolSurface } from "../lazy-tool.js";
 export const contextToolSurface = {
 	name: ToolNames.Context,
 	description:
-		"Environment context: scope=settings explains current effective settings, autonomy, configured limits, and exact UI commands without exposing credentials; scope=workspace returns the git/project snapshot, scope=skills lists installed and marketplace skills or loads an installed one by name, scope=recall returns an exact persisted evicted or summarized tool result by ref; omit ref to discover historical results by query with bounded limit/offset pages. Clio's documentation and the recipe catalog are gateway capabilities (clio_docs, clio_library). For repository code and the repo's generated wiki use code_nav (mode=wiki).",
+		"Environment context: scope=settings explains current effective settings, autonomy, configured limits, and exact UI commands without exposing credentials; scope=workspace returns the git/project snapshot, scope=skills lists ready skills, installed package states and marketplace options, or loads a ready skill by name, scope=recall returns an exact persisted evicted or summarized tool result by ref; omit ref to discover historical results by query with bounded limit/offset pages. Clio's documentation and the recipe catalog are gateway capabilities (clio_docs, clio_library). For repository code and the repo's generated wiki use code_nav (mode=wiki).",
 	parameters: Type.Object({
 		scope: StringEnum(["workspace", "settings", "skills", "recall"], { description: "Context source." }),
 		query: Type.Optional(

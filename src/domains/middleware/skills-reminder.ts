@@ -32,8 +32,8 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 		"Honor requests not to use tools. The following applies when beginning actual repository work: ";
 	const counts =
 		installable > 0
-			? `${installed} installed, ${installable} installable from the marketplace`
-			: `${installed} installed`;
+			? `${installed} available in Clio, ${installable} additional marketplace skills available to install`
+			: `${installed} available in Clio`;
 	// Inline and non-blocking (issue #184): a 27B model read "and wait for the
 	// operator" as the whole job, spent a 40-second turn deliberating over the
 	// suggestion, and ended without one repository read. The suggestion is one
@@ -45,7 +45,7 @@ export function skillsReminderMessage(installed: number, installable = 0, modelA
 		return (
 			`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
 			'and checking for a match; if one matches, load it with context(scope="skills", name="<name>") and ' +
-			"continue the task in the same turn. A marketplace skill is not installed and is offered for install " +
+			"continue the task in the same turn. Discovery in another agent’s folders does not mean installed in Clio. Marketplace additions are offered for install " +
 			"when the operator runs it. If none match, do not mention skills and continue with the task."
 		);
 	}

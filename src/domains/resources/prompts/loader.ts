@@ -26,7 +26,7 @@ export interface PromptTemplate {
 	content: string;
 	filePath: string;
 	sourceInfo: ResourceSourceInfo;
-	/** False for a project compatibility root until the operator opts in; such a template refuses to expand. */
+	/** False for loose compatibility roots and untrusted imported packages; expansion is refused. */
 	trusted: boolean;
 	/**
 	 * Why this template cannot be expanded, when a load-time failure left it
@@ -104,8 +104,8 @@ export type PromptTemplateExpansion =
 /**
  * Clio's own prompt roots plus the command and prompt directories the other
  * agents on the machine own. A foreign prompt is text substituted into a
- * message the operator typed, so a project-scope one stays untrusted behind the
- * same opt-in a project-scope foreign skill needs.
+ * message the operator typed. Loose foreign roots remain discovery-only;
+ * explicitly imported foreign packages share the skills trust gate.
  */
 function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): PromptTemplateRoot[] {
 	const cwd = input.cwd ?? process.cwd();
@@ -119,7 +119,7 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 				scope: "user",
 				source: `${kind.id}-user`,
 				precedence: COMPAT_RESOURCE_PRECEDENCE.userCompat,
-				trusted: true,
+				trusted: false,
 			});
 		}
 		if (kind.projectPromptRoot !== undefined) {
@@ -128,7 +128,7 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 				scope: "project",
 				source: `${kind.id}-project`,
 				precedence: COMPAT_RESOURCE_PRECEDENCE.projectCompat,
-				trusted: trustProject,
+				trusted: false,
 			});
 		}
 	}
@@ -365,7 +365,17 @@ export function loadPromptTemplates(input: LoadPromptTemplatesInput = {}): Promp
 	const roots = input.roots ?? defaultPromptTemplateRoots(input);
 	const diagnostics: ResourceDiagnostic[] = [];
 	const candidates = roots.flatMap((root) => loadPromptRoot(root, diagnostics));
-	const resolved = resolveResourceCollisions(candidates);
+	// Discovery-only foreign files cannot shadow an admitted Clio prompt.
+	const resolved = resolveResourceCollisions(
+		candidates,
+		(template) =>
+			Number(template.trusted) * 2 +
+			Number(
+				template.sourceInfo.scope === "package" ||
+					template.sourceInfo.source === "config" ||
+					template.sourceInfo.source === "project",
+			),
+	);
 	const items: PromptTemplate[] = [];
 	for (const template of resolved.winners) {
 		if (input.reservedNames?.has(template.name) === true) {
@@ -418,7 +428,10 @@ export function expandPromptTemplateInput(input: string, templates: PromptTempla
 		};
 	}
 	if (!template.trusted) {
-		const message = `prompt template ${template.name} comes from an untrusted project root; set integrations.projectResources.trustProjectImports to use it`;
+		const message =
+			template.sourceInfo.scope === "package"
+				? `prompt template ${template.name} is imported but untrusted; review it and enable integrations.projectResources.trustProjectImports to use it`
+				: `prompt template ${template.name} is discovered from another agent; explicitly import it into Clio with interop adopt or library import before use. The trust setting does not import loose files`;
 		return {
 			expanded: false,
 			text: input,

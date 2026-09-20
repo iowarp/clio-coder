@@ -381,9 +381,8 @@ not own checks the loaded prompt templates across native and foreign prompt root
 Built-in command names are reserved across interactive and headless modes; a
 template with the same basename is omitted from `/prompts` with a collision
 diagnostic instead of shadowing a command on one surface and expanding on another.
-If a matching template is found in an untrusted project root, Clio prints that the
-prompt template comes from an untrusted project root and directs the operator to set
-`integrations.projectResources.trustProjectImports`, sending nothing to the model. If the token names
+If a matching template is discovered in another agent's folder, Clio directs the operator to explicitly import it first. Imported foreign templates additionally require
+`integrations.projectResources.trustProjectImports`; blocked templates send nothing to the model. If the token names
 neither a command nor a template, it reports `is not a command` and points at `/help`;
 it is never sent to the model. That covers spellings removed outright, such as
 `/status` and `/receipts`, as well as ordinary typos. It replaces the earlier

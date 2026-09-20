@@ -42,7 +42,7 @@ When inspecting skills discovered across native and foreign compatibility roots,
 1. **Trust-first collision resolution**: `compareSkillCandidates` compares **trusted status first** (`Number(a.trusted) - Number(b.trusted)`), then precedence level, then registry agent order (`interopSourceRank`), and finally file path. This ordering governs both canonical-file deduplication (`dedupeCanonicalSkillPaths`) and same-name collision resolution (`resolveSkillCollisions`). Crucially, trust-first ordering prevents an untrusted project compatibility copy (such as an unvetted `.claude/skills/my-skill` or `.agents/skills/my-skill`) from winning a collision against an admitted native library skill and then disappearing at model visibility time. The trusted native skill wins and remains active.
 2. **Canonical file deduplication**: If multiple scanned roots resolve to the exact same canonical `SKILL.md` path on disk (via symlinks), `dedupeCanonicalSkillPaths` sorts candidates with `compareSkillCandidates` and retains only the winning candidate, logging a diagnostic for the shadowed path.
 3. **Model visibility**: Only admitted skills passing `modelVisibleSkills` (`skill.trusted && !skill.disableModelInvocation`) are visible in `context(scope="skills")` or eligible for model invocation. Setting `disable-model-invocation: true` in skill YAML frontmatter keeps the skill in the catalog for manual operator slash command usage while withholding it from model context.
-4. **Foreign package trust vs unmanaged roots**: Foreign installed packages (carrying `origin: "import"` or `"interop"` and `trust: "foreign"`) are not automatically admitted just because they are installed at user scope. In `defaultSkillRoots`, plugin roots receive `trusted: root.trust !== "foreign" || trustProjectCompatRoots` regardless of install scope; the `integrations.projectResources.trustProjectImports` (`skills.trustProjectCompatRoots`) setting serves as the explicit trust gate for foreign package skills. Conversely, unmanaged user-scoped compatibility roots (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`) have native user trust, while unmanaged project-scoped compatibility roots (`.claude/skills`, `.agents/skills`) remain untrusted until that setting is enabled.
+4. **Foreign package trust vs unmanaged roots**: Skills and prompts discovered in other agents' user or project folders are inactive until explicitly imported into Clio. Imported foreign packages retain `trust: "foreign"` at either scope and additionally require `integrations.projectResources.trustProjectImports` (legacy control id `skills.trustProjectCompatRoots`). Enabling trust never imports or activates loose compatibility files.
 5. **Project-package shadowing**: Shadowing and disabling of entire packages operates through the managed package lifecycle (`state.json`), where a project-scoped package installation can shadow and disable an underlying user-scoped package of the same ID, rather than through an arbitrary filesystem switch on unmanaged files.
 
 ---
@@ -98,14 +98,7 @@ Submitting `/pkg:help` renders the template locally as an operator card in the t
 
 ### Foreign prompt roots
 
-A Claude Code slash command in `.claude/commands`, a Codex prompt in `.codex/prompts`, and an OpenCode command in `.opencode/command` are prompt templates Clio reads directly, at both user and project scope. A foreign prompt is text substituted into a message the operator typed, so it keeps the untrusted-by-project default that skills have and never gains an execution grant of its own.
-
-User-scope foreign prompts are trusted because they came from the operator's
-machine. A project-scope prompt lists in `/prompts` with an
-`untrusted` marker and refuses substitution until
-`integrations.projectResources.trustProjectImports: true` opts in. An untrusted
-template sends nothing to the model. A token naming neither a command nor a
-template reports `is not a command`.
+Claude, Codex, and OpenCode prompt folders are discovered at user and project scope, but their loose templates cannot expand. Explicitly adopt them with `clio-coder interop adopt <host>` or import a package with `clio-coder library import <path>`. Imported foreign prompts additionally require `integrations.projectResources.trustProjectImports: true`. Clio's own prompt roots remain usable. Discovery-only templates cannot shadow a trusted Clio template and send nothing to the model.
 
 ---
 
@@ -157,11 +150,7 @@ Recognized frontmatter fields:
 
 ### Trust and compatibility roots
 
-Shared user roots are model-visible by default, like the Clio user root. Project-local compatibility roots are discovered but **untrusted by default**: they appear in `/skill` with an `untrusted` marker, but they are excluded from the model-visible catalog and cannot be loaded through `context`. This prevents an unreviewed project checkout from injecting skills the model will act on.
-
-Opt in to model-visible project compatibility roots by setting `integrations.projectResources.trustProjectImports: true` in `settings.yaml`. `.clio-coder/skills` is always trusted as the Clio-native project root.
-
-### Loading with context and skill authoring
+Shared and other-agent user/project roots are discovery-only. Explicitly import the desired resources into Clio; then review and enable `integrations.projectResources.trustProjectImports` to use imported foreign packages. This setting applies to imported packages at either scope, despite its historical name. It never activates loose `.claude`, `.agents`, `.codex`, or other compatibility roots. Clio-native roots and trusted marketplace packages remain usable.
 
 `context(scope="skills")` lists model-visible skills when called with no `name`, or loads a pending skill body by `name`. It returns structured metadata (`name`, `description`, `path`, `base_dir`, `hash`, `source`, `scope`, `disable_model_invocation`, parsed tool policy fields, diagnostics, and frontmatter metadata) plus the body. Pass `include_tree: true` to list sibling files under the skill base directory, capped internally at 50 entries. The skills scope never executes bundled scripts and only resolves skills the model is allowed to see.
 

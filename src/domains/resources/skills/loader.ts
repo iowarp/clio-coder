@@ -11,6 +11,7 @@ import { enabledPluginResourceRoots, pluginBaseDir } from "../../plugins/index.j
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
+import { installedSkillNames } from "./availability.js";
 import { normalizedSkillHash } from "./content-hash.js";
 import { getMarketplaceSkills } from "./marketplace.js";
 
@@ -163,7 +164,7 @@ export interface LoadSkillsInput {
 	home?: string;
 	/** Override the Clio config dir used for the user skill root (testing). */
 	configDir?: string;
-	/** Opt in to model-visible project compatibility roots (.agents/.codex). */
+	/** Trust explicitly imported foreign packages; never activates loose compatibility roots. */
 	trustProjectCompatRoots?: boolean;
 	/** Disable normal root discovery. Explicit skill paths still load. */
 	disableDiscovery?: boolean;
@@ -215,9 +216,8 @@ function defaultPrecedenceForScope(scope: ResourceScope): number {
 }
 
 /**
- * Whether project-scope compatibility roots are model-visible. Prompts share
- * this gate with skills: both substitute another agent's project file into
- * Clio's context, so one opt-in covers both.
+ * Whether explicitly imported foreign packages may provide skills/prompts.
+ * Loose compatibility roots remain discovery-only, at every scope.
  */
 export function projectCompatTrusted(explicit?: boolean): boolean {
 	return explicit === true;
@@ -226,9 +226,9 @@ export function projectCompatTrusted(explicit?: boolean): boolean {
 /**
  * Discovery roots, lowest to highest precedence:
  *  1. plugin skills
- *  2. shared user compat roots, one per interop agent kind that owns a skills directory
+ *  2. discovery-only user compat roots, one per interop agent kind
  *  3. Clio user root (<config>/skills)
- *  4. the same agents' project roots, trusted only on opt-in
+ *  4. the same agents' project roots, also discovery-only
  *  5. Clio project root (.clio-coder/skills)
  *
  * The compatibility roots come from the interop registry rather than a list
@@ -264,7 +264,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			source: kind.skillSource,
 			origin: `${kind.skillSource}-user`,
 			precedence: SKILL_PRECEDENCE.userCompat,
-			trusted: true,
+			trusted: false,
 			containment: home,
 		});
 	}
@@ -289,7 +289,7 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 			source: kind.skillSource,
 			origin: `${kind.skillSource}-project`,
 			precedence: SKILL_PRECEDENCE.projectCompat,
-			trusted: trustProject,
+			trusted: false,
 			containment: cwd,
 		});
 	}
@@ -845,6 +845,11 @@ function loadExplicitSkillPath(
 function compareSkillCandidates(a: Skill, b: Skill): number {
 	const trust = Number(a.trusted) - Number(b.trusted);
 	if (trust !== 0) return trust;
+	// An imported copy awaiting trust still owns its name over a loose discovery.
+	const owned = (skill: Skill) =>
+		skill.source === "plugin" || skill.source === "clio-coder" || skill.source === "cli" || skill.source === "path";
+	const ownership = Number(owned(a)) - Number(owned(b));
+	if (ownership !== 0) return ownership;
 	const precedence = a.precedence - b.precedence;
 	if (precedence !== 0) return precedence;
 	const rank = interopSourceRank(b.source) - interopSourceRank(a.source);
@@ -1051,7 +1056,9 @@ export function parsePendingSkillRequests(
 	if (command) {
 		const name = command.name;
 		const args = command.args;
-		const installedSkill = skills.items.find((entry) => entry.name === name);
+		const installedSkill = skills.items.find(
+			(entry) => entry.name === name && (entry.trusted || entry.source === "plugin" || entry.source === "clio-coder"),
+		);
 		if (installedSkill) {
 			return {
 				text: args,
@@ -1065,6 +1072,10 @@ export function parsePendingSkillRequests(
 					},
 				],
 			};
+		}
+		// A package installed by another process can still await session reload.
+		if (installedSkillNames(skills.items, options.cwd ?? process.cwd()).has(name)) {
+			return { text: args, pendingSkillRequests: [{ name, args, source: "slash-command", installed: true }] };
 		}
 		// Check the local marketplace/discovery contract. Empty means unavailable/offline.
 		const marketplaceSkill = getMarketplaceSkills(options.cwd ? { cwd: options.cwd } : {}).find((s) => s.name === name);
