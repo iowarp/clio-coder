@@ -39,7 +39,11 @@
 		"src/domains/extensions/runtime-child.mjs",
 		"src/domains/extensions/public-api.ts",
 		"examples/extensions/lab-status/clio-coder-extension.json",
-		"examples/extensions/measurements/clio-coder-extension.json"
+		"examples/extensions/measurements/clio-coder-extension.json",
+		"examples/extensions/README.md",
+		"examples/extensions/lab-status/extension.mjs",
+		"examples/extensions/lab-status/jobs.synthetic.json",
+		"examples/extensions/measurements/summarize.cjs"
 	],
 	"requiredPrefixes": [
 		"dist/assets/grammars/",

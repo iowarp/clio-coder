@@ -1,6 +1,50 @@
 # Reference evals
 
-These suites exercise Clio's one evaluation engine from a source checkout: run the deterministic built-in authority corpus with `node dist/cli/index.js eval run --suite evals/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js`, or select a configured model target for `behavioral-model.yaml`, `behavioral-model-negative-control.yaml`, and `tracked-metrics-baseline.yaml`. The npm archive keeps these inputs for inspection and reproducibility, but the deterministic TypeScript driver uses the repository development toolchain. The graders and fixtures beside the suites are versioned inputs; `behavioral-machinery-baseline.json` is retained as reference evidence, not as a release gate.
+These are maintained, source-checkout inputs for Clio's production evaluation
+engine. They are excluded from the npm package. Results, temporary workspaces
+and local campaigns belong outside this directory.
+
+## One engine, three kinds of inputs
+
+| Inputs | What they measure | Execution |
+| --- | --- | --- |
+| `behavioral-machinery.yaml` | Production dispatch admission, prompt compilation, result contracts and receipt sealing with scripted workers | Offline, model-free; shared `tests/harness` isolation and dispatch fixtures |
+| `behavioral-model.yaml`, negative control, `tool-surface-model.yaml` | Observed model behavior through the real Clio runner and event stream | Explicit model requests; pass your configured `--target` and optional `--model` |
+| `tool-bench/` | Production tool registry execution, behavior digests and resource measurements | Offline; default correctness in contract tests, large profiles explicitly invoked |
+| `tracked-metrics-baseline.yaml` | Ten coding tasks against a fixed historical source revision | Explicit model requests; Git clone and pnpm dependency setup per fresh workspace |
+| `scalar-decision-machinery.ts` and its Python grader | Decision/commit attribution with a NumPy scalar fixture | Optional offline integration run with an existing Python + NumPy interpreter |
+
+`src/domains/eval` owns suite validation, workspace preparation, runners,
+protected grader files, metrics, artifacts and comparisons. Drivers here only
+prepare scenarios and assert task-specific outcomes. The behavioral driver uses
+the shared test harness instead of maintaining a second dispatch environment;
+that harness delegates prompt compilation to the production prompts domain.
+The tool benchmark likewise calls the production registry, not a copied tool.
+
+Run `pnpm evals:check` to validate all suites without running commands or models.
+It is included in lint. `pnpm typecheck` explicitly includes these drivers.
+
+```sh
+node dist/cli/index.js eval run --suite evals/behavioral-machinery.yaml --clio-coder-entry dist/cli/index.js
+node dist/cli/index.js eval run --suite evals/behavioral-model.yaml --target YOUR_TARGET --clio-coder-entry dist/cli/index.js
+node --import tsx evals/scalar-decision-machinery.ts /path/to/python-with-numpy
+```
+
+The tracked-metrics suite pins commit
+`3ae1ea3a8279472f8585e424d6daca254698e85c` of this repository. Its source and grader
+come from that revision; there is no second current copy of the historical grader.
+It uses the engine's Git workspace and `protectedFiles` support, replacing the
+old shell checksum guards. Dependency setup disables lifecycle scripts and
+requires Git, pnpm and network access; it can be substantially slower than local
+suites. The candidate Clio binary is selected with `--clio-coder-entry` and does
+not come from the historical checkout. Updating the source pin changes the
+benchmark and must be reviewed as a corpus change.
+
+The former `behavioral-machinery-baseline.json` was historical output, not a gate.
+It is available in Git history. Generate fresh results through `clio-coder eval`
+and keep them in its state/evidence directories or an explicitly selected output
+location. Fixtures and graders remain versioned inputs; synthetic safety decoys
+are labeled as such.
 
 The single-system boundary is the engine under `src/domains/eval`: suites, verdict validation, artifact envelopes, comparison, and reporting belong there, while `evals/` contains source-checkout reference inputs and deterministic drivers. In v0.5.0, external-benchmark adapters such as SWE-bench and Terminal-Bench should translate their cases and grader observations into this engine's suite, execution, and verdict contracts, then consume its artifacts and comparison reports instead of adding a parallel harness.
 

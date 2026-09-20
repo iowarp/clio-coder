@@ -296,7 +296,7 @@ function main(): void {
 	const snapshotPath = join(root, "docs", "pi-surface.json");
 	const { snapshot: current, imports } = buildPiSurfaceSnapshot(root);
 	if (process.argv.includes("--write")) {
-		writeFileSync(snapshotPath, `${JSON.stringify(current, null, 2)}\n`, "utf8");
+		writeFileSync(snapshotPath, `${JSON.stringify(current, null, "\t")}\n`, "utf8");
 		process.stdout.write(`pi-surface: wrote ${relative(root, snapshotPath)}\n`);
 		return;
 	}

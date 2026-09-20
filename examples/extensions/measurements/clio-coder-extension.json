@@ -3,7 +3,7 @@
 	"name": "Measurement summary",
 	"version": "1.0.0",
 	"description": "Count, mean, min, max and sample standard deviation of supplied finite measurements.",
-	"compatibility": { "clio": ">=0.4.7" },
+	"compatibility": { "clio": ">=0.5.0" },
 	"capabilities": {
 		"tools": [
 			{

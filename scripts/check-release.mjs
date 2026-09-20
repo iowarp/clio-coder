@@ -49,6 +49,10 @@ const MAX_TARBALL_BYTES = 12_000_000;
 const MAX_UNPACKED_BYTES = 55_000_000;
 
 const FORBIDDEN = [
+	{
+		test: (f) => f.startsWith("evals/") || f.startsWith("patches/"),
+		reason: "checkout-only evaluation and dependency maintenance inputs",
+	},
 	{ test: (f) => f.startsWith("docs/html/"), reason: "retired HTML documentation" },
 	{
 		test: (f) => f.includes("__pycache__") || f.endsWith(".pyc"),

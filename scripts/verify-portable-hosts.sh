@@ -12,7 +12,7 @@
 #
 # The log lands in the given directory, or under TMPDIR when none is named.
 #
-# This is evidence, not a unit test. `tests/contracts/library-portability.test.ts`
+# This is evidence, not a unit test. `tests/extended/library-portability.test.ts`
 # holds the checks that must pass without a host binary present.
 
 set -uo pipefail

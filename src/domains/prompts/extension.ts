@@ -267,10 +267,7 @@ export interface CustomizationFragmentsResult {
  * `operatorProfileApplied` off the result rather than re-deriving them, so the
  * receipt can never disagree with what actually rendered.
  */
-export function customizationFragments(
-	cwd: string,
-	workingContextPaths: ReadonlyArray<string>,
-): CustomizationFragmentsResult {
+function customizationFragments(cwd: string, workingContextPaths: ReadonlyArray<string>): CustomizationFragmentsResult {
 	return renderCustomizationFragments(captureCustomizationSources(cwd), cwd, workingContextPaths);
 }
 

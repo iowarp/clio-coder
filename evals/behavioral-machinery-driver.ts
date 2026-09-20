@@ -1,5 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentRecipe } from "../src/domains/agents/recipe.js";
@@ -7,13 +7,8 @@ import { requestExecutionRole } from "../src/domains/dispatch/execution-role.js"
 import { verifyReceiptIntegrity } from "../src/domains/dispatch/receipt-integrity.js";
 import type { SpawnedWorker } from "../src/domains/dispatch/worker-spawn.js";
 import type { WorkerSpec } from "../src/worker/spec-contract.js";
-import {
-	dispatchStubContext,
-	isolateDispatchState,
-	makeDispatchBundle,
-	restoreDispatchState,
-	scriptedGateFabric,
-} from "./behavioral-machinery-support.js";
+import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../tests/harness/dispatch.js";
+import { dispatchStubContext } from "../tests/harness/dispatch-stub-context.js";
 
 const [role, polarity] = process.argv.slice(2);
 if (role === undefined || (polarity !== "positive" && polarity !== "adversarial")) {
@@ -247,4 +242,36 @@ function positiveOutput(recipe: AgentRecipe): { text: string; writtenPath?: stri
 		default:
 			throw new Error(`unsupported shipped result contract: ${recipe.resultContract.kind}`);
 	}
+}
+
+/** Script one worker result at the worker boundary; all admission and sealing stays in production. */
+function scriptedGateFabric(script: { builderText: string; builderWritesFile?: string }): {
+	spawn: (spec: WorkerSpec, options?: { cwd?: string }) => SpawnedWorker;
+} {
+	let nextPid = 300;
+	return {
+		spawn(_spec, options) {
+			if (script.builderWritesFile !== undefined && options?.cwd !== undefined) {
+				writeFileSync(join(options.cwd, script.builderWritesFile), `work in ${options.cwd}\n`);
+			}
+			const events = (async function* () {
+				yield {
+					type: "message_end",
+					message: {
+						role: "assistant",
+						content: script.builderText,
+						usage: { input: 1, output: 1 },
+					},
+				};
+			})();
+			nextPid += 1;
+			return {
+				pid: nextPid,
+				promise: Promise.resolve({ exitCode: 0, signal: null }),
+				events,
+				abort: () => {},
+				heartbeatAt: { current: Date.now() },
+			};
+		},
+	};
 }

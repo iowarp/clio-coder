@@ -314,8 +314,7 @@ mutable external dataset:
   dispatch through the production gate, runs a scripted worker, and verifies
   the sealed receipt and result-contract outcome. The 26 scenarios require no
   model; they do not infer behavior by grepping recipe frontmatter.
-- `behavioral-model.yaml` provides four isolated main-agent scenarios on the
-  `mini` target: a focused edit, adversarial scope control, required
+- `behavioral-model.yaml` provides nine isolated model scenarios, including: a focused edit, adversarial scope control, required
   delegation, and recovery after Bash is denied. Together they cover all eight
   behavioral categories with per-tool call and blocked-call counts, distinct
   and allowlisted read-path counts, declared decoy hits, and grader-emitted
@@ -326,9 +325,9 @@ mutable external dataset:
   that the rules can reject observed model behavior rather than merely restate
   aggregate success counters.
 
-These are source-checkout workflows: the npm archive keeps the inputs for
-inspection and reproducibility, but the deterministic TypeScript driver uses
-the repository development toolchain. Build once, then run either focused
+These are source-checkout workflows and are excluded from the npm archive.
+The deterministic driver uses the shared test harness and repository development
+toolchain; the production evaluation engine remains part of the installed CLI. Build once, then run either focused
 suite from the repository root:
 
 ```sh
@@ -464,15 +463,15 @@ metric means and variances. When the prompt or recipe identity changes, the
 generated evidence names each affected corpus scenario and role instead of
 hiding it behind an aggregate score.
 
-### Reference behavioral baseline
+### Behavioral results
 
-`evals/behavioral-machinery-baseline.json` is retained as reviewable reference
-evidence for the machinery corpus. It is not a CI or release gate. Run the
-current `evals/behavioral-machinery.yaml` through the built CLI when a prompt,
-recipe, policy, or expected-behavior change needs a fresh measurement, inspect
-the named scenario evidence, and update any retained baseline deliberately in
-the reviewed change. Model-required and negative-control suites remain manual
-measurements tied to their exact target and serving configuration.
+Generate current measurements with `evals/behavioral-machinery.yaml` when a
+prompt, recipe, policy or expected behavior changes. Inspect named scenario
+evidence and retain results outside the source tree. The former checked-in
+baseline was historical output rather than a release gate and remains in Git
+history. Live model and negative-control suites are explicit measurements tied
+to the selected target and serving configuration. See `evals/README.md` for
+suite prerequisites, including the fixed-source tracked-metrics campaign.
 
 ### Hard thresholds and informational budgets
 
