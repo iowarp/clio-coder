@@ -1,5 +1,7 @@
 # CLI surface inventory and GUI routing
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 The promise this table makes, verbatim: *"Every currently registered user or harness command is accounted for here. 'No core GUI' means the capability is not forgotten; it is routed to a later bounded surface or an upstream interface request."*
 
 Keep that promise. When a command family is added to `src/cli/index.ts`, add a row here.

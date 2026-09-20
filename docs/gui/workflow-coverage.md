@@ -1,5 +1,7 @@
 # Harness → GUI human workflow coverage
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 Extracted from `apps/workbench/HARNESS_COVERAGE.md`. Original audit anchor: immutable harness commit `8874a3ff`, the 2026-08-29 `v0.3.9` sprint snapshot, GUI protocol version 4. The audit read Clio Coder's CLI registry, default settings schema, change classifier, ACP server, canonical event bus, and the GUI host/renderer protocol, and made no changes under root `src/`.
 
 The framing, verbatim: *"It is deliberately stricter than a feature wish list: every row names the authoritative public boundary that exists today, the UI coverage that actually exists, and the boundary that must be added before a truthful control or visualization can exist."*

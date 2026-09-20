@@ -1,5 +1,7 @@
 # Inspector presentation atlas
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 What each of the retired workbench's thirteen inspectors showed, in what order, and
 which route in `apps/clio-coder-gui` now carries the same data. The data is
 reproduced; the presentation decisions recorded here are what the new GUI still owes.

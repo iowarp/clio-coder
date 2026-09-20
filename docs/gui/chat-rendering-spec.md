@@ -1,5 +1,7 @@
 # Chat rendering specification
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 The blueprint for the conversation view and the thirteen domain inspectors. It was
 recovered from `apps/workbench` before that application was deleted and re-verified
 against the current `contracts/` and `src/`, so every quoted path, line number and

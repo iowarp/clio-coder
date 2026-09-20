@@ -1,5 +1,7 @@
 # GUI parity matrix — part 3: runtime domain roster and implementation plan
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 ## A. Runtime domain roster (18 rows)
 
 One row per directory under `src/domains/`. Verified: all 18 named directories still exist, plus `eval`, `evidence`, `evolution`, `gateway`, `plugins`, `user-tasks` which the audit has no rows for.

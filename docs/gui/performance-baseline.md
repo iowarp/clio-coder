@@ -1,5 +1,7 @@
 # GUI performance baseline and v0.5.0 regression budgets
 
+> **Reference Design & Planning Blueprint**: This document is an architectural reference blueprint recovered from the deleted `apps/workbench` prototype. It specifies design doctrine, target parity, and inspection layouts for the early GUI preview (`apps/clio-coder-gui`), not verified runtime features of the core v0.5.0 terminal engine.
+
 The tables below are the only measured rendering evidence this repository holds. They
 were recorded against the retired Deno/Preact workbench, not against
 `apps/clio-coder-gui`, so they are a starting budget rather than a current reading.
