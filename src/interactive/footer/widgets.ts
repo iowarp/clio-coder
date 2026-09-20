@@ -243,9 +243,9 @@ function collapseRemote(remote: string | null): string | null {
 }
 
 /**
- * Compact primary row: workspace identity on the left and a meaningful work
- * phase on the right. The editor rail owns model and thinking labels. The
- * branch appears here, and only here, across the whole screen.
+ * Workspace/status row helper: workspace identity on the left and a meaningful
+ * work phase on the right. The active compact dashboard layout is composed in
+ * dashboard.ts, including its separate route and thinking labels.
  */
 export function compactPrimaryLine(
 	workspace: WorkspaceFacts,

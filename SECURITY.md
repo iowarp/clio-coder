@@ -1,14 +1,12 @@
 # Security Policy
 
-Clio Coder is alpha software. Until the project reaches a stable release,
-only the latest tagged alpha minor version receives security fixes.
+Clio Coder is pre-1.0 software. Security maintenance follows the current
+release line; users should update to its latest patch.
 
-| Version | Supported          |
-| ------- | ------------------ |
-| `0.4.x` | Latest alpha patch |
-| `0.3.x` | No                 |
-| `0.2.x` | No                 |
-| `< 0.2` | No                 |
+| Version | Support |
+| --- | --- |
+| `0.5.x` | Current release line |
+| `< 0.5` | Superseded development releases; update to the current line |
 
 ## Reporting a Vulnerability
 
@@ -46,6 +44,8 @@ In scope:
 
 - The `clio-coder` CLI and its subcommands.
 - The interactive TUI session and slash-command surface.
+- The bundled browser app and documentation server, including authentication,
+  origin checks, session access, and background-service lifecycle.
 - Credential storage and leakage.
 - Shell execution safety, the damage-control rule pack, and project safety
   policy enforcement.
@@ -57,8 +57,9 @@ In scope:
 
 Out of scope:
 
-- Vulnerabilities in upstream dependencies that already have a public CVE and
-  are tracked through dependency updates.
+- Issues confined to an upstream project with no demonstrated impact on Clio.
+  Report exploitable shipped-dependency or integration problems to us even if
+  an upstream advisory already exists.
 - Local attacks that require an attacker who already has read or write access
   to the user's home directory.
 - Bugs in third-party model providers or local model runtimes; report those
@@ -68,6 +69,8 @@ Out of scope:
 ## Responsible Use
 
 Clio Coder writes to the local filesystem, dispatches workers, and can reach
-external model APIs when configured to. Run it inside a repository you own
+external model APIs when configured to. Its admission policy is not a general
+operating-system sandbox. The browser app runs a local server; keep its private
+launch links and credentials private. Run Clio inside a repository you own
 and review privileged actions before approving them. Do not paste API keys,
 private source, or proprietary prompts into public issues or pull requests.

@@ -19,3 +19,13 @@ Unacceptable behavior:
 
 The maintainer may edit, lock, close, hide, or ban activity that violates these
 rules.
+
+## Reporting and enforcement
+
+Report conduct concerns privately to `a.kougkas@gmail.com`. Include enough
+context to assess the incident, and avoid sharing unrelated private material.
+Security vulnerabilities use the separate process in [SECURITY.md](SECURITY.md).
+
+These expectations apply to the project's issues, pull requests, discussions,
+and other project-managed collaboration spaces. Maintainers should explain
+moderation decisions where appropriate and handle reports respectfully.

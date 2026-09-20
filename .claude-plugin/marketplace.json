@@ -2,7 +2,7 @@
 	"name": "clio-coder",
 	"owner": {
 		"name": "IOWarp",
-		"url": "https://iowarp.ai"
+		"url": "https://github.com/iowarp/clio-coder#readme"
 	},
 	"description": "The Clio Coder resource library: curated skills for planning, research, git and scientific software work, plus the Materio materials-research bundle.",
 	"plugins": [

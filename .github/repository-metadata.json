@@ -1,6 +1,6 @@
 {
-	"description": "Coding agent for HPC and scientific-software developers, part of IOWarp's CLIO ecosystem of agentic science.",
-	"homepage": "https://iowarp.ai",
+	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
+	"homepage": "https://github.com/iowarp/clio-coder#readme",
 	"topics": [
 		"ai",
 		"agentic-ai",

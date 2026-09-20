@@ -1,7 +1,7 @@
 {
 	"name": "@iowarp/clio-coder",
 	"version": "0.5.0",
-	"description": "The terminal coding agent for people who maintain the code that science runs on, with user-chosen models and inspectable evidence.",
+	"description": "An open-source terminal coding agent for scientific software: your models, bounded workers, and inspectable evidence.",
 	"keywords": [
 		"ai",
 		"agentic-ai",
@@ -12,6 +12,7 @@
 		"terminal",
 		"developer-tools",
 		"llm",
+		"local-llm",
 		"agents",
 		"model-targets",
 		"multi-agent",
@@ -30,7 +31,7 @@
 		"IOWarp <https://iowarp.ai>",
 		"Gnosis Research Center <https://grc.iit.edu/>"
 	],
-	"homepage": "https://iowarp.ai",
+	"homepage": "https://github.com/iowarp/clio-coder#readme",
 	"bugs": "https://github.com/iowarp/clio-coder/issues",
 	"repository": {
 		"type": "git",
@@ -59,6 +60,7 @@
 		"docs/**/*.md",
 		"README.md",
 		"CHANGELOG.md",
+		"ROADMAP.md",
 		"CONTRIBUTING.md",
 		"SECURITY.md",
 		"CODE_OF_CONDUCT.md",

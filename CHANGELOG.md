@@ -2,7 +2,30 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
-## 0.5.0 - 2026-09-18
+## 0.5.0 - 2026-09-20
+
+### public launch and documentation
+
+- Prepare the v0.5.0 public launch with a shorter product README, current contributor and security guidance, a roadmap that separates plans from shipped behavior, and consistent package/repository metadata. Earlier changelog entries record development history; their settings and commands are not a substitute for the current reference.
+- Update and review the shipped Markdown against the implementation, with browser documentation rendered from the same versioned files. Keep the terminal as the primary coding interface and identify the wider graphical app as an early preview.
+
+### engine, prompts, and long sessions
+
+- Upgrade Pi agent, AI, and TUI packages to 0.86.1. Preserve the native system-message transcript through replay, continuation, compaction, prewarming, and worker requests; adapt custom transports at the engine boundary. Keep only the documented TUI compatibility patch.
+- Compose prompts from a stable identity/constitutional prefix, conditional capability and role guidance, and changing context/scope layers. Shared typed turn constraints inform both admission and prompt guidance; ordinary English is not treated as an authorization parser. Record prompt layout version 3 while retaining older manifest readability.
+- Count ready skills through an invalidation-aware snapshot and suppress empty skill reminders, including their unnecessary marketplace lookup.
+- Let empty error/abort responses reach lifecycle observers. Run detached task-memory work at settled native tool-batch boundaries, deliver completed reminders as context updates, and retain context-budget and compaction checks. Abort cancels pending work and suppresses late reminders without discarding completed memory or late usage accounting.
+- Keep internal dispatch-plan fields out of public memory descriptions while retaining exact call fingerprints and result provenance.
+- Measure generation throughput across assistant generation spans instead of including tool, approval, and worker waits. Show tool-call preparation and retain per-call first-token timing.
+- Clarify fork identities and tool-only message previews, show operator text in the session tree, and describe cache-affecting events separately from actual backend cache reuse.
+- Recover a narrowly identified pre-output LiteLLM connection failure through the visible same-route retry path, without hiding SDK retries, changing routes, or retrying a partial answer.
+
+### command admission and context controls
+
+- Preserve upstream command failure in shell pipelines with Bash `pipefail`; explicit `set +o pipefail` retains intentional last-stage semantics. Track working-directory changes through command chains, and preserve repository-script safety checks through redirected compound commands.
+- Scope worker approval reuse to the same run, exact arguments, approval axis, action class, and policy identity; preserve timeout-denial attribution and explain approval reuse accurately. Deny skips the displayed invocation; Stop ends the turn.
+- Wire the existing context-init options into slash parsing and completion, including preview and offline heuristic generation. Route init, refresh, and reset output through the TUI instead of raw terminal output; preview preserves initialization hints and writes no files.
+- Fit context legend values to the actual overlay width and reflow them on terminal resize.
 
 ### graphical application
 

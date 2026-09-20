@@ -210,6 +210,7 @@ test("a malformed CLIO-CODER.md points at the read-only view, never at a regener
 test("missing project context is guidance that keeps the invitation to work", () => {
 	const lines = rows(banner({ clioMd: "none" }), 80);
 	strictEqual(lines[13]?.trim(), "describe a task · /context init to index this repo");
+	ok(lines.join("\n").includes("Ask Clio how to use or extend her."));
 });
 
 test("stale project context offers refresh", () => {
