@@ -87,7 +87,7 @@ The compact footer remains two lines. A small Tip appears for about ten seconds,
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
-| `clio-coder docs [topic] [--no-open]` | Open the documentation in the web app, rendered directly from the canonical Markdown. Reuse the configured background app or start a foreground loopback server; `--no-open` prints its launch link. |
+| `clio-coder docs` | Documentation pages open in the graphical application, which is not part of this release. The command names the shipped Markdown directory and exits 2; `--help` exits 0. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
 | `clio-coder dev share import <path> [--dry-run] [--force] [--project\|--user] [--json]` | Import a share archive with conflict reporting. |
@@ -781,7 +781,7 @@ to execute through the existing engine worker path, the sanctioned Claude Code w
 
 | Command | Purpose |
 | --- | --- |
-| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the web application suite. |
+| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the maintenance suite. The graphical application in `apps/clio-coder-gui` has its own gate and is not part of this one. |
 | `pnpm run ci:release` | Maintainer release gate: `pnpm run ci`, then the `check-release` dist and packaging audit. |
 | `pnpm run typecheck` | Strict TypeScript pass. |
 | `pnpm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the library package pin and skill audit checks, and the README and docs drift rules. |

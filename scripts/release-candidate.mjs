@@ -48,7 +48,6 @@ try {
 		rmSync(receiptPath, { force: true });
 		const commit = source();
 		run("pnpm", ["run", "ci"]);
-		run("pnpm", ["--filter", "@iowarp/clio-coder-gui", "typecheck"]);
 		run(process.execPath, ["scripts/check-release.mjs"]);
 		const packed = pack(scratch);
 		run("pnpm", ["run", "test:package"], { env: { ...process.env, CLIO_CODER_RELEASE_TARBALL: packed } });
