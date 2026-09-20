@@ -159,7 +159,7 @@ export function UsagePage({ client }: { client: Client }) {
 						{view.headline.map((figure) => (
 							<article className="trace-panel" key={figure.label}>
 								<h2>{figure.label}</h2>
-								<p className="usage-figure">{figure.value}</p>
+								<p className="panel-figure">{figure.value}</p>
 								{figure.note && <small>{figure.note}</small>}
 							</article>
 						))}
@@ -222,7 +222,7 @@ export function UsagePage({ client }: { client: Client }) {
 						<article className="trace-panel" key={JSON.stringify(fact)}>
 							<h3>{fact.label}</h3>
 							{fact.single ? (
-								<p className="usage-figure">{fact.single}</p>
+								<p className="panel-figure">{fact.single}</p>
 							) : (
 								<Facts value={fact.values} empty={emptyState.emptyStore(fact.label.toLowerCase(), "in this window")} />
 							)}

@@ -3,6 +3,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { Boundary, PanelHeading } from "../design/panel.js";
+import { PANELS } from "../design/panel-model.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import "./docs.css";
 
@@ -60,10 +62,7 @@ export function Docs({ client }: { client: Client }) {
 	return (
 		<section className="docs">
 			<header className="docs-heading">
-				<div>
-					<p className="eyebrow">Clio Coder / Reference</p>
-					<h1>Documentation</h1>
-				</div>
+				<PanelHeading panel={PANELS.docs} level={1} />
 				<form
 					className="docs-search"
 					onSubmit={(event) => {
@@ -203,6 +202,7 @@ export function Docs({ client }: { client: Client }) {
 					)}
 				</article>
 			</div>
+			<Boundary panel={PANELS.docs} />
 		</section>
 	);
 }

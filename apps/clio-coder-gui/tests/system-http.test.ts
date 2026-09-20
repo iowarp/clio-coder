@@ -69,6 +69,13 @@ test("interop lists all registered kinds, probes only version, keeps configurati
 		const codex = report.agents.find((row) => row.kind === "codex");
 		assert.equal(codex?.presence, "present");
 		assert.equal(codex?.version, "1.2.3");
+		// Installed, speaks ACP, no delegation entry and no standing answer: the terminal review would offer it.
+		assert.deepEqual(
+			[codex?.wiring, codex?.decision, codex?.decidedAt, codex?.decisionStale],
+			["proposed", null, null, false],
+		);
+		assert.equal(report.agents.find((row) => row.kind === "claude-code")?.wiring, "not-offered");
+		assert.equal(report.agents.find((row) => row.kind === "agents")?.wiring, "not-acp");
 		assert.ok(codex?.inventory.items.some((item) => item.kind === "mcp" && item.name === "fixture"));
 		assert.equal(report.agents.find((row) => row.kind === "claude-code")?.presence, "absent");
 		assert.ok(!JSON.stringify(report).includes("private-"));

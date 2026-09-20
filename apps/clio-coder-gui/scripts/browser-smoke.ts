@@ -192,7 +192,10 @@ try {
 			await page.screenshot({ path: join(output, `trace-run-${width}.png`), fullPage: true });
 		await navigate("Fleet");
 		await page.getByRole("heading", { name: "fixture-council", exact: true }).waitFor();
+		await page.getByText("not a live event stream", { exact: false }).waitFor();
 		await check("fleet");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `fleet-${width}.png`), fullPage: true });
 		await page.locator('a[href="/fleet/fleet-149"]').click();
 		await page.getByText("Fixture step passed.", { exact: true }).waitFor();
 		await page.getByRole("heading", { name: "review · pass", exact: true }).waitFor();
@@ -306,8 +309,10 @@ try {
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.getByRole("link", { name: "Why", exact: true }).click();
 		await page.getByRole("heading", { name: "fixture-hook", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "From source to behavior", exact: true }).waitFor();
 		await check("config-graph");
-		if (width === 1600) await page.screenshot({ path: join(output, "config-graph.png") });
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `config-graph-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("config-graph-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
@@ -395,13 +400,25 @@ try {
 		await removal.getByRole("button", { name: "Done", exact: true }).click();
 		await page.getByText("No packages match.").waitFor();
 		await page
-			.getByRole("navigation", { name: "Library collections" })
-			.getByRole("button", { name: /^Skills · [1-9]/ })
+			.getByRole("tablist", { name: "Library collections" })
+			.getByRole("tab", { name: /^Skills · [1-9]/ })
 			.click();
 		await page.getByRole("heading", { name: "fixture-skill", exact: true }).waitFor();
 		await check("library-skills");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `library-skills-${width}.png`), fullPage: true });
+		// The collections are one tab stop: an arrow key moves the selection and the focus together.
+		await page.getByRole("tab", { name: /^Skills · / }).press("ArrowLeft");
+		const agentsTab = page.getByRole("tab", { name: /^Agents · / });
+		if ((await agentsTab.getAttribute("aria-selected")) !== "true")
+			throw new Error("ArrowLeft from Skills did not select the Agents tab.");
+		if (!(await agentsTab.evaluate((node) => node === document.activeElement)))
+			throw new Error("ArrowLeft moved the selection without moving focus.");
+		await page.getByText("Tool-call budget", { exact: true }).first().waitFor();
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `library-agents-${width}.png`), fullPage: true });
 		for (const collection of ["Agents", "Prompts", "Fleets", "Extensions", "Verifiers"]) {
-			await page.getByRole("button", { name: new RegExp(`^${collection} · [1-9]`) }).click();
+			await page.getByRole("tab", { name: new RegExp(`^${collection} · [1-9]`) }).click();
 			await page.locator(".config-entries article").first().waitFor();
 			await check(`library-${collection.toLowerCase()}`);
 		}
@@ -414,7 +431,10 @@ try {
 		await page.getByRole("heading", { name: "Codex", exact: true }).waitFor();
 		await check("interop-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByText("Would be offered", { exact: true }).waitFor();
 		await check("interop");
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `interop-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);

@@ -19,7 +19,8 @@
 	padding-bottom: 0.8rem;
 }
 .settings-tabs [aria-current="page"],
-.settings-tabs [aria-pressed="true"] {
+.settings-tabs [aria-pressed="true"],
+.settings-tabs [aria-selected="true"] {
 	font-weight: 700;
 	text-decoration-thickness: 3px;
 	background: var(--inset);
@@ -63,7 +64,108 @@
 .config-category {
 	margin-top: 2.5rem;
 }
+.config-layers {
+	list-style: none;
+	padding: 0;
+	display: grid;
+	gap: var(--space-3);
+}
+.config-layers code {
+	display: block;
+	overflow-wrap: anywhere;
+}
+.setting-family {
+	border-top: 1px solid var(--line-strong);
+	padding-block: var(--space-3);
+}
+.setting-family > summary {
+	display: flex;
+	justify-content: space-between;
+	align-items: baseline;
+	gap: var(--space-3);
+	cursor: pointer;
+}
+.setting-family > .settings-list {
+	margin: var(--space-3) 0 0;
+}
+.influence-path {
+	list-style: none;
+	margin: var(--space-4) 0 0;
+	padding: 0;
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: var(--space-4);
+}
+.influence-path > li {
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	padding: var(--space-4);
+	min-width: 0;
+	position: relative;
+}
+/* The arrow is the diagram: it sits in the gap and never overlaps a stage. */
+.influence-path > li + li::before {
+	content: "→";
+	position: absolute;
+	left: calc(var(--space-4) * -1);
+	top: var(--space-4);
+	width: var(--space-4);
+	text-align: center;
+	color: var(--ink-muted);
+}
+.influence-path__index {
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.influence-path h3 {
+	margin: var(--space-1) 0;
+}
+.influence-path p {
+	margin: 0 0 var(--space-3);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+.influence-path ul {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+.influence-path ul li {
+	display: flex;
+	justify-content: space-between;
+	gap: var(--space-3);
+	border-top: 1px solid var(--line);
+	padding-block: var(--space-2);
+	font-size: var(--text-meta);
+}
+.influence-path ul li > span {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.influence-path code {
+	display: inline;
+	margin-right: var(--space-2);
+}
+.influence-path small {
+	display: block;
+	color: var(--ink-muted);
+}
+.influence-path ul li > strong {
+	font-family: var(--font-mono);
+}
 @media (max-width: 750px) {
+	.influence-path {
+		grid-template-columns: minmax(0, 1fr);
+	}
+	.influence-path > li + li::before {
+		content: "↓";
+		left: 0;
+		top: calc(var(--space-4) * -1);
+		width: 100%;
+		height: var(--space-4);
+		line-height: var(--space-4);
+	}
 	.settings-list > div {
 		grid-template-columns: minmax(0, 1fr);
 		gap: 0.5rem;

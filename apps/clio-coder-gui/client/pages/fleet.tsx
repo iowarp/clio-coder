@@ -4,7 +4,11 @@ import type { Static } from "typebox";
 import type { Councils, FleetGates } from "../../contracts/fleet.js";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { formatTime, formatTokens } from "../api/clock.js";
 import { Facts } from "../design/facts.js";
+import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
+import { DISPATCH_SCOPE, emptyState, PANELS } from "../design/panel-model.js";
+import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 
 function Topologies({
@@ -17,14 +21,19 @@ function Topologies({
 	return (
 		<>
 			<h2>Councils</h2>
-			{councils?.truncated && <p>The canonical council window is truncated; older groups may be absent.</p>}
-			{councils && !councils.councils.length && <p>No council groups recorded in this window.</p>}
+			{councils?.truncated && <PanelEmpty>{emptyState.bounded("council groups")}</PanelEmpty>}
+			{councils && !councils.councils.length && (
+				<PanelEmpty>{emptyState.emptyStore("council group", "in this window")}</PanelEmpty>
+			)}
 			{councils?.councils.map((council) => (
 				<article className="trace-panel" key={council.group}>
 					<h3>{council.group}</h3>
-					<p>
-						{council.running ? "Running" : "Finished"} · Rounds {council.roundsObserved} /{" "}
-						{council.roundsPlanned ?? "unreported"} · Synthesis: {council.synthesis.kind ?? "unreported"}
+					<p className="panel-marks">
+						<StatusMark tone={council.running ? "running" : "neutral"} label={council.running ? "Running" : "Finished"} />
+						<span>
+							Rounds {council.roundsObserved} of {council.roundsPlanned ?? "a plan that was not reported"}
+						</span>
+						<span>Synthesis {council.synthesis.kind ?? "not reported"}</span>
 					</p>
 					{council.members.map((member) => (
 						<div key={member.label}>
@@ -42,23 +51,30 @@ function Topologies({
 									</li>
 								))}
 							</ul>
-							{member.turnsTruncated && <p>Earlier turns omitted by the canonical topology window.</p>}
+							{member.turnsTruncated && <PanelEmpty>{emptyState.bounded("turns", "Earlier")}</PanelEmpty>}
 						</div>
 					))}
-					{council.membersTruncated && <p>Additional members omitted.</p>}
+					{council.membersTruncated && <PanelEmpty>{emptyState.bounded("members", "Later")}</PanelEmpty>}
 				</article>
 			))}
 			<h2>Gate decisions</h2>
-			{gates?.truncated && <p>The canonical gate window is truncated; older decisions may be absent.</p>}
-			{!!gates?.unverifiable && <p role="status">{gates.unverifiable} gate artifacts could not be authenticated.</p>}
-			{gates && !gates.decisions.length && <p>No verified gate decisions in this window.</p>}
+			{gates?.truncated && <PanelEmpty>{emptyState.bounded("gate decisions")}</PanelEmpty>}
+			{!!gates?.unverifiable && (
+				<PanelEmpty role="status">
+					{gates.unverifiable.toLocaleString("en-US")} gate {gates.unverifiable === 1 ? "artifact" : "artifacts"} could not
+					be authenticated, so {gates.unverifiable === 1 ? "it is" : "they are"} not shown as decisions.
+				</PanelEmpty>
+			)}
+			{gates && !gates.decisions.length && (
+				<PanelEmpty>{emptyState.emptyStore("authenticated gate decision", "in this window")}</PanelEmpty>
+			)}
 			{gates?.decisions.map((gate) => (
 				<article className="trace-panel" key={gate.id}>
 					<h3>
 						{gate.topology} · {gate.outcome}
 					</h3>
 					<p>
-						{gate.group} · Cycle {gate.cycle} · {gate.decidedAt}
+						{gate.group} · Cycle {gate.cycle} · {formatTime(gate.decidedAt)}
 					</p>
 					<ul>
 						{gate.subjects.map((id) => (
@@ -105,9 +121,9 @@ export function FleetPage({ client }: { client: Client }) {
 	const gates = useQuery({ queryKey: ["fleet-gates"], queryFn: () => client.call(routes.fleetGates, emptyInput) });
 	return (
 		<section>
-			<p className="eyebrow">Execution / Durable history</p>
-			<h1>Fleet</h1>
-			<p>Inspect fleet plans, their dispatch runs, and the decisions recorded by Clio.</p>
+			<PanelHeading panel={PANELS.fleet} level={1} />
+			<p>Fleet plans, their dispatch runs, and the decisions Clio Coder recorded about them.</p>
+			<p className="panel-note">{DISPATCH_SCOPE}</p>
 			{Object.entries({ roots, runs, councils, gates }).map(([name, query]) =>
 				query.error ? (
 					<p key={name} role="alert">
@@ -117,7 +133,7 @@ export function FleetPage({ client }: { client: Client }) {
 			)}
 			<h2>Fleet runs</h2>
 			{roots.isPending && <p>Reading fleet history…</p>}
-			{roots.data?.pages[0]?.items.length === 0 && <p>No durable fleet runs.</p>}
+			{roots.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("fleet run")}</PanelEmpty>}
 			<div className="config-entries">
 				{roots.data?.pages
 					.flatMap((page) => page.items)
@@ -127,10 +143,11 @@ export function FleetPage({ client }: { client: Client }) {
 								<Link to={`/fleet/${run.id}`}>{run.fleet}</Link>
 							</h3>
 							<p>{run.id}</p>
+							<StatusMark tone={run.endedAt ? "neutral" : "running"} label={run.endedAt ? "Finished" : "Running"} />
 							<p>
-								{run.completedCount} / {run.stepCount} steps recorded · {run.endedAt ? "Finished" : "Running"}
+								{run.completedCount} of {run.stepCount} {run.stepCount === 1 ? "step" : "steps"} recorded
 							</p>
-							<p>{run.startedAt}</p>
+							<p>Started {formatTime(run.startedAt)}</p>
 						</article>
 					))}
 			</div>
@@ -141,7 +158,7 @@ export function FleetPage({ client }: { client: Client }) {
 			)}
 			<h2>Dispatch runs</h2>
 			{runs.isPending && <p>Reading dispatch history…</p>}
-			{runs.data?.pages[0]?.items.length === 0 && <p>No durable dispatch runs.</p>}
+			{runs.data?.pages[0]?.items.length === 0 && <PanelEmpty>{emptyState.emptyStore("dispatch run")}</PanelEmpty>}
 			<dl className="settings-list">
 				{runs.data?.pages
 					.flatMap((page) => page.items)
@@ -157,7 +174,7 @@ export function FleetPage({ client }: { client: Client }) {
 								<br />
 								{run.targetId} / {run.wireModelId}
 							</dd>
-							<dd>{run.tokenCount} tokens</dd>
+							<dd>{formatTokens(run.tokenCount)} tokens</dd>
 						</div>
 					))}
 			</dl>
@@ -167,6 +184,7 @@ export function FleetPage({ client }: { client: Client }) {
 				</button>
 			)}
 			<Topologies councils={councils.data} gates={gates.data} />
+			<Boundary panel={PANELS.fleet} />
 		</section>
 	);
 }
@@ -192,9 +210,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 	return (
 		<section>
 			<Link to="/fleet">All fleet activity</Link>
-			<h1>
-				{dispatch ? "Dispatch run" : "Fleet run"} · {id}
-			</h1>
+			<PanelHeading panel={PANELS.fleetRun} level={1} title={`${dispatch ? "Dispatch run" : "Fleet run"} · ${id}`} />
 			{Object.entries({ root, run, receipt }).map(([name, query]) =>
 				query.error ? (
 					<p role="alert" key={name}>
@@ -209,7 +225,7 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 						{run.data.agentId} · {run.data.outcome ?? run.data.status}
 					</h2>
 					<p>
-						{run.data.targetId} / {run.data.wireModelId} · {run.data.tokenCount} tokens
+						{run.data.targetId} / {run.data.wireModelId} · {formatTokens(run.data.tokenCount)} tokens
 					</p>
 					<MarkdownContent source={run.data.task} complete />
 				</>
@@ -218,7 +234,8 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 				<>
 					<h2>{root.data.run.fleet}</h2>
 					<p>
-						{root.data.run.completedCount} / {root.data.run.stepCount} steps recorded
+						{root.data.run.completedCount} of {root.data.run.stepCount} {root.data.run.stepCount === 1 ? "step" : "steps"}{" "}
+						recorded
 					</p>
 					{root.data.steps.map((step) => (
 						<article className="trace-panel" key={step.stepId}>
@@ -226,7 +243,10 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 								{step.stepId} · {step.succeeded ? "Succeeded" : "Failed"}
 							</h3>
 							{step.terminalRunId && <Link to={`/fleet/dispatches/${step.terminalRunId}`}>{step.terminalRunId}</Link>}
-							<p>Recorded integrity: {step.integrityValid ? "valid" : "invalid"}</p>
+							<StatusMark
+								tone={step.integrityValid ? "success" : "fail"}
+								label={step.integrityValid ? "Recorded integrity valid" : "Recorded integrity invalid"}
+							/>
 							{step.failureReason && <p>{step.failureReason}</p>}
 							<MarkdownContent source={step.output} complete />
 						</article>
@@ -235,7 +255,12 @@ export function FleetDetail({ client, dispatch = false }: { client: Client; disp
 				</>
 			)}
 			<h2>Receipt</h2>
-			{artifact ? <Facts value={artifact} hide={["version"]} /> : <p>No readable receipt recorded.</p>}
+			{artifact ? (
+				<Facts value={artifact} hide={["version"]} />
+			) : (
+				<PanelEmpty>{emptyState.emptyStore("readable receipt", "for this run")}</PanelEmpty>
+			)}
+			<Boundary panel={PANELS.fleetRun} />
 		</section>
 	);
 }
