@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { markTokenRejected, tokenFromLaunchInput, tokenRejected } from "../client/api/auth-state.js";
+import { markTokenRejected, onTokenRejected, tokenFromLaunchInput, tokenRejected } from "../client/api/auth-state.js";
 import { createClient } from "../client/api/client.js";
 import { routes } from "../contracts/routes.js";
 
@@ -31,6 +31,11 @@ test("a pasted launch link, a link with a path, or a bare token all yield the to
 
 test("only a 401 marks the token refused: a wrong-host 421 and a 503 leave the browser connected", async () => {
 	assert.equal(tokenRejected(), false);
+	// The event stream learns of a refusal that an ordinary request found after the stream's last error.
+	let told = 0;
+	let cancelled = 0;
+	onTokenRejected(() => told++);
+	onTokenRejected(() => cancelled++)();
 	for (const status of [421, 503]) {
 		const client = createClient(token, async () => problem(status));
 		await assert.rejects(client.call(routes.meta, { params: {}, query: {}, body: {} }));
@@ -41,4 +46,8 @@ test("only a 401 marks the token refused: a wrong-host 421 and a 503 leave the b
 	assert.equal(tokenRejected(), true);
 	markTokenRejected();
 	assert.equal(tokenRejected(), true);
+	assert.deepEqual([told, cancelled], [1, 0]);
+	// A subscriber that arrives after the refusal is told at once.
+	onTokenRejected(() => told++);
+	assert.equal(told, 2);
 });

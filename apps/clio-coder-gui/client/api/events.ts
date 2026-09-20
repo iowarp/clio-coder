@@ -3,7 +3,7 @@ import type { Event } from "../../contracts/events.js";
 import type { Operation } from "../../contracts/operations.js";
 import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
-import { tokenRejected } from "./auth-state.js";
+import { onTokenRejected, tokenRejected } from "./auth-state.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { resetSessionBuffers, sessionBuffer } from "./sessions.js";
 
@@ -97,19 +97,27 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 		buffer.flush();
 		// EventSource hides the status code and retries forever. Once a request has shown the token is
 		// refused, the stream can never open, so it stops instead of hammering the server.
-		if (tokenRejected()) {
+		// A refused stream also arrives here already closed: the browser gives up on a 401 and fires this
+		// once, often before any fetch has recorded the refusal. Closed means nothing will retry.
+		if (tokenRejected() || stream.readyState === EventSource.CLOSED) {
 			stream.close();
 			connection("Not connected");
 			return;
 		}
 		connection("Reconnecting…");
 	};
+	// The refusal can also be learned after the last stream error, from an ordinary request.
+	const stopWatching = onTokenRejected(() => {
+		stream.close();
+		connection("Not connected");
+	});
 	const onVisibility = () => {
 		if (document.visibilityState === "visible") buffer.flush();
 	};
 	document.addEventListener("visibilitychange", onVisibility);
 	return () => {
 		document.removeEventListener("visibilitychange", onVisibility);
+		stopWatching();
 		// Closing the buffer first stops a scheduled frame landing in a torn-down tree.
 		buffer.close();
 		stream.close();
