@@ -7,10 +7,11 @@ import {
 	visibleWidth,
 } from "../engine/tui.js";
 import { guardPastedEditorOperator } from "./editor-bash.js";
+import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
-import { clioTheme, editorTheme, GLYPH, rule } from "./theme/index.js";
+import { clioTheme, editorTheme, GLYPH } from "./theme/index.js";
 import type { TargetIdentity } from "./theme/labels.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
@@ -30,6 +31,10 @@ export interface EditorChrome {
 	getModelLabel: () => TargetIdentity | string;
 	/** Effective thinking level, e.g. `high` / `off`. */
 	getThinkingLabel: () => string;
+	/** Effective session autonomy, including live overrides. */
+	getAutonomy?: () => string;
+	/** Monotonic animation clock, injectable for deterministic rendering tests. */
+	getAnimationTime?: () => number;
 	/** Whether Enter currently targets the active Clio response. */
 	isStreaming?: () => boolean;
 	/**
@@ -200,15 +205,37 @@ export class ClioEditor extends Editor {
 		const safeWidth = Math.max(0, width);
 		const text = this.getText();
 		const mode = composerMode(this.chrome, text);
+		const rail: EditorRailState = {
+			phase: mode === "CONFIRM" ? "attention" : mode === "MESSAGE" ? "idle" : "working",
+			fullAuto: this.chrome.getAutonomy?.() === "full-auto",
+			animate:
+				text.length === 0 &&
+				process.env.CLIO_CODER_REDUCE_MOTION !== "1" &&
+				process.env.CLIO_CODER_SCREEN_READER !== "1" &&
+				process.env.TERM !== "dumb" &&
+				process.env.NO_COLOR === undefined,
+			now: this.chrome.getAnimationTime?.() ?? performance.now(),
+		};
 
 		// Normal composition needs no mode or model label on the input rail.
 		// Keep exceptional admission/permission states and native scroll counts.
 		if (!hasScrollIndicator(lines[0] ?? "")) {
 			const exceptional = mode === "CONFIRM" || mode === "PREPARING" || mode === "COMPACTING";
-			lines[0] = rule(theme, safeWidth, {
-				...(exceptional ? { left: mode, leftToken: modeToken(mode) } : {}),
-				fillToken: "editor",
-			});
+			lines[0] = renderEditorRail(
+				theme,
+				safeWidth,
+				{
+					...(exceptional
+						? {
+								left: rail.fullAuto ? `${mode} · FULL-AUTO` : mode,
+								leftToken: rail.fullAuto ? ("editorDanger" as const) : modeToken(mode),
+							}
+						: rail.fullAuto
+							? { left: "FULL-AUTO", leftToken: "editorDanger" as const }
+							: {}),
+				},
+				rail,
+			);
 		}
 
 		if (text.length === 0 && lines[1]) {
@@ -219,14 +246,20 @@ export class ClioEditor extends Editor {
 		// The confirm keys render at every width: the send hint is a convenience
 		// that a narrow composer can drop, the allow and deny keys are not.
 		if (bottomRail >= 0 && mode === "CONFIRM") {
-			lines[bottomRail] = rule(theme, safeWidth, {
-				right: confirmRailHint(theme, safeWidth, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none"),
-				fillToken: "editor",
-				rightRaw: true,
-				rightTail: theme.style("editor", "─", { bold: true }),
-			});
+			lines[bottomRail] = renderEditorRail(
+				theme,
+				safeWidth,
+				{
+					right: confirmRailHint(theme, safeWidth, text.length > 0, this.chrome.getPermissionInspection?.() ?? "none"),
+					fillToken: "editor",
+					rightRaw: true,
+					rightTail: theme.style("editor", "─", { bold: true }),
+				},
+				rail,
+			);
 		}
 
+		if (bottomRail >= 0 && mode !== "CONFIRM") lines[bottomRail] = renderEditorRail(theme, safeWidth, {}, rail);
 		return lines;
 	}
 

@@ -200,12 +200,14 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		getModelLabel: () =>
 			[settings.chat.target, settings.chat.model].filter((part) => part && part.length > 0).join("·") || "starting",
 		getThinkingLabel: () => settings.chat.thinkingLevel ?? "off",
+		getAutonomy: () => settings.safety.autonomy,
 		getSubmitKeyLabel: () => keybindings.getKeys("tui.input.submit")[0] ?? "Enter",
 		getNewlineKeyLabel: () => keybindings.getKeys("tui.input.newLine")[0] ?? "Ctrl+J",
 	};
 	const editorChromeProxy: EditorChrome = {
 		getModelLabel: () => editorChrome.getModelLabel(),
 		getThinkingLabel: () => editorChrome.getThinkingLabel(),
+		getAutonomy: () => editorChrome.getAutonomy?.() ?? settings.safety.autonomy,
 		isStreaming: () => editorChrome.isStreaming?.() ?? false,
 		isAwaitingApproval: () => editorChrome.isAwaitingApproval?.() ?? false,
 		getPermissionInspection: () => editorChrome.getPermissionInspection?.() ?? "none",
