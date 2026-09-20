@@ -53,6 +53,28 @@ export function humanizeKey(key: string): string {
 	].join(" ");
 }
 
+/**
+ * Keys that hold a word from a closed vocabulary rather than an identifier: `state`, `reason`,
+ * `sourceKind`, `reloadClass`. The key decides, never the value, so an agent id such as `cut-it` or a
+ * model id such as `qwen3-coder` under `id`, `name` or `model` is left exactly as written.
+ */
+const VOCABULARY_KEY =
+	/^(kind|state|status|reason|outcome|verdict|level|tier|mode|phase|class|category)$|[a-z0-9](Kind|State|Status|Reason|Outcome|Verdict|Level|Tier|Mode|Phase|Class|Category)$|[_-](kind|state|status|reason|outcome|verdict|level|tier|mode|phase|class|category)$/;
+/** One lowercase wire word: `absent`, `not_observed`, `receipt_integrity_verification`, `next-turn`. */
+const WIRE_TOKEN = /^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$/;
+
+/** `not_observed` → "Not observed"; `external_system` → "External system"; `acp_adapter` → "ACP adapter". */
+export function humanizeToken(token: string): string {
+	const words = token
+		.split(/[_-]+/)
+		.map((word) => ACRONYM_FORMS[word] ?? (ACRONYMS.has(word) ? word.toUpperCase() : word));
+	const first = words[0] ?? token;
+	return [
+		ACRONYMS.has(first.toLowerCase()) ? first : `${first[0]?.toUpperCase()}${first.slice(1)}`,
+		...words.slice(1),
+	].join(" ");
+}
+
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 const clip = (text: string) => (text.length > FACT_LIMITS.text ? `${text.slice(0, FACT_LIMITS.text - 1)}…` : text);
 
@@ -73,6 +95,8 @@ export function scalarText(
 	}
 	if (value === "") return { text: "Empty", tone: "absent" };
 	if (ISO.test(value)) return { text: formatTime(value) };
+	// A vocabulary word reads as words. Free text under the same key has spaces and is left alone.
+	if (VOCABULARY_KEY.test(key) && WIRE_TOKEN.test(value)) return { text: humanizeToken(value) };
 	const mono = /(^|[a-z])(id|ids|hash|sha256|digest|path|ref|cwd|url)$/i.test(key) || /^[a-f0-9]{16,}$/.test(value);
 	return { text: clip(value), ...(mono ? { mono: true } : {}) };
 }
