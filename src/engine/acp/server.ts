@@ -4,12 +4,16 @@ import { isAbsolute, resolve as resolvePath } from "node:path";
 import {
 	type AccountabilityEvidenceReadyPayload,
 	BusChannels,
+	type CompactionPayload,
+	type ContextWarningPayload,
 	type DispatchCompletedPayload,
 	type DispatchEnqueuedPayload,
 	type DispatchFailedPayload,
 	type DispatchProgressPayload,
 	type DispatchStartedPayload,
 	type LoopBlockedPayload,
+	type ProviderHealthPayload,
+	type ToolBudgetExceededPayload,
 } from "../../core/bus-events.js";
 import { DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS } from "../../core/defaults.js";
 import type { SafeEventBus } from "../../core/event-bus.js";
@@ -17,7 +21,10 @@ import { MAX_TIMER_DELAY_MS } from "../../core/timers.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { ProvidersContract } from "../../domains/providers/contract.js";
 import { isOrchestratorEligibleRuntime } from "../../domains/providers/eligibility.js";
+import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import { type AutonomyLevel, DEFAULT_AUTONOMY_LEVEL } from "../../domains/safety/autonomy.js";
+import { describeCallTarget } from "../../domains/safety/call-target.js";
+import type { DecisionPresentation, TrustedDecisionFacts } from "../../domains/safety/decision-presentation.js";
 import {
 	classifyDecisionPresentation,
 	decisionFactsForPermission,
@@ -29,6 +36,7 @@ import { askUserExposure } from "../../tools/ask-user.js";
 import type { ToolRegistry } from "../../tools/registry.js";
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import type { AgentMessage } from "../types.js";
+import type { AcpCommandCatalog, AcpCommandControl } from "./commands.js";
 import { ACP_TURN_FAILED_MESSAGE, AcpRequestError, AcpTimeoutError, acpErrorMessage } from "./errors.js";
 import type { AcpJsonRpcPeerTransport } from "./transport.js";
 import type {
@@ -43,11 +51,19 @@ import type {
 } from "./types.js";
 import {
 	ACP_AGENT_META_KEY,
+	ACP_COMMANDS_INVOKE_METHOD,
+	ACP_COMMANDS_LIST_METHOD,
+	ACP_COMMANDS_META_KEY,
+	ACP_DECISION_META_KEY,
 	ACP_MAX_CHUNK_BYTES,
+	ACP_MAX_RAW_DIFF_BYTES,
 	ACP_MAX_RAW_RECORD_BYTES,
 	ACP_MAX_STRING_BYTES,
 	ACP_MAX_TOOL_CALL_ID_BYTES,
+	ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
+	ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
 	ACP_SESSION_META_KEY,
+	ACP_TOOL_PROGRESS_META_KEY,
 	ACP_USAGE_META_KEY,
 } from "./types.js";
 
@@ -62,7 +78,40 @@ export interface AcpServerChat {
 	getSessionId(): string | null;
 	/** Replace provider context and the next persisted parent for a new or loaded session. */
 	resetForSession?(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void;
+	/**
+	 * Mid-run guidance: queue `text` on the engine's steering queue, where the
+	 * inner loop drains it between tool batches. False means nothing was
+	 * streaming to steer, which the wire reports as a refusal rather than as a
+	 * silent success.
+	 */
+	steer?(text: string): boolean;
+	/** Queue `text` on the follow-up queue, drained when the whole run settles. */
+	queueFollowUp?(text: string): boolean;
+	queuedMessages?(): { steer: ReadonlyArray<string>; followUp: ReadonlyArray<string> };
+	/** Drain both queues and hand back the texts so a client can restore them. */
+	clearQueuedFollowUps?(): string[];
+	/** Why an interrupt would be refused right now, or null when it would cancel the run. */
+	interruptRefusal?(): string | null;
 	dispose?(): void;
+}
+
+/**
+ * The fleet controls the ACP steering surface reaches. Narrowed to the two
+ * operations an external client may perform on a worker it did not start, so a
+ * client cannot enqueue, route, or re-plan dispatch work through this server.
+ */
+export interface AcpDispatchControl {
+	/**
+	 * Queue operator guidance on a running worker's open stdin. Throws with an
+	 * operator-facing message for every refusal; delivery itself is confirmed
+	 * later and out of band, so a return here means queued, never delivered.
+	 */
+	steer(runId: string, text: string): void;
+	abort(runId: string): void;
+	snapshot(): {
+		running: ReadonlyArray<{ runId: string; runtimeKind: string }>;
+		retrying: ReadonlyArray<{ runId: string }>;
+	};
 }
 
 export interface AcpRoutingSnapshot {
@@ -95,6 +144,14 @@ export interface ClioAcpServerOptions {
 	session?: SessionContract;
 	providers?: ProvidersContract;
 	settings?: AcpSettingsControl;
+	/** Wired only by the composition root; absent means `clio-coder/dispatch/steer` refuses. */
+	dispatch?: AcpDispatchControl;
+	/**
+	 * The 13 wire-shaped operator commands. Absent means the catalog is not
+	 * announced and both command methods refuse, which is what an embedder that
+	 * wired no fleet, bus, or provider contract must observe.
+	 */
+	commands?: AcpCommandControl;
 	toolRegistry?: ToolRegistry;
 	bus?: SafeEventBus;
 	autonomy?: () => AutonomyLevel;
@@ -114,6 +171,13 @@ export interface ClioAcpServerOptions {
 	 * unstructured stderr tail (CONTRACT C001 §6). Defaults to dropping it.
 	 */
 	diagnostics?: (line: string) => void;
+	/**
+	 * Clock the tool-progress interval floor measures against. Injectable
+	 * because the floor and the per-call frame ceiling are otherwise only
+	 * observable by spending {@link ACP_MIN_TOOL_PROGRESS_INTERVAL_MS} of real
+	 * time per frame, which puts a 64-frame ceiling sixteen seconds away.
+	 */
+	now?: () => number;
 }
 
 interface AcpServerSession {
@@ -177,6 +241,21 @@ interface ActivePrompt {
 	/** Most recent wire id a `tool_call` was actually emitted for, open or not. */
 	lastEmittedToolCallId: string | null;
 	toolCallSequence: number;
+	/** Opt-in state and per-call counters for the non-terminal progress stream. */
+	toolProgress: AcpToolProgressState;
+}
+
+/**
+ * What one turn has already streamed for each running tool call. The payload a
+ * tool reports is cumulative, so the last text sent is kept as well as the
+ * counters: an unchanged snapshot is a re-send of a frame the client already
+ * rendered and carries nothing it does not have. Bounded by the turn's tool
+ * calls and dies with the turn.
+ */
+interface AcpToolProgressState {
+	enabled: boolean;
+	now: () => number;
+	calls: Map<string, { frames: number; lastSentAt: number; lastText: string }>;
 }
 
 /** What one emitted `tool_call` put on the wire that its permission request must repeat. */
@@ -340,7 +419,16 @@ const ACP_MAX_REPLAY_TOOL_CALLS = 8192;
  * reported facts instead of inferring one from tool titles or timing;
  * `accountability.evidenceReady` follows a run's terminal event once its
  * evidence bundle has landed, so the board can show first-pass success and a
- * finding count without reading Clio's state tree.
+ * finding count without reading Clio's state tree. The last four are the
+ * session's own health: without them a client can only infer that context was
+ * compacted, that the window is close to full, that the loop guard stopped a
+ * turn on volume rather than repetition, or that a target went down, by
+ * watching timing and tool titles.
+ *
+ * Every kind here is the literal `BusChannels` value of the channel it
+ * forwards. That is the invariant: a kind is never renamed on the way out, so
+ * `grep` finds the producer from the wire frame and a client's kind list and
+ * Clio's own channel table cannot drift into two vocabularies.
  */
 const ACP_FORWARDABLE_EVENT_KINDS = [
 	"safety.loopBlocked",
@@ -350,6 +438,10 @@ const ACP_FORWARDABLE_EVENT_KINDS = [
 	"dispatch.completed",
 	"dispatch.failed",
 	"accountability.evidenceReady",
+	"compaction.end",
+	"context.warning",
+	"safety.toolBudgetExceeded",
+	"provider.health",
 ] as const;
 
 type AcpForwardableEventKind = (typeof ACP_FORWARDABLE_EVENT_KINDS)[number];
@@ -370,6 +462,13 @@ const ACP_MAX_DISPATCH_ID_BYTES = 128;
 /** Evidence tags are a closed vocabulary of short identifiers; anything wider is not a tag. */
 const ACP_MAX_EVIDENCE_TAGS = 32;
 const ACP_MAX_EVIDENCE_TAG_BYTES = 64;
+
+/**
+ * The one forwarded payload field that is a sentence rather than an
+ * identifier: the context-window warning is Clio's own operator copy, so it is
+ * bounded to a banner's worth and stripped rather than refused.
+ */
+const ACP_MAX_EVENT_TEXT_BYTES = 256;
 
 /**
  * Progress events forwarded per run before the stream is capped. One run
@@ -456,16 +555,33 @@ function chunkText(text: string, maxBytes: number): string[] {
 	return chunks;
 }
 
-function boundRawValue(value: unknown, depth: number): unknown {
-	if (typeof value === "string") return boundString(value, ACP_MAX_STRING_BYTES);
+/**
+ * The string cap for the value sitting at `key` inside a record sitting at
+ * `parentKey`. Everything gets {@link ACP_MAX_STRING_BYTES}; the single
+ * exception is the rendered diff an `edit` or `write` result carries, which the
+ * engine has already capped for exactly this purpose. The match is on the whole
+ * two-segment path and not on the key alone, so a tool that happens to report a
+ * top-level `diff` string does not widen itself into the exception.
+ */
+function rawStringBytes(key: string | undefined, parentKey: string | undefined): number {
+	return key === "diff" && parentKey === "details" ? ACP_MAX_RAW_DIFF_BYTES : ACP_MAX_STRING_BYTES;
+}
+
+function boundRawValue(value: unknown, depth: number, key?: string, parentKey?: string): unknown {
+	if (typeof value === "string") return boundString(value, rawStringBytes(key, parentKey));
 	if (Array.isArray(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
+		// A member inherits no path: `details.diff` names one string, not a list
+		// of them, and a thousand-entry array of wide strings is the payload the
+		// record cap exists to stop.
 		return value.map((entry) => boundRawValue(entry, depth + 1));
 	}
 	if (isRecord(value)) {
 		if (depth >= ACP_MAX_RAW_RECORD_DEPTH) return "[depth]";
 		const bounded: Record<string, unknown> = {};
-		for (const [key, entry] of Object.entries(value)) bounded[key] = boundRawValue(entry, depth + 1);
+		for (const [entryKey, entry] of Object.entries(value)) {
+			bounded[entryKey] = boundRawValue(entry, depth + 1, entryKey, key);
+		}
 		return bounded;
 	}
 	return value;
@@ -536,7 +652,7 @@ export function emptyUsage(): AcpServerUsage {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0, totalTokens: 0, costUsd: 0 };
 }
 
-function createActivePromptState(): ActivePrompt {
+function createActivePromptState(toolProgress?: { enabled: boolean; now: () => number }): ActivePrompt {
 	return {
 		cancelled: false,
 		permissionExpired: false,
@@ -556,6 +672,11 @@ function createActivePromptState(): ActivePrompt {
 		toolCallSnapshots: new Map<string, AcpToolCallSnapshot>(),
 		lastEmittedToolCallId: null,
 		toolCallSequence: 0,
+		toolProgress: {
+			enabled: toolProgress?.enabled === true,
+			now: toolProgress?.now ?? Date.now,
+			calls: new Map<string, { frames: number; lastSentAt: number; lastText: string }>(),
+		},
 	};
 }
 
@@ -873,6 +994,53 @@ function settleOpenToolCalls(
 	active.openToolCalls.clear();
 }
 
+/**
+ * Streams one running tool's cumulative output as a non-terminal
+ * `tool_call_update`. Nothing here mints a wire id: a frame is an update to a
+ * call the client already rendered, so an event naming a call that was never
+ * emitted or has already finished is dropped rather than announcing progress
+ * for a `tool_call` the client has no row for.
+ *
+ * The three refusals below are the whole cost control. The tool's own throttle
+ * bounds the rate but not the total, the payload is cumulative so a repeat
+ * carries nothing new, and a client is holding per-call state that a long
+ * stream would otherwise grow without a stated end.
+ */
+function sendToolProgress(
+	event: AcpEventRecord,
+	transport: AcpJsonRpcPeerTransport,
+	sessionId: string,
+	active: ActivePrompt,
+): void {
+	const progress = active.toolProgress;
+	if (!progress.enabled) return;
+	const engineId = eventString(event, "toolCallId");
+	const toolCallId = engineId === undefined ? null : openWireIdFor(active, engineId);
+	if (toolCallId === null) return;
+	const text = boundString(outputText(event.partialResult), ACP_MAX_CHUNK_BYTES);
+	if (text.length === 0) return;
+	const sent = progress.calls.get(toolCallId);
+	const sentAt = progress.now();
+	if (sent !== undefined) {
+		if (sent.frames >= ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL) return;
+		if (text === sent.lastText) return;
+		if (sentAt - sent.lastSentAt < ACP_MIN_TOOL_PROGRESS_INTERVAL_MS) return;
+	}
+	progress.calls.set(toolCallId, { frames: (sent?.frames ?? 0) + 1, lastSentAt: sentAt, lastText: text });
+	sendUpdate(
+		transport,
+		sessionId,
+		active,
+		{
+			sessionUpdate: "tool_call_update",
+			toolCallId,
+			status: "in_progress" satisfies AcpToolCallStatus,
+			content: toolCallContent(text),
+		},
+		toolCallUpdateMeta(active.toolCallSnapshots.get(toolCallId)),
+	);
+}
+
 function handleChatEvent(
 	rawEvent: AcpServerEvent,
 	transport: AcpJsonRpcPeerTransport,
@@ -945,6 +1113,10 @@ function handleChatEvent(
 			rawInput: snapshot.rawInput,
 			...(snapshot.locations !== undefined ? { locations: snapshot.locations } : {}),
 		});
+		return;
+	}
+	if (event.type === "tool_execution_update") {
+		sendToolProgress(event, transport, sessionId, active);
 		return;
 	}
 	if (event.type === "tool_execution_end") {
@@ -1386,6 +1558,73 @@ interface AcpPermissionBridge {
 	cancelPending(reason: string): void;
 }
 
+/**
+ * The closed set of option ids a `session/request_permission` from this server
+ * offers, announced at initialize. Exactly one grants; the other two deny and
+ * differ only in what happens to the rest of the turn. A client that returns
+ * anything outside this list is denied, so minting `allow-always` cannot buy a
+ * grant this server never offered.
+ */
+const ACP_PERMISSION_OPTION_IDS = ["allow-once", "reject-once", "reject-and-stop"] as const;
+
+/** Bound for one line of decision copy. The longest of them is well under this. */
+const ACP_MAX_DECISION_COPY_BYTES = 512;
+
+function decisionCopy(value: string): string {
+	return boundString(safeStoredString(value, ACP_MAX_DECISION_COPY_BYTES), ACP_MAX_DECISION_COPY_BYTES);
+}
+
+/**
+ * The classification the server already performed to label the two options,
+ * attached to the ask instead of discarded. Everything here is host-derived:
+ * the copy is generated from enforced policy facts, and the one caller-shaped
+ * value, the call target, is rendered from the tool's own field allowlist and
+ * sanitized before it is bounded. No model-authored prose reaches this record,
+ * which is what lets a client render it as an authority statement rather than
+ * as tool output.
+ */
+function decisionMeta(
+	facts: TrustedDecisionFacts,
+	presentation: DecisionPresentation,
+	call: ClassifierCall,
+): Record<string, unknown> {
+	const axis =
+		facts.axis.kind === "safety-net"
+			? { kind: facts.axis.kind, ruleId: decisionCopy(facts.axis.ruleId) }
+			: facts.axis.kind === "autonomy"
+				? { kind: facts.axis.kind, level: decisionCopy(facts.axis.level) }
+				: { kind: facts.axis.kind };
+	const origin =
+		facts.origin.kind === "worker"
+			? {
+					kind: facts.origin.kind,
+					agentId: decisionCopy(facts.origin.agentId),
+					runId: decisionCopy(facts.origin.runId),
+				}
+			: { kind: facts.origin.kind };
+	const target = decisionCopy(describeCallTarget(call.tool, call.args));
+	return {
+		[ACP_DECISION_META_KEY]: {
+			version: 1,
+			tier: presentation.tier,
+			tierLabel: decisionCopy(presentation.tierLabel),
+			title: decisionCopy(presentation.title),
+			semanticToken: presentation.semanticToken,
+			authorizationCopy: decisionCopy(presentation.authorizationCopy),
+			consequenceCopy: decisionCopy(presentation.consequenceCopy),
+			reversibilityCopy: decisionCopy(presentation.reversibilityCopy),
+			requestedByCopy: decisionCopy(presentation.requestedByCopy),
+			actionClass: facts.actionClass ?? "unknown",
+			axis,
+			origin,
+			exposure: facts.exposure,
+			affectedScope: facts.affectedScope,
+			reversibility: facts.reversibility,
+			...(target.length > 0 ? { target } : {}),
+		},
+	};
+}
+
 function installPermissionBridge(input: {
 	transport: AcpJsonRpcPeerTransport;
 	toolRegistry: ToolRegistry | undefined;
@@ -1416,19 +1655,23 @@ function installPermissionBridge(input: {
 	const queuedRequestDetails = new Map<string, { tool: string; actionClass: string }>();
 	const unregister = input.toolRegistry.onPermissionRequired((call, decision, meta) => {
 		if (queuedRequestIds.has(meta.requestId)) return;
-		const presentation = classifyDecisionPresentation(
-			decisionFactsForPermission({
-				tool: call.tool,
-				actionClass: decision.classification.actionClass,
-				axis: meta.axis.startsWith("net:")
-					? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
-					: { kind: "autonomy", level: meta.axis.slice("autonomy:".length) || DEFAULT_AUTONOMY_LEVEL },
-				origin: { kind: "main" },
-				...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
-			}),
-		);
+		// The facts are kept, not just the presentation built from them. The ask
+		// used to throw away everything but two label strings, leaving a client to
+		// re-derive the tier and the consequence from a tool name it cannot
+		// classify.
+		const facts = decisionFactsForPermission({
+			tool: call.tool,
+			actionClass: decision.classification.actionClass,
+			axis: meta.axis.startsWith("net:")
+				? { kind: "safety-net", ruleId: meta.axis.slice("net:".length) || "unknown" }
+				: { kind: "autonomy", level: meta.axis.slice("autonomy:".length) || DEFAULT_AUTONOMY_LEVEL },
+			origin: { kind: "main" },
+			...(call.tool === ToolNames.AskUser ? { exposure: askUserExposure(call.args) } : {}),
+		});
+		const presentation = classifyDecisionPresentation(facts);
 		const approveAction = presentation.requiredActions.find((action) => action.id === "approve-once");
 		const denyAction = presentation.requiredActions.find((action) => action.id === "deny");
+		const stopAction = presentation.requiredActions.find((action) => action.id === "stop");
 		queuedRequestIds.add(meta.requestId);
 		queuedRequestDetails.set(meta.requestId, {
 			tool: call.tool,
@@ -1555,7 +1798,19 @@ function installPermissionBridge(input: {
 										name: denyAction?.label ?? "Deny this request",
 										kind: "reject_once",
 									},
+									// The TUI's third action, which the wire had no
+									// equivalent for. It is `reject_once` and not
+									// `reject_always`: it grants no standing denial, it
+									// ends this run. A client that renders only the spec
+									// kinds shows it as a second deny, which is a true
+									// reading of what it does.
+									{
+										optionId: "reject-and-stop",
+										name: stopAction?.label ?? "Deny and stop",
+										kind: "reject_once",
+									},
 								],
+								_meta: decisionMeta(facts, presentation, call),
 							},
 							input.permissionTimeoutMs,
 						),
@@ -1581,6 +1836,21 @@ function installPermissionBridge(input: {
 						// start another model request while session/cancel is in flight.
 						input.cancelActivePrompt(reason);
 						emitResolution({ status: "denied", decidedBy: "cancelled", reason });
+						queuedRequestIds.clear();
+						queuedRequestDetails.clear();
+						input.toolRegistry?.cancelParkedCalls(reason);
+						return;
+					}
+					// Deny-and-stop is the TUI's `s` action on the wire: it denies
+					// every parked request from this turn and ends the run, not just
+					// the one the operator is looking at. It orders like the client
+					// cancellation above rather than like a plain denial, because a
+					// parked call released before the prompt aborts can start another
+					// model request while the abort is in flight.
+					if (answer.outcome === "selected" && answer.optionId === "reject-and-stop") {
+						const reason = "ACP client denied this tool call and stopped the run";
+						input.cancelActivePrompt(reason);
+						emitResolution({ status: "denied", decidedBy: "acp-client", reason });
 						queuedRequestIds.clear();
 						queuedRequestDetails.clear();
 						input.toolRegistry?.cancelParkedCalls(reason);
@@ -1649,11 +1919,69 @@ function installPermissionBridge(input: {
 /** How long transport close waits for an in-flight prompt handler to settle. */
 const ACP_PROMPT_SETTLE_BOUND_MS = 5000;
 
+/**
+ * Where a steer lands. `interrupt` is deliberately not admitted here: the
+ * engine's interrupt mode cancels the run and resubmits the text as a fresh
+ * prompt, and ACP binds a turn to the `session/prompt` request/response pair,
+ * so that second turn would have no request to carry its stop reason. A client
+ * that wants it cancels through `clio-coder/session/interrupt` and prompts again.
+ */
+const ACP_STEERING_MODES = ["next-slot", "end-of-turn"] as const;
+type AcpSteeringMode = (typeof ACP_STEERING_MODES)[number];
+
+/** Model-facing steer prose. Wider than a label, far under the transport's line bound. */
+const ACP_MAX_STEER_TEXT_BYTES = 16 * 1024;
+/** Host-authored context a client may attach to an interrupt, echoed into the cancel reason. */
+const ACP_MAX_INTERRUPT_REASON_BYTES = 256;
+/** Queue entries read back in one response; a deeper queue is reported truncated. */
+const ACP_MAX_QUEUED_MESSAGES = 64;
+
+/**
+ * Steer text is model-facing prose, not an identifier, so newlines and tabs are
+ * content and are admitted where {@link requireBoundedClientString} would refuse
+ * the whole message. The remaining C0 controls are still refused rather than
+ * stripped: a steer the model saw shortened or rewritten would disagree with the
+ * text the client sent and with the copy its own UI is showing.
+ */
+function requireSteerText(value: unknown, name: string, maxBytes: number): string {
+	if (typeof value !== "string" || value.trim().length === 0) {
+		throw new AcpRequestError(-32602, `${name} is required`, { code: "invalid_params" });
+	}
+	if (utf8Bytes(value) > maxBytes || hasControlCharacters(value.replace(/[\n\r\t]/g, " "))) {
+		throw new AcpRequestError(-32602, `${name} is invalid`, { code: "invalid_params" });
+	}
+	return value;
+}
+
+/** Bounded read-back of one engine queue, in enqueue order. */
+function boundedQueueTexts(texts: ReadonlyArray<string>): string[] {
+	return texts.slice(0, ACP_MAX_QUEUED_MESSAGES).map((text) => boundString(text, ACP_MAX_STEER_TEXT_BYTES));
+}
+
+/**
+ * Refusal codes for `clio-coder/dispatch/steer`. `DispatchContract.steer` reports
+ * every refusal as an operator-facing Error, so the wire gets the classification
+ * and the prose goes to the stderr tail: the message legitimately quotes a
+ * runtime id and a worker path, and neither belongs in a client's UI.
+ */
+function dispatchSteerReason(message: string): string {
+	if (message.includes("empty message")) return "empty-message";
+	if (message.includes("does not support live steering")) return "steering-unsupported";
+	if (message.includes("has no input channel")) return "no-input-channel";
+	if (message.includes("no longer accepts input")) return "input-closed";
+	if (message.includes("cannot be steered")) return "run-terminating";
+	if (message.includes("is not active")) return "run-not-active";
+	return "steer-failed";
+}
+
 export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<number> {
 	const sessions = new Map<string, AcpServerSession>();
 	const workspaceInstanceId = randomUUID();
 	let initialized = false;
 	const enabledEventKinds = new Set<AcpForwardableEventKind>();
+	/** Negotiated at initialize and read when each prompt builds its turn state. */
+	let toolProgressEnabled = false;
+	const now = options.now ?? Date.now;
 	let eventSequence = 0;
 	/**
 	 * Per-run progress counters for the forwarded dispatch stream, insertion
@@ -1925,6 +2253,63 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				});
 			}),
 		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.CompactionEnd, (payload: CompactionPayload) => {
+				// Only the end fires: a client that drew a "compacting" state from
+				// the begin channel would have to guess when to clear it, and the
+				// fact a context meter needs is that the window was just cut.
+				const trigger = safeStoredIdentifier(payload.trigger, 64);
+				if (trigger === null) return;
+				forwardEvent("compaction.end", null, false, { trigger });
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.ContextWarning, (payload: ContextWarningPayload) => {
+				// Transition-only upstream, so this is a level edge, not a poll:
+				// `warning: null` is the clear and has to cross as itself rather than
+				// be dropped, or a client's banner never comes down.
+				if (payload.warning !== null && typeof payload.warning !== "string") return;
+				const warning = payload.warning === null ? null : safeStoredString(payload.warning, ACP_MAX_EVENT_TEXT_BYTES);
+				forwardEvent("context.warning", null, false, { warning: warning === "" ? null : warning });
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.ToolBudgetExceeded, (payload: ToolBudgetExceededPayload) => {
+				// Bound to the turn that is running, like `safety.loopBlocked`: the
+				// budget it names is per-turn and means nothing outside one.
+				if (activePromptState === null) return;
+				const callsThisTurn = safeCount(payload.callsThisTurn);
+				const softBudget = safeCount(payload.softBudget);
+				const hardCeiling = safeCount(payload.hardCeiling);
+				const tool = safeStoredString(payload.tool, 64).trim();
+				if (callsThisTurn === null || softBudget === null || hardCeiling === null || tool.length === 0) return;
+				forwardEvent(
+					"safety.toolBudgetExceeded",
+					safeStoredIdentifier(payload.turnId, ACP_MAX_SESSION_ID_BYTES),
+					payload.interrupted === true,
+					{ tool, callsThisTurn, softBudget, hardCeiling, interrupted: payload.interrupted === true },
+				);
+			}),
+		);
+		unsubscribeEvents.push(
+			bus.on(BusChannels.ProviderHealth, (payload: ProviderHealthPayload) => {
+				// `status.lastError` is provider prose that legitimately quotes URLs,
+				// response bodies, and credentials-adjacent detail, so it stays behind
+				// exactly as `dispatch.failed`'s `outcomeDetail` does. What crosses is
+				// the taxonomy a retry-visibility row needs.
+				const targetId = safeStoredIdentifier(payload.id, ACP_MAX_TARGET_ID_BYTES);
+				const status = payload.status?.health?.status;
+				if (targetId === null || !(["healthy", "degraded", "unknown", "down"] as ReadonlyArray<unknown>).includes(status)) {
+					return;
+				}
+				forwardEvent("provider.health", null, false, {
+					targetId,
+					status,
+					available: payload.status.available === true,
+					latencyMs: safeCount(payload.status.health.latencyMs),
+				});
+			}),
+		);
 	}
 	const unsubscribeEventStream = (): void => {
 		for (const unsubscribe of unsubscribeEvents) unsubscribe();
@@ -2077,6 +2462,15 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 				if (requestedEventKinds.includes(kind)) enabledEventKinds.add(kind);
 			}
 		}
+		// Repeated in-progress frames for one call are only useful to a client
+		// that collapses them onto the row it already drew. One that appends
+		// every frame it receives would grow a tool segment by a full output
+		// snapshot several times a second, so nothing streams until it asks.
+		const toolProgressRequest =
+			clientMeta !== null && isRecord(clientMeta[ACP_TOOL_PROGRESS_META_KEY])
+				? clientMeta[ACP_TOOL_PROGRESS_META_KEY]
+				: null;
+		toolProgressEnabled = toolProgressRequest !== null && toolProgressRequest.version === 1;
 		const canLoadSession =
 			options.session !== undefined &&
 			options.readSessionEntries !== undefined &&
@@ -2114,10 +2508,49 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 						list: options.providers !== undefined,
 						probe: options.providers !== undefined,
 					},
+					...(options.commands !== undefined ? { [ACP_COMMANDS_META_KEY]: options.commands.capability } : {}),
+					// Steering is announced, never negotiated: every method here is
+					// namespaced and additive, so a client that ignores this block
+					// keeps the exact v1 surface it had. `main` and `dispatch` report
+					// which queues this build actually wired, because an embedder may
+					// pass a chat that cannot steer and a server with no fleet.
+					"clio-coder/steering": {
+						version: 1,
+						main: options.chat.steer !== undefined,
+						dispatch: options.dispatch !== undefined,
+						modes: ACP_STEERING_MODES,
+						interrupt: true,
+						methods: {
+							steer: "clio-coder/session/steer",
+							queue: "clio-coder/session/queue",
+							clear: "clio-coder/session/queue_clear",
+							interrupt: "clio-coder/session/interrupt",
+							dispatch: "clio-coder/dispatch/steer",
+						},
+					},
 					// Per-frame agent attribution on `session/update`. Announced so a
 					// client can tell "this agent produced nothing" apart from "this
 					// peer does not report identity at all".
 					[ACP_AGENT_META_KEY]: { version: 1, meta: ACP_AGENT_META_KEY },
+					// The bounds are announced, not just applied: a client sizing a
+					// progress buffer needs to know where the stream stops, and a
+					// client that never receives a second frame has to be able to
+					// tell "the tool printed once" from "the floor suppressed it".
+					[ACP_TOOL_PROGRESS_META_KEY]: {
+						version: 1,
+						minIntervalMs: ACP_MIN_TOOL_PROGRESS_INTERVAL_MS,
+						maxFramesPerCall: ACP_MAX_TOOL_PROGRESS_FRAMES_PER_CALL,
+						maxContentBytes: ACP_MAX_CHUNK_BYTES,
+					},
+					...(options.toolRegistry !== undefined
+						? {
+								[ACP_DECISION_META_KEY]: {
+									version: 1,
+									meta: ACP_DECISION_META_KEY,
+									options: ACP_PERMISSION_OPTION_IDS,
+								},
+							}
+						: {}),
 					...(options.bus
 						? {
 								"clio-coder/events": {
@@ -2432,6 +2865,44 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		}
 	});
 
+	// The catalog is rebuilt from `commandReference()` on every call and a
+	// palette legitimately re-reads it after a reload, so it is memoized against
+	// a client that polls. The projection is pure: nothing in it depends on a
+	// session, a route, or the wired host.
+	let commandCatalog: AcpCommandCatalog | null = null;
+
+	options.transport.onRequest(ACP_COMMANDS_LIST_METHOD, (params) => {
+		requireInitialized();
+		assertParamKeys(params, new Set());
+		if (options.commands === undefined) {
+			throw new AcpRequestError(-32000, "operator commands are unavailable", { code: "internal_error" });
+		}
+		commandCatalog ??= options.commands.catalog();
+		return commandCatalog;
+	});
+
+	options.transport.onRequest(ACP_COMMANDS_INVOKE_METHOD, (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "command", "argv"]));
+		const session = getSession(request);
+		if (options.commands === undefined) {
+			throw new AcpRequestError(-32000, "operator commands are unavailable", { code: "internal_error" });
+		}
+		// Four of the thirteen put a user turn into the session. Doing that while
+		// a prompt is in flight is the steering path, not the submit path: the
+		// turn already running owns the stopReason, and a second unrequested
+		// submission folds content into it that the client never asked for. Those
+		// four are refused here and the client is told to use
+		// `clio-coder/session/steer` instead; the other nine are unaffected.
+		if (session.activePrompt !== null && options.commands.injectsUserTurn(request.command)) {
+			throw new AcpRequestError(-32000, "this command submits a user turn and a prompt is active", {
+				code: "prompt_active",
+				reason: "steer-instead",
+			});
+		}
+		return options.commands.invoke({ command: request.command, argv: request.argv });
+	});
+
 	options.transport.onRequest("clio-coder/targets/list", (params) => {
 		requireInitialized();
 		assertParamKeys(params, new Set());
@@ -2528,6 +2999,154 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 		if (session) cancelSession(session, "prompt cancelled");
 	});
 
+	/**
+	 * Windows in which a steer must not be queued, or null when it may be.
+	 *
+	 * The engine resubmits a steer it never drained as a fresh prompt
+	 * (`resubmitStrandedSteers`). In a terminal that is the right answer; here it
+	 * is a prompt-shaped turn the client never requested, whose stop reason has
+	 * no request to ride home on. The two windows where stranding is certain are
+	 * knowable from the session, so the server refuses in them and says why,
+	 * rather than accepting a steer that would come back as an unrequested turn.
+	 */
+	const steerRefusal = (session: AcpServerSession): string | null => {
+		if (session.activePrompt === null) {
+			return "no prompt is active on this session; send session/prompt instead of steering";
+		}
+		if (session.activePrompt.cancelled) {
+			return "this prompt is cancelled and its queues are being cleared; prompt again once it returns";
+		}
+		if (!options.chat.isStreaming()) {
+			return "the run is not streaming, so the engine has no slot to drain this steer into";
+		}
+		return null;
+	};
+
+	options.transport.onRequest("clio-coder/session/steer", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "text", "mode"]));
+		const session = getSession(request);
+		const text = requireSteerText(request.text, "text", ACP_MAX_STEER_TEXT_BYTES);
+		if (
+			request.mode !== undefined &&
+			(typeof request.mode !== "string" || !(ACP_STEERING_MODES as ReadonlyArray<string>).includes(request.mode))
+		) {
+			throw new AcpRequestError(-32602, "invalid steering mode", { code: "invalid_params" });
+		}
+		const mode = (request.mode ?? "next-slot") as AcpSteeringMode;
+		const queue = mode === "next-slot" ? "steer" : "follow-up";
+		const enqueue = mode === "next-slot" ? options.chat.steer : options.chat.queueFollowUp;
+		if (enqueue === undefined) {
+			return { accepted: false, queue, refusal: "this agent build does not expose the engine steering queues" };
+		}
+		const refusal = steerRefusal(session);
+		if (refusal !== null) return { accepted: false, queue, refusal };
+		// The engine's own admission is the last word: it refuses a steer whose
+		// run stopped streaming between the check above and this call.
+		if (!enqueue.call(options.chat, text)) {
+			return { accepted: false, queue, refusal: "the engine refused the message; the run is no longer accepting input" };
+		}
+		return { accepted: true, queue };
+	});
+
+	options.transport.onRequest("clio-coder/session/queue", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		getSession(request);
+		// An empty pair of lists is a fact about the queues, so a build that
+		// cannot read them refuses instead of reporting one it did not observe.
+		if (options.chat.queuedMessages === undefined) {
+			throw new AcpRequestError(-32000, "queue inspection is unavailable", { code: "internal_error" });
+		}
+		const queued = options.chat.queuedMessages();
+		return { steer: boundedQueueTexts(queued.steer), followUp: boundedQueueTexts(queued.followUp) };
+	});
+
+	options.transport.onRequest("clio-coder/session/queue_clear", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId"]));
+		getSession(request);
+		if (options.chat.clearQueuedFollowUps === undefined) {
+			throw new AcpRequestError(-32000, "queue clearing is unavailable", { code: "internal_error" });
+		}
+		// Both queues drain together, exactly as Alt+Q does in the terminal: the
+		// returned texts are what the client now owns and must re-send to deliver.
+		return { restored: boundedQueueTexts(options.chat.clearQueuedFollowUps()) };
+	});
+
+	options.transport.onRequest("clio-coder/session/interrupt", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "reason"]));
+		const session = getSession(request);
+		const reason =
+			request.reason === undefined
+				? null
+				: requireBoundedClientString(request.reason, "reason", ACP_MAX_INTERRUPT_REASON_BYTES);
+		if (session.activePrompt === null) {
+			return { cancelled: false, refusal: "no prompt is active on this session" };
+		}
+		// An attached dispatch or a parked permission ask refuses the interrupt in
+		// the terminal too. Honour that here instead of cancelling anyway: the
+		// client gets the reason to show, and `session/cancel` remains the
+		// unconditional stop for a client that means to pay the cost.
+		const refusal = options.chat.interruptRefusal?.() ?? null;
+		if (refusal !== null) return { cancelled: false, refusal };
+		// Cancel only. The outstanding `session/prompt` returns
+		// `stopReason: "cancelled"`, and the next prompt is the client's to send;
+		// a server-side resubmit would start a turn with no request to answer.
+		cancelSession(session, reason === null ? "prompt interrupted by client" : `client interrupt: ${reason}`);
+		return { cancelled: true };
+	});
+
+	options.transport.onRequest("clio-coder/dispatch/steer", (params) => {
+		requireInitialized();
+		const request = assertParamKeys(params, new Set(["sessionId", "runId", "action", "message"]));
+		getSession(request);
+		const runId = requireBoundedClientString(request.runId, "runId", ACP_MAX_DISPATCH_ID_BYTES);
+		if (request.action !== "guide" && request.action !== "cancel") {
+			throw new AcpRequestError(-32602, "action must be guide or cancel", { code: "invalid_params" });
+		}
+		if (request.action === "cancel" && request.message !== undefined) {
+			// An abort carries no operator text anywhere in dispatch, so accepting
+			// one here would promise the worker a message it never receives.
+			throw new AcpRequestError(-32602, "cancel carries no message", { code: "invalid_params" });
+		}
+		const dispatch = options.dispatch;
+		if (dispatch === undefined) return { accepted: false, reason: "dispatch-unavailable" };
+		if (request.action === "cancel") {
+			// `abort` reports nothing, so the fact has to be established before it
+			// is claimed: an abort against an id this fleet never ran would poison
+			// that control root for a future attempt and still answer "accepted".
+			let live = false;
+			try {
+				const snapshot = dispatch.snapshot();
+				live = snapshot.running.some((run) => run.runId === runId) || snapshot.retrying.some((run) => run.runId === runId);
+			} catch {
+				return { accepted: false, reason: "fleet-unavailable" };
+			}
+			if (!live) return { accepted: false, reason: "run-not-active" };
+			try {
+				dispatch.abort(runId);
+			} catch {
+				return { accepted: false, reason: "cancel-failed" };
+			}
+			return { accepted: true };
+		}
+		const message = requireSteerText(request.message, "message", ACP_MAX_STEER_TEXT_BYTES);
+		try {
+			dispatch.steer(runId, message);
+		} catch (err) {
+			const detail = err instanceof Error ? err.message : String(err);
+			options.diagnostics?.(`dispatch steer refused: ${acpErrorMessage(detail)}`);
+			return { accepted: false, reason: dispatchSteerReason(detail) };
+		}
+		// Queued, not delivered. The frame is on the worker's stdin; the worker
+		// acknowledges acceptance later with `clio_coder_steer_received`, and that
+		// ack's `sequence` never returns through this contract, so no sequence is
+		// reported rather than a guessed one.
+		return { accepted: true };
+	});
+
 	options.transport.onRequest("session/close", async (params) => {
 		requireInitialized();
 		const id = sessionIdOf(params);
@@ -2571,7 +3190,7 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 			});
 		}
 		if (options.session?.current()?.id !== session.id && options.session) options.session.resume(session.id);
-		const active = createActivePromptState();
+		const active = createActivePromptState({ enabled: toolProgressEnabled, now });
 		session.activePrompt = active;
 		activePromptState = active;
 		activeSessionId = session.id;

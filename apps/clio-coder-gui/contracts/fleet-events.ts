@@ -92,6 +92,83 @@ export const FleetItem = Type.Object(
 	closed,
 );
 export type FleetItem = Static<typeof FleetItem>;
+/**
+ * The session's own health, as opposed to the fleet's. These four say the
+ * context window was cut, that it is close to full, that the loop guard stopped
+ * a turn on call volume, and that a target changed state. They are kept out of
+ * `fleet` because they describe this conversation rather than a dispatched run,
+ * and a board that mixed them would have to filter its own feed to draw either.
+ */
+export const HealthPayloads = {
+	"health.compacted": Type.Object({ trigger: Type.String({ maxLength: 64 }) }, closed),
+	"health.contextWarning": Type.Object({ warning: Type.Union([Type.String({ maxLength: 256 }), Type.Null()]) }, closed),
+	"health.toolBudget": Type.Object(
+		{
+			tool: Type.String({ maxLength: 64 }),
+			callsThisTurn: count,
+			softBudget: count,
+			hardCeiling: count,
+			interrupted: Type.Boolean(),
+		},
+		closed,
+	),
+	"health.provider": Type.Object(
+		{
+			targetId: identifier,
+			status: Type.Union([
+				Type.Literal("healthy"),
+				Type.Literal("degraded"),
+				Type.Literal("unknown"),
+				Type.Literal("down"),
+			]),
+			available: Type.Boolean(),
+			latencyMs: count,
+		},
+		closed,
+	),
+};
+export const HealthFacts = {
+	"health.compacted": Type.Object(
+		{ type: Type.Literal("health.compacted"), payload: HealthPayloads["health.compacted"] },
+		closed,
+	),
+	"health.contextWarning": Type.Object(
+		{ type: Type.Literal("health.contextWarning"), payload: HealthPayloads["health.contextWarning"] },
+		closed,
+	),
+	"health.toolBudget": Type.Object(
+		{ type: Type.Literal("health.toolBudget"), payload: HealthPayloads["health.toolBudget"] },
+		closed,
+	),
+	"health.provider": Type.Object(
+		{ type: Type.Literal("health.provider"), payload: HealthPayloads["health.provider"] },
+		closed,
+	),
+};
+export const HealthFact = Type.Union([
+	HealthFacts["health.compacted"],
+	HealthFacts["health.contextWarning"],
+	HealthFacts["health.toolBudget"],
+	HealthFacts["health.provider"],
+]);
+export const HealthItem = Type.Object(
+	{ id: Id, at: Type.String(), sourceSequence: Type.Integer({ minimum: 1 }), fact: HealthFact },
+	closed,
+);
+export type HealthItem = Static<typeof HealthItem>;
+export const HEALTH_EVENT_TYPES = [
+	"health.compacted",
+	"health.contextWarning",
+	"health.toolBudget",
+	"health.provider",
+] as const;
+/**
+ * Every `clio-coder/event` kind this app understands, mapped to the delta it
+ * becomes. Adding an engine kind here without also adding it to
+ * `ACP_EVENT_KINDS` in `sessions.ts` only means the server never opts in; the
+ * reverse leaves an opted-in kind with nowhere to go, which the reader logs and
+ * drops rather than treating as a broken peer.
+ */
 export const ACP_TO_WEB_EVENT = {
 	"safety.loopBlocked": "fleet.loopBlocked",
 	"dispatch.enqueued": "fleet.enqueued",
@@ -100,4 +177,8 @@ export const ACP_TO_WEB_EVENT = {
 	"dispatch.completed": "fleet.completed",
 	"dispatch.failed": "fleet.failed",
 	"accountability.evidenceReady": "evidence.ready",
+	"compaction.end": "health.compacted",
+	"context.warning": "health.contextWarning",
+	"safety.toolBudgetExceeded": "health.toolBudget",
+	"provider.health": "health.provider",
 } as const;

@@ -138,7 +138,7 @@ test("safe settings reject extra keys before ACP, project four keys, and expose 
 	assert.equal(autonomy.level, "auto-edit");
 	assert.equal((await h.request(`${base}/autonomy`)).status, 200);
 });
-test("all seven opted-in ACP event kinds reach valid bounded global envelopes and the retained strip", {
+test("all eleven opted-in ACP event kinds reach valid bounded global envelopes, an unknown kind is dropped, and both strips retain", {
 	timeout: 15000,
 }, async (t) => {
 	const h = await harness({}, { scenario: "fleet" });
@@ -149,7 +149,9 @@ test("all seven opted-in ACP event kinds reach valid bounded global envelopes an
 	t.after(h.hub.connect(undefined, (event) => events.push(event)));
 	h.supervisor.startTurn(session.id, "Dispatch");
 	await until(() => h.supervisor.get(session.id).turns.at(-1)?.status !== "running");
-	const forwarded = events.filter((event) => event.type.startsWith("fleet.") || event.type === "evidence.ready");
+	const forwarded = events.filter(
+		(event) => event.type.startsWith("fleet.") || event.type.startsWith("health.") || event.type === "evidence.ready",
+	);
 	assert.deepEqual(
 		forwarded.map((event) => event.type),
 		Object.values(ACP_TO_WEB_EVENT),
@@ -160,6 +162,11 @@ test("all seven opted-in ACP event kinds reach valid bounded global envelopes an
 	}
 	const state = await json(await h.request(`/api/sessions/${session.id}`), routes.session.response);
 	assert.equal(state.fleet.length, 7);
+	assert.equal(state.health.length, 4);
 	assert.doesNotMatch(JSON.stringify(state.fleet), /private|excludedProviderBody/);
+	assert.doesNotMatch(JSON.stringify(state.health), /private|excludedProviderBody/);
+	// The fixture also sends a kind this build has never heard of. It must be
+	// dropped rather than fail the turn and retire the child.
 	assert.equal(state.turns.at(-1)?.status, "succeeded");
+	assert.equal(state.state, "open");
 });

@@ -71,6 +71,7 @@ export function emptySession(id: string, workspaceId: string): SessionSnapshot {
 		label: null,
 		permissions: [],
 		fleet: [],
+		health: [],
 	};
 }
 export function applySessionDelta(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
@@ -135,6 +136,11 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "fleet.failed":
 		case "evidence.ready":
 			return { ...state, fleet: [...state.fleet, event.payload.item].slice(-128) };
+		case "health.compacted":
+		case "health.contextWarning":
+		case "health.toolBudget":
+		case "health.provider":
+			return { ...state, health: [...state.health, event.payload.item].slice(-32) };
 		case "session.changed":
 			return { ...state, state: event.payload.state, recoveredOrphan: event.payload.recoveredOrphan };
 		case "turn.started": {

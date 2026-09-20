@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
+import { Value } from "typebox/value";
+import { type Permission, type PermissionDecision, PermissionDecisionFacts } from "../../contracts/permissions.js";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { AcpRequestPermissionResponse } from "../clio/http-shims.js";
 import { AppProblem } from "../services/problem.js";
@@ -11,9 +12,24 @@ type Pending = {
 	value: Permission;
 	allow: string;
 	reject: string;
+	/** Absent when the agent offered only the two one-time choices. */
+	stop?: string;
 	resolve: (response: AcpRequestPermissionResponse) => void;
 	timers: ReturnType<typeof setTimeout>[];
 };
+
+/**
+ * The agent's own classification of the call, or undefined when it sent none it
+ * could represent. Read leniently and dropped whole on a mismatch: the ask is
+ * still answerable without the facts, and refusing the request over a field the
+ * UI only uses for a badge would park a turn forever.
+ */
+function decisionFacts(meta: unknown): Permission["decision"] {
+	const value = record(meta)["clio-coder/decision"];
+	if (value === undefined) return undefined;
+	const projected = Value.Clean(PermissionDecisionFacts, structuredClone(value));
+	return Value.Check(PermissionDecisionFacts, projected) ? projected : undefined;
+}
 export class Permissions {
 	private pending: Pending | undefined;
 	constructor(
@@ -40,6 +56,12 @@ export class Permissions {
 		const options = Array.isArray(params.options) ? params.options.map(record) : [];
 		const allow = options.find((option) => option.kind === "allow_once"),
 			reject = options.find((option) => option.kind === "reject_once");
+		// The turn-ending refusal is the agent's announced third option, matched by
+		// its exact id rather than by position: a second `reject_once` entry is
+		// only the stop choice when the agent says it is, and an agent that sends
+		// none leaves `canStopTurn` false so the UI does not draw a control that
+		// would resolve to an ordinary reject.
+		const stop = options.find((option) => option.optionId === "reject-and-stop" && typeof option.optionId === "string");
 		if (
 			params.sessionId !== sessionId ||
 			!turnId ||
@@ -58,6 +80,7 @@ export class Permissions {
 		)
 			throw new AppProblem("upstream_acp", "Permission does not match an active tool call and one-time choices.");
 		const now = Date.now();
+		const facts = decisionFacts(params._meta);
 		const permission: Permission = {
 			id: randomUUID(),
 			turnId,
@@ -68,12 +91,15 @@ export class Permissions {
 			escalateAt: new Date(now + this.timing.escalateMs).toISOString(),
 			expiresAt: new Date(now + this.timing.budgetMs).toISOString(),
 			status: "pending",
+			canStopTurn: stop !== undefined,
+			...(facts ? { decision: facts } : {}),
 		};
 		return new Promise<AcpRequestPermissionResponse>((resolve) => {
 			const pending: Pending = {
 				value: permission,
 				allow: allow.optionId as string,
 				reject: reject.optionId as string,
+				...(stop ? { stop: stop.optionId as string } : {}),
 				resolve,
 				timers: [],
 			};
@@ -102,11 +128,16 @@ export class Permissions {
 	decide(id: string, decision: PermissionDecision) {
 		const pending = this.pending;
 		if (!pending || pending.value.id !== id) throw new AppProblem("conflict", "Permission is no longer waiting.");
+		// A turn-ending refusal the agent never offered would land on an unknown
+		// optionId, which the agent treats as a plain deny. Refusing it here
+		// instead keeps the client's own UI honest about what it just did.
+		if (decision === "reject-and-stop" && !pending.stop)
+			throw new AppProblem("conflict", "Clio did not offer a turn-ending refusal for this request.");
 		this.take(pending);
 		this.publish("permission.resolved", { ...pending.value, status: decision === "allow-once" ? "allowed" : "rejected" });
-		pending.resolve({
-			outcome: { outcome: "selected", optionId: decision === "allow-once" ? pending.allow : pending.reject },
-		});
+		const optionId =
+			decision === "allow-once" ? pending.allow : decision === "reject-and-stop" ? pending.stop : pending.reject;
+		pending.resolve({ outcome: { outcome: "selected", optionId: optionId as string } });
 	}
 	cancel() {
 		const pending = this.pending;
