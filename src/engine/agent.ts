@@ -1,3 +1,5 @@
+import { createInitialSystemMessage, toToolDeclaration } from "@earendil-works/pi-ai";
+import { resolvedRequestContext } from "./context.js";
 /**
  * Thin wrapper over Clio's engine Agent class.
  *
@@ -6,16 +8,22 @@
  * from options.initialState on instantiation.
  *
  * pi-agent-core 0.84 requires an explicit stream function on every agent.
- * Clio's default is the compat `streamSimple` dispatcher (the same function the
- * pre-0.81 engine used implicitly); callers may override it for tests.
+ * Clio's default dispatcher preserves Pi's transcript. Production adapters can
+ * wrap that path with transcriptStreamFn; legacy custom/test delegates receive
+ * Pi's resolved prompt/tool request view through streamFn.
  */
 
 import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
 import { isDispositionedToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
 
+export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
+
 export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
-	streamFn?: StreamFn;
+	/** Legacy/custom request view. Explicit overrides also replace the native hook in tests. */
+	streamFn?: EngineStreamFn;
+	/** Native Pi transcript hook for production request adapters. */
+	transcriptStreamFn?: StreamFn;
 	/** Called immediately before each native stream delegate invocation. */
 	onStreamInvocation?: () => void;
 };
@@ -38,19 +46,33 @@ function dispositionAwareAfterToolCall(
 }
 
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
-	const { streamFn = engineStreamSimple, onStreamInvocation, ...agentOptions } = options;
+	const { streamFn, transcriptStreamFn = engineStreamSimple, onStreamInvocation, ...agentOptions } = options;
 	const agent = new Agent({
 		...agentOptions,
-		streamFn: onStreamInvocation
-			? (...args) => {
-					onStreamInvocation();
-					return streamFn(...args);
-				}
-			: streamFn,
+		streamFn: (model, context, streamOptions) => {
+			onStreamInvocation?.();
+			return streamFn
+				? streamFn(model, resolvedRequestContext(context), streamOptions)
+				: transcriptStreamFn(model, context, streamOptions);
+		},
 		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
 	});
 	return {
 		agent,
 		state: () => agent.state,
 	};
+}
+
+/** Clio persists conversation and compiled prompt separately; Pi receives one complete transcript. */
+export function replaceEngineMessages(
+	agent: Agent,
+	messages: Agent["state"]["messages"],
+	systemPrompt = agent.state.systemPrompt,
+): void {
+	const initial = createInitialSystemMessage(systemPrompt, agent.state.tools.map(toToolDeclaration));
+	agent.state.messages = [...(initial ? [initial] : []), ...messages.filter((message) => message.role !== "system")];
+}
+
+export function setEngineSystemPrompt(agent: Agent, systemPrompt: string): void {
+	replaceEngineMessages(agent, agent.state.messages, systemPrompt);
 }

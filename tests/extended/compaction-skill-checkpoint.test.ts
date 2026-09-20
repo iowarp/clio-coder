@@ -24,8 +24,9 @@ import {
 	verifiedSkillContextCheckpoint,
 } from "../../src/domains/session/entries.js";
 import { filterEntriesToActivePath } from "../../src/domains/session/tree/active-path.js";
+import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent.js";
 import type { EngineModel } from "../../src/engine/types.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
@@ -189,7 +190,9 @@ function overflowFixture(activeTask = false) {
 		wireModelId: "source",
 		runtimeResolution: { capabilityDecisions: { tools: true }, contextWindowDetails: { effectiveContextWindow: 32768 } },
 		agent: {
-			state: { systemPrompt: "", tools: [], messages: [], model, thinkingLevel: "off" },
+			state: createEngineAgent({
+				initialState: { systemPrompt: "", tools: [], messages: [], model, thinkingLevel: "off" },
+			}).agent.state,
 			prompt: async (text: string) => {
 				requests.push(text);
 			},
@@ -231,10 +234,10 @@ function overflowFixture(activeTask = false) {
 	});
 	context.refreshAgentMessagesFromSession(runtime);
 	const priceAt = (tokens: number, pending = "") => {
-		runtime.agent.state.systemPrompt = "";
+		setEngineSystemPrompt(runtime.agent, "");
 		const withoutSystem = context.liveContextEstimate(runtime, pending).tokens;
 		ok(tokens > withoutSystem);
-		runtime.agent.state.systemPrompt = "s".repeat((tokens - withoutSystem) * 4);
+		setEngineSystemPrompt(runtime.agent, "s".repeat((tokens - withoutSystem) * 4));
 	};
 	return {
 		state,
@@ -356,16 +359,13 @@ describe("mandatory request-fit compaction", () => {
 				providers,
 				knownTargets: () => new Set(["source"]),
 				readSessionEntries: () => entries,
-				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
-					agent: {
-						state: options?.initialState,
-						subscribe: () => () => {},
-						abort: () => {},
-						prompt: async () => {
+				createAgent: (options) =>
+					createEngineAgent({
+						...options,
+						streamFn: () => {
 							throw new Error("No provider call is allowed in this caller-boundary contract");
 						},
-					},
-				})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+					}),
 				prompts: {
 					inputEpoch: () => 0,
 					compileSessionPrompt: async () => {

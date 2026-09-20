@@ -14,6 +14,7 @@ const ENV_KEYS: Readonly<Record<string, string>> = {
 	"qwen-token-plan-cn": "QWEN_TOKEN_PLAN_CN_API_KEY",
 	"qwen-token-plan-individual": "QWEN_TOKEN_PLAN_API_KEY",
 	openai: "OPENAI_API_KEY",
+	meta: "META_API_KEY",
 	"azure-openai-responses": "AZURE_OPENAI_API_KEY",
 	nvidia: "NVIDIA_API_KEY",
 	deepseek: "DEEPSEEK_API_KEY",
@@ -60,7 +61,7 @@ function apiKeyEnvVars(provider: string): readonly string[] | undefined {
 	return name ? [name] : undefined;
 }
 
-/** Synchronous provider-key discovery pinned to pi-ai 0.85's public behavior. */
+/** Synchronous provider-key discovery pinned to pi-ai 0.86.1's public behavior. */
 export function findEngineEnvKeys(provider: string, env?: ProviderEnv): string[] | undefined {
 	const names = apiKeyEnvVars(provider);
 	if (!names) return undefined;

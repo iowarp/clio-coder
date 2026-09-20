@@ -4,6 +4,7 @@ import { createWorkerObservationStore } from "../domains/context/worker/recall.j
 import { seededWorkerMessages } from "../worker/context-seed.js";
 import { engineStreamSimple } from "./api-registry.js";
 import { estimateInputTokensFromContext, resolveReservedOutputTokens } from "./apis/output-budget.js";
+import { resolvedRequestContext } from "./context.js";
 /**
  * Worker-subprocess engine boundary.
  *
@@ -696,7 +697,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	);
 
 	const inheritedMessages = seededWorkerMessages(input.contextSeed);
-	const inheritedCount = inheritedMessages.length;
 	const contextGuard = createWorkerContextGuard(observations.archive);
 	const options: EngineAgentOptions = {
 		beforeToolCall: async ({ assistantMessage, toolCall }) => {
@@ -720,7 +720,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				? { isError: true }
 				: undefined,
 		shouldStopAfterTurn: () => helperSchema !== null && (acceptedHelperResult !== null || workerBoundFailure !== null),
-		streamFn: (currentModel, currentContext, streamOptions) => {
+		streamFn: (currentModel, transcript, streamOptions) => {
+			const currentContext = resolvedRequestContext(transcript);
 			const helperPrompt =
 				helperToolAvailable && (!(synthesisToolLock || helperTerminalPhase) || helperForcedChoiceAvailable)
 					? `${currentContext.systemPrompt ?? ""}\n\n# Internal helper protocol\nReturn the result by calling ${INTERNAL_HELPER_RESULT_TOOL} alone with the result object as arguments. Successful submission ends the run; no narrative report is needed.${synthesisToolLock || helperTerminalPhase ? " Work tools are disabled. Earlier tool-use instructions apply only to the completed work phase; only the terminal handoff remains available. Do not invent missing evidence." : ""}`
@@ -793,6 +794,8 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.sessionId) options.sessionId = input.sessionId;
 
 	const { agent } = createEngineAgent(options);
+	// Pi adds a leading prompt/tool declaration; exclude the entire inherited baseline.
+	const inheritedCount = agent.state.messages.length;
 	// The result-contract repair queues a call/result pair that must land in
 	// one drain, or the provider sees a lone assistant tool call.
 	agent.followUpMode = "all";

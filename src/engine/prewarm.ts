@@ -1,3 +1,10 @@
+import {
+	createInitialSystemMessage,
+	getCurrentTools,
+	getToolStateChanges,
+	toToolDeclaration,
+} from "@earendil-works/pi-ai";
+import { normalizeContext } from "./context.js";
 /**
  * One bounded-output warm through the eventual caller's engine request path.
  * Copies portable context, applies public Pi transforms and payload hooks,
@@ -38,7 +45,7 @@ export interface PrewarmContext {
  * filter so its message array is the one a turn would send, not the agent's
  * internal list.
  */
-const LLM_MESSAGE_ROLES: ReadonlySet<string> = new Set(["user", "assistant", "toolResult"]);
+const LLM_MESSAGE_ROLES: ReadonlySet<string> = new Set(["system", "user", "assistant", "toolResult"]);
 
 export interface PrewarmRoundInput {
 	model: EngineModel;
@@ -176,31 +183,38 @@ export async function runPrewarmRound(input: PrewarmRoundInput): Promise<Prewarm
 
 	try {
 		input.signal?.throwIfAborted();
-		let messages: AgentMessage[] = [
-			...structuredClone([...input.state.messages]),
-			{ role: "user", content: [{ type: "text", text: PREWARM_USER_TEXT }], timestamp: Date.now() },
-		];
+		// Match Agent's initial baseline and pre-request tool reconciliation, using
+		// Pi's public declaration diff. Never clone executable AgentTool objects.
+		let messages: AgentMessage[] = structuredClone([...input.state.messages]);
+		if (messages[0]?.role !== "system") {
+			const initial = createInitialSystemMessage(input.state.systemPrompt, input.state.tools.map(toToolDeclaration));
+			if (initial) messages.unshift(initial);
+		}
+		const changes = getToolStateChanges(getCurrentTools(messages), input.state.tools.map(toToolDeclaration));
+		if (changes.toolsAdded.length || changes.toolsRemoved.length) {
+			messages.push({
+				role: "system",
+				content: "",
+				timestamp: Date.now(),
+				...(changes.toolsAdded.length ? { toolsAdded: changes.toolsAdded } : {}),
+				...(changes.toolsRemoved.length ? { toolsRemoved: changes.toolsRemoved } : {}),
+			});
+		}
+		messages.push({ role: "user", content: [{ type: "text", text: PREWARM_USER_TEXT }], timestamp: Date.now() });
 		if (input.agent?.transformContext) messages = await input.agent.transformContext(messages, input.signal);
 		const converted = input.agent
 			? await input.agent.convertToLlm(messages)
 			: messages.filter((message) => LLM_MESSAGE_ROLES.has(message.role));
 		input.signal?.throwIfAborted();
-		const context = {
-			systemPrompt: input.state.systemPrompt,
-			messages: converted,
-			tools: [...input.state.tools],
-		} as Parameters<typeof streamSimple>[1];
+		// Transforms own the final prompt and declarations, just as on a real turn.
+		const context = normalizeContext({ messages: converted as Parameters<typeof streamSimple>[1]["messages"] });
 		if (input.maxInputTokens !== undefined && estimateInputTokensFromContext(context) > input.maxInputTokens) {
 			throw new Error("pre-warm input estimate exceeds its token budget");
 		}
 		if (input.canSend?.() === false) {
 			return { aborted: true, usage: null, backend: null, timing: { ttftMs: null, apiMs: elapsed() }, errorMessage: null };
 		}
-		const events = await send(
-			model,
-			context as unknown as Parameters<typeof streamSimple>[1],
-			options as unknown as Parameters<typeof streamSimple>[2],
-		);
+		const events = await send(model, context, options as unknown as Parameters<typeof streamSimple>[2]);
 		for await (const event of events) {
 			const hasDelta =
 				event.type === "toolcall_start" ||

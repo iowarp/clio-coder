@@ -28,7 +28,10 @@ test("system exposes canonical versions and four roots; doctor cannot repair and
 		const meta = await json(await h.request("/api/meta"), Meta);
 		assert.equal(meta.node, process.version);
 		assert.equal(meta.platform, `${process.platform}-${process.arch}`);
-		assert.ok(meta.piTui?.includes("0.85.1"));
+		const manifest = JSON.parse(await readFile(new URL("../../../package.json", import.meta.url), "utf8"));
+		assert.equal(meta.piAgentCore, manifest.dependencies["@earendil-works/pi-agent-core"]);
+		assert.equal(meta.piAi, manifest.dependencies["@earendil-works/pi-ai"]);
+		assert.equal(meta.piTui, manifest.dependencies["@earendil-works/pi-tui"]);
 	} finally {
 		await h.close();
 	}

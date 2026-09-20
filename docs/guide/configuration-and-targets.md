@@ -1481,7 +1481,7 @@ establish an actual hit. A compiler memoization hit or a forked transcript canno
 
 | Responsibility | Existing owner | Clio correction or limit |
 | --- | --- | --- |
-| Native request conversion, thinking history and cache controls | Pi 0.85.1 | Target retention reaches all instrumented native Pi APIs; explicit call options still win. |
+| Native request conversion, thinking history and cache controls | Pi 0.86.1 | Target retention reaches all instrumented native Pi APIs; explicit call options still win. |
 | Exclusive input/read/write buckets, cost tiers and one-hour write cost | Pi | Preserve the full catalog cost and per-call calculated total instead of flattening tiers or repricing an aggregate. |
 | Main, worker, failed/aborted and out-of-turn usage | Clio | Preserve optional `cacheWrite1h` as a subset of writes; retain billed failed calls. Missing provider usage remains unknown. |
 | Main and warm preparation | Pi public transforms and Clio payload hooks | Warm calls use the caller's transforms, ordered tools, thinking and payload replacement without executing tools or adding messages to history. |

@@ -25,6 +25,7 @@ import {
 } from "@earendil-works/pi-ai/providers/faux";
 import "@earendil-works/pi-ai/providers/images/register-builtins";
 
+import { normalizeContext } from "./context.js";
 import { getEngineEnvApiKey } from "./env-api-keys.js";
 import { engineModels } from "./models.js";
 import { instrumentProviderCall } from "./provider-diagnostics.js";
@@ -147,9 +148,9 @@ function dispatchEngineStream(
 		if (model.provider.startsWith("cloudflare-") && !hasCloudflareAuth(options)) {
 			return engineModels.stream(model, context, options);
 		}
-		return provider.stream(model, context, withEnvApiKey(model, options));
+		return provider.stream(model, normalizeContext(context), withEnvApiKey(model, options));
 	}
-	return resolved(model.api).stream(model, context, withEnvApiKey(model, options));
+	return resolved(model.api).stream(model, normalizeContext(context), withEnvApiKey(model, options));
 }
 
 function dispatchEngineStreamSimple(
@@ -164,9 +165,9 @@ function dispatchEngineStreamSimple(
 		if (model.provider.startsWith("cloudflare-") && !hasCloudflareAuth(options)) {
 			return engineModels.streamSimple(model, context, options);
 		}
-		return provider.streamSimple(model, context, withEnvApiKey(model, options));
+		return provider.streamSimple(model, normalizeContext(context), withEnvApiKey(model, options));
 	}
-	return resolved(model.api).streamSimple(model, context, withEnvApiKey(model, options));
+	return resolved(model.api).streamSimple(model, normalizeContext(context), withEnvApiKey(model, options));
 }
 
 export function engineStream(

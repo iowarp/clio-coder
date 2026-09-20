@@ -1,5 +1,6 @@
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
+import { replaceEngineMessages } from "../engine/agent.js";
 import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
 /**
  * The chat loop: one turn's state machine.
@@ -418,7 +419,7 @@ export interface CreateChatLoopDeps {
 	session?: SessionContract;
 	/**
 	 * Prompt compiler. When wired, the session system prompt is compiled once
-	 * per session and written into `state.systemPrompt`; recompiles happen
+	 * per session and applied to Pi’s system transcript baseline; recompiles happen
 	 * only on explicit events (model/target change, safety-level change,
 	 * config hot-reload, session switch).
 	 *
@@ -1585,7 +1586,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			void turnRuntime.ensureLiveCapabilitiesForSelectedModel().catch(() => {});
 			state.replayedContextMessages = replayMessages ? [...replayMessages] : [];
 			if (state.runtime) {
-				state.runtime.agent.state.messages = [...state.replayedContextMessages];
+				replaceEngineMessages(state.runtime.agent, [...state.replayedContextMessages]);
 			}
 			if (deps.protectedArtifacts) {
 				reloadProtectedArtifactsForSession(deps.protectedArtifacts, deps.readSessionEntries);

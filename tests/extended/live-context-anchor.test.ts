@@ -9,6 +9,7 @@ import {
 } from "../../src/domains/session/context-accounting.js";
 import type { SessionContract, SessionMeta } from "../../src/domains/session/contract.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import { createEngineAgent, setEngineSystemPrompt } from "../../src/engine/agent.js";
 import type { AgentMessage, Usage } from "../../src/engine/types.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext, type TurnContextDeps } from "../../src/interactive/turn-context.js";
@@ -79,14 +80,27 @@ describe("live measured context anchor", () => {
 					contextWindowSource: "configured",
 				},
 			},
-			agent: {
-				state: {
-					model: { id: "qwen", baseUrl: "http://source.invalid", maxTokens: 8192, contextWindow: 32768 },
+			agent: createEngineAgent({
+				initialState: {
+					model: {
+						id: "qwen",
+						baseUrl: "http://source.invalid",
+						maxTokens: 8192,
+						contextWindow: 32768,
+					} as AgentRuntime["agent"]["state"]["model"],
 					systemPrompt: "system".repeat(100),
 					messages: [assistant()],
-					tools: [{ name: "read", description: "s".repeat(27000), parameters: { type: "object" } }],
+					tools: [
+						{
+							name: "read",
+							label: "Read",
+							description: "s".repeat(27000),
+							parameters: { type: "object" },
+							execute: async () => ({ content: [], details: {} }),
+						},
+					],
 				},
-			},
+			}).agent,
 		} as unknown as AgentRuntime;
 		state.runtime = runtime;
 		let summaries = 0;
@@ -147,14 +161,14 @@ describe("live measured context anchor", () => {
 		const baseline = estimateAgentContextBreakdown(f.runtime.agent.state);
 		const tool = f.runtime.agent.state.tools[0];
 		ok(tool);
-		f.runtime.agent.state.systemPrompt = "";
+		setEngineSystemPrompt(f.runtime.agent, "");
 		tool.description += "g".repeat(400);
 		strictEqual(
 			f.context.liveContextEstimate(f.runtime).tokens,
 			20442,
 			"system shrink does not erase 100 tokens of new tools",
 		);
-		f.runtime.agent.state.systemPrompt = "s".repeat((baseline.systemPromptTokens + 200) * 4);
+		setEngineSystemPrompt(f.runtime.agent, "s".repeat((baseline.systemPromptTokens + 200) * 4));
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, 20642);
 		tool.description = "small";
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, 20542, "tool shrink does not erase system growth");

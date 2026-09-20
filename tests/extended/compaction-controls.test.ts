@@ -32,8 +32,10 @@ import { appendEntry, appendTurn, startSession } from "../../src/domains/session
 import { ledgerUsageCalls } from "../../src/domains/session/usage.js";
 import { serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import { registerEngineApiProvider, registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { estimateInputTokensFromContext, remainingContextMaxTokens } from "../../src/engine/apis/output-budget.js";
+import { resolvedRequestContext } from "../../src/engine/context.js";
 import { openSession, sessionPaths } from "../../src/engine/session.js";
 import type { Usage } from "../../src/engine/types.js";
 import { createProductionAutoCompact } from "../../src/entry/orchestrator.js";
@@ -41,7 +43,7 @@ import {
 	type ApplicationControllerDeps,
 	createApplicationController,
 } from "../../src/interactive/application-controller.js";
-import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
+import { createChatLoop } from "../../src/interactive/chat-loop.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createTurnContext } from "../../src/interactive/turn-context.js";
 import type { TurnMiddleware } from "../../src/interactive/turn-middleware.js";
@@ -173,7 +175,7 @@ describe("production compaction controls", () => {
 			calls.push({
 				model: model.id,
 				baseUrl: model.baseUrl,
-				systemPrompt: context.systemPrompt,
+				systemPrompt: resolvedRequestContext(context).systemPrompt,
 				user: JSON.stringify(context.messages),
 				apiKey: options?.apiKey,
 				headers: options?.headers,
@@ -266,17 +268,13 @@ describe("production compaction controls", () => {
 				session: f.session,
 				readSessionEntries: f.entries,
 				autoCompact: f.run,
-				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
-					agent: {
-						state: options?.initialState,
-						subscribe: () => () => {},
-						abort: () => {},
-						clearAllQueues: () => {},
-						prompt: async (text: string) => {
-							submitted.push(text);
-						},
-					},
-				})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+				createAgent: (options) => {
+					const handle = createEngineAgent(options);
+					handle.agent.prompt = async (text) => {
+						submitted.push(String(text));
+					};
+					return handle;
+				},
 				prompts: {
 					inputEpoch: () => 0,
 					compileSessionPrompt: async () => ({
@@ -491,10 +489,14 @@ describe("production compaction controls", () => {
 		const request = update.context;
 		ok(request);
 		deepStrictEqual(
-			request.messages,
+			request.messages.filter((message) => message.role !== "system"),
 			buildModelReplayAgentMessagesFromTurns(f.entries(), state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
 		);
-		strictEqual(request.systemPrompt, saved.systemPrompt);
+		strictEqual(
+			resolvedRequestContext({ messages: request.messages as Parameters<typeof resolvedRequestContext>[0]["messages"] })
+				.systemPrompt,
+			saved.systemPrompt,
+		);
 		deepStrictEqual(request.tools, saved.tools);
 		const active = saved.entries[0];
 		ok(active?.kind === "message");

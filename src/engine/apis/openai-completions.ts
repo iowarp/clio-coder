@@ -1,4 +1,5 @@
 import { TextDecoder } from "node:util";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
 import {
 	type Api,
 	type AssistantMessage,
@@ -36,6 +37,7 @@ import {
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../domains/providers/types/local-model-quirks.js";
 import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
+import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
@@ -1095,7 +1097,11 @@ function streamCompletions<TOptions extends StreamOptions>(
 	context: Context,
 	options: TOptions | undefined,
 	level: ThinkingLevel,
-	start: (model: Model<"openai-completions">, context: Context, options: TOptions) => AssistantMessageEventStream,
+	start: (
+		model: Model<"openai-completions">,
+		context: TranscriptContext,
+		options: TOptions,
+	) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
 	const resolved = resolvedCapabilitiesForModel(model, level);
 	const effectiveContext = stripsThinking(resolved) ? stripThinkingFromContext(context) : context;
@@ -1117,7 +1123,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 		withLocalResidency(model, options ?? {}, (requestModel) => {
 			return start(
 				requestModel,
-				preserveInterruptedReasoning(effectiveContext, requestModel, resolved),
+				normalizeContext(preserveInterruptedReasoning(effectiveContext, requestModel, resolved)),
 				withRemainingContextBudget(
 					requestModel,
 					effectiveContext,
@@ -1132,7 +1138,7 @@ function streamCompletions<TOptions extends StreamOptions>(
 	);
 	const thinking = stripNeverReasoningFromStream(channels, model, resolved);
 	const sanitized = stripSentinelsFromStream(thinking, model, resolved);
-	return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, context);
+	return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, resolvedRequestContext(context));
 }
 
 export const openAICompletionsApiProvider: EngineApiProvider<"openai-completions", OpenAICompletionsOptions> = {

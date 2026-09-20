@@ -21,6 +21,7 @@ import {
 	getSupportedThinkingLevels as piGetSupportedThinkingLevels,
 	isContextOverflow as piIsContextOverflow,
 	isRetryableAssistantError as piIsRetryableAssistantError,
+	retryDelayMs as piRetryDelayMs,
 	validateToolArguments as piValidateToolArguments,
 	StringEnum,
 	type Tool,
@@ -220,8 +221,11 @@ export function isEngineRetryableAssistantError(errorMessage: string): boolean {
 	return piIsRetryableAssistantError(message);
 }
 
-export function validateEngineToolArguments(tool: Tool, toolCall: ToolCall): unknown {
-	return piValidateToolArguments(tool, toolCall);
+export function validateEngineToolArguments(
+	tool: Tool,
+	toolCall: Omit<ToolCall, "arguments"> & { arguments: Record<string, unknown> },
+): unknown {
+	return piValidateToolArguments(tool, toolCall as ToolCall);
 }
 
 export function calculateEngineCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
@@ -259,4 +263,9 @@ export function registerFauxFromEnv(): EngineModel | null {
 	}
 	reg.setResponses([fauxAssistantMessage(text, response)]);
 	return reg.getModel(modelId) as EngineModel;
+}
+
+/** Public Pi backoff primitive; Clio owns the visible countdown and local-load floor. */
+export function engineRetryDelayMs(baseDelayMs: number, maxDelayMs: number, attempt: number): number {
+	return piRetryDelayMs({ baseDelayMs, maxAgentDelayMs: maxDelayMs }, attempt);
 }

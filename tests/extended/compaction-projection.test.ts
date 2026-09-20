@@ -8,6 +8,7 @@ import { calculateContextTokens, estimateTokens } from "../../src/domains/sessio
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
+import { resolvedRequestContext } from "../../src/engine/context.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { syntheticCompactionSummary } from "../harness/compaction-summary.js";
 
@@ -70,7 +71,7 @@ describe("compaction working-set provider boundary", () => {
 			Array.from({ length: 10 }, () => (context, options, _state, resolved) => {
 				calls.push({
 					text: JSON.stringify(context),
-					inputTokens: estimateAgentContextTokens(context),
+					inputTokens: estimateAgentContextTokens(resolvedRequestContext(context)),
 					maxTokens: options?.maxTokens,
 				});
 				return {

@@ -15,7 +15,7 @@
 
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { AgentMessage, StreamFn } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import {
 	type AssistantMessage,
 	type Context,
@@ -26,7 +26,7 @@ import {
 import type { Terminal } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { CLIO_APP_KEYBINDINGS, CLIO_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
-import { createEngineAgent } from "../../src/engine/agent.js";
+import { createEngineAgent, type EngineStreamFn as StreamFn } from "../../src/engine/agent.js";
 import { StringEnum, validateEngineToolArguments } from "../../src/engine/ai.js";
 import {
 	InstrumentedTuiAltScreen,
@@ -71,7 +71,7 @@ function assistant(content: AssistantMessage["content"], stopReason: AssistantMe
 	};
 }
 
-function toolTurn(id: string, args: Record<string, unknown>): AssistantMessage {
+function toolTurn(id: string, args: import("@earendil-works/pi-ai").ToolCall["arguments"]): AssistantMessage {
 	return assistant([{ type: "toolCall", id, name: "echo", arguments: args }], "toolUse");
 }
 
@@ -323,7 +323,7 @@ describe("engine lifecycle: transcript resets wait for the run to settle", () =>
 		await handle.agent.waitForIdle();
 		await run;
 		handle.agent.reset();
-		deepStrictEqual(handle.agent.state.messages, []);
+		deepStrictEqual(handle.agent.state.messages, [{ role: "system", content: "system", timestamp: 0 }]);
 		strictEqual(handle.agent.state.isStreaming, false);
 	});
 });
