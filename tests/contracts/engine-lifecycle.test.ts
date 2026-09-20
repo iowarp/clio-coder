@@ -303,6 +303,33 @@ describe("engine lifecycle: prepareNextTurn runs only before another assistant t
 });
 
 describe("engine lifecycle: transcript resets wait for the run to settle", () => {
+	it("retains interruption evidence without replaying partial reasoning or tool calls", async () => {
+		const interrupted = assistant(
+			[
+				{ type: "text", text: "First paragraph of the unfinished explanation." },
+				{ type: "thinking", thinking: "private partial reasoning" },
+				{ type: "toolCall", id: "incomplete", name: "echo", arguments: {} },
+			],
+			"aborted",
+		);
+		const provider = scriptedProvider([finalTurn()], []);
+		const { agent } = createEngineAgent({
+			streamFn: provider.streamFn,
+			initialState: { model: MODEL, messages: [user("Explain this"), interrupted] },
+		});
+		await agent.prompt("Did your explanation finish?");
+		const projected = provider.calls[0]?.messages ?? [];
+		const notice = userTexts(projected).find((text) => text.includes("response lifecycle"));
+		ok(notice?.includes("interrupted before completion"));
+		ok(notice?.includes("First paragraph"));
+		ok(!JSON.stringify(projected).includes("private partial reasoning"));
+		ok(!JSON.stringify(projected).includes('"id":"incomplete"'));
+		strictEqual(interrupted.stopReason, "aborted");
+		ok(agent.state.messages.includes(interrupted));
+		const replay = await agent.convertToLlm(agent.state.messages);
+		strictEqual(userTexts(replay).filter((text) => text.includes("response lifecycle")).length, 1);
+	});
+
 	it("refuses Agent.reset() while a run is active and accepts it once idle", async () => {
 		const timeline: string[] = [];
 		const provider = scriptedProvider([finalTurn()], timeline);

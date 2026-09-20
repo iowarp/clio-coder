@@ -25,6 +25,7 @@ export function routeValidationProjection(
 	allowUnenvelopedApproval = false,
 ): { jobSpec: JobSpec; restore(validated: JobSpec): DispatchRequest } {
 	const {
+		turnConstraints,
 		contextSeed,
 		systemPrompt,
 		reservation,
@@ -57,6 +58,7 @@ export function routeValidationProjection(
 		restore: (validated) => ({
 			...request,
 			...validated,
+			...(turnConstraints !== undefined ? { turnConstraints } : {}),
 			...(contextSeed !== undefined ? { contextSeed } : {}),
 			...(systemPrompt !== undefined ? { systemPrompt } : {}),
 			...(reservation !== undefined ? { reservation } : {}),

@@ -89,10 +89,10 @@ function blockedThenRead(actionClass: "execute" | "write"): ChatLoopEvent[] {
 // local diagnostic, this exercises real receipt persistence and integrity too.
 for (const scenario of [
 	{
-		name: "native read recovers denied shell observation",
+		name: "native read cannot certify recovery of denied execution",
 		events: blockedThenRead("execute"),
-		code: 0,
-		outcome: "succeeded",
+		code: 1,
+		outcome: "failed",
 		calls: 1,
 	},
 	{

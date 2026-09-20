@@ -1,11 +1,20 @@
 import { deepStrictEqual, notStrictEqual, strictEqual, throws } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import type { CompiledSessionPrompt } from "../../src/domains/prompts/compiler.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import { canonicalJson, sha256 } from "../../src/domains/prompts/hash.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import type { SessionMeta } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
+import {
+	getPromptManifestFilePath,
+	PROMPT_MANIFEST_VERSION,
+	readPromptCompileManifest,
+} from "../../src/domains/session/prompt-manifest.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import { toolSignatureFromState } from "../../src/interactive/chat-loop-messages.js";
 import { buildReplayAgentMessagesFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -74,6 +83,17 @@ describe("main compiled-prompt cache identity", () => {
 		);
 
 		const variants: Array<[string, MainPromptCacheIdentityInput]> = [
+			[
+				"turn constraints",
+				{
+					...identityInput(),
+					sessionInputs: { ...identityInput().sessionInputs, turnConstraints: { mode: "answer", allowedTools: [] } },
+				},
+			],
+			[
+				"ready skill inventory",
+				{ ...identityInput(), sessionInputs: { ...identityInput().sessionInputs, readySkillCount: 0 } },
+			],
 			["prompt input epoch", { ...identityInput(), promptInputEpoch: "2:1" }],
 			["target", { ...identityInput(), targetId: "remote" }],
 			["runtime", { ...identityInput(), runtimeId: "ollama" }],
@@ -244,6 +264,7 @@ describe("main compiled-prompt cache identity", () => {
 	it("resolves runtime inputs and exact attached schemas before deciding reuse", async () => {
 		let compileCalls = 0;
 		let memorySection = "# Memory\n\n- first";
+		let readySkillCount = 1;
 		const prompts: PromptsContract = {
 			inputEpoch: () => "1:1",
 			async compileSessionPrompt(input) {
@@ -289,6 +310,7 @@ describe("main compiled-prompt cache identity", () => {
 			toolRegistry: { get: () => undefined } as unknown as ToolRegistry,
 			middleware: {} as TurnMiddleware,
 			getMemorySection: () => memorySection,
+			getReadySkillCount: () => readySkillCount,
 			emitNotice: () => {},
 		});
 
@@ -322,6 +344,18 @@ describe("main compiled-prompt cache identity", () => {
 		memorySection = "# Memory\n\n- second";
 		await context.ensureSessionPrompt(agentRuntime);
 		strictEqual(compileCalls, 5, "resolved memory input must invalidate reuse");
+
+		readySkillCount = 0;
+		await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 6, "ready skill inventory must invalidate reuse");
+		state.currentTurnConstraints = { mode: "answer", allowedTools: ["read"] };
+		const scopedPrompt = await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 7, "host scope must invalidate reuse");
+		const renderedInputs = JSON.parse(scopedPrompt?.systemPrompt ?? "");
+		strictEqual(renderedInputs.readySkillCount, 0);
+		deepStrictEqual(renderedInputs.turnConstraints, state.currentTurnConstraints);
+		await context.ensureSessionPrompt(agentRuntime);
+		strictEqual(compileCalls, 7, "unchanged scope must preserve the compiled result");
 
 		strictEqual(attachedToolSchemasFromState(runtime.agent.state.tools)[0]?.description, "Changed description.");
 		context.dispose();
@@ -493,4 +527,33 @@ describe("session replay prefix stability", () => {
 			"call-d",
 		]);
 	});
+});
+
+it("prompt layout v3 preserves readable provenance from unversioned and v2 manifests", (t) => {
+	strictEqual(PROMPT_MANIFEST_VERSION, 3);
+	const root = mkdtempSync(join(tmpdir(), "clio-prompt-layout-"));
+	t.after(() => rmSync(root, { recursive: true, force: true }));
+	const meta = { id: "layout-compatibility", cwd: root, cwdHash: "fixture" } as SessionMeta;
+	const path = getPromptManifestFilePath(meta, root);
+	mkdirSync(dirname(path), { recursive: true });
+	const record = {
+		at: "2026-09-20T00:00:00.000Z",
+		previousHash: null,
+		systemPromptHash: sha256("old prompt"),
+		tokenEstimate: 2,
+		thinkingLevel: null,
+		projectPreload: null,
+		sections: [],
+		fragments: [],
+	};
+	writeFileSync(
+		path,
+		[record, { ...record, version: 2 }, { ...record, version: 3 }].map((row) => JSON.stringify(row)).join("\n"),
+	);
+	const loaded = readPromptCompileManifest(meta, root);
+	deepStrictEqual(loaded.errors, []);
+	deepStrictEqual(
+		loaded.records.map((row) => row.version),
+		[undefined, 2, 3],
+	);
 });

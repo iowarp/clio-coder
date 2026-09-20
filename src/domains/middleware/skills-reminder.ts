@@ -1,73 +1,34 @@
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
+import { type TurnConstraints, turnAllowsTool } from "../../core/turn-constraints.js";
 import type { MiddlewareHookRegistration } from "./runtime.js";
 import { isSkillSuggestionWait, SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE } from "./stalled-turn.js";
 import { type MiddlewareEffect, metadataNumber } from "./types.js";
 
-/**
- * First-turn skills reminder. The skill-mastery batteries proved local
- * models read and ignore every ambient prompt channel but comply with the
- * identical instruction when it is visible user-message text, and
- * middleware reminders are the sanctioned mechanism for that text. Once
- * per session, on the first substantive task turn, when model-visible or
- * installable skills exist, this registration injects one compact line
- * teaching the same reply protocol as the context(scope="skills") listing
- * footer. Installable skills count because a fresh install has none
- * installed and a marketplace full of them: gating on installed alone meant
- * the one channel these models act on never fired for the operator who
- * needed it most. Reminder text only: loading stays operator-gated
- * (`pendingSkillPolicy` untouched), and a turn that already carries a
- * pending skill request gets no reminder because the operator has already
- * chosen.
- */
+/** Once per fresh session, offer ready workflows without making discovery a task prerequisite. */
 
 export const SKILLS_REMINDER_REGISTRATION_ID = "observer.skills-reminder";
 
 export { SKILL_SUGGESTION_ANCHOR };
 
 export function skillsReminderMessage(installed: number, installable = 0, modelActivation = false): string {
-	// Keep discovery explicit for actionable work, but do not turn onboarding,
-	// supplied examples, or a request for wording into a repository investigation.
-	const conversationalException =
-		"For a greeting, onboarding question, request for wording, or self-contained example, answer directly without skill discovery. " +
-		"Honor requests not to use tools, other explicit tool restrictions, proposal-only scope, and declined installation offers. Do not activate a workflow for work the operator excluded (for example, ship when commits are forbidden). The following applies when beginning actual repository work: ";
-	const counts =
-		installable > 0
-			? `${installed} available in Clio, ${installable} additional marketplace skills available to install`
-			: `${installed} available in Clio`;
-	// Inline and non-blocking (issue #184): a 27B model read "and wait for the
-	// operator" as the whole job, spent a 40-second turn deliberating over the
-	// suggestion, and ended without one repository read. The suggestion is one
-	// line, the task continues in the same turn, and only the operator loads.
-	// At auto-edit and full-auto the model activates installed skills itself,
-	// so the reminder must not repeat "only the operator loads a skill": the
-	// literal models this line exists for act on it over the listing footer.
-	if (modelActivation && installed === 0) {
-		return `[Skills] ${counts}. No ready skill can be activated. Continue the requested task with available tools; do not load marketplace entries or repeat a declined installation offer. List skills only if the operator asks about them or installation.`;
-	}
-	if (modelActivation) {
-		return (
-			`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
-			'and checking for a match; if a ready Clio skill matches the requested work, load it with context(scope="skills", name="<name>") and ' +
-			"continue the task in the same turn. Discovery in another agent’s folders does not mean installed in Clio. Marketplace additions are offered for install " +
-			"when the operator runs it. If none match, do not mention skills and continue with the task."
-		);
-	}
-	return (
-		`[Skills] ${counts}. ${conversationalException}Start this task by listing them with context(scope="skills") ` +
-		"and checking for a match; if one matches, open your reply with the line " +
-		`\`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose) ` +
-		"and then continue the task in the same turn without the skill. Only the operator loads a skill, and a " +
-		"marketplace skill is offered for install when the operator runs it. If none match, do not mention skills " +
-		"and continue with the task."
-	);
+	if (installed <= 0) return "";
+	const counts = `${installed} ready Clio skill${installed === 1 ? "" : "s"}`;
+	const discovery =
+		'If a workflow would help the requested work, inspect context(scope="skills"). Skip discovery for self-contained answers and respect tool and task restrictions. ';
+	const activation = modelActivation
+		? 'For a matching ready skill, load it with context(scope="skills", name="<name>") and continue the task in the same turn.'
+		: `For a match, suggest \`${SKILL_SUGGESTION_ANCHOR}\` and continue the task in the same turn without it; only the operator loads a skill.`;
+	return `[Skills] ${counts}. ${discovery}${activation}${installable > 0 ? " Marketplace installation requires operator approval." : ""}`;
 }
 
 export interface SkillsReminderDeps {
+	/** Same host-owned scope used by tool admission and prompt composition. */
+	getTurnConstraints?(): TurnConstraints | undefined;
 	/** Count of installed skills the model may see and suggest. */
 	countModelVisibleSkills(): number;
 	/**
 	 * Count of marketplace skills not yet installed. Optional; absent reads as
-	 * zero. Either count above zero arms the reminder.
+	 * zero. Marketplace entries alone never arm the reminder.
 	 */
 	countInstallableSkills?(): number;
 	/**
@@ -166,13 +127,24 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 			"once per session, on the first substantive turn, teaches the skill-suggestion reply protocol; keeps a turn going that stopped on the suggestion",
 		hooks: ["turn_start", "turn_end"],
 		evaluate(input): ReadonlyArray<MiddlewareEffect> {
+			const constraints = deps.getTurnConstraints?.();
+			const suppressed =
+				constraints?.mode === "answer" ||
+				constraints?.mode === "proposal" ||
+				constraints?.skills === "disabled" ||
+				!turnAllowsTool(constraints, "context");
 			// The registration that teaches "suggest, then continue" owns the
 			// consequence when a model suggests and stops. The generic stalled-turn
 			// rule cannot see this case: the listing call counts as a tool call.
 			if (input.hook === "turn_end") {
-				return isSkillSuggestionWait(input)
-					? [{ kind: "request_continuation", message: SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE }]
-					: NO_EFFECTS;
+				if (suppressed || !isSkillSuggestionWait(input)) return NO_EFFECTS;
+				try {
+					return deps.countModelVisibleSkills() > 0
+						? [{ kind: "request_continuation", message: SKILL_SUGGESTION_WAIT_CONTINUATION_MESSAGE }]
+						: NO_EFFECTS;
+				} catch {
+					return NO_EFFECTS;
+				}
 			}
 			const sessionId = input.sessionId ?? null;
 			if (lastSeenSessionId === undefined) {
@@ -218,6 +190,7 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 			// task turn. Everything from here consumes the session's one chance.
 			if (!isSubstantiveUserTurn(input.text)) return NO_EFFECTS;
 			spentForActiveSession = true;
+			if (suppressed) return NO_EFFECTS;
 
 			// The operator already chose a skill for this turn; a reminder about
 			// suggesting one would only add noise.
@@ -227,11 +200,11 @@ export function createSkillsReminderRegistration(deps: SkillsReminderDeps): Midd
 			let installable = 0;
 			try {
 				installed = deps.countModelVisibleSkills();
+				if (installed <= 0) return NO_EFFECTS;
 				installable = deps.countInstallableSkills?.() ?? 0;
 			} catch {
 				return NO_EFFECTS;
 			}
-			if (installed <= 0 && installable <= 0) return NO_EFFECTS;
 			let modelActivation = false;
 			try {
 				modelActivation = deps.modelMayActivateSkills?.() ?? false;

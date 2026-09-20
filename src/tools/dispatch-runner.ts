@@ -2120,6 +2120,16 @@ export async function runDispatchTool(
 		runEvents: inputDeps.runEvents ?? createDispatchRunEventRegistry(),
 	};
 	const snapshot = admissionState.trustedExecutionSnapshots.get(args);
+	if (
+		options?.turnConstraints?.allowedTools !== undefined &&
+		(snapshot?.kind === "apply-winner" || (snapshot?.kind === "dispatch" && snapshot.mode === "compete"))
+	) {
+		return {
+			kind: "error",
+			message:
+				"dispatch: compete/worktree application cannot run under a capability allowlist; use a native single-worker assignment",
+		};
+	}
 	if (snapshot?.kind === "list") {
 		const catalog = deps.getAgentCatalog?.().trim() ?? "";
 		if (catalog.length === 0) {
@@ -2186,6 +2196,7 @@ export async function runDispatchTool(
 	// admission bounds. Keep these off the serializable approved request.
 	const dispatch = deps.dispatch;
 	const preparation = {
+		...(options?.turnConstraints === undefined ? {} : { turnConstraints: structuredClone(options.turnConstraints) }),
 		...(options?.hostRun === undefined ? {} : { hostRun: structuredClone(options.hostRun) }),
 		...(options?.signal === undefined ? {} : { signal: options.signal }),
 		...(timeoutMs === undefined ? {} : { deadlineAt: Date.now() + timeoutMs }),

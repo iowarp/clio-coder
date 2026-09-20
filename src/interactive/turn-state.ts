@@ -11,6 +11,7 @@
 
 import type { ClioSettings } from "../core/config.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type {
 	ResolvedRuntimeTarget,
 	RuntimeDescriptor,
@@ -127,6 +128,7 @@ export interface ChatTurnState {
 	/** A middleware request_continuation is waiting to resubmit after settle. */
 	pendingRequestContinuation: boolean;
 	currentPendingSkillPolicy: PendingSkillToolPolicy | undefined;
+	currentTurnConstraints: TurnConstraints | undefined;
 	/**
 	 * Tool surface an activated skill narrowed, held across the operator's
 	 * later turns. Replaced when the operator activates a different skill,
@@ -160,6 +162,7 @@ export function createTurnState(initialThinkingLevel: ThinkingLevel): ChatTurnSt
 		stalledTurnNudgeSpent: false,
 		pendingRequestContinuation: false,
 		currentPendingSkillPolicy: undefined,
+		currentTurnConstraints: undefined,
 		activeSkillSurface: undefined,
 		currentAskUserPolicy: undefined,
 		lastRunSnapshot: null,

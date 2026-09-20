@@ -10,6 +10,25 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
  * canonical setting or flag remains the only accepted policy surface.
  */
 describe("removed knob spellings", () => {
+	it("parses explicit task bounds without interpreting task prose", () => {
+		const parsed = parseRunCliArgs([
+			"--turn-mode",
+			"proposal",
+			"--allow-tools",
+			"context,tasks",
+			"--no-delegate",
+			"Plan it",
+		]);
+		assert.deepEqual(parsed.diagnostics, []);
+		assert.deepEqual(parsed.constraints, {
+			mode: "proposal",
+			allowedTools: ["context", "tasks"],
+			delegation: "forbidden",
+		});
+		assert.deepEqual(parseRunCliArgs(["--allow-tools", "none", "Hello"]).constraints, { allowedTools: [] });
+		assert.equal(parseRunCliArgs(["Do not use tools"]).constraints, undefined);
+		assert.equal(parseRunCliArgs(["--turn-mode", "guess"]).diagnostics[0]?.type, "error");
+	});
 	it("resolves guardrails from the configured settings projection", () => {
 		try {
 			configureGuardrails({ maxDispatchRuns: 42 });

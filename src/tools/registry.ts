@@ -9,6 +9,7 @@ import {
 	type SkillToolSurfaceViolation,
 } from "../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../core/tool-names.js";
+import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
 import { containsInstructionMarkers, INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import type { MiddlewareContract } from "../domains/middleware/contract.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareMetadataValue } from "../domains/middleware/types.js";
@@ -230,6 +231,8 @@ export interface RegistryDeps {
 }
 
 export interface ToolInvokeOptions {
+	/** Host-owned task scope, preserved on nested gateway calls. */
+	turnConstraints?: TurnConstraints;
 	/** Registry-owned filter bound to the active compiled safety policy. */
 	allowsObservationPath?: (path: string) => boolean;
 	/** Trusted submitting host identity for nested dispatch; never model arguments. */
@@ -611,6 +614,27 @@ export function createRegistry(deps: RegistryDeps): ToolRegistry {
 		// confirm rail resolves as the same auto-deny as any other mutation.
 		if (decision.kind === "block") {
 			return { kind: "terminal", verdict: { kind: "blocked", reason: decision.rejection.short, decision } };
+		}
+		const outsideTurn = !turnAllowsTool(options?.turnConstraints, call.tool);
+		const outsideRun =
+			options?.allowedTools !== undefined && !turnAllowsTool({ allowedTools: options.allowedTools }, call.tool);
+		const disabledSkills =
+			options?.turnConstraints?.skills === "disabled" && call.tool === ToolNames.Context && call.args?.scope === "skills";
+		if (outsideTurn || outsideRun || disabledSkills) {
+			const reason = disabledSkills
+				? "Skills are disabled for this task."
+				: `${call.tool} is outside this task's admitted tool scope.`;
+			const blocked: SafetyDecision = {
+				kind: "block",
+				classification: decision.classification,
+				rejection: {
+					short: `${call.tool} blocked: turn constraint`,
+					detail: reason,
+					hints: ["Work within the operator's task scope; approval of an individual tool does not widen it."],
+				},
+			};
+			recordRegistryDisposition(call, blocked, "blocked", { reasonCode: "turn_constraint", reasons: [reason] });
+			return { kind: "terminal", verdict: { kind: "blocked", reason, decision: blocked } };
 		}
 		// Stage 1.5, the skill tool surface: a loaded SKILL.md that declares
 		// allowed-tools or disallowed-tools narrows the surface until the

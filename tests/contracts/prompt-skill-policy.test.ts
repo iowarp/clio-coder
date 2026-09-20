@@ -8,7 +8,11 @@ import {
 	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { skillsReminderMessage } from "../../src/domains/middleware/skills-reminder.js";
+import type { TurnConstraints } from "../../src/core/turn-constraints.js";
+import {
+	createSkillsReminderRegistration,
+	skillsReminderMessage,
+} from "../../src/domains/middleware/skills-reminder.js";
 import { compile, compileWorker } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/index.js";
@@ -73,9 +77,10 @@ for (const level of AUTONOMY_LEVELS) {
 			assert.match(result.message, /only the operator can activate/);
 		}
 		const reminder = skillsReminderMessage(1, 1, enabled);
-		assert.match(reminder, /onboarding question.*answer directly without skill discovery/);
-		assert.match(reminder, /Honor requests not to use tools/);
-		assert.match(reminder, /Start this task by listing them with context\(scope="skills"\)/);
+		assert.match(reminder, /Skip discovery for self-contained answers/);
+		assert.match(reminder, /respect tool and task restrictions/);
+		assert.match(reminder, /If a workflow would help.*context\(scope="skills"\)/);
+		assert.doesNotMatch(reminder, /Start this task by/);
 		assert.match(reminder, /continue.*same turn/);
 		assert.equal(reminder.includes('load it with context(scope="skills", name="<name>")'), enabled);
 	});
@@ -166,4 +171,55 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 	assert.equal(before.systemPrompt, restored.systemPrompt);
 	assert.match(before.systemPrompt, /only the operator activates skills/);
 	assert.match(after.systemPrompt, /Load matching ready Clio skills/);
+});
+
+it("skills reminders and suggestion continuations stay silent outside admitted workflow scope", () => {
+	for (const constraints of [
+		{ mode: "answer" },
+		{ mode: "proposal" },
+		{ skills: "disabled" },
+		{ allowedTools: ["read"] },
+	] satisfies TurnConstraints[]) {
+		const reminder = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 2,
+			getTurnConstraints: () => constraints,
+		});
+		assert.deepEqual(
+			reminder.evaluate({ hook: "turn_start", text: "Explain the entry point", metadata: { conversationMessages: 0 } }),
+			[],
+		);
+		assert.deepEqual(
+			reminder.evaluate({
+				hook: "turn_end",
+				text: "Suggested skill: /skill example. Shall I proceed?",
+				metadata: { stopReason: "stop", turnToolCalls: 0 },
+			}),
+			[],
+		);
+	}
+	for (const modelActivation of [false, true]) {
+		let marketplaceReads = 0;
+		const reminder = createSkillsReminderRegistration({
+			countModelVisibleSkills: () => 0,
+			countInstallableSkills: () => {
+				marketplaceReads += 1;
+				return 100;
+			},
+			modelMayActivateSkills: () => modelActivation,
+		});
+		assert.equal(skillsReminderMessage(0, 100, modelActivation), "");
+		assert.deepEqual(
+			reminder.evaluate({ hook: "turn_start", text: "Fix the file", metadata: { conversationMessages: 0 } }),
+			[],
+		);
+		assert.equal(marketplaceReads, 0, "no-ready reminders must not scan the marketplace");
+		assert.deepEqual(
+			reminder.evaluate({
+				hook: "turn_end",
+				text: "Suggested skill: /skill example. Shall I proceed?",
+				metadata: { stopReason: "stop", turnToolCalls: 0 },
+			}),
+			[],
+		);
+	}
 });

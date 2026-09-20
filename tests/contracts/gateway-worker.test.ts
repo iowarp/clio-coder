@@ -1,4 +1,4 @@
-import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, ok, rejects, strictEqual } from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +36,67 @@ describe("gateway on the worker surface", () => {
 	afterEach(() => {
 		for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 		env.restore();
+	});
+
+	it("intersects explicit turn scope with recipe schemas and gateway admission", async () => {
+		const registry = createWorkerToolRegistry(
+			undefined,
+			createWorkerSafety({ cwd: scratch() }),
+			undefined,
+			[],
+			"full-auto",
+		);
+		const turnConstraints = {
+			allowedTools: ["git", "context"],
+			skills: "disabled" as const,
+			delegation: "forbidden" as const,
+		};
+		deepStrictEqual(
+			resolveAgentTools({ registry, allowedTools: RECIPE_TOOLS, turnConstraints }).map((tool) => tool.name),
+			["context", "gateway"],
+		);
+		const options = { turnConstraints, allowedTools: [...RECIPE_TOOLS, ToolNames.Gateway] };
+		strictEqual((await registry.invoke({ tool: "edit", args: {} }, options)).kind, "blocked");
+		strictEqual((await registry.invoke({ tool: "context", args: { scope: "skills" } }, options)).kind, "blocked");
+		const listing = await registry.invoke({ tool: "gateway", args: { op: "find" } }, options);
+		ok(listing.kind === "ok" && listing.result.kind === "ok");
+		deepStrictEqual(
+			JSON.parse(listing.result.output).capabilities.map((entry: { name: string }) => entry.name),
+			["git"],
+		);
+		const excluded = await registry.invoke(
+			{ tool: "gateway", args: { op: "call", capability: "artifact", args: {} } },
+			options,
+		);
+		ok(excluded.kind === "ok" && excluded.result.kind === "error");
+		const empty = resolveAgentTools({ registry, turnConstraints: { allowedTools: [] } });
+		deepStrictEqual(empty, []);
+	});
+
+	it("refuses delegation that would widen the parent's explicit tools before spawning", async () => {
+		let spawned = false;
+		const bundle = makeDispatchBundle(dispatchStubContext({ agentTools: RECIPE_TOOLS }), {
+			spawnWorker: () => {
+				spawned = true;
+				throw new Error("must not spawn");
+			},
+		});
+		await bundle.extension.start();
+		try {
+			const request = { agentId: "coder", task: "Inspect files", cwd: scratch(), executionRole: "builder" as const };
+			await rejects(
+				bundle.contract.dispatch(request, undefined, { turnConstraints: { allowedTools: ["dispatch", "read"] } }),
+				/exceeds the parent task's explicit scope/,
+			);
+			await rejects(
+				bundle.contract.dispatch(request, undefined, { turnConstraints: { delegation: "forbidden" } }),
+				/forbidden by the parent/,
+			);
+			strictEqual(spawned, false);
+			strictEqual(bundle.contract.listRuns().length, 0);
+		} finally {
+			await bundle.extension.stop?.();
+		}
 	});
 
 	it("narrows a recipe that lists git to a surface that carries gateway and attaches gateway instead of git", () => {

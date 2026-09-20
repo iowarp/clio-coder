@@ -52,6 +52,7 @@ export function createTaskNudgeRegistration(options: CreateTaskNudgeRegistration
 		hooks: ["turn_end"],
 		evaluate(input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> {
 			if (input.hook !== "turn_end") return [];
+			if (input.metadata?.turnMode === "proposal" || input.metadata?.turnMode === "answer") return [];
 			// Only settled stop turns are candidates; aborted and errored turns
 			// already carry their own recovery path. Absent stopReason is "stop",
 			// mirroring the finish contract.

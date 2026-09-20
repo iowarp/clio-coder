@@ -10,6 +10,7 @@
  * model request. Every decision is also written to the audit ledger.
  */
 
+import { type TurnConstraints, turnAllowsContinuation, turnAllowsTool } from "../../core/turn-constraints.js";
 import { VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import type { MiddlewareEffect, MiddlewareHookInput, MiddlewareHookRegistration } from "../middleware/index.js";
 import type { UserTaskAcceptance } from "../user-tasks/acceptance.js";
@@ -38,6 +39,7 @@ export const HIGH_RIGOR_REVALIDATION_MESSAGE =
 	`and reason of what could not be verified. Do not end the turn until you have validated or recorded the limitation.`;
 
 export interface CreateFinishContractRegistrationOptions {
+	getTurnConstraints?: () => TurnConstraints | undefined;
 	/**
 	 * Current session entries for evidence collection, or null when no session
 	 * is active. A null return disables assessment for the turn, matching the
@@ -102,10 +104,32 @@ export function createFinishContractRegistration(
 			recordDecision(options, input.turnId ?? null, assessment, rigor);
 			if (assessment.kind !== "engage") return [];
 			if (rigor === "high") {
+				const constraints = options.getTurnConstraints?.();
+				const attached =
+					typeof input.metadata?.activeToolNames === "string" ? input.metadata.activeToolNames.split(",") : undefined;
+				const available = (name: string) =>
+					turnAllowsTool(constraints, name) && (attached === undefined || attached.includes(name));
+				const verificationTools = ["verify", "bash", "run_script"].filter(available);
+				const canRecordLimitation = available("limitation");
+				if (!turnAllowsContinuation(constraints) || (verificationTools.length === 0 && !canRecordLimitation)) {
+					return [
+						{
+							kind: "inject_reminder",
+							severity: "warn",
+							message:
+								"[Clio Coder] validation evidence is missing. Report the change as unverified and name outstanding acceptance checks. The current task scope does not permit automatic validation recovery; this notice grants no additional authority.",
+						},
+					];
+				}
 				// Withhold the completion and force a re-prompt: a continuation
 				// request carries the turn onward, and the paired reminder gives
 				// the directive its own visible system-reminder line.
-				const message = activeAcceptance?.verification.length ? assessment.message : HIGH_RIGOR_REVALIDATION_MESSAGE;
+				const message =
+					verificationTools.length > 0 && canRecordLimitation
+						? activeAcceptance?.verification.length
+							? assessment.message
+							: HIGH_RIGOR_REVALIDATION_MESSAGE
+						: `[Clio Coder] high-rigor finish gate: validation evidence is missing. ${verificationTools.length > 0 ? `Use an authorized check through ${verificationTools.join(" or ")}; if the operator excluded validation, report the blocker without running it.` : "Record the unavailable validation with limitation."} Do not claim checks passed without evidence.`;
 				return [
 					{ kind: "request_continuation", message },
 					{ kind: "inject_reminder", message, severity: "warn" },

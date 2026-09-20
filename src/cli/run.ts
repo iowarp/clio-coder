@@ -60,6 +60,9 @@ Flags:
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
   --autonomy <level>        one-run autonomy: read-only|suggest|auto-edit|full-auto
+  --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
+  --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
+  --no-delegate            forbid main-agent dispatch for this task and its continuations
   --temperature <N>         one-run sampler override for supported local/OpenAI-compatible runtimes
   --top-p <N>               one-run nucleus sampling override (0..1)
   --top-k <N>               one-run top-k override
@@ -107,8 +110,8 @@ a noop flag. A run is a no-op when a block remains unresolved and no write
 succeeded, or when it ran tools and none succeeded; a run that called no tool
 is not. Only the main agent's own write-class calls count as writes: an
 artifact report, bash, and dispatch work do not. A later successful read or
-command can recover a block of the same action class. Native observation can
-also replace blocked shell execution; it cannot recover a blocked write.
+command can recover a block of the same action class. Native observation does
+not certify that a blocked execution or write requirement was fulfilled.
 Bookkeeping and reports cannot recover blocks. An unresolved blocked run with no successful write exits 1 with outcome
 "failed" and outcomeDetail "noop".
 A successful limitation call also fails, with outcomeDetail "limitation".
@@ -330,6 +333,12 @@ export async function runClioRun(
 				process.stderr.write(USAGE);
 				return 2;
 			}
+			if (parsed.constraints && parsed.agentId !== undefined) {
+				process.stderr.write(
+					"clio-coder run: --turn-mode, --allow-tools, and --no-delegate apply to the main-agent task\n",
+				);
+				return 2;
+			}
 			if (parsed.sessionId !== undefined && parsed.continueSession) {
 				process.stderr.write("clio-coder run: --session and --continue name different sessions; pass one\n");
 				process.stderr.write(USAGE);
@@ -418,6 +427,7 @@ export async function runClioRun(
 							...(skillPaths.length > 0 ? { skillPaths } : {}),
 							headless: {
 								prompt: assembled.prompt,
+								...(parsed.constraints ? { constraints: parsed.constraints } : {}),
 								mode: parsed.json ? "json" : "text",
 								jsonEvents: parsed.jsonEvents,
 								...(noSkills ? { noSkills: true } : {}),

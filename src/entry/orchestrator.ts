@@ -1613,6 +1613,26 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		"auto-edit";
 	const resolveEffectiveAutonomy = (): AutonomyLevel => activeAcpSessionAutonomy ?? resolveBaselineAutonomy();
 	const skillDiscoveryEnabled = options.noSkills !== true && options.headless?.noSkills !== true;
+	let readySkillSnapshot: { key: string; count: number } | undefined;
+	const getReadySkillCount = (): number => {
+		if (!resources) return 0;
+		const cwd = process.cwd();
+		// Skill loading reads and hashes the filesystem. Reuse the count across
+		// warm/real requests and reminders until the same source epoch that
+		// invalidates prompt composition changes (/library reload, config, etc.).
+		if (!prompts) return modelVisibleSkills(resources.skills(cwd).items).length;
+		const key = JSON.stringify([
+			cwd,
+			prompts.inputEpoch(),
+			skillDiscoveryEnabled,
+			config?.get().integrations.projectResources.trustProjectImports === true,
+			options.skillPaths ?? options.headless?.skillPaths ?? [],
+		]);
+		if (readySkillSnapshot?.key === key) return readySkillSnapshot.count;
+		const count = modelVisibleSkills(resources.skills(cwd).items).length;
+		readySkillSnapshot = { key, count };
+		return count;
+	};
 	// First-turn skills reminder: user-message-visible text is the one channel
 	// the battery-tested local models act on. Which protocol it teaches follows
 	// the effective autonomy level, resolved one line up: suggest-and-wait at
@@ -1620,7 +1640,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (resources && skillDiscoveryEnabled) {
 		middleware.registerHook(
 			createSkillsReminderRegistration({
-				countModelVisibleSkills: () => modelVisibleSkills(resources.skills(process.cwd()).items).length,
+				getTurnConstraints: () => chat.currentTurnConstraints?.(),
+				countModelVisibleSkills: getReadySkillCount,
 				// Same lookup context(scope="skills") lists under its Marketplace
 				// heading, minus what is already installed, so the count the
 				// reminder quotes is the count the listing will show.
@@ -2113,6 +2134,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (session) {
 		middleware.registerHook(
 			createFinishContractRegistration({
+				getTurnConstraints: () => chat.currentTurnConstraints?.(),
 				// Tail-scoped: the contract only needs the last-user-message window, so
 				// it parses a bounded ledger tail per turn_end rather than the whole
 				// file (which grows unbounded with session length).
@@ -2133,6 +2155,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(createDemoGuidanceRegistration(() => getCurrentSettings().interface.demo));
 	}
 	const chat = createChatLoop({
+		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch
 		// admission (#250) sees it exactly as it sees the orchestrator's own turn.
@@ -2498,6 +2521,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const workingContextPaths = [...(options.headless.workingContextPaths ?? []), ...fileExpansion.referencedPaths];
 			const code = await runHeadlessMainAgent(chat, {
 				prompt: fileExpansion.text,
+				...(options.headless.constraints ? { constraints: options.headless.constraints } : {}),
 				...(images.length > 0 ? { images } : {}),
 				...(workingContextPaths.length > 0 ? { workingContextPaths } : {}),
 				...(options.headless.sampling ? { sampling: options.headless.sampling } : {}),

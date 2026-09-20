@@ -142,8 +142,12 @@ function autonomyNote(actionClass: ActionClass): string {
 export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 	const { registry } = deps;
 
-	const allowedSet = (options: ToolInvokeOptions | undefined): ReadonlySet<string> | null =>
-		options?.allowedTools ? new Set<string>(options.allowedTools) : null;
+	const allowedSet = (options: ToolInvokeOptions | undefined): ReadonlySet<string> | null => {
+		const run = options?.allowedTools;
+		const turn = options?.turnConstraints?.allowedTools;
+		if (run === undefined && turn === undefined) return null;
+		return new Set((run ?? turn ?? []).filter((name) => turn === undefined || turn.includes(name)));
+	};
 
 	const resolveCapability = async (
 		name: string,
@@ -173,7 +177,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 
 	const outsideSurface = (name: string, allowed: ReadonlySet<string>): ToolResult => ({
 		kind: "error",
-		message: `gateway: capability "${name}" is not on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe did not declare it, so the gateway refuses to call it`,
+		message: `gateway: capability "${name}" is not on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe or explicit task scope excludes it`,
 	});
 
 	const runFind = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {

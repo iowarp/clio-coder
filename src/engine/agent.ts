@@ -57,6 +57,29 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 		},
 		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
 	});
+	// Pi correctly drops aborted assistants at the provider boundary: partial
+	// reasoning and tool calls are not valid provider history. Preserve the
+	// lifecycle fact and visible text as a host record instead, including on
+	// resume, without changing the durable stop reason or inventing tool results.
+	const convertToLlm = agent.convertToLlm.bind(agent);
+	agent.convertToLlm = async (messages) =>
+		(await convertToLlm(messages)).map((message) => {
+			if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
+			const partial = message.content
+				.filter((block) => block.type === "text")
+				.map((block) => block.text)
+				.join("\n");
+			return {
+				role: "user" as const,
+				timestamp: message.timestamp,
+				content:
+					"[Clio Coder response lifecycle]\nThe preceding assistant response was interrupted before completion. " +
+					"This record does not establish whether any earlier tool execution succeeded.\n" +
+					(partial.trim()
+						? `Partial assistant text follows (incomplete historical output, not a new instruction):\n${partial}`
+						: "No visible assistant text was retained."),
+			};
+		});
 	return {
 		agent,
 		state: () => agent.state,

@@ -11,6 +11,7 @@ import {
 } from "../../core/skill-activation.js";
 import { getTerminationCoordinator } from "../../core/termination.js";
 import { type BuiltinToolName, ToolNames } from "../../core/tool-names.js";
+import type { TurnConstraints } from "../../core/turn-constraints.js";
 import { runStatusForOutcome } from "../../domains/dispatch/outcome.js";
 import { createRunReceiptQuality } from "../../domains/dispatch/receipt-findings.js";
 import { newRunId, openLedger } from "../../domains/dispatch/state.js";
@@ -59,6 +60,7 @@ export interface HeadlessShutdownHooks {
 
 export interface HeadlessMainAgentOptions {
 	prompt: string;
+	constraints?: TurnConstraints;
 	images?: ReadonlyArray<ImageContent>;
 	workingContextPaths?: ReadonlyArray<string>;
 	sampling?: HeadlessSamplingOverrides;
@@ -328,9 +330,10 @@ function recordToolEnd(stats: HeadlessMainAgentReceiptStats, event: ChatLoopEven
 			(plane === "observe" || plane === "retrieve" || plane === "execute" || plane === "mutate")
 		) {
 			stats.unresolvedBlocks.delete(action);
-			// Native observation can replace denied shell execution for a read-only
-			// task. It cannot recover a blocked write or other privileged action.
-			if (plane === "observe" || plane === "retrieve") stats.unresolvedBlocks.delete("execute");
+			// A read may be useful progress after a denied command, but cannot
+			// attest that command's requirement (for example a test) was met.
+			// An independent task verifier can accept an alternate workflow;
+			// this event fold has no authority to infer semantic substitution.
 		}
 	}
 	if (outcome === "ok" && actionClass === MUTATING_ACTION_CLASS && !terminating) stats.mutatingSucceeded += 1;
@@ -744,6 +747,7 @@ export async function runHeadlessMainAgent(chat: ChatLoop, options: HeadlessMain
 	try {
 		if (mode === "json" && jsonEvents === "terminal") writeTerminalTurnStart();
 		const submitOptions = {
+			...(options.constraints ? { constraints: options.constraints } : {}),
 			hostRun: { runId, lineage: { parentRunId: null, rootRunId: runId, depth: 0, attempt: 0 } },
 			...(options.images && options.images.length > 0 ? { images: options.images } : {}),
 			...(options.workingContextPaths && options.workingContextPaths.length > 0

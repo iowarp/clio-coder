@@ -1,5 +1,6 @@
 import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
+import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
 import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
@@ -22,6 +23,7 @@ export interface RunSamplingArgs {
 export type RunJsonEventsMode = "full" | "terminal";
 
 export interface RunCliArgs {
+	constraints?: TurnConstraints;
 	help: boolean;
 	json: boolean;
 	jsonEvents: RunJsonEventsMode;
@@ -195,6 +197,31 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		}
 		if (arg === "--no-skills") {
 			parsed.noSkills = true;
+			continue;
+		}
+		if (arg === "--turn-mode") {
+			const value = need(arg);
+			if (value === "answer" || value === "proposal" || value === "change")
+				parsed.constraints = { ...parsed.constraints, mode: value };
+			else if (value !== null)
+				parsed.diagnostics.push({ type: "error", message: "--turn-mode must be answer, proposal, or change" });
+			continue;
+		}
+		if (arg === "--no-delegate") {
+			parsed.constraints = { ...parsed.constraints, delegation: "forbidden" };
+			continue;
+		}
+		if (arg === "--allow-tools") {
+			const value = need(arg);
+			if (value !== null) {
+				const names = value === "none" ? [] : value.split(",").map((name) => name.trim());
+				if (names.some((name) => !/^[a-zA-Z0-9_.-]+$/.test(name)))
+					parsed.diagnostics.push({
+						type: "error",
+						message: "--allow-tools needs comma-separated capability names, or none",
+					});
+				else parsed.constraints = { ...parsed.constraints, allowedTools: [...new Set(names)] };
+			}
 			continue;
 		}
 		if (arg === "--skill") {
