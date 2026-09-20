@@ -2,6 +2,23 @@
 
 This is the deep usage reference behind the deliberately terse tool descriptions in the prompt envelope. Toolkit v2 keeps rich guidance out of tool descriptions and puts it here, where `gateway(op="call", capability="clio_docs", args={query: ...})` retrieves it section by section. Each tool below has its own self-contained `##` section covering the argument surface, defaults, truncation and continuation behavior, and concrete calls. Source of truth is `src/tools/`.
 
+### The tool surface at a glance
+
+| Purpose | Tools |
+| --- | --- |
+| Read and search the workspace | [`read`](#read-page-through-a-file-with-offset-limit-and-tail), [`grep`](#grep-search-file-contents-with-ripgrep), [`find`](#find-locate-files-and-directories-by-glob-pattern), [`ls`](#ls-list-one-directory), [`code_nav`](#codenav-navigate-the-codewiki-index) |
+| Change the workspace | [`edit`](#edit-exact-text-replacements-in-one-file), [`write`](#write-create-or-overwrite-a-whole-file), [`bash`](#bash-run-a-shell-command), [`run_script`](#runscript-stream-a-scientific-processing-step-to-disk) |
+| Prove something works | [`verify`](#verify-run-declared-verification-checks), [`evidence`](#evidence-inspect-canonical-evidence-and-trust-status), [`limitation`](#limitation-record-what-a-turn-could-not-verify) |
+| Delegate and supervise work | [`dispatch`](#dispatch-run-bounded-tasks-on-fleet-agents), [`monitor`](#monitor-inspect-dispatched-runs), [`steer`](#steer-guide-or-cancel-a-running-worker), [`ledger`](#ledger-coordinate-peer-workers-through-typed-entries) |
+| Track and record decisions | [`tasks`](#tasks-the-session-task-board), [`decide`](#decide-record-a-design-decision), [`artifact`](#artifact-plans-reviews-and-reports) |
+| Look things up | [`gateway`](#gateway-discover-and-call-secondary-capabilities), [`clio_docs`](#cliodocs-retrieve-bundled-documentation-through-the-gateway), [`clio_library`](#cliolibrary-inspect-the-recipe-catalog-through-the-gateway), [`context`](#context-workspace-skill-activation-and-recall), [`git`](#git-read-only-inspection-of-git-repository-state), [`data`](#data-inspect-structured-files-through-the-gateway) |
+| Reach outside the machine | [`web_read` and `web_fetch`](#webread-and-webfetch-read-web-pages-or-make-full-http-requests), [`credential_present`](#credentialpresent-check-environment-or-file-for-a-credential-key) |
+| Talk to the operator | [`ask_user`](#askuser-host-owned-operator-interviews), [`panes`](#panes-manage-clio-owned-terminal-panes) |
+
+Cross-cutting behavior that applies to every tool is in
+[Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget)
+and [Search scope](#search-scope-read-ls-grep-and-find-outside-the-workspace).
+
 In the current source tree, `src/tools/agent-tools.ts` serves as the single agent-tool adapter across both orchestrator and worker runtimes. Both surfaces resolve their executable tools through the exact same `effectiveToolNames` narrowing, ensuring that attested tool schemas never drift from the tools available at runtime. Tools are keyed strictly by the `ToolName` union with no alias table. Argument leniency for weak-model callers is provided exclusively by per-tool `prepareArguments` normalizers declared on `ToolSpec`.
 
 ## gateway: discover and call secondary capabilities
@@ -140,13 +157,42 @@ Arguments:
 - `timeout_ms` (optional). Default 300000 (5 minutes).
 - `output_policy` (optional). Canonical model-context disposition: `full`, `bounded`, `summary`, or `metadata-only`. Omission is exactly `bounded`.
 
-Workspace containment: commands whose filesystem targets resolve outside the session workspace escalate to `system_modify` and ask for one-shot confirmation at every autonomy level (headless runs deny asks). Recognized targets are shell redirects, `tee`/`mkdir`/`touch` path operands, `cp`/`mv`/`ln` destinations, in-place `sed -i` operands, and any `cd`/`pushd` whose directory leaves the workspace, since a `cd` outside re-bases every relative path that follows it. A write target the shell expands at run time (`$HOME/x`, `${OUT}`, `{a,b}`) cannot be placed and escalates the same way, and so does a link to outside the workspace made by `ln`, `link`, or `cp -s`/`-l`, recreated by `mv` or a link-keeping `cp` (`-a`, `-P`, `-d`, `-r`), or run through `nice`, `timeout`, `xargs`, `find -exec`, or a similar wrapper. Here-document bodies are read both as text and as script lines, so a body line cannot hide a real `cd`. The child shell never inherits `CDPATH`. Inside-workspace equivalents stay plain `execute` with no new prompts.
+Workspace containment: commands whose filesystem targets resolve outside the session workspace escalate to `system_modify` and ask for one-shot confirmation at every autonomy level. Headless runs deny asks. Inside-workspace equivalents stay plain `execute` with no new prompts.
 
-The default `bounded` policy keeps a tail-biased model excerpt under the 16KB result budget, because the failing assertion, compiler error, and exit summary usually live at the end. `summary` is useful for noisy builds and test runs: code deterministically selects a bounded head, tail, and error-like lines, applies Clio's repository secret redactor, and records the source hash and algorithm in summary provenance. `metadata-only` is appropriate when the model needs only outcome and termination facts; stdout and stderr stay out of model context while the operator presentation, retained byte size, and retrieval path remain available. `full` is for output known to be small. It is admitted only when the complete captured result and its facts fit the bounded result/context budget; otherwise the result explicitly records a typed downgrade to tail-biased `bounded` and provides retrieval. Do not use `full` as the routine default.
+<details>
+<summary>Exactly which write targets and wrappers trigger the escalation</summary>
+
+Recognized targets are shell redirects, `tee`/`mkdir`/`touch` path operands, `cp`/`mv`/`ln` destinations, in-place `sed -i` operands, and any `cd`/`pushd` whose directory leaves the workspace, since a `cd` outside re-bases every relative path that follows it.
+
+A write target the shell expands at run time (`$HOME/x`, `${OUT}`, `{a,b}`) cannot be placed and escalates the same way, and so does a link to outside the workspace made by `ln`, `link`, or `cp -s`/`-l`, recreated by `mv` or a link-keeping `cp` (`-a`, `-P`, `-d`, `-r`), or run through `nice`, `timeout`, `xargs`, `find -exec`, or a similar wrapper.
+
+Here-document bodies are read both as text and as script lines, so a body line cannot hide a real `cd`. The child shell never inherits `CDPATH`.
+
+</details>
+
+The four `output_policy` values differ only in what reaches model context:
+
+| Policy | What the model sees | Use it for |
+| --- | --- | --- |
+| `bounded` (default) | A tail-biased excerpt under the 16KB result budget, because the failing assertion, compiler error, and exit summary usually live at the end. | Most commands. |
+| `summary` | A deterministic bounded head, tail, and error-like lines, run through Clio's repository secret redactor, with the source hash and algorithm recorded in summary provenance. | Noisy builds and test runs. |
+| `metadata-only` | Outcome and termination facts only. stdout and stderr stay out of model context; operator presentation, retained byte size, and retrieval path remain available. | Commands whose output the model does not need. |
+| `full` | The complete captured result, admitted only when it and its facts fit the bounded result/context budget. Otherwise the result records a typed downgrade to `bounded` and provides retrieval. | Output known to be small. Not a routine default. |
 
 Presentation is independent from model context. The operator-facing display remains folded and tail-biased under every policy. When the display or selected context omits captured content, the terminal result writes one per-session scratch artifact and names it in the result. Live updates use the selected policy, remain bounded, and never write per-update artifacts. Every terminal result records requested and applied context modes, captured/displayed/context bytes, truncation or downgrade state, and any offload path. Exit code, signal, timeout, abort, and output-cap facts survive every policy. Scratch retrieval may contain the raw retained output; the deterministic `summary` projection is the redacted surface.
 
-A command producing more than 16 MiB of combined stdout/stderr is stopped with an error. The cap result distinguishes raw observed bytes from retained bytes and states where the partial output went: inline, a named offload, or explicitly discarded bytes when retention was cut or failed. Observed bytes count data received through settlement, not hypothetical output from an uninterrupted command. The diagnostic survives summary and metadata-only dispositions. Use `run_script` for disk-streamed output beyond this cap. UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole; the operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path. A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
+A command producing more than 16 MiB of combined stdout/stderr is stopped with an error. Use `run_script` for disk-streamed output beyond this cap.
+
+<details>
+<summary>What the cap result records, and how partial bytes are decoded</summary>
+
+The cap result distinguishes raw observed bytes from retained bytes and states where the partial output went: inline, a named offload, or explicitly discarded bytes when retention was cut or failed. Observed bytes count data received through settlement, not hypothetical output from an uninterrupted command. The diagnostic survives summary and metadata-only dispositions.
+
+UTF-8 decoding spans process chunks, and a code point split by the hard byte cap is discarded rather than replaced with an invalid character. Raw NUL bytes are removed from model context under every policy, which leaves multi-byte code points and ANSI escape sequences whole. The operator presentation and the scratch artifact keep the captured bytes, and the result still records the omission and its retrieval path.
+
+A timeout, abort, output cap, or nonzero exit preserves captured diagnostics and appends a status line such as `bash: command timed out after <ms>ms` or `bash: command failed (exit N)` before canonical shaping.
+
+</details>
 
 Repository test runners run without confirmation at `auto-edit` and `full-auto`: `npm test`, `pytest`, `python -m pytest`, `python -m unittest` (as `python`, `python3`, or `python3.N`), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, and `gradle test` or `./gradlew test`. Arguments must be bare words, so `ctest --output-on-failure` and `python3 -m unittest -q test_solver` run, while a quoted argument, `$(...)`, a redirect, a pipe, or `;` makes the command ask again. An `&&` chain runs when every step is recognized, so `cd build && ctest` runs from inside the workspace, and `make check && curl ...` asks. These commands execute repository code, which is the price of letting a headless run verify its own work. `npm run lint`, `npm run build`, `npm run typecheck`, and `npm run ci` still ask for one-shot confirmation at every level. At `suggest` a test runner asks like every command, and at `read-only` it is denied.
 
@@ -432,7 +478,26 @@ checks:
     tags: [scientific, performance]
 ```
 
-Every check has a `kind`, absent or `command` by default. A version 1 file still loads and every check there is `kind: command`; the kind fields require `version: 2`. `kind: command` reads the exit code. `kind: numeric-compare` runs the command, parses its stdout as a JSON object of `string -> number | number[]`, and judges it against `reference` (a repository-relative JSON file of the same shape) under `tolerance`, which names at least one of `relative`, `absolute`, or `ulp`; a value uses `tolerance.combine: all|any` (default `all`) to require all named bounds or at least one. Missing keys and array-length mismatches fail independently of combination. `tolerance.nonFinite: fail|match` defaults to `fail`; `match` accepts NaN paired with NaN and same-signed infinities. `ulp` must be an integer at most `Number.MAX_SAFE_INTEGER` (9007199254740991). This is a conjunction/disjunction of individual bounds, not an additive absolute-plus-relative formula. `kind: perf-budget` runs the command and judges the wall time the harness measured against either `budget: {wallTimeMs, tolerance?: {relative}}` or `baseline`, a repository-relative versioned JSON baseline that `clio-coder verifiers baseline <id>` records from one clean run, with an optional `tolerance: {relative}` of headroom over it. Exactly one of `budget` and `baseline` is present. A command that exits non-zero, times out, or is aborted fails before any judgement. Both kinds record a structured `report` on the `verify` result details and on the host-verification check of a dispatch receipt (per-key worst deviation and the failed tolerance, or measured time, effective budget, and ratio); a failing judgement is a check failure, not a new evidence category.
+Every check has a `kind`, absent or `command` by default. A version 1 file still loads and every check there is `kind: command`; the kind fields require `version: 2`.
+
+| `kind` | What it judges |
+| --- | --- |
+| `command` | The exit code. |
+| `numeric-compare` | The command's stdout, parsed as a JSON object of `string -> number \| number[]`, against `reference` (a repository-relative JSON file of the same shape) under `tolerance`. |
+| `perf-budget` | The wall time the harness measured against either `budget: {wallTimeMs, tolerance?: {relative}}` or `baseline`. Exactly one of the two is present. |
+
+A command that exits non-zero, times out, or is aborted fails before any judgement. Both judged kinds record a structured `report` on the `verify` result details and on the host-verification check of a dispatch receipt: per-key worst deviation and the failed tolerance, or measured time, effective budget, and ratio. A failing judgement is a check failure, not a new evidence category.
+
+<details>
+<summary>Tolerance semantics for `numeric-compare` and baseline recording for `perf-budget`</summary>
+
+`tolerance` names at least one of `relative`, `absolute`, or `ulp`. `tolerance.combine: all|any` (default `all`) requires all named bounds or at least one. This is a conjunction or disjunction of individual bounds, not an additive absolute-plus-relative formula.
+
+Missing keys and array-length mismatches fail independently of combination. `tolerance.nonFinite: fail|match` defaults to `fail`; `match` accepts NaN paired with NaN and same-signed infinities. `ulp` must be an integer at most `Number.MAX_SAFE_INTEGER` (9007199254740991).
+
+A `perf-budget` `baseline` is a repository-relative versioned JSON baseline that `clio-coder verifiers baseline <id>` records from one clean run, with an optional `tolerance: {relative}` of headroom over it.
+
+</details>
 
 
 Judged command capture and numeric reference reads have a 32 MiB ceiling. Output-cap, execution, timeout, or abort failures prevent judgement; partial JSON never earns a pass. Reports record effective `combine`, `nonFinite`, and a readable `rule`; numeric provenance includes `reference` (source, path when supplied, SHA-256, bytes) and `actual` (SHA-256, bytes of the extracted payload). Non-finite report numbers serialize as `"NaN"`, `"Infinity"`, or `"-Infinity"`, never JSON null. These report spellings do not extend the input JSON grammar. Relative deviation against zero is zero for equality and undefined for a nonzero actual, so an absolute bound with `combine: any` can admit near-zero values.
@@ -441,7 +506,17 @@ Each declared check carries `judgement = {execution, validation, scientificValid
 
 New performance baselines are version 2 and record `wallTimeMs`, `check`, `recordedAt`, and `environment` (`hostname`, `platform`, `arch`, `cpuModel`, `cpuCount`, `totalMemoryBytes`, `nodeVersion`). Version 1 still loads without an environment. Reports retain baseline path/hash/bytes and compare baseline/current environments in `environment.differing`; differences are informational and do not change the declared time-budget verdict.
 
-Version 2 keeps version 1's strictness. The root version/checks and core check fields (`id`, `description`, `command`, `cwd`, `timeoutMs`, `tags`) are required; kind-specific fields follow the contracts above. Unknown fields and duplicate IDs fail. A project ID uses lowercase letters, digits, `.`, `_`, `:`, or `-`, begins with a letter or digit, and is at most 64 UTF-8 bytes. `frontend` is reserved. Descriptions are trimmed single-line text capped at 512 bytes. `command` is a nonempty argv array with at most 64 entries and 4096 bytes per entry. A shell command string is invalid, and explicit shell executables such as `sh`, `bash`, `pwsh`, and `cmd` are rejected. `cwd` is a repository-relative existing directory capped at 512 bytes; absolute paths, `..` escapes, and symbolic-link escapes fail. `timeoutMs` is a positive integer capped at 900000. A check may carry at most 16 distinct lowercase tags of at most 32 bytes each. The whole file is capped at 262144 bytes and may contain at most 128 checks. YAML aliases are disabled.
+Version 2 keeps version 1's strictness. The root version/checks and core check fields (`id`, `description`, `command`, `cwd`, `timeoutMs`, `tags`) are required, kind-specific fields follow the contracts above, and unknown fields and duplicate IDs fail.
+
+| Field | Constraint |
+| --- | --- |
+| `id` | Lowercase letters, digits, `.`, `_`, `:`, or `-`, beginning with a letter or digit, at most 64 UTF-8 bytes. `frontend` is reserved. |
+| `description` | Trimmed single-line text, at most 512 bytes. |
+| `command` | A nonempty argv array, at most 64 entries, 4096 bytes per entry. A shell command string is invalid, and `sh`, `bash`, `pwsh`, and `cmd` are rejected. |
+| `cwd` | A repository-relative existing directory, at most 512 bytes. Absolute paths, `..` escapes, and symbolic-link escapes fail. |
+| `timeoutMs` | A positive integer, at most 900000. |
+| `tags` | At most 16 distinct lowercase tags of at most 32 bytes each. |
+| The file | At most 262144 bytes and 128 checks. YAML aliases are disabled. |
 
 Provider IDs share one namespace. If a catalog ID collides with a discovered package script, listing and execution fail and identify both source files. Catalog parsing also fails closed before any package or project check runs.
 
@@ -554,7 +629,20 @@ Source: `src/tools/gateway/clio-context-tools.ts` and `src/tools/context/docs-en
 `clio_docs` runs deterministic, offline retrieval over Clio's recursively
 bundled Markdown tree under `docs/` plus README.md, CHANGELOG.md, and
 CLIO-CODER.md, indexed as heading-delimited sections with light stemming, Clio
-vocabulary aliases, phrase boosts, and BM25-style body scoring. The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section. Empty results are still valid JSON with `next` populated (the closest vocabulary expansion, or `query=overview`). 16KB cap; an oversize payload is replaced by the parseable JSON stub. The old `docs_search` `file` filter was dropped in the consolidation. Omitting `query` returns the corpus listing (the file set plus doc and section counts, the same `corpus` shape a search carries) so the model can pick a term without wasting a round on a `requires query` error.
+vocabulary aliases, phrase boosts, and BM25-style body scoring.
+
+Omitting `query` returns the corpus listing, the file set plus doc and section counts, so the model can pick a term without wasting a round on a `requires query` error.
+
+<details>
+<summary>The result payload shape and what an empty or oversize result returns</summary>
+
+The JSON payload carries `corpus`, the expanded `terms`, and ranked `results` with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an `omitted` count. Follow the `followUp` guidance: read the cited file and line range when you need the full section.
+
+Empty results are still valid JSON with `next` populated, carrying the closest vocabulary expansion or `query=overview`. The result is capped at 16KB; an oversize payload is replaced by the parseable JSON stub.
+
+The old `docs_search` `file` filter was dropped in the consolidation.
+
+</details>
 
 ```text
 gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evidence", limit: 8})
@@ -564,9 +652,28 @@ gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evide
 
 Source: `src/tools/gateway/clio-context-tools.ts` and `src/tools/context/library.ts`. Arguments: `query`, `kind` (`skill`, `agent`, `prompt`, `fleet`, `plugin`), `ref`, `limit` (default 20, max 50), and zero-based `offset`.
 
-`clio_library` is the read-only recipe catalog, backed by the same bounded inventory `clio-coder library recipes --json` reads, and it activates, installs, registers and pins nothing. Rows are tagged and never mixed up with one another. A `resource` row is a recipe that actually loaded: its runtime name (skill frontmatter name, agent recipe id, prompt path with colons, fleet contract name), owning package or `core`/`user`/`project`/`compat` source class, scope, origin evidence, format, and the invocation that works. A `hint` row is a catalog claim about one member of a package: it names the owning package, that owner's installed copy states, and the member's own state (`not-installed` when the owner is not installed, `unknown` when the owner is installed and the member did not turn up), and it never carries an invocation because nothing loaded it. A `package` row is the install target itself with its version, origin, installed copies, and bounded `provides` hints; a package with no hints reports its contents as unknown until inspection rather than empty.
+`clio_library` is the read-only recipe catalog, backed by the same bounded inventory `clio-coder library recipes --json` reads. It activates, installs, registers and pins nothing, and it never returns instruction bodies or absolute recipe paths.
 
-The model view is the model audience: internal and shadow agents, untrusted, invalid, shadowed and manual-only resources are not listed. `kind="plugin"` returns plugin-kind install targets only; any recipe kind returns the loaded resources of that kind plus the installable owners that provide it, so an Agents or Prompts query finds the owning bundle before it is installed and without fetching its source. `ref` may match one exact resource key, several same-named records across kinds (the payload says so and each row carries its `key`), or a package, which opens that package's members. A run started with `--no-skills` lists no skill rows, because nothing in it can load one. Instruction bodies and absolute recipe paths are never returned. 16KB cap: the page is fitted to the remaining budget before it is rendered, so `limit` is an upper bound and `nextOffset` carries the remainder; `total` counts what the inventory returned and is flagged `totalIsLowerBound` when the inventory hit its own record cap. Worker registries have no library projection of their own and get a clean unavailable error.
+Rows are tagged and never mixed up with one another:
+
+| Row | What it is |
+| --- | --- |
+| `resource` | A recipe that actually loaded, with its runtime name (skill frontmatter name, agent recipe id, prompt path with colons, fleet contract name), owning package or `core`/`user`/`project`/`compat` source class, scope, origin evidence, format, and the invocation that works. |
+| `hint` | A catalog claim about one member of a package. It names the owning package, that owner's installed copy states, and the member's own state (`not-installed` when the owner is not installed, `unknown` when the owner is installed and the member did not turn up). It carries no invocation, because nothing loaded it. |
+| `package` | The install target itself, with version, origin, installed copies, and bounded `provides` hints. A package with no hints reports its contents as unknown until inspection rather than empty. |
+
+<details>
+<summary>What the model view hides, how `kind` and `ref` resolve, and the page budget</summary>
+
+The model view is the model audience: internal and shadow agents, untrusted, invalid, shadowed and manual-only resources are not listed. A run started with `--no-skills` lists no skill rows, because nothing in it can load one.
+
+`kind="plugin"` returns plugin-kind install targets only. Any recipe kind returns the loaded resources of that kind plus the installable owners that provide it, so an Agents or Prompts query finds the owning bundle before it is installed and without fetching its source.
+
+`ref` may match one exact resource key, several same-named records across kinds (the payload says so and each row carries its `key`), or a package, which opens that package's members.
+
+The result is capped at 16KB. The page is fitted to the remaining budget before it is rendered, so `limit` is an upper bound and `nextOffset` carries the remainder. `total` counts what the inventory returned and is flagged `totalIsLowerBound` when the inventory hit its own record cap. Worker registries have no library projection of their own and get a clean unavailable error.
+
+</details>
 
 ```text
 gateway(op="call", capability="clio_library", args={kind: "agent", query: "materials"})

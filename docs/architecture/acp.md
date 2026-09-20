@@ -167,9 +167,67 @@ The values above are illustrative. Thinking is one of `off`, `minimal`, `low`, `
 
 A client opts into the first extension event with `initialize.params.clientCapabilities._meta["clio-coder/events"]={version:1,kinds:["safety.loopBlocked"]}`. The kinds array has at most 16 strings, each at most 64 UTF-8 bytes and C0/DEL-free; a malformed opt-in is ignored. Unknown bounded versions and kinds are ignored. Without a recognized opt-in, no `clio-coder/event` notification is sent.
 
-The v1 notification is `{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}`. `workspaceInstanceId` is one opaque process UUID advertised at initialize, and `sequence` increases monotonically within it. Recognized kinds are `safety.loopBlocked`, `dispatch.enqueued`, `dispatch.started`, `dispatch.progress`, `dispatch.completed`, `dispatch.failed`, `accountability.evidenceReady`, `compaction.end`, `context.warning`, `safety.toolBudgetExceeded`, and `provider.health`. A loop-blocked event is emitted only during the hosted active prompt and has `terminal:false`. Its payload is `{toolCallId:null,tool,repeatCount,blocksThisTurn,budget,disposition,interrupted,shape:null}`. Disposition is `block`, `lockout`, or `stop`, and `interrupted` is true exactly for `stop`. The detector fires before the blocked call executes, so no honest ACP tool-call id exists; the bus has no disclosure-safe normalized shape. Both fields therefore remain null rather than being fabricated. Dispatch events carry bounded run and agent identity plus the small lifecycle counters or terminal taxonomy appropriate to their kind; completed and failed events set `terminal:true`. Enqueued and started events may include `taskPreview`, a control-character-stripped prefix bounded to 160 UTF-8 bytes. The exact task and raw progress or failure prose never cross this boundary. An `accountability.evidenceReady` event follows the terminal event of a run whose evidence bundle has landed and sets `terminal:true`. Its payload is `{runId,evidenceId,firstPassSuccess,findingCount,tags}`, the same summary the observability projection attaches to the run, published once by the observability extension on the `accountability.evidenceReady` bus channel. Tags are at most 32 bounded identifiers of at most 64 bytes; the bundle's findings and overview prose never cross. A run whose build failed sends nothing, so the absence of the event means only that no bundle is ready.
+The v1 notification is
+`{version,workspaceInstanceId,sessionId,turnId,sequence,kind,terminal,payload}`.
+`workspaceInstanceId` is one opaque process UUID advertised at initialize, and
+`sequence` increases monotonically within it.
 
-The last four kinds describe the session rather than the fleet, and close the context-meter, footer-status, and retry-visibility parity rows a client would otherwise have to infer from timing and tool titles. All four are non-terminal except a hard tool-budget ceiling. `compaction.end` carries `{trigger}`, the bounded identifier naming why the window was cut; the producer's `at` timestamp does not cross, because a client re-stamps on arrival. `context.warning` carries `{warning}`, a control-character-stripped sentence bounded to 256 UTF-8 bytes, or `null`. The channel is transition-only, so the `null` is the clearing edge and crosses as itself: dropping it would leave a client's banner up forever. `safety.toolBudgetExceeded` is emitted only during the hosted active prompt, because the budget it names is per-turn, and carries `{tool,callsThisTurn,softBudget,hardCeiling,interrupted}` with `terminal:true` exactly when `interrupted` is true. `provider.health` carries `{targetId,status,available,latencyMs}` where status is exactly `healthy`, `degraded`, `unknown`, or `down`; `lastError` is provider prose that legitimately quotes URLs and response bodies and stays behind, the same way `dispatch.failed`'s `outcomeDetail` does. An event whose identity or taxonomy cannot be represented safely is dropped rather than forwarded under a repaired one.
+| Kind | Payload | `terminal` |
+| --- | --- | --- |
+| `safety.loopBlocked` | `{toolCallId:null,tool,repeatCount,blocksThisTurn,budget,disposition,interrupted,shape:null}`. Disposition is `block`, `lockout`, or `stop`. | `false` |
+| `dispatch.enqueued`, `dispatch.started` | Bounded run and agent identity, optionally with `taskPreview`. | `false` |
+| `dispatch.progress` | Bounded run and agent identity plus lifecycle counters. | `false` |
+| `dispatch.completed`, `dispatch.failed` | Bounded run and agent identity plus terminal taxonomy. | `true` |
+| `accountability.evidenceReady` | `{runId,evidenceId,firstPassSuccess,findingCount,tags}`. | `true` |
+| `compaction.end` | `{trigger}`, the bounded identifier naming why the window was cut. | `false` |
+| `context.warning` | Always the object `{warning}`, where `warning` is a control-character-stripped sentence bounded to 256 UTF-8 bytes, or `null`. The clearing edge is `{warning: null}`, never a null payload. | `false` |
+| `safety.toolBudgetExceeded` | `{tool,callsThisTurn,softBudget,hardCeiling,interrupted}`. | `true` exactly when `interrupted` |
+| `provider.health` | `{targetId,status,available,latencyMs}`, where status is exactly `healthy`, `degraded`, `unknown`, or `down`. | `false` |
+
+An event whose identity or taxonomy cannot be represented safely is dropped
+rather than forwarded under a repaired one.
+
+<details>
+<summary>What each kind deliberately leaves behind, and why two loop-block fields are null</summary>
+
+`safety.loopBlocked` is emitted only during the hosted active prompt, and its
+`interrupted` is true exactly for a `stop` disposition. `safety.toolBudgetExceeded`
+has no disposition; its `interrupted` is the bus payload's own flag. The loop detector fires before the
+blocked call executes, so no honest ACP tool-call id exists, and the bus has no
+disclosure-safe normalized shape; both fields stay null rather than being
+fabricated.
+
+`taskPreview` on enqueued and started events is a control-character-stripped
+prefix bounded to 160 UTF-8 bytes. The exact task and raw progress or failure
+prose never cross this boundary.
+
+`accountability.evidenceReady` follows the terminal event of a run whose evidence
+bundle has landed, carrying the same summary the observability projection
+attaches to the run, published once by the observability extension on the
+`accountability.evidenceReady` bus channel. Tags are at most 32 bounded
+identifiers of at most 64 bytes; the bundle's findings and overview prose never
+cross. A run whose build failed sends nothing, so the absence of the event means
+only that no bundle is ready.
+
+`safety.toolBudgetExceeded` is emitted only during the hosted active prompt,
+because the budget it names is per-turn.
+
+`compaction.end` does not carry the producer's `at` timestamp, because a client
+re-stamps on arrival.
+
+`context.warning` is a transition-only channel, so `{warning: null}` is the
+clearing edge and crosses as itself. Dropping it would leave a client's banner up
+forever.
+
+`provider.health` leaves `lastError` behind: it is provider prose that
+legitimately quotes URLs and response bodies, the same way `dispatch.failed`'s
+`outcomeDetail` does.
+
+The last four kinds describe the session rather than the fleet, and close the
+context-meter, footer-status, and retry-visibility parity rows a client would
+otherwise have to infer from timing and tool titles.
+
+</details>
 
 ### Prompt input
 
@@ -193,13 +251,103 @@ Every frame the server writes is bounded (`src/engine/acp/types.ts`). Every cap 
 
 ### Admission failure
 
-A prompt Clio cannot start fails with `prompt_not_admitted` and zero preceding `session/update` notifications. `data.reason` is one of `orchestrator-not-configured`, `target-unknown`, `target-not-configured`, `target-not-found`, `runtime-not-registered`, `model-not-configured`, `chat-unsupported`, `streaming-unsupported`, `authentication-required`, or the catch-all `admission-failed`. That list is closed and the server enforces it: the engine's runtime-resolution diagnostics are a larger and faster-moving vocabulary (`runtime-target-unsupported`, `runtime-use-unsupported`, `required-capability-missing`, and others), and any reason outside the list is reported as `admission-failed` rather than teaching clients a code the profile never promised. The two halves of an unconfigured orchestrator are distinguished: no `chat.target` reports `orchestrator-not-configured`, and a configured target with no `chat.model` reports `model-not-configured`, so a client is pointed at the half of the settings that is actually missing. The message is a sanitized one-line sentence and never contains the settings path. A failure after admission fails with `turn_failed` instead. The server checks credential availability through the provider auth contract before admitting a prompt; `authentication-required` carries no environment-variable name, credential, or provider prose. A background service does not inherit terminal-only API keys: save the key with `clio-coder auth login <target>`, then close and reopen the session. Other readiness checks before the first prompt live in the CLI: `paths --json` for home identity, `doctor --json` for installation sanity, and `targets --json [--probe]` for target, auth, and health. `--probe` performs a request to the configured endpoint, so the client decides when that is allowed.
+A prompt Clio cannot start fails with `prompt_not_admitted` and zero preceding
+`session/update` notifications. `data.reason` is one of a closed list:
+`orchestrator-not-configured`, `target-unknown`, `target-not-configured`,
+`target-not-found`, `runtime-not-registered`, `model-not-configured`,
+`chat-unsupported`, `streaming-unsupported`, `authentication-required`, or the
+catch-all `admission-failed`. A failure after admission fails with `turn_failed`
+instead.
+
+The server enforces that list. The engine's runtime-resolution diagnostics are a
+larger and faster-moving vocabulary (`runtime-target-unsupported`,
+`runtime-use-unsupported`, `required-capability-missing`, and others), and any
+reason outside the list is reported as `admission-failed` rather than teaching
+clients a code the profile never promised.
+
+The two halves of an unconfigured orchestrator are distinguished: no
+`chat.target` reports `orchestrator-not-configured`, and a configured target with
+no `chat.model` reports `model-not-configured`, so a client is pointed at the
+half of the settings that is actually missing. The message is a sanitized
+one-line sentence and never contains the settings path, and
+`authentication-required` carries no environment-variable name, credential, or
+provider prose.
+
+The server checks credential availability through the provider auth contract
+before admitting a prompt. A background service does not inherit terminal-only
+API keys: save the key with `clio-coder auth login <target>`, then close and
+reopen the session.
+
+Other readiness checks before the first prompt live in the CLI: `paths --json`
+for home identity, `doctor --json` for installation sanity, and
+`targets --json [--probe]` for target, auth, and health. `--probe` performs a
+request to the configured endpoint, so the client decides when that is allowed.
 
 ### Permission requests
 
-The outbound `session/request_permission` carries `{sessionId, toolCall:{sessionUpdate:"tool_call", toolCallId, title, kind, status:"pending", rawInput, locations?}, options}`. `toolCallId` is always the id of a `tool_call` the client already rendered and has not yet seen finish. Binding is lookup-only. When the engine supplies an id, it resolves through the calls this turn actually emitted, and only to one that is still open; when that id has more than one open call, because the engine reused it, the request binds to the most recently opened of them. When the engine supplies no id, the request binds to the turn's one open tool call. Every other case fails closed: an id nothing was emitted for, an id whose calls have all completed, zero open calls, or more than one open call with no id to choose between them. Failing closed means the client is never asked, no `session/request_permission` frame is written, the parked call is cancelled, and the resolution is recorded as denied with `decidedBy: "error"` and the reason `permission request has no bindable tool call`. There is no bridge-local id and no id is minted here: asking about an id the client never received put an approval on a call nobody could identify. `rawInput` and `locations` are the stored snapshot of the bound call's `tool_call` update, replayed byte for byte and never recomputed, so a client can diff the call it is showing against the call it is being asked to approve and find nothing. The snapshot is taken when the `tool_call` is emitted and keyed by wire id, because the registry's copy of a call is not always the engine's: a tool's `prepareAdmissionArguments` may rewrite a relative path to an absolute one or attach a prepared artifact before the safety net sees the call, so deriving the ask from those arguments made the two frames disagree for reasons the client could only read as a mismatch. The tool's name is in `title`, never folded into `rawInput`. Options are `allow-once`, `reject-once`, and `reject-and-stop`, in that order; the first two ids are unchanged. Only the exact `optionId: "allow-once"` under `outcome: "selected"` grants; every other client answer, including `outcome: "cancelled"`, is a client denial. `reject-once` denies only the presented request and the turn continues with `end_turn`. `reject-and-stop` additionally denies every other parked request from the turn and aborts the prompt, which settles with `cancelled`.
+The outbound `session/request_permission` carries
+`{sessionId, toolCall:{sessionUpdate:"tool_call", toolCallId, title, kind, status:"pending", rawInput, locations?}, options}`.
+`toolCallId` is always the id of a `tool_call` the client already rendered and
+has not yet seen finish. The tool's name is in `title`, never folded into
+`rawInput`.
 
-`params._meta["clio-coder/decision"]` carries the classification the server already computed to pick the option labels, which it previously discarded: `{version:1, tier, tierLabel, title, semanticToken, authorizationCopy, consequenceCopy, reversibilityCopy, requestedByCopy, actionClass, axis, origin, exposure, affectedScope, reversibility, target?}`. Tier is one of `conversation`, `workspace`, `outward`, `safety-net`, `system`, `worker`; `semanticToken` is `accent`, `action`, or `warning`; `affectedScope` and `reversibility` are the machine-readable facts behind the copy, so a client colours a badge without string-matching prose. `target` is a one-line allowlisted render of the call's arguments and is omitted when nothing is derivable. Every string is control-character-stripped and bounded to 512 UTF-8 bytes, and no model-authored prose reaches this record. Without it a client re-derives a tier and a consequence from a tool name, which is a second and worse classifier. At most one request is outstanding at a time and the queue is serial. Transport loss denies every queued request and cancels the parked calls. A `session/cancel` while a request is outstanding stops the server waiting on it, cancels the parked tool, and settles the prompt with `stopReason: "cancelled"`; a late answer to the abandoned request is ignored.
+Options are `allow-once`, `reject-once`, and `reject-and-stop`, in that order.
+Only the exact `optionId: "allow-once"` under `outcome: "selected"` grants; every
+other client answer, including `outcome: "cancelled"`, is a client denial.
+`reject-once` denies only the presented request and the turn continues with
+`end_turn`. `reject-and-stop` additionally denies every other parked request from
+the turn and aborts the prompt, which settles with `cancelled`.
+
+<details>
+<summary>How a request binds to a tool call, and what failing closed does</summary>
+
+Binding is lookup-only. No bridge-local id exists and no id is minted here,
+because asking about an id the client never received put an approval on a call
+nobody could identify.
+
+| Engine supplies | Binds to |
+| --- | --- |
+| An id matching one still-open call this turn actually emitted | That call. |
+| An id matching several still-open calls, because the engine reused it | The most recently opened of them. |
+| No id, with exactly one open call this turn | That call. |
+| Anything else: an id nothing was emitted for, an id whose calls have all completed, zero open calls, or several open calls with no id to choose between them | Nothing. It fails closed. |
+
+Failing closed means the client is never asked, no `session/request_permission`
+frame is written, the parked call is cancelled, and the resolution is recorded as
+denied with `decidedBy: "error"` and the reason
+`permission request has no bindable tool call`.
+
+`rawInput` and `locations` are the stored snapshot of the bound call's
+`tool_call` update, replayed byte for byte and never recomputed, so a client can
+diff the call it is showing against the call it is being asked to approve and
+find nothing. The snapshot is taken when the `tool_call` is emitted and keyed by
+wire id, because the registry's copy of a call is not always the engine's: a
+tool's `prepareAdmissionArguments` may rewrite a relative path to an absolute one
+or attach a prepared artifact before the safety net sees the call, so deriving
+the ask from those arguments made the two frames disagree for reasons the client
+could only read as a mismatch.
+
+</details>
+
+`params._meta["clio-coder/decision"]` carries the classification the server
+already computed to pick the option labels:
+`{version:1, tier, tierLabel, title, semanticToken, authorizationCopy, consequenceCopy, reversibilityCopy, requestedByCopy, actionClass, axis, origin, exposure, affectedScope, reversibility, target?}`.
+Without it a client re-derives a tier and a consequence from a tool name, which
+is a second and worse classifier.
+
+`tier` is one of `conversation`, `workspace`, `outward`, `safety-net`, `system`,
+or `worker`. `semanticToken` is `accent`, `action`, or `warning`. `affectedScope`
+and `reversibility` are the machine-readable facts behind the copy, so a client
+colours a badge without string-matching prose. `target` is a one-line allowlisted
+render of the call's arguments and is omitted when nothing is derivable. Every
+string is control-character-stripped and bounded to 512 UTF-8 bytes, and no
+model-authored prose reaches this record.
+
+At most one request is outstanding at a time and the queue is serial. Transport
+loss denies every queued request and cancels the parked calls. A `session/cancel`
+while a request is outstanding stops the server waiting on it, cancels the parked
+tool, and settles the prompt with `stopReason: "cancelled"`; a late answer to the
+abandoned request is ignored.
 
 The server timeout is different from a client answer. When `--permission-timeout` wins, every permission still parked for the active turn is internally resolved as `expired`, the registry calls are cancelled only to unwind execution, the chat loop is aborted, any later ordinary tool/message events from that unwind are suppressed, and `session/prompt` fails with `permission_expired`. The client therefore never sees a fabricated human denial or model prose reacting to it. A literal `reject-once` remains an ordinary client denial and may be observed by the model as the tool result.
 

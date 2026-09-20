@@ -27,19 +27,66 @@ The composition root snapshots the ready-skill count by workspace, prompt-source
 
 Native Pi 0.86.1 transcript semantics remain unchanged. Warming and actual requests must compare their effective prompt and ordered schema identities after public transforms and payload hooks. A boot warm cannot predict a future task's narrower surface: such a change is an expected prefix disturbance, not proof of cache failure.
 
-`Context window: N` is the window the backend will actually serve. A recorded loaded window outranks a probe, which reports a figure the target advertises without saying it is what is open, so a resumed session states the window its ledger measured rather than a re-probed server-wide number. Each prompt-manifest record carries that window and the layer that answered it (`contextWindow`, `contextWindowSource`) alongside a `version` for the prompt layout itself, so a recompile whose only cause was the window moving is explained by the record rather than inferred.
+`Context window: N` is the window Clio budgets this turn against. It is a
+resolved figure, not proof of backend capacity: `contextWindowSource`
+(`src/domains/providers/runtime-resolution.ts`) records which layer answered, and
+the answer may be `loaded`, `probe`, `target-override`, `catalog`, `model-hint`,
+`descriptor-default`, or `unknown`. Only the first two rest on anything observed.
+
+The resolver combines requested, configured, observed, and saved limits rather
+than treating them as interchangeable. See [context window
+resolution](context-engine.md#context-window-resolution) for the precedence and
+capacity safeguards.
+
+Each prompt-manifest record carries that window and the layer that answered it
+(`contextWindow`, `contextWindowSource`) alongside a `version` for the prompt
+layout itself, so a recompile whose only cause was the window moving is explained
+by the record rather than inferred.
 
 `PROMPT_MANIFEST_VERSION` (`src/domains/session/prompt-manifest.ts`) is `3` for the typed layer layout and separate harness-awareness section. Version 2 recorded the earlier stable-prefix ordering. The field is additive: a record written by 0.3.8 carries no `version` and reads back as version 1, so a `prompt-manifest.jsonl` from an older session still parses. The rule for the field is that it tracks the layout rather than the inputs. Bump it when the compiled text moves for a reason other than a changed fragment, a changed tool surface, or a changed setting, so that a resumed session has the version in hand to explain the single `promptRecompiled` entry its first compile writes.
 
 ### What not to add to the prefix
 
-Two additions look free and are not.
+Keep task-specific and volatile facts out of the immutable identity and
+constitutional prefix. Put current state in the appropriate changing layer,
+user message, or tool result. The runtime layer precedes customization and the
+final task-scope layer.
 
-The first is a terseness rule. It is tempting to cap the prose a model emits between tool calls, because that text is generated tokens on every hop of a long turn. Anthropic measured that exact change on Claude Code and reported a 3 percent quality regression, so a word-count or verbosity limit on inter-tool text is a bad trade: the tokens it saves are the cheapest ones in the turn, and the model's own narration of what it is about to do is load-bearing for what it then does. Bound tool results instead, where a single `grep` can cost thousands of tokens and the envelope caps already do the work.
+Stable effective prompt and tool-schema bytes make prefix reuse possible on
+backends that support it. They do not guarantee a cache hit: serving policy,
+residency, and the backend's cache implementation also matter. Use reported
+cache evidence to assess reuse, rather than assuming a fixed latency saving.
 
-The second is anything that varies with the wall clock or the working tree. No timestamp, no `git status`, no branch name, no session id, and no run id belongs anywhere in the compiled prefix. Every backend Clio targets caches by exact prefix and re-prefills from the earliest changed byte, so one such field turns the whole prompt into a cache miss on every turn for no information the model could not have asked a tool for. On the sprint's measurement server that is a whole 2,778-token prompt re-prefilled at 2.6 s where the same change behind the stable sections cost 516 tokens and 0.72 s. Volatile facts belong in the user message, in a tool result, or in the runtime block, which is last for this reason.
+Bound tool results with the existing envelope caps. Treat any proposed limit on
+model narration as a behavior change to evaluate, not an established quality or
+cost improvement.
 
-The disk fragments under `src/domains/prompts/fragments/` are layered by who reads them. `identity.clio` and `operating.contract` are constitutional: they render for every reader, name no tool, and state what is always true about Clio and her harness. `operating.delegation` (the delegation threshold as a count taken before the first edit, with the dispatch call shape beside it; receipts, spot-checks, shared `[worker result]` notes) renders only when `dispatch` is on the session's tool surface, and `operating.skills` (skill-shaped tasks, `/skill <name>` suggestions) only when `context` is admitted, automatic discovery is enabled, and the typed scope and ready inventory allow it; a fragment that teaches a tool is absent when the tool is, the same rule the Fleet block follows. `identity.docs-routing` directs questions about Clio herself through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. It renders only when Clio self-awareness is present, `gateway` is on the supplied tool surface, and provider tool support is not explicitly false. This gate also checks the `clio_docs` capability against the shared turn constraints. It does not depend on `context`, and tool hints cannot establish tool availability. The Skills fragment retains direct `context(scope="skills")` listing and autonomy-aware activation guidance. The Tool Contract independently describes agent, prompt, fleet, and package discovery through `clio_library` when `gateway` and that capability are admitted and the scope permits workflow discovery, so disabling skill discovery alone does not hide the rest of the library. Catalog reads activate and install nothing. `identity.self-awareness` (installed paths, code outranks docs, configuration locations) names no tool and is unconditional. `operating.worker` (the assigned-task contract) renders only for dispatched workers, which never see the coordinator fragments. `safety.<level>` states what runs, what is approval-required, and what is blocked at the effective autonomy, in the safety net's action-class vocabulary (read, write, command, `system_modify`, `git_destructive`) and never by tool name, so the same body is true on every surface; the session and every worker read that one body, and what "approval-required" resolves to is the only role text (one operator confirmation for the session, the worker's `onPermission` routing for a worker).
+The disk fragments under `src/domains/prompts/fragments/` are layered by who
+reads them. The governing rule is that a fragment which teaches a tool is absent
+when the tool is, the same rule the Fleet block follows.
+
+| Fragment | Renders when | Contents |
+| --- | --- | --- |
+| `identity.clio` | The default main-session identity; the compiler uses the identity selected by its inputs. | Clio’s identity. Workers instead use `identity.clio-coder-worker`. |
+| `operating.contract` | The default main-session operating contract and the shared contract in worker prompts. | Constitutional operating rules, preceding conditional capability guidance. |
+| `identity.self-awareness` | The selected identity is `identity.clio` and the fragment is present in the table (`compiler.ts:673`). | Installed paths, code outranks docs, configuration locations. Names no tool. |
+| `operating.delegation` | `sessionCanDispatch` holds, meaning provider tool support is not explicitly false, `dispatch` is on the surface, and `turnAllowsTool` admits it; and the turn mode is not `answer` (`compiler.ts:244`, `compiler.ts:701`). `proposal` mode still renders it. | The delegation threshold as a count taken before the first edit, the dispatch call shape, receipts, spot-checks, and shared `[worker result]` notes. |
+| `operating.skills` | `sessionCanUseSkills` holds: provider tool support is not explicitly false, `context` is on the surface and admitted by `turnAllowsTool`, `skillDiscoveryEnabled` is not false, turn constraints do not disable skills, the mode is not `answer`, and `readySkillCount` is not zero (`compiler.ts:259`). | Skill-shaped tasks and `/skill <name>` suggestions, plus direct `context(scope="skills")` listing and autonomy-aware activation guidance. |
+| `identity.docs-routing` | `identity.self-awareness` rendered, provider tool support is not explicitly false, `gateway` is on the surface, and `turnAllowsTool` admits `clio_docs` (`compiler.ts:676`). | Routes questions about Clio herself through `gateway(op="call", capability="clio_docs", args={query: ...})` before answering or searching the workspace. |
+| `operating.worker` | The reader is a dispatched worker, which never sees the coordinator fragments. | The assigned-task contract. |
+| `safety.<level>` | Always, selected by the effective autonomy level. | What runs, what is approval-required, and what is blocked, in the safety net's action-class vocabulary (read, write, command, `system_modify`, `git_destructive`) and never by tool name. |
+
+`identity.docs-routing` does not depend on `context`, and tool hints cannot
+establish tool availability. The Tool Contract independently describes agent,
+prompt, fleet, and package discovery through `clio_library` when `gateway` and
+that capability are admitted and the scope permits workflow discovery, so
+disabling skill discovery alone does not hide the rest of the library. Catalog
+reads activate and install nothing.
+
+The `safety.<level>` body is the same on every surface: the session and every
+worker read that one body, and the only role-specific text is what
+"approval-required" resolves to, meaning one operator confirmation for the
+session and the worker's `onPermission` routing for a worker.
 
 Prompt extensions can add dynamic fragments for project rules, the operator profile, and Clio source-tree awareness. Pending skill requests and middleware reminders are visible text in the user message, not hidden prompt machinery.
 
@@ -62,7 +109,58 @@ In addition to project root `CLIO-CODER.md` handbooks, Clio supports directory-s
 
 `wiki.page` and `wiki.plan` (`src/domains/prompts/fragments/wiki/*.md`) load through this same loader, with the same id/version/content-hash contract as every other fragment, but they are consumed differently: `context/wiki/prompts.ts` reads them by id, substitutes per-dispatch `{{token}}` placeholders (a page's path, title, and relative path; the plan file's path), and sends the result as a wiki-generation dispatch's `task`, never as a compiled system prompt. `{{token}}` substitution has no home in the fragment loader itself, the same division `identity.self-awareness`'s `{TOKEN}` placeholders use in `compiler.ts`: the loader hands back a raw body, and the one caller that needs live values fills them in. Both files' bodies open and close on a standalone `---` line that predates their frontmatter and was kept unchanged as body text so the substituted prompt stays byte-identical to what the old hand-rolled `readFileSync` produced.
 
-The Tool Contract section of the prompt renders a fixed set of base lines plus one optional guidance sentence per tool, sourced from the tool registry (`ToolMetadata.promptHint` in `src/tools/registry.ts`, assigned in `src/tools/bootstrap.ts`). The base lines cover the complete-surface rule, the harness model (direct tools, fleet workers, skills as distinct capability sets), the capability-inventory rule, tool-free answering, the narrow-orientation tool list, validation for authorized file changes within scope, and schema correction after argument errors. Policy denials do not invite another route. Delegation, the tasks board, and skill listing are not restated here: `operating.delegation`, the `tasks` hint, and `operating.skills` each say their rule once and render exactly when their tool is on the surface. Fleet routing, including the sentence that `agent:"auto"` is a fallback rather than a router, lives in the Fleet block next to the roster ids and is not restated here; the threshold that says when to delegate at all is the opening of `operating.delegation`, not a Fleet line, because on the round-2 drive with Qwen3.8-27B the bare threshold after the tool contract lost to inertia on every run, while the same count stated up front with the call shape next to it dispatched both workers on every two-changes run and scout on every reconnaissance run once the sentence about repository size was in place. The chat loop derives the hint list once from the session's frozen tool surface at compile time, and the compiler renders the hints sorted by tool name, so the compiled text depends only on which hinted tools are on the surface. The frozen name list is the surface: a hint renders only for a tool in that list, and the gates that decide whether the Delegation, Skills, and docs-routing passages render read the same list, so a stale hint can neither render itself nor pull in a passage for a tool the model cannot call. Today six tools carry hints: `ask_user`, `bash`, `code_nav`, `context`, `panes`, and `tasks`. A hint carries only a decision-local call shape the tool's own description cannot; policy that applies across tools is said once in its prompt section, so `dispatch` carries no hint. Removing a tool from the surface removes its hint with no compiler change; adding a hint to a tool is a deliberate prompt-text change that must land with updated prompt contract tests and a CHANGELOG note.
+The Tool Contract section of the prompt renders a fixed set of base lines plus
+one optional guidance sentence per tool, sourced from the tool registry
+(`ToolMetadata.promptHint` in `src/tools/registry.ts`, assigned in
+`src/tools/bootstrap.ts`).
+
+The base lines cover the complete-surface rule, the harness model (direct tools,
+fleet workers, skills as distinct capability sets), the capability-inventory
+rule, tool-free answering, the narrow-orientation tool list, validation for
+authorized file changes within scope, and schema correction after argument
+errors. Policy denials do not invite another route.
+
+Six tools carry hints today: `ask_user`, `bash`, `code_nav`, `context`, `panes`,
+and `tasks`. A hint carries only a decision-local call shape the tool's own
+description cannot; policy that applies across tools is said once in its prompt
+section, so `dispatch` carries no hint.
+
+<details>
+<summary>Why delegation and fleet routing are not restated here</summary>
+
+Delegation, the tasks board, and skill listing are not restated in the Tool
+Contract. `operating.delegation`, the `tasks` hint, and `operating.skills` each
+say their rule once and render exactly when their tool is on the surface.
+
+Fleet routing, including the sentence that `agent:"auto"` is a fallback rather
+than a router, lives in the Fleet block next to the roster ids.
+
+The threshold that says when to delegate at all is the opening of
+`operating.delegation` rather than a Fleet line. On the round-2 drive with
+Qwen3.8-27B, the bare threshold placed after the tool contract lost to inertia on
+every run, while the same count stated up front with the call shape next to it
+dispatched both workers on every two-changes run and scout on every
+reconnaissance run once the sentence about repository size was in place.
+
+</details>
+
+<details>
+<summary>How the hint list is frozen, and what changing it requires</summary>
+
+The chat loop derives the hint list once from the session's frozen tool surface
+at compile time, and the compiler renders the hints sorted by tool name, so the
+compiled text depends only on which hinted tools are on the surface.
+
+The frozen name list is the surface. A hint renders only for a tool in that list,
+and the gates that decide whether the Delegation, Skills, and docs-routing
+passages render read the same list, so a stale hint can neither render itself nor
+pull in a passage for a tool the model cannot call.
+
+Removing a tool from the surface removes its hint with no compiler change. Adding
+a hint to a tool is a deliberate prompt-text change that must land with updated
+prompt contract tests and a CHANGELOG note.
+
+</details>
 
 ## One tool surface per session
 
@@ -113,29 +211,23 @@ engine assumes.
 | ARTIFACT | `artifact` | write | sequential |
 | GATEWAY | `gateway` | read (inner call retains its class) | sequential |
 
-Several tools sit in a plane for containment rather than class. `git` is
-read-only inspection (op=status/diff/log) that runs on the safe-exec spine, so
-it lives in the EXECUTE plane with read-class safety disposition. `monitor`
-never mutates a run, so it stays read class and parallel inside the ORCHESTRATE
-plane. `tasks` orchestrates the agent's own work rather than workers: board
-mutations append session task-ledger snapshots, and calls can reconcile the
-project-local `.clio-coder/user-tasks.json` inbox while `pick` and linked `done`
-update its durable correlation. These Clio-owned bookkeeping effects retain
-read class without granting source-workspace mutation authority. Calls run
-sequentially so two board mutations in one batch cannot interleave. `ledger` is the agent ledger, the coordination
-board concurrent dispatch workers share: a post reaches a one-way control lane
-and a read answers from a local mirror, so it touches no workspace and stays
-read class, and reviewers and judges are pinned to read-only autonomy where a
-write class would block the peer review the board exists for. `panes` controls
-only Clio-owned terminal panes through the live mux; it stays read class but is
-sequential so two operations cannot race the same pane registry. `evidence` sits in the OBSERVE plane
-because it only reads canonical evidence, trust status, gate decisions, and
-findings, but it is sequential because `run` mode may materialize a bundle
-under Clio's data directory. `limitation` and `decide` sit in the ORCHESTRATE
-plane as read class: each appends one typed receipt or decision-board entry
-to the session ledger and touches nothing else. `limitation` is parallel
-because the call is pure; `decide` is sequential so two decisions in one batch
-cannot race the supersede lookup.
+Several tools sit in a plane for containment rather than class:
+
+| Tool | Placement | Why |
+| --- | --- | --- |
+| `git` | EXECUTE plane, read class | Read-only inspection (`op=status/diff/log`) that runs on the safe-exec spine. |
+| `monitor` | ORCHESTRATE plane, read class, parallel | It never mutates a run. |
+| `tasks` | Read class, sequential | It orchestrates the agent's own work rather than workers. Sequential so two board mutations in one batch cannot interleave. |
+| `ledger` | Read class | A post reaches a one-way control lane and a read answers from a local mirror, so it touches no workspace. Reviewers and judges are pinned to read-only autonomy, where a write class would block the peer review the board exists for. |
+| `panes` | Read class, sequential | It controls only Clio-owned terminal panes through the live mux. Sequential so two operations cannot race the same pane registry. |
+| `evidence` | OBSERVE plane, sequential | It only reads canonical evidence, trust status, gate decisions, and findings, but `run` mode may materialize a bundle under Clio's data directory. |
+| `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |
+| `decide` | ORCHESTRATE plane, read class, sequential | It appends one decision-board entry and touches nothing else. Sequential so two decisions in one batch cannot race the supersede lookup. |
+
+For `tasks`, board mutations append session task-ledger snapshots, and calls can
+reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and
+linked `done` update its durable correlation. These Clio-owned bookkeeping
+effects retain read class without granting source-workspace mutation authority.
 
 Registration is conditional on wiring: `context` gains its workspace scope only
 when a session contract is bound, `dispatch`/`monitor`/`steer` register only

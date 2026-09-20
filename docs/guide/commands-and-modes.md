@@ -260,7 +260,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/view` | `/view [filter] \| /view verify <runId>` | Browse session artifacts and verify receipts |
 | `/panes` | `/panes show <run-or-agent> \| /panes open <preset-or-argv> \| /panes zoom [target] \| /panes close [target]` | Inspect the pane layer, watch a live run in a pane, or open a utility pane (`files`, `logs`, `shell`, `files --once`, or a command); a second open focuses the pane already there |
 | `/files` | `/files [open\|close\|pick]` | Toggle the files pane docked below the session; picks land in the composer as `@` mentions. See [Panes and the Files Pane](panes-and-files.md) |
-| `/thinking` | `/thinking [level]` | Set the chat thinking level, or open Settings → Orchestrator |
+| `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
 | `/resume` | `/resume` | Resume a past session |
@@ -270,19 +270,29 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
 
+### Notes on individual commands
+
+The notes below explain commands whose behavior needs more than a usage line.
+
 Operator tasks are durable project work in `.clio-coder/user-tasks.json`. Use
 `clio-coder tasks add "Fix the solver" --expect src/solver.ts --verify test:solver:60000`
 or `/tasks add Fix the solver --expect src/solver.ts --verify test:solver:60000`.
-Both `--expect <path>` and `--verify <checkId>[:timeoutMs]` are repeatable. Expected
-outputs use repository-relative paths; verification ids must exist in the project
-verifier catalog or package scripts when added. An omitted timeout uses the
-check's declared timeout, and requested timeouts are bounded as in dispatch
-intent. If a complete value matches a declared id containing colons, it names
-that check; otherwise the final numeric suffix is the timeout. Acceptance travels
-with the task when handed and picked, and seeds the board's required validation
-evidence. Under high rigor, a turn that changes files while this task is active
-must record a passing validation receipt for every named check or a successful
-`limitation` receipt whose `paths` array includes the exact check id. A task's
+Both `--expect <path>` and `--verify <checkId>[:timeoutMs]` are repeatable.
+Expected outputs use repository-relative paths, and verification ids must exist
+in the project verifier catalog or package scripts when added.
+
+An omitted timeout uses the check's declared timeout, and requested timeouts are
+bounded as in dispatch intent. If a complete value matches a declared id
+containing colons, it names that check; otherwise the final numeric suffix is the
+timeout.
+
+Acceptance travels with the task when handed and picked, and seeds the board's
+required validation evidence. Under high rigor, a turn that changes files while
+this task is active must record a passing validation receipt for every named
+check or a successful `limitation` receipt whose `paths` array includes the exact
+check id.
+
+A task's
 completion note alone does not satisfy acceptance. `clio-coder tasks list`,
 `hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
 
@@ -297,19 +307,20 @@ Library discovery notices have their own searchable `n` view and independent cou
 Workspace output rows show their basename before the relative path. In View preview, press `i` for scrollable provenance with the full backing path and available session/run/correlation identities; press `i` again for content. This toggle resets the pane's scroll position. `o` reports the backing path, and `v` verifies resources that support verification. Enter or Tab opens a selected preview; Esc returns to the list, then closes. Empty results keep focus in the list. View's literal search is separate from the shared ListOverlay fuzzy search described below.
 
 `/context` with no arguments opens the context-window ledger overlay, including
-the working-set section (policy, evicted items and tokens, events, recalls, churn).
-The subcommands own the durable project-context noun: `compact` summarizes older
-turns in the session window, `recall <ref>` prints an evicted tool-result body
-back into the transcript by the ref its `[evicted ...]` marker names (it never
-enters model context; the model recalls with `context(scope="recall", ref=...)`),
-`init` bootstraps or updates `CLIO-CODER.md` and the
-codewiki, `refresh` re-indexes the codewiki and refreshes `.clio-coder/state.json`
-without touching `CLIO-CODER.md`, and `reset` deletes accumulated
-context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`,
-`.clio-coder/handoffs/`, `.clio-coder/proposals/`). Its interactive choice preserves or
-deletes `CLIO-CODER.md`; cancellation makes no changes. Session reset stays `/new`;
-there is deliberately no `/context clear`. The spellings `/context-init`,
-`/context-clear`, and `/context-view` are gone and are not aliased to anything.
+the working-set section (policy, evicted items and tokens, events, recalls,
+churn). Its subcommands own the durable project-context noun:
+
+| Subcommand | Effect |
+| --- | --- |
+| `compact` | Summarizes older turns in the session window. |
+| `recall <ref>` | Prints an evicted tool-result body back into the transcript by the ref its `[evicted ...]` marker names. It never enters model context; the model recalls with `context(scope="recall", ref=...)`. |
+| `init` | Bootstraps or updates `CLIO-CODER.md` and the codewiki. |
+| `refresh` | Re-indexes the codewiki and refreshes `.clio-coder/state.json` without touching `CLIO-CODER.md`. |
+| `reset` | Deletes accumulated context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`, `.clio-coder/handoffs/`, `.clio-coder/proposals/`). Its interactive choice preserves or deletes `CLIO-CODER.md`; cancellation makes no changes. |
+
+Session reset stays `/new`; there is deliberately no `/context clear`. The
+spellings `/context-init`, `/context-clear`, and `/context-view` are gone and are
+not aliased to anything.
 There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
 `/settings`, and `/skill <name>` are their only spellings. Retired or foreign
 spellings stay errors that name `/help` instead of guessing which operation the
@@ -392,17 +403,23 @@ wrong by the time it was read.
 The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list. Task identity occupies the primary column, with the session name or ID as a fallback; metadata yields as the terminal narrows. Filtering preserves the selected session when it still matches, and undo from an empty result restores that selection. Confirmation resumes the visibly selected session, including with customized list bindings.
 
 Only active commands run. Typing anything command-shaped that the registry does
-not own checks the loaded prompt templates across native and foreign prompt roots.
-Built-in command names are reserved across interactive and headless modes; a
+not own checks the loaded prompt templates across native and foreign prompt
+roots.
+
+If the token names neither a command nor a template, it reports
+`is not a command` and points at `/help`. It is never sent to the model. That
+covers spellings removed outright, such as `/status` and `/receipts`, as well as
+ordinary typos. It replaces the earlier behavior where an unrecognized spelling
+reached the model as prose and was answered conversationally, which left the
+operator believing a command had run when nothing had.
+
+Built-in command names are reserved across interactive and headless modes. A
 template with the same basename is omitted from `/prompts` with a collision
-diagnostic instead of shadowing a command on one surface and expanding on another.
-If a matching template is discovered in another agent's folder, Clio directs the operator to explicitly import it first. Imported foreign templates additionally require
-`integrations.projectResources.trustProjectImports`; blocked templates send nothing to the model. If the token names
-neither a command nor a template, it reports `is not a command` and points at `/help`;
-it is never sent to the model. That covers spellings removed outright, such as
-`/status` and `/receipts`, as well as ordinary typos. It replaces the earlier
-behavior where an unrecognized spelling reached the model as prose and was answered
-conversationally, which left the operator believing a command had run when nothing had.
+diagnostic instead of shadowing a command on one surface and expanding on
+another. A matching template discovered in another agent's folder makes Clio
+direct the operator to import it explicitly first; imported foreign templates
+additionally require `integrations.projectResources.trustProjectImports`, and
+blocked templates send nothing to the model.
 
 A headless `clio-coder run "/typo"` refuses the same way. The verdict is reached
 before boot, so no session is opened and no turn is spent; the diagnostic names
@@ -424,34 +441,59 @@ The accepted spelling of every command is the table under [Interactive Slash Com
 
 Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>` and `/model <pattern>` stay as quick setters that apply without opening anything.
 
-Settings → Targets presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
+Settings → Connections presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
 
-Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight. Running and retrying dispatches live in the `/fleet` or `Alt+W` Fleet Runs board. Its default cards show task previews, route, status, trust/evidence, telemetry and the current operation when available. `Enter` expands the selected card to show its full task and route, policy and budget, and bounded answer. Long task previews explicitly point to Enter detail. Empty boards offer `/run` or `/delegate` and no selection action. An ordinary sealed completion without validation shows `unverified; no validation observed`; Enter restores the full provenance summary. Unknown or failed trust facts remain visible by default. Completion is not scientific validation.
+Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight.
+
+Running and retrying dispatches live in the `/fleet` or `Alt+W` Fleet Runs board. Its default cards show task previews, route, status, trust/evidence, telemetry and the current operation when available. `Enter` expands the selected card to show its full task and route, policy and budget, and bounded answer. Long task previews explicitly point to Enter detail. Empty boards offer `/run` or `/delegate` and no selection action.
+
+An ordinary sealed completion without validation shows `unverified; no validation observed`, and `Enter` restores the full provenance summary. Unknown or failed trust facts remain visible by default. Completion is not scientific validation.
 
 `/run` and `/delegate` put the worker's answer on screen. Both echo the typed
-line dim above the block, then stream the run into the transcript as an attributed
-block: a header (`◇ coder · node-a/example-coder-model · run 2mkas6s` for fleet workers,
-or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's prose down a rail,
-one coalesced line of tool names, and a one-line footer carrying the outcome glyph,
-token count, duration, and contract status (such as `└ ✓ ok · 8.4k tok · 18s · contract unmeasured`),
-with the failure reason printed on the rail above the footer when a run fails.
-Model-launched workers use `◆` and operator-launched workers use `◇`; both follow the same Output style. Standard shows a short reported summary, Detailed adds bounded activity labeled `now:` for current work and `last:` for completed calls, and Compact keeps identity and outcome. Pending checkpoint questions remain visible in Compact. The footer shows the active worker count alongside the main agent's phase. Use `/view transcript` or `/view dispatch:<runId>` for full available details. Memory workers do not appear as transcript blocks. A failover keeps one block with an attempt annotation.
+line dim above the block, then stream the run into the transcript as an
+attributed block: a header (`◇ coder · node-a/example-coder-model · run 2mkas6s`
+for fleet workers, or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's
+prose down a rail, one coalesced line of tool names, and a one-line footer
+carrying the outcome glyph, token count, duration, and contract status, such as
+`└ ✓ ok · 8.4k tok · 18s · contract unmeasured`. A failure reason prints on the
+rail above the footer.
+
+Model-launched workers use `◆` and operator-launched workers use `◇`. Both follow
+the same Output style: Standard shows a short reported summary, Detailed adds
+bounded activity labeled `now:` for current work and `last:` for completed calls,
+and Compact keeps identity and outcome. Pending checkpoint questions remain
+visible in Compact.
+
+The footer shows the active worker count alongside the main agent's phase. Use
+`/view transcript` or `/view dispatch:<runId>` for full available details. Memory
+workers do not appear as transcript blocks, and a failover keeps one block with
+an attempt annotation.
 
 That block is the only place a `/run` answer goes. The main agent is not told
 about it, which is what makes a side run a side run; asked about the answer, it
-will say it has not seen one. `--share` on either command hands the result over
-when the run finishes, and `/share [runId]` does it afterwards for a run already
-on screen. Bare `/share` takes the newest finished run the operator started
-themselves (never a model-asked `◆` run), while `/share <runId>` may name a
-model-asked run explicitly. What crosses is the receipt's own bounded text under a
+will say it has not seen one.
+
+To hand the answer to the main agent, use `--share` on either command to pass it
+over when the run finishes, or `/share [runId]` afterwards for a run already on
+screen. Bare `/share` takes the newest finished run the operator started
+themselves and never a model-asked `◆` run; `/share <runId>` may name a
+model-asked run explicitly.
+
+<details>
+<summary>How a shared result enters the session, and why the model does not discard it</summary>
+
+What crosses is the receipt's own bounded text under a
 `[worker result] coder · run 2mkas6s · ok · shared by the operator` header,
 entering the session through the ordinary user-turn path so replay and
-compaction treat it as operator text. The header names the operator as the
-origin, and the system prompt tells the main agent that such a note is
-operator steering whose run id names a receipt it can read, so a model that
-never dispatched the run does not discard it as unattributed output. A turn
-that only relays a shared note does not trip the unbacked-worker-claim
-advisory.
+compaction treat it as operator text.
+
+The header names the operator as the origin, and the system prompt tells the main
+agent that such a note is operator steering whose run id names a receipt it can
+read, so a model that never dispatched the run does not discard it as
+unattributed output. A turn that only relays a shared note does not trip the
+unbacked-worker-claim advisory.
+
+</details>
 A council run shares as a council. `/share <synthesis runId>` brings the whole
 `council-report` in as one bounded block: every final-round member's answer under
 its roster label, each with its verdict when it declared one, then the synthesis
@@ -841,34 +883,55 @@ structural hash. The same builder is used by `clio-coder context init`, `clio-co
 refresh`, session freshness checks, tool-demand backfill, and in-session
 incremental updates.
 
-`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; missing index refuses, naming `clio-coder context index`. Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds; `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`). Clio produces the deterministic seed while Archify validates and delivers it. Standard validation checks schema conformance and layout composition, while source review assesses semantic claims and visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until refined.
+`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; a missing index refuses and names `clio-coder context index`.
+
+Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds. `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`).
+
+Clio produces the deterministic seed while Archify validates and delivers it. Standard validation checks schema conformance and layout composition, source review assesses semantic claims, and visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until refined.
 
 ### Working-set replay
 
-`clio-coder context replay --sessions <path>...` accepts individual session directories,
-Clio sessions roots, and ledger JSONL files; `--synthetic <ids>` adds one or more procedural
-corpora (`science-long`, `refactor`, `exploration`) generated in memory from a fixed seed, so
-the committed tables can be rebuilt byte for byte on any checkout without private transcripts.
-Clio traces remove prior eviction/recall sidecars and select the active branch. Both sources
-drive the live fold, projection, policy, and eviction planner at deterministic turn
-boundaries. The default inclusion cascade for ledgers requires at least eight turns, eight
-tool results, and one file re-read; `--no-filter` retains every otherwise-readable trace.
-Markdown goes to stdout unless `--md` names a file, while `--json` writes a stable report
-including the configuration, the corpus, git revision when available, and exact command line.
-`--protect-last-turns` and `--min-evictable-tokens` override those two working-set settings
-for the replay only; they never update saved settings. Saturated events is pooled over
-applied eviction events and reports how often a policy exhausted its usable candidates,
-which distinguishes a budget that measures policy choice from one that simply runs out of
-evictable material. Recall tokens is the token-weighted complement of precision: what a
-perfect recall would read back for evicted items the session referenced again. Cold prefix
-tokens is the projected working set after the earliest evicted position of each event, which
-is what an exact-prefix cache re-prefills on the next request. The replay also models the
-summary stage: when the projection is still over the threshold after an eviction, it applies
-the same `findCutPoint(keepRecentTokens)` cut the live path uses, appends a stand-in
-`compactionSummary`, counts it, and treats what the cut removed as lost for retention.
-Summaries (mean) is therefore the number of lossy, token-spending compactions a policy forced
-per trace. The summary-headroom mean always carries its contributing trace count because
-traces that never require summary compaction do not enter that nullable mean.
+`clio-coder context replay --sessions <path>...` accepts individual session
+directories, Clio sessions roots, and ledger JSONL files. `--synthetic <ids>`
+adds one or more procedural corpora (`science-long`, `refactor`, `exploration`)
+generated in memory from a fixed seed, so the committed tables can be rebuilt
+byte for byte on any checkout without private transcripts.
+
+Both sources drive the live fold, projection, policy, and eviction planner at
+deterministic turn boundaries. Clio traces remove prior eviction/recall sidecars
+and select the active branch.
+
+| Flag | Effect |
+| --- | --- |
+| `--no-filter` | Retains every otherwise-readable trace. The default inclusion cascade for ledgers requires at least eight turns, eight tool results, and one file re-read. |
+| `--md <file>` | Writes Markdown to that file instead of stdout. |
+| `--json` | Writes a stable report including the configuration, the corpus, git revision when available, and the exact command line. |
+| `--protect-last-turns`, `--min-evictable-tokens` | Override those two working-set settings for the replay only. They never update saved settings. |
+
+<details>
+<summary>What each reported metric means, and how the replay models the summary stage</summary>
+
+**Saturated events** is pooled over applied eviction events and reports how often
+a policy exhausted its usable candidates, which distinguishes a budget that
+measures policy choice from one that simply runs out of evictable material.
+
+**Recall tokens** is the token-weighted complement of precision: what a perfect
+recall would read back for evicted items the session referenced again.
+
+**Cold prefix tokens** is the projected working set after the earliest evicted
+position of each event, which is what an exact-prefix cache re-prefills on the
+next request.
+
+The replay also models the summary stage. When the projection is still over the
+threshold after an eviction, it applies the same `findCutPoint(keepRecentTokens)`
+cut the live path uses, appends a stand-in `compactionSummary`, counts it, and
+treats what the cut removed as lost for retention. **Summaries (mean)** is
+therefore the number of lossy, token-spending compactions a policy forced per
+trace. The summary-headroom mean always carries its contributing trace count,
+because traces that never require summary compaction do not enter that nullable
+mean.
+
+</details>
 
 `clio-coder context working-set --session <id|path>` is a read-only inspection command for
 one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate
