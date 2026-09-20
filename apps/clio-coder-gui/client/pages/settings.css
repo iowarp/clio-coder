@@ -44,7 +44,7 @@
 	margin: 0;
 }
 /* The key sits on the same line as its value; the global block padding on code would drop it. */
-.settings-list dt > code {
+.setting-key {
 	padding: 0;
 }
 .setting-source {
