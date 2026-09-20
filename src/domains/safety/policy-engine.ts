@@ -39,6 +39,7 @@ import {
 	type ProjectCommandPolicy,
 } from "./project-policy.js";
 import {
+	commandArgumentSegments,
 	extractCommandDeleteTargets,
 	extractCommandWriteTargets,
 	inlineShellScript,
@@ -891,13 +892,10 @@ function evaluateBashPolicy(
 	}
 	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy);
 	if (chain !== null) {
-		const chainReasons = [`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`];
-		if (chain.requiresConfirmation) {
-			for (const segment of recognitionCommand.split("&&").map((part) => part.trim())) {
-				if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(segment)))
-					chainReasons.push(projectScriptPreview(segment, callCwd));
-			}
-		}
+		const chainReasons = [
+			`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`,
+			...(chain.requiresConfirmation ? chain.scriptPreviews : []),
+		];
 		if (chain.requiresConfirmation && posture !== "confirmed") {
 			return {
 				kind: "ask",
@@ -924,9 +922,10 @@ function evaluateBashPolicy(
 	// the full string, so a destructive verb behind an operator was caught before
 	// this point.
 	if (hasSequencingOperators(command)) {
-		const scriptSegments = recognitionCommand
-			.split(/&&|\|\||[;|\n]/)
-			.map((part) => part.trim())
+		// Redirection syntax changes where output goes, not whether repository
+		// code executes. Match parsed argv so `2>&1` cannot erase this net rail.
+		const scriptSegments = commandArgumentSegments(recognitionCommand)
+			.map((args) => args.join(" "))
 			.filter((part) => matchesRepositoryCommand(part));
 		if (scriptSegments.length > 0 && posture !== "confirmed") {
 			return {
@@ -1095,6 +1094,7 @@ const CHAIN_MAX_SEGMENTS = 6;
 interface ChainRecognition {
 	ruleIds: ReadonlyArray<string>;
 	requiresConfirmation: boolean;
+	scriptPreviews: ReadonlyArray<string>;
 }
 
 /**
@@ -1136,26 +1136,32 @@ function recognizeCommandChain(
 	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
 	const ruleIds: string[] = [];
 	let requiresConfirmation = false;
+	let chainCwd = callCwd;
+	const scriptPreviews: string[] = [];
 	for (const segment of segments) {
 		if (segment.length === 0) return null;
 		if (segment[0] === "cd") {
-			// A `cd` that stays inside the workspace re-bases nothing the net cares
-			// about; one that leaves it is the laundering pattern the action
-			// classifier already escalates, so it is not recognizable here.
+			// Each later command runs in this directory, including project-policy
+			// cwd matching and script previews. Keep both logical and physical
+			// readings inside the workspace before recognizing the transition.
 			if (segment.length !== 2) return null;
 			const target = segment[1] ?? "";
-			if (target.startsWith("~") || !isUnderOrSame(path.resolve(callCwd, target), workspaceRoot)) return null;
+			const nextCwd = path.resolve(chainCwd, target);
+			if (target.startsWith("~") || !isUnderOrSame(nextCwd, workspaceRoot)) return null;
 			// A shell `cd` is logical unless `-P` or `set -P` makes it physical;
 			// recognize it only when both readings stay inside.
-			const physical = canonicalizeRawPath(target, callCwd);
+			const physical = canonicalizeRawPath(target, chainCwd);
 			if (physical === null || !isUnderOrSame(physical, workspaceRoot)) return null;
+			chainCwd = nextCwd;
 			ruleIds.push("builtin:cd-workspace");
 			continue;
 		}
 		// Re-rendered from tokens, so quoting is gone: a member that needed its
 		// quotes fails the allowlist regex and the whole chain stays unrecognized.
 		const rendered = segment.join(" ");
-		const projectMatch = matchingProjectCommand(policy, rendered, callCwd);
+		const projectScript = PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(rendered));
+		if (projectScript) scriptPreviews.push(projectScriptPreview(rendered, chainCwd));
+		const projectMatch = matchingProjectCommand(policy, rendered, chainCwd);
 		if (projectMatch) {
 			ruleIds.push(projectMatch.id);
 			if (projectMatch.requireConfirmation) requiresConfirmation = true;
@@ -1166,7 +1172,7 @@ function recognizeCommandChain(
 			ruleIds.push(testRunner.id);
 			continue;
 		}
-		if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(rendered))) {
+		if (projectScript) {
 			ruleIds.push("project-script-confirm");
 			requiresConfirmation = true;
 			continue;
@@ -1175,7 +1181,7 @@ function recognizeCommandChain(
 		if (builtin === undefined) return null;
 		ruleIds.push(builtin.id);
 	}
-	return { ruleIds, requiresConfirmation };
+	return { ruleIds, requiresConfirmation, scriptPreviews };
 }
 
 /**

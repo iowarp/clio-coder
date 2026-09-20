@@ -49,8 +49,8 @@ export const DEFAULT_AUTONOMY_EXPOSURE: AutonomyExposure = "local";
 export interface AutonomyMappingOptions {
 	/**
 	 * Execute-class calls only: true when the command is in the no-prompt set
-	 * (built-in allowlist, project policy command) or is a typed execution tool
-	 * (verify). Raw bash outside that set is unrecognized.
+	 * (built-in allowlist or approved project policy command). Typed verify
+	 * calls also pass their underlying command through the safety net.
 	 */
 	executeRecognized?: boolean;
 	/**
@@ -225,15 +225,15 @@ export function autonomyAskRejection(
 			"The call is parked until the operator approves it once or cancels it.",
 		hints: [
 			"Approving resumes only this call.",
-			"Recognized commands can be added to .clio-coder/safety.yaml.",
-			// The sanctioned pivots for a gated shell command: typed verification
-			// and read-class observe tools run without approval at this level,
-			// and models otherwise stall retrying denied bash for checks or
-			// directory listings.
+			"The operator can approve command declarations in .clio-coder/safety.yaml; declarations do not bypass the autonomy level or safety net.",
+			// Offer available tools without promising that changing the tool
+			// spelling bypasses the execution approval or a safety-net rail.
 			...(actionClass === "execute"
 				? [
-						'A declared package or project-catalog check runs without approval through the verify tool: verify(check="<id>").',
-						"Read-only inspection runs without approval through the ls, read, grep, and find tools.",
+						level === "suggest"
+							? 'Declared checks can use verify(check="<id>"), but execution still requires approval at autonomy suggest.'
+							: 'For a declared check, use verify(check="<id>"). Recognized test commands can run without an autonomy prompt; other checks may still require safety-net confirmation.',
+						"Workspace inspection can use the ls, read, grep, and find tools; path protections and safety-net rules still apply.",
 					]
 				: []),
 		],

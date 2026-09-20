@@ -89,6 +89,45 @@ describe("safety gate boundary", () => {
 			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd /etc && ls" } }).actionClass,
 			"system_modify",
 		);
+		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt", "npm test 2>&1 | tail -30"]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "confirmed").kind, "allow", command);
+		}
+	});
+
+	it("tracks chain directories for scoped command admission and approval previews", () => {
+		mkdirSync(join(scratch, "other/nested"), { recursive: true });
+		mkdirSync(join(scratch, "pkg/nested"));
+		writeFileSync(
+			join(scratch, ".clio-coder/safety.yaml"),
+			"version: 1\ncommands:\n  - id: pkg-check\n    command: custom-check\n    cwd: pkg\n    actionClass: execute\n",
+		);
+		writeFileSync(join(scratch, "package.json"), JSON.stringify({ scripts: { build: "root-build" } }));
+		writeFileSync(join(scratch, "pkg/package.json"), JSON.stringify({ scripts: { build: "pkg-build" } }));
+		const policy = engine();
+		for (const [command, cwd, recognition] of [
+			["cd pkg && custom-check", ".", "recognized"],
+			["cd ../other && custom-check", "pkg", "unrecognized"],
+			["cd other && cd nested && custom-check", ".", "unrecognized"],
+			["cd pkg && cd nested && custom-check", ".", "recognized"],
+		] as const) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command, cwd } });
+			strictEqual(decision.execRecognition, recognition, command);
+			strictEqual(
+				mapAutonomy("auto-edit", decision.actionClass, { executeRecognized: recognition === "recognized" }),
+				recognition === "recognized" ? "allow" : "ask",
+			);
+		}
+		const preview = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build" } });
+		strictEqual(preview.kind, "ask");
+		strictEqual(
+			preview.reasons.some((reason) => reason.includes("build: pkg-build")),
+			true,
+		);
+		strictEqual(
+			preview.reasons.some((reason) => reason.includes("build: root-build")),
+			false,
+		);
 	});
 
 	it("admits destructive command quotations in task prose while blocking bash execution", () => {

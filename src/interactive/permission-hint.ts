@@ -57,7 +57,7 @@ export function permissionHintEntries(
 	return [
 		composerHasDraft
 			? { key: "Backspace", verb: "clear the draft to allow", short: "clear draft", critical: true }
-			: { key: "Enter", verb: "allow once", short: "allow", critical: true },
+			: { key: "Enter", verb: "allow", short: "allow", critical: true },
 		// The terms key is the card's own and the most droppable entry: the folded
 		// card already states what the keys do in one row. It sits before the
 		// inspect key so the narrowing drops it first.

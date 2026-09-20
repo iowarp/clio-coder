@@ -350,6 +350,9 @@ function permissionInspectionLines(
 function termsSummary(presentation: DecisionPresentation, actionClass: string): string {
 	const stop = presentation.requiredActions.find((action) => action.id === "stop");
 	const stopWords = stop?.consequence.includes("main-agent turn") ? "ends the main-agent turn" : "ends the turn";
+	if (presentation.tier === "worker") {
+		return `Allow or Deny applies to this call and identical calls under the same permission conditions for this worker run. The autonomy level stays unchanged. Stop ${stopWords}. Press ${PERMISSION_TERMS_KEY} for the full terms.`;
+	}
 	return `Allow runs this one ${actionClass} call and leaves the autonomy level alone. Deny skips it. Stop ${stopWords}. Press ${PERMISSION_TERMS_KEY} for the full terms.`;
 }
 

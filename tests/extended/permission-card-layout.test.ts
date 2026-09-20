@@ -67,17 +67,37 @@ for (const columns of [80, 120, 160]) {
 	});
 }
 
+test("worker terms disclose approval and denial reuse within the same run", () => {
+	const body = createPermissionOverlayBody({
+		...WRITE_VIEW,
+		origin: { kind: "worker", agentId: "coder", runId: "run-1" },
+	});
+	const folded = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
+	match(
+		folded,
+		/Allow or Deny applies to this call and identical calls under the same permission conditions for this worker run/u,
+	);
+	doesNotMatch(folded, /this one .*call/u);
+	body.toggleTerms();
+	const terms = plain(body.render(76)).join(" ").replace(/\s+/g, " ");
+	match(terms, /same tool, arguments, approval axis, and safety classification/u);
+	match(terms, /Each call still passes the safety net/u);
+	match(terms, /remembers denial for identical calls/u);
+	doesNotMatch(terms, /authorizes one|only.*exact request/u);
+});
+
 test("the footer names the terms key and drops it before any answer key", () => {
 	const wide = permissionOverlayHint(100, false, "closed", "closed");
 	match(wide, /\[\?\] terms/u);
-	match(wide, /\[Enter\] allow once/u);
+	match(wide, /\[Enter\] allow/u);
+	doesNotMatch(wide, /allow once/u);
 	match(wide, /\[s\] stop turn/u);
 	const open = permissionOverlayHint(100, false, "closed", "open");
 	match(open, /\[\?\] hide terms/u);
-	// At the 80-column box the labels shorten before anything drops.
+	// At the 80-column box the neutral allow label leaves room for full labels.
 	strictEqual(
 		permissionOverlayHint(80, false, "closed", "closed"),
-		"[Enter] allow · [?] terms · [v] inspect · [s] stop · [Esc] deny",
+		"[Enter] allow · [?] terms · [v] inspect details · [s] stop turn · [Esc] deny",
 	);
 	// Narrower still, the terms key is the first to go and the inspect key stays.
 	strictEqual(

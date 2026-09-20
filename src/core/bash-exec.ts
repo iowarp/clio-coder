@@ -215,7 +215,7 @@ function buildToolEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEn
 // re-reads /etc/profile and the user's profile chain on EVERY call (~10ms on
 // a lean profile, hundreds of ms with nvm/conda in it). The profile exists to
 // shape the environment, so capture that environment once per process and
-// spawn every subsequent command as a plain `bash -c` with the snapshot. Each
+// spawn every subsequent command as `bash -o pipefail -c` with the snapshot. Each
 // call still gets a fresh shell — only the env composition is cached, so
 // there is no state bleed and cancellation semantics are untouched. When the
 // capture fails (profile error, timeout, no PATH), every call falls back to
@@ -301,7 +301,10 @@ export async function runBashCommand(command: string, options: RunBashCommandOpt
 		let pendingClose: (() => void) | null = null;
 		const output = createBashOutputProgressController(options.onUpdate);
 
-		const child = spawn("/bin/bash", [plan.mode, command], {
+		// Preserve an upstream failure through output filters such as tail, so
+		// verification receipts cannot report success merely because the filter
+		// succeeded. A caller can explicitly opt out with `set +o pipefail`.
+		const child = spawn("/bin/bash", ["-o", "pipefail", plan.mode, command], {
 			...(options.cwd === undefined ? {} : { cwd: options.cwd }),
 			env: attribution.env,
 			detached: process.platform !== "win32",
