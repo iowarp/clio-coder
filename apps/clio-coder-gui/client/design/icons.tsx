@@ -15,6 +15,24 @@ const paths = {
 	menu: "M4 6h16M4 12h16M4 18h16",
 	close: "m6 6 12 12M6 18 18 6",
 	more: "M5 11v2m7-2v2m7-2v2",
+	// Status glyphs mirror client/design/status.tsx: shape, never hue alone.
+	running: "M10 8l6 4-6 4V8ZM12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+	success: "m8 12 3 3 5-6M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+	warn: "M12 9v4m0 3v.5M10.3 4.2 2.6 17.4A2 2 0 0 0 4.3 20.5h15.4a2 2 0 0 0 1.7-3.1L13.7 4.2a2 2 0 0 0-3.4 0Z",
+	fail: "m9 9 6 6m-6 0 6-6M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z",
+	unverified:
+		"M12 3a9 9 0 0 1 4.5 1.2M20 8a9 9 0 0 1 .8 5.4M18.5 18a9 9 0 0 1-4.7 2.8M9 20.6A9 9 0 0 1 4.6 18M3.2 13.4A9 9 0 0 1 4.9 7.2",
+	chevronDown: "m6 9 6 6 6-6",
+	chevronRight: "m9 6 6 6-6 6",
+	copy: "M9 9h10v12H9zM5 15H3V3h12v2",
+	search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14ZM21 21l-5-5",
+	diff:
+		"M6 3v12m0 6v-2M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 21V9m0-6v2M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM9 6h4a5 5 0 0 1 5 5",
+	plus: "M12 5v14M5 12h14",
+	filter: "M3 5h18l-7 8v6l-4 2v-8Z",
+	external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+	play: "M7 5l12 7-12 7V5Z",
+	stop: "M6 6h12v12H6z",
 } as const;
 
 export function Icon({ name }: { name: keyof typeof paths }) {

@@ -70,6 +70,7 @@ test("real built CLI streams through HTTP; E3 records one, two, three ACP child 
 	assert.deepEqual(Object.keys(snapshot.turns.at(-1)?.usage ?? {}).sort(), [
 		"cacheRead",
 		"cacheWrite",
+		"costUsd",
 		"input",
 		"output",
 		"reasoning",

@@ -9896,6 +9896,10 @@
 																	"reasoning": {
 																		"type": "integer",
 																		"minimum": 0
+																	},
+																	"costUsd": {
+																		"type": "number",
+																		"minimum": 0
 																	}
 																},
 																"additionalProperties": false
@@ -11930,6 +11934,10 @@
 																	"reasoning": {
 																		"type": "integer",
 																		"minimum": 0
+																	},
+																	"costUsd": {
+																		"type": "number",
+																		"minimum": 0
 																	}
 																},
 																"additionalProperties": false
@@ -13041,6 +13049,10 @@
 																	"reasoning": {
 																		"type": "integer",
 																		"minimum": 0
+																	},
+																	"costUsd": {
+																		"type": "number",
+																		"minimum": 0
 																	}
 																},
 																"additionalProperties": false
@@ -14115,6 +14127,10 @@
 																		},
 																		"reasoning": {
 																			"type": "integer",
+																			"minimum": 0
+																		},
+																		"costUsd": {
+																			"type": "number",
 																			"minimum": 0
 																		}
 																	},
@@ -15376,6 +15392,10 @@
 																	},
 																	"reasoning": {
 																		"type": "integer",
+																		"minimum": 0
+																	},
+																	"costUsd": {
+																		"type": "number",
 																		"minimum": 0
 																	}
 																},
@@ -21662,6 +21682,10 @@
 															"reasoning": {
 																"type": "integer",
 																"minimum": 0
+															},
+															"costUsd": {
+																"type": "number",
+																"minimum": 0
 															}
 														},
 														"additionalProperties": false
@@ -22334,6 +22358,10 @@
 													},
 													"reasoning": {
 														"type": "integer",
+														"minimum": 0
+													},
+													"costUsd": {
+														"type": "number",
 														"minimum": 0
 													}
 												},

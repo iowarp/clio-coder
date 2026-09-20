@@ -1,39 +1,410 @@
-# Clio Coder web design
+# Clio Coder GUI design
 
-The application is a field notebook for working with code: a readable conversation alongside inspectable actions, outcomes, and evidence. The shell gives those views one place without taking ownership away from the CLI, TUI, or ACP. These rules adapt the relevant parts of `apps/workbench/DESIGN_SYSTEM.md`; its former single-project layout and unavailable-agent assumptions do not apply to this unified app.
+This is the design authority for `apps/clio-coder-gui`. Where this document and the code disagree,
+one of them is a bug; `scripts/check-contrast.mjs` exists so that the colour half of the disagreement
+cannot happen silently.
 
-## Truth and authority
+## What this is
 
-- Display facts reported by Clio Coder, observed locally, or replayed from its ledger. Keep their provenance available. Missing usage, cost, verification, or health is not zero or success.
-- A permission stays pending until explicitly answered. Escalation means it is still waiting; budget expiry means the app cancelled the turn. Cancellation and failure remain distinct outcomes.
-- Target health follows a probe. Inventory and cached metadata do not imply endpoint health.
-- Show problem details with their closed code and instance reference. Notifications persist until dismissed, and a small bounded stack prevents errors from filling the screen.
-- Canonical workspace paths and evidence identifiers remain available where useful. Credentials and provider bodies do not become labels or summary text.
+The Clio Coder GUI is a field observatory for code: a calm scientific instrument wrapped around a
+real Clio Coder process. It helps scientists, researchers and domain experts describe an outcome,
+observe work, make consequential decisions, and inspect the evidence without first learning an IDE
+or a terminal vocabulary. It should feel like a field notebook joined to a calibrated instrument.
+
+It must not feel like a terminal emulator, a fictional mission-control dashboard, a generic chat
+application, or a second implementation of Clio Coder. Those four negations are the review test when
+a new surface is proposed.
+
+**Naming.** The product name shown to people is **Clio Coder**. "GUI" and "desktop app" are
+descriptions, used only where the interface must distinguish its own local observations or settings
+from Clio Coder's authoritative state. Bare "Clio" is not a product alias: prose, status and
+provenance labels, accessible names, errors and diagnostics all say Clio Coder, because this
+application must not be confused with `clio-agent`, `clio-core` or `clio-kit`. Exact compatibility
+identifiers stay unchanged: the `clio-coder` executable, protocol enum values, persisted keys and
+internal type names.
+
+**Interaction language.** Prefer "project", "question", "working freedom", "evidence", "outcome",
+"earlier record", "choose a folder". Keep the precise Clio Coder terms where changing them would
+hide scope: "target", "model", "session", "turn", "ACP". The composer's primary action is never
+"execute"; the operator *sends a request* and Clio Coder decides which permitted tools apply.
+State timing beside configuration: routing reaches the next turn, default autonomy reaches the next
+session, and a bound session retains the autonomy Clio Coder reports it is enforcing.
+
+## Colour roles
+
+The source of truth is `client/design/tokens.css`. That file says what each token *is*; this table
+says what it *means*. No other stylesheet may introduce a raw hex, because a raw hex cannot follow
+the theme.
+
+| Role | Token group | Meaning |
+| --- | --- | --- |
+| Paper and surfaces | `--paper`, `--surface`, `--surface-sunken`, `--overlay` | Background depth and structural hierarchy |
+| Notebook ink | `--ink`, `--ink-strong` | Readable content and headings |
+| Quiet annotation | `--ink-muted`, `--ink-subtle` | Supporting copy and metadata |
+| Sage green | `--accent`, `--accent-strong`, `--accent-soft`, `--on-accent` | Interaction, connection, observation, the evidence spine |
+| Amber | `--action-fg/tint/line` | Consequential action, active work, pending approval |
+| Green | `--status-success-*` | Explicitly completed or healthy facts only |
+| Amber-gold | `--status-warn-*` | Waiting, uncertainty, pending scope, degraded state |
+| Brick | `--status-fail-*` | Failure and destructive action |
+| Slate blue | `--status-running-*` | Tool observation and neutral live information |
+| Violet | `--reason-*` | Clio Coder-reported reasoning or narrative provenance |
+| Slate grey, dashed | `--status-unverified-*` | No probe has run; unavailable; not measured |
+| Rules | `--line` decorative, `--line-strong` control boundary | Structure |
+| Contained code | `--code-paper`, `--code-surface`, `--code-ink`, `--code-line`, `--code-gutter` | Code and diagrams, dark in both themes |
+
+**Colour is always supplementary.** Text, label, shape or pattern must carry the same distinction.
+That is why `StatusMark` always renders a glyph and a word, why `unverified` is dashed, and why a run
+row that failed says `FAILED` rather than merely being red.
+
+Light is warm cream paper with sage-green ink; dark is muted forest with pastel sage. The `--code-*`
+group is deliberately dark in both themes. An explicit theme choice persists in
+`clio-coder-gui-theme` and wins over the system preference in both directions; without a choice, the
+`prefers-color-scheme` block in `tokens.css` paints the correct theme on the first frame.
+
+The evidence-spine hue is `--accent`, and it is not teal. The retired `apps/workbench` palette was
+graphite and teal on a dark-only shell; the ten colour *roles* were ported and the hues were not.
+
+## Type
+
+Three faces, three jobs, no overlap.
+
+- **Atkinson Hyperlegible Next** is the interface and reading face and the default, chosen because
+  legibility matters more than fashionable neutrality.
+- **Newsreader** marks research questions, notebook headings, outcomes and major wayfinding. Use it
+  selectively, so the interface keeps a field-note character rather than becoming a magazine.
+- **Commit Mono** is reserved for paths, exact keys, timestamps, measurements, compact labels and
+  machine-attributed values. It is never the conversation voice.
+
+Fonts are local `@fontsource` package assets, never a CDN link; the CSP is `font-src 'self'`. The
+fallback stacks in `--font-ui`, `--font-editorial` and `--font-mono` are real and are what a reader
+sees before the font files resolve: Segoe UI / system-ui, Georgia, and Cascadia Code / Consolas.
+`:root` carries `font-synthesis: none` so a missing weight is never faked into mush.
+
+Banned: Inter, monospaced body copy, terminal prompts, all-caps paragraphs. Uppercase is limited to
+short instrument labels (`.eyebrow`, `.status-mark`).
+
+Scale: `--text-body` 15px and `--text-reading` 16px for reading, `--text-meta` 13px, `--text-exact`
+12px for mono keys, ids, timestamps and counts. `--text-instrument` 10px is allowed **only** for an
+uppercase eyebrow of a few words, never for a sentence. Nothing renders below 12px except that
+eyebrow.
+
+Variable-font axes are what make the editorial face read as editorial and are easy to lose in a
+port: `"opsz" 28, "wght" 580` for display, `"opsz" 22, "wght" 550` for headings, `"opsz" 20,
+"wght" 480` for a prompt.
+
+**Numbers.** Every rendered count, duration, token figure, cost and byte size uses `--font-mono` with
+`font-variant-numeric: tabular-nums`. This is a performance rule as much as a typographic one:
+proportional digits reflow a whole table on every tick of a live run.
+
+## Density and shape
+
+Generous space around primary work; denser bounded material behind disclosures and at the rails.
+Panels use fine hairlines and shallow radii. Rounded cards are instruments or notes, not floating
+consumer-app bubbles.
+
+Three density zones:
+
+- **Reading** (conversation, docs, page intros): `--space-6` block rhythm, `--text-reading` with
+  `--leading-reading`, `--reading-measure` for prose, `--conversation-max` for the spine.
+- **Instrument** (trace panels, receipt grids, settings, home cards): `--space-4` gaps,
+  `--text-body`, `--leading-body`.
+- **Dense** (tables, event lists, JSON wells, activity groups, rail items): `--space-2` and
+  `--space-3`, `--text-exact` in `--font-mono`, tabular numerals throughout.
+
+**Page frame.** `main` padding is `--space-12 --space-12 --space-16` at desktop, `--space-8
+--space-6` below 1050px, `--space-6 --space-5` below 650px. The minimum side gutter at any width is
+`--space-4`.
+
+**Radius decision rule.** `--radius-xs` for inline chips in dense rows and for code/JSON wells;
+`--radius-sm` for controls (button, input, select, badge); `--radius-md` for panels and cards;
+`--radius-lg` for dialogs and drawers; `--radius-pill` only for status marks, the live chip and the
+jump pill. Nothing gets a radius the tokens do not name.
+
+**Elevation decision rule.** `--shadow-none` is the default for every card, table and panel; the
+boundary comes from `--line-strong`, not from a shadow. `--shadow-raised` is for a sticky masthead
+once the page has scrolled, `--shadow-panel` for drawers and the toast stack, `--shadow-float` for
+modal dialogs. A card does not lift on hover.
+
+**Layout.** Dense bounded material at the `--rail-width` rail, a wider notebook in the centre. Main
+content uses `minmax(0, 1fr)` tracks; tables, code and diagrams scroll inside their own
+`overflow-x: auto` surfaces so the page body never scrolls horizontally.
+
+**Texture.** A faint measurement grid or reticle may establish place, but decorative telemetry must
+never imply data. No fake sparklines, no ambient counters, no decorative numbering in navigation.
+
+## Status
+
+`client/design/status.tsx` owns the ramp. The truthfulness contract needs nine distinct states, and
+they collapse onto six tones where the tone never carries the meaning alone.
+
+| Tone | Means | Glyph | Typical labels |
+| --- | --- | --- | --- |
+| `neutral` | Reported, no judgement | `·` | REPORTED, QUEUED, SKIPPED |
+| `running` | In flight, observed live | `▸` | RUNNING, STREAMING, PROBING |
+| `success` | Explicitly completed or measured healthy | `●` | COMPLETED, HEALTHY, VERIFIED |
+| `warn` | Waiting, degraded, estimated, pending scope | `◐` | WAITING, ESTIMATED, DEGRADED, TRUNCATED |
+| `fail` | Failed or stopped | `✕` | FAILED, CANCELLED, STOPPED |
+| `unverified` | No probe has run; not zero, not success | `◌` | UNAVAILABLE, UNVERIFIED, NOT MEASURED |
+
+`unverified` renders with a **dashed** rule, which is what makes "missing evidence is not success"
+visible in a greyscale screenshot.
+
+`--reason-*` (violet) marks Clio Coder-reported reasoning or narrative provenance and `--action-*`
+(amber) marks consequential action and pending approval. Neither is a status tone; do not merge them
+into the ramp.
+
+## Motion
+
+Short entrance and state-change transitions, only when they clarify hierarchy or causality. No
+continuous pulse, no blinking cursor, no animated waveform, no ambient dashboard motion. A streaming
+response does not animate; text appearing at the display's cadence *is* the animation.
+
+Four durations and two curves, in `tokens.css`: `--motion-fast` 120ms for colour, border and
+background state changes; `--motion-base` 150ms for disclosure and hover displacement;
+`--motion-slow` 180ms with `--ease-emphasis` for the two things that travel a distance, drawers and
+dialogs; `--motion-instant` 90ms for an immediate acknowledgement. Nothing else animates.
+
+`client/design/a11y.css` collapses every transition and neutralises `animation-iteration-count`
+under `prefers-reduced-motion: reduce`, so an infinite animation cannot survive the preference.
+
+Collapsing a rail removes its grid track immediately and restores focus predictably when reopened.
+It does not run a full-shell animated reflow while text is streaming.
+
+## Focus and non-text contrast
+
+**The floor is 4.5:1 for text and 3:1 for non-text boundaries and focus indicators** (WCAG 2.2
+SC 1.4.3 and SC 1.4.11). `scripts/check-contrast.mjs` parses the token values and asserts 84 pairs
+across both themes; it fails the build rather than warning.
+
+The focus ring is two-tone, in `client/design/a11y.css`: a 2px `outline` in `--focus` at a 2px
+offset, over a 2px `--focus-halo` box-shadow. The outline carries the indicator and survives forced
+colours, which a box-shadow does not; the halo repaints the local background so the outline's 3:1
+holds whatever the control sits on. On a filled accent control the ring flips to `--on-accent` over
+`--accent-strong` so it does not blend into the fill. Light `--focus` measures 7.98:1 on paper and
+7.20:1 on the sunken well; dark measures 9.65:1 on paper.
+
+`--line` is decorative and may never be the sole boundary of an interactive control; it measures
+around 1.3:1 by design. `--line-strong` is the boundary of every button, input, select, textarea,
+count, badge, panel, permission card, session control and table cell, and measures 3.13:1 to 3.69:1
+in light and 3.26:1 to 4.08:1 in dark. The mechanical rule: **if removing the border would make the
+control's hit area ambiguous, it is `--line-strong`.**
+
+Under `forced-colors: active` every box-shadow is dropped, the ring becomes `2px solid Highlight`,
+and only the few marks whose shape is the information keep `forced-color-adjust: none`.
+
+`@media (prefers-contrast: more)` darkens `--line`, `--line-strong`, `--ink-muted` and `--ink-subtle`
+in both themes.
+
+## The evidence spine
+
+One continuous vertical rule runs down the left of the transcript. Requests, tool actions,
+approvals, narrative and outcomes hang off that one rule as nodes, so a turn reads as a single
+legible record rather than a stack of chat bubbles. The Conversation and the Session Timeline are
+two projections of the same array, a view switch over the same scroll region and never a second
+shell; neither may show an item the other lacks.
+
+1. One turn is every item sharing a `turnId`.
+2. The request is a right-aligned editorial block with an accent rule, `max-width: 84%`,
+   `margin-left: auto`, in `--font-editorial`. Not a bubble with an avatar.
+3. The response is unboxed prose under an eyebrow reading `CLIO CODER`. There is no card inside a
+   card.
+4. Tool, approval and loop items falling between two stretches of prose collapse into one
+   `<details>` activity group whose `<summary>` counts states ("4 tools completed", "1 tool running ·
+   2 done", "Approval needed"). The group opens itself while attention is needed and then stays
+   exactly as the operator left it. Latch that with a ref, not a controlled `open` prop, so a
+   re-render never reopens a group the operator closed.
+5. The inline approval row carries the same Allow-once / Reject decision as the sticky banner. The
+   banner exists only for discoverability when the row is scrolled out of view; they are one
+   decision, not two.
+6. Reported reasoning lives behind a disclosure, tinted `--reason-*`, never inline with prose.
+7. A one-line outcome footer closes the turn: glyph, label, detail, closed code, elapsed time.
+8. Agent identity is always Clio Coder. If the protocol carries no sub-agent fact, the surface
+   reports which agent is active as *unavailable* rather than inferring it.
+
+**Render budget.** Settled turns are memoized by turn object identity and skip re-rendering
+entirely; only the live turn re-renders on a clock tick, phase change or permission change. Use
+`contain: layout style` on the turn element, **not** `content-visibility: auto`: the latter collapses
+scroll height for a frame when it toggles, and the follow rule reads that collapse as the end of the
+transcript. That is an observed bug, not a preference.
+
+## Follow-latest
+
+The transcript follows new output while the operator is at the end. Four clauses, all load-bearing:
+
+1. A scroll event counts as the operator's only when it moves above the last programmatic position,
+   or when the view was already not following. Growth between a programmatic pin and the scroll event
+   it produces must never read as scroll-away. Keep `lastProgrammaticTop` in a ref and return early
+   from the handler while `following && el.scrollTop >= lastProgrammaticTop.current - 1`.
+2. Scrolling back to the end resumes following, at a threshold of
+   `scrollHeight - scrollTop - clientHeight <= 24`.
+3. Each view remembers its own offset and follow state, and restoring one never counts as a scroll:
+   set `lastProgrammaticTop` before the restoring assignment.
+4. The jump pill sits above the composer and reads "Jump to latest", or "New activity below" in
+   `--action-fg` when timeline *items* arrived while scrolled away. Gate that flag on item arrival,
+   never on a `scrollHeight` change, so lazy highlighting or a growing diagram cannot claim activity.
+
+Do not force `scroll-behavior: smooth` on the transcript; it fights the pin and costs frames. Pin
+with `el.scrollTop = el.scrollHeight` inside the same rAF callback that delivers the batch.
+
+## Streaming cadence
+
+1. Project narrative and reasoning at the browser's display cadence: batch only those
+   high-frequency deltas with `requestAnimationFrame`, retain wire order, and cap each buffered
+   batch at `MAX_FRAME_EVENT_BATCH = 128`.
+2. Tool, approval, terminal, control and error events remain immediate and flush any preceding
+   narrative first, in the same ordered delivery.
+3. Keep the composer's draft and scroll position inside an isolated component so incoming agent
+   frames never reconcile the operator's keystrokes.
+4. Prefer native scrolling with `scrollbar-gutter: stable` and local `contain: layout style` on long
+   text surfaces. Do not force smooth scrolling, do not continuously measure geometry, and never put
+   `backdrop-filter` or another expensive effect over moving text.
+5. Memoize settled evidence cards and settled turns. Only the active card or turn may carry a ticking
+   duration; high-frequency state must not invalidate the rail, the composer or completed history.
+6. Treat 120 Hz and higher as a first-class target: preserve input responsiveness and coalesce work
+   to paints. Never add an artificial timer merely to make streaming look animated. Because the work
+   is coalesced to `requestAnimationFrame`, the surface already runs at whatever the display does;
+   there is no 60 Hz constant to raise.
+7. **Never restate a display rate that was not measured.** The reference budgets below came from a
+   60 Hz headless compositor and bound per-frame work; they do not demonstrate 120 Hz behaviour. This
+   app's own numbers belong in `PERFORMANCE.md` with the exact workload that produced them.
+
+Reference budgets to beat, measured on `apps/workbench` at 60 Hz headless over ~16 KB of Markdown
+streamed in 5-char chunks: keystroke→`input` p95 2-3 ms; keystroke→next frame p95 15-19 ms;
+event→paint p50 25-27 ms and p95 33-35 ms; zero tasks over 50 ms during the stream. At 120 Hz the
+frame budget halves to 8.3 ms, so the target is keystroke→next frame p95 under 10 ms.
+
+## Untrusted Markdown, code and diagrams
+
+The GFM lexer produces tokens and React creates their text nodes and elements. Raw HTML remains
+visible text. Images are represented by their alt text without fetching. Only `http`, `https` and
+`mailto` links are live; other destinations remain inert.
+
+Streaming re-lexes only the tail after the last settled block boundary, a blank line *outside* a
+fence, so settled blocks keep token identity; completion re-lexes once with the same element shape so
+settled blocks stay mounted.
+
+Prism loads its core and known grammars on demand, only for settled blocks near the viewport and at
+most 60,000 characters. Its output is a token tree, never HTML. Unknown languages render plain with
+their label shown. Copy is explicit, and an overflowing `<pre>` accepts focus for keyboard scrolling.
+
+Mermaid loads after the response settles. Bounds are three numbers, not two: **16 KiB and 400 lines**
+of source, and **400 edges** at the renderer. Layout is one synchronous main-thread task, which is
+why diagrams render one at a time with a macrotask between them; without that, a two-diagram turn
+produced a 76 ms task during streaming. Configure `securityLevel: "strict"` and `htmlLabels: false`.
+The DOMPurify SVG profile explicitly forbids `foreignObject`, `a`, `image`, `script`, all animation
+elements, and `href` and `on*` attributes; changing that list is visibly a policy change. A failed or
+oversized diagram keeps its source and the parser's message visible, never a blank box.
+
+**CSP justification.** The page allows `style-src 'self' 'unsafe-inline'` *solely* because strict
+Mermaid output carries its theme in an embedded stylesheet and inline attributes. Scripts stay
+same-origin, and `img-src`, `font-src` and `connect-src` still block CSS-driven fetches. No other
+code path renders model-authored markup.
+
+## Component sources
+
+One design language even when primitives come from several source-available libraries. Copy only the
+component source needed for a concrete product surface, adapt it to these tokens and semantics, and
+keep the result local and testable. **Do not add a component library as a runtime dependency.**
+
+Preferred sources, in order:
+
+1. **shadcn/ui** (MIT) — durable primitives, forms, dialogs, command surfaces, sidebars,
+   accessibility patterns.
+2. **Kibo UI** (MIT) — data-heavy views: bounded tree, code presentation, lists, tables, status,
+   Kanban, and a Gantt-like run view when the real protocol supplies the necessary facts.
+3. **Agent Elements by 21st.dev** (MIT) — agent/tool, plan, question, MCP and subagent presentation.
+   Treat as a younger source: inspect the code, remove runtime assumptions, add tests.
+4. **Blocks.so** (MIT) — onboarding, forms, command menus, file upload, statistics, responsive shell.
+5. **Public ReUI repository components** (MIT) — only where the individual source file is present
+   under the public repository's licence and fills a real gap.
+
+Consult-only: **Vercel AI Elements** (Apache-2.0) for streaming conversation patterns. Its Next.js
+and AI SDK coupling must not become a second runtime inside this Vite application.
+
+**Hard prohibition:** do not copy premium **ReUI Pro or Ultimate** source into this repository. That
+commercial licence does not permit publishing the licensed source as part of a public repository.
+
+Before adopting any block, all seven must hold: verify the exact file and version's licence; remove
+demo data and decorative metrics; map every colour, type, spacing, radius and motion value to these
+tokens, so no adopted file contains a raw hex; replace developer vocabulary with domain-appropriate
+language without weakening precision; preserve keyboard, focus, screen-reader, forced-colors,
+reduced-motion and compact-layout behaviour; prove every displayed fact traces to a protocol field or
+a clearly labelled local observation; and add unit and real-browser coverage for the state it
+represents.
+
+## Authority and truthfulness
+
+1. Clio Coder remains authoritative for sessions, tools, routing, models, autonomy, permissions,
+   context, agents, skills and outcomes. The GUI renders only facts exposed through its bounded
+   protocol.
+2. Every summary must say whether a fact was reported by Clio Coder, observed live, observed locally
+   by the GUI, or replayed. Provenance is a rendered property, not a comment.
+3. **Missing evidence is not success. Silence is not completion.** A target is not healthy until an
+   explicit, timestamped probe says so.
+4. Measured, estimated, reported, replayed, unavailable, failed, stopped and skipped are distinct
+   states and must be distinguishable without colour.
+5. A pending approval is never answered implicitly, and an unanswered approval is never presented as
+   a rejection. Escalation means still waiting; budget expiry means the app cancelled the turn.
+   Cancellation and failure remain distinct outcomes.
+6. Internal identifiers, hidden reasoning, raw provider payloads, untrusted paths and speculative
+   dependency graphs do not become presentation data.
+7. The GUI may simplify vocabulary but must keep the exact underlying Clio Coder key reachable where
+   that helps auditability. Canonical workspace paths and evidence identifiers stay reachable;
+   credentials and provider bodies never become labels or summary text.
+8. **Resource inventories enter the browser only through bounded projections.** Skill bodies, hashes,
+   native locations, extension roots and manifests, source URLs, requirements and raw diagnostics
+   stay host-side. **A formatted CLI table is not a typed fact source.**
+9. Offline model and worker-routing inventories follow the same rule. Provider URLs, credentials,
+   environment and raw warnings stay host-side, and cached residency is never presented as endpoint
+   health.
+10. Show problem details with their closed code and instance reference. Notifications persist until
+    dismissed, and a small bounded stack prevents errors from filling the screen.
+11. Historical views must distinguish a missing store from zero activity, and must not mix
+    installation-wide records into a project-scoped canvas merely because an upstream report contains
+    both.
+
+**Design consequence to enforce in review:** any component that renders a number must be able to
+render "not measured" in the same slot without a layout shift. If it cannot, it will eventually
+render `0` for unknown.
 
 ## Shell and wayfinding
 
-The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet, Evidence, Evals, Library, and System. The 58 px masthead carries the original Clio logo, a discreet connection indicator, and icon controls with accessible names. App preferences hold the reported version, PWA installation, and browser connection controls. There is no page footer; the application gives that space to the work. Navigation uses consistent line icons rather than decorative numbering.
+The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet,
+Evidence, Evals, Library and System. The `--masthead-height` masthead carries the Clio logo, a
+discreet connection indicator, and icon controls with accessible names. App preferences hold the
+reported version, PWA installation and browser connection controls. There is no page footer; the
+application gives that space to the work.
 
-Below 750 px the rail becomes a native modal navigation dialog. The browser owns focus containment, Escape, and return to the trigger. A skip link reaches the main landmark. Page navigation focuses that landmark and updates the document title. Main content uses flexible minimum-zero grid tracks; tables, code, and diagrams scroll within their own surfaces.
+Below 750px the rail becomes a native modal `<dialog>`, so the browser owns focus containment,
+Escape and return-to-trigger. A skip link reaches the main landmark. Route changes focus that
+landmark and update the document title.
 
-## Type, color, and scale
+## Acceptance floor
 
-Fonts are local package assets. Atkinson Hyperlegible Next is the interface and reading face; Newsreader gives major headings an editorial voice; Commit Mono is reserved for exact keys, code, paths, and compact annotations. The theme tokens live in `client/design/tokens.css`; renderer rules live in `client/render/markdown.css`.
+Every UI change must preserve:
 
-The default is soft cream paper and cream surfaces with sage accents, green ink, and fine rules. Dark mode uses muted forest surfaces and pastel sage accents with the same hierarchy. An explicit theme choice persists; otherwise the system preference supplies the initial theme. Action surfaces use a restrained amber treatment; errors use a red rule and text. Color always supplements an explicit label. Reading text is 15–16 px, exact annotations 12 px, and short decorative instrument labels may be 10 px. Code and diagrams use a contained dark surface in both themes.
+1. `pnpm run verify` in `apps/clio-coder-gui`: typecheck, biome, unit tests, build, and the contrast
+   check.
+2. The real browser smoke against an ACP fixture child, driving real handlers and workers at 1600,
+   1050 and 390px.
+3. Zero serious or critical Axe violations in the covered states.
+4. No horizontal overflow at 375px.
+5. Visible focus in forced colors.
+6. Contained and restored focus for dialogs and drawers; below 750px the rail is a native `<dialog>`
+   so the browser owns containment, Escape and return-to-trigger.
+7. Meaningful loading, empty, unavailable, truncated, replayed, failed, waiting and stopped states
+   without relying on animation or colour. This is the clause that catches most regressions: a
+   component with only a happy path fails here.
+8. No unexpected error responses, script exceptions or request failures during the smoke.
+9. No changes under the repository's `src/` as part of GUI-only design work.
+10. Screenshots inspected before being retained as slice evidence.
 
-Use shallow radii, generous space around primary work, and denser bounded details behind disclosures. The conversation has a continuous evidence rule; model prose is not a nested card. Avoid decorative counters or telemetry. Motion is limited to meaningful state changes and respects reduced-motion preferences.
+Covered states the smoke must visit: home in both themes, toolchain, traces and run detail,
+workspaces and sessions, a Markdown/code/Mermaid conversation, session controls, permission and
+cancellation, and a problem notification. This design work adds three: the six status tones rendered
+side by side, a focus-visible capture of a button, an input and a table cell, and one forced-colors
+pass.
 
-## Untrusted Markdown
-
-The GFM lexer produces tokens and React creates their text nodes and elements. Raw HTML remains visible text. Images are represented by their alt text without fetching. Only `http`, `https`, and `mailto` links are live; other destinations remain inert. Docs may later apply a trusted local-page link resolver separately from model content.
-
-Streaming uses Workbench's incremental lexer so settled tokens retain identity while only the tail grows. Completion lexes the canonical final text. Prism loads its core and known grammars only when a settled code block is near the viewport; its output is a token tree, never highlighted HTML. Blocks over 60,000 characters remain plain. Copy is explicit, and overflowing code accepts focus for keyboard scrolling.
-
-Mermaid loads on demand after the response settles, with strict security, SVG text labels, a 16 KiB / 400-line source ceiling, and a 400-edge renderer ceiling. Jobs run serially with a task boundary. DOMPurify sanitizes the generated SVG before DOMParser/importNode mount it; this is the renderer's only markup sink. No model HTML enters it. Diagram bounds are measured once after mount/fonts to keep translated nodes inside the viewport. Failed or oversized diagrams keep their source visible. The CSP permits inline styles for Mermaid; scripts, fonts, and connections remain same-origin.
-
-## Verification floor
-
-The browser smoke drives real app handlers, workers, and an ACP fixture child at 1600, 1050, and 390 px. It checks home in both themes, toolchain, traces/run detail, workspaces/sessions, a Markdown/code/Mermaid conversation, session controls, permission and cancellation, and a problem notification. It rejects serious/critical Axe findings, page overflow, unexpected error responses, script exceptions, or request failures. Hostile-Markdown tests independently verify the renderer contract. Screenshots are inspected before retaining them as slice evidence.
-
-The code viewport has one narrowly documented Biome exception: a noninteractive `pre` must be focusable because it can scroll horizontally. Axe and an ArrowRight browser check verify the reason for that exception; no accessibility rule is disabled globally.
+**Documented exception, kept narrow:** a noninteractive `<pre>` must be focusable because it scrolls
+horizontally. Axe plus an ArrowRight browser check verify the reason. No accessibility rule is
+disabled globally.

@@ -13,6 +13,7 @@ export type WorkerSettings = {
 	fixtureGraphDelayMs?: number;
 	readDelayMs?: number;
 	readDeadlineMs?: number;
+	readLanes?: number;
 	installDelayMs?: number;
 	failInstall?: boolean;
 	crashRead?: boolean;

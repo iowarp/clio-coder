@@ -1,0 +1,70 @@
+/* Focus, forced colours and reduced motion. These are policy, not component
+   style, so they live apart from styles.css and are stated once. */
+
+/* A two-tone ring: the outline carries the indicator (and survives forced
+   colours, which box-shadow does not), the halo repaints the local background
+   so the outline's 3:1 holds regardless of what the control sits on. */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible,
+dialog:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+	box-shadow: 0 0 0 2px var(--focus-halo);
+}
+
+/* On a filled accent control the ring would blend into the fill; flip it. */
+.primary:focus-visible,
+.skip-link:focus-visible,
+[data-on-accent]:focus-visible {
+	--focus: var(--on-accent);
+	--focus-halo: var(--accent-strong);
+}
+
+/* The main landmark takes focus programmatically on every route change; it is
+   not a control, so it must not announce a ring. Specificity here has to beat
+   the [tabindex] arm above, hence the id. */
+main#main:focus,
+main#main:focus-visible {
+	outline: none;
+	box-shadow: none;
+}
+
+@media (forced-colors: active) {
+	*,
+	*::before,
+	*::after {
+		/* biome-ignore lint/complexity/noImportantStyles: a user contrast mode must beat every component rule; that is the point of the block. */
+		box-shadow: none !important;
+	}
+	:focus-visible {
+		outline: 2px solid Highlight;
+		outline-offset: 2px;
+	}
+	.status-mark__glyph,
+	.connection-dot,
+	.trace-bar,
+	.trace-tool-span {
+		forced-color-adjust: none;
+	}
+}
+
+/* Stricter than a bare duration reset: an infinite animation survives that. */
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		/* biome-ignore lint/complexity/noImportantStyles: a motion preference must beat every component transition, including one declared later. */
+		scroll-behavior: auto !important;
+		/* biome-ignore lint/complexity/noImportantStyles: see above. */
+		animation-duration: 0.001ms !important;
+		/* biome-ignore lint/complexity/noImportantStyles: see above; without this an infinite animation survives the preference. */
+		animation-iteration-count: 1 !important;
+		/* biome-ignore lint/complexity/noImportantStyles: see above. */
+		transition-duration: 0.001ms !important;
+	}
+}

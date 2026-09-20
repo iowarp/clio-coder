@@ -60,10 +60,14 @@ export class Supervisor {
 		}, 200);
 		this.monitor.unref();
 	}
-	get(id: string) {
+	/** The live projection, never handed outside this class: callers that only read a field must not pay for a clone. */
+	private snapshot(id: string) {
 		const value = this.snapshots.get(id);
 		if (!value) throw new AppProblem("not_found", "Session is not open in this server.");
-		return structuredClone(value);
+		return value;
+	}
+	get(id: string) {
+		return structuredClone(this.snapshot(id));
 	}
 	list() {
 		return [...this.snapshots.values()].map((value) => structuredClone(value));
@@ -81,7 +85,7 @@ export class Supervisor {
 		this.hub.publish(event);
 	}
 	private revision(id: string) {
-		return this.get(id).revision + 1;
+		return this.snapshot(id).revision + 1;
 	}
 	private state(id: string, state: SessionSnapshot["state"], recoveredOrphan = false) {
 		this.publish({
@@ -160,7 +164,7 @@ export class Supervisor {
 			});
 			transport.onRequest("session/request_permission", (params) => {
 				try {
-					return owned.permissions?.request(owned.id, owned.turnId, params, this.get(owned.id).timeline);
+					return owned.permissions?.request(owned.id, owned.turnId, params, this.snapshot(owned.id).timeline);
 				} catch (error) {
 					this.failTurn(owned, acpProblem(error));
 					this.retireDetached(owned);
@@ -206,7 +210,7 @@ export class Supervisor {
 	}
 	startTurn(id: string, text: string) {
 		const entry = this.entries.get(id);
-		if (!entry || entry.closing || this.get(id).state !== "open")
+		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not available for a turn.");
 		if (entry.turnId) throw new AppProblem("conflict", "A turn is already running in this session.");
 		entry.replay = null;
@@ -303,7 +307,7 @@ export class Supervisor {
 		if (kind === "tool_call" || kind === "tool_call_update") {
 			if (typeof update.toolCallId !== "string" || update.toolCallId.length > 128)
 				throw new AppProblem("upstream_acp", "ACP tool identity is invalid.");
-			const previous = this.get(entry.id).timeline.find(
+			const previous = this.snapshot(entry.id).timeline.find(
 				(item) => item.turnId === entry.turnId && item.toolCallId === update.toolCallId,
 			);
 			const item: TimelineItem = {
@@ -347,7 +351,7 @@ export class Supervisor {
 	}
 	private active(id: string) {
 		const entry = this.entries.get(id);
-		if (!entry || entry.closing || this.get(id).state !== "open")
+		if (!entry || entry.closing || this.snapshot(id).state !== "open")
 			throw new AppProblem("conflict", "Session is not open in this server.");
 		return entry;
 	}
@@ -358,7 +362,7 @@ export class Supervisor {
 	async cancel(id: string, turnId: string) {
 		const entry = this.active(id);
 		if (entry.turnId !== turnId) {
-			if (this.get(id).turns.some((turn) => turn.id === turnId && turn.status !== "running")) return {};
+			if (this.snapshot(id).turns.some((turn) => turn.id === turnId && turn.status !== "running")) return {};
 			throw new AppProblem("conflict", "Turn is not active in this session.");
 		}
 		await this.cancelEntry(entry);

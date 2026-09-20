@@ -19,6 +19,7 @@ import { traceRoutes } from "./http/routes-traces.js";
 import { events } from "./http/sse.js";
 import { staticClient } from "./http/static.js";
 import { idempotencyKey, register } from "./http/validate.js";
+import { ArtifactWindow } from "./services/artifact-window.js";
 import { Commands } from "./services/commands.js";
 import type { DocsService } from "./services/docs.js";
 import type { EventHub } from "./services/event-hub.js";
@@ -52,6 +53,8 @@ export function createApp(options: {
 	reports: ReportsService;
 	evidence: EvidenceService;
 	sessions: SessionService;
+	/** The ids this host has served. Process-wide: a loopback listener serves one operator. */
+	artifacts?: ArtifactWindow;
 	snapshotHold?: () => Promise<void>;
 	clientDir?: string;
 	diagnostics?: boolean;
@@ -60,6 +63,7 @@ export function createApp(options: {
 }) {
 	const app = new Hono();
 	const { hub, operations, toolchain } = options;
+	const artifacts = options.artifacts ?? new ArtifactWindow();
 	app.onError(problemResponse);
 	app.use("*", auth(options.token, options.origin));
 	if (process.env.NODE_ENV === "test" && options.runtime) {
@@ -103,11 +107,11 @@ export function createApp(options: {
 	docsRoutes(app, hub, options.docs);
 	settingsRoutes(app, hub, options.settings);
 	targetsRoutes(app, hub, options.targets);
-	fleetRoutes(app, hub, options.fleet);
+	fleetRoutes(app, hub, options.fleet, artifacts);
 	systemRoutes(app, hub, options.system);
 	libraryRoutes(app, hub, options.library);
 	reportRoutes(app, hub, options.reports);
-	evidenceRoutes(app, hub, options.evidence);
+	evidenceRoutes(app, hub, options.evidence, artifacts);
 	sessionRoutes(app, hub, options.sessions, new Commands(), options.snapshotHold);
 	app.all("/api/*", (context) => {
 		if (

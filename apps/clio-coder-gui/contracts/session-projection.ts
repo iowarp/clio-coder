@@ -2,19 +2,62 @@ import type { SessionDelta, SessionSnapshot, TimelineItem } from "./sessions.js"
 
 const encoder = new TextEncoder();
 const MARKER = "\n[… stream truncated …]";
-export function boundedText(value: string, limit = 65536) {
-	if (encoder.encode(value).byteLength <= limit) return value;
-	const budget = limit - encoder.encode(MARKER).byteLength;
+const STREAM_LIMIT = 65536;
+const MARKER_BYTES = encoder.encode(MARKER).byteLength;
+const MAX_TIMELINE_ITEMS = 2048;
+const MAX_TIMELINE_BYTES = 2 * 1024 * 1024;
+
+/** Every UTF-8 measurement passes through one meter so the suite can prove retention accounting stays O(1) per delta. */
+export const encodeMeter = { bytes: 0, calls: 0 };
+function measure(value: string) {
+	encodeMeter.calls++;
+	encodeMeter.bytes += value.length;
+	return encoder.encode(value).byteLength;
+}
+
+type Bounded = { text: string; bytes: number };
+function bound(value: string, limit: number): Bounded {
+	const bytes = measure(value);
+	if (bytes <= limit) return { text: value, bytes };
+	const budget = limit - MARKER_BYTES;
 	let used = 0,
 		output = "";
 	for (const character of value) {
-		const bytes = encoder.encode(character).byteLength;
-		if (used + bytes > budget) break;
+		const size = measure(character);
+		if (used + size > budget) break;
 		output += character;
-		used += bytes;
+		used += size;
 	}
-	return output + MARKER;
+	return { text: output + MARKER, bytes: used + MARKER_BYTES };
 }
+export function boundedText(value: string, limit = STREAM_LIMIT) {
+	return bound(value, limit).text;
+}
+
+/**
+ * Retention accounting is carried forward rather than recomputed: a streamed turn emits thousands of deltas, and
+ * re-serializing the timeline (or the growing run inside it) on each one is quadratic in the length of the turn.
+ * Costs key on object identity, so a snapshot that arrives over the wire is measured once and then stays incremental.
+ */
+type Cost = { text: number; json: number };
+const costs = new WeakMap<TimelineItem, Cost>();
+const totals = new WeakMap<readonly TimelineItem[], number>();
+function itemCost(item: TimelineItem) {
+	const known = costs.get(item);
+	if (known) return known;
+	const cost: Cost = { text: measure(item.text), json: measure(JSON.stringify(item)) + 1 };
+	costs.set(item, cost);
+	return cost;
+}
+function timelineBytes(timeline: readonly TimelineItem[]) {
+	const known = totals.get(timeline);
+	if (known !== undefined) return known;
+	let bytes = 0;
+	for (const item of timeline) bytes += itemCost(item).json;
+	totals.set(timeline, bytes);
+	return bytes;
+}
+
 export function emptySession(id: string, workspaceId: string): SessionSnapshot {
 	return {
 		id,
@@ -37,23 +80,48 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 	const upsert = (item: Omit<TimelineItem, "sequence">, append = false) => {
 		const previous = state.timeline.find((row) => row.id === item.id);
 		const sequence = previous?.sequence ?? (state.timeline.at(-1)?.sequence ?? 0) + 1;
-		const text =
-			append && previous
-				? previous.text.endsWith(MARKER)
-					? previous.text
-					: boundedText(previous.text + item.text)
-				: boundedText(item.text);
+		const prior = previous ? itemCost(previous) : undefined;
+		let text: string,
+			textBytes: number,
+			// A plain append changes only the run's text, so the item's serialized cost grows by the escaped chunk alone.
+			jsonGrowth: number | undefined;
+		if (append && previous && prior) {
+			if (previous.text.endsWith(MARKER)) {
+				text = previous.text;
+				textBytes = prior.text;
+				jsonGrowth = 0;
+			} else {
+				const added = measure(item.text);
+				if (prior.text + added <= STREAM_LIMIT) {
+					text = previous.text + item.text;
+					textBytes = prior.text + added;
+					jsonGrowth = measure(JSON.stringify(item.text)) - 2;
+				} else {
+					// The overflow walk happens once per run; every later append is dropped by the marker test above.
+					({ text, bytes: textBytes } = bound(previous.text + item.text, STREAM_LIMIT));
+				}
+			}
+		} else ({ text, bytes: textBytes } = bound(item.text, STREAM_LIMIT));
 		const next = { ...previous, ...item, text, sequence };
+		const cost: Cost =
+			prior && jsonGrowth !== undefined
+				? { text: textBytes, json: prior.json + jsonGrowth }
+				: { text: textBytes, json: measure(JSON.stringify(next)) + 1 };
+		costs.set(next, cost);
 		let timeline = previous ? state.timeline.map((row) => (row.id === item.id ? next : row)) : [...state.timeline, next];
 		let truncated = state.timelineTruncated;
 		// Bound retained projection by both entries and bytes, while keeping the newest evidence visible.
-		let bytes = encoder.encode(JSON.stringify(timeline)).byteLength;
-		while ((timeline.length > 2048 || bytes > 2 * 1024 * 1024) && timeline.length > 1) {
-			const removed = timeline[0];
-			timeline = timeline.slice(1);
-			bytes -= encoder.encode(JSON.stringify(removed)).byteLength + 1;
+		let bytes = timelineBytes(state.timeline) - (prior?.json ?? 0) + cost.json;
+		let dropped = 0;
+		for (const removed of timeline) {
+			const retained = timeline.length - dropped;
+			if (retained <= 1 || (retained <= MAX_TIMELINE_ITEMS && bytes <= MAX_TIMELINE_BYTES)) break;
+			bytes -= itemCost(removed).json;
+			dropped++;
 			truncated = true;
 		}
+		if (dropped) timeline = timeline.slice(dropped);
+		totals.set(timeline, bytes);
 		state = { ...state, timeline, timelineTruncated: truncated || text.endsWith(MARKER) };
 	};
 	switch (event.type) {
@@ -157,7 +225,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 /** The same revision buffer is used by React and held-snapshot/reconnect tests. */
 export class SessionBuffer {
 	private snapshotValue: SessionSnapshot | undefined;
-	private pending = new Map<number, SessionDelta>();
+	private pending = new Map<number, { event: SessionDelta; bytes: number }>();
 	private pendingBytes = 0;
 	private overflow = false;
 	get value() {
@@ -169,8 +237,9 @@ export class SessionBuffer {
 	event(event: SessionDelta) {
 		if (event.payload.revision <= (this.snapshotValue?.revision ?? -1)) return this.snapshotValue;
 		if (this.pending.has(event.payload.revision)) return this.drain();
-		this.pending.set(event.payload.revision, event);
-		this.pendingBytes += encoder.encode(JSON.stringify(event)).byteLength;
+		const bytes = measure(JSON.stringify(event));
+		this.pending.set(event.payload.revision, { event, bytes });
+		this.pendingBytes += bytes;
 		if (this.pending.size > 4096 || this.pendingBytes > 8 * 1024 * 1024) {
 			this.pending.clear();
 			this.pendingBytes = 0;
@@ -186,8 +255,8 @@ export class SessionBuffer {
 		return this.drain();
 	}
 	private remove(revision: number) {
-		const value = this.pending.get(revision);
-		if (value) this.pendingBytes -= encoder.encode(JSON.stringify(value)).byteLength;
+		const held = this.pending.get(revision);
+		if (held) this.pendingBytes -= held.bytes;
 		this.pending.delete(revision);
 	}
 	private drain() {
@@ -195,8 +264,8 @@ export class SessionBuffer {
 		while (true) {
 			const next = this.pending.get(this.snapshotValue.revision + 1);
 			if (!next) return this.snapshotValue;
-			this.remove(next.payload.revision);
-			this.snapshotValue = applySessionDelta(this.snapshotValue, next);
+			this.remove(next.event.payload.revision);
+			this.snapshotValue = applySessionDelta(this.snapshotValue, next.event);
 		}
 	}
 }

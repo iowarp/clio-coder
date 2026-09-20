@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
 import type { Event } from "../contracts/events.js";
-import { SessionBuffer } from "../contracts/session-projection.js";
+import { encodeMeter, SessionBuffer } from "../contracts/session-projection.js";
 import { type SessionDelta, SessionDeltas } from "../contracts/sessions.js";
 import { harness } from "./harness/app.js";
 
@@ -58,6 +58,7 @@ test("E2/E4: 1400-event turn reconnects over HTTP without lost/reordered text an
 	let connection = await stream(await h.request("/api/events"));
 	t.after(() => connection.close());
 	assert.equal((await connection.next()).type, "hello");
+	const encodedBefore = encodeMeter.bytes;
 	h.supervisor.startTurn(session.id, "Stream 1400 chunks");
 	let reconnected = false;
 	while (true) {
@@ -90,13 +91,17 @@ test("E2/E4: 1400-event turn reconnects over HTTP without lost/reordered text an
 	assert.equal(buffer.hasGap, false);
 	assert.equal(h.hub.size, 1403);
 	assert.ok(h.hub.byteSize < 8 * 1024 * 1024);
+	// Server and client projections both run in this process. Recompute-from-scratch accounting encoded the whole
+	// timeline on each of the 1,400 deltas on both sides, which is tens of megabytes; incremental accounting is linear.
+	const encoded = encodeMeter.bytes - encodedBefore;
+	assert.ok(encoded < 2 * 1024 * 1024, `Projection encoded ${encoded} bytes across ${text.length} deltas.`);
 	const final = process.memoryUsage();
 	peakRss = Math.max(peakRss, final.rss);
 	peakHeap = Math.max(peakHeap, final.heapUsed);
 	// Budgets are fixed before measurement: 128 MiB RSS growth / 64 MiB heap growth,
 	// including resident workers, reader, and client projection after startup.
 	t.diagnostic(
-		`E2/E4 ${JSON.stringify({ eventCount: sequences.length, turnTextReplayable: true, ringEntries: h.hub.size, ringBytes: h.hub.byteSize, beforeRss: before.rss, peakRss, beforeHeap: before.heapUsed, peakHeap, snapshotBytes: Buffer.byteLength(JSON.stringify(buffer.value)) })}`,
+		`E2/E4 ${JSON.stringify({ eventCount: sequences.length, turnTextReplayable: true, ringEntries: h.hub.size, ringBytes: h.hub.byteSize, beforeRss: before.rss, peakRss, beforeHeap: before.heapUsed, peakHeap, snapshotBytes: Buffer.byteLength(JSON.stringify(buffer.value)), projectionEncodedBytes: encoded, projectionEncodeCalls: encodeMeter.calls })}`,
 	);
 	assert.ok(peakRss - before.rss < 128 * 1024 * 1024, `Streaming RSS grew by ${peakRss - before.rss} bytes.`);
 	assert.ok(

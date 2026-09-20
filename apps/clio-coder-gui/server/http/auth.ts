@@ -2,6 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import type { MiddlewareHandler } from "hono";
 import { routes } from "../../contracts/routes.js";
 import { AppProblem } from "../services/problem.js";
+import { SECURITY_HEADERS } from "./security-headers.js";
 
 const streams = Object.values(routes)
 	.filter((route) => route.stream)
@@ -15,8 +16,9 @@ export function auth(token: string, origin: () => string): MiddlewareHandler {
 		const requestOrigin = context.req.header("origin");
 		if (requestOrigin && requestOrigin !== expected.origin)
 			throw new AppProblem("unauthorized", "Origin must match this loopback listener.");
-		context.header("Referrer-Policy", "no-referrer");
-		context.header("X-Content-Type-Options", "nosniff");
+		// One set for API responses, problem responses, the SSE stream and static
+		// assets alike; a second copy anywhere else would only drift from this one.
+		for (const [name, value] of Object.entries(SECURITY_HEADERS)) context.header(name, value);
 		if (context.req.path === "/api" || context.req.path.startsWith("/api/")) {
 			const authorization = context.req.header("authorization");
 			const supplied =
@@ -30,5 +32,8 @@ export function auth(token: string, origin: () => string): MiddlewareHandler {
 			context.header("Cache-Control", "no-store");
 		}
 		await next();
+		// Re-asserted on the settled response so no downstream handler can weaken the
+		// policy by setting its own copy of one of these headers.
+		for (const [name, value] of Object.entries(SECURITY_HEADERS)) context.res.headers.set(name, value);
 	};
 }

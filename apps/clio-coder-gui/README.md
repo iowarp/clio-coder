@@ -140,9 +140,9 @@ a local OpenAI-compatible fixture in a scratch home. It includes durable session
 load/replay and records real child RSS/boot measurements. It is separate from the
 network-disabled default test lane.
 
-See [SPRINT.md](SPRINT.md) for canonical status, acceptance results, measurements
-and the next slice. Validation notes and screenshots live outside the checkout;
-the ledger records their locations, and earlier commits retain historical evidence.
+See [`../../docs/gui/`](../../docs/gui/README.md) for the parity matrix, the
+settings write-surface table, the event coverage table and the performance
+baseline. [`DESIGN.md`](DESIGN.md) is the design authority.
 
 S1-S7b provide sessions, trace and documentation browsing, settings inspection,
 and target operations. Target listing and offline models/profiles/bindings are
