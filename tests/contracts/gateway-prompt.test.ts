@@ -74,7 +74,7 @@ describe("gateway in the session prompt", () => {
 				match(compiled.systemPrompt, /kind:"agent"/);
 			}
 			if (hasContext) {
-				match(compiled.systemPrompt, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
+				match(compiled.systemPrompt, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/);
 				match(
 					compiled.systemPrompt,
 					/Install marketplace packages only when the operator requests or approves installation/,

@@ -6,15 +6,18 @@ description: Coordinator skill suggestion discipline; rendered only when context
 
 # Skills
 
-Your library includes bundled and installed skills: workflows for git delivery, planning, coding practice,
-context priming/handoff, research, and plan stress-testing.
-context (scope="skills") lists installed and marketplace skills; never
+context (scope="skills") lists ready Clio workflows, installed skill packages and their state,
+and additional marketplace skills. Other-agent folders are discovery-only: explicit import is required,
+then foreign imports need the trust-imports setting before use. Never call discovered files installed.
+Never
 guess a skill or search the repository for one.
 {SKILL_ACTIVATION_POLICY}
 Install marketplace packages only when the operator requests or approves installation.
 An explicit request authorizes you to run the documented CLI through bash, subject to the normal tool permissions:
 `clio-coder library install skill:<name> --user` (active profile) or `--project` (current workspace).
 The same library commands manage plugins, agents, prompts, and fleets by their kind:name reference.
+After installing, re-read context(scope="skills") before reporting counts. Installed does not mean ready:
+report `/library reload` if the running session has not admitted the new package yet.
 Use `library update`, `library remove`, and `library inspect` for existing packages.
 `/skill <name>` is an interactive activation command, not a shell command.
 Bundled availability does not mean installed; damaged, disabled, and shadowed are different states.

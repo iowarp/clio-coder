@@ -507,7 +507,9 @@ function fromSkill(skill: Skill, index: OwnerIndex): LibraryResource {
 	const reason = hard
 		? skill.diagnostics.find((item) => item.type === "error" || item.type === "collision")?.message
 		: !skill.trusted
-			? "root is not trusted; enable integrations.projectResources.trustProjectImports or install the package"
+			? skill.source === "plugin"
+				? "imported package is untrusted; review it and enable integrations.projectResources.trustProjectImports"
+				: "discovered only; explicitly import into Clio with interop adopt or library import"
 			: undefined;
 	const scope = skill.scope === "cli" ? "user" : skill.scope;
 	return {
@@ -541,7 +543,9 @@ function fromPrompt(template: PromptTemplate, index: OwnerIndex): LibraryResourc
 	const reason = template.unavailable
 		? template.unavailable
 		: !template.trusted
-			? "root is not trusted; enable integrations.projectResources.trustProjectImports or install the package"
+			? scope === "package"
+				? "imported package is untrusted; review it and enable integrations.projectResources.trustProjectImports"
+				: "discovered only; explicitly import into Clio with interop adopt or library import"
 			: undefined;
 	return {
 		key: libraryResourceKey(

@@ -303,6 +303,7 @@ export interface ModelSelectorSettings {
 }
 
 export interface ProjectResourcesSettings {
+	/** Admit explicitly imported foreign skills/prompts at either scope; loose compatibility roots stay inactive. */
 	trustProjectImports: boolean;
 }
 

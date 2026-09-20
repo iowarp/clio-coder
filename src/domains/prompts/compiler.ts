@@ -319,7 +319,7 @@ function renderToolContractBlock(inputs: SessionPromptInputs): string {
 			? [
 					inputs.skillDiscoveryEnabled === false
 						? 'context(scope="skills") lists only explicitly supplied skills; automatic discovery and marketplace suggestions are disabled'
-						: 'context(scope="skills") lists bundled and installed skills plus marketplace options',
+						: 'context(scope="skills") lists ready Clio skills, installed package states, and additional marketplace options',
 				]
 			: []),
 		...(hasGateway ? ['gateway(op="find") answers a question about secondary capabilities'] : []),
@@ -638,7 +638,7 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			: undefined;
 	const skillActivation =
 		isAutonomyLevel(autonomyLevel) && modelMayActivateSkills(autonomyLevel)
-			? 'Load matching installed skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
+			? 'Load matching ready Clio skills with context(scope="skills", name="<name>") and continue the task; skill restrictions still apply.'
 			: "Suggest matching skills as /skill <name> (in order when several compose), then continue without them; only the operator activates skills.";
 
 	const legacy = inputs.sectionOrder === "legacy-0.3.8";

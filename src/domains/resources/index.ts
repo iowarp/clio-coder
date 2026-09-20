@@ -114,6 +114,7 @@ export {
 	promptTemplateDisplayText,
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
+export { installedSkillNames, installedSkillPackages } from "./skills/availability.js";
 export { parseSkillEvals, type SkillEvalParseResult, type SkillEvalScenario } from "./skills/evals.js";
 export {
 	type InstallSkillInput,

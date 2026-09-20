@@ -49,7 +49,7 @@ async function fixture(t: TestContext) {
 }
 
 for (const level of AUTONOMY_LEVELS) {
-	it(`compiled skill instructions agree with actual installed-skill admission at ${level}`, async (t) => {
+	it(`compiled skill instructions agree with actual session-skill admission at ${level}`, async (t) => {
 		const { context } = await fixture(t);
 		const enabled = modelMayActivateSkills(level);
 		const pendingSkillPolicy = withModelSkillActivation(undefined, enabled);
@@ -62,7 +62,7 @@ for (const level of AUTONOMY_LEVELS) {
 		assert.match(text, /Install marketplace packages only when the operator requests or approves installation/);
 		assert.doesNotMatch(text, /\{SKILL_ACTIVATION_POLICY\}/);
 		if (enabled) {
-			assert.match(text, /Load matching installed skills with context\(scope="skills", name="<name>"\)/);
+			assert.match(text, /Load matching ready Clio skills with context\(scope="skills", name="<name>"\)/);
 			assert.doesNotMatch(text, /only the operator\s+activates|Skills are operator-activated/i);
 			assert.ok(evaluateSkillToolSurface(pendingSkillPolicy, "bash"));
 			assert.equal(evaluateSkillToolSurface(pendingSkillPolicy, "read"), null);
@@ -89,7 +89,7 @@ for (const level of AUTONOMY_LEVELS) {
 			assert.ok(!compiled.sections.some((section) => section.id === "skills"));
 			assert.doesNotMatch(
 				compiled.systemPrompt,
-				/# Skills|Load matching installed skills|only the operator activates skills/,
+				/# Skills|Load matching ready Clio skills|only the operator activates skills/,
 			);
 		});
 	}
@@ -119,7 +119,7 @@ for (const level of AUTONOMY_LEVELS) {
 		});
 		assert.ok(!compiled.sections.some((section) => section.id === "skills"));
 		assert.match(compiled.systemPrompt, /Persona and bound-skill instructions never add tools/);
-		assert.doesNotMatch(compiled.systemPrompt, /Load matching installed skills/);
+		assert.doesNotMatch(compiled.systemPrompt, /Load matching ready Clio skills/);
 	});
 
 	it(`marketplace skills remain uninstalled and operator-gated at ${level}`, async (t) => {
@@ -165,5 +165,5 @@ it("autonomy transitions change the existing prompt cache identity and compiled 
 	assert.notEqual(before.systemPromptHash, after.systemPromptHash);
 	assert.equal(before.systemPrompt, restored.systemPrompt);
 	assert.match(before.systemPrompt, /only the operator activates skills/);
-	assert.match(after.systemPrompt, /Load matching installed skills/);
+	assert.match(after.systemPrompt, /Load matching ready Clio skills/);
 });

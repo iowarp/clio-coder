@@ -141,6 +141,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
+	installedSkillNames,
 	installSkill,
 	modelVisibleSkills,
 	type ResourcesContract,
@@ -1625,7 +1626,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// reminder quotes is the count the listing will show.
 				countInstallableSkills: () => {
 					if (!skillDiscoveryEnabled) return 0;
-					const installed = new Set(resources.skills(process.cwd()).items.map((skill) => skill.name));
+					const installed = installedSkillNames(resources.skills(process.cwd()).items, process.cwd());
 					return discoverMarketplaceSkills({ cwd: process.cwd() }).skills.filter((skill) => !installed.has(skill.name))
 						.length;
 				},
@@ -1640,7 +1641,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		middleware.registerHook(
 			createMarketplaceOfferRegistration({
 				interactive,
-				listInstalledSkillNames: () => resources.skills(process.cwd()).items.map((skill) => skill.name),
+				listInstalledSkillNames: () => [...installedSkillNames(resources.skills(process.cwd()).items, process.cwd())],
 				listMarketplaceEntries: () => discoverMarketplaceSkills({ cwd: process.cwd() }).skills,
 				installEntry: (entry, scope) => {
 					const installed = installSkill({ source: `skill:${entry.name}`, scope, name: entry.name, cwd: process.cwd() });

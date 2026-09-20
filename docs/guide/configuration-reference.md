@@ -115,7 +115,7 @@ these controls and cannot write configuration through that tool.
 | `integrations.library.confirmedRemote` | `null` | Remote URL written by `clio-coder library remote confirm <url>`; must equal `remote` before sync or push may run (string or null); applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.library.remote` | `null` | Git remote URL of the library repository (string or null); the catalog repository must name that remote `library`; applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.library.sync` | `false` | Whether `library sync` and `library push` may spawn Git at all (boolean); applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
-| `integrations.projectResources.trustProjectImports` | `false` | Whether project-scope skills and prompts from other agents' compat roots become model-visible (boolean); applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
+| `integrations.projectResources.trustProjectImports` | `false` | Whether explicitly imported foreign skills and prompts become usable, at user or project scope (boolean); never imports or activates loose other-agent files; applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `integrations.runtimePlugins` | `[]` | npm package names loaded as provider runtime plugins at boot (list of strings); applies at restart. |  |
 | `interface.desktopNotifications` | `false` | Content-free desktop notifications on turn end, detached batch settlement, and a parked approval, interactive TTY runs only (boolean); applies next turn. | session override (`/settings` apply-this-session) > `.clio-coder/settings.local.yaml` > `.clio-coder/settings.yaml` > user settings.yaml > default |
 | `interface.fullscreenScrollbar` | `auto` | Fullscreen transcript scrollbar visibility: `hidden`, `auto`, `always`; applies at restart. |  |
@@ -972,7 +972,7 @@ Project safety, hooks, and settings are ignored until the operator reviews them 
 
 | Key | Controls | Precedence |
 |---|---|---|
-| `(skill directories)` | Project skills (`<name>/SKILL.md`); third-party imports are inert until `integrations.projectResources.trustProjectImports` trusts them. | explicit `--skill` paths > project skills > user skills > catalog skills, by name |
+| `(skill directories)` | Native project skills (`<name>/SKILL.md`). Foreign packages installed through import/adoption separately require `integrations.projectResources.trustProjectImports`; loose other-agent roots remain discovery-only. | explicit `--skill` paths > project skills > user skills > catalog skills, by name |
 
 ### `.clio-coder/validation.yaml`
 

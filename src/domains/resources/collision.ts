@@ -55,7 +55,10 @@ function compareCandidates<T>(a: ResourceCandidate<T>, b: ResourceCandidate<T>):
 	return a.source.path.localeCompare(b.source.path);
 }
 
-export function resolveResourceCollisions<T>(candidates: ReadonlyArray<ResourceCandidate<T>>): CollisionResolution<T> {
+export function resolveResourceCollisions<T>(
+	candidates: ReadonlyArray<ResourceCandidate<T>>,
+	priority?: (value: T) => number,
+): CollisionResolution<T> {
 	const byName = new Map<string, ResourceCandidate<T>[]>();
 	for (const candidate of candidates) {
 		const key = candidate.name.trim();
@@ -68,7 +71,9 @@ export function resolveResourceCollisions<T>(candidates: ReadonlyArray<ResourceC
 	const winners: T[] = [];
 	const diagnostics: ResourceDiagnostic[] = [];
 	for (const [name, entries] of byName.entries()) {
-		const sorted = [...entries].sort(compareCandidates);
+		const sorted = [...entries].sort(
+			(a, b) => (priority ? priority(a.value) - priority(b.value) : 0) || compareCandidates(a, b),
+		);
 		const winner = sorted[sorted.length - 1];
 		if (!winner) continue;
 		winners.push(winner.value);

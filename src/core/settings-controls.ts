@@ -16,7 +16,7 @@ export const SETTINGS_LABELS_BY_ID = {
 	"workers.escalation.timeoutMs": "Escalation timeout (ms)",
 	"workers.escalation.fallback": "Escalation fallback",
 	"delegation.defaults.toolGovernance": "Delegation governance",
-	"skills.trustProjectCompatRoots": "Trust project skill roots",
+	"skills.trustProjectCompatRoots": "Trust imported skills and prompts",
 	"attribution.gitCommits": "Clio commit provenance",
 	safetyNet: "Safety net",
 	"orchestrator.thinkingLevel": "Thinking level",
@@ -107,7 +107,7 @@ export const SETTINGS_DESCRIPTIONS_BY_ID = {
 	"workers.escalation.timeoutMs": "How long an escalated worker approval waits for you before the fallback applies.",
 	"workers.escalation.fallback": "What an escalated approval becomes when nobody answers inside the timeout.",
 	"delegation.defaults.toolGovernance": "Tool policy for delegated external agents.",
-	"skills.trustProjectCompatRoots": "Whether third-party project skill roots are loaded.",
+	"skills.trustProjectCompatRoots": "Allow explicitly imported foreign skills and prompts to run.",
 	"attribution.gitCommits":
 		"Add evidence-backed assistance, testing, review, and contributor trailers to commits created through Clio.",
 	safetyNet: "Always-on rails; tuned in .clio-coder/safety.yaml.",
@@ -243,7 +243,7 @@ export const SETTINGS_HELP_BY_ID: Partial<Record<string, string>> = {
 	"budget.concurrency":
 		"auto sizes local workers from usable CPUs and available memory, up to eight, and is the default. A fixed number caps how many workers run at once.",
 	"skills.trustProjectCompatRoots":
-		"Project roots like .claude/skills and .codex/skills are untrusted by default; enabling exposes them to the model.",
+		"Applies to foreign packages explicitly imported into Clio, at user or project scope. Loose skills/prompts in other agents' folders stay discovery-only; this setting never imports them.",
 	"attribution.gitCommits":
 		"Role trailers are added only when Clio has trusted evidence for that role. Disabling leaves subsequent commit messages entirely unchanged.",
 	"workers.onPermission":
@@ -339,8 +339,8 @@ export const SETTINGS_VALUE_HELP_BY_ID: Partial<Record<string, Record<string, st
 		false: "surface transient errors immediately without retrying",
 	},
 	"skills.trustProjectCompatRoots": {
-		true: "load skills from .claude/.codex/.github/etc. project roots",
-		false: "ignore third-party project skill roots",
+		true: "allow explicitly imported foreign skills and prompts",
+		false: "keep imported foreign skills and prompts inactive",
 	},
 	"attribution.gitCommits": {
 		enabled: "add only the Clio role trailers justified by trusted evidence",
