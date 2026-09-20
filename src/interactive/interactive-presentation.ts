@@ -465,6 +465,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			);
 		},
 		isStreaming: () => deps.chat.isStreaming(),
+		getAutonomy: () => deps.getSettings?.().safety.autonomy ?? "auto-edit",
 		...(deps.isAwaitingApproval ? { isAwaitingApproval: deps.isAwaitingApproval } : {}),
 		...(deps.getPermissionInspection ? { getPermissionInspection: deps.getPermissionInspection } : {}),
 		getTurnPreparation: () => deps.chat.turnPreparation().phase,
@@ -598,7 +599,8 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		deps.clearScheduledInterval ??
 		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
 	const footerTicker = scheduleInterval(() => {
-		const statusActive = statusController.current().phase !== "idle" || localBashStartedAt !== null;
+		const statusActive =
+			statusController.current().phase !== "idle" || localBashStartedAt !== null || deps.isAwaitingApproval?.() === true;
 		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
 		footer.refresh();
 		requestRender();

@@ -1,6 +1,8 @@
 /** Semantic colors shared by Clio's terminal surfaces and generated companion profiles. */
 export type ClioToken =
 	| "editor"
+	| "editorDanger"
+	| "editorAction"
 	| "accent"
 	| "accentDeep"
 	| "action"
@@ -26,6 +28,8 @@ export type ClioToken =
  */
 const TOKEN_HEX: Readonly<Record<ClioToken, `#${string}`>> = {
 	editor: "#40ffde",
+	editorDanger: "#ff5058",
+	editorAction: "#ffab45",
 	accent: "#53b1a4",
 	accentDeep: "#3e9389",
 	action: "#d99b62",
