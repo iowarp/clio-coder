@@ -42,7 +42,6 @@
 			"!**/node_modules",
 			"!**/*.log",
 			"!**/.superpowers",
-			"!apps/workbench",
 			"!benchmarks/community/*/runs",
 			"!benchmarks/internal/runs",
 			"!**/*.html",

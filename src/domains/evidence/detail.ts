@@ -13,8 +13,9 @@
  * closed.
  *
  * Unlike the other fixed reads this one takes an identifier, because an
- * operator names the bundle. The GUI host may only pass back an id it served
- * inside its current bounded window; see `apps/workbench/artifact-allowlist.ts`.
+ * operator names the bundle. The identifier is validated for shape here; a
+ * GUI host that echoes operator-supplied ids owes its own served-id window on
+ * top of that, because shape alone does not prove the id was ever served.
  */
 
 import { clioDataDir } from "../../core/xdg.js";
