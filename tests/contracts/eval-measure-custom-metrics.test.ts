@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import test from "node:test";
 import { isRedactedArtifactKey, redactArtifactForStorage } from "../../src/domains/eval/artifacts/redact.js";
@@ -71,6 +71,10 @@ test("measure lines admit custom.* keys per trial and keep them through storage"
 						"custom.io.bytes_read": 1234,
 						"custom.cache-hit": true,
 						"custom.ratio": 0.5,
+						"proposal.implementationParked": true,
+						"scope.filesChanged": 0,
+						"explanation.words": 1200,
+						"memory.approved": null,
 						"custom.label": "not a number",
 						"custom.has space": 1,
 						[`custom.${"x".repeat(122)}`]: 1,
@@ -91,6 +95,10 @@ test("measure lines admit custom.* keys per trial and keep them through storage"
 			assert.equal(result.metrics["custom.io.bytes_read"], 1234);
 			assert.equal(result.metrics["custom.cache-hit"], true);
 			assert.equal(result.metrics["custom.ratio"], 0.5);
+			assert.equal(result.metrics["proposal.implementationParked"], true);
+			assert.equal(result.metrics["scope.filesChanged"], 0);
+			assert.equal(result.metrics["explanation.words"], 1200);
+			assert.equal(result.metrics["memory.approved"], null);
 			assert.equal(result.metrics["claims.unsupported"], 0);
 			assert.equal(result.metrics["custom.label"], undefined);
 			assert.equal(result.metrics["custom.has space"], undefined);
@@ -99,6 +107,10 @@ test("measure lines admit custom.* keys per trial and keep them through storage"
 			assert.equal(result.metrics["custom.plain_string"], undefined);
 		}
 		const dataDir = join(env.dir, "data");
+		const checkpoint = JSON.parse(readFileSync(join(dataDir, "evals", artifact.evalId, "checkpoint.json"), "utf8"));
+		assert.equal(checkpoint.status, "completed");
+		assert.equal(checkpoint.completedRuns, 2);
+		assert.equal(checkpoint.results.length, 2);
 		await writeEvalArtifactV4(dataDir, artifact);
 		const stored = await loadEvalArtifactV4(dataDir, artifact.evalId);
 		assert.equal(stored.version, 4);
@@ -106,6 +118,10 @@ test("measure lines admit custom.* keys per trial and keep them through storage"
 			assert.equal(result.metrics["custom.io.bytes_read"], 1234);
 			assert.equal(result.metrics["custom.cache-hit"], true);
 			assert.equal(result.metrics["custom.ratio"], 0.5);
+			assert.equal(result.metrics["proposal.implementationParked"], true);
+			assert.equal(result.metrics["scope.filesChanged"], 0);
+			assert.equal(result.metrics["explanation.words"], 1200);
+			assert.equal(result.metrics["memory.approved"], null);
 		}
 	} finally {
 		env.restore();
@@ -131,6 +147,7 @@ test("measure lines cannot overwrite reserved metrics or add unprefixed keys", a
 		assert.equal(result.metrics["custom.kept"], 1);
 		assert.equal(result.pass, false);
 		assert.equal(result.failureClass, "grader_failed");
+		assert.match(String(result.artifacts.measureStdout ?? ""), /custom.kept/);
 	} finally {
 		env.restore();
 	}

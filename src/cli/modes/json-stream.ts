@@ -57,6 +57,8 @@ export function projectHeadlessJsonEvent(event: ChatLoopEvent): unknown | null {
  * Only an assistant message streams: its `text` and `thinking` blocks arrive
  * incrementally as `text_delta` and `thinking_delta` keyed by the same
  * `contentIndex` this array is indexed by, so a reader reassembles them itself.
+ * Provider replay signatures stay in the durable session, not this observation
+ * stream; encrypted signatures can dwarf the actual answer on every turn.
  * `toolCall` blocks never stream and are kept whole. A `user` or `toolResult`
  * message is returned untouched, because no delta ever carried it.
  */
@@ -65,11 +67,11 @@ function withoutStreamedContent<T>(message: T): T {
 	const content = message.content.map((block: unknown) => {
 		if (!isRecord(block)) return block;
 		if (block.type === "text" && typeof block.text === "string") {
-			const { text: _text, ...rest } = block;
+			const { text: _text, textSignature: _signature, ...rest } = block;
 			return { ...rest, streamed: true, textLength: block.text.length };
 		}
 		if (block.type === "thinking" && typeof block.thinking === "string") {
-			const { thinking: _thinking, ...rest } = block;
+			const { thinking: _thinking, thinkingSignature: _signature, ...rest } = block;
 			return { ...rest, streamed: true, thinkingLength: block.thinking.length };
 		}
 		return block;

@@ -244,7 +244,10 @@ function readVerify(
 		issues.push({ path, message: "expected object" });
 		return {};
 	}
+	if (value.allowNoop !== undefined && typeof value.allowNoop !== "boolean")
+		issues.push({ path: `${path}.allowNoop`, message: "expected boolean" });
 	return {
+		...(typeof value.allowNoop === "boolean" ? { allowNoop: value.allowNoop } : {}),
 		commands: readOptionalStringArray(value, "commands", `${path}.commands`, issues),
 		measure: readOptionalStringArray(value, "measure", `${path}.measure`, issues),
 		protectedFiles: readOptionalStringArray(value, "protectedFiles", `${path}.protectedFiles`, issues),

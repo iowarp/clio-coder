@@ -40,7 +40,12 @@ function receipt(input: FixtureReceipt): Record<string, unknown> {
  * journal the way the headless main agent does, prints the session header and
  * no receipt, then exits with the scripted code.
  */
-async function runItem(input: { receipts: FixtureReceipt[]; exitCode?: number }) {
+async function runItem(input: {
+	receipts: FixtureReceipt[];
+	exitCode?: number;
+	allowNoop?: boolean;
+	measure?: string[];
+}) {
 	const env = await isolateClioEnv("clio-coder-eval-noop-");
 	try {
 		const workspace = join(env.dir, "workspace");
@@ -73,7 +78,10 @@ process.exit(${input.exitCode ?? 0});
 							workspace: { kind: "local", path: workspace },
 							runner: { kind: "clio-coder-run", prompt: "Apply the change." },
 							// No verifier: the untouched workspace already passes.
-							verify: {},
+							verify: {
+								...(input.allowNoop === undefined ? {} : { allowNoop: input.allowNoop }),
+								...(input.measure ? { measure: input.measure } : {}),
+							},
 							metrics: { collect: [] },
 							timeoutMs: 10_000,
 						},
@@ -165,4 +173,16 @@ test("eval noop: a no-op without blocked calls says no mutating call succeeded",
 		} as RunReceipt),
 		/; and 5 more$/u,
 	);
+});
+
+test("eval negative probe needs explicit no-op allowance and a passing grader", async () => {
+	for (const measure of [undefined, ["false"], ["true"]]) {
+		const { result } = await runItem({
+			receipts: [{ name: "main", sessionId: SESSION, noop: true }],
+			allowNoop: true,
+			...(measure ? { measure } : {}),
+		});
+		assert.equal(result.pass, measure?.[0] === "true");
+		assert.equal(result.metrics["result.noop"], true);
+	}
 });

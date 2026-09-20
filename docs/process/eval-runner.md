@@ -543,3 +543,30 @@ The runner keeps at most 200,000 characters of each measure command's stdout: th
 ## Artifact reporting and comparison
 
 Eval runs print a report command for custom output artifacts. `clio-coder eval report --artifact <path>` reads the original artifact with strict provenance validation and does not import it into the store. Comparison aligns jointly declared target/model variations while preserving both route identities, rejects ambiguous route groups, and retains execution-envelope differences. Compact mismatch and hard-gate identities omit runner attachments; full artifact reports retain them.
+
+
+### Interrupted suites and negative probes
+
+Each completed matrix item is atomically checkpointed under the data directory at
+`evals/<eval-id>/checkpoint.json`, before the next item starts. The checkpoint
+records the suite identity, planned and completed counts, status, and graded
+results. A `running` checkpoint is partial evidence, not a completed suite report;
+unstarted cases have no result. The normal artifact is still written at completion.
+
+Graders read a complete, private runner event file rather than the bounded console
+excerpt. Capture fails closed above 64 MiB; a truncated stream cannot silently
+produce a passing grade. This file is retained alongside the session ledgers.
+
+Measure commands retain `measureStdout` and `measureStderr` in result artifacts,
+subject to normal artifact redaction. The shipped `proposal.*`, `memory.*`, and
+`scope.*`, and `explanation.*` grader facts are admitted alongside `custom.*`, `claims.unsupported`, and
+`completion.reported`. Reserved host metrics cannot be overwritten by a grader.
+Gateway call metrics retain both the outer gateway call and the named capability's
+outcome; aggregate tool calls still count one model invocation. Gateway discovery
+and description are not capability executions.
+
+An explicitly negative task, such as checking that an unsupported URL is rejected,
+may set `verify.allowNoop: true`. This bypasses only the no-op gate, and only when
+an independent measure command records `task.solved: true`. Runner errors, blocked
+headless completion, grader failures, and other verification failures still fail.
+Ordinary tasks retain the default no-op failure behavior.

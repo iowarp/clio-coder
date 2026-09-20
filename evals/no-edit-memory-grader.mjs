@@ -104,7 +104,7 @@ export async function gradeNoEditMemory(events, assistant) {
 	// certify #352 promotion, operator approval, or fresh-session delivery from
 	// answer text. Those stages are independently exercised by the #352 smoke.
 	const limitation =
-		/(?:cannot|can't|unable to)[^.\n]{0,100}\b(?:retain|retention|persist|save|store|capture|guarantee)[^.\n]{0,100}\b(?:memory|convention|retention|entry|marker)|\b(?:memory|convention|marker)[^.\n]{0,60}\bnot (?:yet )?(?:retained|stored|saved|persisted)|\bno (?:matching |durable )?(?:entry|proposal)\b/iu.test(
+		/(?:cannot|can't|could not|couldn't|unable to)[^.\n]{0,100}\b(?:retain|retention|persist|save|store|capture|guarantee)[^.\n]{0,100}\b(?:memory|convention|retention|entry|marker)|\b(?:memory|convention|marker)[^.\n]{0,60}\bnot (?:yet )?(?:retained|stored|saved|persisted)|\bno (?:matching |durable )?(?:entry|proposal)\b/iu.test(
 			assistant,
 		);
 	const workflow =
