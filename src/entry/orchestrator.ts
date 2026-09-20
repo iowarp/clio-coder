@@ -83,6 +83,7 @@ import {
 } from "../domains/memory/index.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
+import { createDemoGuidanceRegistration } from "../domains/middleware/demo-guidance.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
@@ -2133,6 +2134,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		);
 	}
 
+	if (!options.headless && !options.acp) {
+		middleware.registerHook(createDemoGuidanceRegistration(() => getCurrentSettings().interface.demo));
+	}
 	const chat = createChatLoop({
 		interactiveGuidance: !options.headless && !options.acp,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch

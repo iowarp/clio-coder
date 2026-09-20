@@ -460,7 +460,7 @@ const OPTIONAL_STRINGS = new Set([
 const EXTRA_HELP: Record<string, [string, string]> = {
 	"interface.demo": [
 		"Demo guidance",
-		"Friendly interactive onboarding and brief contextual footer tips. On by default. Tips update live; conversational guidance changes on the next turn. No automatic demonstrations or permission changes.",
+		"Relevant capability suggestions during real project work and brief contextual footer tips. On by default. Tips update live; conversational guidance changes on the next turn. No automatic demonstrations or permission changes.",
 	],
 	"integrations.externalAgents.entries": [
 		"External agent entries",

@@ -920,7 +920,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | Key | Default | Validation | When it applies |
 | --- | --- | --- | --- |
 | `interface.terminalProgress` | `false` | boolean | next turn |
-| `interface.demo` | `true` | Friendly onboarding persona and contextual footer tips; `--demo` / `--no-demo` override one interactive session | tips immediately; persona next turn |
+| `interface.demo` | `true` | Project-work capability guidance and contextual footer tips; `--demo` / `--no-demo` override one interactive session | tips immediately; persona next turn |
 | `interface.outputDetail` | `standard` | `compact`, `standard`, `detailed` | immediately |
 | `interface.mode` | `regular` | `regular` or `fullscreen` | restart |
 | `interface.fullscreenScrollbar` | `auto` | `hidden`, `auto`, `always` | restart |
