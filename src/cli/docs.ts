@@ -1,18 +1,26 @@
+import { readdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { resolvePackageRoot } from "../core/package-root.js";
 import { printError } from "./argv.js";
+import { runGuiCommand } from "./gui.js";
 
-const HELP = `clio-coder docs
+const HELP = `clio-coder docs [topic] [--no-open]
 
-Documentation pages open in the Clio Coder graphical application, which is not
-part of this release. The Markdown those pages render ships with the package and
-reads as ordinary files; this command prints the directory that holds it.
+Open the documentation in the Clio Coder graphical app. Pages, navigation and outlines
+are rendered from the same Markdown reference shipped with Clio.
 
-Clio reads the same corpus herself. Ask her a documentation question in a session
-and she answers from these files.
+Arguments:
+  [topic]      a topic such as safety, configuration, or fleet_dispatch, or a
+               document path such as architecture/safety-model.md.
+               Omit to open the documentation map.
 
 Flags:
+  --no-open    print the private launch link without opening a browser.
   --help, -h   this message.
+
+Reuses your installed background app when available. Otherwise starts a local
+foreground server on 127.0.0.1; press Ctrl+C to stop it. No background service
+is installed by this command. Your current directory does not affect the docs.
 `;
 
 const key = (value: string) => value.toLowerCase().replace(/_/g, "-");
@@ -41,18 +49,43 @@ export function docsTopicRoute(topic: string | undefined, pages: readonly string
 	return matches.length === 1 && match ? route(match) : undefined;
 }
 
-/**
- * Routing stays in `docsTopicRoute` above, where the application will pick it
- * up again. Until the graphical application ships, this command answers with
- * the one thing an operator can act on: where the Markdown actually is.
- */
+function catalog(root: string) {
+	const pages: string[] = [];
+	const scan = (path: string) => {
+		for (const entry of readdirSync(join(root, path), { withFileTypes: true })) {
+			const name = path ? `${path}/${entry.name}` : entry.name;
+			if (name === "html") continue;
+			if (entry.isDirectory()) scan(name);
+			else if (entry.isFile() && /\.md$/i.test(name)) pages.push(name);
+		}
+	};
+	scan("");
+	return pages;
+}
+
 export async function runDocsCommand(args: readonly string[] = []): Promise<number> {
 	if (args.includes("--help") || args.includes("-h")) {
 		process.stdout.write(HELP);
 		return 0;
 	}
-	printError(
-		`Documentation pages open in the Clio Coder graphical application, which is not part of this release; the Markdown they render ships at ${join(resolvePackageRoot(), "docs")}.`,
-	);
-	return 2;
+	const positionals = args.filter((arg) => arg !== "--no-open");
+	const unknownFlag = positionals.find((arg) => arg.startsWith("-"));
+	if (unknownFlag || positionals.length > 1) {
+		printError(unknownFlag ? `unknown flag: ${unknownFlag}` : "docs accepts at most one [topic]");
+		return 2;
+	}
+	try {
+		const pages = catalog(join(resolvePackageRoot(), "docs"));
+		const path = docsTopicRoute(positionals[0], pages);
+		if (!path) {
+			printError(
+				`Unknown or ambiguous docs topic: ${positionals[0]}. Run clio-coder docs to browse the documentation map.`,
+			);
+			return 2;
+		}
+		return runGuiCommand(["--path", path, "--reuse-background", args.includes("--no-open") ? "--no-open" : "--open"]);
+	} catch (error) {
+		printError(error instanceof Error ? error.message : "Could not open the documentation.");
+		return 1;
+	}
 }

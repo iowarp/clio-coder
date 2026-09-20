@@ -1908,7 +1908,7 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 			return [
 				...DIAGNOSTICS_SECTION.fields(),
 				["Settings file", shortenPath(settingsPath())],
-				["Reference", "docs/guide/configuration-reference.md"],
+				["Reference", "clio-coder docs configuration-reference"],
 			];
 		},
 		actions: [

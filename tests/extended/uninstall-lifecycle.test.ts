@@ -13,13 +13,14 @@ const home = () => createLifecycleHome("clio-coder-test-uninstall-");
 const launcherPath = (temp: LifecycleHome): string => join(temp.binDir, "clio-coder");
 
 describe("contracts/uninstall-lifecycle", () => {
-	// The graphical application is an opt-in build (CLIO_CODER_BUILD_GUI=1). Without its bundle there
-	// is no launcher to install; tests/extended/uninstall-without-gui.test.ts covers that build.
+	// A checkout that has not been built has no application bundle, so there is no launcher to install;
+	// tests/extended/uninstall-without-gui.test.ts covers that case.
 	it("previews and removes the packaged web desktop entry before deleting state", {
 		skip:
 			process.platform !== "linux"
 				? "the desktop launcher is Linux-only"
-				: !existsSync(join(resolvePackageRoot(), "dist/gui/server.js")) && "this build has no graphical application",
+				: !existsSync(join(resolvePackageRoot(), "dist/gui/server.js")) &&
+					"the graphical application has not been built in this checkout",
 	}, async () => {
 		const temp = home();
 		try {

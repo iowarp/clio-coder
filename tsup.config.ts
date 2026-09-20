@@ -53,43 +53,11 @@ function vendorGrammars(): void {
 	}
 }
 
-/**
- * The graphical application keeps being developed in apps/clio-coder-gui, and
- * this release does not ship it. With the flag off nothing here resolves the
- * app's package, its Vite client, or its Hono dependencies, so the build needs
- * none of them installed and emits no dist/gui and no dist/assets/gui-notices.
- * Set CLIO_CODER_BUILD_GUI=1 to build the application into dist/ again.
- */
-const buildGui = process.env.CLIO_CODER_BUILD_GUI === "1";
-
-const guiEntries = {
+const entries = {
+	"cli/index": "src/cli/index.ts",
 	"gui/server": "apps/clio-coder-gui/server/main.ts",
 	"gui/reads-worker": "apps/clio-coder-gui/server/worker/reads-main.ts",
 	"gui/ops-worker": "apps/clio-coder-gui/server/worker/ops-main.ts",
-};
-
-/** Client bundle and dependency notices for the optional graphical build. */
-async function buildGuiAssets(): Promise<void> {
-	const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
-	const { build: buildClient } = await import(appRequire.resolve("vite"));
-	await buildClient({ configFile: "apps/clio-coder-gui/vite.config.ts", configLoader: "runner" });
-	cpSync("apps/clio-coder-gui/dist/client", "dist/gui/client", { recursive: true });
-	const notices = join("dist", "assets", "gui-notices");
-	mkdirSync(notices, { recursive: true });
-	for (const name of ["hono", "@hono/node-server"]) {
-		let directory = dirname(appRequire.resolve(name));
-		while (!existsSync(join(directory, "LICENSE"))) {
-			const parent = dirname(directory);
-			if (parent === directory) throw new Error(`Missing license for ${name}`);
-			directory = parent;
-		}
-		cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
-	}
-}
-
-const entries = {
-	"cli/index": "src/cli/index.ts",
-	...(buildGui ? guiEntries : {}),
 	"worker/entry": "src/worker/entry.ts",
 	"codewiki/build-worker": "src/domains/context/codewiki/build-worker.ts",
 };
@@ -144,13 +112,23 @@ export default defineConfig({
 		js: 'import { createRequire as __clioCreateRequire } from "node:module"; const require = __clioCreateRequire(import.meta.url);',
 	},
 	async onSuccess() {
+		const appRequire = createRequire(join(process.cwd(), "apps/clio-coder-gui/package.json"));
+		const { build: buildClient } = await import(appRequire.resolve("vite"));
+		await buildClient({ configFile: "apps/clio-coder-gui/vite.config.ts", configLoader: "runner" });
+		cpSync("apps/clio-coder-gui/dist/client", "dist/gui/client", { recursive: true });
 		vendorGrammars();
 		vendorTuiNotices();
-		if (buildGui) await buildGuiAssets();
-		// A checkout that built the application once keeps its client here: tsup's
-		// clean removes the files and leaves the tree. Take the whole directory so
-		// the default build's output is the same either way.
-		else rmSync(join("dist", "gui"), { recursive: true, force: true });
+		const notices = join("dist", "assets", "gui-notices");
+		mkdirSync(notices, { recursive: true });
+		for (const name of ["hono", "@hono/node-server"]) {
+			let directory = dirname(appRequire.resolve(name));
+			while (!existsSync(join(directory, "LICENSE"))) {
+				const parent = dirname(directory);
+				if (parent === directory) throw new Error(`Missing license for ${name}`);
+				directory = parent;
+			}
+			cpSync(join(directory, "LICENSE"), join(notices, `${name.replace("/", "__")}-LICENSE`));
+		}
 	},
 	// tsup already externalizes every package.json `dependencies` entry, so the
 	// runtime deps need no listing here. `optionalDependencies` is not part of

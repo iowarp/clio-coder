@@ -23,8 +23,6 @@ at login. Open its launch link once, then install it from your browser. Backgrou
 stop stops it now; background uninstall also removes its login and desktop entries.
 Other platforms can run the foreground app. Your CLI, terminal interface,
 headless runs, and graphical app use the same Clio runtime and configuration.
-
-A build that does not include the graphical application says so and exits 2.
 `;
 
 export async function runGuiCommand(args: string[]): Promise<number> {
@@ -37,7 +35,7 @@ export async function runGuiCommand(args: string[]): Promise<number> {
 		process.env.CLIO_CODER_PACKAGE_ROOT = root;
 		const entry = join(root, "dist/gui/server.js");
 		if (!existsSync(entry)) {
-			printError("The Clio Coder graphical application is not included in this build.");
+			printError("The graphical application has not been built here. Run `pnpm run build` in this checkout.");
 			return 2;
 		}
 		// A URL keeps this a separate entry; bundling it into the command chunk

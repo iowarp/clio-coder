@@ -76,7 +76,8 @@ Configure and `/settings` use the same categories and control catalog. Ask Clio
 `clio-coder` opens the **terminal interface (TUI)**: an interactive chat that
 shows tool calls and diffs as they happen. The same command is the **CLI** for
 setup, diagnostics, headless runs, and automation; `clio-coder --help` lists
-it. Clio also serves as an **ACP agent** for editors that speak that protocol.
+it. An optional local **browser app** over the same runtime is described under
+[Optional browser app](#optional-browser-app). The first session does not need it.
 
 **New in 0.5.0:** `read`, `ls`, `grep`, and `find` ask before they leave the
 workspace below `full-auto`, and bash admission follows `cd`, links, and
@@ -350,7 +351,8 @@ instructions follow the commands supported by the version actually installed.
 Options include `--version <tag-or-version>`, `--prefix <directory>`,
 `--omit-optional`, and `--dry-run`; pass them to a downloaded script using
 `bash -s -- <options>`. A source-checkout symlink is preserved unless you explicitly
-select `--force`. Remove an install at the default prefix with
+select `--force`. If you enabled the background service, run `clio-coder gui background uninstall`
+before removing the package. Remove an install at the default prefix with
 `npm uninstall -g --prefix "$HOME/.local" @iowarp/clio-coder`.
 
 The npm command in [Get started](#get-started) is the shortest path. Other
@@ -444,13 +446,33 @@ exactly which settings, credentials, and session directories each option affects
 
 </details>
 
+## Optional browser app
+
+The terminal is the primary interface. Clio Coder also packages a local browser
+app over the same runtime, projects, configuration, and model targets:
+
+```bash
+clio-coder gui --open
+```
+
+It prints a private launch link and opens your default browser only when asked.
+The server binds to `127.0.0.1`, and its Traces page reads the trace database
+without modifying it. On Linux with a systemd user session,
+`clio-coder gui background install --open` keeps the app available after login
+and lets you install it from the browser as a PWA; `gui background status`,
+`stop`, and `uninstall` manage that service. Other platforms can run the
+foreground app while its server is running. The background service has been
+verified on Linux only; macOS and Windows have not been exercised. Development
+details are in [`apps/clio-coder-gui/README.md`](apps/clio-coder-gui/README.md).
+
 ## Help and documentation
 
 The guides under [`docs/`](docs/README.md) are Markdown, ship with the package,
 and need no browser. To discover commands, use `clio-coder --help` (`--help
 --all` includes developer tools) and `/help` inside a session.
-Ask Clio a documentation question inside a session and she answers from the same
-files. `clio-coder docs` prints the directory the installed package keeps them in.
+`clio-coder docs [topic]` opens the same guides in the browser app; for example,
+`clio-coder docs safety` opens the safety guide, and `--no-open` prints the
+private launch link instead of opening a browser.
 
 If setup fails, start with `clio-coder doctor` and
 `clio-coder configure --section diagnostics`.
