@@ -24,20 +24,27 @@ export type GatewayRoutingObservation = LiteLLMGatewayRoutingObservation;
 
 /**
  * Preserve the provider's diagnostic while making Clio's failure policy
- * explicit and actionable. LiteLLM targets deliberately do not enter Clio's
- * transient retry ladder: a named route is an operator choice, not permission
- * to substitute another model behind their back.
+ * explicit and actionable. A dropped client connection before any output can
+ * use the visible retry ladder on the same route. Gateway/backend errors stay
+ * terminal: a named route never authorizes substitution of another model.
  */
 export function liteLLMRouteFailureMessage(
 	errorMessage: string | null | undefined,
 	targetId: string,
 	modelId: string,
+	hasPartialResponse = false,
 ): string {
 	const providerMessage = errorMessage?.trim() || "LiteLLM request failed.";
+	if (!hasPartialResponse && isLiteLLMConnectionFailure(providerMessage)) return providerMessage;
 	const advice =
 		`LiteLLM route '${modelId}' on target '${targetId}' failed. ` +
 		"Clio did not retry or substitute another model; select a different route with /model, then resend.";
 	return providerMessage.includes(advice) ? providerMessage : `${providerMessage}\n\n${advice}`;
+}
+
+/** OpenAI SDK transport failure, distinct from an HTTP gateway/backend error. */
+export function isLiteLLMConnectionFailure(message: string | null | undefined): boolean {
+	return message?.trim() === "Connection error.";
 }
 
 interface HeaderReader {

@@ -1061,7 +1061,12 @@ function harnessPhasePresentation(status: AgentStatus, width: number, now: numbe
 		case "thinking":
 			return { glyph: GLYPH.phaseThinking, label: "Thinking", token: "reason", live: true };
 		case "writing":
-			return { glyph: GLYPH.phaseWriting, label: "Writing", token: "accent", live: true };
+			return {
+				glyph: GLYPH.phaseWriting,
+				label: status.preparingToolCall ? "Preparing tool call" : "Writing",
+				token: "accent",
+				live: true,
+			};
 		case "tool_running":
 			return {
 				glyph: GLYPH.phaseTool,

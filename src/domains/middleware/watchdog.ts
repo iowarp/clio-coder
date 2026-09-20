@@ -257,6 +257,10 @@ export function createWatchdogRegistration(deps: WatchdogDeps): WatchdogRegistra
 				return NO_EFFECTS;
 			}
 			if (input.hook !== "turn_end") return NO_EFFECTS;
+			if (input.metadata?.stopReason === "error" || input.metadata?.stopReason === "aborted") {
+				resetTurn();
+				return NO_EFFECTS;
+			}
 			// A turn with no file mutations never fires. A middleware continuation
 			// re-evaluates turn_end with the accumulator already cleared, so it
 			// cannot fire a second run for the same change either.

@@ -1,6 +1,7 @@
 import { collectSessionEntries } from "../../domains/session/compaction/session-entries.js";
 import type { SessionContract } from "../../domains/session/contract.js";
 import type { MessageEntry } from "../../domains/session/entries.js";
+import { buildTurnPreview } from "../../domains/session/tree/preview.js";
 import { openSession, sessionPaths } from "../../engine/session.js";
 import {
 	type Component,
@@ -21,7 +22,7 @@ const PREVIEW_WIDTH = 60;
 
 /**
  * /fork picker. Lists the current session's assistant turns, most-recent first,
- * with the first line of the assistant text as the row label. Selecting a row
+ * with a structured assistant preview as the row label. Selecting a row
  * calls onFork(parentTurnId); the caller wires that through
  * SessionContract.fork(parentTurnId).
  *
@@ -36,33 +37,6 @@ export interface OpenMessagePickerOverlayDeps {
 
 function shortTurnId(id: string): string {
 	return id.length > 8 ? id.slice(0, 8) : id;
-}
-
-/**
- * Coerce a structured message payload into a preview string. Handles raw
- * strings, text properties, and pi-ai content blocks.
- */
-function payloadPreview(payload: unknown): string {
-	if (typeof payload === "string") return payload;
-	if (!payload || typeof payload !== "object") return "";
-	const p = payload as Record<string, unknown>;
-	if (typeof p.text === "string") return p.text;
-	if (Array.isArray(p.content)) {
-		for (const block of p.content) {
-			if (block && typeof block === "object") {
-				const b = block as Record<string, unknown>;
-				if (b.type === "text" && typeof b.text === "string") return b.text;
-			}
-		}
-	}
-	return "";
-}
-
-function firstLineClamped(text: string, max: number): string {
-	const firstLine = text.split("\n", 1)[0] ?? "";
-	const trimmed = firstLine.trim();
-	if (trimmed.length === 0) return "(no text)";
-	return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
 }
 
 export interface MessagePickerRow {
@@ -87,7 +61,7 @@ function buildMessagePickerRows(turns: ReadonlyArray<MessageEntry>): MessagePick
 			turnId: turn.turnId,
 			shortId: shortTurnId(turn.turnId),
 			at: turn.timestamp,
-			preview: firstLineClamped(payloadPreview(turn.payload), PREVIEW_WIDTH),
+			preview: buildTurnPreview({ kind: "assistant", payload: turn.payload }, PREVIEW_WIDTH),
 		});
 	}
 	return rows;

@@ -48,6 +48,10 @@ export interface AgentTaskFeatures {
 }
 
 const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
+	// A review commonly discusses tests, documentation, and bugs. Its leading
+	// request should win over those subjects when selecting a recipe. This is
+	// a routing heuristic, never an authorization rule.
+	["code_review", /^(?:please\s+)?(?:(?:independently|carefully)\s+)?(?:review|audit|critique|inspect for)\b/i],
 	["test", /\b(tests?|unit tests?|coverage|spec file)\b/i],
 	["docs", /\b(documentation|docs|readme|changelog|comment|docstring)\b/i],
 	["code_review", /\b(review|audit|critique|inspect for)\b/i],

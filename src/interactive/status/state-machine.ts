@@ -362,8 +362,20 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return next;
 		}
 		case "message_start":
-		case "message_update":
 			return refreshMeaningful(prev, ctx);
+		case "message_update": {
+			const next = refreshMeaningful(prev, ctx);
+			const streamed = event.assistantMessageEvent;
+			const base = activePhaseAfterStuck(prev);
+			if (
+				(streamed.type === "toolcall_start" || streamed.type === "toolcall_delta") &&
+				CORE_ACTIVE_PHASES.has(base) &&
+				base !== "tool_running"
+			) {
+				return { ...next, phase: "writing", preparingToolCall: true, resumePhase: undefined };
+			}
+			return next;
+		}
 		case "tool_execution_update":
 			return refreshMeaningful(prev, ctx);
 		case "message_end":
@@ -413,7 +425,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		}
 		case "thinking_delta": {
 			const base = activePhaseAfterStuck(prev);
-			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
+			const next = refreshMeaningful({ ...prev, phase: base, preparingToolCall: false }, ctx);
 			// Model reasoning arriving while a tool still shows as running means the
 			// tool is done (its end never landed or was an admission block): the
 			// model is generating, nothing is executing, so drop the tool display.
@@ -432,7 +444,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 		}
 		case "text_delta": {
 			const base = activePhaseAfterStuck(prev);
-			const next = refreshMeaningful({ ...prev, phase: base }, ctx);
+			const next = refreshMeaningful({ ...prev, phase: base, preparingToolCall: false }, ctx);
 			// Streamed answer text while a tool still shows as running: same as
 			// above, the model is writing, so the running-tool spinner must clear.
 			if (base === "preparing" || base === "waiting_model" || base === "thinking" || base === "tool_running") {
@@ -460,6 +472,7 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			return {
 				...refreshMeaningful(prev, ctx),
 				phase: "tool_running",
+				preparingToolCall: false,
 				tool,
 				toolStartedAt: ctx.now,
 				activeTools: [...(prev.activeTools ?? []).filter((active) => active.toolCallId !== event.toolCallId), tool],

@@ -19,6 +19,7 @@ import { ceilChars, contentChars } from "../domains/session/context-accounting.j
 import type { SessionContract, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { Component, ScrollView, TUI } from "../engine/tui.js";
+import { createAssistantGenerationTiming, hasAssistantGenerationDelta } from "./assistant-generation-timing.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { type ChatPanel, createChatPanel } from "./chat-panel.js";
 import { type CoalescingChatRenderer, createCoalescingChatRenderer } from "./chat-renderer.js";
@@ -283,17 +284,15 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	let footerToolTruncatedResults = 0;
 	let lastTurnSummary: TurnSummary | null = null;
 	let observabilitySnapshot = deps.observability.snapshot();
+	const generationTiming = createAssistantGenerationTiming();
 	let liveThroughput: {
-		startedAt: number;
-		firstDeltaAt: number | null;
 		settledOutputTokens: number;
 		partialOutputTokens: number;
 	} | null = null;
 	const recordChatEvent = (event: ChatLoopEvent): void => {
+		generationTiming.record(event, now());
 		if (event.type === "agent_start") {
 			liveThroughput = {
-				startedAt: now(),
-				firstDeltaAt: null,
 				settledOutputTokens: 0,
 				partialOutputTokens: 0,
 			};
@@ -310,15 +309,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		}
 		if (event.type === "message_update") {
 			const update = event.assistantMessageEvent as { type?: unknown; partial?: { content?: unknown; payload?: unknown } };
-			if (
-				update.type !== "text_delta" &&
-				update.type !== "thinking_delta" &&
-				update.type !== "toolcall_start" &&
-				update.type !== "toolcall_delta"
-			) {
-				return;
-			}
-			liveThroughput.firstDeltaAt ??= now();
+			if (!hasAssistantGenerationDelta(update)) return;
 			liveThroughput.partialOutputTokens = ceilChars(contentChars(update.partial?.payload ?? update.partial?.content));
 			return;
 		}
@@ -330,17 +321,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		}
 	};
 	const currentLiveThroughput = (): TokenThroughputSnapshot | null => {
-		if (!liveThroughput || liveThroughput.firstDeltaAt === null) return null;
+		if (!liveThroughput) return null;
+		const timing = generationTiming.snapshot(now());
+		if (!timing) return null;
 		const outputTokens = liveThroughput.settledOutputTokens + liveThroughput.partialOutputTokens;
 		if (outputTokens <= 0) return null;
-		const at = now();
-		const durationMs = Math.max(1, at - liveThroughput.firstDeltaAt);
+		const { durationMs, ttftMs } = timing;
 		const settings = deps.getSettings?.();
 		return {
 			tokensPerSecond: outputTokens / (durationMs / 1000),
 			outputTokens,
 			durationMs,
-			ttftMs: Math.max(0, liveThroughput.firstDeltaAt - liveThroughput.startedAt),
+			ttftMs,
 			providerId: settings?.chat?.target ?? "",
 			modelId: settings?.chat?.model ?? "",
 			recordedAt: Date.now(),

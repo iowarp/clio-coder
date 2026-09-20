@@ -31,6 +31,8 @@ export interface TurnMiddlewareDeps {
 }
 
 export interface TurnMiddleware {
+	/** Async-only completed tool-batch observation and delivery of already-finished background reminders. */
+	prepareToolContinuation(agentRuntime: AgentRuntime, signal?: AbortSignal): Promise<boolean>;
 	fireTurnStart(
 		agentRuntime: AgentRuntime,
 		promptText: string,
@@ -72,13 +74,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	// Reminders accumulated from middleware `inject_reminder` effects
 	// (turn_end advisories, hard-block recovery guidance, turn_start
 	// injections). The next accepted prompt flushes them into the model
-	// request as one system-reminder block; the buffer clears on session
-	// switch.
-	const pendingReminders: Array<{ message: string; severity: MiddlewareReminderSeverity }> = [];
+	// request as one system-reminder block. Completed background reminders
+	// can also drain at a native tool-batch boundary; session switches clear all.
+	const pendingReminders: Array<{ message: string; severity: MiddlewareReminderSeverity; deferred: boolean }> = [];
 
-	const bufferReminder = (message: string, severity: MiddlewareReminderSeverity): void => {
+	const bufferReminder = (message: string, severity: MiddlewareReminderSeverity, deferred = false): void => {
 		if (pendingReminders.some((entry) => entry.message === message && entry.severity === severity)) return;
-		pendingReminders.push({ message, severity });
+		pendingReminders.push({ message, severity, deferred });
 	};
 
 	const runMiddlewareTurnHook = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
@@ -171,6 +173,40 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	};
 
 	return {
+		async prepareToolContinuation(agentRuntime, signal): Promise<boolean> {
+			const sessionId = deps.session?.current()?.id;
+			const userTurnId = state.activeUserTurnId;
+			const current = () =>
+				!signal?.aborted &&
+				state.activeInterruptReason === null &&
+				deps.session?.current()?.id === sessionId &&
+				state.activeUserTurnId === userTurnId;
+			if (!current()) return false;
+			// This is not a user-turn finish: run only the async observation phase,
+			// never completion assessors or foreground continuation effects.
+			await runMiddlewareTurnHookAsync(
+				{
+					hook: "after_tool",
+					...(sessionId ? { sessionId } : {}),
+					...(state.lastTurnId ? { turnId: state.lastTurnId } : {}),
+					metadata: { stage: "tool_batch_end", ...(userTurnId ? { userTurnId } : {}) },
+				},
+				[],
+			);
+			if (!current()) return false;
+			const ready = pendingReminders.filter((entry) => entry.deferred);
+			if (ready.length === 0) return false;
+			const content = `<system-reminder>\n${[...new Set(ready.map((entry) => entry.message))].join("\n\n")}\n</system-reminder>`;
+			// injectDeferredReminder already persisted a middleware receipt. Update
+			// context directly: message events would invent a new operator turn and
+			// reset task/tool authority in appendQueuedUserTurn.
+			agentRuntime.agent.state.messages.push({ role: "user", content, timestamp: Date.now() });
+			for (let index = pendingReminders.length - 1; index >= 0; index--) {
+				if (pendingReminders[index]?.deferred) pendingReminders.splice(index, 1);
+			}
+			return true;
+		},
+
 		fireTurnStart(agentRuntime, promptText, pendingSkillRequestCount = 0, requestContinuation = false): void {
 			const sessionId = deps.session?.current()?.id;
 			const input: MiddlewareHookInput = {
@@ -206,7 +242,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			const message = terminalToolResult === undefined ? lastAssistantMessage(messages) : null;
 			if (message === null && terminalToolResult === undefined) return;
 			const text = message === null ? "" : extractText(message);
-			if (terminalToolResult === undefined && text.trim().length === 0) return;
+			// Empty error/abort completions still close a tool-bearing turn. Let
+			// lifecycle observers settle their state even without final prose.
 			const stopReason = message === null ? "stop" : (message as { stopReason?: unknown }).stopReason;
 			const metadata: Record<string, MiddlewareMetadataValue> = {
 				assistantTextChars: text.length,
@@ -240,6 +277,14 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			};
 			const syncEffects = runMiddlewareTurnHook(input);
 			const effects = [...syncEffects, ...(await runMiddlewareTurnHookAsync(input, syncEffects))];
+			// Observation is not recovery authority. No reminder or continuation
+			// may restart a failed or operator-canceled foreground turn.
+			if (stopReason === "aborted") {
+				for (let index = pendingReminders.length - 1; index >= 0; index--) {
+					if (pendingReminders[index]?.deferred) pendingReminders.splice(index, 1);
+				}
+			}
+			if (stopReason === "error" || stopReason === "aborted") return;
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {
 					applyTurnEndReminder(agentRuntime, effect.message, effect.severity ?? "info");
@@ -289,7 +334,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			// could have interrupted is already over.
 			const level: MiddlewareReminderSeverity = severity === "hard-block" ? "advisory" : severity;
 			if (pendingReminders.some((entry) => entry.message === text)) return;
-			bufferReminder(text, level);
+			bufferReminder(text, level, true);
 			appendMiddlewareReminderEntry(text, level);
 			deps.emitNotice(text);
 		},

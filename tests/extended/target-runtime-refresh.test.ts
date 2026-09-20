@@ -18,6 +18,8 @@ test("editing a selected target refreshes the next request and retains portable 
 	settings.chat.model = first.modelId;
 	settings.chat.thinkingLevel = "off";
 	settings.chat.prewarm = false;
+	settings.chat.retry.baseDelayMs = 1;
+	settings.chat.retry.maxDelayMs = 1;
 	const target: TargetDescriptor = {
 		id: "gateway",
 		runtime: "litellm",
@@ -103,6 +105,17 @@ test("editing a selected target refreshes the next request and retains portable 
 			(agents.at(-1)?.agent.state.model as { clioCoder?: { cache?: { retention?: string } } }).clioCoder?.cache?.retention,
 			"none",
 		);
+		const retryPhases: string[] = [];
+		loop.onEvent((event) => {
+			if (event.type === "retry_status") retryPhases.push(event.status.phase);
+		});
+		second.dropNextConnection();
+		await loop.submit("Recover a dropped connection on this exact route");
+		strictEqual(second.requests.length, 3, "one failed connection and one visible retry, no SDK retries");
+		strictEqual(first.requests.length, 2, "recovery must not fall back to another endpoint");
+		ok(retryPhases.includes("retrying"));
+		ok(retryPhases.includes("recovered"));
+		strictEqual(agents.at(-1)?.agent.state.messages.at(-1)?.role, "assistant");
 	} finally {
 		loop.dispose();
 		await first.close();

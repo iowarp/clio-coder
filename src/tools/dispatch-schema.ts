@@ -298,8 +298,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		agent: Type.Optional(
 			Type.String({
 				description: composition.council
-					? "Default recipe id for tasks without their own agent, or auto (default coder; researcher for council)."
-					: "Default recipe id for tasks without their own agent, or auto (default coder).",
+					? "Recipe id, not model: coder, verifier, scout, or auto. Default coder; researcher for council."
+					: "Recipe id, not model: coder, verifier, scout, or auto. Default coder.",
 			}),
 		),
 		context: Type.Optional(WorkerContextSchema),

@@ -11,6 +11,7 @@ export async function startGatewayThinkingFixture(
 ) {
 	const requests: Array<Record<string, unknown>> = [];
 	const paths: string[] = [];
+	let dropNextConnection = false;
 	const server = createServer(async (req, res) => {
 		paths.push(req.url ?? "");
 		res.setHeader("content-type", "application/json");
@@ -46,6 +47,11 @@ export async function startGatewayThinkingFixture(
 		for await (const chunk of req) raw += chunk;
 		const body = JSON.parse(raw) as Record<string, unknown>;
 		requests.push(body);
+		if (dropNextConnection) {
+			dropNextConnection = false;
+			res.destroy();
+			return;
+		}
 		const text = typeof responseText === "function" ? responseText(body, requests.length - 1) : responseText;
 		// LiteLLM's generic OpenAI adapter drops effort unless explicitly allowed.
 		// LM Studio's HTTP route ignores the template switch. Keep both seams in
@@ -93,6 +99,9 @@ export async function startGatewayThinkingFixture(
 		modelId,
 		requests,
 		paths,
+		dropNextConnection: () => {
+			dropNextConnection = true;
+		},
 		url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
 		close: () => closeServer(server),
 	};

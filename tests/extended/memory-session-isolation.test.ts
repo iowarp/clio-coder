@@ -14,7 +14,72 @@ import { createMemoryInterventionRegistration } from "../../src/domains/middlewa
 import type { OutOfTurnUsageRow } from "../../src/domains/observability/out-of-turn-usage.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "../../src/entry/task-memory-lifecycle.js";
+import {
+	DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT,
+	RESOLVED_DISPATCH_PLAN_ARGUMENT,
+} from "../../src/tools/dispatch-plan.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+test("dispatch memory projects public arguments without changing private call identity", async () => {
+	const bank = new TaskMemoryBank();
+	let prompt = "";
+	const registration = createMemoryInterventionRegistration({
+		bank,
+		getModelClient: () => ({
+			complete: async (request) => {
+				prompt = request.userPrompt;
+				return { text: "<operations>[]</operations><no_intervention/>" };
+			},
+		}),
+	});
+	const failure = {
+		hook: "after_tool" as const,
+		toolName: "dispatch",
+		toolArgs: { action: "run", [DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]: "dispatch verify id is undeclared" },
+		metadata: { resultKind: "error", errorMessage: "dispatch verify id is undeclared" },
+	};
+	try {
+		registration.evaluate(failure);
+		const first = bank.snapshot().procedural[0];
+		assert.ok(first);
+		assert.match(first.content, /^dispatch \{"action":"run"\} failed 1 time; first observed at step 1:/u);
+		assert.ok(first.content.includes("dispatch verify id is undeclared"));
+		assert.ok(!first.content.includes(DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT));
+		registration.evaluate(failure);
+		const repeated = bank.snapshot().procedural;
+		assert.equal(repeated.length, 1);
+		assert.equal(repeated[0]?.id, first.id);
+		assert.match(repeated[0]?.content ?? "", /failed 2 times; first observed at step 1/u);
+		registration.evaluate({
+			...failure,
+			toolArgs: { ...failure.toolArgs, [DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]: "different failure" },
+		});
+		assert.equal(bank.snapshot().procedural.length, 2, "readable descriptions must not merge distinct call identities");
+		registration.evaluate({
+			...failure,
+			toolArgs: {
+				action: "run",
+				task: "verify p-limit",
+				[RESOLVED_DISPATCH_PLAN_ARGUMENT]: { privatePlan: "host artifact" },
+			},
+			metadata: { resultKind: "ok" },
+		});
+		registration.evaluate({
+			...failure,
+			toolArgs: { [DISPATCH_PLAN_PREPARATION_ERROR_ARGUMENT]: "dispatch verify id is undeclared" },
+		});
+		assert.match(bank.snapshot().procedural.at(-1)?.content ?? "", /^dispatch plan preparation failed/u);
+		registration.signalLoop();
+		await registration.evaluateAsync({ hook: "turn_end", turnId: "description-check" });
+		await registration.whenIdle();
+		assert.ok(prompt.includes("verify p-limit"));
+		assert.ok(prompt.includes("dispatch verify id is undeclared"));
+		assert.ok(!prompt.includes("__clio_"));
+		assert.ok(!prompt.includes("host artifact"));
+	} finally {
+		registration.dispose();
+	}
+});
 
 // Ported reproductions of the original lazy bank-only session clearing.
 // Model responses are fixtures; lifecycle tests below use isolated session storage.
@@ -425,6 +490,47 @@ test("timeout backoff resets, while settings toggles, busy endpoints and reminde
 	await registration.evaluateAsync({ hook: "turn_end", turnId: "two" });
 	await registration.whenIdle();
 	assert.equal(registration.lastDecision(), "injected");
+});
+
+test("operator cancellation revokes a pending memory step without erasing completed knowledge", async () => {
+	const bank = new TaskMemoryBank();
+	bank.saveKnowledge("Completed knowledge");
+	const pending = deferred<TaskMemoryModelResponse>();
+	let signal: AbortSignal | undefined;
+	let calls = 0;
+	const reminders: string[] = [];
+	const usages: TaskMemoryStepUsage[] = [];
+	const registration = createMemoryInterventionRegistration({
+		bank,
+		getModelClient: () => ({
+			complete: (request) => {
+				calls++;
+				signal = request.signal;
+				return pending.promise;
+			},
+		}),
+		onStepUsage: (usage) => usages.push(usage),
+		onDeferredReminder: (message) => reminders.push(message),
+	});
+	registration.signalLoop();
+	await registration.evaluateAsync({ hook: "turn_end", turnId: "previous" });
+	const prior = registration.whenIdle();
+	registration.evaluate({ hook: "turn_end", turnId: "canceled", metadata: { stopReason: "aborted" } });
+	await registration.evaluateAsync({ hook: "turn_end", turnId: "canceled", metadata: { stopReason: "aborted" } });
+	await prior;
+	assert.equal(signal?.aborted, true);
+	assert.equal(registration.stepInFlight(), false);
+	assert.equal(registration.recentActivity()[0]?.reason, "scope_changed");
+	pending.resolve(response);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(calls, 1);
+	assert.deepEqual(
+		bank.snapshot().knowledge.map((entry) => entry.content),
+		["Completed knowledge"],
+	);
+	assert.deepEqual(reminders, []);
+	assert.deepEqual(usages, [response.usage]);
+	registration.dispose();
 });
 
 function required<T>(value: T | null | undefined): T {

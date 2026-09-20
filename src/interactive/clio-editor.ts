@@ -19,7 +19,7 @@ const REVERSE_VIDEO_BLANK = `${String.fromCharCode(27)}[7m ${String.fromCharCode
 const EMPTY_PROMPT = "Ask Clio…  / for commands";
 const CONFIRM_PROMPT = "A parked call is waiting for your decision";
 const PREPARING_PROMPT = "Clio has your prompt and is preparing the turn";
-const COMPACTING_PROMPT = "Clio has your prompt and is compacting the context first";
+const COMPACTING_PROMPT = "Clio is compacting the session context";
 
 function hasScrollIndicator(line: string): boolean {
 	const stripped = stripTerminalSequences(line);

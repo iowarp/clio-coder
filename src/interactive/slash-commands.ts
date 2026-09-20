@@ -1942,7 +1942,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					);
 					return;
 				case "disabled":
-					ctx.notice("warn", "task memory is disabled; enable memory.intervention before seeding");
+					ctx.notice("warn", "task memory is disabled; enable context.memory.enabled before seeding");
 					return;
 				case "not-found":
 					ctx.notice("info", "no structured task-memory snapshot found in the newest handoff");
