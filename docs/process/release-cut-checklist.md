@@ -60,7 +60,8 @@ This runs:
   eval first-call selection.
 
 No real model, npm login or publication occurs. An unavailable registry or advisory
-service fails qualification. Chrome must be installed at `/usr/bin/google-chrome` on
+service fails qualification. Native search contracts require `rg` and `fd` (or
+`fdfind`) on `PATH`; the hosted qualification job installs both. Chrome must be installed at `/usr/bin/google-chrome` on
 Linux. Windows subprocess semantics have a separate narrow CI lane; a Linux pass is
 not evidence of a full Windows or macOS pass.
 
