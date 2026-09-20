@@ -1,0 +1,218 @@
+/* The composer, the per-message action row and the outcome footer. Every colour
+   is a token from client/design/tokens.css; nothing here names a raw value, and
+   no state is carried by colour alone. */
+
+.composer {
+	display: grid;
+	gap: var(--space-3);
+	margin-top: var(--space-6);
+	padding: var(--space-4);
+	background: var(--surface);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-lg);
+}
+.composer__label {
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+.composer__field {
+	width: 100%;
+	resize: vertical;
+	min-height: 5.5em;
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	padding: var(--space-3) var(--space-4);
+	font: inherit;
+	line-height: var(--leading-body);
+	color: var(--ink);
+	background: var(--paper);
+}
+.composer__field:disabled {
+	color: var(--ink-subtle);
+	background: var(--surface-sunken);
+}
+
+/* Mid-turn delivery. The two modes are not interchangeable, so the chosen one
+   states where it lands rather than leaving the operator to infer it. */
+.composer__modes {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-4);
+	margin: 0;
+	padding: var(--space-2) var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--surface-sunken);
+}
+.composer__modes legend {
+	font-size: var(--text-instrument);
+	letter-spacing: var(--tracking-instrument);
+	text-transform: uppercase;
+	color: var(--ink-muted);
+	padding-inline: var(--space-1);
+}
+.composer__mode {
+	display: inline-flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.composer__mode-lands {
+	flex: 1 1 24ch;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+
+.composer__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: flex-end;
+	gap: var(--space-3);
+}
+.composer__hint {
+	flex: 1 1 28ch;
+	margin: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.composer__submit,
+.composer__secondary {
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) var(--space-4);
+	font: inherit;
+	font-size: var(--text-meta);
+	cursor: pointer;
+}
+.composer__secondary {
+	border: 1px solid var(--line-strong);
+	background: var(--surface);
+	color: var(--ink);
+}
+.composer__secondary:hover:not(:disabled) {
+	background: var(--surface-sunken);
+}
+.composer__submit {
+	border: 1px solid var(--accent-strong);
+	background: var(--accent);
+	color: var(--on-accent);
+}
+.composer__submit:disabled,
+.composer__secondary:disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+
+.composer__blocked,
+.composer__notice {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin: 0;
+	font-size: var(--text-meta);
+	color: var(--ink-muted);
+}
+
+/* What is waiting on the engine. A queued message is not lost work and must
+   never read as one, so the row states when it will be read. */
+.composer__queue {
+	display: grid;
+	gap: var(--space-2);
+	justify-items: start;
+	padding: var(--space-3);
+	border: 1px solid var(--line);
+	border-radius: var(--radius-md);
+	background: var(--surface-sunken);
+}
+.composer__queue-summary {
+	margin: 0;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.composer__queue-list {
+	display: grid;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	width: 100%;
+}
+.composer__queue-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+}
+.composer__queue-text {
+	flex: 1 1 24ch;
+	color: var(--ink);
+	overflow-wrap: anywhere;
+}
+
+/* Message actions stay quiet until the turn is pointed at, and are always
+   present for the keyboard. A pointerless device gets them unconditionally. */
+.message-actions {
+	display: inline-flex;
+	gap: var(--space-2);
+	opacity: 0;
+	transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.message-actions:focus-within,
+.message-actions:hover,
+:where([data-turn-id]:hover) .message-actions {
+	opacity: 1;
+}
+@media (hover: none) {
+	.message-actions {
+		opacity: 1;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.message-actions {
+		transition: none;
+	}
+}
+.message-actions__button {
+	border: 1px solid var(--line);
+	border-radius: var(--radius-xs);
+	background: transparent;
+	padding: var(--space-1) var(--space-2);
+	font: inherit;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	cursor: pointer;
+}
+.message-actions__button:hover {
+	color: var(--ink);
+	border-color: var(--line-strong);
+}
+
+/* The outcome footer. The tone is supplementary; StatusMark carries the glyph
+   and the word, so the meaning survives greyscale. */
+.turn-outcome {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: baseline;
+	gap: var(--space-2) var(--space-3);
+	margin-top: var(--space-3);
+	padding-top: var(--space-2);
+	border-top: 1px solid var(--line);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+}
+.turn-outcome__detail {
+	flex: 1 1 32ch;
+	color: var(--ink);
+}
+.turn-outcome__code {
+	font-family: var(--font-mono);
+	font-size: var(--text-instrument);
+	color: var(--status-fail-fg);
+}
+.turn-outcome__fact {
+	white-space: nowrap;
+}

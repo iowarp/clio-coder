@@ -1,6 +1,13 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { NavLink, useLocation } from "react-router";
+import { composeTitle, useLiveState } from "../interaction/announcer.js";
 import { Icon } from "./icons.js";
+
+/** `--paper` from client/design/tokens.css, light and dark. Keep these two in step with it. */
+export const THEME_COLORS: Readonly<Record<"light" | "dark", string>> = {
+	light: "#f2efe1",
+	dark: "#18211c",
+};
 
 export const navigation = [
 	{ label: "Overview", path: "/", icon: "overview" },
@@ -83,7 +90,10 @@ export function ThemeToggle() {
 	});
 	useLayoutEffect(() => {
 		document.documentElement.dataset.theme = theme;
-		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", theme === "dark" ? "#202a25" : "#eee8d8");
+		// The browser chrome must match the page ground exactly. These are the `--paper` values the
+		// token layer defines; the pair that used to be here predated the green palette and painted a
+		// visible seam above the page.
+		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", THEME_COLORS[theme]);
 		try {
 			localStorage.setItem("clio-coder-gui-theme", theme);
 		} catch {
@@ -102,14 +112,22 @@ export function ThemeToggle() {
 		</button>
 	);
 }
+/**
+ * The one writer of `document.title`. The route label and the approval marker compose in
+ * `announcer.ts`, so a waiting approval is visible on a backgrounded tab without two effects
+ * fighting over the same string.
+ */
 export function RouteFocus() {
 	const location = useLocation(),
 		previous = useRef(location.pathname);
+	const { approvalPending } = useLiveState();
 	useEffect(() => {
 		if (previous.current !== location.pathname) document.getElementById("main")?.focus();
 		previous.current = location.pathname;
-		const section = navigation.find((item) => item.path !== "/" && location.pathname.startsWith(item.path));
-		document.title = section ? `${section.label} · Clio Coder` : "Clio Coder";
 	}, [location.pathname]);
+	useEffect(() => {
+		const section = navigation.find((item) => item.path !== "/" && location.pathname.startsWith(item.path));
+		document.title = composeTitle(section?.label, approvalPending);
+	}, [location.pathname, approvalPending]);
 	return null;
 }

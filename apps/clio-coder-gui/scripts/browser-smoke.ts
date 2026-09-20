@@ -300,7 +300,7 @@ try {
 		await page
 			.getByLabel("Message Clio Coder", { exact: true })
 			.fill("Show the fixture findings with code and a diagram.");
-		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.locator(".diagram.is-rendered svg").waitFor();
 		await page.locator(".token.keyword").first().waitFor();
 		const diagram = await page.locator(".diagram svg").evaluate((node) => {
@@ -343,10 +343,10 @@ try {
 				node.blur();
 			});
 		}
-		assert.equal(await page.locator(".chat-timeline script").count(), 0);
-		assert.equal(await page.locator('.chat-timeline a[href^="javascript:"]').count(), 0);
+		assert.equal(await page.locator(".chat-transcript script").count(), 0);
+		assert.equal(await page.locator('.chat-transcript a[href^="javascript:"]').count(), 0);
 		assert.equal(await page.evaluate(() => Object.hasOwn(window, "modelMarkupExecuted")), false);
-		assert.ok((await page.locator(".chat-timeline").innerText()).includes("<script>window.modelMarkupExecuted"));
+		assert.ok((await page.locator(".chat-transcript").innerText()).includes("<script>window.modelMarkupExecuted"));
 		await check("conversation");
 		await page.screenshot({ path: join(output, `conversation-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
@@ -358,17 +358,17 @@ try {
 		await check("session-controls");
 		await page.getByText("Session controls", { exact: true }).click();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
-		await page.getByRole("button", { name: "Send message", exact: true }).click();
-		await page.getByRole("button", { name: "Allow once", exact: true }).waitFor();
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
 		await check("permission");
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("permission-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByRole("button", { name: "Allow once", exact: true }).click();
+		await page.getByRole("button", { name: "Allow once", exact: true }).first().click();
 		await page.getByText("Tool executed.", { exact: true }).waitFor();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
-		await page.getByRole("button", { name: "Send message", exact: true }).click();
-		await page.getByRole("button", { name: "Cancel turn", exact: true }).click();
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
 		await page.waitForFunction(() => !document.querySelector(".session-status")?.textContent?.includes("working"));
 		await check("cancelled");
 		await page.getByRole("button", { name: "Close session", exact: true }).click();
@@ -376,7 +376,7 @@ try {
 		await navigate("Sessions");
 		await page.getByLabel("Workspace path", { exact: true }).fill(join(h.home.path, "does-not-exist"));
 		await page.getByRole("button", { name: "Open workspace", exact: true }).click();
-		const toast = page.locator(".problem-toast");
+		const toast = page.locator(".notice-region .notice");
 		await toast.waitFor();
 		assert.match(await toast.innerText(), /validation/);
 		assert.match(await toast.innerText(), /Reference: [0-9a-f-]+/);

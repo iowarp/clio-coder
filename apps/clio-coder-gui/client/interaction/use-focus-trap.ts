@@ -60,7 +60,12 @@ export function useFocusTrap(
 		document.addEventListener("keydown", onKeyDown);
 		return () => {
 			document.removeEventListener("keydown", onKeyDown);
-			if (previouslyFocused?.isConnected) previouslyFocused.focus();
+			// The shell marks the page behind a layer `inert`, and it drops that attribute only on the
+			// render after this cleanup runs. Calling `focus()` inside a still-inert subtree does
+			// nothing and leaves focus on `<body>`, so the restore waits one frame for inert to clear.
+			requestAnimationFrame(() => {
+				if (previouslyFocused?.isConnected) previouslyFocused.focus();
+			});
 		};
 	}, [container, active, initial]);
 }
