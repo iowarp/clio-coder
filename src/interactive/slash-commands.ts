@@ -18,6 +18,7 @@ import { isExtensionCommandToken } from "../domains/extensions/operator-commands
 import type { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
 import type { ExtensionOutput } from "../domains/extensions/public-api.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
+import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import {
 	PANES_PRESET_IDS,
 	PANES_PRESETS,
@@ -707,7 +708,10 @@ export interface SlashCommandContext {
 	 * validation-contract dry run at the session's autonomy. Absent on a host
 	 * with no providers, in which case the command says so.
 	 */
-	runDoctor?: (options: { deep: boolean }) => Promise<{ level: NoticeLevel; text: string }>;
+	showDoctor?: (findings: ReadonlyArray<DoctorFinding>) => void;
+	runDoctor?: (options: {
+		deep: boolean;
+	}) => Promise<{ level: NoticeLevel; text: string; findings?: ReadonlyArray<DoctorFinding> }>;
 	/**
 	 * `/btw <question>`: one model round beside the session, answered in an
 	 * overlay. Nothing about it enters the transcript, the ledger, or the task
@@ -1277,7 +1281,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			void (async () => {
 				try {
 					const report = await runDoctor({ deep: command.deep });
-					ctx.notice(report.level, report.text);
+					if (ctx.showDoctor && report.findings) ctx.showDoctor(report.findings);
+					else ctx.notice(report.level, report.text);
 				} catch (error) {
 					ctx.notice("error", `doctor failed: ${error instanceof Error ? error.message : String(error)}`);
 				}
