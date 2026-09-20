@@ -1,5 +1,6 @@
 import { ok, rejects, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
+import { type AcpCommandHost, acpCommandControl } from "../../src/engine/acp/commands.js";
 import { AcpRequestError } from "../../src/engine/acp/errors.js";
 import { type AcpServerChat, serveClioAcpAgent } from "../../src/engine/acp/server.js";
 import type { AcpJsonRpcPeerTransport } from "../../src/engine/acp/transport.js";
@@ -155,4 +156,40 @@ describe("contracts/acp exposes the operator command catalog only when one is wi
 		peer.transport.close();
 		strictEqual(await served, 0);
 	});
+});
+
+it("the real command control carries completed doctor findings through JSON-RPC", async () => {
+	const peer = fakeTransport();
+	const commandControl = acpCommandControl({
+		dispatch: {},
+		bus: {},
+		providers: {},
+		runDoctor: async () => {
+			await Promise.resolve();
+			return { level: "warn", text: "A target is unavailable" };
+		},
+	} as unknown as AcpCommandHost);
+	const served = serveClioAcpAgent({
+		transport: peer.transport,
+		chat: hangingChat(),
+		cwd: process.cwd(),
+		commands: commandControl,
+	});
+	try {
+		await peer.call("initialize", { protocolVersion: 1, clientCapabilities: {} });
+		const session = (await peer.call("session/new", { cwd: process.cwd(), mcpServers: [] })) as { sessionId: string };
+		const result = (await peer.call("clio-coder/commands/invoke", {
+			sessionId: session.sessionId,
+			command: "doctor",
+			argv: [],
+		})) as {
+			level: string;
+			lines: string[];
+		};
+		strictEqual(result.level, "warn");
+		strictEqual(result.lines.join("\n"), "A target is unavailable");
+	} finally {
+		peer.transport.close();
+		strictEqual(await served, 0);
+	}
 });

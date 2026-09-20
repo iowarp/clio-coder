@@ -2346,6 +2346,16 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 								bus,
 								providers,
 								cwd: process.cwd(),
+								runDoctor: async ({ deep }) => {
+									const { collectDoctorFindings, doctorNotice } = await import("../cli/doctor.js");
+									return doctorNotice(
+										await collectDoctorFindings({
+											workspaceRoot: process.cwd(),
+											deep: deep ? { providers, autonomy: resolveBaselineAutonomy() } : false,
+										}),
+									);
+								},
+								clearSkillSurface: () => chat.clearSkillSurface(),
 								// Narrowed exactly as `interactive-slash-runtime.ts` narrows it:
 								// the store's `note` parameter has no command-line spelling, and
 								// a handoff is attributed to the session that asked for it.

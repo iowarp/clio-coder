@@ -2867,8 +2867,8 @@ export async function serveClioAcpAgent(options: ClioAcpServerOptions): Promise<
 
 	// The catalog is rebuilt from `commandReference()` on every call and a
 	// palette legitimately re-reads it after a reload, so it is memoized against
-	// a client that polls. The projection is pure: nothing in it depends on a
-	// session, a route, or the wired host.
+	// a client that polls. Availability is fixed by the host callbacks wired
+	// when this server is created; session/route changes do not alter that wiring.
 	let commandCatalog: AcpCommandCatalog | null = null;
 
 	options.transport.onRequest(ACP_COMMANDS_LIST_METHOD, (params) => {
