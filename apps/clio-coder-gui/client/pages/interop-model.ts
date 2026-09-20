@@ -66,6 +66,13 @@ export function presenceMark(agent: Pick<InteropAgent, "hasExecutable" | "presen
 	return { tone: "unverified", label: "Could not be determined" };
 }
 
+/** A version always says where it came from, because a recorded one can be older than the binary. */
+export function versionText(agent: Pick<InteropAgent, "version" | "versionSource" | "presence">): string {
+	if (agent.version === null)
+		return agent.presence === "present" ? "Not recorded yet. Detect again to probe it." : "Not reported";
+	return `${agent.version} · ${agent.versionSource === "probed" ? "probed just now" : "last recorded"}`;
+}
+
 export function adapterText(adapter: InteropAgent["adapter"]): string {
 	if (adapter === null) return "No recipe";
 	if (adapter === "present") return "Installed locally";

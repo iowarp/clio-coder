@@ -6,6 +6,7 @@ import {
 	interopSummary,
 	orderedAgents,
 	presenceMark,
+	versionText,
 	wiringMark,
 	wiringSentence,
 } from "../client/pages/interop-model.js";
@@ -17,6 +18,7 @@ const agent = (over: Partial<InteropAgent>): InteropAgent => ({
 	presence: "present",
 	binary: "/usr/bin/codex",
 	version: "1.2.3",
+	versionSource: "probed",
 	installDir: null,
 	adapter: "present",
 	decision: null,
@@ -106,4 +108,11 @@ test("the summary counts detected of known kinds, peers and offers, and unreadab
 	});
 	assert.equal(unreadable[1]?.value, "Not established");
 	assert.equal(unreadable[2]?.value, "Not established");
+});
+
+test("a version says whether it was probed now or only recorded, and a missing one says how to get it", () => {
+	assert.equal(versionText(agent({})), "1.2.3 · probed just now");
+	assert.equal(versionText(agent({ versionSource: "recorded" })), "1.2.3 · last recorded");
+	assert.match(versionText(agent({ version: null, versionSource: null })), /Detect again/u);
+	assert.equal(versionText(agent({ version: null, versionSource: null, presence: "absent" })), "Not reported");
 });

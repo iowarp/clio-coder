@@ -37,7 +37,7 @@ test("system exposes canonical versions and four roots; doctor cannot repair and
 	}
 });
 
-test("interop lists all registered kinds, probes only version, keeps configuration values private and bounds a stalled probe", async () => {
+test("interop lists all registered kinds, runs nothing until asked and then probes only version, keeps configuration values private and bounds a stalled probe", async () => {
 	const bin = await mkdtemp(join(tmpdir(), "clio-web-interop-"));
 	const executable = join(bin, "codex");
 	await writeFile(
@@ -55,7 +55,12 @@ test("interop lists all registered kinds, probes only version, keeps configurati
 		);
 		const workspace = await h.workspaces.open(h.home.path),
 			path = `/api/workspaces/${workspace.id}/interop`;
-		const report = await json(await h.request(path), Interop);
+		// Opening the page runs no foreign executable: the binary is found, and its version is not asked for.
+		const opened = await json(await h.request(path), Interop);
+		const unprobed = opened.agents.find((row) => row.kind === "codex");
+		assert.deepEqual([unprobed?.presence, unprobed?.version, unprobed?.versionSource], ["present", null, null]);
+		assert.equal((await h.request(`${path}?probe=everything`)).status, 422);
+		const report = await json(await h.request(`${path}?probe=versions`), Interop);
 		assert.deepEqual(report.agents.map((row) => row.kind).sort(), [
 			"agents",
 			"antigravity",
@@ -68,7 +73,7 @@ test("interop lists all registered kinds, probes only version, keeps configurati
 		]);
 		const codex = report.agents.find((row) => row.kind === "codex");
 		assert.equal(codex?.presence, "present");
-		assert.equal(codex?.version, "1.2.3");
+		assert.deepEqual([codex?.version, codex?.versionSource], ["1.2.3", "probed"]);
 		// Installed, speaks ACP, no delegation entry and no standing answer: the terminal review would offer it.
 		assert.deepEqual(
 			[codex?.wiring, codex?.decision, codex?.decidedAt, codex?.decisionStale],
@@ -81,7 +86,7 @@ test("interop lists all registered kinds, probes only version, keeps configurati
 		assert.ok(!JSON.stringify(report).includes("private-"));
 		await writeFile(executable, "#!/bin/sh\nexec /bin/sleep 30\n");
 		const started = Date.now();
-		const stalled = await json(await h.request(path), Interop);
+		const stalled = await json(await h.request(`${path}?probe=versions`), Interop);
 		assert.equal(stalled.agents.find((row) => row.kind === "codex")?.version, null);
 		assert.ok(Date.now() - started < 7000, "Version probe must not wait for the process's 30-second sleep");
 		assert.equal((await h.post(path, { accept: "codex" })).status, 405);

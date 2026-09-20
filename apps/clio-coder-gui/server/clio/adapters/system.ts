@@ -28,9 +28,14 @@ export function inspectSystem() {
 		}),
 	};
 }
-export async function inspectInterop(cwd: string, fixture = false) {
+/**
+ * Opening the page reads files and nothing else. Only an explicit `probe` runs a foreign executable,
+ * and then only a bounded `--version` inside a scratch home; without it the version is the last one
+ * Clio Coder recorded for the same binary.
+ */
+export async function inspectInterop(cwd: string, probe: boolean, fixture = false) {
 	const home = fixture ? process.env.CLIO_CODER_HOME : undefined;
-	const report = await detectInteropAgents({ cwd, inventory: true, probeVersion: true, ...(home ? { home } : {}) });
+	const report = await detectInteropAgents({ cwd, inventory: true, probeVersion: probe, ...(home ? { home } : {}) });
 	// Wiring is decided by the same function the terminal review uses, so this page can never offer
 	// or withhold an agent the review would treat differently.
 	let wired: { configured: Set<string>; proposed: Set<string> } | undefined;
@@ -66,6 +71,7 @@ export async function inspectInterop(cwd: string, fixture = false) {
 				presence: resolved.presence,
 				binary: resolved.binary ?? null,
 				version: row?.version ?? null,
+				versionSource: row?.version === undefined ? null : probe ? ("probed" as const) : ("recorded" as const),
 				installDir: row?.installDir ?? null,
 				adapter: row?.adapter ?? null,
 				decision: row?.decision ?? null,

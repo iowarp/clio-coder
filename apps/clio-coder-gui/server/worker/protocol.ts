@@ -26,7 +26,7 @@ export type RuntimeInfo = { entry: string; packageRoot: string; execArgv: string
 export interface Methods {
 	"runtime.info": { params: Record<string, never>; result: RuntimeInfo };
 	"system.read": { params: Record<string, never>; result: unknown };
-	"interop.read": { params: { cwd: string }; result: unknown };
+	"interop.read": { params: { cwd: string; probe: boolean }; result: unknown };
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };
 	"evals.read": { params: EvalRequest; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };

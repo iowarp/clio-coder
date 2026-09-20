@@ -142,7 +142,7 @@ export const PANELS = {
 		eyebrow: eyebrow("External coding agents", "installation-wide", "detect only"),
 		title: "Other coding agents",
 		boundary:
-			"Detection reads files on this machine and runs one bounded command per installed agent, its --version, inside a scratch home. It starts no agent's work, reads no agent's sessions or history, and wires nothing: run clio-coder configure --interop in a terminal to answer an offer.",
+			"Opening this page reads files on this machine and runs nothing. Detect again runs one bounded command per installed agent, its --version, inside a scratch home. Neither starts an agent's work, reads its sessions or history, or wires anything: run clio-coder configure --interop in a terminal to answer an offer.",
 	},
 	fleet: {
 		eyebrow: eyebrow("Fleet and dispatch history", "installation-wide", READ_ONLY),

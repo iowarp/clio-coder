@@ -15,11 +15,11 @@ export class SystemService {
 			throw new AppProblem("unavailable", "System inspection returned an invalid projection.");
 		return value;
 	}
-	async interop(workspaceId: string) {
+	async interop(workspaceId: string, probe = false) {
 		const workspace = await this.workspaces.get(workspaceId);
 		const value = Value.Clean(
 			Interop,
-			await this.reads.call("interop.read", { cwd: workspace.path }, { deadlineMs: 25_000 }),
+			await this.reads.call("interop.read", { cwd: workspace.path, probe }, { deadlineMs: 25_000 }),
 		);
 		if (!Value.Check(Interop, value))
 			throw new AppProblem("unavailable", "External agent inspection returned an invalid projection.");
