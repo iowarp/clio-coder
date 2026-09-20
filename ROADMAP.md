@@ -7,7 +7,8 @@ the next session picks it up. Detailed session notes live in
 `.superpowers/devlog-*.md`.
 
 Shipped history lives in CHANGELOG.md. v0.4.0 (2026-08-31) shipped the first
-panes/herdr mux, yazi companion, vendored toolchain, Workbench, dispatch queue,
+panes/herdr mux, yazi companion, vendored toolchain, the first graphical app,
+dispatch queue,
 typed intent, ACP terminal auth, Settings Center, and LiteLLM provider. It
 shipped fast and under-tested; the 0.4.x line pays that down while finishing
 the product surfaces those systems opened.
@@ -66,7 +67,7 @@ in `.superpowers/devlog-v041.md` and `.superpowers/release-test-v041.md`.
       zoom, and clean-exit reclamation
 - [x] Close the original v0.4.0 bug-hunt queue: Fleet cost provenance, retired
       pane controls, embedded-mode guest fallback (`19e94bb0`; explicit
-      refusal shipped in v0.4.4 #294), Workbench clock/deadline/queue
+      refusal shipped in v0.4.4 #294), graphical clock/deadline/queue
       handling, W001 cardinality fixtures, LM Studio harness isolation, dead
       demo seeds, and the live pane-notification failure-path check
 - [x] Close SOL-01..07 and the TUI smoke findings: read-only doctor, trace empty
@@ -111,13 +112,14 @@ preserved 0.4.x queue. Diagnose before changing either Clio or the homelab.
       specified foreign-interactive-agent surface. Guest-mode managed docks
       shipped in v0.4.1; they do not complete either deferred phase.
 
-- [ ] Workbench parity rows 2–3: sanitized ACP events for the eight named
-      channels, session-native reads (branch `feat/workbench-parity`,
-      unmerged; `prompts/parity-continuation.md` is stale, re-anchor first)
+- [ ] GUI parity rows 2–3: sanitized ACP events for the eight named channels
+      and session-native reads. The matrix is now `docs/gui/parity/`; the old
+      `feat/workbench-parity` branch and `prompts/parity-continuation.md` are
+      superseded
 - [ ] Widen the event aperture past `safety.loopBlocked` (dispatch's five
       channels first, so subagent runs stop being one opaque tool card)
 - [ ] ACP registry submission package: `agent.json` + icon (code half shipped)
-- [ ] Typed JSON for the four upstream boundaries Workbench names
+- [ ] Typed JSON for the four upstream boundaries `docs/gui/parity/` names
       (`evidence list`, eval discovery, project-safe `trace runs`,
       `verifiers discover`)
 - [ ] Decide the legacy intent-inference fallback removal once
@@ -196,9 +198,8 @@ follow-through.
 
 ## Later (0.5.0 and beyond)
 
-- Tier 3 of the archify line: archify diagrams inside the docs/html
-  blueprints, and a Workbench panel that lists and opens the maps under
-  `.clio-coder/artifacts/maps/`.
+- Tier 3 of the archify line: archify diagrams inside the rendered docs, and a
+  GUI panel that lists and opens the maps under `.clio-coder/artifacts/maps/`.
 
 - Benchmark campaign (the v0.5.0 headline). Operator decision at the
   v0.4.1 diet: the eval platform (`src/domains/eval`, `clio-coder
@@ -218,7 +219,7 @@ follow-through.
 - Huly dashboard integration — assessed NO-GO, see `.superpowers/huly.md`
   (dead upstream cloud, 14-container stack, trademark, unstable API).
   If the itch is presentation, the alternative is a read-only issues
-  pane in the Workbench over `gh --json`.
+  pane in the GUI over `gh --json`.
 
 ## v0.7.0 — Legacy naming compatibility removal
 
@@ -251,7 +252,7 @@ v0.5.0 is the milestone release: benchmark results, performance, TUI
 rendering quality, ergonomics, and compatibility with other agents,
 protocols, and resources. Deferred spec work queued for the coming waves:
 Settings Center seven-area redesign (slices 1–8, 11–12), operators
-`@@`/`#`/`##` implementation, panes phases 5–6, Workbench parity, and the
+`@@`/`#`/`##` implementation, panes phases 5–6, GUI parity, and the
 LiteLLM gateway/provider track led by v0.4.2.
 
 ## Rules for this line

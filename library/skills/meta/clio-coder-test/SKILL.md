@@ -41,7 +41,7 @@ npm run build                             # tsup plus the codewiki asset
 npm run test:file -- tests/smoke/<file>.test.ts  # requires a current build
 npm run test                              # required contracts and three process smoke files
 npm run test:full                         # explicit extended root investigation
-npm run test:web:full                     # explicit extended web investigation
+npm run test:gui:full                     # explicit extended web investigation
 pnpm --filter @iowarp/clio-coder-gui verify # app types, lint, tests, build, browser
 npm run ci                                # deterministic root gate
 npm run ci:release                        # qualify clean committed source and exact installed tarball
@@ -54,9 +54,8 @@ boot/reconnect against the installed server. The full web `verify` command is an
 explicit development investigation, including its viewport/accessibility matrix.
 Do not run full development tests repeatedly during release or publication.
 
-The separate trace viewer is retired. `apps/workbench/` is retained reference
-source, excluded from builds, publication and product gates. Use `test:web` for
-the required app tests alone; app `verify` requires headless Chrome.
+The separate trace viewer and the earlier workbench client are both retired. Use
+`test:gui` for the required app tests alone; app `verify` requires headless Chrome.
 
 No deterministic gate contacts a real model. When a task explicitly requires
 live validation, build first and run `node dist/cli/index.js run` against a
@@ -73,7 +72,7 @@ settings with the result.
 | Any import edit under `src/` | `npm run lint` | Hygiene invokes all six boundary rules. |
 | CLI, entry, process lifecycle, or ACP stdio flow | Build, then the closest file under `tests/smoke/` | Smoke executes the built binary. |
 | Published package contents | Build, then `tests/smoke/installed-package.test.ts` | The test packs and installs the actual artifact. |
-| Unified web application | `npm run test:web` | Required authentication/runtime boundaries; full `verify` is optional development work. |
+| Unified web application | `npm run test:gui` | Required authentication/runtime boundaries; full `verify` is optional development work. |
 
 Read `references/test-map.md` for the current file map and exact subset
 commands.

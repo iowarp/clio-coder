@@ -130,7 +130,7 @@ work is proven on canonical main. Published tags are immutable.
 ```bash
 pnpm run test:file -- tests/extended/<file>.test.ts
 pnpm run test:full
-pnpm run test:web:full
+pnpm run test:gui:full
 pnpm --filter @iowarp/clio-coder-gui verify
 pnpm run smoke:real-home -- --target <configured-target-id> --strict
 ```

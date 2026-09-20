@@ -93,8 +93,6 @@ function checkProductNamespace(): void {
 	}).split("\0");
 	const legacyProjectPath = /(?:^|[\s"'`/\\])\.clio(?:-(?!coder\b)|(?=$|[\s/\\"'`.,;:)\]}]))/iu;
 	for (const file of new Set(files)) {
-		// Workbench is retained reference source, outside the active product gates.
-		if (file.startsWith("apps/workbench/")) continue;
 		if (!/\.(?:[cm]?[jt]sx?|md|json|ya?ml|toml|sh|html|txt)$/u.test(file)) continue;
 		if (file === "CHANGELOG.md" || file.startsWith("docs/history/") || file.startsWith(".github/releases/")) continue;
 		if (!existsSync(join(root, file))) continue;

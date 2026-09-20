@@ -9,8 +9,9 @@
  * rather than inside it.
  *
  * Like `evidence inspect --json` it takes an identifier, because an operator
- * names the run. A GUI host may only pass back a run id it served inside its
- * current bounded window; see `apps/workbench/artifact-allowlist.ts`.
+ * names the run. The identifier is validated for shape here; a GUI host that
+ * echoes operator-supplied ids owes its own served-id window on top of that,
+ * because shape alone does not prove the id was ever served.
  */
 
 import { readFileSync } from "node:fs";

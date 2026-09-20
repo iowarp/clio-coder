@@ -323,7 +323,7 @@ const ACP_TRUNCATION_SUFFIX = "…[truncated]";
 
 const ACP_TRUNCATION_SUFFIX_BYTES = Buffer.byteLength(ACP_TRUNCATION_SUFFIX, "utf8");
 
-/** Workbench's frozen bounds for standard ACP tool-call presentation fields. */
+/** Frozen bounds for standard ACP tool-call presentation fields. */
 const ACP_MAX_LOCATION_PATH_BYTES = 4 * 1024;
 const ACP_MAX_TOOL_TITLE_BYTES = 512;
 
@@ -1299,14 +1299,14 @@ const ACP_THINKING_LEVELS = new Set<AcpThinkingLevel>(["off", "minimal", "low", 
 const ACP_AUTONOMY_LEVELS = new Set<AutonomyLevel>(["read-only", "suggest", "auto-edit", "full-auto"]);
 const ACP_MAX_TARGETS = 64;
 const ACP_MAX_TARGET_MODELS = 64;
-// Workbench's frozen reader ceiling is 256 KiB per JSON-RPC line. Reserve
+// The frozen client reader ceiling is 256 KiB per JSON-RPC line. Reserve
 // 16 KiB for the response envelope/request id and keep this result a stable
 // prefix of whole targets/model ids.
 const ACP_MAX_TARGET_LIST_RESULT_BYTES = 240 * 1024;
 const ACP_EMPTY_TRUNCATED_TARGET_LIST_BYTES = utf8Bytes(
 	JSON.stringify({ targets: [], _meta: { "clio-coder/truncated": true } }),
 );
-// Session summaries share the same Workbench JSON-RPC line ceiling. Keep a
+// Session summaries share the same JSON-RPC line ceiling. Keep a
 // stable newest-first prefix of whole rows and reserve 16 KiB for the envelope.
 const ACP_MAX_SESSION_LIST_RESULT_BYTES = 240 * 1024;
 const ACP_EMPTY_TRUNCATED_SESSION_LIST_BYTES = utf8Bytes(

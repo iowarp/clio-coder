@@ -1,6 +1,0 @@
-.artifacts/
-.desktop/
-dist/
-node_modules/
-*.log
-dist-dev/

@@ -54,7 +54,7 @@ Expected:
   `pnpm --filter @iowarp/clio-coder-gui verify` with temporary state outside the checkout.
 - Names app type, API/worker boundary, test, client build and headless-browser checks.
 - Explains root `ci:release` includes web tests and the installed package audit.
-- Does not run the retired trace viewer or reference-only Workbench gates.
+- Does not run the retired trace viewer or workbench gates.
 
 RED: the prior 0.3.0 instructions prescribe both obsolete application lanes.
 GREEN: the current instructions name only the unified app lane and retain the
