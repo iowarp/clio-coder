@@ -421,7 +421,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		getContextLedger: () => deps.app.chat.contextLedger(),
 		contextChat: deps.app.chat,
 		bus: deps.app.bus,
-		...(deps.app.onContextClear ? { onContextClear: deps.app.onContextClear } : {}),
+		...(deps.app.onContextClear ? { onContextClear: (options) => deps.app.onContextClear?.(options, deps.io) } : {}),
 		stderr: (text) => io.stderr(text),
 		refreshFooter: () => footer.refresh(),
 		toggleFooter: () => footer.toggleExpanded(),

@@ -105,8 +105,8 @@ export interface InteractiveSlashRuntimeDeps {
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
-	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
-	onContextRefresh?: () => Promise<void>;
+	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
+	onContextRefresh?: (io?: RunIo) => Promise<void>;
 	stateDir: string;
 	shutdown: () => void | Promise<void>;
 	requestRender: () => void;
@@ -650,7 +650,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			void Promise.resolve()
 				.then(() => onInit(options, deps.io))
 				.then(() => {
-					deps.dismissContextBootstrapNotices();
+					if (!options.preview) deps.dismissContextBootstrapNotices();
 					deps.refreshFooter();
 				})
 				.catch((err) => {
@@ -707,7 +707,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				return;
 			}
 			void deps
-				.onContextRefresh()
+				.onContextRefresh(deps.io)
 				.catch((err) => {
 					const msg = err instanceof Error ? err.message : String(err);
 					deps.io.stderr(`[/context refresh] ${msg}\n`);

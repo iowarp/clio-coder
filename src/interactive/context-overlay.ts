@@ -5,7 +5,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
-import { type OverlayHandle, Text, type TUI, visibleWidth } from "../engine/tui.js";
+import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
 import { contextCategorySwatch, renderContextMeterGrid, renderEvictedTokensLine } from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
@@ -78,8 +78,8 @@ function legendRow(group: ContextLedgerGroup, contentWidth: number): string {
 	const percent = formatContextPercent(group.percent);
 	const right = `${tokens.padStart(9)}  ${percent.padStart(6)}`;
 	const labelToken: ClioToken = group.category === "reserve" ? "frame" : group.category === "free" ? "dim" : "muted";
-	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - 2);
-	const labelText = group.label.length > leftWidth ? group.label.slice(0, leftWidth) : group.label.padEnd(leftWidth);
+	const leftWidth = Math.max(0, contentWidth - visibleWidth(right) - visibleWidth(swatch) - 2);
+	const labelText = truncateToWidth(group.label, leftWidth, "", true);
 	return `${swatch} ${theme.fg(labelToken, labelText)} ${theme.fg("muted", right)}`;
 }
 
@@ -268,7 +268,7 @@ function renderContextLedgerLines(
 		}
 		if (coldReasons.length > 0) {
 			const reasons = coldReasons.map(coldReasonLabel).join(", ");
-			lines.push(theme.fg("dim", `last cold turn: ${reasons} (expected)`));
+			lines.push(theme.fg("dim", `last cache-affecting events: ${reasons} (reuse measured separately)`));
 		}
 	}
 
@@ -319,15 +319,28 @@ export function openContextOverlay(
 	getLedger: () => ContextLedger,
 	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
+	let contentWidth = DEFAULT_CONTENT_WIDTH;
 	const render = (): string =>
 		renderContextLedgerLines(
 			getLedger(),
-			DEFAULT_CONTENT_WIDTH,
+			contentWidth,
 			options?.getWorkingSet?.() ?? null,
 			options?.getWorkingSetConfig?.() ?? null,
 		).join("\n");
 	const text = new Text(render(), 0, 0);
-	const handle = showClioOverlayFrame(tui, text, {
+	const body = {
+		render(width: number): string[] {
+			if (width !== contentWidth) {
+				contentWidth = width;
+				text.setText(render());
+			}
+			return text.render(width);
+		},
+		invalidate(): void {
+			text.invalidate();
+		},
+	};
+	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
 		width: CONTEXT_OVERLAY_WIDTH,
 		markerId: "context-view",

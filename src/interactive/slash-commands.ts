@@ -6,7 +6,12 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { resolveSettingsSection, SETTINGS_SECTIONS, type SettingsSectionId } from "../core/settings-navigation.js";
 import { parseCouncilReport, parseOracleResult } from "../domains/agents/index.js";
 import type { AgentSpec } from "../domains/agents/spec.js";
-import type { ContextInitOptions } from "../domains/context/init-options.js";
+import {
+	applyInitImplications,
+	CONTEXT_INIT_FLAG_TABLE,
+	type ContextInitOptions,
+	validateInitOptions,
+} from "../domains/context/init-options.js";
 import { AdmissionCanceledError } from "../domains/dispatch/admission-error.js";
 import type { DispatchContract, DispatchRequest } from "../domains/dispatch/contract.js";
 import { type AgentRoleFactsResolver, requestExecutionRole } from "../domains/dispatch/execution-role.js";
@@ -1707,7 +1712,9 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			subcommands: {
 				compact: { positionals: [...COMPACT_POSITIONALS] },
 				recall: { positionals: [...RECALL_POSITIONALS] },
-				init: {},
+				init: {
+					flags: CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
+				},
 				refresh: {},
 				reset: {},
 			},
@@ -1719,8 +1726,16 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return { kind: "compact", instructions: parsed.rest };
 				case "recall":
 					return { kind: "context-recall", ref: parsed.positionals[0] ?? "" };
-				case "init":
-					return { kind: "init", options: {} };
+				case "init": {
+					const options: ContextInitOptions = {};
+					for (const { flag, aliases = [], field } of CONTEXT_INIT_FLAG_TABLE) {
+						if ([flag, ...aliases].some((name) => parsed.flags.has(name))) options[field] = true;
+					}
+					const reason = validateInitOptions(options);
+					return reason
+						? { kind: "usage-error", command: "context", reason }
+						: { kind: "init", options: applyInitImplications(options) };
+				}
 				case "refresh":
 					return { kind: "context-refresh" };
 				case "reset":

@@ -255,9 +255,9 @@ export interface InteractiveDeps {
 	/** Run /context init for the current working directory. */
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context reset for the current working directory. */
-	onContextClear?: (options: ContextClearCommandOptions) => Promise<void>;
+	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context refresh: re-index codewiki and refresh .clio-coder state without touching CLIO-CODER.md. */
-	onContextRefresh?: () => Promise<void>;
+	onContextRefresh?: (io?: RunIo) => Promise<void>;
 	/**
 	 * Advance the orchestrator target one step forward through `provider.scope`.
 	 * False means nothing moved, which the UI answers with a notice: the keys are
