@@ -19,6 +19,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add bounded query/paging for skill discovery with a preserved response footer and visible installed-skill drift. Record exact skill artifacts in evaluation sidecars and independently judge the baseline for non-gating helped/regressed/mixed/no-change/unmeasured attribution.
 - Correct handoff guidance about persisted summaries, repair the first-turn system-prompt fixture, remove checkout-name dependence from the quota footer test, and stabilize retained-memory measurement across stream finalization without relaxing its memory ceiling.
 
+### Library
+
+- Add `wtfp@0.7.3` as a pinned remote catalog package without vendoring its files. Regenerate remote pins from fetched manifests and full-tree digests, preserve the previous pin with a warning when refresh fails, and keep remote packages out of the local Claude Code marketplace projection. Reject fetched package identity changes and report unverified retained pins separately.
+
 ### Self-development skills
 
 - Redesign `clio-coder-dev` and `clio-coder-test` around source ownership, bounded sprint work, lifecycle correctness, isolated candidate builds, focused validation, and honest evidence. Update their reference maps, behavioral scenarios, and package metadata.
