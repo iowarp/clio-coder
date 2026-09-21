@@ -20,6 +20,7 @@ import {
 } from "../domains/eval/index.js";
 import { buildEvalEvidence } from "../domains/evidence/index.js";
 import {
+	checkSkillDrift,
 	discoverMarketplaceSkills,
 	loadSkills,
 	parseSkillEvals,
@@ -44,6 +45,22 @@ import { formatColumns, printError } from "./shared.js";
  * command lists, receipt-backed token/cost totals when headless main-agent
  * receipts are present, and per-bullet detail in a `skill-eval.json` sidecar
  * registered in the bundle's `overview.json` files list.
+ *
+ * Two things the sidecar records beyond the rubric result.
+ *
+ * `subject` names the exact artifact the run measured: the resolved base
+ * directory, how it was resolved, both hashes of the SKILL.md, and whether that
+ * content still matches whatever hash was recorded for it. A bundle that names
+ * only a skill and an evals.md cannot be compared against another bundle for
+ * the same skill, because nothing in either says whether the skill changed.
+ *
+ * `attribution` answers "did the skill change anything?" by scoring the
+ * baseline arm too. That arm was always executed and always thrown away: the
+ * treatment judge is told the baseline exists only for context. A second,
+ * isolated judge scores it against the same bullets, and the two verdict sets
+ * are paired per bullet. It is advisory in the strict sense: `pass`,
+ * `exitCode` and `failureClass` keep their treatment-only meaning, and no
+ * attribution value reaches the exit code. `--no-attribution` skips it.
  */
 
 const DEFAULT_RUN_TIMEOUT_MS = 600_000;
@@ -82,6 +99,14 @@ export interface SkillsEvalOptions {
 	 * fetch the open web is measuring something else as well.
 	 */
 	allowNetwork: boolean;
+	/**
+	 * Skip the baseline judge, and with it the paired attribution.
+	 *
+	 * Attribution costs one extra judge run per scenario. Turning it off is a
+	 * cost decision, not a result: a skipped comparison is recorded
+	 * `not-attempted` with the reason, never `no-change`.
+	 */
+	noAttribution: boolean;
 	scenario?: string;
 	target?: string;
 	timeoutSeconds?: number;
@@ -121,17 +146,192 @@ interface ScenarioUsage {
 	harness: EvalHarnessMetrics;
 }
 
+/**
+ * The exact artifact a run measured.
+ *
+ * A bundle used to name only its `evals.md` by hash, so two runs of the same
+ * skill could not be told apart when the SKILL.md between them had changed.
+ * Everything here is already computed elsewhere in the run: the loader hashes
+ * the file, `resolveSkillBaseDir` resolves which copy activation would pick,
+ * and `checkSkillDrift` compares it against whatever recorded hash speaks for
+ * it. Discarding all of it was the whole gap.
+ *
+ * @internal Exported for contract tests.
+ */
+export interface SkillEvalSubject {
+	name: string;
+	baseDir: string;
+	/** How the copy was resolved: `path`, `<source>/<scope>`, or `catalog`. */
+	origin: string;
+	/** sha256 of the SKILL.md exactly as read. */
+	sha256: string;
+	/** sha256 with install-lifecycle provenance stripped; this is what pins compare. */
+	normalizedHash: string;
+	evalsPath: string;
+	evalsSha256: string;
+	/** Null when nothing on this machine recorded a hash for the skill. */
+	drift: { verdict: "match" | "mismatch"; authority: string; expected: string } | null;
+}
+
+/**
+ * Whether the skill changed the outcome for one bullet, relative to the same
+ * bullet in the baseline arm.
+ *
+ * `unmeasured` is not a comparison that came out even. It is the absence of a
+ * comparison, and it is returned whenever either arm failed to produce a
+ * verdict for that bullet.
+ *
+ * @internal Exported for contract tests.
+ */
+export type BulletAttribution = "helped" | "regressed" | "no-change-pass" | "no-change-fail" | "unmeasured";
+
+/**
+ * The scenario-level rollup.
+ *
+ * `not-attempted` and `unmeasured` are deliberately separate. The first means
+ * the comparison was never run, the second means it was impossible. Collapsing
+ * either into `no-change` would report "the skill made no difference" about a
+ * measurement that never happened.
+ *
+ * @internal Exported for contract tests.
+ */
+export type ScenarioAttributionVerdict =
+	| "helped"
+	| "regressed"
+	| "mixed"
+	| "no-change"
+	| "unmeasured"
+	| "not-attempted";
+
+/** @internal Exported for contract tests. */
+export interface AttributedBullet {
+	index: number;
+	text: string;
+	baseline: BulletVerdict;
+	treatment: BulletVerdict;
+	attribution: BulletAttribution;
+}
+
+/** @internal Exported for contract tests. */
+export interface ScenarioAttribution {
+	verdict: ScenarioAttributionVerdict;
+	/** Why the verdict is `unmeasured` or `not-attempted`; null once a real comparison ran. */
+	reason: string | null;
+	bullets: AttributedBullet[];
+	counts: {
+		helped: number;
+		regressed: number;
+		noChangePass: number;
+		noChangeFail: number;
+		unmeasured: number;
+	};
+}
+
 interface ScenarioOutcome {
 	scenario: SkillEvalScenario;
 	bullets: ScoredBullet[];
 	baseline: CapturedRun | null;
 	treatment: CapturedRun | null;
 	judge: CapturedRun | null;
+	/** The isolated judge run that scored the baseline arm; null when none ran. */
+	baselineJudge: CapturedRun | null;
+	/** Advisory paired comparison. Never a gate, never folded into `pass`. */
+	attribution: ScenarioAttribution;
 	/** Seed workspace cloned for both arms; removed after the run, kept as a record. */
 	workspace: string;
 	wallTimeMs: number;
 	infraError: string | null;
 	usage: ScenarioUsage;
+}
+
+/**
+ * Did the skill change this bullet's outcome?
+ *
+ * Either arm failing to produce a verdict makes the pair unmeasurable, and that
+ * check comes first: a bullet the baseline judge never scored carries no
+ * information about the treatment, whatever the treatment did.
+ *
+ * @internal Exported for contract tests.
+ */
+export function deriveBulletAttribution(baseline: BulletVerdict, treatment: BulletVerdict): BulletAttribution {
+	if (baseline === "unmeasured" || baseline === "error") return "unmeasured";
+	if (treatment === "unmeasured" || treatment === "error") return "unmeasured";
+	if (baseline === "fail" && treatment === "pass") return "helped";
+	if (baseline === "pass" && treatment === "fail") return "regressed";
+	return baseline === "pass" ? "no-change-pass" : "no-change-fail";
+}
+
+/**
+ * Roll per-bullet attributions into one scenario verdict.
+ *
+ * Order matters and is deliberate. An unmeasured bullet poisons the scenario,
+ * because a rollup that ignored it would report a comparison over a subset
+ * while naming the whole. `mixed` outranks both single-direction verdicts, so a
+ * skill that fixed three bullets and broke one is never reported as simply
+ * having helped.
+ *
+ * @internal Exported for contract tests.
+ */
+export function deriveScenarioAttributionVerdict(
+	bullets: ReadonlyArray<AttributedBullet>,
+): Exclude<ScenarioAttributionVerdict, "not-attempted"> {
+	if (bullets.length === 0) return "unmeasured";
+	if (bullets.some((bullet) => bullet.attribution === "unmeasured")) return "unmeasured";
+	const helped = bullets.some((bullet) => bullet.attribution === "helped");
+	const regressed = bullets.some((bullet) => bullet.attribution === "regressed");
+	if (helped && regressed) return "mixed";
+	if (regressed) return "regressed";
+	if (helped) return "helped";
+	return "no-change";
+}
+
+function attributionCounts(bullets: ReadonlyArray<AttributedBullet>): ScenarioAttribution["counts"] {
+	const counts = { helped: 0, regressed: 0, noChangePass: 0, noChangeFail: 0, unmeasured: 0 };
+	for (const bullet of bullets) {
+		if (bullet.attribution === "helped") counts.helped += 1;
+		else if (bullet.attribution === "regressed") counts.regressed += 1;
+		else if (bullet.attribution === "no-change-pass") counts.noChangePass += 1;
+		else if (bullet.attribution === "no-change-fail") counts.noChangeFail += 1;
+		else counts.unmeasured += 1;
+	}
+	return counts;
+}
+
+/** @internal Exported for contract tests. */
+export function attributionFromBullets(
+	baselineBullets: ReadonlyArray<ScoredBullet>,
+	treatmentBullets: ReadonlyArray<ScoredBullet>,
+): ScenarioAttribution {
+	const byIndex = new Map(baselineBullets.map((bullet) => [bullet.index, bullet]));
+	const bullets: AttributedBullet[] = treatmentBullets.map((treatment) => {
+		// A treatment bullet with no baseline counterpart is not a comparison.
+		// `parseJudgeVerdicts` returns one entry per expected bullet for both
+		// arms, so this is a defensive branch rather than an expected state.
+		const baseline = byIndex.get(treatment.index)?.verdict ?? "unmeasured";
+		return {
+			index: treatment.index,
+			text: treatment.text,
+			baseline,
+			treatment: treatment.verdict,
+			attribution: deriveBulletAttribution(baseline, treatment.verdict),
+		};
+	});
+	return {
+		verdict: deriveScenarioAttributionVerdict(bullets),
+		reason: null,
+		bullets,
+		counts: attributionCounts(bullets),
+	};
+}
+
+/** No comparison was attempted. Records why, and never reads as `no-change`. */
+function notAttemptedAttribution(reason: string): ScenarioAttribution {
+	return { verdict: "not-attempted", reason, bullets: [], counts: attributionCounts([]) };
+}
+
+/** A comparison was impossible. Distinct from one that was never started. */
+function unmeasurableAttribution(reason: string): ScenarioAttribution {
+	return { verdict: "unmeasured", reason, bullets: [], counts: attributionCounts([]) };
 }
 
 async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptions): Promise<number> {
@@ -164,6 +364,31 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 	for (const diagnostic of parsed.diagnostics) {
 		process.stderr.write(`clio-coder eval skill: ${diagnostic}\n`);
 	}
+	const driftReport = checkSkillDrift(skill, process.cwd());
+	const subject: SkillEvalSubject = {
+		name: skill.name,
+		baseDir: resolved.baseDir,
+		origin: resolved.origin ?? "unknown",
+		sha256: skill.hash,
+		normalizedHash: skill.normalizedHash,
+		evalsPath,
+		evalsSha256: createHash("sha256").update(evalsRaw, "utf8").digest("hex"),
+		drift:
+			driftReport === null
+				? null
+				: { verdict: driftReport.verdict, authority: driftReport.authority, expected: driftReport.expected },
+	};
+	// Said once, before any arm runs. A bundle measured against content that no
+	// longer matches its recorded form is evidence about a different artifact
+	// than the one it names, and the reader has to know that up front. It does
+	// not block: drift never gates activation either.
+	if (subject.drift?.verdict === "mismatch") {
+		process.stderr.write(
+			`clio-coder eval skill: WARNING skill_drift: ${skill.name} content (sha256 ${skill.normalizedHash.slice(0, 12)}…) ` +
+				`does not match the hash recorded for it by the ${subject.drift.authority} (expected ${subject.drift.expected.slice(0, 12)}…); ` +
+				"this run measures the copy on disk, not the recorded one\n",
+		);
+	}
 	const matcher = options.scenario === undefined ? null : scenarioMatcher(options.scenario);
 	if (options.scenario !== undefined && matcher === null) {
 		printError(`invalid --scenario "${options.scenario}": use a scenario id like S1 or a bare number`);
@@ -189,8 +414,11 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 	}
 	const startedAt = new Date().toISOString();
 	const outcomes: ScenarioOutcome[] = [];
+	const attributionEnabled = !options.noAttribution;
 	for (const scenario of scenarios) {
-		process.stderr.write(`clio-coder eval skill: ${skill.name} ${scenario.id} baseline/treatment/judge...\n`);
+		process.stderr.write(
+			`clio-coder eval skill: ${skill.name} ${scenario.id} baseline/treatment/judge${attributionEnabled ? "/baseline-judge" : ""}...\n`,
+		);
 		outcomes.push(
 			await runScenario(
 				skill.name,
@@ -201,12 +429,13 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 				workspaceOverride,
 				options.trustFixtures,
 				childEnv,
+				attributionEnabled,
 			),
 		);
 	}
 	const endedAt = new Date().toISOString();
 
-	const artifact = synthesizeArtifact(skill.name, evalsPath, evalsRaw, startedAt, endedAt, outcomes, options.target);
+	const artifact = synthesizeArtifact(subject, evalsPath, evalsRaw, startedAt, endedAt, outcomes, options.target);
 	let evidenceId: string | null = null;
 	let evidenceDirectory: string | null = null;
 	const evidenceErrors: string[] = [];
@@ -222,7 +451,7 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 		evidenceDirectory = built.directory;
 		await writeFile(
 			join(built.directory, SKILL_EVAL_SIDECAR),
-			`${JSON.stringify(sidecar(skill.name, artifact.evalId, outcomes, options.allowNetwork), null, 2)}\n`,
+			`${JSON.stringify(sidecar(subject, artifact.evalId, outcomes, options.allowNetwork, attributionEnabled), null, 2)}\n`,
 			"utf8",
 		);
 	} catch (error) {
@@ -234,23 +463,35 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 
 	if (options.json) {
 		for (const outcome of outcomes) {
+			const attributed = new Map(outcome.attribution.bullets.map((item) => [item.index, item]));
 			for (const bullet of outcome.bullets) {
+				const pair = attributed.get(bullet.index);
 				process.stdout.write(
 					`${JSON.stringify({
 						schema: "experimental",
 						kind: "skill-eval-bullet",
 						skill: skill.name,
+						skillSha256: subject.normalizedHash,
+						skillOrigin: subject.origin,
+						skillDrift: subject.drift?.verdict ?? null,
 						scenario: outcome.scenario.id,
 						title: outcome.scenario.title,
 						bullet: bullet.index,
 						expected: bullet.text,
 						verdict: bullet.verdict,
 						reason: bullet.reason,
+						// Advisory, never a gate: `verdict` above is the rubric result and
+						// is unchanged by anything here.
+						baselineVerdict: pair?.baseline ?? null,
+						attribution: pair?.attribution ?? null,
+						scenarioAttribution: outcome.attribution.verdict,
+						attributionReason: outcome.attribution.reason,
 						network: networkPolicyLabel(options.allowNetwork),
 						autonomy: ARM_AUTONOMY,
 						baselineSessionId: outcome.baseline?.sessionId ?? null,
 						treatmentSessionId: outcome.treatment?.sessionId ?? null,
 						judgeSessionId: outcome.judge?.sessionId ?? null,
+						baselineJudgeSessionId: outcome.baselineJudge?.sessionId ?? null,
 						evalId: artifact.evalId,
 						evidenceId,
 					})}\n`,
@@ -258,7 +499,7 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 			}
 		}
 	} else {
-		printHumanReport(skill.name, outcomes, artifact.evalId, evidenceId, evidenceDirectory, options.allowNetwork);
+		printHumanReport(subject, outcomes, artifact.evalId, evidenceId, evidenceDirectory, options.allowNetwork);
 	}
 	const anyFailure = outcomes.some((outcome) =>
 		outcome.bullets.some((bullet) => bullet.verdict === "fail" || bullet.verdict === "error"),
@@ -300,7 +541,16 @@ function describeArmPolicyOutcome(allowNetwork: boolean): string {
 	return `policy: the baseline and treatment arms ran at autonomy ${ARM_AUTONOMY}; ${network}`;
 }
 
-type EvalArm = "baseline" | "treatment" | "judge";
+type EvalArm = "baseline" | "treatment" | "judge" | "baseline-judge";
+
+/**
+ * A judge arm scores text and is told to call no tools, so granting it
+ * unattended write and exec buys nothing. Both judge arms are excluded from
+ * `--autonomy full-auto` for that reason.
+ */
+function isJudgeArm(arm: EvalArm): boolean {
+	return arm === "judge" || arm === "baseline-judge";
+}
 
 /**
  * The argv for one arm's child `clio-coder run`. Every arm streams the full JSON
@@ -318,7 +568,7 @@ function armRunArgs(
 	options: { target?: string | undefined; skillBaseDir?: string | undefined } = {},
 ): string[] {
 	const args = ["run", "--json", "--json-events", "full", "--no-skills"];
-	if (arm !== "judge") args.push("--autonomy", ARM_AUTONOMY);
+	if (!isJudgeArm(arm)) args.push("--autonomy", ARM_AUTONOMY);
 	if (options.skillBaseDir !== undefined) args.push("--skill", options.skillBaseDir);
 	if (options.target !== undefined) args.push("--target", options.target);
 	args.push(prompt);
@@ -441,6 +691,7 @@ async function runScenario(
 	workspaceOverride: string | null,
 	trustFixtures: boolean,
 	childEnv: NodeJS.ProcessEnv,
+	attributionEnabled: boolean,
 ): Promise<ScenarioOutcome> {
 	// Published per-scenario figure: monotonic so a clock correction during a
 	// long sweep cannot land in one row's wall time.
@@ -448,6 +699,12 @@ async function runScenario(
 	const workspace = await mkdtemp(join(tmpdir(), "clio-coder-skill-eval-seed-"));
 	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
 	try {
+		// A scenario that ended before the comparison could run records why. When
+		// attribution is off the operator's own choice is the operative reason,
+		// because the baseline judge would have been skipped either way.
+		const skipAttribution = (reason: string): ScenarioAttribution =>
+			attributionEnabled ? unmeasurableAttribution(reason) : notAttemptedAttribution(ATTRIBUTION_DISABLED_REASON);
+
 		if (workspaceOverride !== null) await copyWorkspace(workspaceOverride, workspace);
 		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs, trustFixtures);
 		if (fixtureError !== null) {
@@ -457,6 +714,8 @@ async function runScenario(
 				baseline: null,
 				treatment: null,
 				judge: null,
+				baselineJudge: null,
+				attribution: skipAttribution(fixtureError),
 				workspace,
 				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: fixtureError,
@@ -483,6 +742,8 @@ async function runScenario(
 				baseline,
 				treatment,
 				judge: null,
+				baselineJudge: null,
+				attribution: skipAttribution(infra),
 				workspace,
 				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: infra,
@@ -499,6 +760,8 @@ async function runScenario(
 				baseline,
 				treatment,
 				judge: null,
+				baselineJudge: null,
+				attribution: skipAttribution(wall),
 				workspace,
 				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: wall,
@@ -522,18 +785,32 @@ async function runScenario(
 				baseline,
 				treatment,
 				judge,
+				baselineJudge: null,
+				attribution: skipAttribution(judgeInfra),
 				workspace,
 				wallTimeMs: Math.round(performance.now() - scenarioStart),
 				infraError: judgeInfra,
 			});
 		}
 		const bullets = parseJudgeVerdicts(scenario, judge);
+		const attributed = await attributeScenario({
+			scenario,
+			bullets,
+			baseline,
+			target,
+			timeoutMs,
+			childEnv,
+			attributionEnabled,
+			workspace: runWorkspaces.baselineJudge,
+		});
 		return await completeScenarioOutcome({
 			scenario,
 			bullets,
 			baseline,
 			treatment,
 			judge,
+			baselineJudge: attributed.baselineJudge,
+			attribution: attributed.attribution,
 			workspace,
 			wallTimeMs: Math.round(performance.now() - scenarioStart),
 			infraError: null,
@@ -547,10 +824,70 @@ async function runScenario(
 	}
 }
 
+/** The exact reason recorded when the operator turned the comparison off. */
+const ATTRIBUTION_DISABLED_REASON = "disabled by --no-attribution";
+
+interface AttributeScenarioInput {
+	scenario: SkillEvalScenario;
+	/** Treatment verdicts, already parsed. */
+	bullets: ReadonlyArray<ScoredBullet>;
+	baseline: CapturedRun;
+	target: string | undefined;
+	timeoutMs: number;
+	childEnv: NodeJS.ProcessEnv;
+	attributionEnabled: boolean;
+	workspace: string;
+}
+
+/**
+ * Score the baseline arm and pair it with the treatment, or say why not.
+ *
+ * The baseline run is already paid for by the time this is reached; only the
+ * judge that reads it is new. Three states end the comparison before it starts,
+ * and each is recorded with its own reason rather than collapsed into a verdict:
+ * the operator disabled it, the treatment produced nothing to compare against,
+ * or the baseline judge itself failed to run or to answer.
+ */
+async function attributeScenario(
+	input: AttributeScenarioInput,
+): Promise<{ attribution: ScenarioAttribution; baselineJudge: CapturedRun | null }> {
+	if (!input.attributionEnabled) {
+		return { attribution: notAttemptedAttribution(ATTRIBUTION_DISABLED_REASON), baselineJudge: null };
+	}
+	// Nothing on the treatment side was scored, so no pair can be formed. Running
+	// the baseline judge anyway would spend an inference to learn nothing.
+	if (!input.bullets.some((bullet) => bullet.verdict === "pass" || bullet.verdict === "fail")) {
+		return {
+			attribution: unmeasurableAttribution(
+				"the treatment arm produced no scored bullet, so there is nothing to compare a baseline against",
+			),
+			baselineJudge: null,
+		};
+	}
+	const baselineJudge = await captureHeadlessRun(
+		armRunArgs("baseline-judge", baselineJudgePrompt(input.scenario, input.baseline.transcript), {
+			target: input.target,
+		}),
+		input.workspace,
+		input.timeoutMs,
+		input.childEnv,
+	);
+	const infra = runInfraError("baseline-judge", baselineJudge);
+	if (infra !== null) {
+		// The treatment verdicts stand: this failure is about the comparison, not
+		// about the skill, so it never touches `bullets` or the exit code.
+		return { attribution: unmeasurableAttribution(infra), baselineJudge };
+	}
+	const baselineBullets = parseJudgeVerdicts(input.scenario, baselineJudge);
+	return { attribution: attributionFromBullets(baselineBullets, input.bullets), baselineJudge };
+}
+
 export interface MaterializedSkillEvalWorkspaces {
 	baseline: string;
 	treatment: string;
 	judge: string;
+	/** The baseline judge gets its own root for the same reason the other arms do. */
+	baselineJudge: string;
 	cleanup(): Promise<void>;
 }
 
@@ -587,11 +924,16 @@ async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<Ma
 		const baseline = await armWorkspace(created);
 		const treatment = await armWorkspace(created);
 		const judge = await armWorkspace(created);
+		const baselineJudge = await armWorkspace(created);
+		// Only the acting arms get the fixture. A judge scores text and is told to
+		// call no tools, so seeding its workspace would only give it the artifacts
+		// it is supposed to read about.
 		await Promise.all([copyWorkspace(seedWorkspace, baseline), copyWorkspace(seedWorkspace, treatment)]);
 		return {
 			baseline,
 			treatment,
 			judge,
+			baselineJudge,
 			cleanup: async () => {
 				await Promise.all(created.map((path) => rm(path, { recursive: true, force: true })));
 			},
@@ -613,7 +955,7 @@ async function copyWorkspace(source: string, destination: string): Promise<void>
 async function completeScenarioOutcome(outcome: Omit<ScenarioOutcome, "usage">): Promise<ScenarioOutcome> {
 	return {
 		...outcome,
-		usage: await usageForCapturedRuns([outcome.baseline, outcome.treatment, outcome.judge]),
+		usage: await usageForCapturedRuns([outcome.baseline, outcome.treatment, outcome.judge, outcome.baselineJudge]),
 	};
 }
 
@@ -933,6 +1275,41 @@ function judgePrompt(scenario: SkillEvalScenario, baselineTranscript: string, tr
 }
 
 /**
+ * Score the baseline arm alone, against the same bullets.
+ *
+ * Isolated on purpose. The treatment judge above sees both transcripts and is
+ * told to score only the treatment; giving the baseline judge the treatment
+ * transcript as well would let a strong treatment run colour the baseline's
+ * verdicts, and the comparison those verdicts feed would then be measuring the
+ * judge. The bullet contract, the strict-JSON shape and the no-tools rule are
+ * identical, so `parseJudgeVerdicts` reads both without branching.
+ *
+ * The treatment prompt is deliberately left byte-identical to what it was
+ * before attribution existed, so treatment verdicts stay comparable with every
+ * bundle already on disk.
+ */
+function baselineJudgePrompt(scenario: SkillEvalScenario, baselineTranscript: string): string {
+	const bullets = scenario.expected.map((text, index) => `${index + 1}. ${text}`).join("\n");
+	return [
+		"You are scoring an agent run. One transcript follows: it ran WITHOUT any skill loaded.",
+		"Score each EXPECTED bullet strictly against the TRANSCRIPT.",
+		"A bullet passes only if the transcript observably satisfies it; anything unverifiable from the transcript fails.",
+		'Reply with STRICT JSON only, no prose and no code fences, exactly: {"bullets":[{"index":1,"pass":true,"reason":"<= 25 words"}]}',
+		`Include one entry per bullet, indexes 1 through ${scenario.expected.length} in order.`,
+		"Do not use any tools. Respond with the JSON verdict directly.",
+		"",
+		`SCENARIO ${scenario.id} - ${scenario.title}`,
+		`SETUP: ${scenario.setup}`,
+		"",
+		"EXPECTED BULLETS:",
+		bullets,
+		"",
+		"TRANSCRIPT:",
+		baselineTranscript.length > 0 ? baselineTranscript : "(empty)",
+	].join("\n");
+}
+
+/**
  * Why a judge response carried no verdict, named after the thing that failed.
  * A response that opened a bullets object and never closed it is the observed
  * truncation on small local models; a response with no bullets key at all
@@ -1043,7 +1420,7 @@ function balancedJsonSlice(text: string, start: number): string | null {
 }
 
 function synthesizeArtifact(
-	skillName: string,
+	subject: SkillEvalSubject,
 	evalsPath: string,
 	evalsRaw: string,
 	startedAt: string,
@@ -1051,6 +1428,7 @@ function synthesizeArtifact(
 	outcomes: ReadonlyArray<ScenarioOutcome>,
 	target: string | undefined,
 ): EvalRunArtifact {
+	const skillName = subject.name;
 	const contentHash = createHash("sha256").update(evalsRaw, "utf8").digest("hex");
 	const stamp = startedAt.replace(/[-:.]/g, "");
 	// Random suffix for the same reason createEvalId carries one: the stamp plus
@@ -1070,6 +1448,14 @@ function synthesizeArtifact(
 			tags: [
 				"skill-eval",
 				`skill:${skillName}`,
+				// The artifact identity, on every record. Two bundles for one skill
+				// name are only comparable when both say which content they ran.
+				`skill-sha:${subject.normalizedHash.slice(0, 12)}`,
+				`skill-origin:${subject.origin}`,
+				...(subject.drift !== null ? [`skill-drift:${subject.drift.verdict}`] : []),
+				// Advisory. `pass` and `exitCode` below keep their treatment-only
+				// meaning; this tag is read by nothing that gates.
+				`attribution:${outcome.attribution.verdict}`,
 				...(unmeasured ? ["scenario:unmeasured"] : []),
 				...outcome.bullets.map((bullet) => `bullet-${bullet.index}:${bullet.verdict}`),
 			],
@@ -1108,24 +1494,35 @@ function synthesizeArtifact(
 }
 
 function sidecar(
-	skillName: string,
+	subject: SkillEvalSubject,
 	evalId: string,
 	outcomes: ReadonlyArray<ScenarioOutcome>,
 	allowNetwork: boolean,
+	attributionEnabled: boolean,
 ): unknown {
 	return {
-		version: 1,
+		version: 2,
 		schema: "experimental",
 		kind: "skill-eval",
-		skill: skillName,
+		skill: subject.name,
+		// What this run measured, by identity rather than by name. `version` moved
+		// to 2 for this block; readers of version 1 keep working, they just never
+		// learn which copy produced their numbers.
+		subject,
 		evalId,
 		network: networkPolicyLabel(allowNetwork),
 		autonomy: ARM_AUTONOMY,
+		attributionEnabled,
+		attributionSummary: attributionSummary(outcomes),
 		deltas: [
 			"bullet verdicts are judge-scored from run transcripts, not command exit codes; the evals-domain artifact carries scenario-level records with empty command lists",
 			"a bullet the judge never scored is recorded unmeasured, not failed: its scenario record is pass:false with exitCode 3 and no failureClass",
 			"an arm whose transcript carries the headless permission wall is recorded unmeasured with an infraError: the harness's own gate is not a verdict about the skill",
 			"tokens and cost are rolled up from headless main-agent receipts when those receipts are present",
+			"attribution is advisory and gates nothing: pass, exitCode and failureClass keep their treatment-only meaning",
+			"attribution unmeasured means the comparison was impossible; not-attempted means it was never run. Neither is no-change",
+			"the baseline judge scores the baseline transcript alone; the treatment judge prompt is unchanged from version 1 bundles",
+			"subject.drift records whether the measured content still matches its recorded hash; a mismatch never blocks the run",
 			"this sidecar is additive and is registered in overview.json files[]",
 		],
 		scenarios: outcomes.map((outcome) => ({
@@ -1136,11 +1533,27 @@ function sidecar(
 			infraError: outcome.infraError,
 			usage: outcome.usage,
 			bullets: outcome.bullets,
+			attribution: outcome.attribution,
 			baseline: sidecarRun(outcome.baseline),
 			treatment: sidecarRun(outcome.treatment),
 			judge: sidecarRun(outcome.judge),
+			baselineJudge: sidecarRun(outcome.baselineJudge),
 		})),
 	};
+}
+
+/** Scenario counts per attribution verdict. A rollup, never collapsed to one score. */
+function attributionSummary(outcomes: ReadonlyArray<ScenarioOutcome>): Record<ScenarioAttributionVerdict, number> {
+	const summary: Record<ScenarioAttributionVerdict, number> = {
+		helped: 0,
+		regressed: 0,
+		mixed: 0,
+		"no-change": 0,
+		unmeasured: 0,
+		"not-attempted": 0,
+	};
+	for (const outcome of outcomes) summary[outcome.attribution.verdict] += 1;
+	return summary;
 }
 
 function sidecarRun(run: CapturedRun | null): unknown {
@@ -1156,17 +1569,27 @@ function sidecarRun(run: CapturedRun | null): unknown {
 }
 
 function printHumanReport(
-	skillName: string,
+	subject: SkillEvalSubject,
 	outcomes: ReadonlyArray<ScenarioOutcome>,
 	evalId: string,
 	evidenceId: string | null,
 	evidenceDirectory: string | null,
 	allowNetwork: boolean,
 ): void {
-	const rows: string[][] = [["scenario", "bullet", "verdict", "expected"]];
+	const skillName = subject.name;
+	// `vs base` is the same bullet in the arm that ran without the skill. Kept in
+	// its own column so a reader never mistakes it for part of the rubric verdict.
+	const rows: string[][] = [["scenario", "bullet", "verdict", "vs base", "expected"]];
 	for (const outcome of outcomes) {
+		const attributed = new Map(outcome.attribution.bullets.map((item) => [item.index, item]));
 		for (const bullet of outcome.bullets) {
-			rows.push([outcome.scenario.id, String(bullet.index), bullet.verdict, truncate(bullet.text, 76)]);
+			rows.push([
+				outcome.scenario.id,
+				String(bullet.index),
+				bullet.verdict,
+				attributed.get(bullet.index)?.attribution ?? "-",
+				truncate(bullet.text, 64),
+			]);
 		}
 	}
 	process.stdout.write(formatColumns(rows));
@@ -1204,10 +1627,68 @@ function printHumanReport(
 			);
 		}
 	}
+	printAttributionReport(outcomes);
 	process.stdout.write(`${describeArmPolicyOutcome(allowNetwork)}\n`);
+	process.stdout.write(
+		`subject: ${skillName} from ${subject.origin} at ${subject.baseDir} (sha256 ${subject.normalizedHash.slice(0, 12)}…)\n`,
+	);
+	if (subject.drift !== null) {
+		process.stdout.write(
+			subject.drift.verdict === "mismatch"
+				? `subject drift: MISMATCH against the ${subject.drift.authority} (expected ${subject.drift.expected.slice(0, 12)}…); this run measured the copy on disk\n`
+				: `subject drift: matches the ${subject.drift.authority}\n`,
+		);
+	}
 	process.stdout.write(`eval artifact: ${evalId}\n`);
 	if (evidenceId !== null && evidenceDirectory !== null) {
 		process.stdout.write(`evidence: ${evidenceId} at ${evidenceDirectory} (per-bullet detail in skill-eval.json)\n`);
+	}
+}
+
+/**
+ * The paired comparison, stated as scenario counts and never as one score.
+ *
+ * Deliberately separated from the rubric block above it. A reader who takes
+ * "3/4 bullets passed" and "1 scenario regressed" as the same measurement will
+ * draw the wrong conclusion from both: the first says whether the skill met its
+ * rubric, the second says whether it changed anything relative to no skill at
+ * all. Nothing here influences the exit code.
+ */
+function printAttributionReport(outcomes: ReadonlyArray<ScenarioOutcome>): void {
+	if (outcomes.length === 0) return;
+	const summary = attributionSummary(outcomes);
+	const compared = summary.helped + summary.regressed + summary.mixed + summary["no-change"];
+	if (compared === 0) {
+		const reason = outcomes.find((outcome) => outcome.attribution.reason !== null)?.attribution.reason ?? null;
+		process.stdout.write(
+			`attribution: no scenario was compared against its baseline${reason !== null ? ` (${reason})` : ""}\n`,
+		);
+		return;
+	}
+	const parts = [
+		`${summary.helped} helped`,
+		`${summary.regressed} regressed`,
+		`${summary.mixed} mixed`,
+		`${summary["no-change"]} no-change`,
+	];
+	if (summary.unmeasured > 0) parts.push(`${summary.unmeasured} unmeasured`);
+	if (summary["not-attempted"] > 0) parts.push(`${summary["not-attempted"]} not-attempted`);
+	process.stdout.write(
+		`attribution (advisory, vs the no-skill baseline; gates nothing): ${parts.join(", ")} of ${outcomes.length} scenario${outcomes.length === 1 ? "" : "s"}\n`,
+	);
+	for (const outcome of outcomes) {
+		if (outcome.attribution.verdict === "regressed" || outcome.attribution.verdict === "mixed") {
+			const regressed = outcome.attribution.bullets
+				.filter((bullet) => bullet.attribution === "regressed")
+				.map((bullet) => String(bullet.index));
+			process.stdout.write(
+				`${outcome.scenario.id}: ${outcome.attribution.verdict}; the baseline passed bullet${regressed.length === 1 ? "" : "s"} ${regressed.join(", ")} and the treatment did not\n`,
+			);
+		} else if (outcome.attribution.reason !== null) {
+			process.stdout.write(
+				`${outcome.scenario.id}: attribution ${outcome.attribution.verdict}: ${outcome.attribution.reason}\n`,
+			);
+		}
 	}
 }
 
@@ -1249,7 +1730,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** The experimental evals.md lane stays under eval, alongside package suite evals. */
 export async function runSkillEvalCli(args: ReadonlyArray<string>): Promise<number> {
-	const options: SkillsEvalOptions = { json: false, trustFixtures: false, allowNetwork: false };
+	const options: SkillsEvalOptions = { json: false, trustFixtures: false, allowNetwork: false, noAttribution: false };
 	let source: string | undefined;
 	try {
 		for (let i = 0; i < args.length; i++) {
@@ -1258,6 +1739,7 @@ export async function runSkillEvalCli(args: ReadonlyArray<string>): Promise<numb
 			if (arg === "--json") options.json = true;
 			else if (arg === "--trust-fixtures") options.trustFixtures = true;
 			else if (arg === "--allow-network") options.allowNetwork = true;
+			else if (arg === "--no-attribution") options.noAttribution = true;
 			else if (["--scenario", "--target", "--workspace", "--timeout"].includes(arg)) {
 				const value = args[++i];
 				if (!value || value.startsWith("-")) throw new Error(`${arg} requires a value`);
@@ -1270,7 +1752,8 @@ export async function runSkillEvalCli(args: ReadonlyArray<string>): Promise<numb
 				else options.workspace = value;
 			} else if (arg === "--help" || arg === "-h") {
 				process.stdout.write(
-					"clio-coder eval skill <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]\n",
+					"clio-coder eval skill <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--no-attribution] [--json]\n" +
+						"  --no-attribution  skip the baseline judge and the paired comparison; saves one judge run per scenario\n",
 				);
 				return 0;
 			} else if (arg.startsWith("-") || source) throw new Error(`unexpected skill eval argument: ${arg}`);
