@@ -35,7 +35,7 @@ import {
 } from "./protocol.js";
 
 export const MCP_CLIENT_NAME = "clio-coder";
-export const DEFAULT_MCP_CLIENT_VERSION = "0.5.0";
+export const DEFAULT_MCP_CLIENT_VERSION = "0.5.1";
 export const DEFAULT_INITIALIZE_TIMEOUT_MS = 15_000;
 export const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
 export const DEFAULT_STDERR_TAIL_BYTES = 16 * 1024;
