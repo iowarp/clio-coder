@@ -22,6 +22,7 @@ import { extractText, hasStructuredToolCall, toolNamesFromAgentState } from "./c
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 export interface TurnMiddlewareDeps {
+	memoryContentGuard?: (() => () => boolean) | undefined;
 	state: ChatTurnState;
 	middleware?: MiddlewareContract | undefined;
 	session?: SessionContract | undefined;
@@ -50,6 +51,7 @@ export interface TurnMiddleware {
 		tokensBefore?: number,
 	): void;
 	flushPendingReminders(): string;
+	takePendingReminderProjection(): () => string;
 	clearPendingReminders(): void;
 	/**
 	 * Deliver a reminder produced after its own turn boundary already closed.
@@ -57,7 +59,7 @@ export interface TurnMiddleware {
 	 * value; the reminder joins the same buffer, ledger, and transcript path a
 	 * turn_end reminder takes.
 	 */
-	injectDeferredReminder(message: string, severity?: MiddlewareReminderSeverity): void;
+	injectDeferredReminder(message: string, severity?: MiddlewareReminderSeverity, isCurrent?: () => boolean): void;
 	/**
 	 * Deliver an operator-facing finding produced after its turn boundary closed.
 	 * The watchdog seam: its run settles well after the turn it reviewed, and
@@ -76,11 +78,29 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	// injections). The next accepted prompt flushes them into the model
 	// request as one system-reminder block. Completed background reminders
 	// can also drain at a native tool-batch boundary; session switches clear all.
-	const pendingReminders: Array<{ message: string; severity: MiddlewareReminderSeverity; deferred: boolean }> = [];
+	const pendingReminders: Array<{
+		message: string;
+		severity: MiddlewareReminderSeverity;
+		deferred: boolean;
+		isCurrent?: (() => boolean) | undefined;
+	}> = [];
+	const dropStale = () => {
+		for (let index = pendingReminders.length - 1; index >= 0; index--) {
+			if (pendingReminders[index]?.isCurrent?.() === false) pendingReminders.splice(index, 1);
+		}
+	};
 
-	const bufferReminder = (message: string, severity: MiddlewareReminderSeverity, deferred = false): void => {
+	const bufferReminder = (
+		message: string,
+		severity: MiddlewareReminderSeverity,
+		deferred = false,
+		isCurrent?: () => boolean,
+	): void => {
+		dropStale();
+		isCurrent ??= message.startsWith("Memory:") ? deps.memoryContentGuard?.() : undefined;
+		if (isCurrent?.() === false) return;
 		if (pendingReminders.some((entry) => entry.message === message && entry.severity === severity)) return;
-		pendingReminders.push({ message, severity, deferred });
+		pendingReminders.push({ message, severity, deferred, isCurrent });
 	};
 
 	const runMiddlewareTurnHook = (input: MiddlewareHookInput): ReadonlyArray<MiddlewareEffect> => {
@@ -194,6 +214,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				[],
 			);
 			if (!current()) return false;
+			dropStale();
 			const ready = pendingReminders.filter((entry) => entry.deferred);
 			if (ready.length === 0) return false;
 			const content = `<system-reminder>\n${[...new Set(ready.map((entry) => entry.message))].join("\n\n")}\n</system-reminder>`;
@@ -314,7 +335,17 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			});
 		},
 
+		takePendingReminderProjection(): () => string {
+			const entries = pendingReminders.splice(0);
+			return () => {
+				const messages = [
+					...new Set(entries.filter((entry) => entry.isCurrent?.() !== false).map((entry) => entry.message)),
+				];
+				return messages.length ? `<system-reminder>\n${messages.join("\n\n")}\n</system-reminder>` : "";
+			};
+		},
 		flushPendingReminders(): string {
+			dropStale();
 			if (pendingReminders.length === 0) return "";
 			// Severity affects host actions, not the text delivered to the model.
 			// A paired continuation/info and reminder/warn still needs one copy.
@@ -327,14 +358,16 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			pendingReminders.length = 0;
 		},
 
-		injectDeferredReminder(message, severity = "advisory"): void {
+		injectDeferredReminder(message, severity = "advisory", isCurrent): void {
+			dropStale();
+			if (isCurrent?.() === false) return;
 			const text = message.trim();
 			if (text.length === 0) return;
 			// A deferred reminder never carries hard-block authority: the turn it
 			// could have interrupted is already over.
 			const level: MiddlewareReminderSeverity = severity === "hard-block" ? "advisory" : severity;
 			if (pendingReminders.some((entry) => entry.message === text)) return;
-			bufferReminder(text, level, true);
+			bufferReminder(text, level, true, isCurrent);
 			appendMiddlewareReminderEntry(text, level);
 			deps.emitNotice(text);
 		},

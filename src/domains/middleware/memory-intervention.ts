@@ -8,6 +8,13 @@ import {
 	sanitizeToolResultDigest,
 	type ToolResultDigest,
 } from "../../tools/result-disposition.js";
+import {
+	type MemoryCommitScope,
+	MemoryCommitState,
+	type MemoryRestorationOffer,
+	type SuccessfulMemoryContextCommit,
+} from "../memory/commit-state.js";
+import type { MemoryRestorationInput } from "../memory/restoration.js";
 import { TASK_MEMORY_DEFAULT_PROCEDURAL_CAP, type TaskMemoryBank, type TaskMemoryEntry } from "../memory/task-bank.js";
 import {
 	runTaskMemoryPolicy,
@@ -119,7 +126,7 @@ export interface MemoryInterventionDeps {
 	 * closed. The composition root buffers it into the next submitted turn, which
 	 * is where a synchronous turn_end reminder would have landed anyway.
 	 */
-	onDeferredReminder?: (message: string) => void;
+	onDeferredReminder?: (message: string, isCurrent?: () => boolean) => void;
 	/**
 	 * False when no further turn will be submitted in this process. A background
 	 * step is detached from the boundary that triggered it and a local route
@@ -145,6 +152,14 @@ export interface MemoryPromptedStepResult extends TaskMemoryPolicyResult {
 }
 
 export interface MemoryInterventionRegistration extends MiddlewareHookRegistration {
+	bindCommitScope(scope: MemoryCommitScope): void;
+	notifyContextCommitted(input: SuccessfulMemoryContextCommit): void;
+	prepareRestoration(
+		currentState: MemoryRestorationInput["currentState"],
+		maxTokens: number,
+	): MemoryRestorationOffer | null;
+	acknowledgeRestoration(offer: MemoryRestorationOffer): boolean;
+	isContentCurrent(): () => boolean;
 	/** Invalidate pending content and discard all transient session/branch state. */
 	reset(): void;
 	/** Invalidate immediately without waiting for the model; refuse further work. */
@@ -177,6 +192,20 @@ export interface MemoryInterventionRegistration extends MiddlewareHookRegistrati
  */
 export function createMemoryInterventionRegistration(deps: MemoryInterventionDeps): MemoryInterventionRegistration {
 	let generation = 0;
+	let commitState: MemoryCommitState | null = null;
+	let commitScope: MemoryCommitScope | null = null;
+	let commitBridgeEnabled = false;
+	const captureContentGuard = (): (() => boolean) => {
+		const capturedGeneration = generation;
+		const owner = commitState;
+		const scope = commitScope;
+		const stamp = owner?.capture();
+		return () =>
+			!disposed &&
+			generation === capturedGeneration &&
+			commitState === owner &&
+			(!owner || (!!stamp && !!scope && owner.isCurrent(stamp, scope)));
+	};
 	let generationController = new AbortController();
 	let observedSessionId: string | undefined;
 	let disposed = false;
@@ -207,6 +236,40 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	let consecutiveLlmTimeouts = 0;
 
 	return {
+		bindCommitScope(scope) {
+			commitBridgeEnabled = true;
+			if (
+				commitScope?.sessionId === scope.sessionId &&
+				commitScope.branchAnchorTurnId === scope.branchAnchorTurnId &&
+				commitState
+			)
+				return;
+			if (commitState) reset();
+			commitScope = { ...scope };
+			commitState = new MemoryCommitState(scope, generation);
+			observedSessionId = scope.sessionId;
+		},
+		notifyContextCommitted(input) {
+			commitState?.notifyContextCommitted(input, generation);
+		},
+		prepareRestoration(currentState, maxTokens) {
+			if (!commitScope || !settings().enabled) return null;
+			return (
+				commitState?.prepareRestoration({
+					scope: commitScope,
+					generation,
+					bank: deps.bank.snapshot(),
+					currentState,
+					maxTokens: Math.min(maxTokens, settings().maxTokens),
+				}) ?? null
+			);
+		},
+		acknowledgeRestoration(offer) {
+			if (!commitScope || !commitState?.acknowledgeRestoration(offer, commitScope, generation)) return false;
+			deps.bank.recordInjection(offer.citedEntryIds);
+			return true;
+		},
+		isContentCurrent: captureContentGuard,
 		reset,
 		dispose(): void {
 			disposed = true;
@@ -257,7 +320,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 						// Recall grows the working set; it is an observability point, not
 						// context loss that should reactivate compacted task memory.
 						if (input.metadata?.stage === "working_set_recall") return NO_EFFECTS;
-						reactivateAfterCompaction = true;
+						if (!commitBridgeEnabled) reactivateAfterCompaction = true;
 						return NO_EFFECTS;
 					case "turn_start": {
 						if (input.text?.trim()) currentTask = shortText(input.text, 2_000);
@@ -346,6 +409,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 					false);
 			rulesInjectedSincePromptedStep = false;
 			const stepGeneration = generation;
+			const contentCurrent = captureContentGuard();
 			promptedStepInFlight = true;
 			outstandingStep = runPromptedStep({
 				deterministicTrigger: triggers.some((trigger) => trigger !== "interval"),
@@ -353,14 +417,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				triggerReasons: triggers,
 			})
 				.then((result) => {
-					if (stepGeneration !== generation || disposed) return;
+					if (!contentCurrent()) return;
 					// A rules-only reminder can win the visible boundary while the optional
 					// background route resolves to null. Preserve the operator-visible
 					// injected outcome instead of overwriting it with that no-client silence.
 					if (rulesAlreadySpoke && result.decision === "silent") lastDecision = "injected";
 					if (result.reminder === null) return;
 					lastInjectedMessage = result.reminder;
-					deps.onDeferredReminder?.(result.reminder);
+					deps.onDeferredReminder?.(result.reminder, contentCurrent);
 				})
 				.catch(() => {
 					// runPromptedStep already resolves failures to silence; this only
@@ -393,6 +457,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		// Retain completed bank entries, but revoke pending content and delivery
 		// authority. Late provider usage still belongs to its captured origin.
 		generation += 1;
+		commitState?.cancel(generation);
 		generationController.abort();
 		generationController = new AbortController();
 		promptedStepInFlight = false;
@@ -408,6 +473,9 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	}
 
 	function reset(): void {
+		commitState?.dispose();
+		commitState = null;
+		commitScope = null;
 		generation += 1;
 		generationController.abort();
 		generationController = new AbortController();
@@ -466,7 +534,8 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		});
 		const live = settings();
 		const stepGeneration = generation;
-		const isCurrent = () => !disposed && stepGeneration === generation;
+		const isCurrent = captureContentGuard();
+		const isUsageCurrent = () => !disposed && stepGeneration === generation;
 		const usageSink = deps.captureStepUsage?.();
 		if (disposed || !live.enabled) {
 			const result = silent("no_client");
@@ -504,7 +573,7 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							isCurrent,
 							signal: generationController.signal,
 							onStepUsage: (usage) => {
-								if (usageSink) usageSink(usage, isCurrent());
+								if (usageSink) usageSink(usage, isUsageCurrent());
 								else deps.onStepUsage?.(usage);
 							},
 							task: input.task?.trim() || currentTask,
@@ -515,7 +584,13 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 							...(input.suppressIntervention === undefined ? {} : { suppressIntervention: input.suppressIntervention }),
 							previousReminder: lastInjectedMessage,
 							timeoutMs,
-							...(deps.onEnvelope === undefined ? {} : { onEnvelope: deps.onEnvelope }),
+							...(deps.onEnvelope === undefined
+								? {}
+								: {
+										onEnvelope: (envelope: TaskMemoryEnvelope) => {
+											if (isCurrent()) deps.onEnvelope?.(envelope);
+										},
+									}),
 						});
 					const remainingMs = () => Math.floor(live.timeoutMs - Number(process.hrtime.bigint() - started) / 1_000_000);
 					const initialTimeoutMs = remainingMs();
@@ -557,17 +632,18 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 			// runTaskMemoryPolicy resolves its own failures, so reaching here means
 			// resolving the client itself threw. That is still a broken route.
 			promptedResult = silent("client_error");
-			deps.onEnvelope?.({
-				systemPrompt: "",
-				userPrompt: "",
-				response: "",
-				decision: "silent",
-				reason: "client_error",
-				bankOperations: 0,
-				droppedOperations: 0,
-				reminder: null,
-				error: error instanceof Error ? error.message : "resolving the background model client failed",
-			});
+			if (isCurrent())
+				deps.onEnvelope?.({
+					systemPrompt: "",
+					userPrompt: "",
+					response: "",
+					decision: "silent",
+					reason: "client_error",
+					bankOperations: 0,
+					droppedOperations: 0,
+					reminder: null,
+					error: error instanceof Error ? error.message : "resolving the background model client failed",
+				});
 		}
 		if (!isCurrent()) return { ...promptedResult, reminder: null, effects: NO_EFFECTS };
 		if (promptedResult.reason === "endpoint_busy") telemetryDecision = "dropped";

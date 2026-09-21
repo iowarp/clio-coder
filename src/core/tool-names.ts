@@ -26,6 +26,7 @@ export const ToolNames = {
 	Ls: "ls",
 	CodeNav: "code_nav",
 	Context: "context",
+	SelfCompact: "self_compact",
 	CredentialPresent: "credential_present",
 	ClioDocs: "clio_docs",
 	ClioLibrary: "clio_library",

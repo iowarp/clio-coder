@@ -1,4 +1,7 @@
+import type { SuccessfulMemoryContextCommit } from "../domains/memory/commit-state.js";
+import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
 import { replaceEngineMessages, setEngineSystemPrompt } from "../engine/agent.js";
+import type { ContinuityReductionHooks } from "./continuity-controller.js";
 /**
  * Turn context ownership: the session-prompt compile cache, context-snapshot
  * accounting, prompt-cache honesty, and compaction. `runAutoCompact` is the
@@ -115,6 +118,7 @@ import type { TurnMiddleware } from "./turn-middleware.js";
 import type { AgentRuntime, ChatTurnState } from "./turn-state.js";
 
 export interface TurnContextDeps {
+	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
 	state: ChatTurnState;
 	getSettings: () => Readonly<ClioSettings>;
@@ -131,7 +135,12 @@ export interface TurnContextDeps {
 				trigger?: CompactionTrigger,
 				budget?: Pick<
 					CompactInput,
-					"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+					| "keepRecentTokens"
+					| "preserveUserTurnId"
+					| "skillContextState"
+					| "signal"
+					| "beforeSummaryCall"
+					| "checkpointForSummary"
 				>,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
@@ -193,6 +202,12 @@ export type LiveContextUsage = ContextUsageSnapshot &
 	Pick<LiveBudgetView, "revision" | "inputSource" | "historical" | "breakdownSource">;
 
 export interface TurnContext {
+	notifyMemoryCommit(
+		commitId: string,
+		kind: SuccessfulMemoryContextCommit["kind"],
+		outcome: SuccessfulMemoryContextCommit["outcome"],
+	): void;
+	installMemoryRestoration(runtime: AgentRuntime, pendingUserText?: string): boolean;
 	/** Prepare an attempt before preflight; rejected attempts never freeze the next submit. */
 	prepareMemoryTurn(
 		runtime: AgentRuntime,
@@ -257,6 +272,7 @@ export interface TurnContext {
 		pendingUserText?: string,
 		pendingSkillPolicy?: PendingSkillToolPolicy,
 		signal?: AbortSignal,
+		handoff?: ContinuityReductionHooks,
 	): Promise<boolean>;
 	cancelCompaction(): void;
 	postToolContinuationGuard(
@@ -296,6 +312,7 @@ export interface TurnContext {
 	 * without re-arming an advisory; real navigation re-arms it.
 	 */
 	resetForSession(branchAnchorTurnId?: string | null): void;
+	navigationRevision(): number;
 	dispose(): void;
 }
 
@@ -1136,11 +1153,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		pendingUserText?: string,
 		pendingSkillPolicy?: PendingSkillToolPolicy,
 		signal?: AbortSignal,
+		handoff?: ContinuityReductionHooks,
 	): Promise<boolean> => {
 		if (!deps.readSessionEntries) return false;
+		const originSession = deps.session?.current()?.id;
+		const originNavigation = navigationEpoch;
 		// Overflow forces a fit attempt even below the automatic threshold, but
 		// still needs the request budget and active task. Manual force keeps its defaults.
-		const useRequestBudget = !force || triggerOverride === "overflow";
+		const useRequestBudget = !force || triggerOverride === "overflow" || handoff !== undefined;
 		const activeAutoTurnId = useRequestBudget ? state.activeUserTurnId : null;
 		const skillContextState = mainSkillContextState(
 			filterEntriesToActivePath(deps.readSessionEntries(), state.lastTurnId ?? undefined),
@@ -1214,7 +1234,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// reachable only when explicitly requested.
 			if (deps.session?.current()) {
 				const beforeSnapshotId = currentContextSnapshot?.snapshotId ?? null;
-				if (process.env.CLIO_CODER_LEGACY_MASK === "1") {
+				if (process.env.CLIO_CODER_LEGACY_MASK === "1" && !handoff) {
 					let masked: ReturnType<typeof maskStaleObservations>;
 					try {
 						masked = maskStaleObservations(deps.readSessionEntries() ?? [], 6);
@@ -1301,8 +1321,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							pressure: {
 								tokens: estimate.tokens,
 								contextWindow: estimate.contextWindow,
-								threshold: compactionThreshold,
-								target: settings.context.workingSet.target,
+								threshold: requiredFit
+									? Math.min(
+											compactionThreshold,
+											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
+										)
+									: compactionThreshold,
+								target: requiredFit
+									? Math.min(
+											settings.context.workingSet.target,
+											Math.max(0, 1 - resolveTurnOutputReserve(agentRuntime, estimate.tokens) / estimate.contextWindow),
+										)
+									: settings.context.workingSet.target,
 							},
 							estimateTokens,
 						});
@@ -1318,7 +1348,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						emitCompactionActivity("started", "compacting context (working-set eviction)");
 						try {
 							const historyTokens = reconciledHistoryTokens(agentRuntime);
-							deps.session.appendEntry({
+							const evictionEntry = deps.session.appendEntry({
 								...buildEvictionFields(planned, {
 									trigger: "pressure",
 									pressureBefore: verdict.pressure,
@@ -1328,6 +1358,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								// cursor is the leaf the next message will extend.
 								parentTurnId: state.lastTurnId,
 							});
+							if (deps.session.flushAppends) {
+								deps.session.flushAppends();
+								if (!handoff) notifyMemoryCommit(evictionEntry.turnId, "summary", "evicted");
+							}
 							noteColdReason("working_set_evict");
 							refreshAgentMessagesFromSession(agentRuntime);
 							carryReconciledAnchorThroughProjection(agentRuntime, historyTokens, planned.tokensBefore - planned.tokensAfter);
@@ -1434,7 +1468,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		let budget:
 			| Pick<
 					CompactInput,
-					"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+					| "keepRecentTokens"
+					| "preserveUserTurnId"
+					| "skillContextState"
+					| "signal"
+					| "beforeSummaryCall"
+					| "checkpointForSummary"
 			  >
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (useRequestBudget) {
@@ -1466,6 +1505,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					return (
 						(await deps.autoCompact?.(instructions, trigger, {
 							...budget,
+							...handoff,
 							signal: summarySignal,
 						})) ?? null
 					);
@@ -1497,6 +1537,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// live sink, so `/usage` and the footer move the moment /context compact
 		// returns instead of staying byte-identical to before it ran.
 		recordCompactionUsage(agentRuntime, result);
+		if (deps.memoryCommitBridge && !handoff && deps.session?.flushAppends) {
+			deps.session.flushAppends();
+			await deps.session.checkpoint("context-summary");
+			if (originSession !== deps.session.current()?.id || originNavigation !== navigationEpoch || signal?.aborted)
+				throw new Error("Context ownership changed during checkpoint.");
+			const summary = [...deps.readSessionEntries()].reverse().find((entry) => entry.kind === "compactionSummary");
+			if (summary) notifyMemoryCommit(summary.turnId, "summary", "summarized");
+		}
 
 		refreshAgentMessagesFromSession(agentRuntime);
 		// A summary replaces the conversation the attestation described, so no
@@ -1546,7 +1594,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	let reductionInFlight: Promise<boolean> | null = null;
 	const runAutoCompact: TurnContext["runAutoCompact"] = (...args) => {
-		if (reductionInFlight) return reductionInFlight;
+		if (reductionInFlight) {
+			if (args[7]) return Promise.reject(new Error("Another context reduction is already in progress."));
+			return reductionInFlight;
+		}
 		const operation = performAutoCompact(...args);
 		reductionInFlight = operation;
 		void operation
@@ -1555,6 +1606,58 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			})
 			.catch(() => {});
 		return operation;
+	};
+
+	const bindMemoryScope = () => {
+		const sessionId = deps.session?.current()?.id;
+		if (!sessionId) return null;
+		const scope = { sessionId, branchAnchorTurnId };
+		deps.memoryCommitBridge?.bindCommitScope(scope);
+		return scope;
+	};
+	const notifyMemoryCommit: TurnContext["notifyMemoryCommit"] = (commitId, kind, outcome) => {
+		const scope = bindMemoryScope();
+		if (scope) deps.memoryCommitBridge?.notifyContextCommitted({ ...scope, commitId, kind, outcome });
+	};
+	const installMemoryRestoration: TurnContext["installMemoryRestoration"] = (runtime, pendingText) => {
+		const bridge = deps.memoryCommitBridge;
+		if (!bridge || !bindMemoryScope()) return false;
+		const entries = filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined);
+		const latest = [...entries]
+			.reverse()
+			.find((entry) => entry.kind === "continuityCommit" || entry.kind === "compactionSummary");
+		const currentState =
+			latest?.kind === "continuityCommit"
+				? { kind: "handoff" as const, text: latest.continuity.accepted.note }
+				: latest?.kind === "compactionSummary"
+					? { kind: "summary" as const, text: latest.summary }
+					: null;
+		const view = refreshLiveBudget(pendingText);
+		const available = Math.max(
+			0,
+			(view.effectiveWindow ?? 0) - (view.outputReserveTokens ?? 0) - (view.inputTokens ?? 0) - 64,
+		);
+		const offer = bridge.prepareRestoration(currentState, available);
+		if (!offer) return false;
+		if (!offer.message) {
+			bridge.acknowledgeRestoration(offer);
+			return false;
+		}
+		const message: AgentMessage = {
+			role: "user",
+			content: `<system-reminder>\n${offer.message}\n</system-reminder>`,
+			timestamp: Date.now(),
+		};
+		const cost = estimateAgentMessageTokens(message);
+		if (!requestFits((view.inputTokens ?? Infinity) + cost, view.outputReserveTokens, view.effectiveWindow)) return false;
+		const prior = [...runtime.agent.state.messages];
+		replaceEngineMessages(runtime.agent, [...prior, message]);
+		if (!bridge.acknowledgeRestoration(offer)) {
+			replaceEngineMessages(runtime.agent, prior);
+			return false;
+		}
+		refreshLiveBudget(pendingText);
+		return true;
 	};
 
 	const toolResultTail = (agentRuntime: AgentRuntime): boolean => {
@@ -1573,7 +1676,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	});
 
 	return {
+		notifyMemoryCommit,
+		installMemoryRestoration,
 		prepareMemoryTurn(runtime, input): void {
+			bindMemoryScope();
 			pendingUserImages = [...(input.images ?? [])];
 			if (input.continuation && memoryTurn !== null) return;
 			const sessionId = deps.session?.current()?.id ?? null;
@@ -1605,6 +1711,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		rememberedLoadedContextWindow,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
+		navigationRevision: () => navigationEpoch,
 		cancelCompaction: () => compactionController?.abort(),
 
 		liveBudget: (): LiveBudgetView => budgetProducer.current() ?? refreshLiveBudget(),
@@ -2118,6 +2225,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// re-armed rather than treated as already said.
 			branchAnchorTurnId = incomingBranchAnchorTurnId;
 			navigationEpoch += 1;
+			bindMemoryScope();
 			budgetProducer.reset();
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;

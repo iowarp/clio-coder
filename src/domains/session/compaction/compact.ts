@@ -1,3 +1,4 @@
+import type { ContinuityCheckpointPayload } from "../continuity/contract.js";
 /**
  * Compaction orchestration.
  *
@@ -146,6 +147,9 @@ export interface CompactionCallObservation {
 export interface CompactInput {
 	/** Synchronous admission after exact request-fit, before each provider call. */
 	beforeSummaryCall?: (() => void) | undefined;
+	checkpointForSummary?:
+		| ((summaryRef: string, tokensBefore: number, tokensAfter: number) => ContinuityCheckpointPayload)
+		| undefined;
 	/** Ordered active-path session entries to compact; returned cut indexes address this same array. */
 	entries: ReadonlyArray<SessionEntry>;
 	/** Authoritative main-agent selection; omitted for unknown legacy state. */

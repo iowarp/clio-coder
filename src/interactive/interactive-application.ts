@@ -252,6 +252,7 @@ export interface InteractiveDeps {
 	 * engine, and persists a compactionSummary entry.
 	 */
 	onCompact?: (instructions: string | undefined) => Promise<void>;
+	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	/** Run /context init for the current working directory. */
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	/** Run /context reset for the current working directory. */
@@ -827,6 +828,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		...(deps.onSelectModel ? { onSelectModel: deps.onSelectModel } : {}),
 		...(deps.onSetThinkingLevel ? { onSetThinkingLevel: deps.onSetThinkingLevel } : {}),
 		...(deps.onCompact ? { onCompact: deps.onCompact } : {}),
+		...(deps.onRecoverHandoff ? { onRecoverHandoff: deps.onRecoverHandoff } : {}),
 		...(deps.onInit ? { onInit: deps.onInit } : {}),
 		...(deps.onContextClear ? { onContextClear: deps.onContextClear } : {}),
 		...(deps.onContextRefresh ? { onContextRefresh: deps.onContextRefresh } : {}),

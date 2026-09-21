@@ -100,6 +100,15 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			"Use code_nav with source=workspace (default) for project code and source=clio for Clio's shipped code map; modes: symbol, path, entries, outline, deps, dependents, wiki (workspace only).",
 	},
+	[ToolNames.SelfCompact]: {
+		objective: "Save an exact assistant handoff and reduce native session context.",
+		uiLabel: "Compact",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: { kind: "exact", maxBytes: 2048 },
+		costLatency: "local_fast",
+		promptHint:
+			'Use self_compact alone at a safe boundary. Preserve decisions, evidence, paths, and next actions in note_to_self. Inspect context(scope="budget") for current pressure; recovery belongs to the operator.',
+	},
 	[ToolNames.Context]: {
 		objective: "Return workspace, effective configuration, skill, or recall context.",
 		uiLabel: "Context",

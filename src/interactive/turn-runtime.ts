@@ -1,6 +1,7 @@
 import { requestFits } from "../domains/context/budget/request-fit.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
+import type { ContinuityController } from "./continuity-controller.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
@@ -136,6 +137,8 @@ export interface TurnRuntimeDeps {
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	persistence: TurnPersistence;
 	context: TurnContext;
+	continuity?: ContinuityController;
+	hasQueuedSteering?: () => boolean;
 	middleware: TurnMiddleware;
 	retrySettings: () => RetrySettings;
 	/** Stable Clio session id forwarded only to gateway runtimes that understand it. */
@@ -515,10 +518,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			},
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
+			beforeToolBatch: ({ assistantMessage }) => {
+				const calls = assistantMessage.content.filter((block) => block.type === "toolCall");
+				if (calls.some((call) => call.name === "self_compact") && calls.length !== 1) {
+					return { reason: "self_compact must be the only call in its batch; no sibling was executed." };
+				}
+				return undefined;
+			},
 			beforeStreamRequest: ({ context: request }) => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
 					return { block: true, reason: "Request ownership changed before invocation." };
+				}
+				if (deps.hasQueuedSteering?.() && deps.continuity?.admission().block === false) {
+					const handoff = deps.continuity.admission();
+					if (!handoff.block && handoff.correlationId)
+						return { block: true, reason: "Operator steering arrived during handoff preparation; handoff paused." };
 				}
 				const view = context.refreshLiveBudget();
 				const resolved = resolvedRequestContext(request);
@@ -528,7 +543,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
 				const output = resolveTurnOutputReserve(localRuntime, input);
 				return requestFits(input, output, view.effectiveWindow)
-					? { block: false }
+					? (deps.continuity?.admission() ?? { block: false })
 					: {
 							block: true,
 							reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
@@ -656,19 +671,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			stallTimer.unref?.();
 		};
 
-		handle.agent.prepareNextTurn = async (signal?: AbortSignal) => {
+		handle.agent.prepareNextTurnWithContext = async (_completed, signal?: AbortSignal) => {
 			stallSuspendDepth += 1;
 			try {
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
-				const contextChanged = await middleware.prepareToolContinuation(localRuntime, signal);
+				if (deps.hasQueuedSteering?.()) await deps.continuity?.pause();
+				const handoffChanged = (await deps.continuity?.settle(signal)) ?? false;
+				const contextChanged = (await middleware.prepareToolContinuation(localRuntime, signal)) || handoffChanged;
 				const update = await context.postToolContinuationGuard(localRuntime, signal, contextChanged);
+				const restored = context.installMemoryRestoration(localRuntime);
 				if (signal?.aborted || state.activeInterruptReason !== null) return undefined;
 				// Compaction owns any replacement snapshot. Without one, publish the
 				// already-accounted reminder through context, not message events that
 				// would manufacture a new operator turn and reset task authority.
 				return (
-					update ??
-					(contextChanged
+					(!restored ? update : undefined) ??
+					(contextChanged || restored
 						? {
 								context: {
 									messages: [...localRuntime.agent.state.messages],
@@ -972,7 +990,9 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 								apiMs: Math.round(Math.max(0, eventClock - apiCallStartedAt)),
 							}
 						: null;
-				persistence.appendAssistantTurn(enrichedEvent.message, timing);
+				const correlationId = event.type === "message_end" ? handle.requestCorrelationId(event.message) : undefined;
+				const persistedId = persistence.appendAssistantTurn(enrichedEvent.message, timing, correlationId);
+				await deps.continuity?.response(persistedId, correlationId);
 				if (isAssistant) apiCallStartedAt = null;
 				const usage = (enrichedEvent.message as { usage?: Usage }).usage;
 				if (isAssistant && usage && typeof usage === "object" && runFirstCallVerdict === null) {
@@ -996,6 +1016,7 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 						: null;
 			}
 			if (enrichedEvent.type === "agent_end") {
+				await deps.continuity?.pause();
 				clearStallTimer();
 				const terminal = pendingTerminalToolResult;
 				pendingTerminalToolResult = null;

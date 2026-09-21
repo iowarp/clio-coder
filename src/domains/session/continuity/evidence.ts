@@ -68,7 +68,8 @@ function terminalStatus(entry: MessageEntry): TerminalResponseEvidence["status"]
 	if (typeof record.errorMessage === "string" && record.errorMessage.length > 0) return "error";
 	// Any other recorded stop reason is a recorded failure or a non-terminal
 	// stop (`toolUse`, `length`); neither acknowledges a delivery.
-	if (stop !== undefined) return "empty";
+	if (stop !== undefined && stop !== "stop") return "empty";
+	if (record.continuityDeliveryId !== undefined && stop !== "stop") return "empty";
 	const content = Array.isArray(record.content) ? record.content : [];
 	for (const block of content) {
 		if (!block || typeof block !== "object") continue;
@@ -94,16 +95,39 @@ function terminalStatus(entry: MessageEntry): TerminalResponseEvidence["status"]
  */
 function terminalResponses(entries: ReadonlyArray<SessionEntry>): TerminalResponseEvidence[] {
 	const rows: TerminalResponseEvidence[] = [];
+	const messages = new Map(
+		entries.filter((entry): entry is MessageEntry => entry.kind === "message").map((entry) => [entry.turnId, entry]),
+	);
 	for (let position = 0; position < entries.length; position += 1) {
 		const entry = entries[position];
-		if (entry?.kind !== "message" || entry.role !== "assistant") continue;
-		if (entry.parentTurnId === null) continue;
-		rows.push({
-			entryId: entry.turnId,
-			continuationTurnId: entry.parentTurnId,
-			status: terminalStatus(entry),
-			position,
-		});
+		if (entry?.kind !== "message" || entry.role !== "assistant" || entry.parentTurnId === null) continue;
+		let continuationTurnId = entry.parentTurnId;
+		const payload = entry.payload as { continuityDeliveryId?: unknown } | null;
+		if (typeof payload?.continuityDeliveryId === "string") {
+			const delivery = entries
+				.slice(0, position)
+				.filter(
+					(candidate) =>
+						candidate.kind === "handoffTransaction" &&
+						candidate.event.phase === "delivered" &&
+						candidate.event.deliveryId === payload.continuityDeliveryId,
+				);
+			if (delivery.length !== 1) continue;
+			const intent = delivery[0];
+			if (intent?.kind !== "handoffTransaction" || intent.event.phase !== "delivered") continue;
+			const visited = new Set<string>();
+			let ancestor: string | null = entry.parentTurnId;
+			while (ancestor && ancestor !== intent.event.continuationTurnId && !visited.has(ancestor)) {
+				visited.add(ancestor);
+				const parent = messages.get(ancestor);
+				// New operator input ends this delivery's authority, even on the same branch.
+				if (parent?.role === "user") break;
+				ancestor = parent?.parentTurnId ?? null;
+			}
+			if (ancestor !== intent.event.continuationTurnId) continue;
+			continuationTurnId = ancestor;
+		}
+		rows.push({ entryId: entry.turnId, continuationTurnId, status: terminalStatus(entry), position });
 	}
 	return rows;
 }

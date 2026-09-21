@@ -497,5 +497,7 @@ export function resolveSessionTools(
 		supportsImages: runtime.runtimeResolution.capabilityDecisions.vision === true,
 	});
 	if (telemetry) input.telemetry = telemetry;
-	return resolveAgentTools(input);
+	return resolveAgentTools(input).filter(
+		(tool) => tool.name !== ToolNames.SelfCompact || !runtime.runtimeResolution.runtime.externalAgentLoop,
+	);
 }

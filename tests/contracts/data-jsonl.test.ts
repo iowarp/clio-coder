@@ -3,6 +3,7 @@ import { closeSync, mkdtempSync, openSync, rmSync, writeFileSync, writeSync } fr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { setImmediate } from "node:timers/promises";
 import v8 from "node:v8";
 import vm from "node:vm";
 import {
@@ -23,7 +24,13 @@ v8.setFlagsFromString("--expose-gc");
 const collectGarbage = vm.runInNewContext("gc") as () => void;
 
 /** Heap plus external memory after a forced collection: what is really retained. */
-function retainedMemory(): number {
+async function retainedMemory(): Promise<number> {
+	// Stream callbacks and Buffer backing-store finalizers can survive the
+	// first collection. Let them settle, then measure with the same protocol
+	// on both sides; keep the retention ceiling unchanged.
+	await setImmediate();
+	collectGarbage();
+	await setImmediate();
 	collectGarbage();
 	const usage = process.memoryUsage();
 	return usage.heapUsed + usage.external;
@@ -264,9 +271,9 @@ describe("contracts/data-jsonl", () => {
 		} finally {
 			closeSync(fd);
 		}
-		const baseline = retainedMemory();
+		const baseline = await retainedMemory();
 		const result = await inspect(path);
-		const retained = retainedMemory() - baseline;
+		const retained = (await retainedMemory()) - baseline;
 		ok(retained < 16 * 1024 * 1024, `retained ${Math.round(retained / 1024 / 1024)} MB after the scan`);
 		strictEqual(result.rowsScanned, 3);
 		strictEqual(result.linesScanned, 4);

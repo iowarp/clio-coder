@@ -98,6 +98,7 @@ function baseClassify(tool: string): ActionClass | null {
 		case ToolNames.WebFetch:
 		case ToolNames.Git:
 		case ToolNames.CodeNav:
+		case ToolNames.SelfCompact:
 		case ToolNames.Context:
 		// clio_docs and clio_library read Clio's bundled documentation and the
 		// recipe catalog; data streams structured files. None writes.

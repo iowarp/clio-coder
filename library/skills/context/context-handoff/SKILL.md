@@ -34,10 +34,16 @@ Write a durable brief so a fresh session continues the work without re-reading
 the whole transcript. This is the write-side bookend of `context-prime`, which
 reads what this produces.
 
-Distinct from two things it is often confused with:
+Choose the artifact that matches the continuation:
 
-- `/context compact` summarizes *within* the current session; it is ephemeral and lost
-  when the process exits. A handoff is a file that outlives the session.
+- `/context compact` writes a durable summary in the session ledger. `/resume`
+  replays that checkpoint after a restart. A handoff file gives a different
+  session or agent an explicit brief without requiring access to that ledger.
+- On native runtimes, `self_compact({note_to_self})` preserves an exact assistant
+  note while reducing context and continuing the same task. Call it alone, after
+  outstanding tools settle. Its pending receipt does not prove completion; inspect
+  `context(scope="budget")` and leave `/context recover <id> <reduce|deliver>` to
+  the operator if the handoff is paused.
 - `/handoff <goal>` is the built-in that writes a quick handoff file from the
   live session; this skill is the fuller authored version with redaction and
   reference-not-copy discipline.

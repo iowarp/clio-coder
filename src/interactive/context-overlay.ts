@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { relative } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import type { WorkingSetView } from "../domains/context/working-set/contract.js";
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
@@ -301,6 +302,7 @@ export interface OpenContextOverlayOptions {
 	chat?: {
 		onEvent(handler: (event: { type: string }) => void): () => void;
 		isStreaming(): boolean;
+		inspectLiveBudget?(): BudgetInspection;
 	};
 	/** Working-set fold at the live leaf; null or absent hides the section. */
 	getWorkingSet?: () => WorkingSetView | null;
@@ -320,13 +322,32 @@ export function openContextOverlay(
 	options?: OpenContextOverlayOptions,
 ): OverlayHandle {
 	let contentWidth = DEFAULT_CONTENT_WIDTH;
-	const render = (): string =>
-		renderContextLedgerLines(
+	const render = (): string => {
+		const lines = renderContextLedgerLines(
 			getLedger(),
 			contentWidth,
 			options?.getWorkingSet?.() ?? null,
 			options?.getWorkingSetConfig?.() ?? null,
-		).join("\n");
+		);
+		const inspection = options?.chat?.inspectLiveBudget?.();
+		if (inspection?.status === "available") {
+			const view = inspection.view;
+			const count = (value: number | null) => (value === null ? "unknown" : formatTokens(value));
+			lines.push(
+				"",
+				`Next request: ${count(view.inputTokens)} input + ${count(view.outputReserveTokens)} output`,
+				`Headroom: ${count(view.headroomTokens)} · ${view.phase}`,
+			);
+			if (view.pendingHandoff) {
+				lines.push(
+					`Handoff: ${view.lastOutcome?.outcome ?? "pending"}`,
+					view.pendingHandoff.id,
+					`/context recover ${view.pendingHandoff.id} reduce|deliver`,
+				);
+			} else if (view.lastOutcome) lines.push(`Last handoff: ${view.lastOutcome.outcome}`);
+		}
+		return lines.join("\n");
+	};
 	const text = new Text(render(), 0, 0);
 	const body = {
 		render(width: number): string[] {

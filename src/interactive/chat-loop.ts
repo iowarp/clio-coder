@@ -2,8 +2,13 @@ import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
 import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
-import { replaceEngineMessages } from "../engine/agent.js";
+import type { MemoryInterventionRegistration } from "../domains/middleware/memory-intervention.js";
+import { estimateAgentMessageTokens } from "../domains/session/context-accounting.js";
+import { createContinuityPersistencePorts } from "../domains/session/continuity/ports.js";
+import { continuityReplayText, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
+import { continueEngineWithoutInput, replaceEngineMessages } from "../engine/agent.js";
 import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
+import { ContinuityController } from "./continuity-controller.js";
 /**
  * The chat loop: one turn's state machine.
  *
@@ -373,6 +378,8 @@ export interface ChatLoop {
 	 * notice so the `/context compact` handler does not have to mirror the logic.
 	 */
 	compact(instructions?: string): Promise<void>;
+	requestSelfCompact(note: unknown, toolCallId: string, signal?: AbortSignal): Promise<string>;
+	recoverHandoff(handoffId: string, action: "reduce" | "deliver"): Promise<void>;
 	/**
 	 * `/btw`: answer one side question against the session's active target,
 	 * model, and compiled message history without starting a turn.
@@ -421,6 +428,7 @@ export interface ChatLoop {
 }
 
 export interface CreateChatLoopDeps {
+	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
@@ -489,7 +497,12 @@ export interface CreateChatLoopDeps {
 		trigger?: CompactionTrigger,
 		budget?: Pick<
 			CompactInput,
-			"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+			| "keepRecentTokens"
+			| "preserveUserTurnId"
+			| "skillContextState"
+			| "signal"
+			| "beforeSummaryCall"
+			| "checkpointForSummary"
 		>,
 	) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
@@ -548,7 +561,7 @@ export interface CreateChatLoopDeps {
 	 * observers produce after their turn boundary closed. Called once during
 	 * composition; the loop owns the buffer the reminder lands in.
 	 */
-	registerDeferredReminderSink?: (sink: (message: string) => void) => void;
+	registerDeferredReminderSink?: (sink: (message: string, isCurrent?: () => boolean) => void) => void;
 	/**
 	 * The same seam for findings that are for the operator rather than the model.
 	 * The watchdog uses it: its run settles after the turn it reviewed, and its
@@ -800,6 +813,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	const middleware = createTurnMiddleware({
+		memoryContentGuard: deps.memoryCommitBridge?.isContentCurrent,
 		state,
 		middleware: deps.middleware,
 		session: deps.session,
@@ -809,7 +823,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	});
 
 	try {
-		deps.registerDeferredReminderSink?.((message) => middleware.injectDeferredReminder(message));
+		deps.registerDeferredReminderSink?.((message, isCurrent) =>
+			middleware.injectDeferredReminder(message, "advisory", isCurrent),
+		);
 		deps.registerDeferredNoticeSink?.((text) => middleware.emitDeferredNotice(text));
 	} catch {
 		// A background observer losing its delivery path must not stop the loop
@@ -829,9 +845,124 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
 		getMemorySection: deps.getMemorySection,
+		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
+		getPendingHandoff: () => {
+			const sessionId = deps.session?.current()?.id;
+			if (!sessionId) return null;
+			const fold = resolveContinuityProjection({
+				entries: filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+				sessionId,
+			}).current;
+			return fold?.identity && fold.phase !== "acknowledged"
+				? {
+						id: fold.identity.handoffId,
+						preparedAt: fold.policy ? new Date(fold.policy.preparedAtMs).toISOString() : null,
+						sourceRevision: fold.identity.sourceRevision,
+					}
+				: null;
+		},
+		getLastOutcome: () => {
+			const sessionId = deps.session?.current()?.id;
+			if (!sessionId) return null;
+			const fold = resolveContinuityProjection({
+				entries: filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+				sessionId,
+			}).current;
+			return fold?.identity ? { outcome: fold.phase, at: null, detail: fold.commit?.outcome ?? null } : null;
+		},
 		middleware,
 		emitNotice,
+	});
+
+	let continuityReplayInstalled = false;
+	const continuity = new ContinuityController({
+		captureOrigin: () => {
+			continuityReplayInstalled = false;
+			const session = deps.session;
+			const meta = session?.current();
+			const runtime = state.runtime;
+			const leaf = state.lastTurnId;
+			const operator = state.activeUserTurnId;
+			if (!session || !meta || !runtime || !leaf || !operator || context.inspectLiveBudget().status !== "available") {
+				throw new Error("Self-compaction requires a native runtime and a persisted operator turn.");
+			}
+			const revision = context.navigationRevision();
+			const route = `${deps.getSettings().chat.target}/${deps.getSettings().chat.model}`;
+			return {
+				sessionId: meta.id,
+				leafTurnId: leaf,
+				initiatingTurnId: operator,
+				sourceRevision: context.refreshLiveBudget().revision,
+				ports: createContinuityPersistencePorts({
+					session,
+					origin: {
+						sessionId: meta.id,
+						cwdHash: meta.cwdHash,
+						stillCurrent: () =>
+							context.navigationRevision() === revision &&
+							state.runtime === runtime &&
+							state.activeUserTurnId === operator &&
+							`${deps.getSettings().chat.target}/${deps.getSettings().chat.model}` === route,
+					},
+				}),
+			};
+		},
+		entries: () => filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined),
+		leaf: () => state.lastTurnId,
+		admitNote: (accepted) => {
+			const view = context.refreshLiveBudget();
+			if (!view.breakdown || view.historical) return false;
+			const messages = state.runtime?.agent.state.messages ?? [];
+			const operator = [...messages].reverse().find((message) => message.role === "user");
+			const note = continuityReplayText({
+				note: accepted.note,
+				handoffId: "pending",
+				commitId: "pending",
+				originSessionId: view.sessionId ?? "",
+				phase: "prepared",
+				authority: "execution",
+			});
+			// Include the complete skill messages and tool receipts already in the
+			// protected suffix. The final guard still prices the actual replay.
+			const protectedSkills = messages
+				.filter((message) => message.role === "toolResult" && message.toolName === "context")
+				.reduce((sum, message) => sum + estimateAgentMessageTokens(message), 0);
+			const floor =
+				view.breakdown.systemPromptTokens +
+				view.breakdown.toolSchemaTokens +
+				protectedSkills +
+				(operator ? estimateAgentMessageTokens(operator) : 0) +
+				estimateAgentMessageTokens({ role: "assistant", content: [{ type: "text", text: note }] }) +
+				512;
+			return requestFits(floor, view.outputReserveTokens, view.effectiveWindow);
+		},
+		fits: () => {
+			const view = context.refreshLiveBudget();
+			return requestFits(view.inputTokens, view.outputReserveTokens, view.effectiveWindow);
+		},
+		inputTokens: () => context.refreshLiveBudget().inputTokens ?? 0,
+		reduce: async (hooks, signal) => {
+			if (!state.runtime) throw new Error("Native runtime was detached.");
+			continuityReplayInstalled = await context.runAutoCompact(
+				state.runtime,
+				true,
+				undefined,
+				"overflow",
+				undefined,
+				undefined,
+				signal,
+				hooks,
+			);
+		},
+		installReplay: () => {
+			if (state.runtime && !continuityReplayInstalled) {
+				context.refreshAgentMessagesFromSession(state.runtime);
+				continuityReplayInstalled = true;
+			}
+		},
+		onCommit: (commitId, outcome) => context.notifyMemoryCommit(commitId, "continuity", outcome),
+		notice: emitNotice,
 	});
 
 	const persistence = createTurnPersistence({
@@ -871,6 +1002,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		knownTargets: deps.knownTargets,
 		observability: deps.observability,
 		createAgent,
+		continuity,
+		hasQueuedSteering: () => queues.queuedMessages().steer.length > 0,
 		middlewareToolChoice,
 		persistence,
 		context,
@@ -1230,7 +1363,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// the user message: persisted in the ledger, no hidden prompt
 			// machinery.
 			middleware.fireTurnStart(agentRuntime, text, pendingSkillRequests.length, options.requestContinuation === true);
-			const reminderBlock = middleware.flushPendingReminders();
+			const reminderProjection = middleware.takePendingReminderProjection();
 			// Pending skill requests are plain visible text in the user message
 			// itself: persisted in the ledger, no hidden prompt machinery.
 			const skillPreamble = pendingSkillRequestPreamble(pendingSkillRequests);
@@ -1243,9 +1376,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					// the explicitly requested skill turn.
 				}
 			}
-			const submittedText = [reminderBlock, skillPreamble, taskMemoryHandoffSource, text]
-				.filter((part) => part.length > 0)
-				.join("\n\n");
+			const composeSubmittedText = () =>
+				[reminderProjection(), skillPreamble, taskMemoryHandoffSource, text].filter((part) => part.length > 0).join("\n\n");
+			let submittedText = composeSubmittedText();
 
 			// 2. Pre-submit auto-compaction trigger
 			const forceNow = process.env.CLIO_CODER_FORCE_COMPACT === "1";
@@ -1261,6 +1394,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 			// 3. Ensure the session prompt (compiles only on explicit events)
 			const compiledPrompt = await context.ensureSessionPrompt(agentRuntime);
+			submittedText = composeSubmittedText();
 
 			// 4. Preflight overflow check, before the user turn is committed.
 			// A blocked request must not leave a dangling user entry that the
@@ -1288,6 +1422,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 						failure = error instanceof Error ? error.message : String(error);
 					})
 					.finally(endPreparationCompaction);
+				submittedText = composeSubmittedText();
 				admission = context.refreshLiveBudget(submittedText);
 				if (!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)) {
 					emitAdmissionNotice(
@@ -1310,6 +1445,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				text,
 				options.display?.text,
 			);
+			context.installMemoryRestoration(agentRuntime, submittedText);
 			context.commitMemoryTurn(agentRuntime);
 			// An interrupt was submitted while a run was active, so no caller drew
 			// it in the transcript; render it here, after the cancel notice and the
@@ -1498,6 +1634,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		cancel(options?: ChatCancelOptions): void {
+			continuity.cancel();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
@@ -1577,6 +1714,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			continuity.cancel();
+			void continuity.pause();
 			state.currentTurnConstraints = undefined;
 			if (state.runtime) {
 				state.runtime.agent.abort();
@@ -1699,6 +1838,28 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
 		},
 
+		requestSelfCompact: (note, toolCallId, signal) => continuity.request(note, toolCallId, signal),
+		async recoverHandoff(handoffId, action) {
+			if (state.streaming || state.turnPreparation !== "idle")
+				throw new Error("Wait for the current turn to settle before recovery.");
+			const runtime = turnRuntime.ensureRuntime();
+			if (!runtime) throw new Error("No native runtime is configured.");
+			state.activeInterruptReason = null;
+			if (!state.activeUserTurnId) {
+				const operator = [...filterEntriesToActivePath(deps.readSessionEntries?.() ?? [], state.lastTurnId ?? undefined)]
+					.reverse()
+					.find((entry) => entry.kind === "message" && entry.role === "user");
+				state.activeUserTurnId = operator?.turnId ?? null;
+			}
+			state.streaming = true;
+			try {
+				await continuity.recover(handoffId, action);
+				await continueEngineWithoutInput(runtime.agent);
+			} finally {
+				state.streaming = false;
+				await continuity.pause();
+			}
+		},
 		async compact(instructions?: string): Promise<void> {
 			// Session check runs BEFORE orchestrator-configuration so a fresh
 			// TUI with nothing configured still reports the actionable "no

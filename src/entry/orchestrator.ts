@@ -829,7 +829,12 @@ async function runCompactionFlow(
 	observability?: BackgroundMemoryUsageSink,
 	budget?: Pick<
 		CompactInput,
-		"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+		| "keepRecentTokens"
+		| "preserveUserTurnId"
+		| "skillContextState"
+		| "signal"
+		| "beforeSummaryCall"
+		| "checkpointForSummary"
 	>,
 	summarize?: CompactInput["summarize"],
 ): Promise<CompactResult | null> {
@@ -984,6 +989,9 @@ async function runCompactionFlow(
 		// report`, which folded the ledger and so counted every call but this one.
 		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
+	if (budget?.checkpointForSummary) {
+		entry.continuity = budget.checkpointForSummary(entry.turnId, entry.tokensBefore, entry.tokensAfter ?? 0);
+	}
 	if (trigger !== undefined) entry.trigger = trigger;
 	try {
 		session.appendEntry(entry);
@@ -1043,7 +1051,12 @@ export function createProductionAutoCompact(
 	trigger?: CompactionTrigger,
 	budget?: Pick<
 		CompactInput,
-		"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+		| "keepRecentTokens"
+		| "preserveUserTurnId"
+		| "skillContextState"
+		| "signal"
+		| "beforeSummaryCall"
+		| "checkpointForSummary"
 	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
@@ -1551,7 +1564,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const memorySettings = (config?.get() ?? readSettings()).context.memory;
 	// Bound late: the registration is built here, but the buffer a deferred
 	// reminder lands in belongs to the chat loop that has not been composed yet.
-	let deferredMemoryReminderSink: ((message: string) => void) | null = null;
+	let deferredMemoryReminderSink: ((message: string, isCurrent?: () => boolean) => void) | null = null;
 	// The watchdog's findings are for the operator, not the model, so they take
 	// the transcript-notice path rather than the reminder buffer. Bound late for
 	// the same reason: the chat loop that owns the transcript is composed below.
@@ -1606,7 +1619,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		// A headless run submits no further turn, so a detached step could only
 		// finish after the process that would have read it has exited.
 		deliversDeferredReminders: options.headless === undefined,
-		onDeferredReminder: (message) => deferredMemoryReminderSink?.(message),
+		onDeferredReminder: (message, isCurrent) => deferredMemoryReminderSink?.(message, isCurrent),
 		getSettings: () => {
 			const memory = effectiveSettingsForDispatch?.().context.memory ?? memorySettings;
 			return {
@@ -1860,6 +1873,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			: null;
 	const toolBootstrap = registerAllTools(toolRegistry, {
 		getContextBudget: () => chat.inspectLiveBudget(),
+		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),
 		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,
@@ -2261,6 +2275,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				agentIds: [],
 			});
 		},
+		memoryCommitBridge: memoryIntervention,
 		registerDeferredReminderSink: (sink) => {
 			deferredMemoryReminderSink = sink;
 		},
@@ -2855,6 +2870,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 							);
 						}
 					},
+					onRecoverHandoff: (handoffId, action) => chat.recoverHandoff(handoffId, action),
 					onCompact: async (instructions) => {
 						await chat.compact(instructions);
 					},

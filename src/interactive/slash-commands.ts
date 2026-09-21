@@ -144,6 +144,7 @@ type SlashCommandVariant =
 	| { kind: "context-refresh" }
 	/** `ref` is the turnId an `[evicted ...]` marker names. */
 	| { kind: "context-recall"; ref: string }
+	| { kind: "context-recover"; handoffId: string; action: "reduce" | "deliver" }
 	| {
 			kind: "resources";
 			family?: "extensions" | "plugins";
@@ -823,6 +824,7 @@ export interface SlashCommandContext {
 	 * appends a compactionSummary entry. No-op when no session is open, so the
 	 * handler prints an actionable stderr line instead.
 	 */
+	runHandoffRecovery?: (handoffId: string, action: "reduce" | "deliver") => void;
 	runCompact: (instructions: string | undefined) => void;
 	/**
 	 * Escape hatch for the `view verify` entry: verify a receipt file on disk
@@ -1700,9 +1702,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		name: "context",
 		description: "Context hub: window overlay plus compact, recall, init, refresh, and reset",
 		group: "Inspect",
-		kinds: ["context-view", "compact", "context-recall", "init", "context-clear", "context-refresh"],
+		kinds: ["context-view", "compact", "context-recover", "context-recall", "init", "context-clear", "context-refresh"],
 		subcommandDescriptions: {
 			compact: "Compact session context",
+			recover: "Recover a paused handoff: ID reduce|deliver",
 			recall: "Recall an evicted result",
 			init: "Initialize project context",
 			refresh: "Refresh project context",
@@ -1711,6 +1714,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		args: {
 			subcommands: {
 				compact: { positionals: [...COMPACT_POSITIONALS] },
+				recover: {
+					positionals: [
+						{ name: "handoffId", required: true },
+						{ name: "action", required: true },
+					],
+				},
 				recall: { positionals: [...RECALL_POSITIONALS] },
 				init: {
 					flags: CONTEXT_INIT_FLAG_TABLE.flatMap(({ flag, aliases = [] }) => [flag, ...aliases].map((name) => ({ name }))),
@@ -1724,6 +1733,12 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			switch (parsed.subcommand) {
 				case "compact":
 					return { kind: "compact", instructions: parsed.rest };
+				case "recover": {
+					const [handoffId, action] = parsed.positionals;
+					return handoffId && (action === "reduce" || action === "deliver")
+						? { kind: "context-recover", handoffId, action }
+						: { kind: "usage-error", command: "context", reason: "Use /context recover <handoffId> <reduce|deliver>" };
+				}
 				case "recall":
 					return { kind: "context-recall", ref: parsed.positionals[0] ?? "" };
 				case "init": {
@@ -1751,6 +1766,10 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 					return;
 				case "compact":
 					ctx.runCompact(command.instructions);
+					return;
+				case "context-recover":
+					if (ctx.runHandoffRecovery) ctx.runHandoffRecovery(command.handoffId, command.action);
+					else ctx.notice("error", "native handoff recovery is unavailable");
 					return;
 				case "context-recall":
 					if (ctx.runContextRecall) {
