@@ -2027,10 +2027,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// The mid-run settled tool-batch boundary: whatever the guard did or
 			// declined to do, this is the context the continuation will send.
 			const afterView = refreshLiveBudget();
-			const after = liveContextEstimate(agentRuntime);
 			if (!requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
 				throw new Error(
-					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
+					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated input ${afterView.inputTokens} plus reserved output ${afterView.outputReserveTokens} tokens does not fit context window ${afterView.effectiveWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);
 			}
 			return compacted ? continuationContextUpdate(agentRuntime) : undefined;

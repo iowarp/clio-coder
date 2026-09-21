@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { tokenHex } from "../../src/core/theme-token-hex.js";
 import { parseTomlDocument } from "../../src/core/toml.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import type { MuxContract } from "../../src/domains/mux/contract.js";
@@ -480,14 +481,14 @@ describe("contracts/files pane theme", () => {
 		const theme = renderYaziTheme();
 		const parsed = parseTomlDocument(theme);
 		ok(parsed, "the yazi theme must parse as TOML");
-		match(theme, /cwd = \{ fg = "#46e5d0" \}/u);
+		ok(theme.includes(`cwd = { fg = "${tokenHex("accent")}" }`));
 		for (const section of ["mgr", "mode", "status", "which", "pick", "input", "notify"]) {
 			ok(theme.includes(`[${section}]`), `theme must cover [${section}]`);
 		}
 		const herdr = renderHerdrThemeBlock();
 		ok(parseTomlDocument(herdr), "the herdr block must parse as TOML");
 		match(herdr, /\[theme\.custom\]/u);
-		match(herdr, /accent = "#46e5d0"/u);
+		ok(herdr.includes(`accent = "${tokenHex("accent")}"`));
 		// Every literal color in both documents is one of Clio's tokens.
 		const colors = new Set([...`${theme}${herdr}`.matchAll(/#[0-9a-f]{6}/gu)].map((m) => m[0]));
 		for (const color of colors) ok(theme.includes(color) || herdr.includes(color));

@@ -174,7 +174,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
 			"done completes a task (started or still pending) and requires note as the " +
 			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
-			"For operator handoff, pick the intended uN and use its linked tN; CLI hand does not pick it. Never pick unrelated tasks. " +
+			"For operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. Never pick unrelated tasks. " +
 			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
 			"For proposal-only work, plan/add with initialStatus=blocked and note naming the pending operator decision; " +

@@ -16,6 +16,7 @@ import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createDispatchTool } from "../../src/tools/dispatch.js";
@@ -157,38 +158,33 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 		knownTargets: () => new Set(["fixture"]),
 		toolRegistry: f.registry,
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
-			const state = options?.initialState;
-			ok(state);
+			const handle = createEngineAgent(options);
+			const state = handle.agent.state;
 			let listener: ((event: AgentEvent) => void) | undefined;
-			return {
-				agent: {
-					state,
-					abort() {},
-					subscribe: (callback: (event: AgentEvent) => void) => {
-						listener = callback;
-						return () => {};
-					},
-					prompt: async () => {
-						const dispatch = state.tools?.find((entry) => entry.name === "dispatch");
-						ok(dispatch, "the real chat loop must install the admitted dispatch tool");
-						const result = await dispatch.execute("fixture-call", {
-							agent: "scout",
-							task: "Inspect input.txt",
-							cwd: process.cwd(),
-						});
-						strictEqual(result.details.kind, "ok", JSON.stringify(result).slice(0, 1200));
-						await duringSubmit?.();
-						const message = {
-							role: "assistant",
-							content: [{ type: "text", text: "Complete" }],
-							stopReason: "stop",
-							timestamp: Date.now(),
-						} as AgentMessage;
-						state.messages?.push(message);
-						listener?.({ type: "message_end", message });
-					},
-				},
+			handle.agent.subscribe = (callback) => {
+				listener = callback;
+				return () => {};
 			};
+			handle.agent.prompt = async () => {
+				const dispatch = state.tools?.find((entry) => entry.name === "dispatch");
+				ok(dispatch, "the real chat loop must install the admitted dispatch tool");
+				const result = await dispatch.execute("fixture-call", {
+					agent: "scout",
+					task: "Inspect input.txt",
+					cwd: process.cwd(),
+				});
+				strictEqual(result.details.kind, "ok", JSON.stringify(result).slice(0, 1200));
+				await duringSubmit?.();
+				const message = {
+					role: "assistant",
+					content: [{ type: "text", text: "Complete" }],
+					stopReason: "stop",
+					timestamp: Date.now(),
+				} as AgentMessage;
+				state.messages?.push(message);
+				listener?.({ type: "message_end", message });
+			};
+			return handle;
 		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
 	});
 	try {
