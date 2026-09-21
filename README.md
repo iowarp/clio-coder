@@ -253,7 +253,7 @@ once its release tag is published; for development before the tag, use the
 [contributor checkout instructions](CONTRIBUTING.md#set-up-a-checkout).
 
 ```bash
-git clone --branch v0.5.1 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.5.2 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
