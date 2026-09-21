@@ -1,4 +1,6 @@
-import { estimateMemoryTokens, selectApprovedMemory } from "./operations.js";
+import { ceilChars } from "../session/context-accounting.js";
+import { eligibleMemoryRecords } from "./operations.js";
+import { type MemoryRelevanceInput, type RankedMemoryCandidate, rankMemoryByRelevance } from "./relevance.js";
 import type {
 	MemoryAgentIdentity,
 	MemoryRecord,
@@ -21,6 +23,8 @@ export const MEMORY_PROMPT_DEFAULT_MAX_ITEMS = 5;
 export const MEMORY_PROMPT_DEFAULT_SCOPES: ReadonlyArray<MemoryScope> = ["global", "repo"];
 
 export interface MemoryPromptOptions {
+	/** Explicit experiment only; omitted options preserve legacy priority. */
+	relevance?: MemoryRelevanceInput;
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget?: number;
 	maxItems?: number;
@@ -42,18 +46,51 @@ export function selectMemoryForPrompt(
 	records: ReadonlyArray<MemoryRecord>,
 	options: MemoryPromptOptions = {},
 ): MemoryRecord[] {
+	return inspectMemoryPromptSelection(records, options).records;
+}
+
+export interface MemoryPromptDecision {
+	id: string;
+	reason: "selected" | "token-budget" | "item-limit";
+	relevance?: Omit<RankedMemoryCandidate, "record">;
+}
+
+/** Diagnostics cover eligible candidates only: excluded records are never scored. */
+export function inspectMemoryPromptSelection(
+	records: ReadonlyArray<MemoryRecord>,
+	options: MemoryPromptOptions = {},
+): { records: MemoryRecord[]; decisions: MemoryPromptDecision[] } {
 	const scopes = options.scopes ?? MEMORY_PROMPT_DEFAULT_SCOPES;
 	const tokenBudget = options.tokenBudget ?? MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET;
 	const maxItems = options.maxItems ?? MEMORY_PROMPT_DEFAULT_MAX_ITEMS;
-	if (tokenBudget <= 0 || maxItems <= 0) return [];
-	const selected = selectApprovedMemory(records, {
+	if (!Number.isFinite(tokenBudget) || !Number.isFinite(maxItems) || tokenBudget <= 0 || maxItems < 1)
+		return { records: [], decisions: [] };
+	const eligibility = {
 		scopes,
-		tokenBudget,
 		activeRepository: options.activeRepository ?? null,
 		activeRuntime: options.activeRuntime ?? null,
 		activeAgent: options.activeAgent ?? null,
-	});
-	return selected.slice(0, maxItems);
+	};
+	const candidates =
+		options.relevance === undefined
+			? eligibleMemoryRecords(records, eligibility).map((record) => ({ record, relevance: undefined }))
+			: rankMemoryByRelevance(records, eligibility, options.relevance).map(({ record, ...relevance }) => ({
+					record,
+					relevance,
+				}));
+	const selected: MemoryRecord[] = [];
+	const decisions: MemoryPromptDecision[] = [];
+	for (const { record, relevance } of candidates) {
+		const reason =
+			selected.length >= Math.floor(maxItems)
+				? "item-limit"
+				: ceilChars(renderMemoryPromptSection([...selected, record]).length) > tokenBudget
+					? "token-budget"
+					: "selected";
+		decisions.push({ id: record.id, reason, ...(relevance === undefined ? {} : { relevance }) });
+		if (reason === "selected") selected.push(record);
+	}
+	return { records: selected, decisions };
 }
 
 /**
@@ -74,8 +111,14 @@ export function renderMemoryPromptSection(records: ReadonlyArray<MemoryRecord>):
 		const lesson = record.lesson.replace(/\s+/g, " ").trim();
 		const evidence = record.evidenceRefs.join(", ");
 		lines.push(`- [${record.id}] (${renderApplicability(record)}) ${lesson} Evidence: ${evidence}.`);
+		if (record.appliesWhen.length > 0) lines.push(`  Applies when: ${record.appliesWhen.map(compactText).join("; ")}.`);
+		if (record.avoidWhen.length > 0) lines.push(`  Avoid when: ${record.avoidWhen.map(compactText).join("; ")}.`);
 	}
 	return lines.join("\n");
+}
+
+function compactText(value: string): string {
+	return value.replace(/\s+/g, " ").trim();
 }
 
 function renderApplicability(record: MemoryRecord): string {
@@ -101,6 +144,6 @@ export function buildMemoryPromptSection(
 ): { section: string; records: MemoryRecord[]; tokens: number } {
 	const selected = selectMemoryForPrompt(records, options);
 	const section = renderMemoryPromptSection(selected);
-	const tokens = selected.reduce((acc, record) => acc + estimateMemoryTokens(record), 0);
+	const tokens = ceilChars(section.length);
 	return { section, records: selected, tokens };
 }
