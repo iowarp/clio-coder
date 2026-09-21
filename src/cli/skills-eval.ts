@@ -484,12 +484,12 @@ export async function skillTreeDigest(baseDir: string): Promise<string | null> {
  * evidence about a cooperative model, which is the same caveat
  * `materializeSkillEvalWorkspaces` already records about arm isolation.
  *
- * Returns null when the artifact cannot be snapshotted faithfully, which is the
- * honest answer for the two cases pinning would otherwise misrepresent: a tree
- * whose digest could not be taken, and a body carrying package references. Those
- * resolve against the owning package root, which sits above the skill directory
- * and is not part of the copy, so a pinned copy would deliver different
- * instructions from the ones the live path delivers.
+ * Returns false for the one case a copy would misrepresent: a body carrying
+ * package references. Those resolve against the owning package root, which
+ * sits above the skill directory and is not part of the copy, so a copied
+ * skill would deliver different instructions from the ones the live path
+ * delivers. A tree whose digest cannot be taken is a separate failure and is
+ * reported by `skillTreeDigest` returning null.
  *
  * @internal Exported for contract tests.
  */
@@ -1165,7 +1165,7 @@ const SUBJECT_REFUSAL: Record<Exclude<SubjectVerification, "verified">, string> 
 		"the measured skill tree changed on disk during this scenario, so its two arms did not run against one artifact",
 	unreadable: "the measured skill tree could not be re-read, so the artifact under test is unverified",
 	"not-pinned":
-		"the skill body carries package references, which resolve against an owning package root outside the skill directory, so the artifact could not be pinned to an immutable copy for this run",
+		"the skill body carries package references, which resolve against an owning package root outside the skill directory, so the artifact could not be copied faithfully for this run",
 	"not-activated":
 		"the treatment arm recorded no successful activation of this skill, so nothing establishes that the measured artifact ran",
 	"activation-mismatch":
@@ -1267,7 +1267,11 @@ export interface MaterializedSkillEvalWorkspaces {
 	judge: string;
 	/** The baseline judge gets its own root for the same reason the other arms do. */
 	baselineJudge: string;
-	/** Immutable copy of the artifact the treatment arm loads; null when unpinnable. */
+	/**
+	 * Private per-run copy of the artifact the treatment arm loads; null when the
+	 * artifact cannot be copied faithfully. Isolated from the source directory,
+	 * not read-only to the arm itself.
+	 */
 	pin: string | null;
 	cleanup(): Promise<void>;
 }

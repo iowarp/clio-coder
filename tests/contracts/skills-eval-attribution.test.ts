@@ -605,7 +605,7 @@ describe("contracts/skill eval scenario orchestration", () => {
 			{ pinnable: false },
 			answering(),
 			"unmeasured",
-			"could not be pinned to an immutable copy",
+			"could not be copied faithfully",
 		],
 	];
 
