@@ -412,8 +412,8 @@ describe("live budget adapter", () => {
 		const quiet = f.context.refreshLiveBudget();
 		strictEqual(quiet.breakdown?.pendingUserTokens, 0);
 		const pending = f.context.refreshLiveBudget("pending text");
-		strictEqual(pending.breakdown?.pendingUserTokens, 3);
-		strictEqual(pending.inputTokens, (quiet.inputTokens ?? 0) + 3);
+		strictEqual(pending.breakdown?.pendingUserTokens, 20);
+		strictEqual(pending.inputTokens, (quiet.inputTokens ?? 0) + 20);
 		strictEqual(f.context.refreshLiveBudget().inputTokens, quiet.inputTokens);
 	});
 

@@ -827,7 +827,10 @@ async function runCompactionFlow(
 	instructions?: string,
 	trigger?: CompactionTrigger,
 	observability?: BackgroundMemoryUsageSink,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
+	budget?: Pick<
+		CompactInput,
+		"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+	>,
 	summarize?: CompactInput["summarize"],
 ): Promise<CompactResult | null> {
 	const meta = session.current();
@@ -1038,7 +1041,10 @@ export function createProductionAutoCompact(
 ): (
 	instructions?: string,
 	trigger?: CompactionTrigger,
-	budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
+	budget?: Pick<
+		CompactInput,
+		"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+	>,
 ) => Promise<CompactResult | null> {
 	return (instructions, trigger, budget) =>
 		runCompactionFlow(session, getSettings(), providers, instructions, trigger, observability, budget, summarize);
