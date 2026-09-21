@@ -39,6 +39,7 @@ export const TOOL_PLACEMENT: Readonly<Record<BuiltinToolName, ToolPlacement>> = 
 	[ToolNames.Ls]: "direct",
 	[ToolNames.CodeNav]: "direct",
 	[ToolNames.Context]: "direct",
+	[ToolNames.SelfCompact]: "direct",
 	[ToolNames.CredentialPresent]: "gateway",
 	[ToolNames.ClioDocs]: "gateway",
 	[ToolNames.ClioLibrary]: "gateway",

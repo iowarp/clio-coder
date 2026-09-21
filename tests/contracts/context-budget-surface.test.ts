@@ -180,8 +180,8 @@ describe("native budget inspection through the registered context tool", () => {
 	it("refreshes after tool growth, shares the UI revision, and leaves accounting reads free of persistence/reduction", async () => {
 		const f = fixture();
 		const first = await inspect(f.registry);
-		strictEqual(first.payload.mode, "shadow");
-		match(first.payload.admissionNote, /captured-snapshot floor/);
+		strictEqual(first.payload.mode, "enforced");
+		match(first.payload.admissionNote, /input plus reserved output/);
 		const before = viewOf(first.payload);
 		f.runtime.agent.state.messages.push(result("漢字".repeat(8000)));
 		const grown = viewOf((await inspect(f.registry)).payload);

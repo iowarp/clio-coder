@@ -232,7 +232,7 @@ entries:
       - write a continuation brief
     version: 0.5.1
     sourceUrl: skills/context/context-handoff
-    sha256: f5d32418c95dcc9766b5564b00e9d27de6c86662b742666792f1ef984921ad24
+    sha256: 64fc4593679735a9e827d8753183595c48fc38ce031902af2d17da7f747a68b1
     provides:
       - kind: skill
         name: context-handoff

@@ -4,6 +4,8 @@ Clio manages two kinds of context: the material sent to your model, and the proj
 
 **Start with `/context`.** It shows the current model window, context usage, project guidance, and available cache measurements. Most sessions need no manual tuning.
 
+For exact assistant handoffs, request admission, and interrupted-session recovery, see [Context continuity and recovery](../guide/context-continuity.md).
+
 ## Choose the action you need
 
 | You want to… | Use | What to expect |

@@ -4,6 +4,21 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## Unreleased
 
+## 0.5.2 - 2026-09-21
+
+### Context continuity and memory
+
+- Add native `self_compact({note_to_self})` with exact assistant-authored notes, whole-batch exclusivity, durable preparation and reduction attempts, summary/eviction checkpoints, continuation delivery, and acknowledgement tied to the persisted successful response. Bound each handoff to two attempts and four summary invocations, and preserve the original operator turn across continuation.
+- Add `/context recover <handoffId> <reduce|deliver>` for explicit recovery, with branch-bound operator authority, preserved transaction identity, bounded deadlines, and no automatic redelivery after an uncertain interruption. Session format v5 retains continuity records through replay, forks, export, and later summaries; inherited notes remain recall only.
+- Enforce input plus reserved output at submission, settled tool continuation, and the final provider boundary. Price pending message framing and images, serialize reductions, retain calibrated accounting through eviction, and inspect the live budget through `context(scope="budget")` and `/context`.
+- Freeze approved durable-memory selection for a prepared turn and its continuations, using bounded content hashes that detect same-size rewrites. Retain existing default record/token limits and keep lexical relevance ranking experimental.
+- Restore private task memory only after successful durable reductions and admitted installation. Revoke pre-commit content jobs and queued reminders while retaining originating usage, deduplicate successful commit notifications, and close repeated-failure episodes on exact successful tool receipts.
+
+### Skills and harness correctness
+
+- Add bounded query/paging for skill discovery with a preserved response footer and visible installed-skill drift. Record exact skill artifacts in evaluation sidecars and independently judge the baseline for non-gating helped/regressed/mixed/no-change/unmeasured attribution.
+- Correct handoff guidance about persisted summaries, repair the first-turn system-prompt fixture, remove checkout-name dependence from the quota footer test, and stabilize retained-memory measurement across stream finalization without relaxing its memory ceiling.
+
 ### Self-development skills
 
 - Redesign `clio-coder-dev` and `clio-coder-test` around source ownership, bounded sprint work, lifecycle correctness, isolated candidate builds, focused validation, and honest evidence. Update their reference maps, behavioral scenarios, and package metadata.

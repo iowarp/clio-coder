@@ -214,3 +214,12 @@ export function replaceEngineMessages(
 export function setEngineSystemPrompt(agent: Agent, systemPrompt: string): void {
 	replaceEngineMessages(agent, agent.state.messages, systemPrompt);
 }
+
+/** Explicit host recovery can follow a terminal assistant. Empty input starts
+ * the native loop on the installed transcript without emitting a user message.
+ * Agent.continue() rejects that tail even when durable operator control already
+ * authorized another invocation. Normal tool continuation stays inside Pi.
+ */
+export function continueEngineWithoutInput(agent: Agent): Promise<void> {
+	return agent.prompt([]);
+}

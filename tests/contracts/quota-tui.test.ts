@@ -1,4 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
+import { basename } from "node:path";
 import { test } from "node:test";
 import { setImmediate } from "node:timers/promises";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
@@ -149,7 +150,7 @@ test("footer keeps unassociated accounts out of compact rows and supplies all ac
 		const compact = footer.view.render(160);
 		strictEqual(compact.length, 2);
 		doesNotMatch(plain(compact), /Claude|Codex|Antigravity|weekly/);
-		match(plain(compact), /clio-coder/);
+		ok(plain(compact).includes(basename(process.cwd())));
 		columns = 50;
 		footer.refresh();
 		const narrow = footer.view.render(50);

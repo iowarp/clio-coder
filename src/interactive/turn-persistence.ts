@@ -60,7 +60,11 @@ export interface TurnPersistenceDeps {
 export interface TurnPersistence {
 	/** True when this exact assistant message object was already persisted. */
 	wasPersisted(message: unknown): boolean;
-	appendAssistantTurn(message: AgentMessage, timing?: AssistantCallTiming | null): void;
+	appendAssistantTurn(
+		message: AgentMessage,
+		timing?: AssistantCallTiming | null,
+		deliveryId?: string,
+	): string | undefined;
 	appendQueuedUserTurn(message: AgentMessage): void;
 	appendToolCallTurn(event: Extract<AgentEvent, { type: "tool_execution_start" }>): void;
 	appendToolResultTurn(
@@ -226,7 +230,11 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		};
 	};
 
-	const appendAssistantTurn = (message: AgentMessage, timing?: AssistantCallTiming | null): void => {
+	const appendAssistantTurn = (
+		message: AgentMessage,
+		timing?: AssistantCallTiming | null,
+		deliveryId?: string,
+	): string | undefined => {
 		if (message?.role !== "assistant") return;
 		if (persistedAssistantMessages.has(message)) return;
 		// A loop-guard interrupt already persisted a durable closing turn with the
@@ -237,6 +245,10 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 		const failure = terminalFailureFromAssistantMessage(message);
 		const payload = assistantSessionPayload(message, failure);
 		if (timing) payload.timing = timing;
+		if (deliveryId) {
+			payload.continuityDeliveryId = deliveryId;
+			payload.stopReason = message.stopReason;
+		}
 		const usage = (message as { usage?: Usage }).usage;
 		if (usage && typeof usage === "object") {
 			const backendTimings = (message as { backendTimings?: BackendCompletionTimings }).backendTimings;
@@ -279,6 +291,7 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			tokens: traceUsage?.totalTokens ?? null,
 		});
 		if (!turnContinues) finishTracedTurn(failure ? "fail" : "success", failure?.errorMessage ?? null);
+		return turn.id;
 	};
 
 	return {

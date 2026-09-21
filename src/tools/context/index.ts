@@ -760,9 +760,9 @@ function runBudgetScope(
 		inspection.status === "available"
 			? {
 					...inspection,
-					mode: "shadow",
+					mode: "enforced",
 					admissionNote:
-						"Advisory only: submit retains its captured-snapshot floor; post-tool enforcement does not yet reserve output.",
+						"Submission and continuation enforce input plus reserved output against the effective window. Counts are estimates unless provider-attested; pressure advice remains advisory.",
 				}
 			: inspection;
 	const full = JSON.stringify(payload);

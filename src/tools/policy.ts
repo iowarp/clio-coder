@@ -36,6 +36,7 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.Find]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.Ls]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.CodeNav]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
+	[ToolNames.SelfCompact]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
 	[ToolNames.Context]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.CredentialPresent]: { plane: "observe", actionClass: "read", executionMode: "parallel" },
 	// clio_docs and clio_library are the bundled-documentation and recipe-catalog
@@ -191,6 +192,8 @@ export function validateBuiltinToolPolicy(
 	const includeLedgerTools = options.includeLedgerTools ?? false;
 	const includeNetworkTools = options.includeNetworkTools ?? true;
 	const required = new Set<ToolName>(Object.values(ToolNames));
+	// The native interactive host alone supplies the durable continuity port.
+	required.delete(ToolNames.SelfCompact);
 	for (const tool of [...required]) {
 		if (!includeSessionTools && SESSION_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeDispatchTools && DISPATCH_BOUND_TOOLS.has(tool)) required.delete(tool);

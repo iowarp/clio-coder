@@ -1,5 +1,8 @@
 # Proactive task memory
 
+
+After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
+
 Clio's proactive task memory protects long-running work from behavioral state
 decay: a requirement, environment fact, failed attempt, or diagnosis can still
 exist in the transcript while no longer influencing the next action. The design

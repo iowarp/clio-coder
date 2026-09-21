@@ -22,11 +22,13 @@ import { lazyTool } from "./lazy-tool.js";
 import { monitorToolSurface } from "./monitor-surface.js";
 import { panesToolSurface } from "./panes-surface.js";
 import type { ToolRegistry } from "./registry.js";
+import { createSelfCompactTool, type RequestSelfCompact } from "./self-compact.js";
 import { steerToolSurface } from "./steer-surface.js";
 
 export { toolPromptHintsForNames };
 
 export interface ToolBootstrapDeps extends Omit<CoreToolBootstrapDeps, "mcpCapabilities"> {
+	requestSelfCompact?: RequestSelfCompact;
 	captureWorkerContext?: () => WorkerContextSnapshot | null;
 	dispatch?: DispatchContract;
 	bus?: SafeEventBus;
@@ -77,6 +79,10 @@ export function registerAllTools(registry: ToolRegistry, deps: ToolBootstrapDeps
 		...coreDeps,
 		...(mcpCapabilities ? { mcpCapabilities } : {}),
 	});
+	if (deps.requestSelfCompact)
+		registry.register(
+			builtin(createSelfCompactTool(deps.requestSelfCompact), { path: "src/tools/self-compact.ts", scope: "core" }),
+		);
 	if (deps.dispatch) {
 		const dispatch = deps.dispatch;
 		// Display tail only. In a composed process the dispatch domain writes the

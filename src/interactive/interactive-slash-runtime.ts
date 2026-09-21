@@ -114,6 +114,7 @@ export interface InteractiveSlashRuntimeDeps {
 	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "global") => void;
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
+	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;
 	onContextClear?: (options: ContextClearCommandOptions, io?: RunIo) => Promise<void>;
 	onContextRefresh?: (io?: RunIo) => Promise<void>;
@@ -593,6 +594,17 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		setEditorText: (text) => {
 			deps.setEditorText(text);
 			deps.requestRender();
+		},
+		runHandoffRecovery: (handoffId, action) => {
+			if (!deps.onRecoverHandoff) {
+				appendCommandNotice("error", "[/context recover] native handoff recovery is unavailable");
+				return;
+			}
+			void deps
+				.onRecoverHandoff(handoffId, action)
+				.catch((error) =>
+					appendCommandNotice("error", `[/context recover] ${error instanceof Error ? error.message : String(error)}`),
+				);
 		},
 		runCompact: (instructions) => {
 			runCompactWithNotice(deps.onCompact, appendCommandNotice, instructions);
