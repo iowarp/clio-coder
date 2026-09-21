@@ -1,5 +1,6 @@
 import type { ClioSettings } from "../../core/config.js";
 import { readClioVersion } from "../../core/package-root.js";
+import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
 import type { TaskMemoryOperatorStatus } from "../../domains/memory/index.js";
 import {
@@ -100,7 +101,8 @@ export interface FooterDashboardDeps {
 	getSessionTokens?: () => UsageBreakdown;
 	getTokenThroughput?: () => TokenThroughputSnapshot | null;
 	getSessionCost?: () => CostAggregate;
-	getContextUsage?: () => ContextUsageSnapshot;
+	getContextUsage?: () => ContextUsageSnapshot &
+		Partial<Pick<LiveBudgetView, "revision" | "historical" | "inputSource">>;
 	getContextLedger?: () => ContextLedger;
 	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
 	getTaskBoard?: () => TaskBoardSnapshot | null;
@@ -458,6 +460,15 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 					: null,
 			},
 			context: {
+				...(contextUsage?.revision
+					? {
+							budget: {
+								revision: contextUsage.revision,
+								historical: contextUsage.historical ?? true,
+								inputSource: contextUsage.inputSource ?? "unknown",
+							},
+						}
+					: {}),
 				label: null,
 				used: contextUsage?.tokens ?? null,
 				contextWindow: contextUsage?.contextWindow ?? null,

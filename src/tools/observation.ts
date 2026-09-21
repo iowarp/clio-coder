@@ -306,6 +306,8 @@ function bumpExhaustedStreak(key: string | null): number {
 export function observationBudgetExhausted(input: {
 	tool: string;
 	unit: ObservationUnit;
+	/** Preserve parseable JSON for structured inspection tools, without offloading. */
+	format?: ObservationFormat;
 	reservation: ObservationReservation;
 	subject: string;
 	hint: string;
@@ -322,7 +324,11 @@ export function observationBudgetExhausted(input: {
 		recordSpentBytes(reservation, byteLength(message));
 		return { kind: "error", message };
 	}
-	const output = `[observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}]`;
+	const message = `observation budget exhausted for this turn before ${tool} ${subject}: ${spent}. ${hint}`;
+	const output =
+		input.format === "json"
+			? JSON.stringify({ status: "unavailable", reason: "observation-budget-exhausted", message })
+			: `[${message}]`;
 	const shownBytes = byteLength(output);
 	recordSpentBytes(reservation, shownBytes);
 	const budget = budgetDetails(reservation);
@@ -336,7 +342,7 @@ export function observationBudgetExhausted(input: {
 		// the full size is the message itself; keep totalBytes >= shownBytes.
 		totalBytes: shownBytes,
 		truncated: true,
-		format: "text",
+		format: input.format ?? "text",
 		...(budget !== null ? { budget } : {}),
 	};
 	return { kind: "ok", output, details: { observation } };

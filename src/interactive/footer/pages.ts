@@ -4,7 +4,7 @@ import type { UsageSnapshot } from "../../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
 import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { contextCategorySwatch, renderContextMeterBar, renderContextMeterGrid } from "../context-meter.js";
+import { contextCategorySwatch, renderContextMeterGrid } from "../context-meter.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
@@ -13,7 +13,7 @@ import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
-import { activityQuadrant, contextQuadrant, zipColumns } from "./widgets.js";
+import { activityQuadrant, contextOccupancyBar, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -183,13 +183,15 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 		...wrapTextWithAnsi(
 			theme.style(
 				"accent",
-				`${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown window"} tokens${ledger.percent === null ? "" : ` · ${ledger.percent.toFixed(1)}% occupied`}`,
+				state.context.budget
+					? `${contextUsageText(state.context)} tokens`
+					: `${formatFooterTokens(ledger.usedTokens)} / ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.contextWindow) : "unknown window"} tokens${ledger.percent === null ? "" : ` · ${ledger.percent.toFixed(1)}% occupied`}`,
 				{ bold: true },
 			),
 			width,
 		),
 		...wrapTextWithAnsi(
-			`Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${ledger.compactionAuto ? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}` : "manual"}`,
+			`${state.context.budget ? "Capture diagnostics: " : ""}Free ${ledger.contextWindow > 0 ? formatFooterTokens(ledger.freeTokens) : "unknown"} · reserved ${formatFooterTokens(ledger.reserveTokens)} · ${ledger.toolCount} tool definitions · compaction ${ledger.compactionAuto ? `auto${ledger.compactionThreshold === null ? "" : ` @${Math.round(ledger.compactionThreshold * 100)}%`}` : "manual"}`,
 			width,
 		),
 	];
@@ -206,7 +208,13 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 				legendWidth,
 			),
 		);
-	out.push("", rule(theme, width, { left: "CONTEXT COMPOSITION", leftToken: "accent" }));
+	out.push(
+		"",
+		rule(theme, width, {
+			left: state.context.budget ? "CAPTURE DIAGNOSTICS" : "CONTEXT COMPOSITION",
+			leftToken: "accent",
+		}),
+	);
 	out.push(...(width >= 76 ? zipColumns(grid, legend, gridWidth, legendWidth, "    ") : [...grid, "", ...legend]));
 	out.push(
 		...wrapTextWithAnsi(
@@ -270,8 +278,8 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const activity = `${theme.fg("accent", phase)}${workers ? theme.fg("agent", ` · ${workers} active`) : ""}`;
 	const identity = clean(state.session.target ?? "No model selected");
 	const thinking = theme.fg("reason", `think ${clean(state.session.thinking ?? "off")}`);
-	const usage = `${formatFooterTokens(ledger?.usedTokens ?? state.context.used ?? 0)} / ${(ledger?.contextWindow ?? state.context.contextWindow) ? formatFooterTokens(ledger?.contextWindow ?? state.context.contextWindow ?? 0) : "?"}`;
-	const context = `${ledger ? renderContextMeterBar(ledger, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
+	const usage = contextUsageText(state.context);
+	const context = `${ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
 	const rightWidth = Math.min(Math.floor(w * 0.48), visibleWidth(context));
 
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;

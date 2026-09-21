@@ -33,6 +33,7 @@ import {
 } from "../core/skill-activation.js";
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
+import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
@@ -54,7 +55,7 @@ import {
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
-import type { ContextSnapshot, ContextUsageSnapshot } from "../domains/session/context-accounting.js";
+import type { ContextSnapshot } from "../domains/session/context-accounting.js";
 import { ceilChars, snapshotInputTokens } from "../domains/session/context-accounting.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -92,7 +93,7 @@ import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
-import { createTurnContext } from "./turn-context.js";
+import { createTurnContext, type LiveContextUsage } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
 import { createTurnPersistence } from "./turn-persistence.js";
 import { createTurnPrewarm, type PrewarmOutcome, subscribePrewarmToCompaction } from "./turn-prewarm.js";
@@ -340,7 +341,7 @@ export interface ChatLoop {
 	turnPreparation(): { phase: TurnPreparationPhase; since: number };
 	/** Fires on every preparation transition, including back to `idle`. */
 	onTurnPreparation(handler: (phase: TurnPreparationPhase) => void): () => void;
-	contextUsage(): ContextUsageSnapshot;
+	contextUsage(): LiveContextUsage;
 	/**
 	 * Categorized context-window ledger for the `/context` overlay: where every
 	 * occupied token lives (system prompt, tools, agents, skills, memory,
@@ -356,6 +357,7 @@ export interface ChatLoop {
 	 * the conversation, calls a model, persists anything, or triggers reduction.
 	 */
 	liveBudget(): LiveBudgetView;
+	inspectLiveBudget(): BudgetInspection;
 	/**
 	 * Republish the live budget before making a decision from it, for a consumer
 	 * that may be observing results appended since the last publication. The
@@ -1600,6 +1602,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		currentTurnConstraints: () => state.currentTurnConstraints,
 		contextLedger: () => context.contextLedger(),
 		liveBudget: () => context.liveBudget(),
+		inspectLiveBudget: () => context.inspectLiveBudget(),
 		refreshLiveBudget: () => context.refreshLiveBudget(),
 		whenSettled: () => activeSubmit,
 		whenPrewarmSettled: () => prewarm.settled(),

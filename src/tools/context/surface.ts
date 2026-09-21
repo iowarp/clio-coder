@@ -12,9 +12,9 @@ import type { ToolSurface } from "../lazy-tool.js";
 export const contextToolSurface = {
 	name: ToolNames.Context,
 	description:
-		"Environment context: scope=settings explains current effective settings, autonomy, configured limits, and exact UI commands without exposing credentials; scope=workspace returns the git/project snapshot, scope=skills lists ready skills, installed package states and marketplace options, or loads a ready skill by name, scope=recall returns an exact persisted evicted or summarized tool result by ref; omit ref to discover historical results by query with bounded limit/offset pages. Clio's documentation and the recipe catalog are gateway capabilities (clio_docs, clio_library). For repository code and the repo's generated wiki use code_nav (mode=wiki).",
+		"Environment context: scope=settings explains effective settings, autonomy, limits and UI commands without credentials; workspace returns the git/project snapshot; budget inspects the native session's live request budget (read-only, shadow policy); skills lists ready skills, installed states and marketplace options, or loads a ready skill by name; recall retrieves persisted evicted/summarized tool results by ref, or discovers them by query with limit/offset pages. Clio docs and recipes: gateway capabilities clio_docs and clio_library. Repository code/wiki: code_nav (mode=wiki).",
 	parameters: Type.Object({
-		scope: StringEnum(["workspace", "settings", "skills", "recall"], { description: "Context source." }),
+		scope: StringEnum(["workspace", "settings", "skills", "recall", "budget"], { description: "Context source." }),
 		// These three carry three scopes each. The attached-schema byte budget in
 		// tests/contracts/gateway-prompt.test.ts had 18 bytes of headroom, so
 		// naming scope=skills here is paid for by compressing the wording rather

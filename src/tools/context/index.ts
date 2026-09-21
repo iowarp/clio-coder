@@ -5,6 +5,7 @@ import type { ClioSettings } from "../../core/config.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { BudgetProvider } from "../../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../../domains/context/worker/recall.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
 import {
@@ -75,6 +76,8 @@ export interface ContextSessionDeps {
 }
 
 export interface ContextToolDeps {
+	/** Refreshes this run's native budget; absent for external/worker registries. */
+	getContextBudget?: BudgetProvider;
 	/** Live session view, including overrides. Omit when no authoritative settings snapshot exists. */
 	getSettings?: () => Readonly<ClioSettings>;
 	/** Run-scoped evidence port; never reads or appends the parent session. */
@@ -742,6 +745,52 @@ function runRecallScope(
 	});
 }
 
+/** A byte-fitted JSON observation. Inspection never spills to disk. */
+function runBudgetScope(
+	deps: ContextToolDeps,
+	reservation: ObservationReservation,
+	options?: ToolInvokeOptions,
+): ToolResult {
+	const inspection = deps.getContextBudget?.() ?? {
+		status: "unavailable",
+		reason:
+			"This run has no native session budget port. Worker and external-agent budgets are not the parent session's budget.",
+	};
+	const payload =
+		inspection.status === "available"
+			? {
+					...inspection,
+					mode: "shadow",
+					admissionNote:
+						"Advisory only: submit retains its captured-snapshot floor; post-tool enforcement does not yet reserve output.",
+				}
+			: inspection;
+	const full = JSON.stringify(payload);
+	const fits = Buffer.byteLength(full, "utf8") <= reservation.callCapBytes;
+	// Do not pass fullOutput to finalizeObservation: an inspection must not
+	// persist its view even when an optional projection contains huge text.
+	const output = fits
+		? full
+		: JSON.stringify({
+				status: "unavailable",
+				reason: "observation-limit",
+				message:
+					"The budget view exceeds the available observation bytes. Continue in a follow-up turn; do not retry this turn.",
+			});
+	return finalizeObservation({
+		tool: ToolNames.Context,
+		unit: "results",
+		format: "json",
+		output,
+		shownCount: fits ? 1 : 0,
+		totalCount: 1,
+		totalBytes: Buffer.byteLength(full, "utf8"),
+		truncated: !fits,
+		reservation,
+		...(options ? { options } : {}),
+	});
+}
+
 export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 	return {
 		...contextToolSurface,
@@ -757,11 +806,20 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 					message: `context: scope "${scope}" is a gateway capability now: call gateway(op="call", capability="${capability}", args={...}) or gateway(op="describe", capability="${capability}") for its arguments.`,
 				};
 			}
-			if (scope !== "workspace" && scope !== "settings" && scope !== "skills" && scope !== "recall") {
+			if (
+				scope !== "workspace" &&
+				scope !== "settings" &&
+				scope !== "skills" &&
+				scope !== "recall" &&
+				scope !== "budget"
+			) {
 				return {
 					kind: "error",
-					message: `context: scope must be workspace, settings, skills, or recall; got '${scope}'`,
+					message: `context: scope must be workspace, settings, skills, recall, or budget; got '${scope}'`,
 				};
+			}
+			if (scope === "budget" && Object.keys(args).some((key) => key !== "scope")) {
+				return { kind: "error", message: 'context: scope="budget" accepts only scope; it inspects the current request.' };
 			}
 			const selfCap = scope === "skills" ? OBSERVE_SELF_CAPS.contextSkills : OBSERVE_SELF_CAPS.contextWorkspace;
 			// Reserved before any scope handler runs, so an exhausted pool answers
@@ -771,6 +829,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 				return observationBudgetExhausted({
 					tool: ToolNames.Context,
 					unit: scope === "skills" ? "entries" : "results",
+					...(scope === "budget" ? { format: "json" as const } : {}),
 					reservation,
 					subject: `scope=${scope}`,
 					hint: "Continue in a follow-up turn.",
@@ -813,6 +872,7 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 					...(options ? { options } : {}),
 				});
 			}
+			if (scope === "budget") return runBudgetScope(deps, reservation, options);
 			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);
 			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
 			return runSkillsScope(deps, args, reservation, options);

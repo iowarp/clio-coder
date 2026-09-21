@@ -1,5 +1,6 @@
 import type { OutputStyle } from "../../core/defaults.js";
 import { ToolNames } from "../../core/tool-names.js";
+import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import {
 	type CostAggregate,
 	formatCostAggregate,
@@ -99,6 +100,8 @@ export interface SessionFacts {
 
 /** Context engine telemetry. */
 export interface ContextEngineFacts {
+	/** Identifies the published accounting used by the meter; ledger stays diagnostic. */
+	budget?: Pick<LiveBudgetView, "revision" | "historical" | "inputSource">;
 	label: string | null;
 	used: number | null;
 	contextWindow: number | null;
@@ -393,14 +396,36 @@ function contextComposition(context: ContextEngineFacts): {
 		system: finiteNonNegative(breakdown?.systemPromptTokens),
 		tools: finiteNonNegative(breakdown?.toolSchemaTokens),
 		chat: finiteNonNegative(breakdown?.messageTokens) + finiteNonNegative(breakdown?.pendingUserTokens),
-		free: window > 0 ? Math.max(0, window - used) : null,
+		free:
+			window > 0 && typeof context.used === "number" && Number.isFinite(context.used) ? Math.max(0, window - used) : null,
 	};
+}
+
+/** Short truthful occupancy label shared by compact and expanded surfaces. */
+export function contextUsageText(context: ContextEngineFacts): string {
+	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
+	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
+	const source = context.budget?.inputSource === "historical" ? "saved " : context.budget && used !== null ? "~" : "";
+	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
+}
+
+/** Reads published numbers only; never refreshes accounting from a renderer. */
+export function contextOccupancyBar(context: ContextEngineFacts, cells: number, theme: ClioTheme): string {
+	if (!context.budget && context.ledger) return renderContextMeterBar(context.ledger, cells, theme);
+	return buildSegmentedContextBar(
+		theme,
+		cells,
+		context.contextWindow ?? 0,
+		context.used === null ? undefined : contextBreakdownForBar(context),
+	);
 }
 
 /** The live window after the percent; null when unknown or the row is too narrow to carry it. */
 export function compactContextWindowLabel(context: ContextEngineFacts, width: number): string | null {
 	if (width < 72) return null;
-	const window = finiteNonNegative(context.ledger?.contextWindow ?? context.contextWindow);
+	const window = finiteNonNegative(
+		context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow),
+	);
 	return window > 0 ? formatFooterTokens(window) : null;
 }
 
@@ -427,7 +452,7 @@ export function compactSecondaryLine(
 	const safeWidth = Math.max(1, Math.floor(width));
 	const barCells = compactContextBarWidth(safeWidth);
 	let left = "";
-	if (context.ledger) {
+	if (context.ledger && !context.budget) {
 		// The row follows the kv grammar: dim key, muted value. An unmeasured
 		// percent renders the ?% placeholder dim because it is scaffolding for a
 		// number that has not arrived, not a measurement.
@@ -437,7 +462,7 @@ export function compactSecondaryLine(
 		);
 		left = `${theme.fg("dim", "ctx")} ${renderContextMeterBar(context.ledger, barCells, theme)} ${percent}`;
 	} else {
-		left = buildSegmentedContextBar(theme, barCells, context.contextWindow ?? 0, contextBreakdownForBar(context));
+		left = `${context.budget?.inputSource === "historical" ? theme.fg("dim", "saved ") : ""}${contextOccupancyBar(context, barCells, theme)}`;
 	}
 	// A percentage alone does not say whether the window is 128k or 1M, so at
 	// widths that can afford it the live window follows the percent. It comes
@@ -713,7 +738,7 @@ function ledgerBar(theme: ClioTheme, ledger: ContextLedger, cells: number): stri
 export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuadrantOptions = {}): string[] {
 	const theme = clioTheme();
 	const ledger = facts.ledger ?? null;
-	const hasLedger = ledger !== null && ledger.contextWindow > 0;
+	const hasLedger = !facts.budget && ledger !== null && ledger.contextWindow > 0;
 	const barCells = expandedContextBarCells(options.width);
 
 	let bar: string;
@@ -737,7 +762,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 				? theme.style("frame", `free ${formatFooterTokens(composition.free)}`, { dim: true })
 				: null,
 		]);
-		bar = buildSegmentedContextBar(theme, barCells, facts.contextWindow ?? 0, contextBreakdownForBar(facts));
+		bar = contextOccupancyBar(facts, barCells, theme);
 		const filledChar = visibleWidth(GLYPH.contextFull) === 1 ? GLYPH.contextFull : GLYPH.barFull;
 		const freeChar = visibleWidth(GLYPH.contextFree) === 1 ? GLYPH.contextFree : GLYPH.barEmpty;
 		legendRows = [
@@ -752,7 +777,7 @@ export function contextQuadrant(facts: ContextEngineFacts, options: ExpandedQuad
 		"Context",
 		[
 			statusRow(bar),
-			kv("used", formatUsedWindow(usedTokens, windowTokens)),
+			kv("used", facts.budget ? contextUsageText(facts) : formatUsedWindow(usedTokens, windowTokens)),
 			fill ? styledKv("fill", fill) : statusRow(null),
 			chatFree ? styledKv("budget", chatFree) : statusRow(null),
 			kv("compact", formatCompaction(facts)),

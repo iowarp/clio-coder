@@ -27,6 +27,7 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
+import type { BudgetInspection } from "../domains/context/budget/inspection.js";
 import {
 	createLiveBudgetProducer,
 	type LiveBudgetBreakdown,
@@ -49,6 +50,7 @@ import {
 	type ContextWindowDetails,
 	type ContextWindowSource,
 	canonicalEndpointKey,
+	isOrchestratorEligibleRuntime,
 	type ProvidersContract,
 	resolveRuntimeTarget,
 } from "../domains/providers/index.js";
@@ -66,7 +68,6 @@ import {
 	appendContextSnapshot,
 	type CaptureContextSnapshotInput,
 	type ContextSnapshot,
-	type ContextUsageBreakdown,
 	type ContextUsageSnapshot,
 	captureContextSnapshot,
 	ceilChars,
@@ -185,6 +186,9 @@ export type ExpectedColdReason =
 	 */
 	| "background_memory";
 
+export type LiveContextUsage = ContextUsageSnapshot &
+	Pick<LiveBudgetView, "revision" | "inputSource" | "historical" | "breakdownSource">;
+
 export interface TurnContext {
 	/** Prepare an attempt before preflight; rejected attempts never freeze the next submit. */
 	prepareMemoryTurn(runtime: AgentRuntime, input: { taskText: string; continuation: boolean }): void;
@@ -230,6 +234,8 @@ export interface TurnContext {
 	 * read.
 	 */
 	liveBudget(): LiveBudgetView;
+	/** Inspect only when the native engine owns the request; never initialize it. */
+	inspectLiveBudget(): BudgetInspection;
 	/**
 	 * The loaded context window this session already recorded for a target and
 	 * model, so a resume budgets against it instead of re-probing. Null when the
@@ -260,7 +266,7 @@ export interface TurnContext {
 		  }
 		| undefined
 	>;
-	contextUsage(): ContextUsageSnapshot;
+	contextUsage(): LiveContextUsage;
 	contextLedger(): ContextLedger;
 	emitContextWindowWarningTransition(warning: string | null): void;
 	/** Record one known cache disturbance for the current or next call. */
@@ -637,7 +643,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return resumedPromptHash;
 	};
 
-	const resolveWindowWithoutRuntime = (): ContextWindowDetails | null => {
+	const resolveWindowWithoutRuntime = (allowLedgerRead = true): ContextWindowDetails | null => {
 		const settings = deps.getSettings();
 		const targetId = settings.chat?.target?.trim();
 		const wireModelId = settings.chat?.model?.trim();
@@ -649,7 +655,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			use: "orchestrator",
 			requireTools: false,
 			requireOutputBudget: true,
-			knownLoadedContextWindow: rememberedLoadedContextWindow(targetId, wireModelId),
+			knownLoadedContextWindow: allowLedgerRead
+				? rememberedLoadedContextWindow(targetId, wireModelId)
+				: currentContextSnapshot?.contextWindowSource === "loaded" &&
+						currentContextSnapshot.providerId === targetId &&
+						currentContextSnapshot.modelId === wireModelId
+					? currentContextSnapshot.effectiveContextWindow
+					: null,
 		});
 		return resolved.ok ? resolved.target.contextWindowDetails : null;
 	};
@@ -675,12 +687,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * resumed snapshot's recorded window, which is what the previous process
 	 * measured the same messages against.
 	 */
-	const windowWithoutRuntime = (): {
+	const windowWithoutRuntime = (
+		allowLedgerRead = true,
+	): {
 		contextWindow: number;
 		contextWindowSource: ContextWindowSource | null;
 		contextWindowSlots: ContextWindowDetails["contextWindowSlots"];
 	} => {
-		const details = resolveWindowWithoutRuntime();
+		const details = resolveWindowWithoutRuntime(allowLedgerRead);
 		if (details) {
 			return {
 				contextWindow: details.effectiveContextWindow,
@@ -804,10 +818,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const snapshot = currentContextSnapshot;
 			return sha256Json([
 				"historical/1",
+				settings.chat?.target ?? null,
+				settings.chat?.model ?? null,
 				snapshot?.snapshotId ?? null,
 				snapshot ? snapshotInputTokens(snapshot) : null,
 				snapshot?.sources.total ?? null,
-				windowWithoutRuntime().contextWindow,
+				windowWithoutRuntime(false).contextWindow,
 				promptFingerprint,
 				toolSignature,
 				eligibility,
@@ -892,7 +908,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		snapshot: ContextSnapshot | null,
 		settings: Readonly<ClioSettings>,
 	): LiveBudgetAccounting => {
-		const window = windowWithoutRuntime();
+		// Inspection uses already-loaded capture facts, never a diagnostic-ledger scan.
+		const sameRoute =
+			!snapshot || (snapshot.providerId === settings.chat?.target && snapshot.modelId === settings.chat?.model);
+		// A saved request from model A cannot acquire model B's window while
+		// retaining A's identity and input measurement. Keep that capture coherent.
+		const window =
+			snapshot && !sameRoute
+				? {
+						contextWindow: snapshot.effectiveContextWindow,
+						contextWindowSource: snapshotWindowSource(snapshot),
+					}
+				: windowWithoutRuntime(false);
 		const pendingTokens = pendingUserInputTokens();
 		return {
 			targetId: snapshot?.providerId ?? settings.chat?.target ?? null,
@@ -1546,6 +1573,23 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		cancelCompaction: () => compactionController?.abort(),
 
 		liveBudget: (): LiveBudgetView => budgetProducer.current() ?? refreshLiveBudget(),
+		inspectLiveBudget(): BudgetInspection {
+			const targetId = deps.getSettings().chat?.target;
+			const target = !state.runtime && targetId ? deps.providers.getTarget(targetId) : null;
+			const runtime =
+				state.runtime?.runtimeResolution.runtime ?? (target ? deps.providers.getRuntime(target.runtime) : null);
+			if (runtime && (!isOrchestratorEligibleRuntime(runtime) || runtime.externalAgentLoop))
+				return {
+					status: "unsupported",
+					reason: "The external agent owns its context; native request accounting is unavailable.",
+				};
+			if (!runtime)
+				return {
+					status: "unavailable",
+					reason: "No native runtime descriptor is resolved. Inspection does not initialize a runtime.",
+				};
+			return { status: "available", capability: "native", view: refreshLiveBudget() };
+		},
 
 		setCurrentSnapshot(snapshot: ContextSnapshot): void {
 			currentContextSnapshot = snapshot;
@@ -1841,23 +1885,17 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			return compacted ? continuationContextUpdate(agentRuntime) : undefined;
 		},
 
-		contextUsage(): ContextUsageSnapshot {
-			const effectiveWindow = state.runtime
-				? state.runtime.runtimeResolution.contextWindowDetails.effectiveContextWindow
-				: windowWithoutRuntime().contextWindow;
-			if (!currentContextSnapshot) {
-				return contextUsageSnapshot(null, effectiveWindow);
-			}
-
-			const pendingTokens = pendingUserInputTokens();
-			const totalUsed = snapshotInputTokens(currentContextSnapshot) + pendingTokens + liveStreamingOutputTokens();
-			const breakdown: ContextUsageBreakdown = {
-				systemPromptTokens: currentContextSnapshot.categories.system,
-				messageTokens: currentContextSnapshot.categories.messages + (currentContextSnapshot.categories.toolResults ?? 0),
-				pendingUserTokens: pendingTokens,
-				toolSchemaTokens: currentContextSnapshot.categories.tools,
+		contextUsage(): LiveContextUsage {
+			// Footer reads project the last publication. They never rescan the
+			// ledger or add streaming output to the next-request message estimate.
+			const view = budgetProducer.current() ?? refreshLiveBudget();
+			return {
+				...contextUsageSnapshot(view.inputTokens, view.effectiveWindow, view.breakdown ?? undefined),
+				revision: view.revision,
+				inputSource: view.inputSource,
+				historical: view.historical,
+				breakdownSource: view.breakdownSource,
 			};
-			return contextUsageSnapshot(totalUsed > 0 ? totalUsed : null, effectiveWindow, breakdown);
 		},
 
 		contextLedger(): ContextLedger {
@@ -1874,7 +1912,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						contextWindowSource: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSource,
 						contextWindowSlots: state.runtime.runtimeResolution.contextWindowDetails.contextWindowSlots,
 					}
-				: windowWithoutRuntime();
+				: windowWithoutRuntime(false);
 			const provider = state.runtime?.targetId ?? settings.chat?.target ?? null;
 			const model = state.runtime?.wireModelId ?? settings.chat?.model ?? null;
 			const liveToolCount = state.runtime?.agent.state.tools.length ?? 0;
