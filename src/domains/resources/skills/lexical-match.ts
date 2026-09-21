@@ -119,9 +119,13 @@ function wordMatches(words: ReadonlySet<string>, token: string): boolean {
  * of an empty page.
  */
 export function lexicalMatches(query: string, haystack: string, mode: LexicalMatchMode = "all"): boolean {
-	const normalizedQuery = normalize(query);
+	// Canonical composition on both sides, so a decomposed `café` typed by
+	// one editor matches a composed `café` written by another. Applied here
+	// rather than inside `normalize`, because `normalize` is also the promotion
+	// matcher's and changing what that fires on is a separate decision.
+	const normalizedQuery = normalize(query.normalize("NFC"));
 	if (normalizedQuery.length === 0) return true;
-	const normalizedHaystack = normalize(haystack);
+	const normalizedHaystack = normalize(haystack.normalize("NFC"));
 	if (` ${normalizedHaystack} `.includes(` ${normalizedQuery} `)) return true;
 	const tokens = queryTokens(normalizedQuery);
 	if (tokens.length === 0) return false;
