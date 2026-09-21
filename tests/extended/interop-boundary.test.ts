@@ -120,7 +120,7 @@ describe("contracts/interop boundary", () => {
 		strictEqual(readInteropReport()?.agents.find((agent) => agent.kind === "codex")?.decision, "declined");
 	});
 
-	it("refuses untrusted project prompts while allowing trusted user-scope compatibility prompts", () => {
+	it("keeps both project and user compatibility prompts discovery-only", () => {
 		const cwd = join(isolated.dir, "project-prompts");
 		const home = join(isolated.dir, "user-prompts");
 		writePrompt(cwd, join(".claude", "commands", "demo.md"), "Run the project demo.\n");
@@ -130,16 +130,14 @@ describe("contracts/interop boundary", () => {
 		const project = templates.items.find((item) => item.name === "demo");
 		const user = templates.items.find((item) => item.name === "review");
 		strictEqual(project?.trusted, false);
-		strictEqual(user?.trusted, true);
+		strictEqual(user?.trusted, false);
 		const refused = expandPromptTemplateInput("/demo", templates);
 		strictEqual(refused.expanded, false);
 		if (refused.expanded) throw new Error("expected project prompt refusal");
 		strictEqual(refused.refusal?.template.name, "demo");
-		const expanded = expandPromptTemplateInput("/review", templates);
-		strictEqual(expanded.expanded, true);
-		if (!expanded.expanded) throw new Error("expected user prompt expansion");
-		strictEqual(expanded.text, "Review the change.");
-		strictEqual(expanded.template, user);
-		strictEqual(expanded.diagnostics.length, 0);
+		const userRefused = expandPromptTemplateInput("/review", templates);
+		strictEqual(userRefused.expanded, false);
+		if (userRefused.expanded) throw new Error("expected user compatibility prompt refusal");
+		strictEqual(userRefused.refusal?.template, user);
 	});
 });

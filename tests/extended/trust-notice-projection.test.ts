@@ -41,8 +41,8 @@ for (const audience of ["internal", "shadow"] as const)
 			reason: "failed",
 		});
 		deepStrictEqual(notices, [
-			"Clio → context-bootstrap · working · run helper-1",
-			"Clio → context-bootstrap · failed · run helper-1",
+			"Clio-Coder → Context-bootstrap · working · run helper-1",
+			"Clio-Coder → Context-bootstrap · failed · run helper-1",
 		]);
 		strictEqual(islands, 2);
 		subscriptions.dispose();

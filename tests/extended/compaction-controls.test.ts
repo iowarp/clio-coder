@@ -412,6 +412,7 @@ describe("production compaction controls", () => {
 			wireModelId: "chat",
 			runtimeResolution: {
 				costProvenance: "known_free",
+				capabilityDecisions: { maxTokens: 8192 },
 				contextWindowDetails: {
 					desiredContextWindow: 32768,
 					effectiveContextWindow: 32768,
@@ -534,11 +535,13 @@ describe("production compaction controls", () => {
 		ok(output >= 4096);
 		ok(estimateInputTokensFromContext(wireContext) + output <= 32768);
 		t.diagnostic(JSON.stringify({ before: before.tokens, after: after.tokens, output, attempts }));
-		// Disabling auto still enforces the original local guard before a provider call.
+		// Disabling proactive compaction does not disable required overflow reduction.
 		install(17);
 		f.settings.context.compaction.auto = false;
-		await rejects(context.postToolContinuationGuard(runtime), /stopped continuation before provider call/);
-		strictEqual(attempts, 5);
+		ok(await context.postToolContinuationGuard(runtime));
+		strictEqual(attempts, 6);
+		ok(context.liveContextEstimate(runtime).tokens + 8192 <= 32768);
+		install(17);
 		// A completed memory reminder follows the tool result without becoming a
 		// new user ledger turn. Its tail must not bypass accounting or compaction.
 		const reminder = {
@@ -549,11 +552,6 @@ describe("production compaction controls", () => {
 		const beforeReminder = context.liveContextEstimate(runtime).tokens;
 		runtime.agent.state.messages.push(reminder);
 		ok(context.liveContextEstimate(runtime).tokens > beforeReminder, "reminder tokens count before admission");
-		await rejects(
-			context.postToolContinuationGuard(runtime, undefined, true),
-			/stopped continuation before provider call/,
-		);
-		f.settings.context.compaction.auto = true;
 		const reminderUpdate = await context.postToolContinuationGuard(runtime, undefined, true);
 		ok(reminderUpdate, "reminder-tail pressure still compacts");
 		strictEqual(reminderUpdate.context.messages.at(-1), reminder, "the rebuilt context retains the pending reminder");

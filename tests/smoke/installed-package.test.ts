@@ -893,11 +893,17 @@ describe("smoke/installed package", { concurrency: false }, () => {
 				authored.entries.map((entry) => `${entry.kind}:${entry.name}`).sort(),
 				"the installed marketplace must expose every bundled package",
 			);
-			strictEqual(authored.entries.length, 35, "bundled catalog must contain 35 packages");
+			strictEqual(authored.entries.length, 36, "catalog contains 35 bundled packages and one remote package");
 
 			const standaloneSkill = authored.entries.find((entry) => entry.kind === "skill");
 			ok(standaloneSkill);
 			for (const entry of authored.entries) {
+				if (/^https:\/\//.test(entry.sourceUrl)) {
+					const remote = discovered.entries.find((item) => item.name === entry.name);
+					strictEqual(remote?.sourceUrl, entry.sourceUrl, "remote catalog source stays remote after packaging");
+					strictEqual(remote?.sha256, entry.sha256, "remote pin survives packaging unchanged");
+					continue;
+				}
 				const packedSource = resolve(packageRoot, "library", entry.sourceUrl);
 				strictEqual(discovered.entries.find((item) => item.name === entry.name)?.sourceUrl, packedSource);
 				strictEqual(
