@@ -1083,7 +1083,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 		// The checkpoint identifies the selected summary route; older results
 		// fall back to the active chat route. The ledger carries usage for reseed; this is the
-		// live sink, so `/cost` and the footer move the moment /context compact
+		// live sink, so `/usage` and the footer move the moment /context compact
 		// returns instead of staying byte-identical to before it ran.
 		recordCompactionUsage(agentRuntime, result);
 

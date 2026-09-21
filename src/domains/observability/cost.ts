@@ -7,7 +7,7 @@
  *
  * Per-entry token breakdown (input/output/cacheRead/cacheWrite/reasoning)
  * matches the shape of pi-ai's `Usage` plus provider-specific reasoning detail
- * fields. The /cost overlay aggregates it via `aggregateCostEntries`; the TUI
+ * fields. The /usage overlay aggregates it via `aggregateCostEntries`; the TUI
  * footer consumes the session sum through `ObservabilityContract.sessionTokens()`.
  */
 
@@ -92,7 +92,7 @@ export function formatCostAggregate(cost: CostAggregate | null | undefined): str
 
 /**
  * What a fixed-width surface says when there is no cost claim. The footer and
- * `/cost` drop their cost field instead; a table cell that owns a column cannot,
+ * `/usage` drop their cost field instead; a table cell that owns a column cannot,
  * so it says the same thing in words rather than inventing `$0.00`.
  */
 export const COST_NOT_MEASURED = "not measured";
@@ -134,7 +134,7 @@ export interface UsageBreakdown {
 }
 
 /**
- * What produced a priced call, when it was not an ordinary turn. `/cost` and
+ * What produced a priced call, when it was not an ordinary turn. `/usage` and
  * the usage surfaces separate these out so an operator can see that money was
  * spent beside the session rather than inside it.
  */

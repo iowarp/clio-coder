@@ -14,6 +14,7 @@ import {
 	resolveModelCapabilities,
 	resolveModelRuntimeCapabilitiesForProviders,
 } from "../../domains/providers/index.js";
+import type { UsageSnapshot } from "../../domains/quota/types.js";
 import type { LocalCapacity } from "../../domains/scheduling/local-capacity.js";
 import type { ContextUsageSnapshot } from "../../domains/session/context-accounting.js";
 import type { ContextLedger } from "../../domains/session/context-ledger.js";
@@ -88,6 +89,7 @@ export type { ToolTallySnapshot } from "./widgets.js";
 export type FooterDashboardMode = "compact" | "expanded";
 
 export interface FooterDashboardDeps {
+	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
 	providers: ProvidersContract;
@@ -127,6 +129,8 @@ export interface FooterDashboardDeps {
 }
 
 export interface FooterDashboardRenderState {
+	quota?: ReadonlyArray<UsageSnapshot>;
+	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
@@ -413,6 +417,15 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 
 		return {
 			resources: machine.snapshot(),
+			quota: deps.getQuotaSnapshots?.() ?? [],
+			...(current?.runtime && wireModelId
+				? {
+						quotaRoute: {
+							runtimeId: current.runtime.id,
+							wireModelId,
+						},
+					}
+				: {}),
 			...(deps.getConnections ? { connections: deps.getConnections() } : {}),
 			...(settings ? { costCeilingUsd: settings.safety.limits.sessionCostUsd } : {}),
 

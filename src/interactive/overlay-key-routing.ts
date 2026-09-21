@@ -7,7 +7,7 @@ export type OverlayState =
 	| "permission-confirm"
 	| "dispatch-board"
 	| "auth"
-	| "cost"
+	| "usage"
 	| "context-view"
 	| "context-reset"
 	| "tasks"
@@ -213,8 +213,8 @@ function routeAuthOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	return false;
 }
 
-/** Pure overlay key router for the /cost overlay. Esc closes; everything else is swallowed. */
-function routeCostOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
+/** Esc closes an inspection overlay; callers decide how to route its remaining keys. */
+function routeReadOnlyOverlayKey(data: string, deps: CloseOverlayKeyDeps): boolean {
 	if (isEscapeKey(data)) {
 		deps.closeOverlay();
 		return true;
@@ -262,19 +262,16 @@ export function routeOverlayKey(
 		return true;
 	}
 	if (overlayState === "auth") return routeAuthOverlayKey(data, deps);
-	if (overlayState === "cost") {
-		routeCostOverlayKey(data, deps);
-		return true;
-	}
+	if (overlayState === "usage") return routeReadOnlyOverlayKey(data, deps);
 	if (overlayState === "context-view") {
-		routeCostOverlayKey(data, deps);
+		routeReadOnlyOverlayKey(data, deps);
 		return true;
 	}
 	// Esc is the only key the side-question overlay answers: it aborts a round
 	// that is still streaming and closes one that has settled. Everything else is
 	// swallowed so a keystroke cannot reach the composer behind it.
 	if (overlayState === "side-question") {
-		routeCostOverlayKey(data, deps);
+		routeReadOnlyOverlayKey(data, deps);
 		return true;
 	}
 	// The handoff review overlay owns Enter, `e`, the arrows, and Esc itself, so

@@ -101,6 +101,7 @@ For the bootstrap installer, source builds, upgrades, and removal, see
 | **Keep long tasks moving** | Context accounting, compaction, task memory, durable conversation history, and fork/resume navigation. | [Memory](docs/guide/proactive-memory.md) |
 | **Add domain knowledge** | Operator-activated skills, prompt templates, plugins, harness extensions, and local MCP tool servers. | [Library](library/README.md) |
 | **Inspect what happened** | Tool activity, usage, traces, decisions, evidence, and worker receipts. | [Observability](docs/architecture/observability.md) |
+| **Know what you have left** | `/usage` gathers subscription headroom for your connected accounts beside this session's tokens, cost, per-model shares, and worker accounting. | [Quota and usage](docs/guide/commands-and-modes.md#subscription-quota-and-session-usage) |
 
 These capabilities work together. A worker result is a lead you can inspect;
 a successful command is evidence of that command's outcome; neither substitutes
@@ -109,15 +110,16 @@ for scientific validation.
 ### Work in the terminal
 
 The TUI keeps the conversation, tool activity, diffs, and permission decisions
-in one place. Its footer shows the active model and context use; dashboards
-provide more detail without taking over the conversation.
+in one place. Its footer shows the active model, its remaining weekly
+subscription headroom where a connected account reports one, and context use;
+dashboards provide more detail without taking over the conversation.
 
 | Want to… | Use… |
 | --- | --- |
 | Find commands and shortcuts | `/help` |
 | Choose a model or change settings | `/model`, `/settings` |
 | Attach a project file | Type `@` and choose a path |
-| Inspect context, memory, or cost | `/context`, `/memory`, `/cost` |
+| Inspect context, memory, or usage | `/context`, `/memory`, `/usage` |
 | Browse skills and recipes | `/library` or `Alt+L` |
 | Inspect workers | `Alt+W` |
 | Manage the task board | `/tasks` |

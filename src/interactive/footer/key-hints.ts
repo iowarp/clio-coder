@@ -14,8 +14,8 @@ export function footerKeyHint(now: number, narrow = false): string | null {
 		}),
 	];
 	const count = narrow ? 1 : 2;
-	const page = Math.floor(now / 12_000) % (Math.ceil(entries.length / count) + 1);
-	if (page === Math.ceil(entries.length / count)) return null;
+	if (!entries.length) return null;
+	const page = Math.floor(now / 12_000) % Math.ceil(entries.length / count);
 	const start = page * count;
 	return entries.slice(start, start + count).join(" · ");
 }

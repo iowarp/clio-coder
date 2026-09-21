@@ -263,7 +263,7 @@ LM Studio 2.29.0 is that case today. Its OpenAI-compatible port returns `usage`,
 
 The verdict keeps its existing pi-ai path unless pi-ai reports `cacheRead === 0` while the backend reports a numeric `cachedTokens`. In that one case the same hot, partial, cold, and small thresholds are applied to the measured counts instead. No timing ratio or wall-clock heuristic participates in a verdict.
 
-`/context` renders the last call as `prefill: N uncached · M cached · X ms`, and falls back to `prefill: N prompt · X ms` when the server gave no cache figure. `/cost` folds every durable call in the session into a total uncached prefill plus the four verdict counts, `clio-coder usage report` carries the same two facts per session, and `clio-coder doctor` reports the latest session's verdict counts and its most frequent expected-cold reason without opening the TUI.
+`/context` renders the last call as `prefill: N uncached · M cached · X ms`, and falls back to `prefill: N prompt · X ms` when the server gave no cache figure. `/usage` folds every durable call in the session into a total uncached prefill plus the four verdict counts, `clio-coder usage report` carries the same two facts per session, and `clio-coder doctor` reports the latest session's verdict counts and its most frequent expected-cold reason without opening the TUI.
 
 The `/context` overlay closes the loop. When the last settled run came back `cold` and Clio had recorded a reason for it, the overlay adds a line naming that reason, for example `last cache-affecting events: working-set eviction (reuse measured separately)`, and reports the cache line without the warning token. A reused prompt shell with a cold backend and no recorded reason stays a warning: Clio kept the bytes stable and the provider re-prefilled anyway, which is a disagreement worth surfacing.
 
@@ -304,7 +304,7 @@ Submitting a task detaches an in-flight warm-up so interactive admission does no
 
 Each round appends one `prewarm` custom ledger entry carrying its trigger, the backend prompt tokens, `timing`, and `promptCache`. The entry is never rendered and never becomes a model message, so it contributes zero tokens to the context estimate.
 
-`/context` shows `prewarmed: N tokens in X ms` until the next settled run answers the question it asked. `prewarm` is never an expected-cold reason: a pre-warm is the opposite of a disturbance. Its provider usage is real spend and is reported to `/cost` and `clio-coder usage report` under its own row, the way a `/btw` side question is.
+`/context` shows `prewarmed: N tokens in X ms` until the next settled run answers the question it asked. `prewarm` is never an expected-cold reason: a pre-warm is the opposite of a disturbance. Its provider usage is real spend and is reported to `/usage` and `clio-coder usage report` under its own row, the way a `/btw` side question is.
 
 </details>
 

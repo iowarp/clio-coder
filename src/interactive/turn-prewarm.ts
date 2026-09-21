@@ -72,7 +72,7 @@ export interface TurnPrewarmDeps {
 	) => Promise<{ ok: true; runtime: AgentRuntime; apiKey: string | undefined } | { ok: false; reason: string }>;
 	/** Freeze the session tool surface onto the agent, exactly as a submit does. */
 	applySessionTools: (runtime: AgentRuntime) => void;
-	/** Report the round's provider usage under its own `/cost` label. */
+	/** Report the round's provider usage under its own `/usage` label. */
 	recordUsage: (runtime: AgentRuntime, usage: Usage | null) => void;
 	/**
 	 * Claim one in-flight request on the runtime's endpoint for the duration of

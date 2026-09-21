@@ -30,7 +30,7 @@ export function formatFooterTokens(n: number): string {
  * Build the token-counter footer segment. Returns `null` when no usage has
  * landed yet so the footer stays uncluttered at session start. Cache-read
  * tokens are omitted here to keep the line scannable; reasoning tokens are
- * shown only when the provider exposes them. The `/cost` overlay exposes the
+ * shown only when the provider exposes them. The `/usage` overlay exposes the
  * full breakdown.
  */
 export function tokensSegment(usage: UsageBreakdown | null | undefined): string | null {

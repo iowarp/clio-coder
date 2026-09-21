@@ -13,6 +13,8 @@ import type {
 	TokenThroughputSnapshot,
 } from "../domains/observability/index.js";
 import { type ProvidersContract, resolveModelRuntimeCapabilitiesForProviders } from "../domains/providers/index.js";
+import { createQuotaSummaryFeed } from "../domains/quota/summary-feed.js";
+import type { UsageSnapshot } from "../domains/quota/types.js";
 import type { ResourcesContract } from "../domains/resources/index.js";
 import type { LocalCapacity } from "../domains/scheduling/local-capacity.js";
 import { ceilChars, contentChars } from "../domains/session/context-accounting.js";
@@ -160,6 +162,7 @@ export interface InteractivePresentation {
 	changeOutputStyle(mutation: () => void): void;
 	setLocalBashRunning(running: boolean): void;
 	getObservabilitySnapshot(): ObservabilitySnapshot;
+	getQuotaSnapshots(): ReadonlyArray<UsageSnapshot>;
 	/** Fold one raw chat event into the ephemeral throughput shown only while this turn is active. */
 	recordChatEvent(event: ChatLoopEvent): void;
 	recordToolStart(toolCallId: string, toolName: string): void;
@@ -234,6 +237,12 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		return key === undefined || key.length === 0 ? null : formatKeyLabel(key, "");
 	};
 
+	const quotaSummary = createQuotaSummaryFeed({
+		onUpdate: () => {
+			footer?.refresh();
+			requestRender();
+		},
+	});
 	const banner = factories.createBanner({
 		providers: deps.providers,
 		...(deps.agents ? { getAgentCount: () => deps.agents?.listSpecs().filter(isUserVisibleAgent).length ?? 0 } : {}),
@@ -248,6 +257,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 			return key ? formatKeyLabel(key, "") : null;
 		},
 		onFactsRefreshed: requestRender,
+		// Subscription usage is read lazily off the render path and cached, so the
+		// banner reads a string and never awaits a provider.
+		getQuotaSummary: () => quotaSummary.peek(),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 	});
 	// A boot-time `--continue`/`--session` resume opens onto an existing
@@ -391,6 +403,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getTokenThroughput: () =>
 			liveThroughput === null ? observabilitySnapshot.session.latestThroughput : currentLiveThroughput(),
 		getSessionCost: () => observabilitySnapshot.session.cost,
+		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		getContextUsage: () => deps.chat.contextUsage(),
 		getContextLedger: () => deps.chat.contextLedger(),
 		getDispatchRows: () => dispatchBoardStore.rows(),
@@ -622,6 +635,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		beforeStatusDisposed = true;
 		// Before the subscriptions go: a project-context refresh already in flight
 		// must not land afterwards and ask a torn-down presentation for a frame.
+		quotaSummary.dispose();
 		banner.dispose();
 		footer.dispose();
 		unsubscribeObservability();
@@ -664,6 +678,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		changeOutputStyle: (mutation) =>
 			chatRenderer.mutate(() => preserveTranscriptScroll(transcriptView, deps.terminal.columns, mutation), "output-style"),
 		getObservabilitySnapshot: () => observabilitySnapshot,
+		getQuotaSnapshots: () => quotaSummary.peekSnapshots(),
 		recordChatEvent,
 		recordToolStart: (toolCallId, toolName) => {
 			footerActiveTools.add(toolCallId);

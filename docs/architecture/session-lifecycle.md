@@ -167,7 +167,7 @@ cancels the whole handoff with nothing written in either session.
 The extraction round itself runs on the out-of-turn seam `/btw` uses: one call
 against the session's live target and model, the compiled message history as
 read-only input, no tools, and no entry in the ledger. Its provider usage is
-reported to `/cost` under a handoffs row and excluded from the turn count.
+reported to `/usage` under a handoffs row and excluded from the turn count.
 
 ### Streaming Turn Settlement During Session Transitions
 

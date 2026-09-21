@@ -379,7 +379,7 @@ export interface RunUsageSummary {
  * messages. Earlier versions of this function walked the list from the tail
  * and returned the first match, which silently dropped every intermediate
  * API call from the cost tally. Summing instead matches what the provider
- * actually billed and keeps the `/cost` overlay and footer counters
+ * actually billed and keeps the `/usage` overlay and footer counters
  * aligned across tool-heavy runs.
  */
 export function sumRunUsage(messages: ReadonlyArray<AgentMessage>): RunUsageSummary {
@@ -539,7 +539,7 @@ export function assistantSessionPayload(
  *
  * `estimated: true` is the provenance marker: no surface may report these as
  * provider-reported numbers. The usage fold and the context estimator both skip
- * aborted turns already, so this never reaches `/cost` or the window math; it is
+ * aborted turns already, so this never reaches `/usage` or the window math; it is
  * the record's own honesty about what the cancelled call cost.
  *
  * Returns null when the provider did report usage (there is nothing to fill in)

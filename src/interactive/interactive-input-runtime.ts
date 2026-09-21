@@ -326,7 +326,7 @@ export function createInteractiveInputRuntime(deps: InteractiveInputRuntimeDeps)
 		},
 		cancelFocusedOwner: () => {
 			const state = deps.overlay.getState();
-			if (["permission-confirm", "cost", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
+			if (["permission-confirm", "usage", "context-view", "side-question", "dispatch-board", "auth"].includes(state))
 				deps.overlay.closeOverlay();
 			else if (focused()?.handleInput) {
 				focused()?.handleInput?.("\x1b");
@@ -531,7 +531,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		"permission-confirm": "Permission",
 		"dispatch-board": "Workers",
 		auth: "Authentication",
-		cost: "Usage",
+		usage: "Usage",
 		"context-view": "Context",
 		"context-reset": "Context reset",
 		tasks: "Tasks",

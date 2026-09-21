@@ -925,7 +925,7 @@ async function runCompactionFlow(
 		isSplitTurn: result.isSplitTurn,
 		tokensAfter: estimateTokensAfterCompaction(entries, result),
 		// The summarization call is a real model call. Persisting its provider
-		// usage on the entry is what puts it in front of `/cost` and `clio-coder usage
+		// usage on the entry is what puts it in front of `/usage` and `clio-coder usage
 		// report`, which folded the ledger and so counted every call but this one.
 		...(result.usage !== undefined ? { usage: result.usage } : {}),
 	};
@@ -1495,7 +1495,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	// check and the cost row read the same resolution the step itself used.
 	/**
 	 * Account for one background memory step exactly as a `/btw` side question is
-	 * accounted for: the in-process cost tracker under its own label so `/cost`
+	 * accounted for: the in-process cost tracker under its own label so `/usage`
 	 * shows it while the session lives, and one durable out-of-turn row so
 	 * `clio-coder usage report` can still see it afterwards.
 	 *

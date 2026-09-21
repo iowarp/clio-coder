@@ -100,7 +100,7 @@ function positive(value: unknown): number {
 }
 
 /**
- * Normalize one provider usage object into the shape `/cost` and the
+ * Normalize one provider usage object into the shape `/usage` and the
  * out-of-turn usage store take. Shared with the session pre-warm, which is
  * another call billed beside the session rather than inside it.
  */
@@ -144,7 +144,7 @@ function textFromMessage(message: unknown): string {
 
 /**
  * Run the side-question round. Resolves with the answer, the provider usage
- * (which is still real money and is reported to `/cost`), and whether the
+ * (which is still real money and is reported to `/usage`), and whether the
  * operator aborted it. Provider failures reject; the caller renders the reason
  * in the overlay.
  */

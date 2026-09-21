@@ -23,12 +23,14 @@ import {
 } from "../domains/observability/index.js";
 import type { WorkerAction, WorkerProgressSnapshot } from "../domains/observability/worker-progress.js";
 import { type CostProvenance, foregroundStreamUsage } from "../domains/providers/index.js";
+import type { UsageSnapshot } from "../domains/quota/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { type Component, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import { formatWorkerContextMeter } from "./context-meter.js";
 import { COUNCIL_SYNTHESIS_LABEL } from "./council.js";
 import { type CouncilGroupView, type CouncilMemberView, councilGroupBody, councilIslandLines } from "./council-grid.js";
 import { formatFooterTokens } from "./footer-panel.js";
+import { routeWeeklyQuota } from "./quota-view.js";
 import { presentWorkerContractAnswer, safeWorkerAnswerText } from "./renderers/worker-answer.js";
 import {
 	type ClioTheme,
@@ -780,8 +782,9 @@ function renderDispatchCard(
 	return frame(theme, cardTitle, bodyLines, width, { rightMeta: elapsed });
 }
 
-function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
+function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: ReadonlyArray<UsageSnapshot>): string[] {
 	const theme = clioTheme();
+	const weekly = routeWeeklyQuota(row, quota);
 	const agentLabel = agentDisplayLabel(row);
 	const elapsed = formatCompactMs(row.elapsedMs);
 	const cost = formatCostAggregate(costAggregateForAmount(row.costUsd, row.costProvenance)) ?? COST_NOT_MEASURED;
@@ -854,6 +857,17 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number): string[] {
 		...quality.map((line) => padAnsi(theme.fg("muted", line), width)),
 		...task.map((line) => padAnsi(line, width)),
 		padAnsi(telemetry, width),
+		...(weekly
+			? [
+					padAnsi(
+						theme.fg(
+							weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "dim" : "warning",
+							`  Shared account · ${weekly.label}`,
+						),
+						width,
+					),
+				]
+			: []),
 		...wrapTextWithAnsi(theme.fg("dim", `  /view dispatch:${row.runId}`), width),
 	];
 }
@@ -1110,7 +1124,11 @@ export function createDispatchBoardView(
 	};
 }
 
-export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, maxRows = 4): string[] {
+export function formatTaskIslandLines(
+	rows: ReadonlyArray<DispatchBoardRow>,
+	maxRows = 4,
+	quota: ReadonlyArray<UsageSnapshot> = [],
+): string[] {
 	// Councils are folded before the row cap, so a five-member council costs the
 	// island one card and never crowds out the runs beside it.
 	const items = dispatchBoardItems(rows.filter((row) => !isHelperRun(row)));
@@ -1131,7 +1149,7 @@ export function formatTaskIslandLines(rows: ReadonlyArray<DispatchBoardRow>, max
 			body.push(
 				...(item.kind === "council"
 					? councilIslandLines(clioTheme(), item.group, TASK_ISLAND_WIDTH)
-					: renderTaskIslandRow(item.row, TASK_ISLAND_WIDTH)),
+					: renderTaskIslandRow(item.row, TASK_ISLAND_WIDTH, quota)),
 			);
 		}
 		const hidden = items.length - visibleItems.length;

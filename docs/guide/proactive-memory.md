@@ -19,7 +19,7 @@ writes, model resolution, reminders, handoff offers, and handoff seeding.
 | --- | --- |
 | Inspect the bank and recent memory steps | `/memory` |
 | Select a background model or change memory controls | `/settings` → **Context & Memory** |
-| Review recorded cost | `/cost` or `clio-coder usage report` |
+| Review recorded cost | `/usage` or `clio-coder usage report` |
 | Look up the default values and routing example | [Operator setup](#operator-setup) |
 | Understand what survives a handoff | [Handoff continuity](#handoff-continuity) |
 
@@ -234,7 +234,7 @@ The LLM tier costs real tokens, real seconds of model time, and a request slot o
 a server that is usually the same machine the operator's own turns run on.
 
 Every step is therefore accounted for the way a `/btw` side question is: one cost
-entry under the `background-memory` label, which `/cost` shows as its own
+entry under the `background-memory` label, which `/usage` shows as its own
 `memory steps` row, and one durable row in `<stateDir>/usage/out-of-turn.jsonl`
 carrying the usage, the call's duration, and the backend's prefill facts.
 `clio-coder usage report` folds those rows after the process exits, and `/memory`
@@ -582,7 +582,7 @@ Every exact-schema record has:
 - count of cited entries, input/output/total memory-model tokens, and latency.
 
 The same steps are also billed. See "Cost and the default decision" for the
-`/cost` row, the durable out-of-turn usage row, and the lifetime figures `/memory`
+`/usage` row, the durable out-of-turn usage row, and the lifetime figures `/memory`
 folds out of this file.
 
 `dropped` is the one outcome that ran no step. It has two causes, separated by

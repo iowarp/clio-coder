@@ -47,6 +47,7 @@ or CLI-owned feature areas.
 | plugins | `src/domains/plugins/**` | Plugin discovery, catalog, and lifecycle. |
 | prompts | `src/domains/prompts/**` | Prompt fragments, system prompt envelope, template hashing. |
 | providers | `src/domains/providers/**` | Target-first runtime registry, model probing, credentials. |
+| quota | `src/domains/quota/**` | Read-only subscription and credit readings from connected provider accounts, cached and normalized for the usage surfaces. |
 | resources | `src/domains/resources/**` | Package library, skills loader, prompts loader. |
 | safety | `src/domains/safety/**` | 10-step policy engine, path policy, zero-access rails, audit. |
 | scheduling | `src/domains/scheduling/**` | Budget ceilings, node cluster states, batch capacity checks. |

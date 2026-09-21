@@ -250,7 +250,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | Open the Library on Agents. |
-| `/cost` | `/cost` | Show session token and cost totals |
+| `/usage` | `/usage` | Show subscription quota, credits, and session token and cost totals |
 | `/doctor` | `/doctor [deep]` | Show a diagnostic report with errors and warnings first and full wrapped check details; `deep` adds live tool probes on the session's targets and a validation-contract dry run at the session's autonomy. See [Doctor](doctor.md). |
 | `/context` | `/context compact [instructions] \| /context recall <ref> \| /context init [--preview] [--heuristic] [--adopt] [--global] [--propose\|--apply\|--rewrite] \| /context refresh \| /context reset` | Context hub: window overlay plus compact, recall, init, refresh, and reset |
 | `/fleet` | `/fleet [run [--var <key=value>] <name>]` | Open Fleet Runs, or run a fleet contract with an approval preview. Configure fleets with `/settings fleet`. |
@@ -269,6 +269,92 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd and `s` to cycle tree order or most recent first. |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
+
+### Subscription quota and session usage
+
+`/usage` replaces `/cost`. There is no alias: `/cost` is no longer a command.
+The overlay keeps the token and cost accounting `/cost` carried and adds what
+the connected subscription accounts report. It is a live view of this session
+and of your accounts right now; `clio-coder usage report` remains the separate
+command for folding token and cost facts across past sessions.
+
+| View | What it shows |
+| --- | --- |
+| Accounts | Subscription and credit meters, every reported model group, remaining capacity, reset countdowns and local reset times with an explicit time zone, and stale or expired readings |
+| Session | Recorded token and cost totals, cache traffic, reasoning, and the background-call categories (side questions, handoffs, pre-warms, memory steps) |
+| Models | Each model's share of recorded processed tokens, including cache traffic, plus its detailed token and cost breakdown |
+| Workers | Active and recent runs, recorded tokens and cost, context usage, and the shared account limit when the local credential owner is known |
+
+Press 1–4, Tab/Shift+Tab, or ←/→ to change views; ↑/↓ or PgUp/PgDn to scroll;
+Home/End or Ctrl+Home/Ctrl+End to jump to either end; and Esc to close. Each
+view keeps its own scroll position while the overlay stays open.
+
+#### Used, left, and what a percentage describes
+
+One direction per label, on every surface. A filled meter cell always means
+consumed capacity, and the detailed meters in Accounts and Status label that
+number `used` and print the complement beside it as `remaining`. Compact badges
+carry the other direction and say so: `weekly 9% used` in a detailed meter is
+the same reading as `weekly 91% left` in a footer badge.
+
+Subscription percentages describe an account-wide provider window shared across
+your sessions and devices. Session tokens and costs describe only what this
+process recorded, and the two cannot be converted into each other. Context
+occupancy is a third quantity again: it measures one request against a model's
+window, not an account against its plan.
+
+#### Where quota appears outside the overlay
+
+The welcome header, the compact footer, the expanded dashboard, worker cards,
+and fleet islands read the same cached readings the overlay does.
+
+- The **welcome launchpad** carries a `Subscriptions` field beside the wordmark,
+  wrapped so every connected account and the free local-inference row stay visible.
+- The **compact footer** shows the selected model's weekly headroom on line 1,
+  beside the model identity, and only when the account and model group are
+  identifiable. Line 2 always keeps the working directory and Git branch or dirty
+  state; notices, tips, and urgent prompts borrow the rotating hint area beside
+  them. Quota never takes line 2, and the footer never promotes an unrelated
+  account's busier window in place of the selected model's.
+- The expanded dashboard's **Status** page puts the session total above the
+  account meters, **Activity** shows shared account headroom on worker cards, and
+  **Context** states that request occupancy and account limits are different
+  quantities.
+
+#### What Clio does not claim
+
+Worker badges are shared account headroom, not a measured per-worker share.
+Clio does not infer a worker's subscription consumption from its token counts or
+from account deltas, and a badge appears only for a supported local credential
+owner and the matching model group. Antigravity's Gemini group stays distinct
+from its Claude and GPT group. Remote workers and generic transports stay
+unlinked rather than being attributed to an account that may not be theirs.
+Clio's own `openai-codex` sign-in is separate storage from the Codex CLI's
+`auth.json`, so a Codex CLI reading is never attributed to an `openai-codex`
+worker.
+
+Local inference is listed at `$0.00` with no subscription window consumed. No
+saved-quota figure is claimed, because per-target token attribution does not
+exist yet.
+
+#### Reads, caching, and failures
+
+Quota reads are read-only. They read stored credentials and never refresh a
+token, write a credential, or start a sign-in. An expired credential is reported
+as expired with the provider's own sign-in guidance rather than repaired.
+
+A reading is cached for about five minutes and refreshed lazily when a surface
+that shows it is rendered, never on a background timer. A failed refresh keeps
+the last good reading and marks it `STALE` rather than blanking the account. A
+provider that reports no window for a period reports nothing for it: Codex sends
+a weekly window and no 5h window, and Clio prints the rows a provider actually
+sent instead of a fixed shape. Where a provider sends its own severity word,
+that word wins over Clio's thresholds.
+
+Two credentials on one Anthropic subscription (an `anthropic-max` sign-in and a
+Claude Code sign-in) report identical windows, so they are folded into one
+account and the apparent budget is not doubled. Accounts that merely happen to
+show equal percentages are never merged.
 
 ### Notes on individual commands
 
@@ -345,7 +431,7 @@ context every worker inherits. Esc closes the overlay, and cancels the round if 
 is still streaming. `/btw` during an in-flight turn is refused with a notice
 rather than queued, because a side question answered after the run it was asked
 during has already missed its moment. The round's token usage still shows in
-`/cost`, labeled as a side question, because it was a real call and cost real
+`/usage`, labeled as a side question, because it was a real call and cost real
 money; it is deliberately not counted as a turn.
 
 `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] <task>`
@@ -564,7 +650,7 @@ not a potentially double-counted total. Supported GPU drivers expose utilization
 and VRAM through sysfs. Missing counters stay unavailable; WSL measurements are
 labeled as guest measurements and do not describe the Windows host or remote GPU.
 Counter resets wait for a fresh baseline instead of showing negative rates. Memory
-bank and context-engine activity remain visible. `/cost`, `/mcp`, `/library`, `/context`, and
+bank and context-engine activity remain visible. `/usage`, `/mcp`, `/library`, `/context`, and
 Fleet Runs retain deeper inspection. Narrow or short terminals explicitly indicate
 when detail does not fit.
 
@@ -1047,9 +1133,9 @@ The footer owns live activity. Transcript actions have static running or outcome
 
 The Clio TUI maximizes operational focus, ergonomics, and discoverability:
 
-- **Welcome Launchpad & Session Header:** Prior to your first prompt, Clio renders a framed launchpad dashboard (`src/interactive/welcome-dashboard.ts`) with 11 detail rows (model route status, workspace path, permissions/autonomy, guidance, target inventory, and fleet recipes), accompanied by ASCII wordmark art at ≥76 columns and rotating hints at ≥160 columns. A bottom action row indicates the immediate step or blocker (`describe a task · Enter to send · / for commands`, or route blockers such as `/model` or `/settings targets`). On prompt submission, the launchpad collapses to a single live header row (`>C_ Clio Coder v0.5.0 · <target/model> · <workspace> · <branch>*`) tracking mid-session route or branch changes. `/new` restores the launchpad; `/resume`, `/tree`, `/fork`, and `/handoff` collapse it after transition. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header).
+- **Welcome Launchpad & Session Header:** Prior to your first prompt, Clio renders a framed launchpad dashboard (`src/interactive/welcome-dashboard.ts`) with 11 detail rows (model route status, workspace path, permissions/autonomy, guidance, target inventory, and fleet recipes) plus a wrapping `Subscriptions` field once a connected account reports quota, accompanied by ASCII wordmark art at ≥76 columns and rotating hints at ≥160 columns. A bottom action row indicates the immediate step or blocker (`describe a task · Enter to send · / for commands`, or route blockers such as `/model` or `/settings targets`). On prompt submission, the launchpad collapses to a single live header row (`>C_ Clio Coder v0.5.0 · <target/model> · <workspace> · <branch>*`) tracking mid-session route or branch changes. `/new` restores the launchpad; `/resume`, `/tree`, `/fork`, and `/handoff` collapse it after transition. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header).
 - **Quiet, Focused Clio Composer:** Normal composition rails remain clean and uncluttered (`src/interactive/clio-editor.ts`), omitting duplicate model identity or newline hints already provided by the footer. Exceptional operational states elevate to the top rail: `CONFIRM` (`warning` token, or `CONFIRM · FULL-AUTO` in `editorDanger`) when an approval prompt owns input, `PREPARING` during turn dispatch, `COMPACTING` during context compaction, or `FULL-AUTO` (`editorDanger`). Native editor scroll indicators (`↑/↓` line counts) remain on line 0 when drafts scroll. When the draft is empty, line 1 shows context-aware dim placeholder text (`Ask Clio…  / for commands`, `A parked call is waiting for your decision`, `Clio has your prompt and is preparing the turn`, or `Clio is compacting the session context`). During parked permission prompts, the bottom rail carries fitted decision keys (`confirmRailHint` via `src/interactive/permission-hint.ts`: `Enter` allow, or `Backspace` clear draft to allow if a draft is present; `Esc` deny; `s` stop turn; `v` inspect mutation; standing approval terms toggle via `?` on the permission card itself).
-- **Two-Line Compact Footer & Expanded Dashboard:** The compact footer (`src/interactive/footer/pages.ts`) renders an ambient two-line strip: Line 1 displays live activity phase (`accent`) and active worker counts (`agent`), model/target identity, thinking level, context meter bar, and token usage; Line 2 surfaces urgent input prompts (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices, or rotating shortcut hints alternating with workspace cwd and git dirty state on the left, alongside session throughput and dashboard toggle keys on the right. Pressing `Alt+U` expands the dashboard into 1/4 of the viewport (minimum 8 rows), cycling through `Activity` (live worker cards and finished history), `Context` (meter bar/grid, category swatches, headroom), `Status` (Cost & Connections, Local Machine metrics, memory bank), and closed.
+- **Two-Line Compact Footer & Expanded Dashboard:** The compact footer (`src/interactive/footer/pages.ts`) renders an ambient two-line strip: Line 1 displays live activity phase (`accent`) and active worker counts (`agent`), model/target identity, thinking level, context meter bar, and token usage; Line 1 also shows the selected model’s weekly quota remaining when its account and model group are known; Line 2 preserves workspace cwd and Git branch/dirty state on the left, with rotating shortcuts, tips, or urgent notices on the right. Pressing `Alt+U` expands the dashboard into 1/4 of the viewport (minimum 8 rows), cycling through `Activity` (live worker cards and finished history), `Context` (meter bar/grid, category swatches, headroom), `Status` (Cost & Connections, Local Machine metrics, memory bank), and closed.
 - **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
 - **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor Output style: Compact omits the separate receipt, Standard shows a small completion line with available duration, and Detailed includes available call counts, token usage and reasoning provenance.
 - **Transactional Settings Center:** Open `/settings` or deep-link to one of `chat`, `fleet`, `targets`, `context`, `safety`, `interface`, or `integrations`. Value edits construct change plans offering `Apply this session`, `Apply and save globally`, or `Cancel`; narrow terminals use a drill-down layout below 72 columns.

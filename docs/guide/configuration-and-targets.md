@@ -687,7 +687,7 @@ Every new assistant ledger entry carries `responseModelIdObservation` in one of 
 
 </details>
 
-The adapter retains `responseModel` as the differing response id because providers outside the stream tap still supply that fact. `clio-coder usage report` emits `attributedModelId`, `requestedModelIds`, and `responseModelIdObservationCounts`. Its text table and the `/cost` overlay use the labels `attributed model`, `requested model ids`, and `response model id observation`; requested ids are printed as ids rather than as `same`.
+The adapter retains `responseModel` as the differing response id because providers outside the stream tap still supply that fact. `clio-coder usage report` emits `attributedModelId`, `requestedModelIds`, and `responseModelIdObservationCounts`. Its text table and the `/usage` overlay use the labels `attributed model`, `requested model ids`, and `response model id observation`; requested ids are printed as ids rather than as `same`.
 
 The footer's last-turn line uses `response model id observation <state>`, with the id after `reported` or a historical `legacy difference-only` state. Dispatch receipt `upstreamResponses` entries carry `requestedModelId`, `responseModelIdObservation`, `differingResponseModelId`, and `providerResponseId`. The peer warning is said once per process per distinct fact (target, requested id, resolved instance, peer set), not once per turn.
 

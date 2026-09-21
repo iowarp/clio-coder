@@ -362,7 +362,7 @@ export interface ChatLoop {
 	 *
 	 * Nothing this produces reaches the session ledger, the transcript, the
 	 * context ledger, or the footer token counters; the message history is read,
-	 * never mutated. The round's provider usage is still reported to `/cost`,
+	 * never mutated. The round's provider usage is still reported to `/usage`,
 	 * labeled as a side question, because money was spent. Refused outright
 	 * while a turn is in flight rather than queued.
 	 */
@@ -967,12 +967,12 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		deps.recordOutOfTurnUsageRow ?? ((row: OutOfTurnUsageRow): void => appendOutOfTurnUsageRow(clioStateDir(), row));
 
 	/**
-	 * Report an out-of-turn round's provider usage. Money was spent, so `/cost`
+	 * Report an out-of-turn round's provider usage. Money was spent, so `/usage`
 	 * says so under its own label; turn persistence, the working-set ledger,
 	 * compaction inputs, and the footer counters never see it.
 	 *
 	 * The same call is also appended to the out-of-turn usage store under the
-	 * state dir. That store exists because `/cost` only knows what this process
+	 * state dir. That store exists because `/usage` only knows what this process
 	 * spent: the round appends nothing to the session JSONL by design, so an
 	 * archive reader such as `clio-coder usage report` had no record of the
 	 * spend at all once the process exited. The session ledger stays untouched.
