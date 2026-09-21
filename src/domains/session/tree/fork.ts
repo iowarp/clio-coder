@@ -1,5 +1,6 @@
 import { readSessionFileEntries, type SessionTreeNode, sessionPaths } from "../../../engine/session.js";
 import { collectSessionEntries } from "../compaction/session-entries.js";
+import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type { SessionMeta } from "../contract.js";
 import { isSessionHeader, type SessionEntry } from "../entries.js";
 import { enrichForkMeta } from "../history.js";
@@ -87,13 +88,26 @@ function treeFromLinearPath(path: ReadonlyArray<LinkedRecord>): SessionTreeNode[
  * happens to be on the path. Live `/tree`-switch replay does not need this
  * extra gate (see the comment on the shared function for why), which is the
  * one place fork and live replay still deliberately disagree.
+ *
+ * Continuity records need the same gate and for a stronger reason. They anchor
+ * to a turn on the path, so the shared verdict would carry a pause, a delivery,
+ * an acknowledgement or an operator recovery request written *after* the fork
+ * point into a branch that stands before it. That is not just stale display: a
+ * fork inheriting a later `resumed` record, or the control request behind it,
+ * would inherit the evidence for a state it never reached. §8 requires ancestry
+ * **and** file position for both new kinds; the reserved operator control
+ * subtype is named explicitly because §3.1 puts it under the same cutoff, and
+ * because it is the one `custom` record that is authority rather than display.
  */
 function sessionEntryBelongsToPath(
 	entry: SessionEntry,
 	pathIds: ReadonlySet<string>,
 	atOrBeforeForkPoint: boolean,
 ): boolean {
-	if (entry.kind === "compactionSummary" && !atOrBeforeForkPoint) return false;
+	if (atOrBeforeForkPoint) return entryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
+	if (entry.kind === "compactionSummary") return false;
+	if (entry.kind === "handoffTransaction" || entry.kind === "continuityCommit") return false;
+	if (entry.kind === "custom" && entry.customType === HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE) return false;
 	return entryBelongsToPath(entry, pathIds, atOrBeforeForkPoint);
 }
 

@@ -36,6 +36,7 @@ import { appendNotice, appendOperatorAside, appendOperatorCommand, appendReferen
 import { runOperatorRecall } from "./context-recall-command.js";
 import { renderSessionHtml } from "./export-html/index.js";
 import { dateLocal } from "./format-time.js";
+import { withContinuityReplay } from "./model-session-replay.js";
 import type { OracleDigestSources } from "./oracle.js";
 import type { PendingModelScope } from "./overlays/model-scope.js";
 import { renderDoctorReport } from "./renderers/doctor-report.js";
@@ -56,6 +57,15 @@ import { verifyReceiptFileReport } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
 
 const EXPORT_RENDER_WIDTH = 100;
+
+/** Longest run of consecutive backticks in the rendered transcript, for fence sizing. */
+function longestBacktickRun(lines: ReadonlyArray<string>): number {
+	let longest = 0;
+	for (const line of lines) {
+		for (const run of line.match(/`+/gu) ?? []) longest = Math.max(longest, run.length);
+	}
+	return longest;
+}
 
 export interface InteractiveSlashSubmitExpansion {
 	text: string;
@@ -608,10 +618,19 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				// rehydrate exported it as ordinary history (issue #109). No session
 				// contract means no pin can exist for this reader, so the file replays whole.
 				const leafTurnId = deps.session?.tree(sessionId).leafId ?? null;
-				rehydrateChatPanelFromTurns(exportPanel, turns, {
-					unboundedToolBodies: true,
-					...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
-				});
+				// The export shows the same continuity the model sees, resolved from
+				// the same ledger through the same helper, so the two cannot drift.
+				// It is labelled as assistant handoff text and is never rendered as an
+				// operator turn.
+				rehydrateChatPanelFromTurns(
+					exportPanel,
+					turns,
+					withContinuityReplay(
+						turns,
+						{ unboundedToolBodies: true, ...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}) },
+						deps.session,
+					),
+				);
 				const ansiLines = exportPanel.render(EXPORT_RENDER_WIDTH);
 				// The operator names this file by the day they ran the export, so the
 				// date in it is their calendar date. The header below keeps the ISO
@@ -626,8 +645,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				mkdirSync(resolve(target, ".."), { recursive: true });
 				if (markdown) {
 					const lines = ansiLines.map(stripTerminalSequences);
-					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", "```text"];
-					writeFileSync(target, `${[...header, ...lines, "```", ""].join("\n")}`, "utf8");
+					// The fence has to be longer than the longest backtick run the
+					// transcript contains, or a body that includes its own fence closes
+					// the block early and the rest of the session renders as Markdown.
+					// A handoff note is assistant-authored prose that routinely carries
+					// fenced code, so this is reachable content, not a hypothetical.
+					const fence = "`".repeat(Math.max(3, longestBacktickRun(lines) + 1));
+					const header = [`# Clio session ${sessionId}`, "", `Exported ${exportedAt.toISOString()}`, "", `${fence}text`];
+					writeFileSync(target, `${[...header, ...lines, fence, ""].join("\n")}`, "utf8");
 				} else {
 					writeFileSync(target, renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines }), "utf8");
 				}

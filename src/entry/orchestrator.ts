@@ -164,6 +164,8 @@ import type { CompactionCallObservation } from "../domains/session/compaction/co
 import { type CompactInput, type CompactResult, compact } from "../domains/session/compaction/compact.js";
 import { collectSessionEntries } from "../domains/session/compaction/session-entries.js";
 import { estimateTokens } from "../domains/session/compaction/tokens.js";
+import { continuityPayloadFromFold } from "../domains/session/continuity/carry.js";
+import { continuityProjectionTokens, resolveContinuityProjection } from "../domains/session/continuity/projection.js";
 import type { SessionContract, SessionMeta } from "../domains/session/contract.js";
 import { activeDecisionRefs, createDecisionBoardStore } from "../domains/session/decision-board.js";
 import type { CompactionSummaryEntry, CompactionTrigger, SessionEntry } from "../domains/session/entries.js";
@@ -203,7 +205,10 @@ import { cwdHash, openSession, readSessionTailTurns, sessionCurrentPath, session
 import type { EngineModel } from "../engine/types.js";
 import { createChatLoop } from "../interactive/chat-loop.js";
 import type { RunIo } from "../interactive/index.js";
-import { buildModelReplayAgentMessagesFromTurns } from "../interactive/model-session-replay.js";
+import {
+	buildModelReplayAgentMessagesFromTurns,
+	continuityContextFromSession,
+} from "../interactive/model-session-replay.js";
 import { prepareBackgroundModelMetadata } from "./background-model-metadata.js";
 import type { BootOptions } from "./boot-options.js";
 import { readCompactionSystemPrompt } from "./compaction-prompt.js";
@@ -835,6 +840,26 @@ async function runCompactionFlow(
 		session.current()?.id === meta.id && (session.tree(meta.id).leafId ?? undefined) === activeLeafTurnId;
 	const entries = filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId);
 	if (entries.length === 0) return null;
+	// Folded over the full applicable ledger before this compaction cuts it, so
+	// the carry written below reflects every durable transition, including ones
+	// older than the cut. Resolved once and used for three things: the payload
+	// the summary carries, the note's one-time price on both sides of the
+	// before/after comparison, and nothing else. Inspection never executes the
+	// action it proposes.
+	const continuity = resolveContinuityProjection({
+		entries,
+		sessionId: meta.id,
+		...(meta.parentSessionId && meta.parentTurnId
+			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
+			: {}),
+	});
+	// Only this session's own validated fold is carried forward. An inherited
+	// note is recall: writing it into this session's summary would republish
+	// another branch's transaction under this one's compaction.
+	const continuityNote = {
+		tokens: continuityProjectionTokens(continuity),
+		anchorTurnId: continuity.noteAnchorTurnId,
+	};
 	budget?.signal?.throwIfAborted();
 	const systemPrompt = await readCompactionSystemPrompt(settings.context.compaction.systemPrompt, meta.cwd);
 	budget?.signal?.throwIfAborted();
@@ -874,6 +899,7 @@ async function runCompactionFlow(
 	try {
 		result = await compact({
 			entries,
+			continuityNote,
 			...budget,
 			...(summarize ? { summarize } : {}),
 			onCall: (call) => calls.push(call),
@@ -910,6 +936,26 @@ async function runCompactionFlow(
 		result.usage = { ...result.usage, targetId: resolved.targetId, modelId: resolved.wireModelId };
 	}
 
+	// Refold before publishing the carry. The projection above was resolved
+	// before prompt loading, route resolution and the summary stream, and a
+	// transition appended during any of those awaits leaves the message leaf
+	// untouched, so the origin check just above passes while the carry in hand
+	// still says `ready`. §3 requires the summary to embed the *current*
+	// validated fold, so the ledger is re-read and refolded here. Only the carry
+	// is re-derived: `result` indexes the entry array the cut was computed
+	// against, which must not move under it.
+	const settledContinuity = resolveContinuityProjection({
+		entries: filterEntriesToActivePath(readSessionEntriesForCompact(meta.id), activeLeafTurnId),
+		sessionId: meta.id,
+		...(meta.parentSessionId && meta.parentTurnId
+			? { fork: { parentSessionId: meta.parentSessionId, parentTurnId: meta.parentTurnId } }
+			: {}),
+	});
+	// A suppressed projection publishes no authoritative carry: the adapter marks
+	// its own fold unvalidated, and `continuityPayloadFromFold` refuses one.
+	const continuityCarry =
+		settledContinuity.current === null ? null : continuityPayloadFromFold(settledContinuity.current);
+
 	const entry: Omit<CompactionSummaryEntry, "timestamp"> = {
 		kind: "compactionSummary",
 		turnId: randomUUID(),
@@ -921,7 +967,15 @@ async function runCompactionFlow(
 		firstKeptTurnId: result.firstKeptTurnId ?? "",
 		messagesSummarized: result.messagesSummarized,
 		isSplitTurn: result.isSplitTurn,
-		tokensAfter: estimateTokensAfterCompaction(entries, result),
+		tokensAfter: estimateTokensAfterCompaction(entries, result, continuityNote.tokens),
+		// The latest validated fold, carried so the transaction survives the cut
+		// that is about to remove its earlier records from replay. It preserves
+		// the immutable identity, accepted note, original policy and commit; it
+		// never manufactures a commit and never turns an eviction-only outcome
+		// into a summarized one. A later ordinary compaction with no handoff of
+		// its own still carries the newest validated payload forward, which is
+		// what keeps an eviction-only commit's state alive across summary cycles.
+		...(continuityCarry === null ? {} : { continuity: continuityCarry }),
 		// The summarization call is a real model call. Persisting its provider
 		// usage on the entry is what puts it in front of `/usage` and `clio-coder usage
 		// report`, which folded the ledger and so counted every call but this one.
@@ -1021,13 +1075,24 @@ function estimateTokensFromSummary(result: CompactResult): number {
  * still holds the assistant message whose usage describes the pre-compaction
  * prompt. Anchoring on it reports precisely the number compaction removed.
  */
-function estimateTokensAfterCompaction(entries: ReadonlyArray<SessionEntry>, result: CompactResult): number {
+function estimateTokensAfterCompaction(
+	entries: ReadonlyArray<SessionEntry>,
+	result: CompactResult,
+	/**
+	 * The projected continuity note, which survives the reduction and is
+	 * therefore on both sides. It is already inside `tokensBefore` and the
+	 * subtraction below never removes it, because continuity records estimate at
+	 * zero; it only has to be restored on the floor branch, which discards
+	 * `tokensBefore` entirely.
+	 */
+	continuityNoteTokens = 0,
+): number {
 	let droppedTokens = 0;
 	for (const entry of entries.slice(0, result.firstKeptEntryIndex)) droppedTokens += estimateTokens(entry);
 	const summaryTokens = estimateTokensFromSummary(result);
 	// The summary alone is the floor: a session whose dropped estimate exceeds
 	// the measured anchor must not report a negative or sub-summary context.
-	return Math.max(summaryTokens, result.tokensBefore - droppedTokens + summaryTokens);
+	return Math.max(summaryTokens + continuityNoteTokens, result.tokensBefore - droppedTokens + summaryTokens);
 }
 
 /**
@@ -2263,10 +2328,14 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				// parent onto.
 				chat.resetForSession(
 					leafTurnId,
-					buildModelReplayAgentMessagesFromTurns(
-						readCurrentSessionEntries(),
-						leafTurnId ? { activeLeafTurnId: leafTurnId } : {},
-					),
+					buildModelReplayAgentMessagesFromTurns(readCurrentSessionEntries(), {
+						...(leafTurnId ? { activeLeafTurnId: leafTurnId } : {}),
+						// The same ownership the interactive /resume overlay supplies.
+						// Without it this reader owns nothing, the fold finds no
+						// current origin, and a resumed session boots with its accepted
+						// note silently missing from the provider context.
+						continuity: continuityContextFromSession(session),
+					}),
 				);
 			} catch (err) {
 				chat.resetForSession(leafTurnId);
@@ -2317,8 +2386,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				...(session
 					? {
 							readSessionEntries: readSessionEntriesForCompact,
+							// Ownership is read at call time, not captured: an ACP client
+							// can switch sessions between turns, and a fork opened this way
+							// must separate its own transactions from the ones it inherited
+							// exactly as the interactive path does.
 							buildReplayMessages: (entries: ReadonlyArray<SessionEntry>, leafTurnId: string | null) =>
-								buildModelReplayAgentMessagesFromTurns(entries, leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+								buildModelReplayAgentMessagesFromTurns(entries, {
+									...(leafTurnId === null ? {} : { activeLeafTurnId: leafTurnId }),
+									continuity: continuityContextFromSession(session),
+								}),
 						}
 					: {}),
 				providers,

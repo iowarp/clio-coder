@@ -1532,6 +1532,30 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry, calls: Readonl
 	if (entry.kind === "contextRecall") {
 		return [`${prefix} contextRecall ref=${entry.ref.entry} trigger=${entry.trigger} tokens=${entry.tokensReadmitted}`];
 	}
+	// Continuity provenance, bounded to identity and position in the chain. The
+	// accepted note is deliberately not rendered here: it is agent-authored
+	// handoff text, it is already carried under the existing redaction policy on
+	// the transcript surfaces that do show it, and an evidence bundle needs to
+	// know that a handoff happened and where it stands, not to hold a second copy.
+	if (entry.kind === "handoffTransaction") {
+		const link = entry.transition;
+		const detail =
+			entry.event.phase === "failed" || entry.event.phase === "paused"
+				? ` reason=${entry.event.reason}`
+				: entry.event.phase === "resumed"
+					? ` action=${entry.event.authority.action} answers=${entry.event.authority.pausedOrFailedEntryId}`
+					: "";
+		return [
+			`${prefix} handoffTransaction handoff=${entry.identity.handoffId} phase=${entry.event.phase} seq=${link.sequence} attempt=${link.attempt} prev=${link.prevEntryId ?? "none"}${detail}`,
+		];
+	}
+	if (entry.kind === "continuityCommit") {
+		const commit = entry.continuity.commit;
+		const ref = commit.summaryRef ?? commit.evictionRef ?? "none";
+		return [
+			`${prefix} continuityCommit handoff=${entry.continuity.identity.handoffId} commit=${entry.continuity.identity.commitId} outcome=${commit.outcome} ref=${ref} tokens=${commit.tokensBefore}->${commit.tokensAfter} state=${entry.continuity.state.event.phase}`,
+		];
+	}
 	const _exhaustive: never = entry;
 	return [`${prefix} ${String(_exhaustive)}`];
 }

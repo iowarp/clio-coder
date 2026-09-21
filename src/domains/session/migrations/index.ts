@@ -8,9 +8,13 @@
  * whatever that build understood and this one does not. Downgrading and
  * resuming would then write the truncated reading back over the original.
  *
- * Version 3 to 4 is the one additive step: 4 only adds the working-set kinds
- * (`contextEviction`, `contextRecall`), so a version-3 ledger is read as-is
- * and the metadata is restamped. Nothing in the file changes.
+ * Versions 3, 4 and 5 are one additive chain. 4 added the working-set kinds
+ * (`contextEviction`, `contextRecall`); 5 adds the continuity kinds
+ * (`handoffTransaction`, `continuityCommit`) and the optional continuity
+ * payload on a compaction summary. Each step only makes new records legal, so
+ * a version-3 or version-4 ledger is read exactly as it stands and only the
+ * metadata is restamped. Nothing in the file changes, and an old ledger simply
+ * has no handoff in it.
  */
 
 import { CURRENT_SESSION_FORMAT_VERSION } from "../../../engine/session.js";

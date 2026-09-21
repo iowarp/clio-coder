@@ -30,7 +30,7 @@ import {
 import { serializeConversation } from "./branch-summary.js";
 import { findCutPoint } from "./cut-point.js";
 import { DEFAULT_KEEP_RECENT_TOKENS, DEFAULT_RESERVE_TOKENS } from "./defaults.js";
-import { calculateContextTokens, getLastAssistantUsage } from "./tokens.js";
+import { type ContinuityNoteCost, calculateContextTokens, getLastAssistantUsage } from "./tokens.js";
 
 interface FileOperations {
 	read: Set<string>;
@@ -175,6 +175,15 @@ export interface CompactInput {
 	preserveUserTurnId?: string;
 	/** Accounting observer; called once per invoked stream, including failures. */
 	onCall?: (call: CompactionCallObservation) => void;
+	/**
+	 * The continuity note replay projects, from `continuityProjectionTokens` and
+	 * the projection's `noteAnchorTurnId`. The note survives the reduction, so it
+	 * is on both sides of the before/after comparison; counting it needs the
+	 * session and fork facts the caller has and this module does not, and the
+	 * anchor id is what keeps it from being counted twice once a provider usage
+	 * anchor already includes it.
+	 */
+	continuityNote?: ContinuityNoteCost;
 }
 
 export interface CompactResult {
@@ -804,7 +813,7 @@ export async function compact(input: CompactInput): Promise<CompactResult> {
 	const usageStart = prevCompactionIndex >= 0 ? prevCompactionIndex : 0;
 	const usageEntries = entries.slice(usageStart);
 	const lastUsage = getLastAssistantUsage(usageEntries);
-	const tokensBefore = calculateContextTokens(usageEntries, lastUsage);
+	const tokensBefore = calculateContextTokens(usageEntries, lastUsage, input.continuityNote);
 	const rawCut = findCutPoint(entries, keepRecentTokens, { startIndex: boundaryStart });
 	const cut =
 		protectedStart !== null && rawCut.firstKeptEntryIndex > protectedStart

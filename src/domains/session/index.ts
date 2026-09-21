@@ -19,6 +19,54 @@ export {
 	readAuditRows,
 	readSessionEntriesForId,
 } from "./archive-readers.js";
+// Durable continuity (CONTRACTS §§2-8). Only the consumer-facing half surfaces
+// here: the record and fold contracts, the reader-side projection, the operator
+// control carrier and the persistence binding. The pure fold, its validators
+// and the group persister stay reachable through their own modules, because the
+// packets that use them are inside this domain or hold an explicit grant.
+export type {
+	AcceptedNote,
+	ContinuityAuthority,
+	ContinuityCarriedState,
+	ContinuityCheckpointPayload,
+	ContinuityCommitData,
+	ContinuityCommitEntry,
+	ContinuityFoldResult,
+	ContinuityOutcome,
+	ContinuityPersistencePorts,
+	ContinuityPhase,
+	ContinuityRecoveryAction,
+	HandoffEvent,
+	HandoffIdentity,
+	HandoffPolicy,
+	HandoffTransactionEntry,
+	TransitionLink,
+} from "./continuity/contract.js";
+export type {
+	HandoffRecoveryRequestData,
+	HandoffRecoveryRequestEntry,
+} from "./continuity/operator-request.js";
+export {
+	HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE,
+	isHandoffRecoveryRequestData,
+	isHandoffRecoveryRequestEntry,
+} from "./continuity/operator-request.js";
+export type { ContinuityPortOrigin, ContinuityPortsInput } from "./continuity/ports.js";
+export { createContinuityPersistencePorts, readContinuityRecordExact } from "./continuity/ports.js";
+export type {
+	ContinuityForkBinding,
+	ContinuityProjection,
+	ContinuityProjectionInput,
+	ContinuityRecallNote,
+	ProjectedContinuityNote,
+} from "./continuity/projection.js";
+export {
+	continuityProjectionTokens,
+	continuityReplayBlocks,
+	continuityReplayText,
+	inheritedContinuityReplayText,
+	resolveContinuityProjection,
+} from "./continuity/projection.js";
 export type {
 	ClioSessionMetaExtension,
 	DeleteSessionOptions,

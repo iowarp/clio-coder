@@ -8,6 +8,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import {
 	appendSessionFileEntry,
+	CURRENT_SESSION_FORMAT_VERSION,
 	createSession,
 	openSession,
 	readSessionFileEntries,
@@ -150,7 +151,7 @@ describe("session integrity", () => {
 		}
 	}
 
-	for (const version of [2, 3, 4, 5]) {
+	for (const version of [2, 3, 4, 5, 6]) {
 		it(`preserves version ${version} admission and torn-tail recovery`, async () => {
 			const current = createSessionBundle({ bus: { emit() {} } } as unknown as DomainContext).contract;
 			const old = current.create({ cwd: scratch.dir });
@@ -167,7 +168,7 @@ describe("session integrity", () => {
 			if (version === 3) fs.writeFileSync(paths.current, `${JSON.stringify(entry("candidate"))}\n`);
 			fs.appendFileSync(paths.current, '{"interrupted":');
 			try {
-				if (version === 2 || version === 5) {
+				if (version === 2 || version === 6) {
 					const before = fs.readFileSync(paths.meta, "utf8");
 					throws(() => current.resume(candidate.meta.id), /unsupported format version|newer Clio/u);
 					strictEqual(current.current()?.id, old.id);
@@ -175,7 +176,7 @@ describe("session integrity", () => {
 					current.append(turn("continued", "old"));
 				} else {
 					current.switchBranch(candidate.meta.id);
-					strictEqual(current.current()?.sessionFormatVersion, 4);
+					strictEqual(current.current()?.sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
 					current.append(turn("continued", "candidate"));
 					deepStrictEqual(
 						openSession(candidate.meta.id)
@@ -504,7 +505,7 @@ describe("session integrity", () => {
 	}
 
 	for (const transition of ["resume", "switchBranch"] as const) {
-		for (const version of [2, 5]) {
+		for (const version of [2, 6]) {
 			it(`${transition} refuses version ${version} before publishing recovery files`, async () => {
 				const events: unknown[] = [];
 				const current = createSessionBundle({
@@ -571,7 +572,7 @@ describe("session integrity", () => {
 				current[transition](candidate.meta.id);
 				strictEqual(publications, 1);
 				strictEqual(readSessionMeta(candidate.meta.id).endedAt, null);
-				strictEqual(readSessionMeta(candidate.meta.id).sessionFormatVersion, 4);
+				strictEqual(readSessionMeta(candidate.meta.id).sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
 			} finally {
 				fs.renameSync = rename;
 				syncBuiltinESMExports();
@@ -620,7 +621,7 @@ describe("session integrity", () => {
 					);
 					current[transition](candidate.meta.id);
 					strictEqual(readSessionMeta(candidate.meta.id).endedAt, null);
-					strictEqual(current.current()?.sessionFormatVersion, 4);
+					strictEqual(current.current()?.sessionFormatVersion, CURRENT_SESSION_FORMAT_VERSION);
 					current.append(turn("candidate-continued", "candidate"));
 				} finally {
 					await current.close();

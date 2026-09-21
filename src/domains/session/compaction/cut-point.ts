@@ -74,6 +74,12 @@ function isValidCutPoint(entry: SessionEntry): boolean {
 		case "workerRun":
 		case "contextEviction":
 		case "contextRecall":
+		// Transaction bookkeeping is not a place the conversation can be sliced.
+		// A cut landing on a handoff record would put the summary boundary in the
+		// middle of a durable transaction, and the records carry no conversation
+		// text for the retained suffix to be about.
+		case "handoffTransaction":
+		case "continuityCommit":
 			return false;
 	}
 }
@@ -193,7 +199,20 @@ export function findCutPoint(
 			prev.kind === "bashExecution" ||
 			prev.kind === "custom" ||
 			prev.kind === "skillActivation" ||
-			prev.kind === "branchSummary"
+			prev.kind === "branchSummary" ||
+			// Stop before a continuity record rather than widening onto it. The
+			// widening exists so bookkeeping rides with the retained suffix, but
+			// the cut index also names `firstKeptTurnId`, which becomes the new
+			// summary's structural parent. Parking that on a transaction record
+			// would anchor the summary to a non-message, and `entryBelongsToPath`
+			// resolves a summary through its anchor: on a branched session the
+			// summary would then be filtered off its own active path. Continuity
+			// records ahead of the cut lose nothing by being on the summarized
+			// side, because `serializeConversation` never projects them into the
+			// prompt and the fold reads the full pre-cut ledger rather than the
+			// replay slice.
+			prev.kind === "handoffTransaction" ||
+			prev.kind === "continuityCommit"
 		) {
 			break;
 		}
