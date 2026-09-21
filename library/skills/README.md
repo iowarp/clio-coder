@@ -2,8 +2,9 @@
 
 This tree contains reviewed skill instructions and authoring evidence. Complete
 packages participate in the same [library](../../docs/guide/resource-library.md) as
-plugins, agents, prompts and fleets. Nothing in this source tree loads merely
-because it ships with Clio.
+plugins, agents, prompts and fleets. Bundling a package does not activate it.
+Inside a detected Clio source checkout, the two self-development skills described
+below are also available directly from their authoring directories.
 
 `library/skills/` is the canonical source for Clio Coder's curated skills. The npm
 package includes this tree, `library/plugins/`, and the `library/registry.yaml` index.
@@ -41,6 +42,30 @@ worker activations remain scoped to their run. A skill can narrow tools but neve
 grant authority the host disallows.
 
 ## Source organization
+
+### Developing Clio itself
+
+When Clio detects its own Git checkout (including worktrees and subdirectory
+launches), it discovers `clio-coder-dev` and `clio-coder-test` from
+`library/skills/meta/` as native local skills. This does not install packages or
+discover the rest of the catalog. Source roots must remain inside the checkout;
+an unrelated nested Git repository does not inherit them.
+
+The session prompt recommends `clio-coder-dev` for source changes and
+`clio-coder-test` for validation. At `auto-edit` and `full-auto`, the model can
+load ready skills through `context(scope="skills", name="...")`. At `read-only`
+and `suggest`, operator activation is still required. This is automatic discovery
+and task-aware guidance, not automatic body injection or a guarantee of a model's
+tool choice. `--no-skills`, hidden skills, and task/tool restrictions still apply.
+
+An installed package owns its name even when disabled, damaged, or pending
+reload; source discovery does not bypass it. Native local overrides keep their
+precedence. Worker recipes retain their declared skill bindings; parent-session
+activation is not inherited. A running process needs a new candidate build and
+restart for runtime changes, while editing these source skills remains ordinary
+repository work. Follow `CONTRIBUTING.md` and the skills' focused references.
+
+## Catalog layout
 
 | Directory | Subject |
 | --- | --- |

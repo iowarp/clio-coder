@@ -148,53 +148,50 @@ entries:
           worktree-create. Not for integrating branches; use worktre
   - kind: skill
     name: clio-coder-dev
-    description: "Governs changes to Clio Coder's own source and harness (TUI,
-      skills, agents, tools, prompts, domains): what may change freely, what
-      needs explicit user intent, and how to change it without breaking the
-      architecture. Not for verifying a change against the harness; use
-      clio-coder-test."
+    description: "Develop Clio Coder inside its own repository: trace source
+      contracts, implement bounded changes, coordinate sprint work, and preserve
+      running-agent and session correctness. Use before changing Clio source,
+      prompts, tools, or library; pair with clio-coder-test for validation."
     category: meta
     audit: pass
     triggers:
-      - modify Clio Coder
-      - change the Clio harness
-      - edit Clio skills or agents
-      - evolve Clio tools or prompts
-      - Clio contribution boundary
-    version: 0.4.0
+      - develop Clio in its own repository
+      - implement a Clio sprint packet
+      - change Clio context or session lifecycle
+      - edit Clio skills tools or prompts
+    version: 0.5.0
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: d72e2dcd441600f927738d352766a7472e2340bb60b1a23b6894f921079e4243
+    sha256: a2a9558348234ef5fb5fe821651ef57b8f6430473bd48818a1d468b405c1f61a
     provides:
       - kind: skill
         name: clio-coder-dev
-        description: "Governs changes to Clio Coder's own source and harness (TUI,
-          skills, agents, tools, prompts, domains): what may change freely, what
-          needs explicit user intent, and how to change it without breaking the
-          architecture. Not for verifying a change against the h"
+        description: "Develop Clio Coder inside its own repository: trace source
+          contracts, implement bounded changes, coordinate sprint work, and
+          preserve running-agent and session correctness. Use before changing
+          Clio source, prompts, tools, or library; pair with clio-coder-t"
   - kind: skill
     name: clio-coder-test
-    description: Verifies a Clio Coder source change against the current contract,
-      smoke, boundary, and application test lanes, including temporary-state and
-      local-provider harnesses. Not for deciding what may change; use
-      clio-coder-dev.
+    description: Validate Clio Coder changes using focused source regressions, built
+      CLI and ACP fixtures, skill/library checks, and isolated package or GUI
+      gates. Use when developing or diagnosing Clio itself; select checks from
+      the changed behavior and report evidence without claiming unrun coverage.
     category: meta
     audit: pass
     triggers:
-      - test Clio Coder
-      - verify a Clio source change
-      - run Clio contract tests
-      - test ACP over stdio
-      - Clio mock provider harness
-    version: 0.3.1
+      - validate a Clio change
+      - test Clio context compaction or memory
+      - verify Clio skill activation
+      - choose Clio test gates
+    version: 0.4.0
     sourceUrl: skills/meta/clio-coder-test
-    sha256: c5a1fa81a19d671560d98a5f4e78f56a0515294611bc9ae796aac37165719a92
+    sha256: 6a4748d77d27be81da75ae8359cde2c44f76db83f025920b102a8aa309e17208
     provides:
       - kind: skill
         name: clio-coder-test
-        description: Verifies a Clio Coder source change against the current contract,
-          smoke, boundary, and application test lanes, including temporary-state
-          and local-provider harnesses. Not for deciding what may change; use
-          clio-coder-dev.
+        description: Validate Clio Coder changes using focused source regressions, built
+          CLI and ACP fixtures, skill/library checks, and isolated package or
+          GUI gates. Use when developing or diagnosing Clio itself; select
+          checks from the changed behavior and report evidence wi
   - kind: skill
     name: coding-standards
     description: Correct-by-construction TypeScript rules (errors as values, parse

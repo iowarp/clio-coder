@@ -2,6 +2,13 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## Unreleased
+
+### Self-development skills
+
+- Redesign `clio-coder-dev` and `clio-coder-test` around source ownership, bounded sprint work, lifecycle correctness, isolated candidate builds, focused validation, and honest evidence. Update their reference maps, behavioral scenarios, and package metadata.
+- Discover these two source skills inside Clio's own checkout and give task-aware loading guidance through the existing skill interface. Preserve autonomy and worker bindings, no-skills mode, package ownership, hidden skills, and repository containment; keep skill bodies out of the base prompt until loaded.
+
 ## 0.5.1 - 2026-09-21
 
 ### subscription quota and unified usage

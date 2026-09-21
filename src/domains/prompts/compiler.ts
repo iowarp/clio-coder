@@ -256,7 +256,7 @@ function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	return toolSurfaceHasTool(inputs.toolNames, "context") && turnAllowsTool(inputs.turnConstraints, "context");
 }
 
-function sessionCanUseSkills(inputs: SessionPromptInputs): boolean {
+export function sessionCanUseSkills(inputs: SessionPromptInputs): boolean {
 	return (
 		sessionHasContext(inputs) &&
 		inputs.skillDiscoveryEnabled !== false &&

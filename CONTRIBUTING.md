@@ -227,6 +227,15 @@ generated peer-host projection; do not edit it by hand. Core recipes under
 
 ## Working with coding agents
 
+In this repository, Clio discovers the local `clio-coder-dev` and
+`clio-coder-test` skills and recommends them for development and validation.
+Load them through the normal skill interface when the task calls for them;
+source discovery does not bypass autonomy, `--no-skills`, installed package
+state, or worker recipe bindings. See the
+[self-development skill behavior](library/skills/README.md#developing-clio-itself).
+When the current checkout's `dist/` backs the running agent, build and test a
+candidate in a separate worktree and restart a separate process to dogfood it.
+
 Read this file, the relevant changelog entry, any local `CLIO-CODER.md`, and the
 owning subsystem's documentation. Prefer `rg` and focused source reads. Preserve
 other work in a shared checkout and coordinate file ownership before editing.
