@@ -1,5 +1,5 @@
 /**
- * Thin reducer over TelemetrySnapshot. Produces a view the TUI + /cost overlay
+ * Thin reducer over TelemetrySnapshot. Produces a view the TUI + /usage overlay
  * consume. Stays pure so tests can hand-roll snapshots and assert the shape.
  */
 

@@ -85,6 +85,8 @@ An `EvidenceIndexRow` has the following schema:
 
 ## Cross-Session Usage Facts
 
+Everything in this section describes what Clio itself recorded. Subscription quota is a separate source with separate meaning: `src/domains/quota/**` reads what each connected provider account reports about its own windows and credits, account-wide and shared across your sessions and devices, and nothing in that domain enters the cost ledger, the evidence spine, or the trace store. The `/usage` overlay shows both and keeps them in separate views, because a session's recorded tokens cannot be converted into a percentage of a provider's plan. See [Subscription quota and session usage](../guide/commands-and-modes.md#subscription-quota-and-session-usage).
+
 `clio-coder usage report` folds the local archive into one window of facts. Its token and cost facts come from two inputs: the per-session ledgers, folded through the session domain's `ledgerUsageCalls`, and the out-of-turn usage store described below. Both the text report and `--json` carry the same fields.
 
 | Field | Where it appears | Meaning |
@@ -92,7 +94,7 @@ An `EvidenceIndexRow` has the following schema:
 | `apiCalls` | `tokens in window: <total> over <n> model calls` and the `tokens` JSON fact | Provider calls folded in the window, out-of-turn rounds included. |
 | `input`, `output`, `cacheRead`, `cacheWrite`, `reasoningTokens`, `totalTokens` | the same line and fact | Provider-reported token breakdown for those calls. |
 | `costUsd` | `provider-reported cost in window` and the `tokens` fact | Provider-reported cost. Never estimated. |
-| `turns` | `turns in window` and the `tokens` fact | Folded calls that were turns, so labelled calls are subtracted exactly as `/cost` subtracts them. |
+| `turns` | `turns in window` and the `tokens` fact | Folded calls that were turns, so labelled calls are subtracted exactly as `/usage` subtracts them. |
 | `sideQuestions` | `side questions in window` and the `tokens` fact | `/btw` rounds in the window. |
 | `handoffs` | `handoffs in window` and the `tokens` fact | `/handoff` extraction rounds in the window. |
 | `prewarms` | `pre-warms in window` and the `tokens` fact | Prompt pre-warm rounds in the window. |
@@ -120,7 +122,7 @@ The row reads `top expected reason none` when the session recorded verdicts but 
 
 ### The Out-of-Turn Usage Store
 
-A `/btw` side question and a `/handoff` extraction round are real provider calls that append nothing to the session JSONL, by design: a fleet run briefs its workers from the transcript, and a question the operator asked to orient themselves must not become context those workers inherit. The spend still has to be recorded somewhere durable, so it goes to `<stateDir>/usage/out-of-turn.jsonl`, one JSON line per priced call, written by the chat loop at the same moment it reports the call to `/cost`.
+A `/btw` side question and a `/handoff` extraction round are real provider calls that append nothing to the session JSONL, by design: a fleet run briefs its workers from the transcript, and a question the operator asked to orient themselves must not become context those workers inherit. The spend still has to be recorded somewhere durable, so it goes to `<stateDir>/usage/out-of-turn.jsonl`, one JSON line per priced call, written by the chat loop at the same moment it reports the call to `/usage`.
 
 The file is append-only NDJSON kept as a bounded ring (capped at 1000 rows, rewritten atomically under the shared state-file lock when it grows past the cap). Reads are tolerant: a malformed line is reported as a diagnostic on stderr and skipped.
 
@@ -155,9 +157,9 @@ Failed compaction attempts record one `failed-compaction` row per invoked summar
 
 New failed-compaction rows preserve missing usage fields as `null`. Positive partial-response facts survive an error that resets missing fields to zero. Ambiguous failed zeros remain unknown, reasoning is separate from ordinary output/total tokens, and an absent total is not inferred. Positive adapter prices are labeled `estimated`; zero or missing pricing is `unknown`, not a free-call claim. Existing numeric rows and historical checkpoints remain readable without rewriting them.
 
-`clio-coder usage report` includes these calls in its known subtotals, labels the failed-attempt count, and exposes `failedCompaction.knownUsage`, `erroredKnownUsage`, and per-field `unobservedUsageCalls` in the token and model JSON facts. A field with missing coverage and no known positive amount is `null`, including cost-only or wholly unobserved failures. Text output identifies incomplete subtotals. The live `/cost` view records positive known contributions under a failed-compaction label; its numeric token counters remain known subtotals. These figures do not certify provider billing or complete spending. The existing session-cost ceiling checks the numeric known sum, so unreported cost does not become an enforced complete-cost bound.
+`clio-coder usage report` includes these calls in its known subtotals, labels the failed-attempt count, and exposes `failedCompaction.knownUsage`, `erroredKnownUsage`, and per-field `unobservedUsageCalls` in the token and model JSON facts. A field with missing coverage and no known positive amount is `null`, including cost-only or wholly unobserved failures. Text output identifies incomplete subtotals. The live `/usage` view records positive known contributions under a failed-compaction label; its numeric token counters remain known subtotals. These figures do not certify provider billing or complete spending. The existing session-cost ceiling checks the numeric known sum, so unreported cost does not become an enforced complete-cost bound.
 
-In v0.5.0, eval tracked/stdout folds omit the failed-compaction sidecar, and live `/cost` reseeding reads the session ledger rather than this store. A later usage report can therefore include retained failed-compaction amounts that those views omit. These consumer projections remain separate; retained known amounts must not be presented as complete cross-surface billing.
+In v0.5.0, eval tracked/stdout folds omit the failed-compaction sidecar, and live `/usage` reseeding reads the session ledger rather than this store. A later usage report can therefore include retained failed-compaction amounts that those views omit. These consumer projections remain separate; retained known amounts must not be presented as complete cross-surface billing.
 
 A failed or empty summary produces no checkpoint. Required failed-compaction usage appends are flushed and a write failure remains an explicit operation error; no model call is repeated to repair accounting. If checkpoint append throws, Clio checks that checkpoint's exact identity in the original ledger before choosing the sidecar: an already written checkpoint is not counted again, and proven absence permits the sidecar. An unreadable or malformed ledger that leaves persistence ambiguous fails visibly without a speculative duplicate write. This is the existing bounded usage store, not a new recovery store; its 1000-row retention and unknown telemetry limits still apply.
 

@@ -92,7 +92,7 @@ export interface OverlaySessionLifecycle {
 
 /**
  * The target and model a session started under, so reseeded calls land in the
- * same `/cost` bucket the live path writes to. Without it a single target read
+ * same `/usage` bucket the live path writes to. Without it a single target read
  * as two providers, one under the target id and one under the runtime name.
  */
 function sessionUsageDefaults(session: SessionContract): { target?: string | null; model?: string | null } {
@@ -120,7 +120,7 @@ function restorePriorSessionOrReopen(
 
 export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps): OverlaySessionLifecycle {
 	/**
-	 * Point every running number the footer and `/cost` show at one branch. The
+	 * Point every running number the footer and `/usage` show at one branch. The
 	 * session total and the last-turn line are read off the same lineage in the
 	 * same call, so a switch cannot move one and leave the other behind.
 	 */
@@ -244,7 +244,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
 					deps.chat.resetForSession(turnId, replayMessages);
 					// The same branch the transcript above was just scoped to. Without the
-					// leaf, /cost, the footer Σ, and the last-turn line kept reporting the
+					// leaf, /usage, the footer Σ, and the last-turn line kept reporting the
 					// abandoned turns.
 					rescopeToBranch(session, turns, turnId);
 				} catch (error) {

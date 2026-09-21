@@ -183,7 +183,7 @@ type SlashCommandVariant =
 	| { kind: "fleet-run-usage"; reason?: string }
 	| { kind: "fleet" }
 	| { kind: "agents"; connect?: boolean }
-	| { kind: "cost" }
+	| { kind: "usage" }
 	| { kind: "context-view" }
 	| { kind: "tasks" }
 	| { kind: "decisions" }
@@ -706,7 +706,7 @@ export interface SlashCommandContext {
 	}>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
-	openCost: () => void;
+	openUsage: () => void;
 	/**
 	 * `/doctor [deep]`: the CLI doctor's findings, rendered as one notice.
 	 * `deep` adds the live tool probe on the session's targets and the
@@ -1686,14 +1686,14 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 		},
 	},
 	{
-		name: "cost",
-		description: "Show session token and cost totals",
+		name: "usage",
+		description: "Show subscription quota, credits, and session token and cost totals",
 		group: "Inspect",
-		kinds: ["cost"],
+		kinds: ["usage"],
 		args: {},
-		fromArgs: fromArgsOrUsage("cost", { kind: "cost" }),
+		fromArgs: fromArgsOrUsage("usage", { kind: "usage" }),
 		handle(_command, ctx) {
-			ctx.openCost();
+			ctx.openUsage();
 		},
 	},
 	{
@@ -2648,7 +2648,7 @@ const COMMAND_ORDER = [
 	"memory",
 	"view",
 	"panes",
-	"cost",
+	"usage",
 	"doctor",
 	"decisions",
 	"library",

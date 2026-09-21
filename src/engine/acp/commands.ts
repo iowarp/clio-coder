@@ -590,7 +590,7 @@ function headlessContext(
 		listAgents: () => unreachable("listAgents"),
 		listDelegationAgents: () => unreachable("listDelegationAgents"),
 		shutdown: () => unreachable("shutdown"),
-		openCost: () => unreachable("openCost"),
+		openUsage: () => unreachable("openUsage"),
 		openSideQuestion: () => unreachable("openSideQuestion"),
 		startHandoff: () => unreachable("startHandoff"),
 		openContextView: () => unreachable("openContextView"),

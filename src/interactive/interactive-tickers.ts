@@ -1,3 +1,4 @@
+import type { UsageSnapshot } from "../domains/quota/types.js";
 import { type TaskBoardSnapshot, type TaskBoardStore, taskBoardCounts } from "../domains/session/task-board.js";
 import { Text, type TUI, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
@@ -28,6 +29,7 @@ export interface InteractiveTickersDeps {
 	dispatchBoardStore: InteractiveDispatchStore;
 	contextActivityStore: InteractiveContextActivityStore;
 	getOverlayState: () => string;
+	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	isFooterExpanded: () => boolean;
 	/** Bound to TaskBoardStore.cachedSnapshot; repaint must never fold the session ledger. */
 	getTaskBoard?: TaskBoardStore["cachedSnapshot"];
@@ -126,7 +128,11 @@ export function createInteractiveTickers(deps: InteractiveTickersDeps): Interact
 		taskIslandHidden = hidden;
 		if (rows.length > 0)
 			taskIsland.setText(
-				formatTaskIslandLines(rows, Math.max(1, Math.min(4, Math.floor((taskIslandHeight - 8) / 9)))).join("\n"),
+				formatTaskIslandLines(
+					rows,
+					Math.max(1, Math.min(4, Math.floor((taskIslandHeight - 8) / 10))),
+					deps.getQuotaSnapshots?.() ?? [],
+				).join("\n"),
 			);
 		else if (board) taskIsland.setText(formatTaskBoardIslandLines(board).join("\n"));
 		taskIsland.invalidate();

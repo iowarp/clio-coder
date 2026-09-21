@@ -1,7 +1,7 @@
 /**
  * Rebuild the running usage totals from a session's own ledger.
  *
- * The `/cost` overlay and the footer both render one process-lifetime
+ * The `/usage` overlay and the footer both render one process-lifetime
  * accumulator, and only `startNewSession` ever reset it. Resuming did not, so a
  * resumed session showed the *previous* session's numbers under the resumed
  * session's id: one process, two sessions, byte-identical totals relabelled.
@@ -56,7 +56,7 @@ export interface SessionUsageSink {
  * `activeLeafTurnId` scopes the fold to one branch, through the same
  * `filterEntriesToActivePath` the transcript replays through. current.jsonl is
  * append-only, so after a `/tree` switch the abandoned sibling turns are still
- * in the file: the transcript stopped showing them and `/cost` and the footer Σ
+ * in the file: the transcript stopped showing them and `/usage` and the footer Σ
  * kept counting them, which put a session total on screen for turns the reader
  * had just been told were not on this branch. Omitted, the fold follows the
  * newest message's ancestry, the same fallback an offline read of the transcript

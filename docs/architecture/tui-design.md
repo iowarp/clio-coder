@@ -203,7 +203,7 @@ Interactive startup uses one terminal lease across both boot stages. Stage 0 own
 The header has two operational modes: a framed launchpad dashboard on fresh start, and a single live session row after prompt admission. Source: `src/interactive/welcome-dashboard.ts`; contracts: `tests/extended/welcome-boot-header.test.ts`.
 
 - **Launchpad (before the first prompt): framed panel dashboard.** A boxed container (`buildWelcomeDashboardLines`) enclosed by `╭─ Clio Coder v<version> ─╮` and `╰─╯`:
-  - **11 Detail Rows:** Subhead/title ("Built for the code behind science."), model route status (`routeRow`), workspace path, permissions/autonomy (`stats.autonomy`), guidance ("Ask Clio how to use or extend her."), target inventory (`stats.targets`), and fleet recipes inventory (`stats.fleet`).
+  - **11 Detail Rows:** Subhead/title ("Built for the code behind science."), model route status (`routeRow`), workspace path, permissions/autonomy (`stats.autonomy`), guidance ("Ask Clio how to use or extend her."), target inventory (`stats.targets`), and fleet recipes inventory (`stats.fleet`). A `Subscriptions` field (`stats.quota`) joins the list between Targets and Fleet once a cached quota reading exists, wrapping at the detail-column width rather than clipping, and is absent entirely when no account is connected.
   - **Responsive Layout:** Renders wordmark ASCII art on the left at ≥76 columns (`sideBySide`), and rotating hint cards on the right at ≥160 columns (`WELCOME_HINT_MIN_WIDTH`) cycling commands and shortcuts every 15 seconds.
   - **Action Row:** A horizontal rule (`├─┤`) separates details from the action row (`actionRow`), which prints the next step or work blocker: no route or model (`/model`), route unavailable or degraded (`/settings targets`), malformed handbook (`CLIO-CODER.md malformed · /context to inspect`), uninitialized handbook (`describe a task · /context init to index this repo`), stale handbook (`describe a task · /context refresh to update it`), or default `describe a task · <SubmitKey> to send · / for commands`.
 
@@ -267,12 +267,12 @@ Starting Clio · you can type now
 Source: `src/interactive/footer/dashboard.ts`, `src/interactive/footer/pages.ts`.
 
 - **Compact Mode (Two-Line Ambient Strip)**:
-  - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · Target/model identity (`fitIdentityLabel`) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right.
-  - **Line 2 (Status & Hints)**: Urgent input prompt (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`), demo tips, or rotating shortcut hints alternating with workspace path and git branch/dirty (`*`) on the left; Session throughput (`tok/s`) and dashboard toggle shortcut (`Alt+U`) on the right.
+  - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · Target/model identity (`fitIdentityLabel`) · Selected model’s weekly quota (`weekly N% left`, when the local credential owner and model group are known) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right.
+  - **Line 2 (Status & Hints)**: Persistent workspace cwd and Git branch/dirty (`*`) on the left; rotating shortcut hints on the right. Urgent input prompts (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`), and demo tips borrow only the hint area. Quota never occupies this row.
 - **Expanded Mode (`Alt+U`)**: Renders across one-quarter of the viewport (minimum 8 rows), keeping the composer anchored below. Repeated presses cycle through three responsive pages (`DASHBOARD_PAGES`) and closed:
   1. `Activity`: Live agent phase, tool counts, session metrics, active worker cards (route, task, token usage, tool calls, timing, budget, `/view dispatch:<id>`), and finished worker history.
   2. `Context`: Context meter bar and category occupancy grid (system, tools, files, turns, memory), compaction/cache telemetry, headroom.
-  3. `Status`: Cost & Connections (session cost, MCP servers, plugins, extensions) and Local Machine metrics (CPU, memory, disk I/O sampled on 2s cadence), plus memory bank entries and free tokens.
+  3. `Status`: A session line (recorded tokens and tracked cost) above one compact row per connected subscription account (`renderQuotaAccounts`, `src/interactive/quota-view.ts`), then Cost & Connections (session cost, MCP servers, plugins, extensions) and Local Machine metrics (CPU, memory, disk I/O sampled on 2s cadence), plus memory bank entries and free tokens.
 
 ### 5.4 State Choreography Table
 
@@ -418,17 +418,20 @@ Agents and Fleets label plugin provider packages as `[plugin]` and show only the
 
 ## 8. Shared Vocabulary
 
-One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. The current vocabulary is owned by `src/interactive/chat-panel.ts`, `src/interactive/cost-overlay.ts`, `src/interactive/status/reasoning.ts`, and `src/interactive/thinking-level-policy.ts`; there is no standalone `usage-vocabulary` contract test in the current tree.
+One quantity gets one word, and every surface that shows it uses that word. A user comparing the transcript, the footer, and an overlay is checking whether Clio is telling a consistent story; a synonym reads as a discrepancy. The current vocabulary is owned by `src/interactive/chat-panel.ts`, `src/interactive/usage-overlay.ts`, `src/interactive/status/reasoning.ts`, and `src/interactive/thinking-level-policy.ts`; there is no standalone `usage-vocabulary` contract test in the current tree.
 
 | Concept | Word | Surfaces |
 | --- | --- | --- |
-| One model API call | `call` | Chat panel `turn · in N over M calls`, `/cost` `model calls`, `/cost` `(avg/call …)` |
-| One user-to-assistant exchange | `turn` | Chat panel `turn · …`, `/cost` `turns` |
+| One model API call | `call` | Chat panel `turn · in N over M calls`, `/usage` `model calls`, `/usage` `(avg/call …)` |
+| One user-to-assistant exchange | `turn` | Chat panel `turn · …`, `/usage` `turns` |
 | Provider-reported reasoning tokens | `reasoning N provider` | Chat panel |
 | Reasoning tokens estimated from displayed text | `reasoning ≈N estimated` | Chat panel; the footer carries the same `≈` on `r≈N` |
-| Reasoning tokens in the cost tally | `reasoning N provider-reported only` | `/cost`. This tally never estimates, so it disagrees with the panel on a model that reports nothing, and the row says which one it is. |
+| Reasoning tokens in the cost tally | `reasoning N provider-reported only` | `/usage`. This tally never estimates, so it disagrees with the panel on a model that reports nothing, and the row says which one it is. |
 | Thinking level a model cannot turn off | `forced` | Editor rail, model overlay, thinking cycle (`thinkingLevelDisplayWord`) |
 | Thinking level on a model with only on and off | `on` / `off` | Same surfaces |
+| Consumed share of a subscription window | `N% used` | `/usage` Accounts, dashboard Status, welcome `Subscriptions`. A filled meter cell always means consumed capacity. |
+| Unconsumed share of the same window | `N% remaining` in a detailed meter, `N% left` in a compact badge | `/usage` Accounts and Status print `remaining` beside `used`; the compact footer, worker cards, and fleet islands carry `weekly N% left`. |
+| A limit belonging to the account rather than to this session | `Shared <account>` | Worker cards, fleet islands, `/usage` Workers. Never a measured per-worker share. |
 
 ### 8.1 Slash-Command Failures
 

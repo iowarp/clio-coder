@@ -11,19 +11,22 @@ import {
 	type ObservabilityContract,
 	type ObservabilitySnapshot,
 } from "../domains/observability/index.js";
+import type { UsageSnapshot } from "../domains/quota/types.js";
 import {
 	foldPromptCacheTelemetry,
 	hasPromptCacheTelemetry,
 	type PromptCacheTelemetry,
 	type SessionEntry,
 } from "../domains/session/index.js";
-import type { Component, OverlayHandle, TUI } from "../engine/tui.js";
-import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { type Component, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../engine/tui.js";
+import type { DispatchBoardRow } from "./dispatch-board.js";
+import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
+import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
 import { clioTheme, rule } from "./theme/index.js";
 
-const DEFAULT_CONTENT_WIDTH = 80;
+const DEFAULT_CONTENT_WIDTH = 104;
 
-export const COST_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
+export const USAGE_OVERLAY_WIDTH = DEFAULT_CONTENT_WIDTH + 4;
 
 export interface CostRow {
 	providerId: string;
@@ -295,19 +298,9 @@ function modelBlock(row: CostRow): string[] {
 	]);
 }
 
-function formatCostOverlayBodyLines(
-	totalCost: CostAggregate,
-	totalTokens: number,
-	rows: ReadonlyArray<CostRow>,
-	contentWidth: number,
-	promptCache: PromptCacheTelemetry | null = null,
-): string[] {
+function modelDetailLines(rows: ReadonlyArray<CostRow>, contentWidth: number): string[] {
 	const theme = clioTheme();
-	const lines: string[] = [];
-	for (const line of summaryBlock(totalCost, totalTokens, rows, promptCache)) {
-		lines.push(line);
-	}
-	lines.push(rule(theme, contentWidth));
+	const lines: string[] = [rule(theme, contentWidth)];
 	if (rows.length === 0) {
 		lines.push(theme.fg("muted", "no token usage recorded for this session"));
 	} else {
@@ -352,32 +345,116 @@ function buildCostSnapshot(
 	};
 }
 
-export interface OpenCostOverlayOptions {
+export interface OpenUsageOverlayOptions {
+	getDispatchRows?: () => ReadonlyArray<DispatchBoardRow>;
+	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	sessionId?: string | null;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
 }
 
-class CostOverlayBody implements Component {
-	constructor(private readonly getSnapshot: () => CostSnapshot) {}
+const USAGE_TABS = ["Accounts", "Session", "Models", "Workers"] as const;
+
+class UsageOverlayBody implements Component {
+	private tab = 0;
+	private offsets = [0, 0, 0, 0];
+	private height = 20;
+	private pageHeight = 16;
+	private lineCount = 0;
+
+	constructor(
+		private readonly getSnapshot: () => CostSnapshot,
+		private readonly getQuotaSnapshots: () => ReadonlyArray<UsageSnapshot>,
+		private readonly getDispatchRows: () => ReadonlyArray<DispatchBoardRow>,
+		private readonly requestRender: () => void,
+	) {}
+
+	setHeight(rows: number): void {
+		this.height = Math.max(1, rows - 3);
+	}
+
+	handleInput(data: string): void {
+		const selected = (["1", "2", "3", "4"] as const).findIndex((key) => matchesKey(data, key));
+		if (selected >= 0) this.tab = selected;
+		else if (matchesKey(data, "tab") || matchesKey(data, "right")) this.tab = (this.tab + 1) % USAGE_TABS.length;
+		else if (matchesKey(data, "shift+tab") || matchesKey(data, "left"))
+			this.tab = (this.tab + USAGE_TABS.length - 1) % USAGE_TABS.length;
+		else {
+			let offset = this.offsets[this.tab] ?? 0;
+			if (matchesKey(data, "up")) offset--;
+			else if (matchesKey(data, "down")) offset++;
+			else if (matchesKey(data, "pageUp")) offset -= this.pageHeight;
+			else if (matchesKey(data, "pageDown")) offset += this.pageHeight;
+			else if (matchesKey(data, "home") || matchesKey(data, "ctrl+home")) offset = 0;
+			else if (matchesKey(data, "end") || matchesKey(data, "ctrl+end")) offset = this.lineCount;
+			else return;
+			this.offsets[this.tab] = Math.max(0, Math.min(offset, this.lineCount - this.pageHeight));
+		}
+		this.requestRender();
+	}
 
 	render(width: number): string[] {
 		const contentWidth = Math.max(1, Math.floor(width));
 		const snapshot = this.getSnapshot();
-		return formatCostOverlayBodyLines(
-			snapshot.totalCost,
-			snapshot.totalTokens,
-			snapshot.rows,
+		const quota = this.getQuotaSnapshots();
+		const theme = clioTheme();
+		const tabs = wrapTextWithAnsi(
+			USAGE_TABS.map((name, index) =>
+				index === this.tab
+					? theme.style("accent", `${index + 1} ${name}`, { bold: true, underline: true })
+					: theme.fg("dim", `${index + 1} ${name}`),
+			).join("   "),
 			contentWidth,
-			snapshot.promptCache,
 		);
+		let body: string[];
+		if (this.tab === 0)
+			body = [
+				theme.fg("dim", "Account-wide limits · filled = used · shared across sessions and devices"),
+				"",
+				...renderQuotaAccounts(quota, contentWidth),
+			];
+		else if (this.tab === 1)
+			body = [
+				theme.style("accent", "Session tokens & cost", { bold: true }),
+				theme.fg("dim", "Recorded calls in this session · estimates are marked in the cost totals"),
+				"",
+				...summaryBlock(snapshot.totalCost, snapshot.totalTokens, snapshot.rows, snapshot.promptCache),
+				"",
+				rule(theme, contentWidth),
+				theme.fg("dim", "Session tokens cannot be converted to subscription percentages."),
+				...(snapshot.rows.length ? [] : ["no token usage recorded for this session"]),
+			];
+		else if (this.tab === 2) {
+			body = [
+				theme.style("accent", "Model activity · this session", { bold: true }),
+				theme.fg("dim", "Share of recorded processed tokens, including cache traffic; not account quota."),
+				"",
+			];
+			for (const row of [...snapshot.rows].sort((a, b) => b.tokens - a.tokens)) {
+				const share = snapshot.totalTokens > 0 ? (row.tokens / snapshot.totalTokens) * 100 : 0;
+				body.push(
+					`${row.providerId} · ${row.attributedModelId}`,
+					`${quotaMeter(share, Math.min(24, contentWidth), "normal")} ${share.toFixed(1)}% · ${formatTokens(row.tokens)} tokens`,
+				);
+			}
+			body.push("", ...modelDetailLines(snapshot.rows, contentWidth));
+		} else body = renderWorkerUsage(this.getDispatchRows(), quota, contentWidth);
+		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
+		this.lineCount = lines.length;
+		this.pageHeight = Math.max(1, this.height - tabs.length - 1);
+		const offset = Math.max(0, Math.min(this.offsets[this.tab] ?? 0, lines.length - this.pageHeight));
+		this.offsets[this.tab] = offset;
+		const visible = [...tabs, "", ...lines.slice(offset, offset + this.pageHeight)];
+		if (lines.length > this.pageHeight)
+			visible.push(theme.fg("dim", `${offset + 1}–${Math.min(lines.length, offset + this.pageHeight)} / ${lines.length}`));
+		return visible;
 	}
 
 	invalidate(): void {}
 }
 
 /**
- * Mount a read-only session-cost overlay. The running USD total comes from the
+ * Mount the read-only usage overlay. Quota comes from the shared presentation feed. The running USD total comes from the
  * observability projection's `snapshot().session.costUsd`, while the
  * per-provider/model rows fold `observability.costEntries()`. The overlay is
  * kept live by `observability.subscribe()`: the projection already folds the
@@ -385,23 +462,34 @@ class CostOverlayBody implements Component {
  * update, so a single subscription replaces the former DispatchCompleted /
  * DispatchFailed / chat-turn refresh wiring. `hide()` unsubscribes.
  */
-export function openCostOverlay(
+export function openUsageOverlay(
 	tui: TUI,
 	observability: ObservabilityContract,
-	options?: OpenCostOverlayOptions,
+	options?: OpenUsageOverlayOptions,
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
 	let latest: ObservabilitySnapshot = observability.snapshot();
-	const body = new CostOverlayBody(() =>
-		buildCostSnapshot(observability, sessionId, latest, options?.getSessionEntries),
+	const body = new UsageOverlayBody(
+		() => buildCostSnapshot(observability, sessionId, latest, options?.getSessionEntries),
+		options?.getQuotaSnapshots ?? (() => []),
+		options?.getDispatchRows ?? (() => []),
+		() => tui.requestRender(),
 	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
-		width: COST_OVERLAY_WIDTH,
+		width: USAGE_OVERLAY_WIDTH,
 		// Not derived from the title: that one carries the session id.
-		markerId: "cost",
-		title: sessionId && sessionId.length > 0 ? `Session usage (${sessionId})` : "Session usage",
-		footerHint: buildHint([]),
+		markerId: "usage",
+		title: sessionId && sessionId.length > 0 ? `Usage (${sessionId})` : "Usage",
+		footerHint: buildResponsiveHint([
+			{ key: "1–4 / Tab", verb: "view", critical: true },
+			{ key: "↑↓", verb: "scroll" },
+			{ key: "PgUp/PgDn", verb: "page" },
+		]),
+		visible: (_width, height) => {
+			body.setHeight(height);
+			return true;
+		},
 	});
 
 	// subscribe() fires immediately with the current snapshot, then on each

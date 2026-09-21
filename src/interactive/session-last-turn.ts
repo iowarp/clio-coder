@@ -4,7 +4,7 @@
  * The line is a live accumulator: it describes whatever turn this process last
  * ran. current.jsonl is append-only, so after a `/tree` switch that turn can sit
  * on a branch the reader just left, and the line kept describing it while the Σ
- * total and `/cost` beside it had already been rescoped by the usage reseed. One
+ * total and `/usage` beside it had already been rescoped by the usage reseed. One
  * footer, two branches, no way to tell which line belonged to which.
  *
  * The fold reads the same lineage the reseed does, through

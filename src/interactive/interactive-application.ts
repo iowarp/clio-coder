@@ -840,7 +840,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		expandSubmit: (text) => expandInteractiveSubmitAsync(text, deps.resources),
 		openAskUser: (questions, options) => openAskUserOverlayState(questions, options),
 		openSkillsHub: (request) => openSkillsHubState(request),
-		openCost: () => openCostOverlayState(),
+		openUsage: () => openUsageOverlayState(),
 		openSideQuestion: (question) => openSideQuestionOverlayState(question),
 		startHandoff: (goal) => startHandoffState(goal),
 		startFleetRun: (name, vars) => startFleetRunState(name, vars),
@@ -901,6 +901,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	editor.onSubmit = editorSubmit.submitEditorText;
 
 	const interactiveTickers = createInteractiveTickers({
+		getQuotaSnapshots: presentation.getQuotaSnapshots,
 		tui,
 		dispatchBoardStore,
 		contextActivityStore,
@@ -937,6 +938,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		resetTranscript();
 	};
 	overlayLifecycle = createOverlayLifecycle({
+		getQuotaSnapshots: presentation.getQuotaSnapshots,
+		getDispatchRows: () => dispatchBoardStore.rows(),
 		app: deps,
 		tui,
 		footer,
@@ -972,7 +975,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	const {
 		closeOverlay,
 		openAskUserOverlayState,
-		openCostOverlayState,
+		openUsageOverlayState,
 		openSideQuestionOverlayState,
 		startHandoffState,
 		startFleetRunState,

@@ -240,7 +240,7 @@ test("compact footer exposes activity, headroom and inference identity in two bo
 	match(text, /1 active/);
 
 	match(text, /262.1k/);
-	match(text, /alt\+u|Dashboard/);
+	match(text, /clio-coder.*v050/);
 	match(text, /think/);
 	doesNotMatch(text, /auto-edit|70k processed|standard/);
 });
@@ -261,7 +261,7 @@ test("Status renders live resource telemetry instead of a configuration dump", (
 		match(text, /Clio RSS/);
 		match(text, /RAM/);
 		match(text, /GPU/);
-		match(text, /Provider quota.*not reported/);
+		match(text, /Subscriptions.*loading/);
 		match(text, /Clio ceiling/);
 		doesNotMatch(text, /Worker approvals|PERMISSIONS & LIMITS/);
 	} finally {
@@ -379,4 +379,74 @@ test("footer hints resolve remapped bindings and omit unbound actions", () => {
 	} finally {
 		setKeybindings(previous);
 	}
+});
+
+test("worker cards and Status distinguish shared account limits from recorded session usage", () => {
+	const snapshot = state();
+	snapshot.quota = [
+		{
+			providerId: "claude-code",
+			displayName: "Claude Code",
+			status: "ok",
+			plan: "Max",
+			windows: [{ key: "weekly", label: "Weekly", usedPct: 91, resetsAt: null }],
+			fetchedAt: null,
+		},
+	];
+	snapshot.dispatchRows = snapshot.dispatchRows.map((row) => ({
+		...row,
+		runtimeId: "claude-code",
+		runtimeKind: "subprocess",
+	}));
+	match(plain(renderDashboardPage(snapshot, "Activity", 160, 120, "alt+u")), /Account.*Shared Claude Code.*9% left/);
+	const status = plain(renderDashboardPage(snapshot, "Status", 160, 120, "alt+u"));
+	match(status, /SESSION.*recorded tokens/);
+	match(status, /Claude Code.*Weekly 91%/);
+	match(plain(renderDashboardPage(snapshot, "Context", 160, 120, "alt+u")), /subscription limits are account-wide/);
+});
+
+test("compact quota stays beside the selected model while workspace and rotating hints remain visible", () => {
+	const snapshot = state();
+	snapshot.workspace.dirty = true;
+	snapshot.quotaRoute = { runtimeId: "claude-code", wireModelId: "claude-opus" };
+	snapshot.session.target = "Claude · claude-opus";
+	snapshot.quota = [
+		{
+			providerId: "claude-code",
+			displayName: "Claude Code",
+			status: "ok",
+			fetchedAt: null,
+			windows: [
+				{ key: "session", label: "5h", usedPct: 7, resetsAt: null },
+				{ key: "weekly", label: "Weekly", usedPct: 9, resetsAt: null },
+			],
+		},
+		{
+			providerId: "codex",
+			displayName: "Codex",
+			status: "ok",
+			fetchedAt: null,
+			windows: [{ key: "weekly", label: "Weekly", usedPct: 77, resetsAt: null }],
+		},
+	];
+	for (const width of [80, 120, 160]) {
+		const rows = renderCompactDashboard(snapshot, width).map(stripTerminalSequences);
+		match(rows[0] ?? "", /weekly 91% left/);
+		doesNotMatch(rows[0] ?? "", /Codex|5h/);
+		match(rows[1] ?? "", /clio-coder.*v050 \*/);
+		doesNotMatch(rows[1] ?? "", /weekly|Claude|Codex/);
+		ok(rows.every((line) => visibleWidth(line) <= width));
+	}
+	const initial = plain(renderCompactDashboard(snapshot, 160));
+	snapshot.now += 12000;
+	ok(plain(renderCompactDashboard(snapshot, 160)) !== initial);
+	for (let page = 0; page < 40; page++) {
+		snapshot.now = page * 12000;
+		match(stripTerminalSequences(renderCompactDashboard(snapshot, 160)[1] ?? ""), /clio-coder.*v050 \*/);
+		ok(footerKeyHint(snapshot.now));
+	}
+	snapshot.session.shutdownArmed = true;
+	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050 \*.*Ctrl\+C again/);
+	snapshot.quotaRoute = { runtimeId: "litellm", wireModelId: "claude-opus" };
+	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });

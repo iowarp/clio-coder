@@ -1,4 +1,5 @@
 import { costAggregateForAmount, formatCostAggregate } from "../../domains/observability/index.js";
+import type { UsageSnapshot } from "../../domains/quota/types.js";
 /** Expanded footer pages: dense inspection, separate from transcript output style. */
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { redactSecretString } from "../../domains/safety/redaction.js";
@@ -6,6 +7,7 @@ import { getKeybindings, truncateToWidth, visibleWidth, wrapTextWithAnsi } from 
 import { contextCategorySwatch, renderContextMeterBar, renderContextMeterGrid } from "../context-meter.js";
 import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivity } from "../dispatch-board.js";
 import { formatFooterTokens } from "../footer-panel.js";
+import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
 import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
@@ -18,7 +20,12 @@ export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
 const ACTIVE_AGENT_STATUSES = new Set(["running", "enqueued", "cancelling", "retrying", "stale"]);
 const clean = (value: string) => sanitizeCallTargetText(redactSecretString(value));
 
-function agentCard(row: DispatchBoardRow, width: number, compact = false): string[] {
+function agentCard(
+	row: DispatchBoardRow,
+	width: number,
+	compact = false,
+	quota: ReadonlyArray<UsageSnapshot> = [],
+): string[] {
 	const theme = clioTheme();
 	const presentation = dispatchStatusPresentation(row.status, { compact: false });
 	const name = clean(row.agentId).replace(
@@ -34,6 +41,9 @@ function agentCard(row: DispatchBoardRow, width: number, compact = false): strin
 	const field = (label: string, value: string) =>
 		wrapTextWithAnsi(`${theme.fg("dim", `${label}  `)}${clean(value)}`, width);
 	lines.push(...previewRows(field("Route", `${row.targetId}/${row.wireModelId}`), 2, width));
+	const weekly = routeWeeklyQuota(row, quota);
+	if (weekly)
+		lines.push(...previewRows(field("Account", `Shared ${weekly.account} · ${weekly.label}`), compact ? 1 : 2, width));
 	if (row.taskSummary)
 		lines.push(...(compact ? previewRows(field("Task", row.taskSummary), 2, width) : field("Task", row.taskSummary)));
 	const activity = renderDispatchActivity(row, width);
@@ -107,8 +117,8 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 		if (first && second) {
 			cards.push(
 				...zipColumns(
-					agentCard(first, col, true),
-					agentCard(second, width - col - 5, true),
+					agentCard(first, col, true, state.quota),
+					agentCard(second, width - col - 5, true, state.quota),
 					col,
 					width - col - 5,
 					`  ${theme.fg("frame", "│")}  `,
@@ -119,7 +129,7 @@ function activityPage(state: FooterDashboardRenderState, width: number, budget: 
 		}
 	} else
 		for (const row of active) {
-			const card = agentCard(row, width, active.length > 1 || cardBudget < 18);
+			const card = agentCard(row, width, active.length > 1 || cardBudget < 18, state.quota);
 			if (cards.length + card.length + 2 > cardBudget && shown > 0) break;
 			cards.push(...card, "");
 			shown++;
@@ -183,6 +193,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 			width,
 		),
 	];
+	out.push(theme.fg("dim", "Context occupancy is per request; subscription limits are account-wide · /usage"));
 	const gridWidth = Math.max(12, Math.min(64, width >= 76 ? Math.floor(width * 0.38) : width));
 	const gridHeight = width >= 76 ? 8 : 3;
 	const grid = renderContextMeterGrid(ledger, gridWidth, gridHeight, theme);
@@ -248,7 +259,7 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	return out;
 }
 
-/** Two-line ambient strip. Notices borrow workspace space until dismissed/expired. */
+/** Model and context above; persistent workspace and a rotating hint area below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
 	const w = Math.max(1, width);
@@ -262,8 +273,21 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const usage = `${formatFooterTokens(ledger?.usedTokens ?? state.context.used ?? 0)} / ${(ledger?.contextWindow ?? state.context.contextWindow) ? formatFooterTokens(ledger?.contextWindow ?? state.context.contextWindow ?? 0) : "?"}`;
 	const context = `${ledger ? renderContextMeterBar(ledger, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
 	const rightWidth = Math.min(Math.floor(w * 0.48), visibleWidth(context));
-	const identityRoom = Math.max(8, w - rightWidth - visibleWidth(thinking) - visibleWidth(activity) - 10);
-	const left = `${activity}  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))} · ${thinking}`;
+
+	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
+	const leftRoom = Math.max(1, w - rightWidth - 3);
+	const activityLabel = fit(activity, Math.min(visibleWidth(activity), Math.max(5, Math.floor(leftRoom / 3))));
+	const badge =
+		weekly && leftRoom - visibleWidth(activityLabel) - visibleWidth(weekly.label) >= 16
+			? theme.fg(
+					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
+					weekly.label,
+				)
+			: "";
+	const baseRoom = leftRoom - visibleWidth(activityLabel) - (badge ? visibleWidth(badge) + 3 : 0) - 5;
+	const showThinking = baseRoom - visibleWidth(thinking) - 3 >= 12;
+	const identityRoom = Math.max(1, baseRoom - (showThinking ? visibleWidth(thinking) + 3 : 0));
+	const left = `${activityLabel}  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)
@@ -283,20 +307,30 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				)
 			: state.demoHint
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
-				: theme.fg(
-						"dim",
-						footerKeyHint(state.now, w < 80) ??
-							`${clean(state.workspace.cwd)} · ${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`,
-					);
-	const hint = theme.fg("muted", `${state.session.throughput ? `${state.session.throughput}  ·  ` : ""}${key}`);
-	return [
-		fit(pair(left, context, rightWidth)),
-		fit(pair(foot, hint, Math.min(Math.floor(w * 0.4), visibleWidth(hint)))),
-	];
+				: theme.fg("dim", footerKeyHint(state.now, w < 120) ?? `${key} Dashboard`);
+	const hintWidth = Math.min(Math.floor(w * 0.48), visibleWidth(foot));
+	const workspaceWidth = Math.max(1, w - hintWidth - 3);
+	const git = `${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`;
+	const gitWidth = Math.min(visibleWidth(git), Math.max(4, Math.floor(workspaceWidth * 0.45)));
+	const cwdWidth = Math.max(1, workspaceWidth - gitWidth - 3);
+	const workspace = theme.fg(
+		"dim",
+		`${fitIdentityLabel(clean(state.workspace.cwd), cwdWidth)} · ${fitIdentityLabel(git, gitWidth)}`,
+	);
+	return [fit(pair(left, context, rightWidth)), fit(pair(workspace, foot, hintWidth))];
 }
 
 function statusPage(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
+
+	const quotaRows = [
+		theme.style(
+			"accent",
+			`SESSION · ${formatFooterTokens(state.sessionTokens?.totalTokens ?? 0)} recorded tokens · ${formatCostAggregate(state.sessionCost) ?? "cost not yet priced"}`,
+			{ bold: true },
+		),
+		...renderQuotaAccounts(state.quota ?? [], width, { compact: true, now: state.now }),
+	];
 
 	const active = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status));
 	const completed = state.dispatchRows.filter((row) => row.status === "completed").length;
@@ -334,7 +368,6 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		["Target", state.session.target ?? "not selected"],
 		["Tracked cost", formatCostAggregate(state.sessionCost) ?? "not yet priced"],
 		["Clio ceiling", state.costCeilingUsd === undefined ? "unknown" : `$${state.costCeilingUsd} · tracked pricing only`],
-		["Provider quota", "not reported by provider"],
 		["MCP connected", names(state.connections?.mcp)],
 		["Plugins active", names(state.connections?.plugins)],
 		[
@@ -404,6 +437,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 	];
 	if (width < 76)
 		return [
+			...quotaRows,
 			...section("COST & CONNECTIONS", left, width),
 			...section("LOCAL MACHINE", right, width),
 			theme.fg("accent", "CONTEXT ENGINE"),
@@ -414,6 +448,7 @@ function statusPage(state: FooterDashboardRenderState, width: number): string[] 
 		];
 	const col = Math.floor((width - 5) / 2);
 	return [
+		...quotaRows,
 		...zipColumns(
 			section("COST & CONNECTIONS", left, col),
 			section("LOCAL MACHINE", right, width - col - 5),
@@ -457,7 +492,7 @@ export function renderDashboardPage(
 	const hint = truncateToWidth(
 		theme.fg(
 			"muted",
-			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/cost · /mcp · /library" : "composer stays active"}`,
+			`${cycleKey || "Dashboard"} → ${next}   ·   ${page === "Status" ? "/usage · /mcp · /library" : "composer stays active"}`,
 		),
 		safeWidth,
 		"…",
@@ -475,7 +510,7 @@ export function renderDashboardPage(
 				? `${getKeybindings().getKeys("clio-coder.dispatchBoard.toggle").join("/") || "Fleet Runs"} · /view`
 				: page === "Context"
 					? "/context"
-					: "/cost · /context";
+					: "/usage · /context";
 		content = [
 			...content.slice(0, available - 1),
 			truncateToWidth(theme.fg("dim", `More detail: ${detail}`), safeWidth, "…", true),

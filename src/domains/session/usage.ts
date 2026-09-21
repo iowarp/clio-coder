@@ -5,7 +5,7 @@
  * for each call.
  *
  * This lives in the session domain because the ledger is the only durable
- * record of what a session spent, and three surfaces read it: the `/cost`
+ * record of what a session spent, and three surfaces read it: the `/usage`
  * overlay and footer reseed from it on every session change, and `clio-coder usage
  * report` folds it across sessions. It was written for the overlay first and
  * sat under src/interactive; a headless report reaching into the TUI surface's
@@ -94,7 +94,7 @@ export function ledgerUsageCalls(
 		// A compaction summarizes history through a real model call, billed like
 		// any other. Its usage rides on the compactionSummary entry rather than on
 		// an assistant message, because the summary is context machinery and never
-		// enters the conversation; folding it here is what puts it on `/cost` and
+		// enters the conversation; folding it here is what puts it on `/usage` and
 		// in `clio-coder usage report`.
 		if (entry?.kind === "compactionSummary") {
 			const usage = entry.usage;

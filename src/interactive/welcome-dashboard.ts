@@ -4,7 +4,7 @@ import type { ContextState } from "../domains/context/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/index.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { WorkspaceSnapshot } from "../domains/session/workspace/index.js";
-import { type Component, type Keybinding, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { type Component, type Keybinding, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import {
 	brandMark,
 	type ClioTheme,
@@ -55,6 +55,12 @@ export interface WelcomeDashboardDeps {
 	getSubmitKeyLabel?: () => string | null;
 	/** Effective shortcut labels; null hides an unbound action. */
 	getKeyLabel?: (action: Keybinding) => string | null;
+	/**
+	 * Connected subscription quota, already summarized, or null when nothing is
+	 * connected yet. Read synchronously on every frame, so the supplier must
+	 * serve a cached value and do its own refreshing off the render path.
+	 */
+	getQuotaSummary?: () => string | null;
 	/** Called when an off-render refresh lands, so the frame owner can ask for one. */
 	onFactsRefreshed?: () => void;
 	/**
@@ -82,6 +88,8 @@ export interface WelcomeDashboardStats {
 	autonomy: string;
 	targets: string;
 	fleet: string;
+	/** One line of connected subscription usage; null hides the row entirely. */
+	quota: string | null;
 }
 
 export type WelcomeDashboardMode = "launchpad" | "session";
@@ -536,13 +544,24 @@ function buildWelcomeDashboardLines(
 		theme.fg("dim", "Ask Clio how to use or extend her."),
 		theme.fg("dim", "Targets"),
 		theme.fg("muted", stats.targets),
+		// Keep the subscription field beside the wordmark, between Targets and
+		// Fleet. Wrap at the actual detail-column width instead of clipping the
+		// last accounts (especially Local) off a single concatenated line.
+		...(stats.quota === null
+			? []
+			: wrapTextWithAnsi(
+					field("Subscriptions", theme.fg("muted", sanitizeCallTargetText(stats.quota))),
+					Math.max(1, detailWidth),
+				)),
 		theme.fg("dim", "Fleet"),
 		theme.fg("muted", stats.fleet),
 	];
+
 	return [
 		heading,
-		...details.map((detail, index) => {
-			const art = sideBySide ? `${theme.fg("accent", wordmark[index] ?? "")}   ` : "";
+		...Array.from({ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) }, (_, index) => {
+			const detail = details[index] ?? "";
+			const art = sideBySide ? `${padAnsi(theme.fg("accent", wordmark[index] ?? ""), artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
 			return row(
 				showHints
@@ -577,6 +596,7 @@ function statsSignature(stats: WelcomeDashboardStats): string {
 		stats.autonomy,
 		stats.targets,
 		stats.fleet,
+		stats.quota,
 	].join("\0");
 }
 
@@ -707,6 +727,7 @@ export class WelcomeDashboard implements WelcomeDashboardComponent {
 			projectContext: launchpad ? this.projectContext(cwd) : "checking",
 			submitKeyLabel: launchpad ? (this.deps.getSubmitKeyLabel?.() ?? null) : null,
 			autonomy: settings?.safety?.autonomy ?? "auto-edit",
+			quota: launchpad ? (this.deps.getQuotaSummary?.() ?? null) : null,
 			...inventory(settings, statuses, this.deps.getAgentCount?.()),
 		};
 	}
@@ -804,6 +825,8 @@ export function createBootWelcome(
 		routeReason: null,
 		projectContext: "checking",
 		submitKeyLabel,
+		// Boot paints before any provider has been read, so the row stays hidden.
+		quota: null,
 		autonomy: settings.safety.autonomy,
 		...inventory(settings),
 	};

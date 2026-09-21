@@ -10,7 +10,7 @@
  *
  * The two writes are the same pair the side-question path makes: the
  * in-process cost tracker under the `background-memory` label, which is what
- * `/cost` folds, and one durable row in the out-of-turn usage store, which is
+ * `/usage` folds, and one durable row in the out-of-turn usage store, which is
  * what an archive reader folds after the process is gone.
  */
 

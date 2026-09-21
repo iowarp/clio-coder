@@ -75,6 +75,8 @@ function interopProposalsFor(
 
 export interface OverlayLifecycleRuntimeDeps {
 	app: OverlayLifecycleApplicationDeps;
+	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
+	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	tui: import("../engine/tui.js").TUI;
 	footer: import("./footer/dashboard.js").FooterDashboardPanel;
 	interactiveTickers: import("./interactive-tickers.js").InteractiveTickers;
@@ -117,7 +119,7 @@ export interface OverlayLifecycleRuntimeDeps {
 	openTreeOverlay?: typeof import("./overlays/tree-selector.js").openTreeOverlay;
 	openMessagePickerOverlay?: typeof import("./overlays/message-picker.js").openMessagePickerOverlay;
 	openCwdFallbackOverlay?: typeof import("./overlays/cwd-fallback.js").openCwdFallbackOverlay;
-	openCostOverlay?: typeof import("./cost-overlay.js").openCostOverlay;
+	openUsageOverlay?: typeof import("./usage-overlay.js").openUsageOverlay;
 	openContextOverlay?: typeof import("./context-overlay.js").openContextOverlay;
 	openContextResetOverlay?: typeof import("./overlays/context-reset.js").openContextResetOverlay;
 	openTasksOverlay?: typeof import("./tasks-overlay.js").openTasksOverlay;
@@ -140,7 +142,7 @@ export interface OverlayLifecycleController {
 	isAskUserWaiting(): boolean;
 	resetAskUserCancellation(): void;
 	refreshSettingsOverlay(): void;
-	openCostOverlayState(): void;
+	openUsageOverlayState(): void;
 	openContextViewOverlayState(): void;
 	openContextResetOverlayState(): void;
 	toggleFooterDashboardState(): void;
@@ -207,7 +209,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openTreeOverlay: openTreeOverlayFactory,
 		openMessagePickerOverlay: openMessagePickerOverlayFactory,
 		openCwdFallbackOverlay: openCwdFallbackOverlayFactory,
-		openCostOverlay: openCostOverlayFactory,
+		openUsageOverlay: openUsageOverlayFactory,
 		openContextOverlay: openContextOverlayFactory,
 		openContextResetOverlay: openContextResetOverlayFactory,
 		openTasksOverlay: openTasksOverlayFactory,
@@ -417,6 +419,8 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		tui,
 		transitions: overlayTransitions,
 		observability: deps.app.observability,
+		...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
+		...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 		...(deps.app.getSessionId ? { getSessionId: deps.app.getSessionId } : {}),
 		getContextLedger: () => deps.app.chat.contextLedger(),
 		contextChat: deps.app.chat,
@@ -445,7 +449,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		startDispatchBoardTicker: () => interactiveTickers.startDispatchBoardTicker(),
 		closeOverlay,
 		showOverlayFrame,
-		...(openCostOverlayFactory ? { openCostOverlay: openCostOverlayFactory } : {}),
+		...(openUsageOverlayFactory ? { openUsageOverlay: openUsageOverlayFactory } : {}),
 		...(openContextOverlayFactory ? { openContextOverlay: openContextOverlayFactory } : {}),
 		...(openContextResetOverlayFactory ? { openContextResetOverlay: openContextResetOverlayFactory } : {}),
 		...(openTasksOverlayFactory ? { openTasksOverlay: openTasksOverlayFactory } : {}),
@@ -462,7 +466,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openResumeOverlayState = overlaySessions.openResume;
 	const openTreeOverlayState = overlaySessions.openTree;
 	const openMessagePickerOverlayState = overlaySessions.openMessagePicker;
-	const openCostOverlayState = overlayGeneralOpeners.openCost;
+	const openUsageOverlayState = overlayGeneralOpeners.openUsage;
 	const openContextViewOverlayState = overlayGeneralOpeners.openContextView;
 	const openContextResetOverlayState = overlayGeneralOpeners.openContextReset;
 	const toggleFooterDashboardState = overlayGeneralOpeners.toggleFooter;
@@ -484,7 +488,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		isAskUserWaiting: overlayAskUser.isWaiting,
 		resetAskUserCancellation: overlayAskUser.resetCancellation,
 		refreshSettingsOverlay: overlayModelSelectors.refreshSettingsOverlay,
-		openCostOverlayState,
+		openUsageOverlayState,
 		openContextViewOverlayState,
 		openContextResetOverlayState,
 		toggleFooterDashboardState,

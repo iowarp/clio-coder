@@ -23,7 +23,6 @@ import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
-import { openCostOverlay } from "./cost-overlay.js";
 import {
 	type createDispatchBoardView,
 	isDispatchBoardRowCancellable,
@@ -43,6 +42,7 @@ import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
 import { openTasksOverlay } from "./tasks-overlay.js";
+import { openUsageOverlay } from "./usage-overlay.js";
 import { type ArtifactProviderDeps, createDefaultArtifactProviders } from "./view/artifacts.js";
 import { openViewOverlay } from "./view/view-overlay.js";
 
@@ -51,6 +51,8 @@ export interface OverlayGeneralOpenersDeps {
 	tui: TUI;
 	transitions: OverlayTransitions;
 	observability: ObservabilityContract;
+	getQuotaSnapshots?: () => ReadonlyArray<import("../domains/quota/types.js").UsageSnapshot>;
+	getDispatchRows?: () => ReadonlyArray<import("./dispatch-board.js").DispatchBoardRow>;
 	getSessionId?: () => string | null;
 	getContextLedger: () => ContextLedger;
 	contextChat: NonNullable<OpenContextOverlayOptions["chat"]>;
@@ -80,7 +82,7 @@ export interface OverlayGeneralOpenersDeps {
 	startDispatchBoardTicker: () => void;
 	closeOverlay: () => void;
 	showOverlayFrame?: typeof showClioOverlayFrame;
-	openCostOverlay?: typeof openCostOverlay;
+	openUsageOverlay?: typeof openUsageOverlay;
 	openContextOverlay?: typeof openContextOverlay;
 	openContextResetOverlay?: typeof openContextResetOverlay;
 	openTasksOverlay?: typeof openTasksOverlay;
@@ -121,7 +123,7 @@ export interface OverlayGeneralOpenersDeps {
 }
 
 export interface OverlayGeneralOpeners {
-	openCost(): void;
+	openUsage(): void;
 	openContextView(): void;
 	openContextReset(): void;
 	toggleFooter(): void;
@@ -136,7 +138,7 @@ export interface OverlayGeneralOpeners {
 }
 
 export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): OverlayGeneralOpeners {
-	const openCostOverlayFactory = deps.openCostOverlay ?? openCostOverlay;
+	const openUsageOverlayFactory = deps.openUsageOverlay ?? openUsageOverlay;
 	const openContextOverlayFactory = deps.openContextOverlay ?? openContextOverlay;
 	const openContextResetOverlayFactory = deps.openContextResetOverlay ?? openContextResetOverlay;
 	const openTasksOverlayFactory = deps.openTasksOverlay ?? openTasksOverlay;
@@ -146,11 +148,13 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const showOverlayFrameFactory = deps.showOverlayFrame ?? showClioOverlayFrame;
 	const openSideQuestionOverlayFactory = deps.openSideQuestionOverlay ?? openSideQuestionOverlay;
 
-	const openCost = (): void => {
+	const openUsage = (): void => {
 		if (deps.transitions.state !== "closed") return;
-		deps.transitions.state = "cost";
-		deps.transitions.handle = openCostOverlayFactory(deps.tui, deps.observability, {
+		deps.transitions.state = "usage";
+		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.observability, {
 			sessionId: deps.getSessionId?.() ?? null,
+			...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
+			...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 			...(deps.readSessionEntries
 				? {
 						getSessionEntries: () => deps.readSessionEntries?.() ?? [],
@@ -525,7 +529,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	return {
-		openCost,
+		openUsage,
 		openContextView,
 		openContextReset,
 		toggleFooter,

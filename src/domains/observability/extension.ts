@@ -53,7 +53,7 @@ function recordDispatchCost(
 	}
 	telemetry.record("counter", "tokens.total", payload.tokenCount);
 	// Dispatch terminal payloads carry the same full split as receipts. Preserve
-	// it so /cost and the footer agree with the fleet board instead of showing
+	// it so /usage and the footer agree with the fleet board instead of showing
 	// zero input/output/cache for worker-only sessions.
 	cost.accumulate(
 		payload.targetId,

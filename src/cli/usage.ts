@@ -114,7 +114,7 @@ function addResponseModelIdObservation(counts: ResponseModelIdObservationCounts,
  * session pre-warm, and a proactive-memory step are real spend and belong in
  * the token and cost totals, but none of them is a turn: they never entered
  * the session. `turns` therefore subtracts them from the folded row count,
- * which is exactly what the `/cost` overlay does.
+ * which is exactly what the `/usage` overlay does.
  */
 interface CallOrigins {
 	rows: number;
@@ -435,7 +435,7 @@ export async function runUsageCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 
-	// Token and cost facts fold the same per-call usage the `/cost` overlay
+	// Token and cost facts fold the same per-call usage the `/usage` overlay
 	// reseeds from, through the same session-domain function, so the report and
 	// the overlay cannot disagree about what a session spent.
 	// Keyed by the model id accounting attributes the call to. A reported LM

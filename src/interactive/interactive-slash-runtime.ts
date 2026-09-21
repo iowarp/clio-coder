@@ -127,7 +127,7 @@ export interface InteractiveSlashRuntimeDeps {
 	expandSubmit: (text: string) => Promise<InteractiveSlashSubmitExpansion>;
 	openAskUser: AskUserHandler;
 	openSkillsHub: (request?: LibraryBrowseRequest) => void;
-	openCost: () => void;
+	openUsage: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
@@ -461,7 +461,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				? deps.share.planImport(resolve(archivePath), importOptions)
 				: deps.share.importArchive(resolve(archivePath), importOptions);
 		},
-		openCost: deps.openCost,
+		openUsage: deps.openUsage,
 		openSideQuestion: deps.openSideQuestion,
 		// `/oracle` is refused, never queued, while a turn streams: the digest it
 		// packs describes the record as it stands.
