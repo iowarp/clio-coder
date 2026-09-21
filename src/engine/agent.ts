@@ -1,4 +1,9 @@
-import { createInitialSystemMessage, toToolDeclaration } from "@earendil-works/pi-ai";
+import {
+	type AssistantMessage,
+	createAssistantMessageEventStream,
+	createInitialSystemMessage,
+	toToolDeclaration,
+} from "@earendil-works/pi-ai";
 import { resolvedRequestContext } from "./context.js";
 /**
  * Thin wrapper over Clio's engine Agent class.
@@ -13,11 +18,32 @@ import { resolvedRequestContext } from "./context.js";
  * Pi's resolved prompt/tool request view through streamFn.
  */
 
-import { Agent, type AgentOptions, type StreamFn } from "@earendil-works/pi-agent-core";
+import {
+	Agent,
+	type AgentMessage,
+	type AgentOptions,
+	type BeforeToolCallContext,
+	type StreamFn,
+} from "@earendil-works/pi-agent-core";
 import { isDispositionedToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
+
+/** Pi's settled-turn port, after all awaited result listeners. Replace context, not operator messages. */
+export type EnginePrepareNextTurnContext = Parameters<NonNullable<AgentOptions["prepareNextTurnWithContext"]>>[0];
+export type EnginePrepareNextTurnUpdate = Awaited<ReturnType<NonNullable<AgentOptions["prepareNextTurnWithContext"]>>>;
+export type EngineToolBatchContext = Pick<BeforeToolCallContext, "assistantMessage" | "context">;
+export interface EngineToolBatchRejection {
+	reason: string;
+}
+export interface EngineStreamRequest {
+	model: Parameters<StreamFn>[0];
+	/** Actual normalized transcript, after conversion and the final steering drain. Inspect only. */
+	context: Parameters<StreamFn>[1];
+	options: Parameters<StreamFn>[2];
+}
+export type EngineStreamAdmission = { block: true; reason: string } | { block: false; correlationId?: string };
 
 export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	/** Legacy/custom request view. Explicit overrides also replace the native hook in tests. */
@@ -26,11 +52,63 @@ export type EngineAgentOptions = Omit<AgentOptions, "streamFn"> & {
 	transcriptStreamFn?: StreamFn;
 	/** Called immediately before each native stream delegate invocation. */
 	onStreamInvocation?: () => void;
+	/** One fail-closed decision per assistant batch, before any valid sibling's per-call guard. */
+	beforeToolBatch?: (
+		context: EngineToolBatchContext,
+		signal?: AbortSignal,
+	) => EngineToolBatchRejection | undefined | Promise<EngineToolBatchRejection | undefined>;
+	/** Synchronous final admission: no suspension, reduction, request mutation, or model invocation. */
+	beforeStreamRequest?: (request: EngineStreamRequest) => EngineStreamAdmission;
 };
 
 export interface EngineAgentHandle {
 	agent: Agent;
 	state(): Agent["state"];
+	/** Exact emitted assistant object only. In-memory attribution, never proof of success or durability. */
+	requestCorrelationId(message: AgentMessage): string | undefined;
+}
+
+function batchAwareBeforeToolCall(
+	batch: NonNullable<EngineAgentOptions["beforeToolBatch"]>,
+	delegate: AgentOptions["beforeToolCall"],
+): NonNullable<AgentOptions["beforeToolCall"]> {
+	const decisions = new WeakMap<AssistantMessage, Promise<EngineToolBatchRejection | undefined>>();
+	return async (context, signal) => {
+		let decision = decisions.get(context.assistantMessage);
+		if (!decision) {
+			decision = Promise.resolve()
+				.then(() => batch({ assistantMessage: context.assistantMessage, context: context.context }, signal))
+				.catch(() => ({ reason: "Tool batch admission failed" }));
+			decisions.set(context.assistantMessage, decision);
+		}
+		const rejection = await decision;
+		if (rejection) return { block: true, reason: rejection.reason.slice(0, 1024) || "Tool batch rejected" };
+		return delegate?.(context, signal);
+	};
+}
+
+function refusedStream(request: EngineStreamRequest, reason: string, aborted = false): ReturnType<StreamFn> {
+	const stream = createAssistantMessageEventStream();
+	const message: AssistantMessage = {
+		role: "assistant",
+		content: [],
+		api: request.model.api,
+		provider: request.model.provider,
+		model: request.model.id,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: aborted ? "aborted" : "error",
+		errorMessage: reason.slice(0, 1024) || "Request admission refused",
+		timestamp: Date.now(),
+	};
+	stream.push({ type: "error", reason: aborted ? "aborted" : "error", error: message });
+	return stream;
 }
 
 function dispositionAwareAfterToolCall(
@@ -46,17 +124,53 @@ function dispositionAwareAfterToolCall(
 }
 
 export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgentHandle {
-	const { streamFn, transcriptStreamFn = engineStreamSimple, onStreamInvocation, ...agentOptions } = options;
+	const {
+		streamFn,
+		transcriptStreamFn = engineStreamSimple,
+		onStreamInvocation,
+		beforeToolBatch,
+		beforeStreamRequest,
+		...agentOptions
+	} = options;
+	const correlations = new WeakMap<AgentMessage, string>();
+	let activeCorrelationId: string | undefined;
+	const invoke: StreamFn = (model, context, streamOptions) => {
+		onStreamInvocation?.();
+		return streamFn
+			? streamFn(model, resolvedRequestContext(context), streamOptions)
+			: transcriptStreamFn(model, context, streamOptions);
+	};
+	const admit: StreamFn = (model, context, streamOptions) => {
+		if (!beforeStreamRequest) return invoke(model, context, streamOptions);
+		activeCorrelationId = undefined;
+		const request: EngineStreamRequest = { model, context, options: streamOptions };
+		let admission: EngineStreamAdmission;
+		try {
+			admission = beforeStreamRequest(request);
+		} catch {
+			return refusedStream(request, "Request admission failed", streamOptions?.signal?.aborted);
+		}
+		if (streamOptions?.signal?.aborted) return refusedStream(request, "Request aborted before invocation", true);
+		if (admission.block) return refusedStream(request, admission.reason);
+		activeCorrelationId = admission.correlationId;
+		return invoke(model, context, streamOptions);
+	};
 	const agent = new Agent({
 		...agentOptions,
-		streamFn: (model, context, streamOptions) => {
-			onStreamInvocation?.();
-			return streamFn
-				? streamFn(model, resolvedRequestContext(context), streamOptions)
-				: transcriptStreamFn(model, context, streamOptions);
-		},
+		streamFn: beforeStreamRequest ? admit : invoke,
+		...(beforeToolBatch ? { beforeToolCall: batchAwareBeforeToolCall(beforeToolBatch, options.beforeToolCall) } : {}),
 		afterToolCall: dispositionAwareAfterToolCall(options.afterToolCall),
 	});
+	if (beforeStreamRequest) {
+		agent.subscribe((event) => {
+			if (event.type === "message_end" && event.message.role === "assistant" && activeCorrelationId !== undefined) {
+				correlations.set(event.message, activeCorrelationId);
+			}
+			if (event.type === "agent_start" || event.type === "turn_end" || event.type === "agent_end") {
+				activeCorrelationId = undefined;
+			}
+		});
+	}
 	// Pi correctly drops aborted assistants at the provider boundary: partial
 	// reasoning and tool calls are not valid provider history. Preserve the
 	// lifecycle fact and visible text as a host record instead, including on
@@ -83,6 +197,7 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	return {
 		agent,
 		state: () => agent.state,
+		requestCorrelationId: (message) => correlations.get(message),
 	};
 }
 
