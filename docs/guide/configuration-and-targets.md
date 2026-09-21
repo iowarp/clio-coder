@@ -1235,7 +1235,7 @@ integrations:
 ```
 Then invoke it using `/delegate claude-code <task>`.
 
-`/delegate [--share] <agent-id> <task>` does not accept `--model` in v0.5.0.
+`/delegate [--share] <agent-id> <task>` does not accept `--model` in v0.5.1.
 `/run --model <id>` selects a model for a Clio fleet worker; it does not configure
 an external ACP session. External model selection depends on the adapter's own
 supported configuration. Clio does not currently expose an ACP model selector.

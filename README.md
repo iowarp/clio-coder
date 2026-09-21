@@ -41,8 +41,9 @@ workflows when the task calls for them.
 
 **v0.5.1 adds subscription quota monitoring and a unified `/usage` dashboard.**
 The terminal is the primary working interface, and the bundled browser app
-provides documentation and an early preview of the wider graphical experience. Clio is pre-1.0 software. Review
-changes and validate scientific results with your own reference checks.
+provides documentation and an early preview of the wider graphical experience.
+Clio is pre-1.0 software. Review changes and validate scientific results with your
+own reference checks.
 
 ## Get started
 

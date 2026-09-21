@@ -211,7 +211,7 @@ The header has two operational modes: a framed launchpad dashboard on fresh star
 
 - **Session header (after the first prompt): exactly one row, and live.**
   ```
-  >C_ Clio Coder v0.5.0 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*
+  >C_ Clio Coder v0.5.1 · dynamo · qwen3.8-27b · ~/iowarp/clio-coder · main*
   ```
   Collapsed via `sessionRow`, this line tracks mid-session model or branch mutations. It preserves identity (`>C_ Clio Coder v<version>`), active route, workspace tail, and git dirty state (`*`), dropping readiness and onboarding hints owned by the footer. Under extreme width pressure, the route is preserved longest, outliving workspace and version labels.
 

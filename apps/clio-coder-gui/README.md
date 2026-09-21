@@ -1,6 +1,6 @@
 # Clio Coder graphical application
 
-Clio Coder 0.5.0 ships this application as an early preview. The default build
+Clio Coder 0.5.1 ships this application as an early preview. The default build
 bundles it, and it runs through the installed CLI:
 
 ```sh
