@@ -941,3 +941,266 @@ entries:
           integration branch, testing after each merge and running the full
           suite before the main line moves, with exact rollback on failure. Not
           for creating worktrees; use worktree-create. Not for closeou
+  - kind: plugin
+    name: wtfp
+    description: Portable, evidence-grounded academic research and writing workflows.
+    version: 0.7.3
+    sourceUrl: https://github.com/akougkas/wtf-p/tree/v0.7.3/vendors/plugin
+    sha256: 5a4209bed7c4926dc884c5b04bb66ce5ed61083e1b718045cf720f295cc2f3b5
+    provides:
+      - kind: agent
+        name: wtfp-argument-verifier
+        description: Verify that completed section text actually delivers the claims,
+          evidence, constraints, and connections promised by its plan. Execution
+          summaries are navigation aids, not proof; verdicts must be grounded in
+          the manuscript itself.
+      - kind: agent
+        name: wtfp-citation-expert
+        description: "Find a precise, defensible set of sources for explicit manuscript
+          claims and analyze whether the existing bibliography covers the
+          approved argument. Every recommendation must be grounded in resolvable
+          scholarly metadata and its relevance must be explained "
+      - kind: agent
+        name: wtfp-citation-formatter
+        description: Audit bibliography integrity and produce deterministic corrections
+          without touching the primary bibliography. The role cross-references
+          manuscript citation keys, detects missing and unused entries,
+          identifies likely duplicates, and normalizes records while
+      - kind: agent
+        name: wtfp-coherence-checker
+        description: Evaluate the manuscript as a connected argument rather than a set
+          of individually acceptable sections. Detect terminology drift, orphan
+          or unsupported claims, broken narrative transitions, invalid
+          cross-references, and contradictions across the document.
+      - kind: agent
+        name: wtfp-outliner
+        description: Turn the approved project brief into the structural foundation for
+          an academic document. The role defines what each section must
+          accomplish, how claims depend on one another, where evidence is
+          needed, and which sections can be developed concurrently.
+      - kind: agent
+        name: wtfp-plan-checker
+        description: "Determine whether proposed section plans are likely to produce the
+          intended academic outcome. Verification is goal-backward: a
+          syntactically complete plan still fails if it omits a claim, lacks
+          usable evidence, contradicts an author decision, or cannot fit"
+      - kind: agent
+        name: wtfp-prose-polisher
+        description: Improve clarity, rhythm, concision, and authorial voice without
+          changing technical meaning, evidence, citation placement, or
+          argumentative direction. Polishing is a constrained transformation,
+          not a substantive rewrite.
+      - kind: agent
+        name: wtfp-research-synthesizer
+        description: Investigate the literature needed to plan and write a specific
+          section well. The output is an evidence-traceable synthesis of
+          foundational and recent work, standard approaches, genuine gaps,
+          positioning options, and concrete writing guidance—not a search-r
+      - kind: agent
+        name: wtfp-section-planner
+        description: "Convert one approved section goal into small, executable writing
+          plans. A plan is a precise writing contract: it connects claims,
+          evidence, word budgets, sequencing, author decisions, and measurable
+          completion criteria without pre-writing the section."
+      - kind: agent
+        name: wtfp-section-reviewer
+        description: Review a section as an academic evaluator and produce prioritized,
+          actionable feedback. The invocation may select a review
+          lens—adversarial peer, significance-focused chair, production editor,
+          or constructive mentor—without changing the underlying evidence
+      - kind: agent
+        name: wtfp-section-writer
+        description: Execute an approved section plan into evidence-grounded academic
+          prose or the explicitly requested scaffold. Preserve the author’s
+          epistemic authority, make only supported claims, and leave an
+          auditable account of what was produced and what remains unresol
+      - kind: fleet
+        name: wtfp-draft-review
+        description: Draft one approved section and independently review its argument
+          and evidence.
+      - kind: fleet
+        name: wtfp-plan-section
+        description: Create and independently check one evidence-grounded section plan.
+      - kind: prompt
+        name: wtfp:add-todo
+        description: Capture a bounded note or task without disrupting the active
+          research flow.
+      - kind: prompt
+        name: wtfp:analyze-bib
+        description: Analyze a bibliography and map its evidence to the paper's sections
+          and claims.
+      - kind: prompt
+        name: wtfp:audit-milestone
+        description: Run readiness checks across section completion, arguments, length,
+          citations, and reviews.
+      - kind: prompt
+        name: wtfp:check-refs
+        description: Audit citation integrity and emit a validated
+          corrected-bibliography candidate without mutating source records or
+          manuscript inputs.
+      - kind: prompt
+        name: wtfp:check-todos
+        description: Review pending tasks and explicitly act on, defer, complete, or
+          dismiss each one.
+      - kind: prompt
+        name: wtfp:checkpoint
+        description: Save, list, or restore an exact portable paper-state checkpoint.
+      - kind: prompt
+        name: wtfp:contribute
+        description: Guide a bounded WTF-P contribution from branch creation through a
+          reviewable change request.
+      - kind: prompt
+        name: wtfp:create-outline
+        description: Build the section structure, argument map, dependencies, and word
+          budgets.
+      - kind: prompt
+        name: wtfp:create-poster
+        description: Transform the paper's argument, methods, and findings into a
+          concise academic poster.
+      - kind: prompt
+        name: wtfp:create-slides
+        description: Transform the paper's argument, evidence, and findings into an
+          audience-appropriate presentation.
+      - kind: prompt
+        name: wtfp:discuss-section
+        description: Capture the researcher's intended purpose, essential content,
+          voice, and boundaries before planning.
+      - kind: prompt
+        name: wtfp:execute-outline
+        description: Draft independent section waves in parallel and verify
+          cross-section coherence.
+      - kind: prompt
+        name: wtfp:export-latex
+        description: Export the manuscript and bibliography to portable LaTeX source
+          with declared formatting.
+      - kind: prompt
+        name: wtfp:help
+        description: Render the stable WTF-P action reference from the canonical catalog.
+      - kind: prompt
+        name: wtfp:insert-section
+        description: Insert a newly discovered section while preserving established
+          numbering and dependencies.
+      - kind: prompt
+        name: wtfp:list-assumptions
+        description: Preview the intended approach and assumptions for a section without
+          changing project files.
+      - kind: prompt
+        name: wtfp:map-project
+        description: Index existing drafts, data, figures, and references into portable
+          project state.
+      - kind: prompt
+        name: wtfp:new-paper
+        description: Interview the researcher and initialize a portable WTF-P project.
+      - kind: prompt
+        name: wtfp:pause-writing
+        description: Record an exact context handoff so another session can resume
+          without reconstructing intent.
+      - kind: prompt
+        name: wtfp:plan-milestone-gaps
+        description: Convert milestone audit failures into targeted, verifiable fix plans.
+      - kind: prompt
+        name: wtfp:plan-revision
+        description: Turn prioritized review findings into a bounded, testable revision
+          plan.
+      - kind: prompt
+        name: wtfp:plan-section
+        description: Create and independently check a detailed writing plan for one section.
+      - kind: prompt
+        name: wtfp:polish-prose
+        description: Improve clarity, flow, precision, and academic voice without
+          changing supported claims.
+      - kind: prompt
+        name: wtfp:progress
+        description: Summarize writing progress, surface blockers, and recommend the
+          next compatible action.
+      - kind: prompt
+        name: wtfp:quick
+        description: Apply a small, bounded writing fix with minimal planning overhead
+          and state tracking.
+      - kind: prompt
+        name: wtfp:remove-section
+        description: Remove an unwritten future section and repair numbering and
+          dependencies.
+      - kind: prompt
+        name: wtfp:report-bug
+        description: Collect a reproducible bug report and publish it only after
+          explicit user approval.
+      - kind: prompt
+        name: wtfp:request-feature
+        description: Shape a concrete feature request and publish it only after explicit
+          user approval.
+      - kind: prompt
+        name: wtfp:research-gap
+        description: Synthesize literature, domain conventions, open gaps, and
+          defensible positioning for a section.
+      - kind: prompt
+        name: wtfp:resume-writing
+        description: Restore the latest portable handoff and route the researcher to the
+          next safe action.
+      - kind: prompt
+        name: wtfp:review-section
+        description: Review a drafted section for evidence, citations, coherence,
+          requirements, and reader expectations.
+      - kind: prompt
+        name: wtfp:settings
+        description: View and update portable project settings after presenting the
+          exact proposed diff.
+      - kind: prompt
+        name: wtfp:submit-milestone
+        description: Archive a completed draft or submission round with its reproducible
+          project state and statistics.
+      - kind: prompt
+        name: wtfp:update
+        description: Check for a newer compatible package or plugin release and install
+          it only after approval.
+      - kind: prompt
+        name: wtfp:verify-work
+        description: Test a drafted section against each plan requirement and record
+          evidence one check at a time.
+      - kind: prompt
+        name: wtfp:write-section
+        description: Execute an approved section plan, update state, and optionally
+          verify argument coverage.
+      - kind: skill
+        name: wtfp-deliver-research
+        description: This skill packages completed research for publication and
+          presentation. It activates when an agent needs to export a manuscript
+          to LaTeX, archive a draft or submission milestone, create research
+          slides, design an academic poster, or perform the WTF-P expo
+      - kind: skill
+        name: wtfp-manage-project
+        description: This skill coordinates the durable state of a research-writing
+          project. It activates when an agent needs to report progress, pause or
+          resume work, save or restore a checkpoint, edit project settings,
+          capture or review todos, choose the next workflow, or pe
+      - kind: skill
+        name: wtfp-plan-section
+        description: This skill plans and safely reshapes manuscript sections. It
+          activates when an agent needs to discuss a section, expose
+          assumptions, make a writing or revision plan, insert a newly
+          discovered section, remove an unstarted section, or perform the WTF-P
+          discu
+      - kind: skill
+        name: wtfp-research-literature
+        description: This skill researches, organizes, and audits scholarly literature
+          for an academic manuscript. It activates when an agent needs to
+          investigate a research gap, analyze a bibliography, map references to
+          sections, validate citation coverage, repair reference m
+      - kind: skill
+        name: wtfp-review-manuscript
+        description: This skill reviews, verifies, audits, and polishes academic
+          manuscripts. It activates when an agent needs to review a section,
+          test work against a plan, refine academic voice, audit submission
+          readiness, create milestone gap plans, or perform the WTF-P rev
+      - kind: skill
+        name: wtfp-start-project
+        description: This skill initializes and structures academic writing projects. It
+          activates when an agent needs to start a paper, map existing drafts,
+          data, or references, create an outline, build an argument map,
+          allocate word budgets, or perform the WTF-P new-paper, m
+      - kind: skill
+        name: wtfp-write-section
+        description: This skill drafts and revises manuscript sections from approved
+          plans and evidence. It activates when an agent needs to write one
+          section, execute an outline in dependency waves, make a small targeted
+          prose or citation change, or perform the WTF-P write-se
