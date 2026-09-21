@@ -1,9 +1,9 @@
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync, realpathSync } from "node:fs";
+import { cp, mkdir, mkdtemp, readdir, readFile, readlink, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative as relativePath, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { combineBashOutput, runBashCommand } from "../core/bash-exec.js";
 import { HEADLESS_PERMISSION_DENIED_MARKER } from "../core/headless-permission.js";
@@ -129,6 +129,18 @@ export interface ScoredBullet {
 	reason: string;
 }
 
+/**
+ * One skill activation this run actually performed, as the activation contract
+ * reported it. `hash` is the sha256 of the bytes the child read.
+ *
+ * @internal Exported for contract tests.
+ */
+export interface ObservedActivation {
+	name: string;
+	hash: string;
+	path: string;
+}
+
 /** Exported for contracts tests. */
 export interface CapturedRun {
 	sessionId: string | null;
@@ -138,6 +150,8 @@ export interface CapturedRun {
 	timedOut: boolean;
 	wallTimeMs: number;
 	stderr: string;
+	/** Skill loads this run completed successfully; empty when none did. */
+	activations: ObservedActivation[];
 }
 
 interface ScenarioUsage {
@@ -167,11 +181,49 @@ export interface SkillEvalSubject {
 	sha256: string;
 	/** sha256 with install-lifecycle provenance stripped; this is what pins compare. */
 	normalizedHash: string;
+	/**
+	 * Digest over every file under `baseDir`, not just SKILL.md.
+	 *
+	 * A skill is a directory: the body can point at `references/` and scripts
+	 * the run will read. Naming the artifact by its SKILL.md hash alone would
+	 * claim an identity for content that hash does not cover, and would miss an
+	 * edit to a reference file entirely. Null when the tree could not be read.
+	 */
+	treeSha256: string | null;
+	/**
+	 * Whether the artifact could be snapshotted for the run. False when the body
+	 * carries package references, which resolve against an owning package root
+	 * above the skill directory: a copy of the directory alone would deliver
+	 * different instructions from the live path.
+	 */
+	pinnable: boolean;
 	evalsPath: string;
 	evalsSha256: string;
 	/** Null when nothing on this machine recorded a hash for the skill. */
 	drift: { verdict: "match" | "mismatch"; authority: string; expected: string } | null;
 }
+
+/**
+ * Whether the artifact on disk still matched {@link SkillEvalSubject} across
+ * one scenario's treatment arm.
+ *
+ * `verified` states exactly one thing: the tree digest taken immediately before
+ * the treatment arm and again immediately after both equalled the run-level
+ * subject. It is not proof of what the child activated. The treatment child
+ * loads the skill from the live source directory by path, so an edit landing
+ * between resolution and the arm, or between two scenarios, would otherwise be
+ * measured under the previous artifact's recorded identity. This check closes
+ * that window; it cannot see a change reverted entirely inside the arm, and the
+ * sidecar says so rather than implying activation was witnessed.
+ */
+export type SubjectVerification =
+	| "verified"
+	| "mismatch"
+	| "unreadable"
+	| "not-pinned"
+	| "not-activated"
+	| "activation-mismatch"
+	| "not-checked";
 
 /**
  * Whether the skill changed the outcome for one bullet, relative to the same
@@ -210,6 +262,8 @@ export interface AttributedBullet {
 	baseline: BulletVerdict;
 	treatment: BulletVerdict;
 	attribution: BulletAttribution;
+	/** Why this bullet is unmeasured; absent once both arms supplied evidence. */
+	reason?: string;
 }
 
 /** @internal Exported for contract tests. */
@@ -235,6 +289,10 @@ interface ScenarioOutcome {
 	judge: CapturedRun | null;
 	/** The isolated judge run that scored the baseline arm; null when none ran. */
 	baselineJudge: CapturedRun | null;
+	/** Whether the artifact on disk still matched the subject across this scenario. */
+	subjectVerification: SubjectVerification;
+	/** Tree digest observed after this scenario's treatment arm; null when unread. */
+	observedTreeSha256: string | null;
 	/** Advisory paired comparison. Never a gate, never folded into `pass`. */
 	attribution: ScenarioAttribution;
 	/** Seed workspace cloned for both arms; removed after the run, kept as a record. */
@@ -297,31 +355,146 @@ function attributionCounts(bullets: ReadonlyArray<AttributedBullet>): ScenarioAt
 	return counts;
 }
 
-/** @internal Exported for contract tests. */
-export function attributionFromBullets(
-	baselineBullets: ReadonlyArray<ScoredBullet>,
-	treatmentBullets: ReadonlyArray<ScoredBullet>,
+/**
+ * Pair two arms' strict verdicts into a per-bullet comparison.
+ *
+ * Both sides have to have supplied unambiguous evidence for the same bullet.
+ * When either did not, the bullet is `unmeasured` and carries the reason it was
+ * refused, so a reader can tell "the judge omitted it" from "the judge answered
+ * with a string" from "the judge contradicted itself". The reason used to be
+ * dropped during pairing, which left an unmeasured scenario with nothing saying
+ * why.
+ *
+ * @internal Exported for contract tests.
+ */
+export function attributionFromStrict(
+	scenario: SkillEvalScenario,
+	baseline: StrictJudgeVerdicts,
+	treatment: StrictJudgeVerdicts,
 ): ScenarioAttribution {
-	const byIndex = new Map(baselineBullets.map((bullet) => [bullet.index, bullet]));
-	const bullets: AttributedBullet[] = treatmentBullets.map((treatment) => {
-		// A treatment bullet with no baseline counterpart is not a comparison.
-		// `parseJudgeVerdicts` returns one entry per expected bullet for both
-		// arms, so this is a defensive branch rather than an expected state.
-		const baseline = byIndex.get(treatment.index)?.verdict ?? "unmeasured";
+	const verdictOf = (pass: boolean | undefined): BulletVerdict =>
+		pass === undefined ? "unmeasured" : pass ? "pass" : "fail";
+	const refusal = (side: string, strict: StrictJudgeVerdicts, index: number): string | null => {
+		if (strict.verdicts.has(index)) return null;
+		if (strict.absent !== null) return `${side} judge: ${strict.absent}`;
+		return `${side} judge: ${strict.rejected.get(index) ?? `no verdict for bullet ${index}`}`;
+	};
+	const bullets: AttributedBullet[] = scenario.expected.map((text, i) => {
+		const index = i + 1;
+		const baselinePass = baseline.verdicts.get(index);
+		const treatmentPass = treatment.verdicts.get(index);
+		const baselineVerdict = verdictOf(baselinePass);
+		const treatmentVerdict = verdictOf(treatmentPass);
+		const reason = refusal("baseline", baseline, index) ?? refusal("treatment", treatment, index);
 		return {
-			index: treatment.index,
-			text: treatment.text,
-			baseline,
-			treatment: treatment.verdict,
-			attribution: deriveBulletAttribution(baseline, treatment.verdict),
+			index,
+			text,
+			baseline: baselineVerdict,
+			treatment: treatmentVerdict,
+			attribution: deriveBulletAttribution(baselineVerdict, treatmentVerdict),
+			...(reason !== null ? { reason } : {}),
 		};
 	});
+	const verdict = deriveScenarioAttributionVerdict(bullets);
+	const firstReason = bullets.find((bullet) => bullet.reason !== undefined)?.reason ?? null;
 	return {
-		verdict: deriveScenarioAttributionVerdict(bullets),
-		reason: null,
+		verdict,
+		reason: verdict === "unmeasured" ? firstReason : null,
 		bullets,
 		counts: attributionCounts(bullets),
 	};
+}
+
+/**
+ * A digest of the whole skill directory, path-sensitive and order-independent.
+ *
+ * Sorted relative paths are hashed alongside their contents, so adding, moving
+ * or removing a reference file changes the digest as surely as editing one
+ * does. Null on any read failure rather than a partial digest, because a digest
+ * over some of a tree would compare unequal for a reason that is not a change.
+ *
+ * @internal Exported for contract tests.
+ */
+export async function skillTreeDigest(baseDir: string): Promise<string | null> {
+	interface Entry {
+		relative: string;
+		kind: "file" | "symlink";
+		target?: string;
+	}
+	const root = resolve(baseDir);
+	const entries: Entry[] = [];
+	const seenDirs = new Set<string>();
+	const walk = async (dir: string): Promise<void> => {
+		// A directory symlink pointing at an ancestor would otherwise walk forever.
+		const real = await realpath(dir);
+		if (seenDirs.has(real)) throw new Error("cycle");
+		seenDirs.add(real);
+		const found = await readdir(dir, { withFileTypes: true });
+		for (const entry of found.sort((a, b) => a.name.localeCompare(b.name))) {
+			const full = join(dir, entry.name);
+			if (entry.isSymbolicLink()) {
+				// A link is part of the artifact's identity: retargeting one changes
+				// what the skill reads without changing any regular file. The link's
+				// own target string is hashed, and a link leaving the tree makes the
+				// artifact unverifiable rather than silently half-covered.
+				const target = await readlink(full);
+				const resolved = resolve(dir, target);
+				const relative = relativePath(root, resolved);
+				if (relative.startsWith("..") || isAbsolute(relative)) throw new Error("escaping symlink");
+				entries.push({ relative: full.slice(root.length), kind: "symlink", target });
+				continue;
+			}
+			if (entry.isDirectory()) await walk(full);
+			else if (entry.isFile()) entries.push({ relative: full.slice(root.length), kind: "file" });
+		}
+	};
+	try {
+		await walk(root);
+		const hash = createHash("sha256");
+		for (const entry of entries.sort((a, b) => a.relative.localeCompare(b.relative))) {
+			hash.update(entry.relative, "utf8");
+			hash.update("\0");
+			hash.update(entry.kind, "utf8");
+			hash.update("\0");
+			if (entry.kind === "symlink") hash.update(entry.target ?? "", "utf8");
+			else hash.update(await readFile(join(root, entry.relative)));
+			hash.update("\0");
+		}
+		return hash.digest("hex");
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Whether the artifact can be snapshotted for the run.
+ *
+ * The treatment arm runs against a private copy rather than the live source
+ * directory. Hashing the source before and after the arm catches an edit that
+ * persists and nothing else: an A to B to A change inside the arm leaves both
+ * observations equal while the child read B. A copy under a per-run temp root
+ * is not reachable from the source path, so an ordinary edit there cannot
+ * affect the run.
+ *
+ * What that is, precisely: an isolated snapshot, not an immutable pin. The
+ * copy sits in a writable temp directory, and the arm runs at full-auto, so a
+ * model that chose to edit the copy, read it, and restore it would not be
+ * detected. The harness has no mechanism that would make the copy read-only to
+ * its own child, and building one is out of scope here. These results are
+ * evidence about a cooperative model, which is the same caveat
+ * `materializeSkillEvalWorkspaces` already records about arm isolation.
+ *
+ * Returns null when the artifact cannot be snapshotted faithfully, which is the
+ * honest answer for the two cases pinning would otherwise misrepresent: a tree
+ * whose digest could not be taken, and a body carrying package references. Those
+ * resolve against the owning package root, which sits above the skill directory
+ * and is not part of the copy, so a pinned copy would deliver different
+ * instructions from the ones the live path delivers.
+ *
+ * @internal Exported for contract tests.
+ */
+export function artifactIsPinnable(skillBody: string): boolean {
+	return !skillBody.includes("${pluginRoot}") && !skillBody.includes("${component:");
 }
 
 /** No comparison was attempted. Records why, and never reads as `no-change`. */
@@ -364,6 +537,15 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 	for (const diagnostic of parsed.diagnostics) {
 		process.stderr.write(`clio-coder eval skill: ${diagnostic}\n`);
 	}
+	// Coherence check on the subject itself. `skill` was loaded, and its hashes
+	// taken, before the tree digest; an edit landing in that gap would produce a
+	// subject naming one SKILL.md revision and a tree containing another. The
+	// SKILL.md is re-read here and compared, so the recorded identity describes
+	// one state of the directory or admits it could not.
+	const subjectTree = await skillTreeDigest(resolved.baseDir);
+	const reread = await readFile(join(resolved.baseDir, "SKILL.md"), "utf8").catch(() => null);
+	const coherent = reread !== null && createHash("sha256").update(reread, "utf8").digest("hex") === skill.hash;
+	const pinnable = reread !== null && artifactIsPinnable(reread);
 	const driftReport = checkSkillDrift(skill, process.cwd());
 	const subject: SkillEvalSubject = {
 		name: skill.name,
@@ -371,6 +553,8 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 		origin: resolved.origin ?? "unknown",
 		sha256: skill.hash,
 		normalizedHash: skill.normalizedHash,
+		treeSha256: coherent ? subjectTree : null,
+		pinnable,
 		evalsPath,
 		evalsSha256: createHash("sha256").update(evalsRaw, "utf8").digest("hex"),
 		drift:
@@ -420,17 +604,28 @@ async function runSkillsEvalCommand(nameOrPath: string, options: SkillsEvalOptio
 			`clio-coder eval skill: ${skill.name} ${scenario.id} baseline/treatment/judge${attributionEnabled ? "/baseline-judge" : ""}...\n`,
 		);
 		outcomes.push(
-			await runScenario(
-				skill.name,
-				resolved.baseDir,
+			await runScenario({
+				skillName: skill.name,
+				skillBaseDir: resolved.baseDir,
 				scenario,
-				options.target,
+				target: options.target,
 				timeoutMs,
 				workspaceOverride,
-				options.trustFixtures,
+				trustFixtures: options.trustFixtures,
 				childEnv,
 				attributionEnabled,
-			),
+				subjectTreeSha256: subject.treeSha256,
+				subjectSha256: subject.sha256,
+				pinnable: subject.pinnable,
+			}),
+		);
+	}
+	const unverified = outcomes.filter((outcome) => outcome.subjectVerification === "mismatch");
+	if (unverified.length > 0) {
+		process.stderr.write(
+			`clio-coder eval skill: WARNING subject_changed: the skill tree at ${resolved.baseDir} changed during ${unverified
+				.map((outcome) => outcome.scenario.id)
+				.join(", ")}; those scenarios' rubric results stand but their baseline comparison is unmeasured\n`,
 		);
 	}
 	const endedAt = new Date().toISOString();
@@ -682,28 +877,80 @@ async function resolveWorkspaceOverride(workspace: string | undefined): Promise<
 	}
 }
 
-async function runScenario(
-	skillName: string,
-	skillBaseDir: string,
-	scenario: SkillEvalScenario,
-	target: string | undefined,
+/**
+ * One arm's child process, behind a seam.
+ *
+ * The default is {@link captureHeadlessRun}, which spawns a real
+ * `clio-coder run`. Contract tests substitute a scripted runner so the arm
+ * sequencing, the skip gates and the recorded reasons are exercised through the
+ * production orchestration rather than by constructing already-correct typed
+ * data, and without paying for an inference.
+ *
+ * @internal
+ */
+export type SkillEvalArmRunner = (
+	args: ReadonlyArray<string>,
+	cwd: string,
 	timeoutMs: number,
-	workspaceOverride: string | null,
-	trustFixtures: boolean,
-	childEnv: NodeJS.ProcessEnv,
-	attributionEnabled: boolean,
-): Promise<ScenarioOutcome> {
+	env: NodeJS.ProcessEnv,
+) => Promise<CapturedRun>;
+
+/** @internal Exported for contract tests. */
+export interface RunScenarioInput {
+	skillName: string;
+	skillBaseDir: string;
+	scenario: SkillEvalScenario;
+	target: string | undefined;
+	timeoutMs: number;
+	workspaceOverride: string | null;
+	trustFixtures: boolean;
+	childEnv: NodeJS.ProcessEnv;
+	attributionEnabled: boolean;
+	/** Tree digest recorded at resolution; the scenario re-checks against it. */
+	subjectTreeSha256: string | null;
+	/** sha256 of the subject's SKILL.md, compared against the activation receipt. */
+	subjectSha256: string;
+	/** False when the artifact cannot be snapshotted faithfully; see artifactIsPinnable. */
+	pinnable: boolean;
+	runner?: SkillEvalArmRunner;
+}
+
+/** @internal Exported for contract tests. */
+export async function runScenario(input: RunScenarioInput): Promise<ScenarioOutcome> {
+	const {
+		skillName,
+		skillBaseDir,
+		scenario,
+		target,
+		timeoutMs,
+		workspaceOverride,
+		trustFixtures,
+		childEnv,
+		attributionEnabled,
+		subjectTreeSha256,
+		subjectSha256,
+		pinnable,
+	} = input;
+	const runArm = input.runner ?? captureHeadlessRun;
 	// Published per-scenario figure: monotonic so a clock correction during a
 	// long sweep cannot land in one row's wall time.
 	const scenarioStart = performance.now();
 	const workspace = await mkdtemp(join(tmpdir(), "clio-coder-skill-eval-seed-"));
 	let runWorkspaces: MaterializedSkillEvalWorkspaces | null = null;
+	let subjectVerification: SubjectVerification = "not-checked";
+	let observedTreeSha256: string | null = null;
 	try {
 		// A scenario that ended before the comparison could run records why. When
 		// attribution is off the operator's own choice is the operative reason,
 		// because the baseline judge would have been skipped either way.
 		const skipAttribution = (reason: string): ScenarioAttribution =>
 			attributionEnabled ? unmeasurableAttribution(reason) : notAttemptedAttribution(ATTRIBUTION_DISABLED_REASON);
+		const outcomeBase = () => ({
+			workspace,
+			subjectVerification,
+			observedTreeSha256,
+			wallTimeMs: Math.round(performance.now() - scenarioStart),
+		});
 
 		if (workspaceOverride !== null) await copyWorkspace(workspaceOverride, workspace);
 		const fixtureError = await runFixtureCommands(scenario, workspace, timeoutMs, trustFixtures);
@@ -716,24 +963,41 @@ async function runScenario(
 				judge: null,
 				baselineJudge: null,
 				attribution: skipAttribution(fixtureError),
-				workspace,
-				wallTimeMs: Math.round(performance.now() - scenarioStart),
+				...outcomeBase(),
 				infraError: fixtureError,
 			});
 		}
-		runWorkspaces = await materializeSkillEvalWorkspaces(workspace);
-		const baseline = await captureHeadlessRun(
+		runWorkspaces = await materializeSkillEvalWorkspaces(workspace, pinnable ? skillBaseDir : null);
+		const baseline = await runArm(
 			armRunArgs("baseline", scenario.setup, { target }),
 			runWorkspaces.baseline,
 			timeoutMs,
 			childEnv,
 		);
-		const treatment = await captureHeadlessRun(
-			armRunArgs("treatment", `/skill ${skillName} ${scenario.setup}`, { target, skillBaseDir }),
+		// The arm runs against a private copy, so an edit to the source tree
+		// cannot reach the child mid-run. The copy is still digested either side
+		// of the arm, so the claim rests on a measurement rather than on the
+		// assumption that nothing touched it.
+		const pinned = pinnable ? runWorkspaces.pin : null;
+		const armSkillDir = pinned ?? skillBaseDir;
+		const before = await skillTreeDigest(armSkillDir);
+		const treatment = await runArm(
+			armRunArgs("treatment", `/skill ${skillName} ${scenario.setup}`, { target, skillBaseDir: armSkillDir }),
 			runWorkspaces.treatment,
 			timeoutMs,
 			childEnv,
 		);
+		const after = await skillTreeDigest(armSkillDir);
+		observedTreeSha256 = after;
+		// Three conditions, in the order they can fail. The artifact must be
+		// pinnable, the pin must have held, and the child must have actually
+		// activated it. Disk equality alone is satisfied by a run that activated
+		// nothing, so it is necessary and not sufficient.
+		subjectVerification = !pinnable
+			? "not-pinned"
+			: verifySubjectTree(subjectTreeSha256, before, after) === "verified"
+				? verifyObservedActivation(skillName, subjectSha256, join(armSkillDir, "SKILL.md"), treatment.activations)
+				: verifySubjectTree(subjectTreeSha256, before, after);
 		const infra = runInfraError("baseline", baseline) ?? runInfraError("treatment", treatment);
 		if (infra !== null) {
 			return await completeScenarioOutcome({
@@ -744,8 +1008,7 @@ async function runScenario(
 				judge: null,
 				baselineJudge: null,
 				attribution: skipAttribution(infra),
-				workspace,
-				wallTimeMs: Math.round(performance.now() - scenarioStart),
+				...outcomeBase(),
 				infraError: infra,
 			});
 		}
@@ -762,8 +1025,7 @@ async function runScenario(
 				judge: null,
 				baselineJudge: null,
 				attribution: skipAttribution(wall),
-				workspace,
-				wallTimeMs: Math.round(performance.now() - scenarioStart),
+				...outcomeBase(),
 				infraError: wall,
 			});
 		}
@@ -771,7 +1033,7 @@ async function runScenario(
 		// terminating tool (artifact plan/review/report) prints only that tool's
 		// result line in text mode, while the event stream carries the artifact
 		// content the verdict may live in.
-		const judge = await captureHeadlessRun(
+		const judge = await runArm(
 			armRunArgs("judge", judgePrompt(scenario, baseline.transcript, treatment.transcript), { target }),
 			runWorkspaces.judge,
 			timeoutMs,
@@ -787,21 +1049,26 @@ async function runScenario(
 				judge,
 				baselineJudge: null,
 				attribution: skipAttribution(judgeInfra),
-				workspace,
-				wallTimeMs: Math.round(performance.now() - scenarioStart),
+				...outcomeBase(),
 				infraError: judgeInfra,
 			});
 		}
 		const bullets = parseJudgeVerdicts(scenario, judge);
+		// The rubric result above stands whatever the comparison decides. The
+		// comparison, unlike the rubric, is refused when the artifact measured is
+		// not demonstrably the artifact the subject names.
 		const attributed = await attributeScenario({
 			scenario,
 			bullets,
 			baseline,
+			judge,
 			target,
 			timeoutMs,
 			childEnv,
 			attributionEnabled,
+			subjectVerification,
 			workspace: runWorkspaces.baselineJudge,
+			runner: runArm,
 		});
 		return await completeScenarioOutcome({
 			scenario,
@@ -811,8 +1078,7 @@ async function runScenario(
 			judge,
 			baselineJudge: attributed.baselineJudge,
 			attribution: attributed.attribution,
-			workspace,
-			wallTimeMs: Math.round(performance.now() - scenarioStart),
+			...outcomeBase(),
 			infraError: null,
 		});
 	} finally {
@@ -827,26 +1093,116 @@ async function runScenario(
 /** The exact reason recorded when the operator turned the comparison off. */
 const ATTRIBUTION_DISABLED_REASON = "disabled by --no-attribution";
 
+/**
+ * Compare the tree digests taken either side of the treatment arm against the
+ * one the subject was resolved from.
+ *
+ * All three must agree. `verified` therefore means "the artifact on disk was
+ * the subject's artifact before the arm and still was after it", which is a
+ * narrower claim than "the child activated the subject", and the sidecar states
+ * that distinction rather than letting the word imply more.
+ *
+ * @internal Exported for contract tests.
+ */
+export function verifySubjectTree(
+	subject: string | null,
+	before: string | null,
+	after: string | null,
+): SubjectVerification {
+	if (subject === null || before === null || after === null) return "unreadable";
+	return subject === before && before === after ? "verified" : "mismatch";
+}
+
+/**
+ * Did the treatment child actually activate the artifact the subject names?
+ *
+ * Disk equality answers a different question. It says the directory looked the
+ * same either side of the arm, which is true of a run that activated nothing at
+ * all, and true of a run that loaded a revision written and reverted inside the
+ * arm. Neither is a measurement of the subject, and reporting `helped` about
+ * either would attribute a difference to an artifact that was never read.
+ *
+ * So the positive evidence is the activation receipt: the child reports the
+ * sha256 of the bytes it read, and that has to equal the pinned SKILL.md's.
+ * Several activations of the same name are ambiguous and are refused rather
+ * than resolved by picking one.
+ *
+ * @internal Exported for contract tests.
+ */
+export function verifyObservedActivation(
+	skillName: string,
+	expectedSha256: string,
+	expectedPath: string,
+	activations: ReadonlyArray<ObservedActivation>,
+): SubjectVerification {
+	const matching = activations.filter((entry) => entry.name === skillName);
+	if (matching.length === 0) return "not-activated";
+	if (matching.length > 1 && new Set(matching.map((entry) => `${entry.hash}|${entry.path}`)).size > 1) {
+		return "activation-mismatch";
+	}
+	const observed = matching[0];
+	if (observed === undefined || observed.hash !== expectedSha256) return "activation-mismatch";
+	// The hash says which bytes; the path says which copy. Two directories can
+	// hold the same SKILL.md and different reference files beside it, and the
+	// body's own pointers resolve against the directory it was loaded from, so a
+	// matching hash from somewhere else is not the artifact under test.
+	return samePath(observed.path, expectedPath) ? "verified" : "activation-mismatch";
+}
+
+/** Compare two paths as the filesystem resolves them, falling back to lexical. */
+function samePath(left: string, right: string): boolean {
+	if (left.length === 0 || right.length === 0) return false;
+	try {
+		return realpathSync.native(left) === realpathSync.native(right);
+	} catch {
+		return resolve(left) === resolve(right);
+	}
+}
+
+/** Why the comparison was refused, named after what was not established. */
+const SUBJECT_REFUSAL: Record<Exclude<SubjectVerification, "verified">, string> = {
+	mismatch:
+		"the measured skill tree changed on disk during this scenario, so its two arms did not run against one artifact",
+	unreadable: "the measured skill tree could not be re-read, so the artifact under test is unverified",
+	"not-pinned":
+		"the skill body carries package references, which resolve against an owning package root outside the skill directory, so the artifact could not be pinned to an immutable copy for this run",
+	"not-activated":
+		"the treatment arm recorded no successful activation of this skill, so nothing establishes that the measured artifact ran",
+	"activation-mismatch":
+		"the treatment arm activated content whose hash is not the pinned artifact's, so the comparison would name the wrong revision",
+	"not-checked": "the artifact identity was never checked for this scenario",
+};
+
 interface AttributeScenarioInput {
 	scenario: SkillEvalScenario;
-	/** Treatment verdicts, already parsed. */
+	/** Treatment verdicts from the legacy rubric parser, used only as a skip gate. */
 	bullets: ReadonlyArray<ScoredBullet>;
 	baseline: CapturedRun;
+	/** The treatment judge run, re-read under strict rules for the comparison. */
+	judge: CapturedRun;
 	target: string | undefined;
 	timeoutMs: number;
 	childEnv: NodeJS.ProcessEnv;
 	attributionEnabled: boolean;
+	subjectVerification: SubjectVerification;
 	workspace: string;
+	runner: SkillEvalArmRunner;
 }
 
 /**
  * Score the baseline arm and pair it with the treatment, or say why not.
  *
  * The baseline run is already paid for by the time this is reached; only the
- * judge that reads it is new. Three states end the comparison before it starts,
- * and each is recorded with its own reason rather than collapsed into a verdict:
- * the operator disabled it, the treatment produced nothing to compare against,
- * or the baseline judge itself failed to run or to answer.
+ * judge that reads it is new. Five states end the comparison before it produces
+ * a verdict, and each is recorded with its own reason rather than collapsed
+ * into one: the operator disabled it, the artifact measured was not
+ * demonstrably the artifact the subject names, the treatment produced nothing
+ * to compare against, the baseline judge failed to run, or the baseline judge
+ * hit the harness's own permission wall.
+ *
+ * The verdicts it pairs come from {@link strictJudgeVerdicts}, not from the
+ * rubric parser, so a judge that answered with a missing, null or string `pass`
+ * contributes nothing instead of contributing an invented `fail`.
  */
 async function attributeScenario(
 	input: AttributeScenarioInput,
@@ -854,6 +1210,18 @@ async function attributeScenario(
 	if (!input.attributionEnabled) {
 		return { attribution: notAttemptedAttribution(ATTRIBUTION_DISABLED_REASON), baselineJudge: null };
 	}
+	// Nothing establishes which artifact ran, so nothing can be attributed to
+	// one. Each refusal names what was not established rather than collapsing
+	// into one verdict.
+	if (input.subjectVerification !== "verified") {
+		return { attribution: unmeasurableAttribution(SUBJECT_REFUSAL[input.subjectVerification]), baselineJudge: null };
+	}
+	// The same comparative eligibility the baseline judge gets. A treatment judge
+	// that collected the harness's own denial and then answered was scoring under
+	// a constraint the other arm did not have. The rubric result it produced
+	// stands; only the comparison is refused.
+	const treatmentWall = permissionWallReason("judge", input.judge);
+	if (treatmentWall !== null) return { attribution: unmeasurableAttribution(treatmentWall), baselineJudge: null };
 	// Nothing on the treatment side was scored, so no pair can be formed. Running
 	// the baseline judge anyway would spend an inference to learn nothing.
 	if (!input.bullets.some((bullet) => bullet.verdict === "pass" || bullet.verdict === "fail")) {
@@ -864,7 +1232,7 @@ async function attributeScenario(
 			baselineJudge: null,
 		};
 	}
-	const baselineJudge = await captureHeadlessRun(
+	const baselineJudge = await input.runner(
 		armRunArgs("baseline-judge", baselineJudgePrompt(input.scenario, input.baseline.transcript), {
 			target: input.target,
 		}),
@@ -878,8 +1246,19 @@ async function attributeScenario(
 		// about the skill, so it never touches `bullets` or the exit code.
 		return { attribution: unmeasurableAttribution(infra), baselineJudge };
 	}
-	const baselineBullets = parseJudgeVerdicts(input.scenario, baselineJudge);
-	return { attribution: attributionFromBullets(baselineBullets, input.bullets), baselineJudge };
+	// The prompt tells the judge to use no tools, which is an instruction and not
+	// enforcement. A judge that tried anyway and collected the harness's denial
+	// was scoring under a constraint the treatment judge did not have.
+	const wall = permissionWallReason("baseline-judge", baselineJudge);
+	if (wall !== null) return { attribution: unmeasurableAttribution(wall), baselineJudge };
+	return {
+		attribution: attributionFromStrict(
+			input.scenario,
+			strictJudgeVerdicts(input.scenario, baselineJudge),
+			strictJudgeVerdicts(input.scenario, input.judge),
+		),
+		baselineJudge,
+	};
 }
 
 export interface MaterializedSkillEvalWorkspaces {
@@ -888,6 +1267,8 @@ export interface MaterializedSkillEvalWorkspaces {
 	judge: string;
 	/** The baseline judge gets its own root for the same reason the other arms do. */
 	baselineJudge: string;
+	/** Immutable copy of the artifact the treatment arm loads; null when unpinnable. */
+	pin: string | null;
 	cleanup(): Promise<void>;
 }
 
@@ -918,13 +1299,23 @@ async function armWorkspace(created: string[]): Promise<string> {
 }
 
 /** @internal Exported for contract tests. */
-async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<MaterializedSkillEvalWorkspaces> {
+async function materializeSkillEvalWorkspaces(
+	seedWorkspace: string,
+	pinSource: string | null,
+): Promise<MaterializedSkillEvalWorkspaces> {
 	const created: string[] = [];
 	try {
 		const baseline = await armWorkspace(created);
 		const treatment = await armWorkspace(created);
 		const judge = await armWorkspace(created);
 		const baselineJudge = await armWorkspace(created);
+		let pin: string | null = null;
+		if (pinSource !== null) {
+			const root = await mkdtemp(join(tmpdir(), "clio-coder-skill-eval-pin-"));
+			created.push(root);
+			pin = join(root, "skill");
+			await cp(pinSource, pin, { recursive: true, preserveTimestamps: true, verbatimSymlinks: true });
+		}
 		// Only the acting arms get the fixture. A judge scores text and is told to
 		// call no tools, so seeding its workspace would only give it the artifacts
 		// it is supposed to read about.
@@ -934,6 +1325,7 @@ async function materializeSkillEvalWorkspaces(seedWorkspace: string): Promise<Ma
 			treatment,
 			judge,
 			baselineJudge,
+			pin,
 			cleanup: async () => {
 				await Promise.all(created.map((path) => rm(path, { recursive: true, force: true })));
 			},
@@ -1158,12 +1550,36 @@ function loadsSkillBody(tool: string, args: unknown): boolean {
 	return args.scope === "skills" && typeof args.name === "string" && args.name.trim().length > 0;
 }
 
+/**
+ * The activation contract inside a successful skill load's result details.
+ *
+ * `runSkillsScope` records `name`, `filePath` and `hash` on every activation,
+ * and the agent loop puts the tool result's details on the execution-end event.
+ * Anything missing either field is not an activation receipt and is ignored
+ * rather than half-read.
+ */
+function activationFromResult(result: unknown): ObservedActivation | null {
+	if (!isRecord(result)) return null;
+	const details = isRecord(result.details) ? result.details : null;
+	if (details === null) return null;
+	const name = readString(details.name);
+	const hash = readString(details.hash);
+	if (name === null || hash === null) return null;
+	return { name, hash, path: readString(details.filePath) ?? readString(details.path) ?? "" };
+}
+
 /** @internal Exported for contract tests. */
-function parseRunStdout(stdout: string): { sessionId: string | null; transcript: string; finalText: string } {
+export function parseRunStdout(stdout: string): {
+	sessionId: string | null;
+	transcript: string;
+	finalText: string;
+	activations: ObservedActivation[];
+} {
 	let sessionId: string | null = null;
 	const lines: string[] = [];
 	let finalText = "";
 	let sawJson = false;
+	const activations: ObservedActivation[] = [];
 	const streamedText = new Map<number, string>();
 	// Tool calls whose result is the skill's own SKILL.md. Correlated by
 	// toolCallId, which both the start and end events carry.
@@ -1209,6 +1625,15 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 			const tool = readString(event.toolName) ?? readString(event.tool) ?? "tool";
 			const status = event.isError === true ? "error" : "ok";
 			const callId = readString(event.toolCallId);
+			// A successful skill load carries the activation contract in its result
+			// details: the name, the file and the sha256 of the bytes the child
+			// actually read. That is the only evidence in this stream about which
+			// artifact ran, and it is collected here and kept out of the transcript
+			// so the judge still never sees the body or its identity.
+			if (event.isError !== true && callId !== null && skillBodyCallIds.has(callId)) {
+				const activation = activationFromResult(event.result);
+				if (activation !== null) activations.push(activation);
+			}
 			// The skill body is the instructions, not the behavior. Left in the
 			// transcript it is the easiest thing in the run for a judge to quote,
 			// and a 30B judge scored bullets as passing from SKILL.md prose that
@@ -1245,9 +1670,9 @@ function parseRunStdout(stdout: string): { sessionId: string | null; transcript:
 	}
 	if (!sawJson) {
 		const text = stdout.trim();
-		return { sessionId: null, transcript: text, finalText: text };
+		return { sessionId: null, transcript: text, finalText: text, activations: [] };
 	}
-	return { sessionId, transcript: elide(lines.join("\n")), finalText };
+	return { sessionId, transcript: elide(lines.join("\n")), finalText, activations };
 }
 
 function judgePrompt(scenario: SkillEvalScenario, baselineTranscript: string, treatmentTranscript: string): string {
@@ -1359,6 +1784,85 @@ function parseJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): Sc
 		}
 		return { index, text, verdict: entry.pass ? ("pass" as const) : ("fail" as const), reason: entry.reason };
 	});
+}
+
+/**
+ * Verdicts strict enough to compare two arms against each other.
+ *
+ * {@link parseJudgeVerdicts} above is the legacy rubric gate and its coercions
+ * are load-bearing for `pass` / `exitCode` / `failureClass`, so it is left
+ * exactly as it is. It is, however, forgiving in ways that are fine for a
+ * one-armed verdict and wrong for a comparison: `pass: item.pass === true`
+ * turns a missing, null or string field into a genuine `fail`, and
+ * `Number.parseInt(String(item.index))` reads `"1oops"` as bullet 1. Pairing a
+ * real treatment `pass` against an invented baseline `fail` reports `helped`
+ * about a measurement the judge never made.
+ *
+ * So comparison reads the raw judge output again under stricter rules, and
+ * anything that does not clear them stays out of the comparison rather than
+ * entering it as a verdict. Rejecting evidence here cannot change the rubric
+ * result: the two parsers have separate callers on purpose.
+ *
+ * @internal Exported for contract tests.
+ */
+export interface StrictJudgeVerdicts {
+	/** Bullet index to its unambiguous boolean verdict. */
+	verdicts: Map<number, boolean>;
+	/** Bullet index to why its evidence was refused. */
+	rejected: Map<number, string>;
+	/** Set when the run produced no parseable verdict object at all. */
+	absent: string | null;
+}
+
+/** @internal Exported for contract tests. */
+export function strictJudgeVerdicts(scenario: SkillEvalScenario, judge: CapturedRun): StrictJudgeVerdicts {
+	const verdicts = new Map<number, boolean>();
+	const rejected = new Map<number, string>();
+	const parsed = extractBulletsObject(judge.finalText) ?? extractBulletsObject(judge.transcript);
+	if (parsed === null) return { verdicts, rejected, absent: judgeVerdictAbsenceReason(judge) };
+	if (!Array.isArray(parsed.bullets)) {
+		return { verdicts, rejected, absent: "judge verdict object carried no bullets array" };
+	}
+	const count = scenario.expected.length;
+	const seen = new Map<number, boolean>();
+	for (const item of parsed.bullets) {
+		if (!isRecord(item)) continue;
+		// A numeric index and nothing else. A string that happens to start with
+		// digits is not an index the judge chose; it is a parse accident.
+		const index = item.index;
+		if (typeof index !== "number" || !Number.isInteger(index) || index < 1 || index > count) {
+			continue;
+		}
+		// A rejection for an index is final and order-independent. An entry that
+		// arrives after a valid one still poisons it: the judge emitted two
+		// answers for one bullet and only one of them is usable, so which one it
+		// "meant" is a guess, and a guess is not comparison evidence.
+		if (typeof item.pass !== "boolean") {
+			rejected.set(index, `judge gave no boolean pass for bullet ${index}: comparison evidence refused`);
+			verdicts.delete(index);
+			continue;
+		}
+		if (rejected.has(index)) {
+			verdicts.delete(index);
+			continue;
+		}
+		const previous = seen.get(index);
+		if (previous !== undefined && previous !== item.pass) {
+			// Two contradictory verdicts for one bullet. Taking either would pick a
+			// winner the judge never picked.
+			rejected.set(index, `judge gave contradictory verdicts for bullet ${index}: comparison evidence refused`);
+			verdicts.delete(index);
+			continue;
+		}
+		seen.set(index, item.pass);
+		verdicts.set(index, item.pass);
+	}
+	for (let index = 1; index <= count; index += 1) {
+		if (!verdicts.has(index) && !rejected.has(index)) {
+			rejected.set(index, `judge omitted bullet ${index}: comparison evidence absent`);
+		}
+	}
+	return { verdicts, rejected, absent: null };
 }
 
 /**
@@ -1493,7 +1997,8 @@ function synthesizeArtifact(
 	};
 }
 
-function sidecar(
+/** @internal Exported for contract tests. */
+export function sidecar(
 	subject: SkillEvalSubject,
 	evalId: string,
 	outcomes: ReadonlyArray<ScenarioOutcome>,
@@ -1522,7 +2027,16 @@ function sidecar(
 			"attribution is advisory and gates nothing: pass, exitCode and failureClass keep their treatment-only meaning",
 			"attribution unmeasured means the comparison was impossible; not-attempted means it was never run. Neither is no-change",
 			"the baseline judge scores the baseline transcript alone; the treatment judge prompt is unchanged from version 1 bundles",
+			"comparison reads both judges' raw output under strict rules (boolean pass, integer in-range index, no contradictory duplicate); refused evidence stays unmeasured and never becomes a verdict",
+			"the rubric bullets above keep the legacy parser's forgiving coercions: tightening comparison eligibility does not move the pass/exitCode gate",
+			"the treatment arm runs against a private per-run copy of the skill directory, so an edit to the source during the arm cannot reach the child; subject.pinnable is false when the body carries package references, which resolve above the skill directory and cannot be snapshotted faithfully",
+			"that copy is an isolated snapshot, not an immutable pin: it lives in a writable temp directory and the arm runs at full-auto, so a model that edited the copy, read it and restored it would not be detected. These are results about a cooperative model, the same caveat the arm workspaces already carry",
+			"subjectVerification is verified only when the snapshot held (tree digest equal before and after the arm) AND the treatment arm reported a successful activation whose sha256 equals subject.sha256 and whose file is the snapshot's own SKILL.md by canonical path. not-activated, activation-mismatch, not-pinned, mismatch and unreadable each name what was not established",
+			"a scenario whose subjectVerification is not verified keeps its rubric result and records its comparison unmeasured",
+			"treeSha256 covers regular files and in-tree symlink targets; a symlink leaving the directory makes the tree unverifiable rather than partially hashed",
+			"both judges are checked for the headless permission wall before their verdicts are eligible for comparison; the legacy rubric result is unaffected either way",
 			"subject.drift records whether the measured content still matches its recorded hash; a mismatch never blocks the run",
+			"subject hashes cover SKILL.md (sha256, normalizedHash) and the whole skill directory (treeSha256); neither covers resources the skill reads from outside its own directory",
 			"this sidecar is additive and is registered in overview.json files[]",
 		],
 		scenarios: outcomes.map((outcome) => ({
@@ -1533,6 +2047,8 @@ function sidecar(
 			infraError: outcome.infraError,
 			usage: outcome.usage,
 			bullets: outcome.bullets,
+			subjectVerification: outcome.subjectVerification,
+			observedTreeSha256: outcome.observedTreeSha256,
 			attribution: outcome.attribution,
 			baseline: sidecarRun(outcome.baseline),
 			treatment: sidecarRun(outcome.treatment),
@@ -1637,6 +2153,13 @@ function printHumanReport(
 			subject.drift.verdict === "mismatch"
 				? `subject drift: MISMATCH against the ${subject.drift.authority} (expected ${subject.drift.expected.slice(0, 12)}…); this run measured the copy on disk\n`
 				: `subject drift: matches the ${subject.drift.authority}\n`,
+		);
+	}
+	const unverified = outcomes.filter((outcome) => outcome.subjectVerification !== "verified");
+	if (unverified.length > 0) {
+		process.stdout.write(
+			`subject verification: ${unverified.map((o) => `${o.scenario.id}=${o.subjectVerification}`).join(", ")}; ` +
+				"those scenarios kept their rubric result and recorded no baseline comparison\n",
 		);
 	}
 	process.stdout.write(`eval artifact: ${evalId}\n`);
