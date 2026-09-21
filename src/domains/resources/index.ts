@@ -115,6 +115,14 @@ export {
 } from "./prompts/loader.js";
 export { parseCommandArgs, substituteArgs } from "./prompts/substitute.js";
 export { installedSkillNames, installedSkillPackages } from "./skills/availability.js";
+export {
+	buildSkillCatalogView,
+	type SkillCatalogPackage,
+	type SkillCatalogRow,
+	type SkillCatalogRowKind,
+	type SkillCatalogView,
+	type SkillCatalogViewInput,
+} from "./skills/catalog-view.js";
 export { parseSkillEvals, type SkillEvalParseResult, type SkillEvalScenario } from "./skills/evals.js";
 export {
 	type InstallSkillInput,
@@ -127,6 +135,7 @@ export {
 	type UpdateSkillsInput,
 	updateSkills,
 } from "./skills/install.js";
+export { type LexicalMatchMode, lexicalMatches } from "./skills/lexical-match.js";
 export {
 	defaultSkillRoots,
 	expandSkillInvocationInput,
@@ -163,6 +172,8 @@ export {
 } from "./skills/marketplace.js";
 export {
 	checkSkillDrift,
+	checkSkillDriftBatch,
+	type SkillDriftSubject,
 	type SkillDriftVerdict,
 	type SkillPinEntry,
 } from "./skills/provenance-pin.js";
