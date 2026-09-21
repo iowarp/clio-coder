@@ -269,15 +269,20 @@ export class ContinuityController {
 			const fold = this.fold(live);
 			if (!fold?.validated) throw new Error("Handoff evidence is unresolved.");
 			if (!recovery) {
-				const receipt = this.deps
-					.entries()
-					.some(
-						(entry) =>
-							entry.kind === "message" &&
-							entry.role === "tool_result" &&
-							(entry.payload as { toolCallId?: string; isError?: boolean }).toolCallId === live.identity.toolCallId &&
-							(entry.payload as { isError?: boolean }).isError === false,
-					);
+				const entries = this.deps.entries();
+				const preparedIndex = entries.findIndex((entry) => entry.turnId === live.identity.preparedEntryId);
+				const receipt =
+					preparedIndex >= 0 &&
+					entries.slice(preparedIndex + 1).some((entry) => {
+						if (entry.kind !== "message" || entry.role !== "tool_result") return false;
+						const payload = entry.payload as { toolCallId?: string; toolName?: string; isError?: boolean };
+						return (
+							entry.parentTurnId === live.origin.leafTurnId &&
+							payload.toolCallId === live.identity.toolCallId &&
+							payload.toolName === "self_compact" &&
+							payload.isError === false
+						);
+					});
 				if (!receipt) throw new Error("Matching successful handoff receipt has not been persisted.");
 			}
 			await this.persist(live, []);

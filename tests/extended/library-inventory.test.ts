@@ -294,7 +294,9 @@ describe("library inventory", () => {
 			ok(model.resources.some((item) => item.name === "project-skill"));
 
 			const trusted = readLibraryInventory({ cwd, home: env.dir, trustProjectCompatRoots: true, ref: "foreign-skill" });
-			strictEqual(trusted.resources[0]?.availability, "available");
+			// Import trust admits imported packages; loose foreign folders remain discovery-only.
+			strictEqual(trusted.resources[0]?.availability, "untrusted");
+			strictEqual(trusted.resources[0]?.invocation, undefined);
 
 			const onlyCore = readLibraryInventory({ cwd, home: env.dir, sources: ["core"] });
 			ok(onlyCore.resources.length > 0);

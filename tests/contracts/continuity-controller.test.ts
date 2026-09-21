@@ -155,6 +155,24 @@ test("three real transaction cycles preserve exact notes, ordering, and original
 	strictEqual(f.entries.filter((entry) => entry.kind === "message" && entry.role === "user").length, 1);
 });
 
+test("an old successful receipt cannot authorize a reused tool call ID", async () => {
+	const f = fixture();
+	f.receipt();
+	await f.controller.request("Keep this exact note.", "call");
+	f.append("tool_result", { toolCallId: "call", toolName: "self_compact", isError: true });
+	await rejects(f.controller.settle(), /Matching successful handoff receipt/);
+	ok(!f.log.includes("reducing"));
+	strictEqual(f.fold()?.phase, "paused");
+});
+
+test("a different tool's successful receipt cannot authorize compaction", async () => {
+	const f = fixture();
+	await f.controller.request("Keep this exact note.", "call");
+	f.append("tool_result", { toolCallId: "call", toolName: "read", isError: false });
+	await rejects(f.controller.settle(), /Matching successful handoff receipt/);
+	ok(!f.log.includes("reducing"));
+});
+
 test("summary carries the reserved commit before the checkpoint barrier", async () => {
 	const f = fixture();
 	f.setReduction(async (hooks) => {
