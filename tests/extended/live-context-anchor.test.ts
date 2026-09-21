@@ -148,7 +148,7 @@ describe("live measured context anchor", () => {
 			"legacy duplicate schema charge crosses pressure threshold",
 		);
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, expected);
-		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 3);
+		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 20);
 		ok(expected + 8192 < 32768);
 		strictEqual(await f.context.runAutoCompact(f.runtime, false), false);
 		strictEqual(f.summaries(), 0);
@@ -267,7 +267,7 @@ describe("live measured context anchor", () => {
 		strictEqual(f.summaries(), 0);
 		strictEqual(f.context.liveContextEstimate(f.runtime).reconciledTokens, expected);
 		strictEqual(f.context.liveContextEstimate(f.runtime).tokens, expected);
-		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 3);
+		strictEqual(f.context.liveContextEstimate(f.runtime, "pending text").tokens, expected + 20);
 		deepStrictEqual(entries.slice(0, original.length), original, "raw observations and usage stay unchanged");
 		ok(JSON.stringify(f.runtime.agent.state.messages).includes("retained"));
 		ok(!JSON.stringify(f.runtime.agent.state.messages).includes("oldoldold"));

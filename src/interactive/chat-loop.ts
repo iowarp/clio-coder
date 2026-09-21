@@ -34,6 +34,7 @@ import {
 import { snapshotTurnConstraints, type TurnConstraints } from "../core/turn-constraints.js";
 import { clioStateDir } from "../core/xdg.js";
 import type { BudgetInspection } from "../domains/context/budget/inspection.js";
+import { requestFits } from "../domains/context/budget/request-fit.js";
 import {
 	createMiddlewareToolChoiceControl,
 	type MiddlewareContract,
@@ -56,7 +57,6 @@ import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/au
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
 import type { ContextSnapshot } from "../domains/session/context-accounting.js";
-import { ceilChars, snapshotInputTokens } from "../domains/session/context-accounting.js";
 import type { ContextLedger } from "../domains/session/context-ledger.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import {
@@ -88,7 +88,6 @@ import {
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
-import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
@@ -488,7 +487,10 @@ export interface CreateChatLoopDeps {
 	autoCompact?: (
 		instructions?: string,
 		trigger?: CompactionTrigger,
-		budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
+		budget?: Pick<
+			CompactInput,
+			"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+		>,
 	) => Promise<CompactResult | null>;
 	/** Optional observability sink for orchestrator chat token usage. */
 	observability?: ObservabilityContract;
@@ -1192,7 +1194,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const pendingSkillRequests =
 				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
-			context.prepareMemoryTurn(agentRuntime, { taskText: text, continuation: options.requestContinuation === true });
+			context.prepareMemoryTurn(agentRuntime, {
+				taskText: text,
+				continuation: options.requestContinuation === true,
+				images,
+			});
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
 			// fresh /skill this turn replaces the armed surface; otherwise the
@@ -1271,63 +1277,26 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					toolSignature,
 				});
 
-			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
-			const outputForInput = (inputTokens: number): number => resolveTurnOutputReserve(agentRuntime, inputTokens);
-			const pendingInputTokens = ceilChars(submittedText.length);
 			let turnSnapshot = captureTurnSnapshot("pending");
-			// The snapshot prices the prompt at chars/4. When the provider has
-			// already attested a larger prompt for this conversation, that figure
-			// is what the request will actually cost, so the overflow guard reads
-			// the higher of the two (issue #227). Both already carry the pending
-			// user text and the tool schema estimate.
-			//
-			// The live half comes from the published budget view rather than a
-			// second `liveContextEstimate` call, so admission, the footer, and a
-			// budget read all quote one total at one revision. Publishing here is
-			// also the required refresh before admission.
-			const budgetedPromptTokens = (snapshot: ContextSnapshot): number =>
-				Math.max(
-					snapshotInputTokens(snapshot) + pendingInputTokens,
-					context.refreshLiveBudget(submittedText).inputTokens ?? 0,
-				);
-			const inputEstimate = budgetedPromptTokens(turnSnapshot);
-			const reservedOutput = outputForInput(inputEstimate);
-			const totalEstimate = inputEstimate + reservedOutput;
-
-			if (effectiveWindow > 0 && totalEstimate > effectiveWindow) {
-				emitNotice(
-					`[Clio Coder] Estimated request size ${totalEstimate} tokens (input ${totalEstimate - reservedOutput} + output budget ${reservedOutput}) exceeds the effective context window of ${effectiveWindow} tokens. Running compaction before sending...`,
-				);
+			let admission = context.refreshLiveBudget(submittedText);
+			if (!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)) {
 				setTurnPreparation("compacting");
-				let compactionFailure: string | undefined;
-				const compacted = await context
+				let failure: string | undefined;
+				await context
 					.runAutoCompact(agentRuntime, true, undefined, "overflow", submittedText, pendingSkillPolicy)
 					.catch((error: unknown) => {
-						compactionFailure = error instanceof Error ? error.message : String(error);
-						return false;
+						failure = error instanceof Error ? error.message : String(error);
 					})
 					.finally(endPreparationCompaction);
-				if (!compacted) {
+				admission = context.refreshLiveBudget(submittedText);
+				if (!requestFits(admission.inputTokens, admission.outputReserveTokens, admission.effectiveWindow)) {
 					emitAdmissionNotice(
-						`[Clio Coder] Request exceeds the context window and compaction could not reclaim enough space.${compactionFailure ? ` ${compactionFailure}.` : ""} Trim the prompt or reduce active tools.`,
+						`[Clio Coder] Request exceeds the available context window (input ${admission.inputTokens ?? "unknown"} + output ${admission.outputReserveTokens ?? "unknown"}, window ${admission.effectiveWindow ?? "unknown"}).${failure ? ` ${failure}` : ""} Trim the prompt or reduce active tools.`,
 						"context-window-exceeded",
 					);
 					return;
 				}
-				context.refreshAgentMessagesFromSession(agentRuntime);
 				turnSnapshot = captureTurnSnapshot("pending");
-				const postInputEstimate = budgetedPromptTokens(turnSnapshot);
-				const postTotalEstimate = postInputEstimate + outputForInput(postInputEstimate);
-				if (postTotalEstimate > effectiveWindow) {
-					emitAdmissionNotice(
-						`[Clio Coder] Request still exceeds the effective window after compaction (${postTotalEstimate} > ${effectiveWindow}). Request blocked.`,
-						"context-window-exceeded",
-					);
-					return;
-				}
-				emitNotice(
-					`[Clio Coder] Context budget check passed post-compaction (${postTotalEstimate} <= ${effectiveWindow}). Proceeding.`,
-				);
 			}
 
 			// 5. Append the user turn, then stamp and persist the snapshot.

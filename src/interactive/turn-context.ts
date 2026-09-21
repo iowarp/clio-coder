@@ -37,6 +37,7 @@ import {
 	type LiveBudgetView,
 	resolveLiveBudgetPolicy,
 } from "../domains/context/budget/live-view.js";
+import { requestFits } from "../domains/context/budget/request-fit.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart } from "../domains/context/working-set/horizon.js";
@@ -96,7 +97,6 @@ import {
 	type SessionPromptCompileRecord,
 } from "../domains/session/prompt-manifest.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
-import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import type { AgentMessage, Usage } from "../engine/types.js";
 import { resolveToolPromptHint, type ToolRegistry } from "../tools/registry.js";
 import {
@@ -129,7 +129,10 @@ export interface TurnContextDeps {
 		| ((
 				instructions?: string,
 				trigger?: CompactionTrigger,
-				budget?: Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">,
+				budget?: Pick<
+					CompactInput,
+					"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+				>,
 		  ) => Promise<CompactResult | null>)
 		| undefined;
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
@@ -191,7 +194,10 @@ export type LiveContextUsage = ContextUsageSnapshot &
 
 export interface TurnContext {
 	/** Prepare an attempt before preflight; rejected attempts never freeze the next submit. */
-	prepareMemoryTurn(runtime: AgentRuntime, input: { taskText: string; continuation: boolean }): void;
+	prepareMemoryTurn(
+		runtime: AgentRuntime,
+		input: { taskText: string; continuation: boolean; images?: ReadonlyArray<unknown> | undefined },
+	): void;
 	/** Bind first-session creation after append without rereading the prepared snapshot. */
 	commitMemoryTurn(runtime: AgentRuntime): void;
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
@@ -752,13 +758,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return anchor.tokens + tail;
 	};
 
+	let pendingUserImages: ReadonlyArray<unknown> = [];
 	const liveContextEstimate = (agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate => {
 		const contextWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
 		const estimateInput = {
 			systemPrompt: agentRuntime.agent.state.systemPrompt,
 			messages: agentRuntime.agent.state.messages.filter((message) => message.role !== "system"),
 			tools: agentRuntime.agent.state.tools,
-			...(pendingUserText !== undefined ? { pendingUserText } : {}),
+			...(pendingUserText !== undefined ? { pendingUserText, pendingUserImages } : {}),
 		};
 		const breakdown = estimateAgentContextBreakdown(estimateInput);
 		const historyTokens = reconciledHistoryTokens(agentRuntime);
@@ -844,6 +851,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// the two cannot disagree about whether the conversation changed.
 			messageListDigest(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")),
 			pendingUserText ?? null,
+			pendingUserText === undefined ? null : pendingUserImages,
 			eligibility,
 		]);
 	};
@@ -1120,7 +1128,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	 * the LLM summary directly. Used for `/context compact`, CLIO_CODER_FORCE_COMPACT=1,
 	 * and overflow recovery.
 	 */
-	const runAutoCompact = async (
+	const performAutoCompact = async (
 		agentRuntime: AgentRuntime,
 		force: boolean,
 		instructions?: string,
@@ -1143,9 +1151,11 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const autoEnabled = cfg?.auto !== false;
 		if (!force && !autoEnabled) return false;
 		const compactionThreshold = cfg?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
-		const pressureEstimate = force ? null : liveContextEstimate(agentRuntime, pendingUserText);
+		const requiredFit = triggerOverride === "overflow";
+		const pressureEstimate = force && !requiredFit ? null : liveContextEstimate(agentRuntime, pendingUserText);
 		if (
 			pressureEstimate &&
+			!requiredFit &&
 			!shouldCompact(pressureEstimate.tokens, compactionThreshold, pressureEstimate.contextWindow).shouldCompact
 		)
 			return false;
@@ -1266,7 +1276,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 						refreshLiveBudget(pendingUserText);
 						const after = liveContextEstimate(agentRuntime, pendingUserText);
-						if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+						if (
+							requiredFit
+								? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
+								: !shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact
+						)
+							return true;
 					}
 				} else if (settings.context.workingSet.enabled) {
 					let planned: ReturnType<typeof planEviction>;
@@ -1363,7 +1378,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							// projection carry exists to preserve.
 							refreshLiveBudget(pendingUserText);
 							const after = liveContextEstimate(agentRuntime, pendingUserText);
-							if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
+							if (
+								requiredFit
+									? requestFits(after.tokens, resolveTurnOutputReserve(agentRuntime, after.tokens), after.contextWindow)
+									: !shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact
+							)
+								return true;
 						} catch (error) {
 							emitCompactionActivity("failed", compactionFailureMessage(error));
 							throw error;
@@ -1412,18 +1432,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			snapshotMetadata,
 		);
 		let budget:
-			| Pick<CompactInput, "keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal">
+			| Pick<
+					CompactInput,
+					"keepRecentTokens" | "preserveUserTurnId" | "skillContextState" | "signal" | "beforeSummaryCall"
+			  >
 			| undefined = skillContextState !== undefined ? { skillContextState } : undefined;
 		if (useRequestBudget) {
 			const estimate = liveContextEstimate(agentRuntime, pendingUserText);
-			const output = Math.min(
-				resolveReservedOutputTokens(agentRuntime.agent.state.model?.maxTokens, {
-					api: agentRuntime.agent.state.model?.api ?? "",
-					contextWindow: estimate.contextWindow,
-					inputTokens: estimate.tokens,
-				}),
-				settings.chat.maxOutputTokens > 0 ? settings.chat.maxOutputTokens : Number.POSITIVE_INFINITY,
-			);
+			const output = resolveTurnOutputReserve(agentRuntime, estimate.tokens);
 			const inputTarget = Math.min(estimate.contextWindow * compactionThreshold, estimate.contextWindow - output);
 			const staticTokens = estimate.breakdown.systemPromptTokens + estimate.breakdown.toolSchemaTokens;
 			const calibration = Math.max(
@@ -1528,6 +1544,19 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		return true;
 	};
 
+	let reductionInFlight: Promise<boolean> | null = null;
+	const runAutoCompact: TurnContext["runAutoCompact"] = (...args) => {
+		if (reductionInFlight) return reductionInFlight;
+		const operation = performAutoCompact(...args);
+		reductionInFlight = operation;
+		void operation
+			.finally(() => {
+				if (reductionInFlight === operation) reductionInFlight = null;
+			})
+			.catch(() => {});
+		return operation;
+	};
+
 	const toolResultTail = (agentRuntime: AgentRuntime): boolean => {
 		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
 		const tail = messages[messages.length - 1] as AgentMessage | undefined;
@@ -1545,6 +1574,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 
 	return {
 		prepareMemoryTurn(runtime, input): void {
+			pendingUserImages = [...(input.images ?? [])];
 			if (input.continuation && memoryTurn !== null) return;
 			const sessionId = deps.session?.current()?.id ?? null;
 			memoryTurnSequence += 1;
@@ -1559,6 +1589,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		commitMemoryTurn(runtime): void {
+			pendingUserImages = [];
 			// appendSubmittedUserTurn creates the first session synchronously.
 			// Only that null -> bound transition with unchanged origin can alias
 			// its prepared authority; navigation never uses this exception.
@@ -1856,17 +1887,26 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// The tool batch appended results the last publication predates, and the
 			// guard is about to decide on them. Publish before that inspection, not
 			// after it.
-			refreshLiveBudget();
+			const beforeView = refreshLiveBudget();
 			const before = liveContextEstimate(agentRuntime);
-			if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
+			if (before.contextWindow <= 0) throw new Error("Context window is unavailable; continuation refused.");
 
 			const settings = deps.getSettings();
 			const threshold = settings.context.compaction?.threshold ?? DEFAULT_COMPACTION_THRESHOLD;
 			const verdict = shouldCompact(before.tokens, threshold, before.contextWindow);
 			let compacted = false;
-			if (verdict.shouldCompact) {
+			const mustFit = !requestFits(beforeView.inputTokens, beforeView.outputReserveTokens, beforeView.effectiveWindow);
+			if (mustFit || verdict.shouldCompact) {
 				try {
-					compacted = await runAutoCompact(agentRuntime, false, undefined, "auto", undefined, undefined, signal);
+					compacted = await runAutoCompact(
+						agentRuntime,
+						mustFit,
+						undefined,
+						mustFit ? "overflow" : "auto",
+						undefined,
+						undefined,
+						signal,
+					);
 				} catch (err) {
 					throw new Error(
 						`[Clio Coder] post-tool context guard could not compact before continuation: ${err instanceof Error ? err.message : String(err)}`,
@@ -1879,9 +1919,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			// The mid-run settled tool-batch boundary: whatever the guard did or
 			// declined to do, this is the context the continuation will send.
-			refreshLiveBudget();
+			const afterView = refreshLiveBudget();
 			const after = liveContextEstimate(agentRuntime);
-			if (after.tokens >= after.contextWindow) {
+			if (!requestFits(afterView.inputTokens, afterView.outputReserveTokens, afterView.effectiveWindow)) {
 				throw new Error(
 					`[Clio Coder] post-tool context guard stopped continuation before provider call: estimated ${after.tokens} tokens exceeds reported context window ${after.contextWindow}. Use /context compact, narrower reads, or a follow-up turn with smaller observations.`,
 				);

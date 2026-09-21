@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { PromptsContract } from "../../src/domains/prompts/contract.js";
 import type { ProvidersContract } from "../../src/domains/providers/contract.js";
+import { createEngineAgent } from "../../src/engine/agent.js";
 import { setGlobalDefaultMaxOutputTokens } from "../../src/engine/apis/output-budget.js";
 import { type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 
@@ -80,16 +81,13 @@ for (const api of ["openai-completions", "ollama-native"]) {
 				getSettings: () => settings,
 				providers,
 				knownTargets: () => new Set(["local"]),
-				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
-					agent: {
-						state: options?.initialState,
-						subscribe: () => () => {},
-						abort: () => {},
-						prompt: async (text: string) => {
-							submitted.push(text);
-						},
-					},
-				})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+				createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+					const handle = createEngineAgent(options);
+					handle.agent.prompt = async (text: unknown) => {
+						submitted.push(String(text));
+					};
+					return handle;
+				}) as NonNullable<CreateChatLoopDeps["createAgent"]>,
 				prompts: {
 					inputEpoch: () => 0,
 					compileSessionPrompt: async () => ({

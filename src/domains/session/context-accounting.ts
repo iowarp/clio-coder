@@ -14,6 +14,7 @@ export interface AgentContextEstimateInput {
 	messages: ReadonlyArray<AgentMessage>;
 	systemPrompt?: string;
 	pendingUserText?: string;
+	pendingUserImages?: ReadonlyArray<unknown>;
 	tools?: ReadonlyArray<unknown>;
 }
 
@@ -253,7 +254,13 @@ export function estimateAgentContextBreakdown(input: AgentContextEstimateInput):
 			(sum, message) => sum + (message.role === "system" ? 0 : estimateAgentMessageTokens(message)),
 			0,
 		),
-		pendingUserTokens: input.pendingUserText ? ceilChars(input.pendingUserText.length) : 0,
+		pendingUserTokens:
+			input.pendingUserText !== undefined
+				? estimateAgentMessageTokens({
+						role: "user",
+						content: [{ type: "text", text: input.pendingUserText }, ...(input.pendingUserImages ?? [])],
+					})
+				: 0,
 		toolSchemaTokens: (input.tools ?? []).reduce<number>((sum, tool) => sum + ceilChars(toolSchemaChars(tool)), 0),
 	};
 }

@@ -1,4 +1,7 @@
+import { requestFits } from "../domains/context/budget/request-fit.js";
+import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
+import { resolveTurnOutputReserve } from "./output-reserve.js";
 /**
  * Turn runtime ownership: orchestrator target resolution, model synthesis,
  * live-agent construction and model hot-swap, thinking-level reconciliation,
@@ -512,6 +515,25 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 			},
 			maxRetryDelayMs: deps.retrySettings().maxDelayMs,
 			...(gatewaySessionId ? { sessionId: gatewaySessionId } : {}),
+			beforeStreamRequest: ({ context: request }) => {
+				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
+				if (state.activeInterruptReason !== null || state.runtime !== localRuntime) {
+					return { block: true, reason: "Request ownership changed before invocation." };
+				}
+				const view = context.refreshLiveBudget();
+				const resolved = resolvedRequestContext(request);
+				const actual = state.synthesisToolLock
+					? { ...resolved, systemPrompt: lockedSynthesisSystemPrompt(resolved.systemPrompt ?? "") }
+					: request;
+				const input = Math.max(estimateInputTokensFromContext(actual), view.inputTokens ?? 0);
+				const output = resolveTurnOutputReserve(localRuntime, input);
+				return requestFits(input, output, view.effectiveWindow)
+					? { block: false }
+					: {
+							block: true,
+							reason: `Context window exceeded: input ${input} + output ${output}, window ${view.effectiveWindow ?? "unknown"}.`,
+						};
+			},
 			onStreamInvocation: () => {
 				setGlobalDefaultMaxOutputTokens(deps.getSettings().chat.maxOutputTokens);
 				apiCallStartedAt = performance.now();
