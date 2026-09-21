@@ -1,13 +1,14 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { parse, stringify } from "yaml";
-import {
-	isLibraryResourceKind,
-	LIBRARY_PROVIDES_LIMITS,
-	type LibraryProvidedResource,
-} from "../src/domains/resources/library-types.js";
+import { stringify } from "yaml";
 import { validateLibraryPackage } from "../src/domains/resources/library-validation.js";
 import { generateLibraryMarketplace } from "./generate-library-marketplace.js";
+import {
+	buildRegistryRow,
+	type RegistryRow,
+	readBlessedRemoteRows,
+	refreshBlessedRemoteRow,
+} from "./pin-library-remote.js";
 import { pinSkillsCatalog } from "./pin-skills.js";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -128,60 +129,41 @@ if (!skillResult.ok) {
 // 3. Compute and check/refresh full-tree package pins (library/registry.yaml)
 // ---------------------------------------------------------------------------
 const names = new Set<string>();
-const entries = validatedPackages
-	.map(({ directory, expectedKind, result }) => {
-		if (!result.manifest) {
-			throw new Error(`${directory}: missing manifest`);
-		}
-		const manifest = result.manifest;
-		const actualKind = manifest.clio.kind ?? "plugin";
-		if (actualKind !== expectedKind) {
-			throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
-		}
-		const skillFile = path.join(directory, "SKILL.md");
-		const frontmatter = existsSync(skillFile)
-			? /^---\r?\n([\s\S]*?)\r?\n---/.exec(readFileSync(skillFile, "utf8"))?.[1]
-			: undefined;
-		const metadata = frontmatter ? (parse(frontmatter) as Record<string, unknown>) : {};
-		const triggers = Array.isArray(metadata.triggers)
-			? metadata.triggers.filter((item): item is string => typeof item === "string")
-			: [];
+const localEntries: RegistryRow[] = validatedPackages.map(({ directory, expectedKind, result }) => {
+	if (!result.manifest) {
+		throw new Error(`${directory}: missing manifest`);
+	}
+	const actualKind = result.manifest.clio.kind ?? "plugin";
+	if (actualKind !== expectedKind) {
+		throw new Error(`${directory}: package kind "${actualKind}" does not match kind directory "${expectedKind}"`);
+	}
+	if (names.has(result.manifest.name)) throw new Error(`duplicate library package identity: ${result.manifest.name}`);
+	names.add(result.manifest.name);
+	const sourceUrl = path.relative(path.dirname(destination), directory).split(path.sep).join("/");
+	return buildRegistryRow(directory, result, sourceUrl, path.basename(path.dirname(directory)));
+});
 
-		if (names.has(manifest.name)) throw new Error(`duplicate library package identity: ${manifest.name}`);
-		names.add(manifest.name);
-		// Hints are the validator's actual parsed runtime names, never component
-		// ids or display titles. Ancillary scripts/resources stay manifest metadata.
-		const provides: LibraryProvidedResource[] = result.validation.resources
-			.flatMap((resource) =>
-				isLibraryResourceKind(resource.kind) && resource.valid
-					? [
-							{
-								kind: resource.kind,
-								name: resource.name,
-								...(resource.description
-									? { description: resource.description.slice(0, LIBRARY_PROVIDES_LIMITS.description) }
-									: {}),
-							},
-						]
-					: [],
-			)
-			.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name))
-			.slice(0, LIBRARY_PROVIDES_LIMITS.entries);
-		return {
-			kind: manifest.clio.kind ?? "plugin",
-			name: manifest.name,
-			description: manifest.description ?? "",
-			...(manifest.clio.kind === "skill"
-				? { category: path.basename(path.dirname(directory)), audit: "pass", ...(triggers.length ? { triggers } : {}) }
-				: {}),
-			version: manifest.version,
-			sourceUrl: path.relative(path.dirname(destination), directory).split(path.sep).join("/"),
-			sha256: result.contentDigest,
-			...(manifest.clio.requires ? { requires: manifest.clio.requires } : {}),
-			...(provides.length ? { provides } : {}),
-		};
-	})
-	.sort((a, b) => a.name.localeCompare(b.name));
+// ---------------------------------------------------------------------------
+// 3b. Refresh blessed remote packages (GitHub-hosted rows already pinned in
+// the committed registry.yaml). Their content is never scanned from a local
+// directory, so they are read back from the previous pin, always re-fetched
+// to verify the digest, and only left unchanged when the fetch itself fails.
+// ---------------------------------------------------------------------------
+const previousRemoteRows = readBlessedRemoteRows(destination);
+
+let retainedRemotePins = 0;
+const remoteEntries: RegistryRow[] = previousRemoteRows.map((row) => {
+	// A collision with a local package name is always an error: it does not
+	// depend on whether the remote fetch itself succeeds.
+	if (names.has(row.name)) throw new Error(`duplicate library package identity: ${row.name}`);
+	const { row: refreshedRow, refreshed, warning } = refreshBlessedRemoteRow(row);
+	if (!refreshed) retainedRemotePins++;
+	if (warning) process.stderr.write(`library:pin warning: ${warning}\n`);
+	names.add(refreshedRow.name);
+	return refreshedRow;
+});
+
+const entries: RegistryRow[] = [...localEntries, ...remoteEntries].sort((a, b) => a.name.localeCompare(b.name));
 
 const content = `# Generated by pnpm library:pin. SHA-256 covers every package file.\n${stringify({ entries })}`;
 
@@ -209,7 +191,9 @@ if (checkMode) {
 // compatibility claim and never treated as a pinning failure.
 const marketplace = generateLibraryMarketplace({ root, check: checkMode });
 for (const skip of marketplace.excluded) {
-	process.stdout.write(`not published to Claude Code: ${skip.name} (library/${skip.sourceUrl}) — ${skip.reason}\n`);
+	process.stdout.write(
+		`not published to Claude Code: ${skip.name} (${/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(skip.sourceUrl) ? skip.sourceUrl : `library/${skip.sourceUrl}`}) — ${skip.reason}\n`,
+	);
 }
 if (!marketplace.ok) {
 	for (const error of marketplace.errors) process.stderr.write(`library marketplace error: ${error}\n`);
@@ -223,7 +207,7 @@ if (!marketplace.ok) {
 
 if (checkMode) {
 	process.stdout.write(
-		`Verified ${templateTargets.length} authoring templates, ${skillResult.entries.length} normalized skills, ${entries.length} full-tree library package pins, and ${marketplace.entries.length} of ${entries.length} packages published as Claude Code marketplace entries.\n`,
+		`Verified ${templateTargets.length} authoring templates, ${skillResult.entries.length} normalized skills, ${entries.length - retainedRemotePins} full-tree library package pins (${retainedRemotePins} remote pins retained without verification), and ${marketplace.entries.length} of ${entries.length} packages published as Claude Code marketplace entries.\n`,
 	);
 } else {
 	process.stdout.write(

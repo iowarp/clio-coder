@@ -472,7 +472,9 @@ Check \${pluginRoot}/assets/nonexistent-file.txt
 			entries: Array<{ name: string; sourceUrl: string }>;
 		};
 
-		equal(libraryRegistry.entries.length, 35, "library registry must contain exactly 35 packages");
+		// 36 = 35 locally scanned packages + 1 blessed remote package (wtfp), which
+		// has no local directory under library/ and so is never in packagePaths.
+		equal(libraryRegistry.entries.length, 36, "library registry must contain exactly 36 packages");
 
 		// None of the entries should reference _authoring or templates
 		for (const entry of libraryRegistry.entries) {

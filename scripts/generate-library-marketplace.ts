@@ -209,6 +209,14 @@ export function renderLibraryMarketplace(options: GenerateMarketplaceOptions = {
 	const entries: MarketplaceEntry[] = [];
 	const excluded: Exclusion[] = [];
 	for (const entry of registry) {
+		if (/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(entry.sourceUrl)) {
+			excluded.push({
+				name: entry.name,
+				sourceUrl: entry.sourceUrl,
+				reason: "remote package; not vendored into the marketplace tree, so it has no local plugin.json to project",
+			});
+			continue;
+		}
 		const directory = path.join(root, "library", entry.sourceUrl);
 		const manifestPath = path.join(directory, "plugin.json");
 		if (!existsSync(manifestPath)) {
@@ -321,7 +329,9 @@ if (path.resolve(process.argv[1] ?? "") === path.resolve(import.meta.filename)) 
 	const result = generateLibraryMarketplace({ check });
 	for (const error of result.errors) process.stderr.write(`generate-library-marketplace: ${error}\n`);
 	for (const skip of result.excluded) {
-		process.stdout.write(`not published to Claude Code: ${skip.name} (library/${skip.sourceUrl}) — ${skip.reason}\n`);
+		process.stdout.write(
+			`not published to Claude Code: ${skip.name} (${/^(?:[a-z][a-z0-9+.-]*:\/\/|git@)/i.test(skip.sourceUrl) ? skip.sourceUrl : `library/${skip.sourceUrl}`}) — ${skip.reason}\n`,
+		);
 	}
 	if (!result.ok) {
 		if (check && result.drift) {
