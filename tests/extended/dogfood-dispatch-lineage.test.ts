@@ -160,7 +160,7 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
 			const handle = createEngineAgent(options);
 			const state = handle.agent.state;
-			let listener: ((event: AgentEvent) => void) | undefined;
+			let listener: ((event: AgentEvent, signal: AbortSignal) => void | Promise<void>) | undefined;
 			handle.agent.subscribe = (callback) => {
 				listener = callback;
 				return () => {};
@@ -182,7 +182,7 @@ it("a worker admitted during main submit points to its eventual receipt; indepen
 					timestamp: Date.now(),
 				} as AgentMessage;
 				state.messages?.push(message);
-				listener?.({ type: "message_end", message });
+				await listener?.({ type: "message_end", message }, new AbortController().signal);
 			};
 			return handle;
 		}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
