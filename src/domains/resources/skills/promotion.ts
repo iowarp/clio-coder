@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import { clioConfigDir } from "../../../core/xdg.js";
+import { distinctiveTokens, normalize } from "./lexical-match.js";
 import type { MarketplaceSkill } from "./marketplace.js";
 
 /**
@@ -24,61 +25,6 @@ export interface PromotionMatch {
 	score: number;
 	/** The trigger phrase that fired, when the match came from one. */
 	matchedTrigger?: string;
-}
-
-const TOKEN_STOPWORDS = new Set([
-	"the",
-	"a",
-	"an",
-	"and",
-	"or",
-	"for",
-	"with",
-	"this",
-	"that",
-	"when",
-	"what",
-	"how",
-	"into",
-	"from",
-	"use",
-	"used",
-	"using",
-	"one",
-	"not",
-	"skill",
-	"skills",
-	"clio",
-	"please",
-	"can",
-	"you",
-	"should",
-	"would",
-	"about",
-	"need",
-	"want",
-	"help",
-	"make",
-	"file",
-	"files",
-	"code",
-]);
-
-function normalize(text: string): string {
-	return text
-		.toLowerCase()
-		.replace(/[^\p{L}\p{N}\s]/gu, " ")
-		.replace(/\s+/g, " ")
-		.trim();
-}
-
-/** Distinctive tokens: 4+ chars and outside the stopword set. */
-function distinctiveTokens(text: string): Set<string> {
-	return new Set(
-		normalize(text)
-			.split(" ")
-			.filter((token) => token.length >= 4 && !TOKEN_STOPWORDS.has(token)),
-	);
 }
 
 const TRIGGER_SCORE = 4;

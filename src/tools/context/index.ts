@@ -3,13 +3,7 @@ import path from "node:path";
 import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
-import {
-	SKILL_INSTALL_OFFER_OPTION_NEVER,
-	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
-	SKILL_INSTALL_OFFER_OPTION_PROJECT,
-	SKILL_INSTALL_OFFER_OPTION_USER,
-	SKILL_SUGGESTION_ANCHOR,
-} from "../../core/skill-activation.js";
+import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { WorkerRecall } from "../../domains/context/worker/recall.js";
 import { foldWorkingSet } from "../../domains/context/working-set/fold.js";
@@ -21,7 +15,9 @@ import {
 	resolveRecall,
 } from "../../domains/context/working-set/recall.js";
 import {
+	buildSkillCatalogView,
 	checkSkillDrift,
+	checkSkillDriftBatch,
 	discoverMarketplaceSkills,
 	installedSkillNames,
 	installedSkillPackages,
@@ -294,84 +290,29 @@ function marketplaceRowsFor(
 	}
 }
 
-function renderSkillsList(
-	skills: ReadonlyArray<Skill>,
-	marketplace: ReadonlyArray<MarketplaceSkill>,
-	marketplaceOffered: boolean,
-	modelActivation: boolean,
-	packages: ReturnType<typeof installedSkillPackages> = [],
-): string {
-	if (skills.length === 0 && marketplace.length === 0 && packages.length === 0) {
-		// A registry that never offers the marketplace (a worker) must not
-		// claim none is configured; it simply has nothing to list.
-		return marketplaceOffered
-			? "No skills are available in Clio and no additional marketplace skills were found."
-			: "No skills are available in Clio.";
+/**
+ * Ready rows whose installed content no longer matches the hash recorded for
+ * it, resolved for the whole listing in one manifest read.
+ *
+ * Drift used to be checked only in the activation branch below, so the listing
+ * reported a drifted skill as ready with no caveat and the warning arrived only
+ * after the model had already spent its turn loading it. This is the same
+ * comparison, one step earlier, through the batched entry point so a listing
+ * does not re-parse the pin manifest once per row.
+ *
+ * It annotates and nothing else. The skill stays listed, stays ready and stays
+ * loadable, the installed copy keeps its ownership, and the activation warning
+ * is unchanged. A skill with no recorded hash is not marked, because absence of
+ * evidence is not drift, and a failure here yields an unmarked listing rather
+ * than no listing.
+ */
+function driftedSkillNames(skills: ReadonlyArray<Skill>, cwd: string): Set<string> {
+	try {
+		const reports = checkSkillDriftBatch(skills, cwd);
+		return new Set([...reports].filter(([, report]) => report.verdict === "mismatch").map(([name]) => name));
+	} catch {
+		return new Set<string>();
 	}
-	// The header names the listing and nothing more. The reply protocol is
-	// stated once, as the recency anchor at the bottom, because that is the
-	// line literal models act on; a second copy up here cost every listing
-	// call the same sentences again.
-	const lines = ["Available skills.", ""];
-
-	const native = skills.filter((skill) => skill.source === "clio-coder" || skill.source === "plugin");
-	const discovered = skills.filter((skill) => skill.source !== "clio-coder" && skill.source !== "plugin");
-	lines.push(`Ready skills in Clio (${native.length}):`);
-	if (native.length === 0) lines.push("- none");
-	for (const skill of native) {
-		lines.push(`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`);
-	}
-	if (discovered.length > 0) {
-		lines.push("", "Explicitly supplied session skills (not installed packages):");
-		for (const skill of discovered) {
-			lines.push(
-				`- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}; file: ${skill.filePath}): ${skill.description}`,
-			);
-		}
-		lines.push(
-			"These skills were explicitly supplied for this session. Preserve their source; session availability does not mean Clio installed or copied them.",
-		);
-	}
-
-	if (packages.length > 0) {
-		lines.push("", `Installed packages providing skills (${packages.length}):`);
-		for (const pkg of packages)
-			lines.push(
-				`- ${pkg.name} (scope: ${pkg.scope}; origin: ${pkg.origin === "catalog" ? "marketplace catalog" : pkg.origin}; state: ${pkg.state}; path: ${pkg.path})`,
-			);
-	}
-	lines.push(
-		"",
-		"Other-agent skill folders are discovery-only. Explicitly import into Clio before use; the trust-imports setting does not install or activate loose files.",
-	);
-
-	if (marketplace.length > 0) {
-		// Installable rows are suggested exactly like installed ones: the
-		// operator's /skill <name> prompts to install before it runs, so the
-		// model's move is the same suggest-and-wait. Only the body is out of
-		// reach until then, which is why the description is all that appears.
-		lines.push("", "Marketplace (additional skills available to install; /skill <name> offers to install):");
-		for (const entry of marketplace) {
-			const category = entry.category ? ` [${entry.category}]` : "";
-			lines.push(`- ${entry.name}${category}: ${entry.description}`);
-		}
-	}
-	// Recency anchor with an exact reply shape: literal models act on an output
-	// template where they skip conditional prose in the header.
-	lines.push(
-		"",
-		modelActivation
-			? `If one skill above matches the current task, load it now with context(scope="skills", name="<name>") and continue in the same turn; at this autonomy level you activate installed skills yourself and do not wait for the operator. Marketplace additions still require operator approval. If none match, do not mention skills.`
-			: `If one skill above matches the current task, begin your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` (a comma-separated sequence, in order, when several compose), then continue the task in the same turn without it; only the operator can run it. If none match, do not mention skills.`,
-	);
-	if (marketplace.length > 0) {
-		// The offer protocol mirrors the marketplace-offer middleware: fixed
-		// option labels so the harness recognizes and handles the answer.
-		lines.push(
-			`When no installed skill serves the task but a marketplace skill above genuinely does, you may instead ask the operator with ask_user (mode=single_question, header "Install skill") whether to install it, offering exactly: "${SKILL_INSTALL_OFFER_OPTION_PROJECT}", "${SKILL_INSTALL_OFFER_OPTION_USER}", "${SKILL_INSTALL_OFFER_OPTION_NOT_NOW}", "${SKILL_INSTALL_OFFER_OPTION_NEVER}". The harness handles those exact offer options. An explicit operator request or approval also authorizes the documented library install CLI. After installation, refresh the inventory; distinguish installed from ready and report /library reload when required.`,
-		);
-	}
-	return lines.join("\n");
 }
 
 function runWorkspaceScope(
@@ -496,38 +437,59 @@ function runSkillsScope(
 						cwdFromDeps(deps),
 						deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
 					);
-		const rendered = renderSkillsList(
-			visible,
-			marketplace,
-			deps.skillMarketplace !== false,
-			options?.pendingSkillPolicy?.modelActivation === true,
+		// The catalog is bounded but not small, and it has to fit the per-call cap
+		// like any observation. It is cut by whole rows with the reply protocol
+		// reserved first, rather than by head-truncating the finished string:
+		// head truncation keeps the head, and the tail is the one line a model
+		// acts on. `query`, `limit` and `offset` are the context tool's existing
+		// optional arguments, wired here so a caller can ask for less than all of
+		// it; omitting them still lists every row.
+		const view = buildSkillCatalogView({
+			skills: visible,
 			packages,
-		);
-		// The catalog is bounded but not small: the whole listing must fit the
-		// per-call cap like any observation, and a cut list says so instead of
-		// silently dropping the marketplace tail.
-		const truncation = truncateHead(rendered, { maxBytes: reservation.callCapBytes, maxLines: Number.MAX_SAFE_INTEGER });
-		const total = visible.length + marketplace.length + packages.length;
+			marketplace,
+			drifted: driftedSkillNames(visible, cwdFromDeps(deps)),
+			marketplaceOffered: deps.skillMarketplace !== false,
+			modelActivation: options?.pendingSkillPolicy?.modelActivation === true,
+			query: typeof args.query === "string" ? args.query : "",
+			limit: typeof args.limit === "number" ? args.limit : undefined,
+			offset: typeof args.offset === "number" ? args.offset : 0,
+			capBytes: reservation.callCapBytes,
+		});
+		const shownNames = new Set(view.rows.map((row) => row.name));
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "entries",
-			output: truncation.content,
-			...(truncation.truncated ? { fullOutput: rendered } : {}),
-			shownCount: total,
-			totalCount: total,
-			truncated: truncation.truncated,
+			output: view.text,
+			shownCount: view.shown,
+			totalCount: view.total,
+			truncated: view.nextOffset !== undefined || view.shown < view.total,
+			...(view.nextOffset !== undefined ? { next: `offset=${view.nextOffset}` } : {}),
 			details: {
-				skills: visible.map((skill) => ({
-					name: skill.name,
-					scope: skill.scope,
-					source: skill.source,
-					path: skill.filePath,
-				})),
-				installedPackages: packages,
-				marketplace: marketplace.map((entry) => ({
-					name: entry.name,
-					...(entry.category ? { category: entry.category } : {}),
-				})),
+				// Rows on this page, so a caller reading `details` sees the same
+				// listing the text carries. The totals beside them are how a
+				// filtered or paged view is told apart from a complete one.
+				skills: visible
+					.filter((skill) => shownNames.has(skill.name))
+					.map((skill) => ({
+						name: skill.name,
+						scope: skill.scope,
+						source: skill.source,
+						path: skill.filePath,
+						...(view.driftedNames.includes(skill.name) ? { drift: "mismatch" } : {}),
+					})),
+				installedPackages: packages.filter((pkg) => shownNames.has(pkg.name)),
+				marketplace: marketplace
+					.filter((entry) => shownNames.has(entry.name))
+					.map((entry) => ({
+						name: entry.name,
+						...(entry.category ? { category: entry.category } : {}),
+					})),
+				totalSkills: visible.length,
+				totalPackages: packages.length,
+				totalMarketplace: marketplace.length,
+				...(view.filtered ? { query: (args.query as string).trim(), matchMode: view.matchMode } : {}),
+				...(view.driftedNames.length > 0 ? { drifted: view.driftedNames } : {}),
 			},
 			reservation,
 			...(options ? { options } : {}),
