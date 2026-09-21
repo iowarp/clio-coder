@@ -705,6 +705,14 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 		};
 		trajectory.push(step);
 		if (trajectory.length > live.windowSteps) trajectory.splice(0, trajectory.length - live.windowSteps);
+		if (input.metadata?.resultKind === "ok") {
+			// Only an explicit receipt for this exact operation closes its failure
+			// episode. Keep the bank entry and trajectory as history; this does not
+			// verify the surrounding task or reinterpret tool exit classifications.
+			failures.delete(step.operationFingerprint);
+			annotatedThisTurn.delete(step.operationFingerprint);
+			if (lastInjectedOperationFingerprint === step.operationFingerprint) lastInjectedOperationFingerprint = null;
+		}
 		if (outcome !== "error") return NO_EFFECTS;
 		rememberFailure(step);
 		return annotateRepeatedFailure(step);
@@ -718,11 +726,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 	 */
 	function annotateRepeatedFailure(step: TrajectoryStep): ReadonlyArray<MiddlewareEffect> {
 		if (annotatedThisTurn.has(step.operationFingerprint)) return NO_EFFECTS;
-		const occurrences = trajectory.filter(
-			(candidate) => candidate.outcome === "error" && candidate.operationFingerprint === step.operationFingerprint,
-		).length;
 		const failure = failures.get(step.operationFingerprint);
-		if (occurrences < 2 || failure === undefined) return NO_EFFECTS;
+		if (failure === undefined) return NO_EFFECTS;
+		const occurrences = trajectory.filter(
+			(candidate) =>
+				candidate.outcome === "error" &&
+				candidate.operationFingerprint === step.operationFingerprint &&
+				candidate.step >= failure.firstStep,
+		).length;
+		if (occurrences < 2) return NO_EFFECTS;
 		const message = boundedReminder(
 			`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}. Change the approach rather than repeating it.`,
 			settings().maxTokens,
@@ -780,11 +792,15 @@ export function createMemoryInterventionRegistration(deps: MemoryInterventionDep
 				) {
 					continue;
 				}
-				const occurrences = trajectory.filter(
-					(candidate) => candidate.outcome === "error" && candidate.operationFingerprint === step.operationFingerprint,
-				).length;
 				const failure = failures.get(step.operationFingerprint);
-				if (occurrences < 2 || failure === undefined) continue;
+				if (failure === undefined || step.step < failure.firstStep) continue;
+				const occurrences = trajectory.filter(
+					(candidate) =>
+						candidate.outcome === "error" &&
+						candidate.operationFingerprint === step.operationFingerprint &&
+						candidate.step >= failure.firstStep,
+				).length;
+				if (occurrences < 2) continue;
 				const message = boundedReminder(
 					`Memory: [${failure.entryId}] you already tried ${failure.callDescription} at step ${failure.firstStep} and it failed with ${failure.errorDigest}.`,
 					settings().maxTokens,
