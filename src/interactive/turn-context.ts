@@ -27,6 +27,15 @@ import type { SafeEventBus } from "../core/event-bus.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
+import {
+	createLiveBudgetProducer,
+	type LiveBudgetBreakdown,
+	type LiveBudgetHandoffProjection,
+	type LiveBudgetInput,
+	type LiveBudgetOutcomeProjection,
+	type LiveBudgetView,
+	resolveLiveBudgetPolicy,
+} from "../domains/context/budget/live-view.js";
 import { buildEvictionFields, planEviction } from "../domains/context/working-set/engine.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart } from "../domains/context/working-set/horizon.js";
@@ -94,8 +103,10 @@ import {
 	runtimeSupportsTools,
 	sumRunUsage,
 	toolNamesFromAgentState,
+	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
+import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers/compaction-summary.js";
 import type { TurnMiddleware } from "./turn-middleware.js";
@@ -123,6 +134,14 @@ export interface TurnContextDeps {
 	planEviction?: typeof planEviction;
 	getMemorySection?: (() => string) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
+	/**
+	 * Optional continuity projections carried into the live budget view. They
+	 * are injected interfaces: this module never reads, writes, or validates the
+	 * durable records behind them, and a throwing reader degrades to null rather
+	 * than failing a budget publication.
+	 */
+	getPendingHandoff?: (() => LiveBudgetHandoffProjection | null) | undefined;
+	getLastOutcome?: (() => LiveBudgetOutcomeProjection | null) | undefined;
 	middleware: TurnMiddleware;
 	emitNotice: (text: string) => void;
 }
@@ -189,6 +208,24 @@ export interface TurnContext {
 	promptSideTokens(): number;
 	liveContextEstimate(agentRuntime: AgentRuntime, pendingUserText?: string): LiveContextEstimate;
 	/**
+	 * Recompute and publish the live budget view.
+	 *
+	 * Called at the seams that change the next request (capture, reconcile,
+	 * reduction, the mid-run tool-batch boundary, run settlement) and by any
+	 * consumer about to make a decision from it. The only thing it mutates is
+	 * the accounting cache: no
+	 * persistence, no model call, and no reduction happens because something
+	 * asked what the budget is.
+	 */
+	refreshLiveBudget(pendingUserText?: string): LiveBudgetView;
+	/**
+	 * The published live budget view. A pure getter for renderers and tools:
+	 * it never rescans the conversation or reprices the footer. The first call
+	 * of a session publishes once, because a view has to exist before it can be
+	 * read.
+	 */
+	liveBudget(): LiveBudgetView;
+	/**
 	 * The loaded context window this session already recorded for a target and
 	 * model, so a resume budgets against it instead of re-probing. Null when the
 	 * ledger has no such measurement.
@@ -235,7 +272,13 @@ export interface TurnContext {
 	 * of a disturbance, it is the prefix the next turn wants already resident.
 	 */
 	notePrewarm(prewarm: PrewarmStats): void;
-	resetForSession(): void;
+	/**
+	 * Drop per-session accounting. `branchAnchorTurnId` is the leaf the incoming
+	 * session's next turn parents under; it becomes the advisory branch identity,
+	 * which is why it is supplied only here. Ordinary appends advance the leaf
+	 * without re-arming an advisory; real navigation re-arms it.
+	 */
+	resetForSession(branchAnchorTurnId?: string | null): void;
 	dispose(): void;
 }
 
@@ -260,6 +303,43 @@ function evictionSkipMessage(
 	});
 }
 
+/**
+ * The token and route facts of one budget publication, separate from the
+ * identity fields that name it. Split out so the live and pre-runtime paths
+ * produce the same shape and the reduction basis can be keyed over it after it
+ * is resolved rather than before.
+ */
+type LiveBudgetAccounting = Pick<
+	LiveBudgetInput,
+	| "targetId"
+	| "runtimeId"
+	| "modelId"
+	| "modelApi"
+	| "effectiveWindow"
+	| "windowSource"
+	| "estimatedInputTokens"
+	| "anchoredInputTokens"
+	| "inputTokens"
+	| "inputSource"
+	| "historical"
+	| "breakdown"
+	| "breakdownSource"
+	| "outputReserveTokens"
+>;
+
+/**
+ * Content identity of a message list.
+ *
+ * The one serialization used for both jobs that need to know whether the same
+ * message objects still hold the same bytes: validating a provider anchor's
+ * attested prefix, and fingerprinting the live request. Token counts cannot do
+ * either, because `estimateAgentMessageTokens` prices by character count and a
+ * same-length replacement leaves every figure identical.
+ */
+function messageListDigest(messages: ReadonlyArray<AgentMessage>): string {
+	return createHash("sha256").update(JSON.stringify(messages)).digest("hex");
+}
+
 export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const { state, middleware } = deps;
 	const compactionTrigger = new AutoCompactionTrigger<CompactResult | null>();
@@ -282,6 +362,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let reconciledAnchor: {
 		tokens: number;
 		anchoredMessages: ReadonlyArray<AgentMessage>;
+		/**
+		 * Content identity of `anchoredMessages` when the attestation was taken.
+		 * Object identity alone cannot detect an in-place edit: rewriting a
+		 * message's text with a different string of the same length leaves the
+		 * reference, the length, and therefore every chars/4 figure unchanged,
+		 * while the provider counted different tokens. Without this the anchor
+		 * would keep lending its authority to a prefix the provider never saw.
+		 */
+		contentDigest: string;
 		runtime: AgentRuntime;
 		model: AgentRuntime["agent"]["state"]["model"];
 		modelKey: string;
@@ -327,6 +416,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	// context. Same-turn tool growth or same-length content replacement must
 	// get a fresh cut; ordinary below-threshold checks never fingerprint it.
 	let emptyAutoCompactContextKey: string | null = null;
+
+	// The live budget view and the identity that decides when an advisory
+	// re-arms. `branchAnchorTurnId` moves only on real branch navigation, so two
+	// tool batches advancing `state.lastTurnId` under the same branch keep one
+	// advisory epoch; `navigationEpoch` separates two visits to the same leaf id.
+	const budgetProducer = createLiveBudgetProducer();
+	let branchAnchorTurnId: string | null = null;
+	let navigationEpoch = 0;
+	// Reduction-basis key of the last automatic attempt that produced nothing.
+	// It is the post-accounting identity, so a recalibrated anchor or a
+	// different resolved output cap clears the refusal even when the
+	// conversation, the route, and the configuration are byte-identical. The
+	// pressure policy reuses a refusal only for this exact key.
+	let noUsefulCutBasisKey: string | null = null;
 
 	// Cache-disturbance honesty (T3.3). Accumulate every known local-runtime
 	// disturbance and prefix-byte change since the last settled run. The next
@@ -589,6 +692,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		const anchor = reconciledAnchor;
 		if (!anchor) return null;
 		const messages = agentRuntime.agent.state.messages.filter((message) => message.role !== "system");
+		// The identity, route, and length checks are cheap and run first; `||`
+		// short-circuits, so the content digest is only computed for a prefix that
+		// still looks like the attested one. The digest covers the attested prefix
+		// and never the tail, so an append does not invalidate the anchor; the
+		// prefix itself is re-serialized and rehashed on every validation, which
+		// is the cost of detecting an in-place edit at all.
 		if (
 			anchor.runtime !== agentRuntime ||
 			anchor.model !== agentRuntime.agent.state.model ||
@@ -597,7 +706,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			anchor.runtimeId !== agentRuntime.runtimeId ||
 			anchor.wireModelId !== agentRuntime.wireModelId ||
 			anchor.anchoredMessages.length > messages.length ||
-			anchor.anchoredMessages.some((message, index) => message !== messages[index])
+			anchor.anchoredMessages.some((message, index) => message !== messages[index]) ||
+			messageListDigest(messages.slice(0, anchor.anchoredMessages.length)) !== anchor.contentDigest
 		) {
 			reconciledAnchor = null;
 			return null;
@@ -648,6 +758,226 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		};
 	};
 
+	const sha256Json = (value: unknown): string => createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+	/**
+	 * Identity of the exact material the next request would carry, plus the
+	 * settings that decide its reserve and whether a reduction is even eligible.
+	 * This is the pre-accounting half: the reduction basis adds the resolved
+	 * estimate, cap, and reservation on top of it.
+	 *
+	 * Token counts alone cannot do this job: `estimateAgentMessageTokens` prices
+	 * by character count, so replacing a message with another of the same length
+	 * leaves every figure identical while the request is a different one. The
+	 * conversation is therefore hashed by content, not by length or count.
+	 */
+	const liveBudgetContentFingerprint = (
+		agentRuntime: AgentRuntime | null,
+		pendingUserText: string | undefined,
+		promptFingerprint: string | null,
+		toolSignature: string | null,
+	): string => {
+		const settings = deps.getSettings();
+		const eligibility = {
+			compaction: settings.context.compaction ?? null,
+			workingSet: settings.context.workingSet ?? null,
+			maxOutputTokens: settings.chat?.maxOutputTokens ?? null,
+		};
+		if (!agentRuntime) {
+			const snapshot = currentContextSnapshot;
+			return sha256Json([
+				"historical/1",
+				snapshot?.snapshotId ?? null,
+				snapshot ? snapshotInputTokens(snapshot) : null,
+				snapshot?.sources.total ?? null,
+				windowWithoutRuntime().contextWindow,
+				promptFingerprint,
+				toolSignature,
+				eligibility,
+			]);
+		}
+		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		return sha256Json([
+			"live/1",
+			agentRuntime.targetId,
+			agentRuntime.runtimeId,
+			agentRuntime.wireModelId,
+			agentRuntime.agent.state.model?.api ?? null,
+			details.effectiveContextWindow,
+			details.contextWindowSource,
+			promptFingerprint,
+			toolSignature,
+			// Same serialization the anchor validates its attested prefix with, so
+			// the two cannot disagree about whether the conversation changed.
+			messageListDigest(agentRuntime.agent.state.messages.filter((message) => message.role !== "system")),
+			pendingUserText ?? null,
+			eligibility,
+		]);
+	};
+
+	/**
+	 * A captured decomposition, labelled as one. The mapping is the same the
+	 * `/context` overlay already uses, so the two cannot disagree; it is not a
+	 * fresh measurement of the live agent state and is never presented as one.
+	 */
+	const capturedBreakdown = (snapshot: ContextSnapshot, pendingTokens: number): LiveBudgetBreakdown => ({
+		systemPromptTokens: snapshot.categories.system,
+		messageTokens: snapshot.categories.messages + (snapshot.categories.toolResults ?? 0),
+		pendingUserTokens: pendingTokens,
+		toolSchemaTokens: snapshot.categories.tools,
+	});
+
+	const optionalProjection = <T>(read: (() => T | null) | undefined): T | null => {
+		if (!read) return null;
+		try {
+			return read();
+		} catch {
+			// A continuity projection is supplemental. Losing it must not stop the
+			// budget from being published.
+			return null;
+		}
+	};
+
+	/**
+	 * Token facts of the live next request, all from one `liveContextEstimate`
+	 * call: the same one admission budgets against. Old snapshot categories are
+	 * never summed to reconstruct the total, and streaming output is never added
+	 * on top, because the live next-request message list already carries the
+	 * completed assistant turn and the estimate already carries the pending
+	 * text. Each is charged exactly once.
+	 */
+	const liveRuntimeAccounting = (
+		agentRuntime: AgentRuntime,
+		pendingUserText: string | undefined,
+	): LiveBudgetAccounting => {
+		const estimate = liveContextEstimate(agentRuntime, pendingUserText);
+		const details = agentRuntime.runtimeResolution.contextWindowDetails;
+		return {
+			targetId: agentRuntime.targetId,
+			runtimeId: agentRuntime.runtimeId,
+			modelId: agentRuntime.wireModelId,
+			modelApi: agentRuntime.agent.state.model?.api ?? null,
+			effectiveWindow: details.effectiveContextWindow > 0 ? details.effectiveContextWindow : null,
+			windowSource: details.contextWindowSource,
+			estimatedInputTokens: estimate.estimatedTokens,
+			anchoredInputTokens: estimate.reconciledTokens,
+			inputTokens: estimate.tokens,
+			inputSource: estimate.reconciledTokens === null ? "estimated" : "anchored-plus-estimated-tail",
+			historical: false,
+			breakdown: { ...estimate.breakdown },
+			breakdownSource: "live",
+			outputReserveTokens: resolveTurnOutputReserve(agentRuntime, estimate.tokens),
+		};
+	};
+
+	/** Token facts before this process built a runtime: a persisted measurement, labelled as one. */
+	const historicalAccounting = (
+		snapshot: ContextSnapshot | null,
+		settings: Readonly<ClioSettings>,
+	): LiveBudgetAccounting => {
+		const window = windowWithoutRuntime();
+		const pendingTokens = pendingUserInputTokens();
+		return {
+			targetId: snapshot?.providerId ?? settings.chat?.target ?? null,
+			runtimeId: snapshot?.runtimeId ?? null,
+			modelId: snapshot?.modelId ?? settings.chat?.model ?? null,
+			modelApi: null,
+			effectiveWindow: window.contextWindow > 0 ? window.contextWindow : null,
+			windowSource: window.contextWindowSource,
+			estimatedInputTokens: snapshot?.estimatedTokens ?? null,
+			anchoredInputTokens: snapshot?.reconciledTokens ?? null,
+			inputTokens: snapshot ? snapshotInputTokens(snapshot) + pendingTokens : null,
+			inputSource: snapshot ? "historical" : "unknown",
+			historical: true,
+			breakdown: snapshot ? capturedBreakdown(snapshot, pendingTokens) : null,
+			breakdownSource: snapshot ? "captured" : null,
+			// No resolved route means no honest output reservation, and an unpriced
+			// reserve is unknown rather than zero.
+			outputReserveTokens: null,
+		};
+	};
+
+	/**
+	 * Assemble one publication from the live runtime, or from the persisted
+	 * capture when this process has not built a runtime yet.
+	 */
+	const liveBudgetInput = (pendingUserText?: string): LiveBudgetInput => {
+		const settings = deps.getSettings();
+		const agentRuntime = state.runtime;
+		const snapshot = currentContextSnapshot;
+		const promptFingerprint = agentRuntime
+			? sha256Json(agentRuntime.agent.state.systemPrompt ?? null)
+			: (snapshot?.promptHash ?? null);
+		const toolSignature = agentRuntime
+			? toolSignatureFromState(agentRuntime.agent.state.tools)
+			: (snapshot?.toolSignature ?? null);
+		const contentFingerprint = liveBudgetContentFingerprint(
+			agentRuntime,
+			pendingUserText,
+			promptFingerprint,
+			toolSignature,
+		);
+		// Two independent existing settings, not one derived from the other: the
+		// reduce point is `context.compaction.threshold` and the working-set
+		// target is `context.workingSet.target`. A pair the policy refuses is
+		// reported as a refusal rather than repaired into a fabricated setting.
+		const policyResolution = resolveLiveBudgetPolicy(
+			settings.context.compaction?.threshold,
+			settings.context.workingSet?.target,
+		);
+
+		// Accounting first, then the identity that describes it. A reduction
+		// refusal is only reusable for the request the reducer actually saw, and
+		// the resolved anchor, cap, and reservation are part of that request even
+		// when not a byte of the conversation moved.
+		const accounting = agentRuntime
+			? liveRuntimeAccounting(agentRuntime, pendingUserText)
+			: historicalAccounting(snapshot, settings);
+		const reductionBasisKey = sha256Json([
+			"reduction-basis/1",
+			contentFingerprint,
+			accounting.effectiveWindow,
+			accounting.estimatedInputTokens,
+			accounting.anchoredInputTokens,
+			accounting.inputTokens,
+			accounting.inputSource,
+			accounting.outputReserveTokens,
+			// The resolved cap can move without moving the reservation, because a
+			// route clamp may be the binding constraint. Both belong in the key.
+			agentRuntime?.runtimeResolution.capabilityDecisions?.maxTokens ?? null,
+			snapshot?.categories.reserve ?? null,
+			policyResolution.policy.reduce,
+			policyResolution.policy.target,
+		]);
+
+		return {
+			...accounting,
+			sessionId: deps.session?.current()?.id ?? snapshot?.sessionId ?? null,
+			branchAnchorTurnId,
+			activeLeafTurnId: state.lastTurnId,
+			activeUserTurnId: state.activeUserTurnId,
+			capturedSnapshotId: snapshot?.snapshotId ?? null,
+			// Compaction headroom recorded by the capture. Carried under its own
+			// name so nothing can mistake it for the output reserve.
+			thresholdReserveTokens: snapshot?.categories.reserve ?? null,
+			policy: policyResolution.policy,
+			policyRejection: policyResolution.rejection,
+			// Reduction has not been asked about unless an automatic attempt for
+			// this exact basis already came back empty.
+			reduction: noUsefulCutBasisKey !== null && noUsefulCutBasisKey === reductionBasisKey ? "no-useful-cut" : "unknown",
+			reductionBasisKey,
+			promptFingerprint,
+			toolSignature,
+			navigationEpoch,
+			lastReduction: lastCompactionEvent ? { ...lastCompactionEvent } : null,
+			pendingHandoff: optionalProjection(deps.getPendingHandoff),
+			lastOutcome: optionalProjection(deps.getLastOutcome),
+		};
+	};
+
+	const refreshLiveBudget = (pendingUserText?: string): LiveBudgetView =>
+		budgetProducer.publish(liveBudgetInput(pendingUserText));
+
 	/**
 	 * A working-set projection removes tokens from messages the attestation
 	 * covered; it does not make the attestation wrong about the rest. Subtract
@@ -664,10 +994,15 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		tokensRemoved: number,
 	): void => {
 		if (!reconciledAnchor || historyTokens === null) return;
+		const anchoredMessages = [...agentRuntime.agent.state.messages.filter((message) => message.role !== "system")];
 		reconciledAnchor = {
 			...reconciledAnchor,
 			tokens: Math.max(0, historyTokens - Math.max(0, tokensRemoved)),
-			anchoredMessages: [...agentRuntime.agent.state.messages.filter((message) => message.role !== "system")],
+			anchoredMessages,
+			// Re-anchoring on the projected list is the point of this carry, so its
+			// content identity is retaken here. Keeping the old digest would fail
+			// the next validation and discard the attestation this preserves.
+			contentDigest: messageListDigest(anchoredMessages),
 		};
 	};
 
@@ -802,7 +1137,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		// actually follows.
 		let evictionSkipNotice: string | null = null;
 		const rememberEmptyAutomaticAttempt = (): void => {
-			if (!force && !preSummaryStageActed && attemptKey) emptyAutoCompactContextKey = attemptKey;
+			if (force || preSummaryStageActed || !attemptKey) return;
+			emptyAutoCompactContextKey = attemptKey;
+			// The reducer was actually asked and found nothing. Record the request
+			// it was asked about, so the pressure policy can suppress a repeat
+			// advisory for that exact request and no other.
+			noUsefulCutBasisKey = liveBudgetInput(pendingUserText).reductionBasisKey;
 		};
 
 		const trigger: CompactionTrigger = triggerOverride ?? (force ? "force" : "auto");
@@ -876,6 +1216,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 							`[context engine] mask_observations: ${masked.maskedObservations} observations masked${thinkingNote}; ~${estimate.tokens} tokens -> ~${tokensAfterMask} tokens`,
 						);
 
+						refreshLiveBudget(pendingUserText);
 						const after = liveContextEstimate(agentRuntime, pendingUserText);
 						if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
 					}
@@ -967,6 +1308,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 								`[context engine] working set: ${planned.items.length} ${itemsWord} evicted by ${planned.policyId}; ~${planned.tokensBefore} -> ~${planned.tokensAfter} tokens, recall by ref with context(scope="recall")`,
 							);
 
+							// Published only after the carried anchor and the post-eviction
+							// capture are both in place: `liveContextEstimate` clears an
+							// anchor whose message prefix no longer matches, so pricing the
+							// rebuilt list any earlier would discard the attestation the
+							// projection carry exists to preserve.
+							refreshLiveBudget(pendingUserText);
 							const after = liveContextEstimate(agentRuntime, pendingUserText);
 							if (!shouldCompact(after.tokens, compactionThreshold, after.contextWindow).shouldCompact) return true;
 						} catch (error) {
@@ -1129,6 +1476,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				isSplitTurn: result.isSplitTurn,
 			}),
 		);
+		refreshLiveBudget(pendingUserText);
 		return true;
 	};
 
@@ -1151,18 +1499,25 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		captureRuntimeContextSnapshot,
 		persistContextSnapshot,
 		liveContextEstimate,
+		refreshLiveBudget,
 		rememberedLoadedContextWindow,
 		refreshAgentMessagesFromSession,
 		runAutoCompact,
 		cancelCompaction: () => compactionController?.abort(),
 
+		liveBudget: (): LiveBudgetView => budgetProducer.current() ?? refreshLiveBudget(),
+
 		setCurrentSnapshot(snapshot: ContextSnapshot): void {
 			currentContextSnapshot = snapshot;
+			refreshLiveBudget(snapshot.pendingUserInput);
 		},
 
 		flushReconciledSnapshot(): void {
-			if (!snapshotPersistPending || !currentContextSnapshot) return;
-			persistContextSnapshot(currentContextSnapshot);
+			if (snapshotPersistPending && currentContextSnapshot) persistContextSnapshot(currentContextSnapshot);
+			// Run settlement. Its callers are `agent_end` and submit's finally, so
+			// this is where the finished run's accounting is published, not the
+			// mid-run tool-batch boundary; that one is `postToolContinuationGuard`.
+			refreshLiveBudget();
 		},
 
 		reconcileUsage(usage: Usage): void {
@@ -1172,11 +1527,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			const runtime = state.runtime;
 			if (promptTokens > 0 && runtime) {
 				const breakdown = estimateAgentContextBreakdown({ ...runtime.agent.state, messages: [] });
+				const anchoredMessages = [...runtime.agent.state.messages.filter((message) => message.role !== "system")];
 				// The output of this call is part of the next call's prompt for the
 				// same messages, which is why it is folded in here.
 				reconciledAnchor = {
 					tokens: promptTokens + (usage.output || 0),
-					anchoredMessages: [...runtime.agent.state.messages.filter((message) => message.role !== "system")],
+					anchoredMessages,
+					contentDigest: messageListDigest(anchoredMessages),
 					runtime,
 					model: runtime.agent.state.model,
 					modelKey: anchorModelKey(runtime),
@@ -1187,7 +1544,12 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 					toolSchemaTokens: breakdown.toolSchemaTokens,
 				};
 			}
-			if (!currentContextSnapshot) return;
+			if (!currentContextSnapshot) {
+				// The anchor still moved, and it is what the next request budgets
+				// against, so the view is republished with or without a snapshot.
+				refreshLiveBudget();
+				return;
+			}
 			// Reconcile in memory on every API call so the live meters
 			// track usage; persistence waits for the run to settle.
 			if (runtime) {
@@ -1208,6 +1570,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 			currentContextSnapshot = reconcileSnapshot(currentContextSnapshot, usage);
 			snapshotPersistPending = true;
+			// A reconcile moves the anchor and therefore the figure the next
+			// request budgets against, so it is a publication point of its own.
+			refreshLiveBudget();
 		},
 
 		promptSideTokens(): number {
@@ -1387,6 +1752,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			// ledger turn. Preserve its newly appended context tail if compaction
 			// rebuilds messages from the ledger, and count it in both estimates.
 			const reminder = contextChanged ? agentRuntime.agent.state.messages.at(-1) : undefined;
+			// The tool batch appended results the last publication predates, and the
+			// guard is about to decide on them. Publish before that inspection, not
+			// after it.
+			refreshLiveBudget();
 			const before = liveContextEstimate(agentRuntime);
 			if (before.contextWindow <= 0 || before.tokens <= 0) return undefined;
 
@@ -1407,6 +1776,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			if (reminder && !agentRuntime.agent.state.messages.includes(reminder)) {
 				agentRuntime.agent.state.messages.push(reminder);
 			}
+			// The mid-run settled tool-batch boundary: whatever the guard did or
+			// declined to do, this is the context the continuation will send.
+			refreshLiveBudget();
 			const after = liveContextEstimate(agentRuntime);
 			if (after.tokens >= after.contextWindow) {
 				throw new Error(
@@ -1581,7 +1953,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			}
 		},
 
-		resetForSession(): void {
+		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
 			compactionController?.abort();
 			// An in-process switch replaces the whole prefix: the backend's slot
 			// still holds the outgoing session's prompt and history, so the first
@@ -1602,7 +1974,14 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			sessionWorkingContextPaths.clear();
 			pendingPromptLogEntry = null;
 			emptyAutoCompactContextKey = null;
+			noUsefulCutBasisKey = null;
 			reconciledAnchor = null;
+			// Real branch navigation. The epoch separates two visits to the same
+			// leaf id, so an advisory announced on the branch this session left is
+			// re-armed rather than treated as already said.
+			branchAnchorTurnId = incomingBranchAnchorTurnId;
+			navigationEpoch += 1;
+			budgetProducer.reset();
 			const session = deps.session?.current();
 			currentContextSnapshot = session ? getLatestContextSnapshot(session) : null;
 		},

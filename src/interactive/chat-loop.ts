@@ -1,3 +1,4 @@
+import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
 import { replaceEngineMessages } from "../engine/agent.js";
@@ -67,7 +68,6 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { createEngineAgent } from "../engine/agent.js";
-import { resolveReservedOutputTokens } from "../engine/apis/output-budget.js";
 import { cwdHash } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
@@ -86,6 +86,7 @@ import {
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
+import { resolveTurnOutputReserve } from "./output-reserve.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
 import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
@@ -346,6 +347,20 @@ export interface ChatLoop {
 	 * estimate with the current turn's prompt segment manifest.
 	 */
 	contextLedger(): ContextLedger;
+	/**
+	 * The published live budget for the next request: one immutable view with
+	 * the effective window, the structural accounting, the real output
+	 * reservation, headroom, pressure, and an opaque revision every consumer
+	 * quotes. A pure read of what the producer last published; it never rescans
+	 * the conversation, calls a model, persists anything, or triggers reduction.
+	 */
+	liveBudget(): LiveBudgetView;
+	/**
+	 * Republish the live budget before making a decision from it, for a consumer
+	 * that may be observing results appended since the last publication. The
+	 * only thing it mutates is the accounting cache.
+	 */
+	refreshLiveBudget(): LiveBudgetView;
 	/**
 	 * Force-run the compaction flow for the current session, swap the agent's
 	 * in-memory `state.messages` for a single bridge message carrying the
@@ -1253,12 +1268,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				});
 
 			const effectiveWindow = agentRuntime.runtimeResolution.contextWindowDetails.effectiveContextWindow;
-			const outputForInput = (inputTokens: number): number =>
-				resolveReservedOutputTokens(agentRuntime.runtimeResolution.capabilityDecisions.maxTokens, {
-					api: agentRuntime.agent.state.model?.api ?? "",
-					contextWindow: effectiveWindow,
-					inputTokens,
-				});
+			const outputForInput = (inputTokens: number): number => resolveTurnOutputReserve(agentRuntime, inputTokens);
 			const pendingInputTokens = ceilChars(submittedText.length);
 			let turnSnapshot = captureTurnSnapshot("pending");
 			// The snapshot prices the prompt at chars/4. When the provider has
@@ -1266,10 +1276,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// is what the request will actually cost, so the overflow guard reads
 			// the higher of the two (issue #227). Both already carry the pending
 			// user text and the tool schema estimate.
+			//
+			// The live half comes from the published budget view rather than a
+			// second `liveContextEstimate` call, so admission, the footer, and a
+			// budget read all quote one total at one revision. Publishing here is
+			// also the required refresh before admission.
 			const budgetedPromptTokens = (snapshot: ContextSnapshot): number =>
 				Math.max(
 					snapshotInputTokens(snapshot) + pendingInputTokens,
-					context.liveContextEstimate(agentRuntime, submittedText).tokens,
+					context.refreshLiveBudget(submittedText).inputTokens ?? 0,
 				);
 			const inputEstimate = budgetedPromptTokens(turnSnapshot);
 			const reservedOutput = outputForInput(inputEstimate);
@@ -1581,6 +1596,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		contextUsage: () => context.contextUsage(),
 		currentTurnConstraints: () => state.currentTurnConstraints,
 		contextLedger: () => context.contextLedger(),
+		liveBudget: () => context.liveBudget(),
+		refreshLiveBudget: () => context.refreshLiveBudget(),
 		whenSettled: () => activeSubmit,
 		whenPrewarmSettled: () => prewarm.settled(),
 
@@ -1597,7 +1614,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			middlewareToolChoice.reset();
 			state.lastTurnId = leafTurnId;
 			state.lastRunSnapshot = null;
-			context.resetForSession();
+			// The incoming leaf is the advisory branch identity for the new session.
+			// Ordinary appends advance `state.lastTurnId` from here without re-arming
+			// an advisory; arriving here at all is the navigation that does.
+			context.resetForSession(leafTurnId);
 			// The resumed ledger renders before the first new turn (issue #189),
 			// and the window it renders against should be the probed one rather
 			// than the catalog's, so the live capability probe the first submit
