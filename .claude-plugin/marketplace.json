@@ -57,16 +57,16 @@
 		{
 			"name": "clio-coder-dev",
 			"source": "./library/skills/meta/clio-coder-dev",
-			"description": "Governs changes to Clio Coder's own source and harness (TUI, skills, agents, tools, prompts, domains): what may change freely, what needs explicit user intent, and how to change it without breaking the architecture. Not for verifying a change against the harness; use clio-coder-test.",
-			"version": "0.4.0",
+			"description": "Develop Clio Coder inside its own repository: trace source contracts, implement bounded changes, coordinate sprint work, and preserve running-agent and session correctness. Use before changing Clio source, prompts, tools, or library; pair with clio-coder-test for validation.",
+			"version": "0.5.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},
 		{
 			"name": "clio-coder-test",
 			"source": "./library/skills/meta/clio-coder-test",
-			"description": "Verifies a Clio Coder source change against the current contract, smoke, boundary, and application test lanes, including temporary-state and local-provider harnesses. Not for deciding what may change; use clio-coder-dev.",
-			"version": "0.3.1",
+			"description": "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage.",
+			"version": "0.4.0",
 			"category": "meta",
 			"license": "Apache-2.0"
 		},

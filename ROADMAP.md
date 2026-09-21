@@ -1,15 +1,40 @@
 # Clio Coder roadmap
 
-Clio Coder is preparing v0.5.0 for its public launch. The terminal is the primary
-coding interface; bundled browser documentation and the early graphical app
-introduce the next part of the product.
+Clio Coder v0.5.1 is released. The next release focus is context management,
+compaction, and memory: preserving task continuity, making context decisions
+understandable, and reducing the cost of long sessions. The terminal remains
+the primary coding interface.
 
 This roadmap describes priorities, not available features or delivery promises.
 For implemented behavior, use the [documentation](docs/README.md). Historical
 release changes are in [CHANGELOG.md](CHANGELOG.md); older development plans in
 git history are not current contracts.
 
+## v0.5.2 context and memory priorities
+
+Development starts on the local `v052` branch with solution design and
+evaluation planning. The implementation sprint follows maintainer approval of
+the solution shape. These priorities describe intended work, not shipped features.
+
+- **Task continuity through compaction.** Let the active agent save a bounded
+  handoff with its next action, preserve it verbatim, and recover interrupted
+  transitions from the session ledger.
+- **Earlier, shared context awareness.** Give the agent and operator the same
+  pressure and budget facts while preserving automatic eviction and overflow
+  recovery.
+- **Clear memory lifetimes.** Distinguish the active working set, session
+  continuity, and reviewed durable lessons; keep provenance and scope explicit.
+- **Measured speed and usefulness.** Prefer reversible eviction, avoid redundant
+  restoration and model calls, and evaluate task completion, context cost,
+  cache effects, and recovery latency together.
+
+Threshold changes and wider memory automation depend on comparative evaluation.
+The first implementation slice is the shared context snapshot and deterministic
+pressure policy, followed by the recoverable handoff transaction.
+
 ## v0.5.0 launch priorities
+
+These priorities are retained as the historical scope of the public launch.
 
 - **A dependable terminal workflow.** Responsive startup, clear tool activity,
   honest progress and timing, useful permissions, and recoverable sessions.
@@ -25,8 +50,8 @@ git history are not current contracts.
 - **A reproducible distribution.** Package contents, installed CLI/browser
   checks, component notices, and qualification of the exact release artifact.
 
-The candidate includes these systems; final publication remains a maintainer
-action after the [release checklist](docs/process/release-cut-checklist.md).
+These systems formed the public launch. Future releases still follow the
+[release checklist](docs/process/release-cut-checklist.md).
 A completed test campaign establishes its recorded coverage, not universal
 correctness across every model, platform, or scientific workload.
 

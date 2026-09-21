@@ -196,31 +196,29 @@
 		},
 		{
 			"name": "clio-coder-dev",
-			"description": "Governs changes to Clio Coder's own source and harness (TUI, skills, agents, tools, prompts, domains): what may change freely, what needs explicit user intent, and how to change it without breaking the architecture. Not for verifying a change against the harness; use clio-coder-test.",
+			"description": "Develop Clio Coder inside its own repository: trace source contracts, implement bounded changes, coordinate sprint work, and preserve running-agent and session correctness. Use before changing Clio source, prompts, tools, or library; pair with clio-coder-test for validation.",
 			"triggers": [
-				"modify Clio Coder",
-				"change the Clio harness",
-				"edit Clio skills or agents",
-				"evolve Clio tools or prompts",
-				"Clio contribution boundary"
+				"develop Clio in its own repository",
+				"implement a Clio sprint packet",
+				"change Clio context or session lifecycle",
+				"edit Clio skills tools or prompts"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev",
-			"version": "0.4.0",
+			"version": "0.5.0",
 			"audit": "pass",
 			"category": "meta"
 		},
 		{
 			"name": "clio-coder-test",
-			"description": "Verifies a Clio Coder source change against the current contract, smoke, boundary, and application test lanes, including temporary-state and local-provider harnesses. Not for deciding what may change; use clio-coder-dev.",
+			"description": "Validate Clio Coder changes using focused source regressions, built CLI and ACP fixtures, skill/library checks, and isolated package or GUI gates. Use when developing or diagnosing Clio itself; select checks from the changed behavior and report evidence without claiming unrun coverage.",
 			"triggers": [
-				"test Clio Coder",
-				"verify a Clio source change",
-				"run Clio contract tests",
-				"test ACP over stdio",
-				"Clio mock provider harness"
+				"validate a Clio change",
+				"test Clio context compaction or memory",
+				"verify Clio skill activation",
+				"choose Clio test gates"
 			],
 			"sourceUrl": "https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test",
-			"version": "0.3.1",
+			"version": "0.4.0",
 			"audit": "pass",
 			"category": "meta"
 		},

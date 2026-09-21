@@ -18,7 +18,14 @@ import {
 	selectActiveRules,
 } from "../context/index.js";
 import { detectRunIdentity } from "../dispatch/run-identity.js";
-import { compile, compileWorker, type RenderedPromptFragment } from "./compiler.js";
+import { isAutonomyLevel, modelMayActivateSkills } from "../safety/autonomy.js";
+import {
+	compile,
+	compileWorker,
+	type RenderedPromptFragment,
+	type SessionPromptInputs,
+	sessionCanUseSkills,
+} from "./compiler.js";
 import type { CompileSessionPromptInput, CompileWorkerPromptInput, PromptsContract } from "./contract.js";
 import { type FragmentTable, loadFragments } from "./fragment-loader.js";
 import { sha256 } from "./hash.js";
@@ -182,6 +189,7 @@ export function createPromptsBundle(
 				additionalFragments: [
 					...sources.workspaceRoot,
 					...sources.clioRepoAwareness,
+					...selfDevelopmentSkillFragments(sources.clioRepoAwareness.length > 0, sessionInputs, safety),
 					...renderCustomizationFragments(sources.customization, cwd, input.workingContextPaths ?? []).fragments,
 				],
 			});
@@ -372,6 +380,7 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 	const body = [
 		"# Clio Source Tree",
 		"This workspace is Clio Coder's own source tree.",
+		`Source repository root: ${JSON.stringify(awareness.repoRoot)}.`,
 		"When running inside this repo, Clio can modify her own TUI, skills, agents, tools, prompts, context/bootstrap, and harness as ordinary local source work when the user asks.",
 		"Shared contribution/publishing/push/PR/release requires explicit user intent and normal Git/GitHub etiquette. Do not imply autonomous publishing.",
 	].join("\n");
@@ -379,6 +388,34 @@ function clioRepoAwarenessFragments(cwd: string): RenderedPromptFragment[] {
 		{
 			id: CLIO_REPO_AWARENESS_ID,
 			relPath: "inline/clio-repo-awareness",
+			body,
+			contentHash: sha256(body),
+			dynamic: true,
+		},
+	];
+}
+
+/** A small task-aware nudge; actual loading still uses normal skill admission. */
+function selfDevelopmentSkillFragments(
+	selfRepo: boolean,
+	inputs: SessionPromptInputs,
+	autonomy: string,
+): RenderedPromptFragment[] {
+	if (!selfRepo || !sessionCanUseSkills(inputs) || inputs.turnConstraints?.mode === "proposal") return [];
+	const activation = isAutonomyLevel(autonomy) && modelMayActivateSkills(autonomy);
+	const body = [
+		"# Self-development skills",
+		"For a task that changes Clio's source, harness, prompts, or library, use clio-coder-dev before editing and clio-coder-test when choosing validation. Skip this workflow for unrelated or self-contained questions.",
+		'These two skills are discoverable from this checkout\'s library/skills/meta when no installed package owns their names. Check context(scope="skills") for current readiness; disabled, damaged, or hidden skills stay unavailable.',
+		activation
+			? 'Load each relevant ready skill with context(scope="skills", name="clio-coder-dev") or context(scope="skills", name="clio-coder-test") as needed, without waiting for a separate skill request. Reuse already loaded guidance; do not load every reference or the whole catalog.'
+			: "Only the operator activates skills at this autonomy level. Suggest /skill clio-coder-dev or /skill clio-coder-test when relevant, then continue permitted work without waiting or bypassing the activation gate.",
+		"Read CONTRIBUTING.md and the assigned sprint packet from the detected repository root. A plan or skill does not launch an unapproved implementation sprint or authorize publication.",
+	].join("\n");
+	return [
+		{
+			id: "context.self-development-skills",
+			relPath: "inline/self-development-skills",
 			body,
 			contentHash: sha256(body),
 			dynamic: true,

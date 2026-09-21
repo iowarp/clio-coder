@@ -13,6 +13,9 @@ interface PackageJsonShape {
 
 const CLIO_PACKAGE_NAME = "@iowarp/clio-coder";
 
+/** Only these authoring skills become native discovery in Clio's own checkout. */
+export const CLIO_SELF_DEVELOPMENT_SKILLS = ["clio-coder-dev", "clio-coder-test"] as const;
+
 const SOURCE_MARKERS = [
 	"src/entry/orchestrator.ts",
 	"src/worker/entry.ts",

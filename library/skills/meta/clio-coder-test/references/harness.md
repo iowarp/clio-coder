@@ -32,10 +32,10 @@ in teardown.
 
 ## Driving the built CLI
 
-Every file under `tests/smoke/` spawns `dist/cli/index.js` through a local
+Built-process tests under `tests/smoke/` and `tests/extended-smoke/` spawn `dist/cli/index.js` through a local
 process driver suited to that boundary:
 
-- `cli-core.test.ts` captures stdout and stderr with a bounded timeout.
+- `tests/extended-smoke/cli-core.test.ts` captures stdout and stderr with a bounded timeout.
 - `acp-boundary.test.ts` keeps stdin open and frames ACP v1 JSON-RPC messages.
 - `installed-package.test.ts` packs, installs, and launches the installed
   artifact.
@@ -44,7 +44,7 @@ process driver suited to that boundary:
 - `real-binary-boot.test.ts` supports interactive setup input and bounded
   shutdown during first-run and migration checks.
 
-Build before a focused smoke run. `npm run ci` performs that build in the
+Build before a focused smoke run. `pnpm run ci` performs that build in the
 correct order. Keep environment roots under a scratch directory, capture both
 output streams, bound every wait, and terminate a surviving child in teardown.
 Do not import a nonexistent shared `runCli`; copy the closest smoke driver's

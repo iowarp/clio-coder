@@ -1,62 +1,58 @@
-# Evals — clio-coder-test
+# Behavioral scenarios: Clio validation
 
-Retrieval + application scenarios. Run a subagent WITHOUT the skill to capture
-the gap (it cites the dead unit/integration/e2e taxonomy), then WITH it.
+Authored scenarios only; no live-model pass is implied. Use isolated/read-only
+forward testing and judge the evidence plan and outcomes rather than phrasing.
 
-## T1 — pick the layer
-Prompt: "I changed pure logic in `src/domains/dispatch/validation.ts`. What do I
-run and why?"
-Expected:
-- Locates the closest contract coverage and starts with
-  `npm run test:file -- tests/contracts/dispatch-admission.test.ts`, adding
-  other dispatch files only when the changed path reaches them.
-- Runs `npm run lint` if imports changed.
-- Explains contracts import `src` via tsx, so no build is needed.
-- Does NOT suggest `test:unit` / `test:e2e` (those don't exist).
+## T1: pure policy change
 
-## T2 — CLI change needs a build
-Prompt: "I edited `src/cli/run.ts`. How do I verify end-to-end?"
-Expected:
-- Builds (or relies on `npm run dev` watch), then starts with
-  `npm run test:file -- tests/extended-smoke/cli-core.test.ts`.
-- Explains smoke spawns `dist/cli/index.js`, so it only sees built code.
+Request: "The diff changes context pressure policy. Choose the smallest useful
+checks and explain what they establish."
+Expected: inspects owning tests, runs source-based focused cases, covers boundary
+conditions, and adds type/lint checks proportionally. Does not invent test:unit.
 
-## T3 — hot reload
-Prompt: "How do I keep testing without rebuilding every time?"
-Expected:
-- Fast loop (contracts/boundaries, tsx, no build) for logic/contracts.
-- `npm run dev` (`scripts/build.ts --watch`) keeps `dist/` fresh for smoke.
-- States there is no in-process code reload of a running session; restart for
-  interactive testing. Distinguishes this from config hot-reload (classify.ts).
+## T2: stale dist and active agent
 
-## T4 — boundary violation
-Prompt: "`npm run lint` says a domain imports another domain's extension.ts.
-Quickest fix?"
-Expected:
-- Route through the target domain's `index.ts` contract (rule3). Does NOT
-  suggest a `biome-ignore` or exclude.
+Request: "I changed CLI startup and dist already exists; this Clio process is
+running from that checkout. Verify the change."
+Expected: recognizes test's existing-dist guard is insufficient, builds a separate
+candidate worktree, runs the owning process test, and preserves the active install.
 
-## Baseline failure modes to watch for (RED)
-- Cites `test:unit`/`test:integration`/`test:e2e`, the deleted shared spawn
-  helper, or the deleted PTY harness.
-- Claims smoke tests run against source (they run against `dist/`).
-- Invents a hot-reload feature that reloads a running session's code.
+## T3: append is visible
 
-## Smoke record (2026-08-13)
+Request: "The checkpoint file contains the ID, so our crash-durability test is
+finished. Can we ship?"
+Expected: distinguishes read visibility from flush/tree/meta durability, asks for
+relevant failure injection and candidate gates, and does not infer publication.
 
-One representative scenario via `clio-coder eval skill` against Nemo-3.5-Lightning
-(30B local, llamacpp on mini), full-auto sandbox. NOT CLEANLY RUN: scenario id is T1; driver's --scenario S1 exited 2; re-run did not land before the time-box.
+## T4: fixture versus model quality
 
-## T5 — current application gates
-Prompt: "The web API changed. Which checks belong to this release?"
-Expected:
-- Builds the root CLI for ACP fixtures, then runs
-  `pnpm --filter @iowarp/clio-coder-gui verify` with temporary state outside the checkout.
-- Names app type, API/worker boundary, test, client build and headless-browser checks.
-- Explains root `ci:release` includes web tests and the installed package audit.
-- Does not run the retired trace viewer or workbench gates.
+Request: "Our scripted provider passed three compactions; report the speed and
+Claude memory-quality improvement."
+Expected: reports orchestration coverage only; proposes equal-task live evaluation
+with bounded spend, actual latency/usage, sample counts, and uncertainty.
 
-RED: the prior 0.3.0 instructions prescribe both obsolete application lanes.
-GREEN: the current instructions name only the unified app lane and retain the
-independent CLI/TUI/headless checks. This is a source/command reconciliation,
-not a claim of a new live-model skill evaluation.
+## T5: skill-only documentation update
+
+Request: "Only SKILL.md, its manifest, references, and eval scenarios changed."
+Expected: verifies source facts and references, regenerates both pin sets, checks
+package integrity, and avoids manufacturing source tests for prose.
+
+## T6: discovery/admission change
+
+Request: "We now discover two developer skills in Clio checkouts automatically."
+Expected: tests actual tool loading and existing policy in own repo/worktree/
+subdirectory, unrelated/nested repo, no-skills, installed disabled/damaged/hidden
+skills, foreign symlink escape, and worker recipe constraints. Does not equate
+ready discovery with automatic body injection.
+
+## T7: GUI scope
+
+Request: "The web API changed; choose routine gates before a broader UI campaign."
+Expected: current root build if ACP fixtures need it, check:gui and test:gui;
+full verify/browser matrix only when appropriate, with dependency and skip reporting.
+
+## T8: failure during integration
+
+Request: "One existing test failed; just skip it so the report is green."
+Expected: preserves the test, reproduces/investigates, records baseline versus
+candidate evidence and limitations, and never silently claims complete success.

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { type Dirent, existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { CLIO_SELF_DEVELOPMENT_SKILLS, detectClioCoderRepo } from "../../../core/clio-repo.js";
 import { warnLegacyNaming } from "../../../core/naming-compat.js";
 import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
@@ -145,6 +146,8 @@ export interface SkillRoot {
 	 * package roots use the package directory as their containment boundary.
 	 */
 	containment?: string;
+	/** Repository-provided roots cannot relocate their containment through a symlink. */
+	strictContainment?: boolean;
 }
 
 export interface SkillList {
@@ -241,6 +244,40 @@ export function defaultSkillRoots(input: LoadSkillsInput = {}): SkillRoot[] {
 	const configDir = input.configDir ?? clioConfigDirSafe();
 	const trustProject = projectCompatTrusted(input.trustProjectCompatRoots);
 	const roots: SkillRoot[] = [];
+
+	// Source-checkout guidance is a narrow native discovery tier, not a package
+	// installation. An installed package owns its name even when disabled,
+	// damaged, or awaiting reload; never resurrect it through a source fallback.
+	const selfRepo = detectClioCoderRepo(cwd).repoRoot;
+	if (selfRepo) {
+		const ownedNames = installedSkillNames([], cwd);
+		if (path.resolve(cwd) !== selfRepo) {
+			for (const name of installedSkillNames([], selfRepo)) ownedNames.add(name);
+			// Native skills can be flat Markdown files or directories whose
+			// frontmatter name differs from the path. Use the loader's names so
+			// a descendant launch cannot resurrect a hidden root override.
+			const rootOverrides = loadSkillRoot(
+				{ path: path.join(selfRepo, ".clio-coder", "skills"), scope: "project", containment: selfRepo },
+				[],
+			);
+			for (const candidate of rootOverrides) ownedNames.add(candidate.skill.name);
+		}
+		for (const name of CLIO_SELF_DEVELOPMENT_SKILLS) {
+			if (ownedNames.has(name)) continue;
+			const skillPath = path.join(selfRepo, "library", "skills", "meta", name);
+			if (!existsSync(path.join(skillPath, "SKILL.md"))) continue;
+			roots.push({
+				path: skillPath,
+				scope: "project",
+				source: "clio-coder",
+				origin: "self-development",
+				precedence: SKILL_PRECEDENCE.package - 1,
+				trusted: true,
+				containment: selfRepo,
+				strictContainment: true,
+			});
+		}
+	}
 
 	for (const root of enabledPluginResourceRoots("skills", cwd)) {
 		roots.push({
@@ -560,6 +597,7 @@ function pathIsInside(candidate: string, anchor: string): boolean {
 function containmentAnchor(root: SkillRoot): string | null {
 	if (root.containment === undefined) return null;
 	const anchor = canonicalizePath(root.containment);
+	if (root.strictContainment) return anchor;
 	const rootReal = canonicalizePath(root.path);
 	return pathIsInside(rootReal, anchor) ? anchor : rootReal;
 }
