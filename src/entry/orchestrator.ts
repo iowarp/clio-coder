@@ -1788,6 +1788,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				})
 			: null;
 	const toolBootstrap = registerAllTools(toolRegistry, {
+		getContextBudget: () => chat.inspectLiveBudget(),
 		getSettings: () => getCurrentSettings(),
 		termination,
 		captureWorkerContext: () => chat.captureWorkerContext?.() ?? null,

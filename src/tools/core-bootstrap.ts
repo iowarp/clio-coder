@@ -1,6 +1,7 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import { ToolNames } from "../core/tool-names.js";
+import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -40,6 +41,8 @@ import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js"
 import { writeTool } from "./write.js";
 
 export interface CoreToolBootstrapDeps {
+	/** Native session accounting only. Worker registries do not inherit it. */
+	getContextBudget?: BudgetProvider;
 	getSettings?: () => Readonly<ClioSettings>;
 	workerRecall?: WorkerRecall;
 	session?: SessionContract;
@@ -164,6 +167,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		),
 	});
 	const skillToolDeps = {
+		...(deps.getContextBudget ? { getContextBudget: deps.getContextBudget } : {}),
 		...(deps.getSettings ? { getSettings: deps.getSettings } : {}),
 		...(deps.workerRecall ? { workerRecall: deps.workerRecall } : {}),
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
