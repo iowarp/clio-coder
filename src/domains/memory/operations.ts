@@ -35,19 +35,7 @@ export function selectApprovedMemory(
 	options: MemoryRetrievalOptions,
 ): MemoryRecord[] {
 	if (options.tokenBudget <= 0) return [];
-	const allowedScopes = options.scopes === undefined ? null : new Set(options.scopes);
-	const activeRepository = canonicalActiveRepository(options.activeRepository);
-	const activeRuntime = validActiveNamedIdentity(options.activeRuntime, "runtime");
-	const activeAgent = validActiveNamedIdentity(options.activeAgent, "agent");
-	const candidates = sortMemoryRecords(records)
-		.filter((record) => record.approved)
-		.filter((record) => record.evidenceRefs.length > 0)
-		.filter((record) => record.regressions === undefined || record.regressions.length === 0)
-		.filter((record) => allowedScopes === null || allowedScopes.has(record.scope))
-		.filter((record) => repositoryApplies(record, activeRepository))
-		.filter((record) => runtimeApplies(record, activeRuntime))
-		.filter((record) => agentApplies(record, activeAgent))
-		.sort(compareRetrievalPriority);
+	const candidates = eligibleMemoryRecords(records, options);
 	const selected: MemoryRecord[] = [];
 	let spent = 0;
 	for (const record of candidates) {
@@ -57,6 +45,26 @@ export function selectApprovedMemory(
 		spent += cost;
 	}
 	return selected;
+}
+
+/** Eligibility precedes ranking or budget truncation; output retains legacy priority. */
+export function eligibleMemoryRecords(
+	records: ReadonlyArray<MemoryRecord>,
+	options: Omit<MemoryRetrievalOptions, "tokenBudget">,
+): MemoryRecord[] {
+	const allowedScopes = options.scopes === undefined ? null : new Set(options.scopes);
+	const activeRepository = canonicalActiveRepository(options.activeRepository);
+	const activeRuntime = validActiveNamedIdentity(options.activeRuntime, "runtime");
+	const activeAgent = validActiveNamedIdentity(options.activeAgent, "agent");
+	return sortMemoryRecords(records)
+		.filter((record) => record.approved)
+		.filter((record) => record.evidenceRefs.length > 0)
+		.filter((record) => record.regressions === undefined || record.regressions.length === 0)
+		.filter((record) => allowedScopes === null || allowedScopes.has(record.scope))
+		.filter((record) => repositoryApplies(record, activeRepository))
+		.filter((record) => runtimeApplies(record, activeRuntime))
+		.filter((record) => agentApplies(record, activeAgent))
+		.sort(compareRetrievalPriority);
 }
 
 export function estimateMemoryTokens(record: MemoryRecord): number {
