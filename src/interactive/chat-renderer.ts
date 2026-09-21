@@ -365,6 +365,48 @@ export interface RehydrateChatPanelOptions {
 	 * every failure, so a session whose receipts are gone still replays.
 	 */
 	readWorkerReceipt?: WorkerReceiptReader;
+	/**
+	 * Already-rendered continuity blocks, in order, from
+	 * `continuityReplayBlocks`. Each is emitted verbatim exactly once and never
+	 * routed through `appendContextMessage`, whose trim and replay cap would
+	 * crop an accepted note; §4 forbids trimming, normalizing or regenerating
+	 * accepted text. Resolving which blocks these are needs the session and fork
+	 * facts a renderer does not have, so the caller supplies the finished text
+	 * and this module only places it.
+	 */
+	continuityBlocks?: ReadonlyArray<string>;
+}
+
+/**
+ * The active-path slice a replay works from, **before** the compaction cut.
+ *
+ * Exported because the continuity fold needs exactly this array: evidence for a
+ * transaction routinely sits older than the cut, and `selectReplayEntries`
+ * would both drop it and renumber every surviving position. A caller that
+ * resolves a projection folds this, then renders, so the two agree on one
+ * ordered input.
+ */
+export function activeEntriesBeforeCompactionCut(
+	turns: ReadonlyArray<SessionEntry>,
+	options: RehydrateChatPanelOptions = {},
+	/**
+	 * Whether to apply `uptoTurnId`'s positional truncation.
+	 *
+	 * Display replay always does. Continuity does not, unless the selection is a
+	 * genuine historical cut, because `uptoTurnId` carries two different meanings
+	 * through one option: a live `/tree` switch passes it to stop the transcript
+	 * at the selected message, and a historical fork passes it to describe a
+	 * moment that really had no later records. Truncating for the first case
+	 * physically discards a pause, a delivery or an acknowledgement anchored
+	 * after the selected message, and a fold cannot restore a record it was never
+	 * shown: leaving a `historical` flag false does not undo a cut already made.
+	 * The branch selection honors the leaf either way; only the positional cut
+	 * is conditional.
+	 */
+	truncateAtSelection = true,
+): SessionEntry[] {
+	const active = filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId);
+	return truncateAtSelection ? truncateAtTurn(active, options.uptoTurnId) : active;
 }
 
 function extractTurnText(payload: unknown): string {
@@ -1105,15 +1147,23 @@ export function buildReplayAgentMessagesFromTurns(
 ): AgentMessage[] {
 	const out = createOrderedReplaySink();
 	const seenToolCalls = new Set<string>();
-	const activeEntries = truncateAtTurn(
-		filterEntriesToActivePath(turns, options.activeLeafTurnId ?? options.uptoTurnId),
-		options.uptoTurnId,
-	);
+	const activeEntries = activeEntriesBeforeCompactionCut(turns, options);
 	const skillState = latestSkillContextState(activeEntries);
-	const evidence = truncateAtTurn(
-		filterEntriesToActivePath(options.skillContextEntries ?? turns, options.activeLeafTurnId ?? options.uptoTurnId),
-		options.uptoTurnId,
-	);
+	// One emission point for the continuity blocks, tracked by a flag rather than
+	// by counting occurrences: the note has to appear exactly once whether the
+	// replay window holds a carrying summary, an eviction-only commit, or
+	// neither. `selectReplayEntries` keeps at most one compaction summary, so
+	// the in-loop emission below cannot fire twice.
+	let continuityEmitted = false;
+	const emitContinuity = (timestamp: string): void => {
+		if (continuityEmitted) return;
+		continuityEmitted = true;
+		// Verbatim. The accepted note is agent-authored handoff text and is
+		// carried as data; it is never presented as an operator turn and never
+		// passes through the trimming/truncating context helper.
+		for (const block of options.continuityBlocks ?? []) out.push(makeTextMessage("user", block, timestamp));
+	};
+	const evidence = activeEntriesBeforeCompactionCut(options.skillContextEntries ?? turns, options);
 	const verified = captureSkillContext(evidence, skillState);
 	for (const entry of selectReplayEntries(turns, options)) {
 		switch (entry.kind) {
@@ -1181,6 +1231,10 @@ export function buildReplayAgentMessagesFromTurns(
 						for (const block of skill.content) out.push(makeTextMessage("user", block.text, entry.timestamp));
 					}
 				}
+				// The reduction boundary is where the handoff happened, so the note
+				// sits directly after the summary that replaced the history it
+				// describes, whether or not this summary is the one that carried it.
+				emitContinuity(entry.timestamp);
 				break;
 			case "skillActivation":
 				if (entry.activation.runId !== undefined || (skillState && !skillState.activationRefs.includes(entry.turnId)))
@@ -1213,9 +1267,20 @@ export function buildReplayAgentMessagesFromTurns(
 			// entries themselves never become messages.
 			case "contextEviction":
 			case "contextRecall":
+			// Continuity records are bookkeeping. The chain and the commit payload
+			// never become model messages; the one thing that reaches the model is
+			// the accepted note, projected once through `continuityBlocks`. Handling
+			// each commit here instead would emit a copy per record and would still
+			// miss a commit that sits before the cut.
+			case "handoffTransaction":
+			case "continuityCommit":
 				break;
 		}
 	}
+	// No compaction summary in the replay window: an eviction-only or
+	// continuity-only outcome still has a note to carry, so it lands at the end
+	// of the replayed history rather than being dropped.
+	emitContinuity(activeEntries[activeEntries.length - 1]?.timestamp ?? new Date(0).toISOString());
 	out.flush();
 	return out.messages;
 }
@@ -1412,6 +1477,21 @@ export function rehydrateChatPanelFromTurns(
 				chatPanel.applyWorkerState(state);
 				break;
 			}
+			// One bounded provenance line each. The transcript says a handoff
+			// happened and where it stands; the note itself is rendered once,
+			// below, under its own label, rather than once per record.
+			case "handoffTransaction":
+				appendReplayLine(
+					chatPanel,
+					`[continuity] ${entry.event.phase} handoff=${entry.identity.handoffId} seq=${entry.transition.sequence} attempt=${entry.transition.attempt}`,
+				);
+				break;
+			case "continuityCommit":
+				appendReplayLine(
+					chatPanel,
+					`[continuity] commit handoff=${entry.continuity.identity.handoffId} outcome=${entry.continuity.commit.outcome} tokens=${entry.continuity.commit.tokensBefore}->${entry.continuity.commit.tokensAfter}`,
+				);
+				break;
 			case "label":
 			case "taskLedger":
 			case "decisionLedger":
@@ -1419,6 +1499,17 @@ export function rehydrateChatPanelFromTurns(
 			case "contextRecall":
 				break;
 		}
+	}
+	// The transcript shows the note as what it is: assistant-authored handoff
+	// text, labelled, never rendered as an operator turn.
+	//
+	// This is a presentation view, not the durable text. The panel wraps to its
+	// width and strips terminal control sequences, so a rendered line is not
+	// byte-identical to the note; §12 permits an export transformation exactly
+	// when it is labelled, and the exact bytes stay in the ledger and in the
+	// model replay the same blocks feed.
+	for (const block of options.continuityBlocks ?? []) {
+		for (const line of block.split("\n")) appendReplayLine(chatPanel, line);
 	}
 	for (const pendingId of pendingToolIds) {
 		chatPanel.applyEvent({

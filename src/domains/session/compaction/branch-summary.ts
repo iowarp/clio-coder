@@ -185,7 +185,10 @@ export function serializeConversation(entries: ReadonlyArray<SessionEntry>): str
 		}
 		// custom, modelChange, thinkingLevelChange, fileEntry, sessionInfo,
 		// protectedArtifact, taskLedger, decisionLedger, and workerRun do not
-		// project into the serialized conversation.
+		// project into the serialized conversation. Neither do handoffTransaction
+		// and continuityCommit: this is an allowlist, so transaction JSON can
+		// never reach the summarization prompt as if it were conversation, and
+		// the accepted note is never regenerated from summarizer prose.
 	}
 	return parts.join("\n\n");
 }

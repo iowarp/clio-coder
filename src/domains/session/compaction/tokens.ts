@@ -13,6 +13,7 @@
 
 import type { Usage } from "../../../engine/types.js";
 import { ceilChars, contentChars, estimateAgentMessageTokens } from "../context-accounting.js";
+import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -53,6 +54,11 @@ function estimateBashExecution(entry: BashExecutionEntry): number {
 
 function estimateCustom(entry: CustomEntry): number {
 	if (entry.data === undefined) return 0;
+	// The reserved operator recovery request is a control record, not model text.
+	// Model replay skips it by design (it is never turned into a user turn), so
+	// charging its data to the context budget would claim the model can see a
+	// record it is never shown.
+	if (entry.customType === HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE) return 0;
 	return ceilChars(contentChars(entry.data));
 }
 
@@ -100,6 +106,14 @@ export function estimateTokens(entry: SessionEntry): number {
 		// projection accounts for marker cost on the projected messages.
 		case "contextEviction":
 		case "contextRecall":
+		// Continuity bookkeeping. The transaction chain and the commit payload
+		// are never model text, and a carried payload is a copy of facts the
+		// projection already holds: charging every copy would price one accepted
+		// note three times over three summary cycles. The single rendered note
+		// the projection does emit is priced once, by the caller that resolved
+		// it, through `continuityNoteTokens` on `calculateContextTokens`.
+		case "handoffTransaction":
+		case "continuityCommit":
 			return 0;
 	}
 }
@@ -152,8 +166,27 @@ function findLastAssistantUsageIndex(entries: ReadonlyArray<SessionEntry>): numb
  * accurate for sessions whose most recent assistant turn carried real
  * provider usage data.
  */
-export function calculateContextTokens(entries: ReadonlyArray<SessionEntry>, lastUsage?: Usage): number {
+/**
+ * The continuity note a replay projects, for callers pricing a whole prompt.
+ *
+ * `tokens` comes from `continuityProjectionTokens`, and `anchorTurnId` is the
+ * ledger record that introduced the transaction. Selecting which note gets
+ * projected needs session and fork facts a token estimator does not have, so
+ * the caller resolves it; a second selection rule here would be free to drift
+ * from the fold's.
+ */
+export interface ContinuityNoteCost {
+	tokens: number;
+	anchorTurnId: string | null;
+}
+
+export function calculateContextTokens(
+	entries: ReadonlyArray<SessionEntry>,
+	lastUsage?: Usage,
+	continuityNote?: ContinuityNoteCost,
+): number {
 	const usage = lastUsage ?? getLastAssistantUsage(entries);
+	const noteTokens = continuityNote?.tokens ?? 0;
 	if (usage) {
 		const anchorTokens = usageTotalTokens(usage);
 		const anchorIndex = findLastAssistantUsageIndex(entries);
@@ -162,9 +195,21 @@ export function calculateContextTokens(entries: ReadonlyArray<SessionEntry>, las
 			const entry = entries[i];
 			if (entry) trailing += estimateTokens(entry);
 		}
-		return anchorTokens + trailing;
+		// The anchor is a real provider prompt count. Once a continuation has run
+		// with the note in front of it, that measurement already contains the note,
+		// and adding it again would inflate `tokensBefore` a little more on every
+		// compaction cycle. Only a note introduced *after* the anchored call is new
+		// material. An unlocatable anchor record is treated as new, which
+		// over-counts by one note rather than hiding it.
+		const introducedAt =
+			continuityNote?.anchorTurnId == null
+				? -1
+				: entries.findIndex((entry) => entry.turnId === continuityNote.anchorTurnId);
+		const alreadyMeasured = introducedAt >= 0 && introducedAt <= anchorIndex;
+		return anchorTokens + trailing + (alreadyMeasured ? 0 : noteTokens);
 	}
-	let total = 0;
+	// With no anchor everything is estimated, so the note is always new material.
+	let total = noteTokens;
 	for (const entry of entries) total += estimateTokens(entry);
 	return total;
 }

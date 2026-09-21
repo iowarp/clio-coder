@@ -20,7 +20,7 @@ import type { ChatPanel } from "./chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "./chat-renderer.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import type { InteractiveNoticeLevel } from "./interactive-subscriptions.js";
-import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns, withContinuityReplay } from "./model-session-replay.js";
 import type { OverlayTransitions } from "./overlay-transitions.js";
 import { openCwdFallbackOverlay } from "./overlays/cwd-fallback.js";
 import { openHandoffReviewOverlay } from "./overlays/handoff-review.js";
@@ -188,7 +188,7 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					// after it (a compaction summary covering the leaf, above all)
 					// still belong on screen. uptoTurnId is the historical-truncation
 					// variant `/tree` uses.
-					const replayOptions = leafTurnId ? { activeLeafTurnId: leafTurnId } : {};
+					const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
 					deps.resetTranscript();
 					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
 					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
@@ -240,8 +240,14 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 					if (!sessionId) throw new Error("no current session after turn switch");
 					const turns = deps.readStructuredEntries(sessionId);
 					deps.resetTranscript();
-					rehydrateChatPanelFromTurns(deps.chatPanel, turns, { uptoTurnId: turnId });
-					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, { uptoTurnId: turnId });
+					// `uptoTurnId` truncates the display at the selected turn. It is
+					// deliberately not a continuity `historical` flag: a live /tree
+					// selection is still this session's own branch, and treating every
+					// display truncation as a historical fork would surrender ownership
+					// of its own transactions for good.
+					const replayOptions = withContinuityReplay(turns, { uptoTurnId: turnId }, session);
+					rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+					const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
 					deps.chat.resetForSession(turnId, replayMessages);
 					// The same branch the transcript above was just scoped to. Without the
 					// leaf, /usage, the footer Σ, and the last-turn line kept reporting the
@@ -324,12 +330,12 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 	function replayFork(forkedSessionId: string, parentTurnId: string, session: SessionContract): void {
 		try {
 			const turns = deps.readStructuredEntries(forkedSessionId);
-			rehydrateChatPanelFromTurns(deps.chatPanel, turns);
 			const leafTurnId = session.tree(forkedSessionId).leafId ?? parentTurnId;
-			const replayMessages = buildModelReplayAgentMessagesFromTurns(
-				turns,
-				leafTurnId ? { activeLeafTurnId: leafTurnId } : {},
-			);
+			// The child is already current here, so its own id and fork pointers are
+			// what separate the transactions it inherited from any it later mints.
+			const replayOptions = withContinuityReplay(turns, leafTurnId ? { activeLeafTurnId: leafTurnId } : {}, session);
+			rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+			const replayMessages = buildModelReplayAgentMessagesFromTurns(turns, replayOptions);
 			deps.chat.resetForSession(leafTurnId, replayMessages);
 			rescopeToBranch(session, turns, leafTurnId);
 		} catch (error) {
@@ -617,8 +623,9 @@ export function createOverlaySessionLifecycle(deps: OverlaySessionLifecycleDeps)
 		try {
 			const turns = deps.readStructuredEntries(toSessionId);
 			deps.resetTranscript();
-			rehydrateChatPanelFromTurns(deps.chatPanel, turns);
-			deps.chat.resetForSession(null, buildModelReplayAgentMessagesFromTurns(turns));
+			const replayOptions = withContinuityReplay(turns, {}, session);
+			rehydrateChatPanelFromTurns(deps.chatPanel, turns, replayOptions);
+			deps.chat.resetForSession(null, buildModelReplayAgentMessagesFromTurns(turns, replayOptions));
 			rescopeToBranch(session, turns, null);
 		} catch (error) {
 			deps.stderr(`[/handoff] seeding replay failed: ${error instanceof Error ? error.message : String(error)}\n`);

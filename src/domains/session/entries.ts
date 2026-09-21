@@ -12,6 +12,13 @@
  *     (interactive/editor-bash.ts).
  *   - fileEntry is consumed by the renderer, compaction, handoff, and
  *     evidence builders but has no in-tree producer.
+ *   - handoffTransaction and continuityCommit are durable continuity records
+ *     (CONTRACTS §3), validated by src/domains/session/continuity/validate.ts.
+ *     Format v5 registers them; packet 03 wires the runtime that writes them.
+ *
+ * The continuity import is a value import in one direction only: this module
+ * calls those validators, and the continuity modules reach back for
+ * `BaseSessionEntry` as an erased `import type`, so there is no runtime cycle.
  */
 
 import { createHash } from "node:crypto";
@@ -19,6 +26,17 @@ import { createHash } from "node:crypto";
 import { isSkillActivation, type PendingSkillToolPolicy, type SkillActivation } from "../../core/skill-activation.js";
 import type { ClioTurnRecord } from "../../engine/session.js";
 import { AUTONOMY_EXPOSURES, type AutonomyExposure } from "../safety/autonomy.js";
+import type {
+	ContinuityCheckpointPayload,
+	ContinuityCommitEntry,
+	HandoffTransactionEntry,
+} from "./continuity/contract.js";
+import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE, isHandoffRecoveryRequestData } from "./continuity/operator-request.js";
+import {
+	isContinuityCheckpointPayload,
+	isContinuityCommitEntry,
+	isHandoffTransactionEntry,
+} from "./continuity/validate.js";
 
 export interface SessionHeader {
 	type: "session";
@@ -288,6 +306,15 @@ export interface CompactionSummaryEntry extends BaseSessionEntry {
 	messagesSummarized?: number;
 	/** True when the cut split a turn (caller may want to render a banner). */
 	isSplitTurn?: boolean;
+	/**
+	 * The latest validated continuity fold this summary carries (CONTRACTS §3).
+	 *
+	 * Optional because every summary written before v5, and every ordinary
+	 * compaction with no agent handoff behind it, has none. A present payload is
+	 * fully validated by `isSessionEntry`: a summary carrying a malformed
+	 * checkpoint is a malformed summary, not a summary with a field to ignore.
+	 */
+	continuity?: ContinuityCheckpointPayload;
 }
 
 export interface SessionInfoEntry extends BaseSessionEntry {
@@ -561,7 +588,9 @@ export type SessionEntry =
 	| DecisionLedgerEntry
 	| WorkerRunEntry
 	| ContextEvictionEntry
-	| ContextRecallEntry;
+	| ContextRecallEntry
+	| HandoffTransactionEntry
+	| ContinuityCommitEntry;
 
 export type SessionFileEntry = SessionHeader | SessionEntry;
 
@@ -589,6 +618,12 @@ export const SESSION_ENTRY_KINDS = [
 	"workerRun",
 	"contextEviction",
 	"contextRecall",
+	// Durable continuity (CONTRACTS §3). Both are bookkeeping sidecars: they
+	// never become model messages by themselves, never move the message leaf,
+	// and never become a cut point. The accepted note reaches the model exactly
+	// once, through the continuity replay projection.
+	"handoffTransaction",
+	"continuityCommit",
 ] as const;
 
 export type SessionEntryKind = (typeof SESSION_ENTRY_KINDS)[number];
@@ -793,7 +828,10 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 			return (
 				isString(v.customType) &&
 				isOptionalBoolean(v.display) &&
-				(v.customType !== SKILL_CONTEXT_STATE || isSkillContextState(v.data))
+				(v.customType !== SKILL_CONTEXT_STATE || isSkillContextState(v.data)) &&
+				// A reserved control subtype is strictly validated, because opaque
+				// custom data must never become resume authority by claiming the name.
+				(v.customType !== HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE || isHandoffRecoveryRequestData(v.data))
 			);
 		case "modelChange":
 			return isString(v.provider) && isString(v.modelId) && isOptionalString(v.target);
@@ -816,7 +854,8 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isOptionalNumber(v.messagesSummarized) &&
 				isOptionalBoolean(v.isSplitTurn) &&
 				(v.skillContext === undefined || isSkillContextCheckpoint(v.skillContext)) &&
-				(v.userContext === undefined || isPreservedUserContext(v.userContext))
+				(v.userContext === undefined || isPreservedUserContext(v.userContext)) &&
+				(v.continuity === undefined || isContinuityCheckpointPayload(v.continuity))
 			);
 		case "sessionInfo":
 			return isOptionalString(v.name) && isOptionalString(v.targetTurnId) && isOptionalString(v.label);
@@ -889,6 +928,14 @@ export function isSessionEntry(value: unknown): value is SessionEntry {
 				isNumber(v.tokensReadmitted) &&
 				isOptionalString(v.toolCallId)
 			);
+		// The continuity guards check payload structure and the identity/link
+		// equalities the chain depends on, not just the kind string. A record
+		// that says `continuityCommit` and carries nothing usable is rejected
+		// here rather than surfacing later as an empty-but-present commit.
+		case "handoffTransaction":
+			return isHandoffTransactionEntry(v);
+		case "continuityCommit":
+			return isContinuityCommitEntry(v);
 	}
 	return false;
 }

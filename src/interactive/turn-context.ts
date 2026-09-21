@@ -107,7 +107,7 @@ import {
 	toolNamesFromAgentState,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
-import { buildModelReplayAgentMessagesFromTurns } from "./model-session-replay.js";
+import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
 import { renderCompactionSummaryLine, renderEvictionSkipLine } from "./renderers/compaction-summary.js";
@@ -1056,6 +1056,10 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			agentRuntime.agent,
 			buildModelReplayAgentMessagesFromTurns(refreshedEntries, {
 				...(state.lastTurnId ? { activeLeafTurnId: state.lastTurnId } : {}),
+				// The post-compaction rebuild is where an accepted note has to
+				// survive: wiring continuity only into /fork would lose it on the
+				// very refresh the reduction triggers.
+				continuity: continuityContextFromSession(deps.session),
 			}),
 		);
 		state.replayedContextMessages = [];
