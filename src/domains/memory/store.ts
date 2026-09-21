@@ -1,4 +1,5 @@
-import { readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, openSync, readFileSync, readSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { safeResourceWrite } from "../../core/safe-resource-write.js";
@@ -8,6 +9,43 @@ import { validateMemoryStore } from "./validate.js";
 export const MEMORY_STORE_MAX_RECORDS = 500;
 export const MEMORY_STALE_APPROVED_DAYS = 180;
 export const MEMORY_STALE_UNAPPROVED_DAYS = 30;
+/** Prompt compilation fails closed above this read ceiling; store writers are unchanged. */
+export const MEMORY_PROMPT_STORE_MAX_BYTES = 16 * 1024 * 1024;
+
+export interface MemoryStoreSnapshot {
+	revision: string;
+	records: MemoryRecord[];
+}
+
+/** Hash the exact bounded bytes read, so same-size external replacements invalidate selection. */
+export function readMemoryStoreSnapshot(dataDir: string): MemoryStoreSnapshot {
+	const path = memoryStorePath(dataDir);
+	let fd: number;
+	try {
+		fd = openSync(path, "r");
+	} catch (error) {
+		if (isErrorWithCode(error) && error.code === "ENOENT") return { revision: "missing", records: [] };
+		throw error;
+	}
+	const chunks: Buffer[] = [];
+	let total = 0;
+	try {
+		while (true) {
+			const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, MEMORY_PROMPT_STORE_MAX_BYTES + 1 - total));
+			const count = readSync(fd, chunk);
+			if (count === 0) break;
+			total += count;
+			if (total > MEMORY_PROMPT_STORE_MAX_BYTES) throw new Error("memory prompt store exceeds read ceiling");
+			chunks.push(chunk.subarray(0, count));
+		}
+	} finally {
+		closeSync(fd);
+	}
+	const raw = Buffer.concat(chunks);
+	const records = parseAndValidate(raw.toString("utf8"), path);
+	if (records.length > MEMORY_STORE_MAX_RECORDS) throw new Error("memory prompt store exceeds record limit");
+	return { revision: createHash("sha256").update(raw).digest("hex"), records };
+}
 
 export function memoryRoot(dataDir: string): string {
 	return join(dataDir, "memory");

@@ -65,11 +65,8 @@ import {
 } from "../domains/lifecycle/index.js";
 import { getVersionInfo } from "../domains/lifecycle/version.js";
 import {
-	buildMemoryPromptSection,
-	canonicalMemoryRepositoryIdentity,
 	createTaskMemoryTelemetrySink,
 	createTaskMemoryTrace,
-	loadMemoryRecordsSync,
 	proposeInjectedTaskMemory,
 	readTaskMemorySpendSummary,
 	renderTaskMemoryHandoffSource,
@@ -81,6 +78,7 @@ import {
 	taskMemoryHandoffSeedOffer,
 	taskMemoryTracePath,
 } from "../domains/memory/index.js";
+import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
 import { createDemoGuidanceRegistration } from "../domains/middleware/demo-guidance.js";
@@ -2177,21 +2175,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		bus,
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
-		getMemorySection: () => {
-			try {
-				const records = loadMemoryRecordsSync(clioDataDir());
-				const settings = getCurrentSettings();
-				const targetId = session?.current()?.target ?? settings.chat?.target;
-				const runtimeId = targetId ? providers.getTarget(targetId)?.runtime : undefined;
-				return buildMemoryPromptSection(records, {
-					scopes: ["global", "repo", "runtime"],
-					activeRepository: canonicalMemoryRepositoryIdentity(process.cwd()),
-					activeRuntime: runtimeId === undefined ? null : { kind: "runtime", key: runtimeId },
-				}).section;
-			} catch {
-				return "";
-			}
-		},
+		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");

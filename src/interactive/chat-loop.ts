@@ -1,6 +1,7 @@
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
+import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import { replaceEngineMessages } from "../engine/agent.js";
 import { isLockedSynthesisFallbackOnly, lockedSynthesisRepromptMessages } from "../engine/loop-guard.js";
 /**
@@ -534,7 +535,7 @@ export interface CreateChatLoopDeps {
 	 * compiler injects via the memory dynamic fragment. Optional so unit
 	 * tests omit it when memory is irrelevant.
 	 */
-	getMemorySection?: () => string;
+	getMemorySection?: (request: MemoryPromptRequest) => string;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -1189,6 +1190,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const pendingSkillRequests =
 				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
+			context.prepareMemoryTurn(agentRuntime, { taskText: text, continuation: options.requestContinuation === true });
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
 			// fresh /skill this turn replaces the armed surface; otherwise the
@@ -1337,6 +1339,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				text,
 				options.display?.text,
 			);
+			context.commitMemoryTurn(agentRuntime);
 			// An interrupt was submitted while a run was active, so no caller drew
 			// it in the transcript; render it here, after the cancel notice and the
 			// cancelled run's leftovers, which is the order the ledger has.

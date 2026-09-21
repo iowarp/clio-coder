@@ -41,6 +41,7 @@ import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { isTurnStart } from "../domains/context/working-set/horizon.js";
 import { resolveWorkingSetPolicy } from "../domains/context/working-set/policies/index.js";
 import { selectVisibleEntries } from "../domains/context/working-set/visible.js";
+import type { MemoryPromptRequest } from "../domains/memory/prompt-cache.js";
 import type { ObservabilityContract } from "../domains/observability/contract.js";
 import type { CompiledSessionPrompt, SessionPromptInputs } from "../domains/prompts/compiler.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
@@ -132,7 +133,7 @@ export interface TurnContextDeps {
 		| undefined;
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
-	getMemorySection?: (() => string) | undefined;
+	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/**
 	 * Optional continuity projections carried into the live budget view. They
@@ -185,6 +186,10 @@ export type ExpectedColdReason =
 	| "background_memory";
 
 export interface TurnContext {
+	/** Prepare an attempt before preflight; rejected attempts never freeze the next submit. */
+	prepareMemoryTurn(runtime: AgentRuntime, input: { taskText: string; continuation: boolean }): void;
+	/** Bind first-session creation after append without rereading the prepared snapshot. */
+	commitMemoryTurn(runtime: AgentRuntime): void;
 	ensureSessionPrompt(agentRuntime: AgentRuntime): Promise<CompiledSessionPrompt | null>;
 	logPromptCompileIfPending(): void;
 	invalidateSessionPromptCache(): void;
@@ -411,6 +416,18 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	let resumedPromptHashRead = false;
 	let resumedPromptHash: string | null = null;
 	const sessionWorkingContextPaths = new Set<string>();
+	let memoryTurnSequence = 0;
+	let memoryAuthorityEpoch = 0;
+	let memoryTurn: {
+		id: string;
+		sessionId: string | null;
+		sessionAuthority: string;
+		origin: string;
+		taskText: string;
+		activePaths: readonly string[];
+	} | null = null;
+	const memoryOrigin = (runtime: AgentRuntime): string =>
+		JSON.stringify([process.cwd(), runtime.targetId, runtime.runtimeId, runtime.wireModelId]);
 	let pendingPromptLogEntry: SessionPromptCompileRecord | null = null;
 	// Reuse an empty automatic attempt only for identical ledger and provider
 	// context. Same-turn tool growth or same-length content replacement must
@@ -1496,6 +1513,29 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	});
 
 	return {
+		prepareMemoryTurn(runtime, input): void {
+			if (input.continuation && memoryTurn !== null) return;
+			const sessionId = deps.session?.current()?.id ?? null;
+			memoryTurnSequence += 1;
+			memoryTurn = {
+				id: String(memoryTurnSequence),
+				sessionId,
+				sessionAuthority: JSON.stringify([memoryAuthorityEpoch, sessionId ?? `pending:${memoryTurnSequence}`]),
+				origin: memoryOrigin(runtime),
+				taskText: input.taskText,
+				activePaths: Object.freeze([...sessionWorkingContextPaths]),
+			};
+		},
+
+		commitMemoryTurn(runtime): void {
+			// appendSubmittedUserTurn creates the first session synchronously.
+			// Only that null -> bound transition with unchanged origin can alias
+			// its prepared authority; navigation never uses this exception.
+			if (memoryTurn?.sessionId === null && memoryTurn.origin === memoryOrigin(runtime)) {
+				memoryTurn.sessionId = deps.session?.current()?.id ?? null;
+			}
+		},
+
 		captureRuntimeContextSnapshot,
 		persistContextSnapshot,
 		liveContextEstimate,
@@ -1636,7 +1676,20 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			if (deps.getMemorySection) {
 				try {
-					const memorySection = deps.getMemorySection();
+					if (memoryTurn !== null && memoryTurn.sessionId !== (sessionId || null)) {
+						memoryAuthorityEpoch += 1;
+						memoryTurn = null;
+					}
+					const memorySection = deps.getMemorySection({
+						turnId: memoryTurn?.id ?? null,
+						sessionAuthority: memoryTurn?.sessionAuthority ?? JSON.stringify([memoryAuthorityEpoch, sessionId]),
+						cwd,
+						targetId: agentRuntime.targetId,
+						runtimeId: agentRuntime.runtimeId,
+						modelId: agentRuntime.wireModelId,
+						taskText: memoryTurn?.taskText ?? "",
+						activePaths: memoryTurn?.activePaths ?? [],
+					});
 					if (memorySection.length > 0) sessionInputs.memorySection = memorySection;
 				} catch (err) {
 					deps.emitNotice(
@@ -1954,6 +2007,8 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		},
 
 		resetForSession(incomingBranchAnchorTurnId: string | null = null): void {
+			memoryTurn = null;
+			memoryAuthorityEpoch += 1;
 			compactionController?.abort();
 			// An in-process switch replaces the whole prefix: the backend's slot
 			// still holds the outgoing session's prompt and history, so the first
