@@ -26,6 +26,7 @@ import {
 	type MarketplaceSkill,
 	modelVisibleSkills,
 	type Skill,
+	type SkillCatalogRowKind,
 } from "../../domains/resources/index.js";
 import type { SessionEntryInput } from "../../domains/session/contract.js";
 import type { SessionEntry } from "../../domains/session/entries.js";
@@ -456,7 +457,12 @@ function runSkillsScope(
 			offset: typeof args.offset === "number" ? args.offset : 0,
 			capBytes: reservation.callCapBytes,
 		});
-		const shownNames = new Set(view.rows.map((row) => row.name));
+		// Shown rows are selected by the row's own stable key, not by its name. An
+		// installed standalone skill has a ready row and a package row under one
+		// name, and the same package id can be installed at user and project scope,
+		// so a name set puts rows in `details` that the text never carried.
+		const shownKeys = new Set(view.rows.map((row) => row.key));
+		const shown = (kind: SkillCatalogRowKind, identity: string): boolean => shownKeys.has(`${kind}:${identity}`);
 		return finalizeObservation({
 			tool: ToolNames.Context,
 			unit: "entries",
@@ -464,13 +470,20 @@ function runSkillsScope(
 			shownCount: view.shown,
 			totalCount: view.total,
 			truncated: view.nextOffset !== undefined || view.shown < view.total,
-			...(view.nextOffset !== undefined ? { next: `offset=${view.nextOffset}` } : {}),
+			// Offsets index the filtered result set. A continuation carrying only
+			// the offset would be applied to the unfiltered catalog, which repeats
+			// rows and skips matches, so the envelope says the query is part of it.
+			...(view.nextOffset !== undefined
+				? {
+						next: view.filtered ? `offset=${view.nextOffset} with the same query` : `offset=${view.nextOffset}`,
+					}
+				: {}),
 			details: {
 				// Rows on this page, so a caller reading `details` sees the same
 				// listing the text carries. The totals beside them are how a
 				// filtered or paged view is told apart from a complete one.
 				skills: visible
-					.filter((skill) => shownNames.has(skill.name))
+					.filter((skill) => shown("ready", skill.filePath) || shown("session", skill.filePath))
 					.map((skill) => ({
 						name: skill.name,
 						scope: skill.scope,
@@ -478,9 +491,9 @@ function runSkillsScope(
 						path: skill.filePath,
 						...(view.driftedNames.includes(skill.name) ? { drift: "mismatch" } : {}),
 					})),
-				installedPackages: packages.filter((pkg) => shownNames.has(pkg.name)),
+				installedPackages: packages.filter((pkg) => shown("package", `${pkg.scope}:${pkg.path}`)),
 				marketplace: marketplace
-					.filter((entry) => shownNames.has(entry.name))
+					.filter((entry) => shown("marketplace", entry.sourceUrl))
 					.map((entry) => ({
 						name: entry.name,
 						...(entry.category ? { category: entry.category } : {}),

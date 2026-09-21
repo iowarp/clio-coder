@@ -5,7 +5,7 @@ import {
 	SKILL_INSTALL_OFFER_OPTION_USER,
 	SKILL_SUGGESTION_ANCHOR,
 } from "../../../core/skill-activation.js";
-import { type LexicalMatchMode, lexicalMatches } from "./lexical-match.js";
+import { type LexicalMatchMode, lexicalMatches, normalize } from "./lexical-match.js";
 import type { Skill } from "./loader.js";
 import type { MarketplaceSkill } from "./marketplace.js";
 
@@ -42,6 +42,17 @@ export interface SkillCatalogRow {
 	name: string;
 	/** The rendered bullet, exactly as it appears in the listing. */
 	line: string;
+	/** Typed drift state. Never re-derived by reading the rendered line back. */
+	drifted: boolean;
+	/**
+	 * Stable identity for this row, unique across the whole listing.
+	 *
+	 * A name is not an identity here. One installed standalone skill produces a
+	 * ready row and a package row under the same name, and the same package id
+	 * can be installed at both user and project scope. Callers that reconcile a
+	 * page against their own inventories have to match on this, not on the name.
+	 */
+	key: string;
 }
 
 /** Disk-install state for one package, as {@link installedSkillPackages} reports it. */
@@ -105,14 +116,38 @@ const EMPTY_WITHOUT_MARKETPLACE = "No skills are available in Clio.";
 /** Marks a ready row whose content no longer matches the hash recorded for it. */
 const DRIFT_MARKER = " [drifted]";
 
-/** Upper bound on the bytes the shown/total and continuation lines can take. */
-const PAGE_NOTE_RESERVE = 320;
-
 /** Ceiling on an explicit `limit`; the byte budget is the real bound. */
 const MAX_LIMIT = 200;
 
+/** Code points of a caller-supplied query echoed back in the note. */
+const MAX_QUERY_ECHO = 48;
+/** Code points of a name echoed back in the note. */
+const MAX_NAME_ECHO = 64;
+/** Drifted skills named individually before the notice reports a remainder. */
+const MAX_DRIFT_NAMES = 6;
+
 function byteLength(text: string): number {
 	return Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Clip by code point, not by UTF-16 unit, so a surrogate pair is never split
+ * into a lone half and a multi-byte script is bounded by what it reads as
+ * rather than by how it happens to encode.
+ */
+function boundText(text: string, maxCodePoints: number): string {
+	const points = [...text];
+	if (points.length <= maxCodePoints) return text;
+	return `${points.slice(0, maxCodePoints - 1).join("")}…`;
+}
+
+/** Echoing the caller's query must not let one argument size the response. */
+function boundQuery(query: string): string {
+	return boundText(query.replace(/\s+/g, " ").trim(), MAX_QUERY_ECHO);
+}
+
+function boundName(name: string): string {
+	return boundText(name, MAX_NAME_ECHO);
 }
 
 function activationProtocolLine(modelActivation: boolean): string {
@@ -136,7 +171,12 @@ function marketplaceOfferClause(): string {
  */
 function driftNotice(names: ReadonlyArray<string>): string {
 	if (names.length === 0) return "";
-	const subject = names.length === 1 ? `${names[0]} no longer matches` : `${names.join(", ")} no longer match`;
+	// Bounded: a catalog where everything drifted would otherwise put every name
+	// in one sentence and size the response by how much is wrong.
+	const shown = names.slice(0, MAX_DRIFT_NAMES).map(boundName);
+	const omitted = names.length - shown.length;
+	const list = omitted > 0 ? `${shown.join(", ")} and ${omitted} more` : shown.join(", ");
+	const subject = names.length === 1 ? `${list} no longer matches` : `${list} no longer match`;
 	return `Marked [drifted]: ${subject} the content hash recorded for it; the skill still loads unchanged, and /library shows the installed copy.`;
 }
 
@@ -173,11 +213,13 @@ function buildRows(input: SkillCatalogViewInput): CandidateRow[] {
 	const drifted = input.drifted ?? new Set<string>();
 	const rows: CandidateRow[] = [];
 	for (const skill of readySkills(input.skills)) {
-		const marker = drifted.has(skill.name) ? DRIFT_MARKER : "";
+		const isDrifted = drifted.has(skill.name);
 		rows.push({
 			kind: "ready",
 			name: skill.name,
-			line: `- ${skill.name}${marker} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`,
+			key: `ready:${skill.filePath}`,
+			drifted: isDrifted,
+			line: `- ${skill.name}${isDrifted ? DRIFT_MARKER : ""} (source: ${skill.source}; scope: ${skill.scope}): ${skill.description}`,
 			haystack: haystackForSkill(skill),
 		});
 	}
@@ -185,6 +227,8 @@ function buildRows(input: SkillCatalogViewInput): CandidateRow[] {
 		rows.push({
 			kind: "session",
 			name: skill.name,
+			key: `session:${skill.filePath}`,
+			drifted: false,
 			line: `- ${skill.name} (source: ${skill.source}; scope: ${skill.scope}; file: ${skill.filePath}): ${skill.description}`,
 			haystack: haystackForSkill(skill),
 		});
@@ -193,6 +237,8 @@ function buildRows(input: SkillCatalogViewInput): CandidateRow[] {
 		rows.push({
 			kind: "package",
 			name: record.name,
+			key: `package:${record.scope}:${record.path}`,
+			drifted: false,
 			line: `- ${record.name} (scope: ${record.scope}; origin: ${record.origin === "catalog" ? "marketplace catalog" : record.origin}; state: ${record.state}; path: ${record.path})`,
 			haystack: haystackForPackage(record),
 		});
@@ -202,6 +248,8 @@ function buildRows(input: SkillCatalogViewInput): CandidateRow[] {
 		rows.push({
 			kind: "marketplace",
 			name: entry.name,
+			key: `marketplace:${entry.sourceUrl}`,
+			drifted: false,
 			line: `- ${entry.name}${category}: ${entry.description}`,
 			haystack: haystackForMarketplace(entry),
 		});
@@ -224,38 +272,6 @@ function selectRows(
 	const strict = rows.filter((row) => lexicalMatches(query, row.haystack, "all"));
 	if (strict.length > 0) return { rows: strict, mode: "all" };
 	return { rows: rows.filter((row) => lexicalMatches(query, row.haystack, "any")), mode: "any" };
-}
-
-/**
- * Bytes every line that is not a catalog row could take, measured with every
- * optional section present.
- *
- * Over-reserving is the safe direction: the real rendering is always at most
- * this much scaffolding, so a page fitted against this bound cannot overrun the
- * cap once the shorter real text is written. Under-reserving would put the
- * whole listing back through the truncation this module exists to avoid.
- */
-function scaffoldBytes(input: SkillCatalogViewInput, drift: string): number {
-	const lines = [
-		LISTING_HEADER,
-		"",
-		`Ready skills in Clio (${input.skills.length}):`,
-		"- none",
-		"",
-		SESSION_HEADER,
-		SESSION_NOTE,
-		"",
-		`Installed packages providing skills (${input.packages.length}):`,
-		"",
-		INTEROP_NOTE,
-		"",
-		MARKETPLACE_HEADER,
-		"",
-		activationProtocolLine(input.modelActivation),
-		marketplaceOfferClause(),
-		drift,
-	];
-	return byteLength(lines.join("\n")) + PAGE_NOTE_RESERVE;
 }
 
 function renderSections(rows: ReadonlyArray<SkillCatalogRow>, input: SkillCatalogViewInput, drift: string): string {
@@ -307,7 +323,12 @@ function clampOffset(offset: number | undefined): number {
  * not claim a marketplace is unconfigured when it simply has none of its own.
  */
 export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalogView {
-	const query = (input.query ?? "").trim();
+	const rawQuery = (input.query ?? "").trim();
+	// A query of punctuation or emoji normalizes to nothing searchable. Filtering
+	// on it would return an empty page for a request that carried no terms, so it
+	// is treated as no query and the note says the terms were dropped.
+	const query = normalize(rawQuery).length > 0 ? rawQuery : "";
+	const emptyTerms = rawQuery.length > 0 && query.length === 0;
 	const filtered = query.length > 0;
 	const all = buildRows(input);
 
@@ -334,65 +355,165 @@ export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalo
 
 	// The drift notice describes the matched result set, not the page: a drifted
 	// skill the caller filtered to is worth naming even when paging pushed its
-	// row to the next offset.
-	const driftedNames = matching
-		.filter((row) => row.kind === "ready" && row.line.includes(DRIFT_MARKER))
-		.map((row) => row.name);
-	const drift = driftNotice(driftedNames);
+	// row to the next offset. Read from the typed flag, never from the rendered
+	// line, so a description that happens to contain the marker text cannot give
+	// a healthy skill a drift footer.
+	const driftedNames = matching.filter((row) => row.drifted).map((row) => row.name);
 
-	const budget = input.capBytes - scaffoldBytes(input, drift);
-	const page: SkillCatalogRow[] = [];
-	let used = 0;
-	let budgetLimited = false;
-	for (const row of window) {
-		const cost = byteLength(row.line) + 1;
-		if (used + cost > budget) {
-			budgetLimited = true;
-			break;
-		}
-		used += cost;
-		page.push({ kind: row.kind, name: row.name, line: row.line });
-	}
-
-	const consumed = offset + page.length;
-	// A page that carried nothing must not hand back the offset it was given:
-	// that is a loop, not a continuation.
-	const nextOffset = page.length > 0 && consumed < total ? consumed : undefined;
-	const body = renderSections(page, input, drift);
-	const note = pageNote({
+	const context: RenderContext = {
+		input,
+		drift: driftNotice(driftedNames),
 		filtered,
+		emptyTerms,
 		query,
 		matchMode: selected.mode,
 		total,
-		shown: page.length,
 		offset,
-		nextOffset,
-		budgetLimited,
 		catalogTotal: all.length,
-	});
+		window,
+	};
 
+	// The whole window first, so an inventory that exactly fits is never cut. The
+	// previous version reserved scaffolding for sections that did not exist and
+	// dropped complete listings that fitted with room to spare.
+	const whole = renderCandidate(context, window.length, false);
+	if (byteLength(whole) <= input.capBytes) {
+		return finishView(context, window, whole, false);
+	}
+
+	// Bisection is valid only over row counts of one or more.
+	//
+	// For k >= 1 the rendered size is non-decreasing in k: each extra row adds
+	// its line and, at a section's first row, that section's heading, while the
+	// note only grows by the digits of a larger count. A zero-row page is NOT on
+	// that curve, because it alone carries the "this row is too large, open it
+	// directly" sentence, which a one-row page does not. Including 0 in the
+	// search let a midpoint of 0 test larger than a one-row page and report that
+	// nothing fits while the first row would have fitted comfortably.
+	let low = 1;
+	let high = window.length - 1;
+	let best = -1;
+	let bestText = "";
+	while (low <= high) {
+		const mid = (low + high) >> 1;
+		const text = renderCandidate(context, mid, true);
+		if (byteLength(text) <= input.capBytes) {
+			best = mid;
+			bestText = text;
+			low = mid + 1;
+		} else {
+			high = mid - 1;
+		}
+	}
+	if (best >= 1) return finishView(context, window.slice(0, best), bestText, true);
+
+	// No row fits. The zero-row page is measured on its own, off the monotonic
+	// curve, because it says something the others do not.
+	const blocked = renderCandidate(context, 0, true);
+	if (byteLength(blocked) <= input.capBytes) {
+		return finishView(context, [], blocked, true);
+	}
+	// Not even the scaffolding fits. Say what is there and how to reach it, in a
+	// line short enough to survive any usable reservation.
 	return {
-		text: note.length > 0 ? `${body}\n${note}` : body,
-		rows: page,
+		text: compactFallback(context),
+		rows: [],
 		total,
-		shown: page.length,
-		nextOffset,
+		shown: 0,
+		nextOffset: undefined,
 		filtered,
 		matchMode: selected.mode,
-		budgetLimited,
+		budgetLimited: true,
 		driftedNames,
 	};
 }
 
+interface RenderContext {
+	input: SkillCatalogViewInput;
+	drift: string;
+	filtered: boolean;
+	emptyTerms: boolean;
+	query: string;
+	matchMode: LexicalMatchMode | null;
+	total: number;
+	offset: number;
+	catalogTotal: number;
+	window: ReadonlyArray<SkillCatalogRow>;
+}
+
+/** Where paging resumes, and whether a row too large to carry was stepped over. */
+function continuation(context: RenderContext, shown: number): { nextOffset: number | undefined; blocked: boolean } {
+	const consumed = context.offset + shown;
+	if (consumed >= context.total) return { nextOffset: undefined, blocked: false };
+	// A page that carried nothing must not hand back the offset it was given:
+	// that is a loop, not a continuation. Stepping over the oversized row keeps
+	// the rows behind it reachable, and the note names what was stepped over.
+	if (shown === 0) return { nextOffset: context.offset + 1, blocked: true };
+	return { nextOffset: consumed, blocked: false };
+}
+
+function renderCandidate(context: RenderContext, shown: number, cut: boolean): string {
+	const page = context.window.slice(0, shown);
+	const body = renderSections(page, context.input, context.drift);
+	const { nextOffset, blocked } = continuation(context, shown);
+	const note = pageNote({
+		filtered: context.filtered,
+		emptyTerms: context.emptyTerms,
+		query: context.query,
+		matchMode: context.matchMode,
+		total: context.total,
+		shown,
+		nextOffset,
+		budgetLimited: cut,
+		blockedRow: blocked ? (context.window[0] ?? null) : null,
+		catalogTotal: context.catalogTotal,
+	});
+	return note.length > 0 ? `${body}\n${note}` : body;
+}
+
+function finishView(
+	context: RenderContext,
+	page: ReadonlyArray<SkillCatalogRow>,
+	text: string,
+	budgetLimited: boolean,
+): SkillCatalogView {
+	const { nextOffset } = continuation(context, page.length);
+	return {
+		text,
+		rows: page.map((row) => ({ ...row })),
+		total: context.total,
+		shown: page.length,
+		nextOffset,
+		filtered: context.filtered,
+		matchMode: context.matchMode,
+		budgetLimited,
+		driftedNames: context.window.filter((row) => row.drifted).map((row) => row.name),
+	};
+}
+
+/**
+ * What to say when the reservation cannot carry the listing's own scaffolding.
+ *
+ * One short line naming the size of the thing and the one argument that makes
+ * it smaller. Deliberately free of the reply protocol: a page that shows no
+ * skills has nothing for the protocol to point at, and repeating it here would
+ * be the same overrun in a smaller font.
+ */
+function compactFallback(context: RenderContext): string {
+	const scope = context.filtered ? `${context.total} matching` : `${context.total}`;
+	return `Available skills: ${scope}. This call's budget cannot carry the listing; narrow it with context(scope="skills", query="<terms>") or raise the budget in a fresh turn.`;
+}
+
 interface PageNoteInput {
 	filtered: boolean;
+	emptyTerms: boolean;
 	query: string;
 	matchMode: LexicalMatchMode | null;
 	total: number;
 	shown: number;
-	offset: number;
 	nextOffset: number | undefined;
 	budgetLimited: boolean;
+	blockedRow: SkillCatalogRow | null;
 	catalogTotal: number;
 }
 
@@ -403,15 +524,23 @@ interface PageNoteInput {
  * the default view byte-identical to the one this module replaced. Everything
  * here is a statement about what the caller is *not* seeing, so a view that
  * hides nothing has nothing to say.
+ *
+ * Every value interpolated here is bounded. The query is a caller-supplied
+ * string with no length limit in the schema, and the drift notice can name a
+ * whole catalog, so echoing either whole would let one argument decide the size
+ * of a response this module exists to keep inside its budget.
  */
 function pageNote(input: PageNoteInput): string {
 	const clauses: string[] = [];
+	if (input.emptyTerms) {
+		clauses.push("The query carried no searchable terms, so the full list is shown.");
+	}
 	if (input.filtered) {
 		const broadened = input.matchMode === "any" ? ", matched on any query word after no row matched them all" : "";
 		clauses.push(
 			input.total === 0
-				? `No skill matches "${input.query}"; ${input.catalogTotal} are available unfiltered, so drop query to list them.`
-				: `Filtered by "${input.query}"${broadened}: ${input.total} of ${input.catalogTotal} rows match.`,
+				? `No skill matches "${boundQuery(input.query)}"; ${input.catalogTotal} are available unfiltered, so drop query to list them.`
+				: `Filtered by "${boundQuery(input.query)}"${broadened}: ${input.total} of ${input.catalogTotal} rows match.`,
 		);
 	}
 	if (input.shown < input.total) {
@@ -421,8 +550,20 @@ function pageNote(input: PageNoteInput): string {
 				: `Showing ${input.shown} of ${input.total} matching rows.`,
 		);
 	}
+	if (input.blockedRow !== null) {
+		clauses.push(
+			`"${boundName(input.blockedRow.name)}" is too large to carry in this call's budget and was stepped over; open it directly with context(scope="skills", name="${boundName(input.blockedRow.name)}").`,
+		);
+	}
 	if (input.nextOffset !== undefined) {
-		clauses.push(`Continue with context(scope="skills", offset=${input.nextOffset}) for the remainder.`);
+		clauses.push(
+			input.filtered
+				? // Offsets index the FILTERED result set. A continuation that dropped
+					// the query would apply this cursor to the unfiltered catalog, which
+					// repeats rows and skips matches.
+					`Continue with the same query at offset=${input.nextOffset}; the offset indexes the filtered rows, so dropping query changes which rows it selects.`
+				: `Continue with context(scope="skills", offset=${input.nextOffset}) for the remainder.`,
+		);
 	} else if (input.shown < input.total) {
 		clauses.push("The remainder cannot be carried this turn; narrow with query or continue in a follow-up turn.");
 	}
