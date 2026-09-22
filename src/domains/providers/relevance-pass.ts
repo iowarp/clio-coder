@@ -199,10 +199,14 @@ export async function scoreTurnRelevance(
 
 	const results = await Promise.all(
 		[...batches.values()].map(async (group) => {
-			const sites = group.map((entry) => entry.site);
-			const questions: Record<string, DecisionQuestion> = {};
-			for (const entry of group) Object.assign(questions, questionsFor(entry.site, entry.subjects));
 			try {
+				// Building the request is inside the guard too. A caller handing in a
+				// malformed subject would otherwise reject this function, which its
+				// own contract says it never does, and push the failure onto a caller
+				// that has no better answer than the one here.
+				const sites = group.map((entry) => entry.site);
+				const questions: Record<string, DecisionQuestion> = {};
+				for (const entry of group) Object.assign(questions, questionsFor(entry.site, entry.subjects));
 				const answers = await (group[0] as BoundSite).decider.ask(stateFor(request, sites), questions, {
 					...(request.signal !== undefined ? { signal: request.signal } : {}),
 				});
