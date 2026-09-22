@@ -236,14 +236,14 @@ describe("turn sites", () => {
 	});
 
 	it("hints a plan only on a confident dispatch forecast, naming the shape it read", () => {
-		strictEqual(dispatchForecastHint({ dispatch: 0.84, shape: "parallel" }), null);
+		strictEqual(dispatchForecastHint({ dispatch: 0.69, shape: "parallel" }), null);
 		strictEqual(
 			dispatchForecastHint({ dispatch: 0.9, shape: "parallel" }),
-			"[Plan] This reads as work suited to workers; it splits into independent pieces that could run in parallel. Whether and how to dispatch stays your call.",
+			"[Plan] This reads as work suited to workers; it splits into independent pieces that could run in parallel. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.",
 		);
 		strictEqual(
 			dispatchForecastHint({ dispatch: 0.9, shape: null }),
-			"[Plan] This reads as work suited to workers. Whether and how to dispatch stays your call.",
+			"[Plan] This reads as work suited to workers. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.",
 		);
 	});
 
@@ -266,7 +266,7 @@ describe("turn sites", () => {
 		]);
 		deepStrictEqual(preTurnHints([memory, ...TURN_SITES], brief as never), [
 			TURN_SCOPE_HINT,
-			"[Plan] This reads as work suited to workers; one worker could carry it. Whether and how to dispatch stays your call.",
+			"[Plan] This reads as work suited to workers; one worker could carry it. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.",
 		]);
 	});
 });

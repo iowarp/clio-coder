@@ -1084,9 +1084,12 @@ turn_start reminder goes:
   that the main model tends to explore anyway. Session ledgers showed a
   self-introduction question spending 40 tool calls and a dispatch.
 - `dispatchForecast` adds `[Plan] This reads as work suited to workers...` when
-  the answer is at least 0.85. The line also names the shape the work reads
+  the answer is at least 0.7. The line also names the shape the work reads
   as (one worker, independent pieces in parallel, dependent steps in order, or
-  independent opinions) when that answer is confident.
+  independent opinions) when that answer is confident, and points at the
+  delegation rules: dispatch before reading or editing. On a local 27B main
+  model, the line without that pointer did not change how often it delegated
+  a repository-wide exploration.
 
 The hint goes into the message rather than into the tool list or the system
 prompt, because both of those sit in the cached prefix. A narrower tool surface
