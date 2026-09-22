@@ -17,7 +17,7 @@
 import { type Decider, isTrue, rate, rating, yesNo } from "../providers/decisions.js";
 
 /** Bumped when the ladder or the wording changes. */
-export const TOOL_RISK_VERSION = "toolrisk-v1";
+export const TOOL_RISK_VERSION = "toolrisk-v2";
 
 /**
  * The blast-radius ladder, lowest rung first.
@@ -25,23 +25,34 @@ export const TOOL_RISK_VERSION = "toolrisk-v1";
  * Rungs are written as what the call does to the world rather than as severity
  * words, because "medium risk" means nothing to an operator deciding about one
  * specific command and "changes state version control cannot restore" does.
+ *
+ * The top rung names changing remote state, not reaching a remote host. The v1
+ * wording said "reaches another machine", and jev-latest followed it exactly:
+ * a plain `curl` GET read as irreversible, so the card cried wolf on every
+ * download. Against twelve commands spanning the four rungs, v1 agreed with the
+ * intended rung on nine and abstained on `npm install`; v2 agreed on all twelve
+ * in two consecutive live runs.
  */
 const TOOL_RISK_RUNGS = [
 	{
 		label: "contained",
-		criteria: "Reads, lists or inspects. Nothing outside this call changes.",
+		criteria:
+			"Only reads: lists, inspects, searches, or downloads for display, and changes nothing on this machine or any other.",
 	},
 	{
 		label: "local",
-		criteria: "Changes files inside the workspace, in a way version control can restore.",
+		criteria:
+			"Creates or changes files inside the workspace, including downloads and installed dependencies, in a way version control or a reinstall can restore.",
 	},
 	{
 		label: "broad",
-		criteria: "Changes state outside the workspace, or changes the workspace where version control cannot restore it.",
+		criteria:
+			"Changes state outside the workspace on this machine, or discards workspace history or uncommitted work that version control cannot bring back.",
 	},
 	{
 		label: "irreversible",
-		criteria: "Destroys data, or reaches another machine or a published service.",
+		criteria:
+			"Deletes data for good, or changes state on another machine or a published service: pushes, publishes, deploys, uploads, or remote writes and deletes.",
 	},
 ] as const;
 
