@@ -41,7 +41,11 @@ informational `slurm mcp` row. None of these rows ever fails doctor.
 
 The gateway lists them as `mcp_slurm__<tool>`. Find them with
 `gateway(op="find", query="slurm")` and read a tool's parameters with
-`gateway(op="describe", capability="mcp_slurm__slurm_submit")`.
+`gateway(op="describe", capability="mcp_slurm__slurm_submit")`. Both read a
+recorded catalog and launch nothing. Until one exists, `find` reports the server
+with `catalog: "missing"`; fill it once with
+`gateway(op="find", server="slurm", refresh=true)`, or just call a tool, which
+lists the server live and records the result as a side effect.
 
 | Capability | What it does |
 | --- | --- |
