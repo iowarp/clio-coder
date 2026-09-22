@@ -890,6 +890,19 @@ quirks it knows about its own endpoint on top of whatever the catalog entry
 says. A provider can be OpenAI-compatible in shape without being compatible in
 vocabulary, and this is where that difference is recorded.
 
+In the interactive TUI, Mercury's answers stream as diffusion frames. The
+request carries `diffusing: true`, and every chunk then holds the whole response
+so far, with positions the model has not resolved yet still showing as noise.
+The transcript replaces the live answer with each frame instead of appending to
+it, renders the unresolved remainder dim, and hands the settled message to the
+Markdown renderer once the last frame arrives. A long code answer typically
+settles in five to eleven frames over one to three seconds. Frames are requested
+only by the TUI. Headless `run`, ACP hosts, JSONL output and dispatched workers
+never ask for them, and a `/model` switch to any other runtime stops them on the
+next request. A response that writes a preamble and then calls a tool keeps the
+preamble in one place above the tool line: Mercury repeats the frame on every
+chunk that carries a tool-call argument, and sends the resolved text last.
+
 The pre-probe capability placeholder is a 260,000-token window with 65,536
 output tokens, which is `mercury-2.5`'s shape. `mercury-2` and `mercury-edit-2`
 are 128k. The live probe reads `context_length` and `max_output_length` per

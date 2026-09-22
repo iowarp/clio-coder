@@ -40,7 +40,9 @@ export function classifyStreamEvent(event: StreamSemanticEvent): StreamEventClas
 		if (innerType === "text_delta" || innerType === "thinking_delta") return "transparent-mirror";
 	}
 	if (event.type === "text_delta" || event.type === "thinking_delta") return "paced-display-content";
-	if (event.type === "tool_execution_update") return "cumulative-live-state";
+	// A diffusion frame is the whole text so far, not a slice to pace: it
+	// drains anything queued ahead of it and replaces the live segment.
+	if (event.type === "tool_execution_update" || event.type === "text_frame") return "cumulative-live-state";
 	if (NON_TRANSCRIPT_INPUT_TYPES.has(event.type)) return "non-transcript-input";
 	return "ordered-content-boundary";
 }

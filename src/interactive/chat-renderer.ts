@@ -81,6 +81,7 @@ const MAX_REPLAY_TEXT_CHARS = 20_000;
  */
 const DELTA_TYPES: ReadonlySet<ChatLoopEvent["type"]> = new Set([
 	"text_delta",
+	"text_frame",
 	"thinking_delta",
 	"tool_execution_update",
 ]);
