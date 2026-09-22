@@ -1,3 +1,4 @@
+import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import type { LiveBudgetView } from "../domains/context/budget/live-view.js";
 import type { WorkerContextSnapshot } from "../domains/context/worker/contract.js";
 import { captureWorkerContext } from "../domains/context/worker/snapshot.js";
@@ -553,6 +554,17 @@ export interface CreateChatLoopDeps {
 	 * tests omit it when memory is irrelevant.
 	 */
 	getMemorySection?: (request: MemoryPromptRequest) => string;
+	/**
+	 * Resolve this turn's decision-model relevance scores, once, at the turn
+	 * boundary. Absent when no decision site is bound, which is the default.
+	 *
+	 * It is awaited because both its readers are synchronous: the prompt builder
+	 * wants memory's scores while composing, and the skills listing wants its own
+	 * from inside a tool handler. It always settles, so a provider outage costs
+	 * ordering rather than the turn.
+	 */
+	refreshTurnRelevance?: (taskText: string) => Promise<void>;
+	getMemoryRelevance?: () => PrecomputedRanking | undefined;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -845,6 +857,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		readSessionEntries: deps.readSessionEntries,
 		autoCompact: deps.autoCompact,
 		getMemorySection: deps.getMemorySection,
+		...(deps.getMemoryRelevance ? { getMemoryRelevance: deps.getMemoryRelevance } : {}),
 		memoryCommitBridge: deps.memoryCommitBridge,
 		getReadySkillCount: deps.getReadySkillCount,
 		getPendingHandoff: () => {
@@ -1332,6 +1345,10 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				continuation: options.requestContinuation === true,
 				images,
 			});
+			// The one place a turn pays for the decision pass. It runs after the
+			// task text is known and before the prompt is built, because both of
+			// its readers are synchronous and cannot fetch their own scores.
+			if (deps.refreshTurnRelevance) await deps.refreshTurnRelevance(text);
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
 			// fresh /skill this turn replaces the armed surface; otherwise the
