@@ -20,7 +20,9 @@ import {
 	ACTIVE_ROUTING_POSTURES,
 	ACTIVE_ROUTING_ROLES,
 	COUNCIL_MEMBER_LABEL_PATTERN,
+	DECISION_SITES,
 	DEFAULT_SETTINGS,
+	type DecisionSite,
 	normalizeOutputStyle,
 	THEME_NAMED_COLORS,
 	THINKING_LEVELS,
@@ -1363,6 +1365,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"profiles",
 				"rosters",
 				"agentProfiles",
+				"decisionProfiles",
 				"adaptiveRouting",
 				"nodes",
 				"permissions",
@@ -1508,6 +1511,34 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 					if (profile !== undefined) bindings[agentId] = profile;
 				}
 				settings.fleet.agentProfiles = bindings;
+			}
+		}
+		if ("decisionProfiles" in rawFleet) {
+			if (!isPlainObject(rawFleet.decisionProfiles))
+				issues.add("fleet.decisionProfiles", `expected a map, got ${describe(rawFleet.decisionProfiles)}`);
+			else {
+				const bindings: ClioSettings["fleet"]["decisionProfiles"] = {};
+				for (const [rawSite, rawProfileName] of Object.entries(rawFleet.decisionProfiles)) {
+					const site = rawSite.trim();
+					if (!DECISION_SITES.includes(site as DecisionSite)) {
+						issues.add(
+							"fleet.decisionProfiles",
+							`unknown decision site '${rawSite}', expected one of ${DECISION_SITES.join(", ")}`,
+						);
+						continue;
+					}
+					const profile = expectString(issues, `fleet.decisionProfiles.${site}`, rawProfileName);
+					if (profile === undefined) continue;
+					// A binding that names a profile nobody defined would fail later at
+					// the call site, where the operator has no way to connect the
+					// failure back to this line.
+					if (!(profile in settings.fleet.profiles)) {
+						issues.add("fleet.decisionProfiles", `profile '${profile}' is not defined in fleet.profiles`);
+						continue;
+					}
+					bindings[site as DecisionSite] = profile;
+				}
+				settings.fleet.decisionProfiles = bindings;
 			}
 		}
 		if ("adaptiveRouting" in rawFleet) {

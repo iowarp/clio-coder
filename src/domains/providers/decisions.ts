@@ -47,9 +47,26 @@ export interface ReadThresholds {
 	minConfidence?: number;
 }
 
+/**
+ * How peaked the answer's distribution is, on the same 0..1 axis for every
+ * primitive. `choice` and `score` carry the figure directly. A live `noul` does
+ * not: the wire response omits `confidence` entirely, so reading it as zero
+ * made every `minConfidence` check abstain unconditionally.
+ *
+ * A noul is a two-outcome distribution, and the provider's own peakedness
+ * formula `(n * max - 1) / (n - 1)` reduces at n=2 to `|2p - 1|`, which is the
+ * probability's distance from the coin-flip scaled to that axis. So a noul of
+ * 0.65 reports 0.30, exactly as a two-option `choice` at the same mass would.
+ */
+function certainty(answer: DecisionAnswer): number {
+	if (answer.confidence !== undefined) return answer.confidence;
+	if (answer.type === "noul" && answer.noul !== undefined) return Math.abs(answer.noul * 2 - 1);
+	return 0;
+}
+
 function confident(answer: DecisionAnswer, minConfidence: number | undefined): boolean {
 	if (minConfidence === undefined) return true;
-	return (answer.confidence ?? 0) >= minConfidence;
+	return certainty(answer) >= minConfidence;
 }
 
 /**

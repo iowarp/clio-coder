@@ -63,6 +63,23 @@ export type WorkerRosters = Record<string, { members: WorkerRosterMember[] }>;
 export type FleetAgentProfiles = Record<string, string>;
 
 /**
+ * Harness decisions a System One model may answer instead of a chat model.
+ * Each names a moment in the turn, not an agent: `routing` picks a worker at
+ * dispatch, `skills` and `memory` narrow what the prompt carries, and
+ * `toolRisk` rates a command's blast radius for the approval prompt.
+ */
+export const DECISION_SITES = ["routing", "skills", "memory", "toolRisk"] as const;
+export type DecisionSite = (typeof DECISION_SITES)[number];
+
+/**
+ * Map of decision site -> fleet.profiles key. A site with no entry is off, so
+ * the whole capability is opt-in by absence and there is no flag to retire once
+ * it leaves alpha. Keying by site rather than one global binding means a site
+ * that misbehaves can be unbound without giving up the other three.
+ */
+export type FleetDecisionProfiles = Partial<Record<DecisionSite, string>>;
+
+/**
  * Non-stall posture for dispatched native workers. A worker tool call that
  * requires interactive permission resolves within bounded time: "deny" turns
  * it into a structured tool denial and the run continues; "fail" finalizes
@@ -107,6 +124,7 @@ export interface FleetRouteSettings {
 	profiles: WorkerProfiles;
 	rosters: WorkerRosters;
 	agentProfiles: FleetAgentProfiles;
+	decisionProfiles: FleetDecisionProfiles;
 }
 
 /**
@@ -519,6 +537,7 @@ export const DEFAULT_SETTINGS = {
 		profiles: {} as WorkerProfiles,
 		rosters: {} as WorkerRosters,
 		agentProfiles: {} as FleetAgentProfiles,
+		decisionProfiles: {} as FleetDecisionProfiles,
 		nodes: [] as FleetNodeSettings[],
 		adaptiveRouting: {
 			roles: [] as ActiveRoutingRole[],
@@ -655,6 +674,7 @@ fleet:
   profiles: {}
   rosters: {}
   agentProfiles: {}
+  decisionProfiles: {}
   adaptiveRouting:
     roles: []
     postures: []
