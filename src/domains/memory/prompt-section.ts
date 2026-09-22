@@ -1,6 +1,13 @@
 import { ceilChars } from "../session/context-accounting.js";
 import { eligibleMemoryRecords } from "./operations.js";
-import { type MemoryRelevanceInput, type RankedMemoryCandidate, rankMemoryByRelevance } from "./relevance.js";
+import {
+	type MemoryRelevanceInput,
+	type PrecomputedMemoryCandidate,
+	type PrecomputedMemoryRelevance,
+	type RankedMemoryCandidate,
+	rankMemoryByPrecomputedScore,
+	rankMemoryByRelevance,
+} from "./relevance.js";
 import type {
 	MemoryAgentIdentity,
 	MemoryRecord,
@@ -25,6 +32,12 @@ export const MEMORY_PROMPT_DEFAULT_SCOPES: ReadonlyArray<MemoryScope> = ["global
 export interface MemoryPromptOptions {
 	/** Explicit experiment only; omitted options preserve legacy priority. */
 	relevance?: MemoryRelevanceInput;
+	/**
+	 * Scores resolved before the turn, applied on top of whatever order the
+	 * lexical or legacy path produced. Selection stays synchronous, so a ranker
+	 * that has to await anything belongs here rather than behind `relevance`.
+	 */
+	precomputedRelevance?: PrecomputedMemoryRelevance;
 	scopes?: ReadonlyArray<MemoryScope>;
 	tokenBudget?: number;
 	maxItems?: number;
@@ -53,6 +66,8 @@ export interface MemoryPromptDecision {
 	id: string;
 	reason: "selected" | "token-budget" | "item-limit";
 	relevance?: Omit<RankedMemoryCandidate, "record">;
+	/** Orthogonal to `relevance`: the two rankers can both run on one selection. */
+	precomputed?: Omit<PrecomputedMemoryCandidate, "record">;
 }
 
 /** Diagnostics cover eligible candidates only: excluded records are never scored. */
@@ -71,26 +86,57 @@ export function inspectMemoryPromptSelection(
 		activeRuntime: options.activeRuntime ?? null,
 		activeAgent: options.activeAgent ?? null,
 	};
-	const candidates =
+	const base: LexicalCandidate[] =
 		options.relevance === undefined
 			? eligibleMemoryRecords(records, eligibility).map((record) => ({ record, relevance: undefined }))
 			: rankMemoryByRelevance(records, eligibility, options.relevance).map(({ record, ...relevance }) => ({
 					record,
 					relevance,
 				}));
+	const candidates =
+		options.precomputedRelevance === undefined
+			? base.map((entry) => ({ ...entry, precomputed: undefined }))
+			: withPrecomputedOrder(base, options.precomputedRelevance);
 	const selected: MemoryRecord[] = [];
 	const decisions: MemoryPromptDecision[] = [];
-	for (const { record, relevance } of candidates) {
+	for (const { record, relevance, precomputed } of candidates) {
 		const reason =
 			selected.length >= Math.floor(maxItems)
 				? "item-limit"
 				: ceilChars(renderMemoryPromptSection([...selected, record]).length) > tokenBudget
 					? "token-budget"
 					: "selected";
-		decisions.push({ id: record.id, reason, ...(relevance === undefined ? {} : { relevance }) });
+		decisions.push({
+			id: record.id,
+			reason,
+			...(relevance === undefined ? {} : { relevance }),
+			...(precomputed === undefined ? {} : { precomputed }),
+		});
 		if (reason === "selected") selected.push(record);
 	}
 	return { records: selected, decisions };
+}
+
+interface LexicalCandidate {
+	record: MemoryRecord;
+	relevance: Omit<RankedMemoryCandidate, "record"> | undefined;
+}
+
+/** Reorders the already-eligible list; eligibility is never revisited here. */
+function withPrecomputedOrder(
+	base: ReadonlyArray<LexicalCandidate>,
+	input: PrecomputedMemoryRelevance,
+): Array<LexicalCandidate & { precomputed: Omit<PrecomputedMemoryCandidate, "record"> }> {
+	const lexicalById = new Map(base.map((entry) => [entry.record.id, entry.relevance]));
+	const ranked = rankMemoryByPrecomputedScore(
+		base.map((entry) => entry.record),
+		input,
+	);
+	return ranked.map(({ record, ...precomputed }) => ({
+		record,
+		relevance: lexicalById.get(record.id),
+		precomputed,
+	}));
 }
 
 /**

@@ -6,6 +6,7 @@ import type { ActionClass, ClassifierCall } from "../domains/safety/action-class
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
 import { decisionActionClass } from "../domains/safety/decision-presentation.js";
+import type { ToolRiskSubject } from "../domains/safety/tool-risk.js";
 import { askUserExposure } from "../tools/ask-user.js";
 import type { PermissionRequiredMeta, ToolRegistry } from "../tools/registry.js";
 import { approvalParkedNotice, autonomyDeniedNotice, workerEscalationNotice } from "./bus-notices.js";
@@ -13,7 +14,12 @@ import type { ToolApprovalStateEvent } from "./chat-loop.js";
 import type { NoticeLevel } from "./command-output.js";
 import { createMutationInspector, type MutationInspector, mutationFacts } from "./mutation-preview.js";
 import type { OverlayState } from "./overlay-key-routing.js";
-import { type ApprovalRequestView, askAxis, describeCallTarget } from "./permission-overlay.js";
+import {
+	type ApprovalRequestView,
+	askAxis,
+	describeCallTarget,
+	type PermissionAdvisoryReader,
+} from "./permission-overlay.js";
 
 type PermissionToolRegistry = Pick<
 	ToolRegistry,
@@ -50,7 +56,12 @@ export interface OverlayPermissionLifecycleDeps {
 	 * mutation text and is the only channel that does; it is process-local by
 	 * construction, so it is passed here rather than folded into the view.
 	 */
-	openPermissionOverlay(view: ApprovalRequestView, inspect?: MutationInspector, invocation?: () => unknown): boolean;
+	openPermissionOverlay(
+		view: ApprovalRequestView,
+		inspect?: MutationInspector,
+		invocation?: () => unknown,
+		advisory?: PermissionAdvisoryReader,
+	): boolean;
 	closeOverlay(): void;
 	appendNotice(level: NoticeLevel, text: string): void;
 	applyApprovalState(event: ToolApprovalStateEvent): void;
@@ -63,6 +74,16 @@ export interface OverlayPermissionLifecycleDeps {
 	 * re-presented dialog does not notify twice.
 	 */
 	onOperatorParked?(): void;
+	/**
+	 * An advisory sentence about one parked call's blast radius, or the empty
+	 * string when there is nothing to say. Absent when the operator has bound no
+	 * decision site to `toolRisk`, which is the default.
+	 *
+	 * It is asked after the dialog is already on screen and its result is never
+	 * waited on, so it cannot delay or block an approval. It is also advisory in
+	 * the strict sense: nothing on the admission path reads it.
+	 */
+	describeToolRisk?(subject: ToolRiskSubject): Promise<string>;
 }
 
 export interface OverlayPermissionLifecycle {
@@ -207,6 +228,30 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
 	};
 }
 
+/**
+ * Start the advisory for one card and hand back the reader the body polls.
+ *
+ * The request is deliberately not awaited. The dialog is already on screen by
+ * the time this returns, the reader answers with the empty string until an
+ * answer lands, and a rejected promise leaves it answering that way forever.
+ * A render is requested when something arrives so the line appears without the
+ * operator having to press a key.
+ */
+function advisorySlot(deps: OverlayPermissionLifecycleDeps, subject: ToolRiskSubject): PermissionAdvisoryReader {
+	let line = "";
+	deps
+		.describeToolRisk?.(subject)
+		.then((text) => {
+			if (typeof text !== "string" || text.length === 0) return;
+			line = text;
+			deps.requestRender();
+		})
+		.catch(() => {
+			// An outage costs the card one sentence and nothing else.
+		});
+	return () => line;
+}
+
 export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycleDeps): OverlayPermissionLifecycle {
 	let pendingPermission: { call: ClassifierCall; decision: SafetyDecision; meta?: PermissionRequiredMeta } | null = null;
 	let pendingWorker: WorkerEscalationEntry | null = null;
@@ -221,7 +266,12 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 	let withdrawingWorker = false;
 
 	const openWorker = (entry: WorkerEscalationEntry): boolean => {
-		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry))) return false;
+		const advisory = advisorySlot(deps, {
+			tool: entry.tool,
+			actionClass: entry.actionClass,
+			target: entry.target ?? "",
+		});
+		if (!deps.openPermissionOverlay(workerApprovalRequestView(entry), undefined, undefined, advisory)) return false;
 		pendingWorker = entry;
 		pendingPermission = null;
 		confirmed = false;
@@ -304,7 +354,16 @@ export function createOverlayPermissionLifecycle(deps: OverlayPermissionLifecycl
 					view,
 				});
 			}
-			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args)) {
+			// Facts only, and only the ones already on the card. The parked args
+			// hold mutation text and command strings that have not been through the
+			// call-target allowlist, so the advisory reads the sanitized target the
+			// operator is looking at rather than the raw call.
+			const advisory = advisorySlot(deps, {
+				tool: call.tool,
+				actionClass: decision.classification.actionClass,
+				target: view.target ?? "",
+			});
+			if (!deps.openPermissionOverlay(view, mainMutationInspector(call, view), () => call.args, advisory)) {
 				announceParked();
 				return;
 			}

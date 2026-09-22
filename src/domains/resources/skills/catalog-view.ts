@@ -1,3 +1,4 @@
+import { type PrecomputedRanking, rankByPrecomputedScore } from "../../../core/precomputed-rank.js";
 import {
 	SKILL_INSTALL_OFFER_OPTION_NEVER,
 	SKILL_INSTALL_OFFER_OPTION_NOT_NOW,
@@ -36,6 +37,9 @@ import type { MarketplaceSkill } from "./marketplace.js";
 
 /** Ordered lowest-value-last, which is also the order overflow drops them in. */
 export type SkillCatalogRowKind = "ready" | "session" | "package" | "marketplace";
+
+/** The same order {@link buildRows} emits, named so ranking can rebuild the blocks. */
+const ROW_KIND_ORDER: ReadonlyArray<SkillCatalogRowKind> = ["ready", "session", "package", "marketplace"];
 
 export interface SkillCatalogRow {
 	kind: SkillCatalogRowKind;
@@ -77,6 +81,15 @@ export interface SkillCatalogViewInput {
 	modelActivation: boolean;
 	/** Operator/model query; empty means no filtering. */
 	query?: string;
+	/**
+	 * Per-skill-name relevance from a decision model, resolved before the turn.
+	 *
+	 * It orders rows and never removes one. A skill the model cannot see is a
+	 * capability it cannot use and has no way to ask for, so a wrong judgment
+	 * must cost position rather than visibility. Paging already bounds the
+	 * listing; ranking is what makes the first page carry the useful rows.
+	 */
+	relevance?: PrecomputedRanking;
 	/** Maximum rows on this page; undefined means every row the budget allows. */
 	limit?: number | undefined;
 	offset?: number;
@@ -99,6 +112,8 @@ export interface SkillCatalogView {
 	matchMode: LexicalMatchMode | null;
 	/** True when the byte budget, rather than the query or the limit, cut the page. */
 	budgetLimited: boolean;
+	/** Who ordered the rows, or null when nothing did and the listing is in catalog order. */
+	rankedBy: string | null;
 	/** Ready-row names reported as drifted in this result set. */
 	driftedNames: string[];
 }
@@ -274,6 +289,25 @@ function selectRows(
 	return { rows: rows.filter((row) => lexicalMatches(query, row.haystack, "any")), mode: "any" };
 }
 
+/**
+ * Order rows by relevance inside each kind, keeping every row.
+ *
+ * The kind blocks stay put because their order is also the order overflow drops
+ * them in: a highly ranked marketplace row must not cost a ready skill its
+ * place on the page. Inside a block, scored rows sort by score and an unscored
+ * row keeps the slot the catalog gave it, so an abstention is not read as a
+ * judgment that the skill is irrelevant.
+ */
+function rankRows(rows: ReadonlyArray<CandidateRow>, relevance: PrecomputedRanking): CandidateRow[] {
+	return ROW_KIND_ORDER.flatMap((kind) =>
+		rankByPrecomputedScore(
+			rows.filter((row) => row.kind === kind),
+			(row) => row.name,
+			relevance.scores,
+		).map(({ item }) => item),
+	);
+}
+
 function renderSections(rows: ReadonlyArray<SkillCatalogRow>, input: SkillCatalogViewInput, drift: string): string {
 	const ready = rows.filter((row) => row.kind === "ready");
 	const session = rows.filter((row) => row.kind === "session");
@@ -342,12 +376,17 @@ export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalo
 			filtered: false,
 			matchMode: null,
 			budgetLimited: false,
+			rankedBy: null,
 			driftedNames: [],
 		};
 	}
 
 	const selected = filtered ? selectRows(all, query) : { rows: [...all], mode: null as LexicalMatchMode | null };
-	const matching = selected.rows;
+	// Ranking runs after the query, on the rows that are actually about to be
+	// paged, so an unscored row holds its position in the list the caller sees
+	// rather than in one the filter already changed.
+	const matching = input.relevance === undefined ? selected.rows : rankRows(selected.rows, input.relevance);
+	const rankedBy = input.relevance === undefined ? null : boundName(input.relevance.source);
 	const total = matching.length;
 	const offset = clampOffset(input.offset);
 	const limit = clampLimit(input.limit, total);
@@ -367,6 +406,7 @@ export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalo
 		emptyTerms,
 		query,
 		matchMode: selected.mode,
+		rankedBy,
 		total,
 		offset,
 		catalogTotal: all.length,
@@ -424,6 +464,7 @@ export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalo
 		filtered,
 		matchMode: selected.mode,
 		budgetLimited: true,
+		rankedBy,
 		driftedNames,
 	};
 }
@@ -435,6 +476,7 @@ interface RenderContext {
 	emptyTerms: boolean;
 	query: string;
 	matchMode: LexicalMatchMode | null;
+	rankedBy: string | null;
 	total: number;
 	offset: number;
 	catalogTotal: number;
@@ -461,6 +503,7 @@ function renderCandidate(context: RenderContext, shown: number, cut: boolean): s
 		emptyTerms: context.emptyTerms,
 		query: context.query,
 		matchMode: context.matchMode,
+		rankedBy: context.rankedBy,
 		total: context.total,
 		shown,
 		nextOffset,
@@ -487,6 +530,7 @@ function finishView(
 		filtered: context.filtered,
 		matchMode: context.matchMode,
 		budgetLimited,
+		rankedBy: context.rankedBy,
 		driftedNames: context.window.filter((row) => row.drifted).map((row) => row.name),
 	};
 }
@@ -509,6 +553,7 @@ interface PageNoteInput {
 	emptyTerms: boolean;
 	query: string;
 	matchMode: LexicalMatchMode | null;
+	rankedBy: string | null;
 	total: number;
 	shown: number;
 	nextOffset: number | undefined;
@@ -532,6 +577,14 @@ interface PageNoteInput {
  */
 function pageNote(input: PageNoteInput): string {
 	const clauses: string[] = [];
+	// An unexpected order is worth one sentence. Without it an operator reading a
+	// listing that no longer matches the catalog order has no way to tell that a
+	// decision model produced it, and a listing nothing ranked says nothing.
+	if (input.rankedBy !== null) {
+		clauses.push(
+			`Ordered by relevance to this task, judged by ${input.rankedBy}; every skill is still listed and paging carries the rest.`,
+		);
+	}
 	if (input.emptyTerms) {
 		clauses.push("The query carried no searchable terms, so the full list is shown.");
 	}

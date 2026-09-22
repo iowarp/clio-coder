@@ -1,3 +1,4 @@
+import { type PrecomputedRanking, rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { eligibleMemoryRecords } from "./operations.js";
 import type { MemoryRecord, MemoryRetrievalOptions } from "./types.js";
 
@@ -20,6 +21,40 @@ export interface RankedMemoryCandidate {
 		readonly symbols: readonly string[];
 	};
 	readonly fallback: boolean;
+}
+
+/** Versioned alongside the lexical heuristic so caches invalidate on either. */
+export const MEMORY_PRECOMPUTED_RELEVANCE_VERSION = "precomputed-v1";
+
+/**
+ * Per-record relevance produced ahead of selection. Prompt-build selection is
+ * synchronous and a System One call is not, so a model-scored ranking has to
+ * arrive as values an async pre-turn pass already resolved.
+ */
+export type PrecomputedMemoryRelevance = PrecomputedRanking;
+
+export interface PrecomputedMemoryCandidate {
+	readonly record: MemoryRecord;
+	/** Null when the pass abstained on this record, which is not the same as a zero. */
+	readonly score: number | null;
+	readonly source: string;
+}
+
+/**
+ * Reorder only the records the scoring pass had an opinion about, so an
+ * abstention keeps the position the incoming order gave it. That order decides
+ * everything the pass did not speak to, whether it is legacy priority or the
+ * lexical ranking above.
+ */
+export function rankMemoryByPrecomputedScore(
+	candidates: ReadonlyArray<MemoryRecord>,
+	input: PrecomputedMemoryRelevance,
+): PrecomputedMemoryCandidate[] {
+	return rankByPrecomputedScore(candidates, (record) => record.id, input.scores).map(({ item, score }) => ({
+		record: item,
+		score,
+		source: input.source,
+	}));
 }
 
 const STOP_WORDS = new Set(["and", "are", "for", "from", "into", "the", "this", "that", "with", "use", "when"]);
