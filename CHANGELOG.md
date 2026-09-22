@@ -2,6 +2,28 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.5.3 - 2026-09-22
+
+### Diffusion model support
+
+- Add the `inception` cloud runtime for Inception's Mercury diffusion models, authenticated from `INCEPTION_API_KEY` against `https://api.inceptionlabs.ai/v1`, with `mercury-2.5`, `mercury-2`, and `mercury-edit-2` as its known wire models. Mercury denoises whole blocks of tokens in parallel instead of emitting them left to right, which is what makes it fast enough for a latency-sensitive slot a frontier model cannot fill. Inception prices it at $0.04 per million input tokens and $0.15 per million output tokens.
+- Wire two surfaces. Chat runs at `/v1/chat/completions` through the ordinary pi-ai transport with tool calling and `json-schema` structured outputs. Fill-in-the-middle runs at `/v1/fim/completions` through the existing `infill()` verb, so callers reach it exactly as they reach llama.cpp's, and a target that names no `defaultModel` infills with the edit-tuned `mercury-edit-2`. `/v1/edit/completions` is left out; its next-edit prediction needs a contract verb of its own and its context-tag request format is not covered by the published reference.
+- Declare reasoning false and pin `reasoning_effort: instant`. Mercury accepts the field, but above `instant` the response carries `content: null` with `reasoning_summary: null` and the streaming path leaks a raw `<|think_end|>` token, so there is nothing to show the operator. Omitting the field is worse than pinning it: Mercury then reasons by default, spends the whole token budget on hidden reasoning, and returns an empty completion with `finish_reason: "length"`.
+- Give catalog-backed model synthesis `compat` and `samplingParams` passthrough, so a runtime can declare the wire quirks it knows about its own endpoint over whatever the catalog entry says. Inception rejects the `developer` role, so without it every request carrying a system prompt is a 400. A provider can be OpenAI-compatible in shape without being compatible in vocabulary.
+- Correct capabilities from the live `/models` listing, reading `context_length` and `max_output_length` per model over the pre-probe placeholder, and fail the probe by name when a configured model is not in the listing rather than attempting it.
+
+### System One decision models
+
+- Add the hidden `typesafe-jev` cloud runtime, authenticated from `TYPESAFE_API_KEY` against `https://api.typesafe.ai/v1`, with `jev-latest` and `jev-preview` as its known wire models. A System One model does not generate prose: every question names a closed answer shape up front and the model returns a calibrated distribution over it, which makes it a substrate for the harness's micro-decisions where a chat model is both slower and unparseable. The descriptor declares `chat: false`, so Jev never appears as a conversational target and the configure wizard does not offer it.
+- Add `decide()` to `RuntimeDescriptor`. It answers a batch of independent typed questions against one body of evidence in a single round trip and covers the three primitives the API exposes: `noul` for a truth probability, `choice` for an option with its distribution, and `score` for a position on a criteria ladder. A question's `criteria` carries what each answer means, so the caller defines the scale rather than hoping a prompt implies it.
+- Parse confidence as a separate axis from the answer, because they are different questions. A `noul` of 0.5 at high confidence is a decided coin-flip; at low confidence it is an abstention, and a caller gating on the result must be able to tell them apart. The readers in `decisions.ts` return `null` rather than `false` below a confidence floor.
+- Throw on a missing or unrecognised answer rather than defaulting one. Callers index by the ids they submitted, so a dropped answer is a contract break, and a caller gating dispatch must never receive a decision the model did not make.
+- This release lands the provider surface and its wire contract, pinned against a recorded live response. No harness caller is wired yet, and no settings keys for one are published.
+
+### Harness eval baselines
+
+- TBD, owned by the evals agent.
+
 ## 0.5.2 - 2026-09-21
 
 ### Context continuity and memory
