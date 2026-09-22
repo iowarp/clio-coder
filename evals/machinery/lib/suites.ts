@@ -59,6 +59,21 @@ export const MACHINERY_SUITES: ReadonlyArray<MachinerySuite> = [
 			"worker-prompt-layers",
 		],
 	},
+	{
+		name: "context-budget",
+		id: "machinery-context-budget",
+		title: "Machinery, context budget enforcement",
+		description:
+			"Input plus reserved output admission at submission, at the post-tool continuation guard, and at the provider boundary that re-derives the wire ceiling.",
+		scenarios: [
+			"submission-admission",
+			"output-reserve-resolution",
+			"provider-boundary-ceiling",
+			"live-view-admission",
+			"tool-continuation-guard",
+			"pressure-policy-resolution",
+		],
+	},
 ];
 
 export function machinerySuite(name: string): MachinerySuite {
