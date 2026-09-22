@@ -248,7 +248,6 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// form is rejected above on a restricted surface, so the two filters
 			// here never have to compose.
 			const scoped = server.length > 0;
-			const namespace = `mcp_${server}__`;
 			if (deps.mcp && allowed === null) {
 				if (refresh) {
 					const result = await deps.mcp.refresh(server, options?.signal ? { signal: options.signal } : {});
@@ -259,7 +258,7 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				diagnostics = catalog.diagnostics;
 				missing = scoped ? catalog.missing.filter((id) => id === server) : catalog.missing;
 				mcpEntries = catalog.entries
-					.filter((entry) => !scoped || entry.name.startsWith(namespace))
+					.filter((entry) => !scoped || deps.mcp?.ownerIdOf(entry.name) === server)
 					.map((entry) => ({
 						name: entry.name,
 						kind: gatewayCapabilityKind(entry.name),
@@ -269,7 +268,11 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			}
 			const registryEntries: GatewayCapabilityEntry[] = registry
 				.listGateway()
-				.filter((spec) => (scoped ? spec.name.startsWith(namespace) : allowed === null || allowed.has(spec.name)))
+				// Scoping asks the source who owns a name rather than testing the
+				// `mcp_<id>__` prefix. Server ids may contain `__`, so with
+				// declarations `a` and `a__b` the prefix test hands `a__b`'s
+				// capabilities to a caller that asked for `a`.
+				.filter((spec) => (scoped ? deps.mcp?.ownerIdOf(spec.name) === server : allowed === null || allowed.has(spec.name)))
 				.map((spec) => ({
 					name: spec.name,
 					kind: gatewayCapabilityKind(spec.name),

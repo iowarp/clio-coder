@@ -153,6 +153,14 @@ export interface McpCapabilitySource {
 	ensure(name: string, options?: { signal?: AbortSignal }): Promise<McpEnsureResult>;
 	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
 	authorityNote(name: string): string | null;
+	/**
+	 * The declared server that owns `name` under the longest-prefix rule, or
+	 * null when no declaration owns it. Callers that scope results to one server
+	 * must ask rather than testing the `mcp_<id>__` prefix themselves: server ids
+	 * may contain `__`, so with declarations `a` and `a__b` the prefix test
+	 * claims `a__b`'s capabilities for `a`.
+	 */
+	ownerIdOf(name: string): string | null;
 	/** Ids of the servers launched this session and still open. */
 	connectedIds(options?: { readyOnly?: boolean }): string[];
 	/**
@@ -733,6 +741,9 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 						? "calls are admitted like an unrecognized shell command"
 						: "calls run as reads at every autonomy level"
 			}. Launching the server does not sandbox it.`;
+		},
+		ownerIdOf(name) {
+			return ownerOf(name)?.declaration.id ?? null;
 		},
 		connectedIds(options) {
 			return [...(states?.values() ?? [])]
