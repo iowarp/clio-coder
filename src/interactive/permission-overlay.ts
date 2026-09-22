@@ -114,6 +114,16 @@ export function permissionOverlayPlacement(
  * preview is built on the first toggle rather than per frame, so the file read
  * and the diff happen once when the operator asks for them.
  */
+/**
+ * A late-arriving advisory line for the card, read once per frame.
+ *
+ * It is a getter rather than a field on the view because the dialog opens the
+ * instant the call parks and the advisory is answered over the network after
+ * that. Nothing waits for it: the card renders without the line, and the line
+ * appears at the next frame if an answer ever arrives.
+ */
+export type PermissionAdvisoryReader = () => string;
+
 export interface PermissionOverlayBodyHandle extends Component {
 	/** Whether this card has a mutation the operator can read locally. */
 	canInspect(): boolean;
@@ -136,6 +146,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		private readonly view: ApprovalRequestView,
 		private readonly inspect?: MutationInspector,
 		private readonly invocation?: () => unknown,
+		private readonly advisory?: PermissionAdvisoryReader,
 	) {}
 
 	canInspect(): boolean {
@@ -194,7 +205,7 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		}
 		if (this.preview === null)
 			return [
-				...permissionOverlayLines(this.view, width, this.terms),
+				...permissionOverlayLines(this.view, width, this.terms, this.readAdvisory()),
 				...(this.invocation && !this.inspect
 					? wrapTextWithAnsi(clioTheme().fg("dim", "v · inspect the complete invocation before deciding"), width)
 					: []),
@@ -202,6 +213,20 @@ class PermissionOverlayBody implements PermissionOverlayBodyHandle {
 		const rendered = permissionInspectionLines(this.view, this.preview, width, this.scroll);
 		this.lastLineCount = rendered.wrappedLineCount;
 		return rendered.lines;
+	}
+
+	/**
+	 * A throwing or absent advisory reader is simply no advisory. This runs on
+	 * every frame of a dialog the operator is answering, so it cannot be a place
+	 * where anything fails loudly.
+	 */
+	private readAdvisory(): string {
+		if (this.advisory === undefined) return "";
+		try {
+			return this.advisory();
+		} catch {
+			return "";
+		}
 	}
 
 	invalidate(): void {}
@@ -370,7 +395,7 @@ function termsSummary(presentation: DecisionPresentation, actionClass: string): 
  * `?` and the card leads with what changes per call: the tool, the target in
  * full, the mutation facts, and who asked.
  */
-function permissionOverlayLines(view: ApprovalRequestView, width: number, terms = false): string[] {
+function permissionOverlayLines(view: ApprovalRequestView, width: number, terms = false, advisory = ""): string[] {
 	const content = Math.max(8, Math.floor(width));
 	const presentation = permissionDecisionPresentation(view);
 	// The parked call is awaiting a decision, not blocked: the raw rejection
@@ -398,6 +423,10 @@ function permissionOverlayLines(view: ApprovalRequestView, width: number, terms 
 				)
 			: []),
 		...wrapSentence(`Requested by: ${presentation.requestedByCopy}`, content),
+		// Dimmed and below the facts, because it is the only line on this card
+		// that no part of the harness acted on. The sentence says so itself; the
+		// styling keeps it from reading as a verdict at a glance.
+		...(advisory.length > 0 ? wrapSentence(clioTheme().fg("dim", advisory), content) : []),
 		...(view.queueDepth !== undefined && view.queueDepth > 1 ? [`1 of ${view.queueDepth} parked`] : []),
 		...(view.artifact !== undefined
 			? [
@@ -432,6 +461,7 @@ export function createPermissionOverlayBody(
 	view: ApprovalRequestView,
 	inspect?: MutationInspector,
 	invocation?: () => unknown,
+	advisory?: PermissionAdvisoryReader,
 ): PermissionOverlayBodyHandle {
-	return new PermissionOverlayBody(view, inspect, invocation);
+	return new PermissionOverlayBody(view, inspect, invocation, advisory);
 }
