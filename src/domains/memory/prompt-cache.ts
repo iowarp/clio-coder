@@ -1,8 +1,20 @@
 import { createHash } from "node:crypto";
 import { canonicalMemoryRepositoryIdentity } from "./operations.js";
 import { buildMemoryPromptSection, type MemoryPromptOptions } from "./prompt-section.js";
-import { MEMORY_RELEVANCE_VERSION } from "./relevance.js";
+import {
+	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
+	MEMORY_RELEVANCE_VERSION,
+	type PrecomputedMemoryRelevance,
+} from "./relevance.js";
 import { readMemoryStoreSnapshot } from "./store.js";
+
+/**
+ * Key-sorted entries, so two passes that scored the same records the same way
+ * hit the cache regardless of the order the answers came back in.
+ */
+function sortedScores(scores: Readonly<Record<string, number>>): Array<[string, number]> {
+	return Object.entries(scores).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+}
 
 /** Host-owned attempt identity, distinct from the ledger ID allocated after preflight. */
 export interface MemoryPromptRequest {
@@ -15,6 +27,13 @@ export interface MemoryPromptRequest {
 	readonly taskText: string;
 	readonly activePaths: readonly string[];
 	readonly activeSymbols?: readonly string[];
+	/**
+	 * Scores this turn's pre-turn pass resolved, or absent when the memory
+	 * decision site is unbound or the pass produced nothing. It is part of the
+	 * cache key: a new pass that reused the previous turn's cached section would
+	 * be serving a selection the scores no longer justify.
+	 */
+	readonly precomputedRelevance?: PrecomputedMemoryRelevance;
 }
 
 export interface MemoryPromptReaderOptions {
@@ -63,6 +82,10 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 				activePaths: [...request.activePaths],
 				activeSymbols: [...(request.activeSymbols ?? [])],
 			};
+			// The score map is keyed, not just its presence: the same records under
+			// a new turn's scores select differently, and reusing the cached text
+			// would serve a section those scores no longer justify.
+			const precomputed = request.precomputedRelevance;
 			const key = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -72,6 +95,8 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 						relevance,
 						experimentalRelevance,
 						MEMORY_RELEVANCE_VERSION,
+						MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
+						precomputed === undefined ? null : [precomputed.source, sortedScores(precomputed.scores)],
 					]),
 				)
 				.digest("hex");
@@ -82,6 +107,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
+					...(precomputed === undefined ? {} : { precomputedRelevance: precomputed }),
 				}).section;
 				selected = Object.freeze({ key, section });
 			}
