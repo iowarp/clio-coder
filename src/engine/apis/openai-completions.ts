@@ -43,6 +43,14 @@ import { HarmonyResponseParser } from "../harmony-response.js";
 import { captureErrorBody, restoreTruncatedErrorBody } from "../provider-error-body.js";
 import { createSentinelStripper, stripTokenizerSentinels } from "../strip-tokenizer-sentinels.js";
 import { createDegradedInferenceStream, type WatchDegradedInferenceOptions } from "./degraded-inference.js";
+import {
+	applyDiffusionFrame,
+	type DiffusionFrame,
+	diffusionFramesEnabled,
+	observeDiffusionFrameChunk,
+	runtimeStreamsDiffusionFrames,
+	withDiffusingRequest,
+} from "./diffusion-frames.js";
 import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
 import { ensureLmStudioResidency, listLmStudioResidentModels } from "./lmstudio.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
@@ -115,6 +123,8 @@ interface ResponseModelIdCapture {
 	gatewayRouting: GatewayRoutingObservation | null;
 	/** Latest non-2xx body, read from a clone before the SDK truncates its copy. */
 	errorBody: Promise<string | null> | null;
+	/** Whole-response frames seen on the wire, in order; null when frames were not requested. */
+	diffusionFrames: DiffusionFrame[] | null;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
@@ -166,6 +176,7 @@ function observeResponseMetadataLine(line: string, capture: ResponseModelIdCaptu
 	try {
 		const payload = JSON.parse(data) as unknown;
 		if (!isPlainRecord(payload)) return;
+		if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
 		const usage = isPlainRecord(payload.usage) ? payload.usage : {};
 		const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
 		if (
@@ -240,6 +251,13 @@ function captureResponseModelId(response: Response, capture: ResponseModelIdCapt
 	});
 }
 
+/** Whether this request asks the provider for whole-response diffusion frames. */
+function diffusionFramesActive(model: Model<Api>): boolean {
+	// Engine models carry the runtime id in their Clio metadata; a model
+	// synthesized straight from the descriptor carries only its provider name.
+	return diffusionFramesEnabled() && runtimeStreamsDiffusionFrames(runtimeMetadata(model)?.runtimeId ?? model.provider);
+}
+
 function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	model: Model<Api>,
 	options: TOptions,
@@ -254,6 +272,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		backendTimingsSource: backendTimingsSourceForModel(model),
 		gatewayRouting: null,
 		errorBody: null,
+		diffusionFrames: diffusionFramesActive(model) ? [] : null,
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -267,7 +286,8 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 	const annotated = createAssistantMessageEventStream();
 	(async () => {
 		try {
-			for await (const event of source) {
+			for await (const raw of source) {
+				const event = capture.diffusionFrames !== null ? applyDiffusionFrame(raw, capture.diffusionFrames) : raw;
 				const observation: ResponseModelIdObservation = capture.observed
 					? capture.reportedModelId === null
 						? { state: "not-reported" }
@@ -1127,7 +1147,17 @@ function streamCompletions<TOptions extends StreamOptions>(
 				),
 			} as TOptions)
 		: options;
-	const requestOptions = withLiteLLMRequestOptions(model, transportOptions ?? ({} as TOptions));
+	const diffusion = diffusionFramesActive(model);
+	const framedOptions: TOptions = diffusion
+		? ({
+				...(transportOptions ?? {}),
+				onPayload: async (payload: unknown, payloadModel: Model<Api>) => {
+					const base = await transportOptions?.onPayload?.(payload, payloadModel);
+					return withDiffusingRequest(base ?? payload);
+				},
+			} as TOptions)
+		: (transportOptions ?? ({} as TOptions));
+	const requestOptions = withLiteLLMRequestOptions(model, framedOptions);
 	const source = withResponseModelIdCapture(model, requestOptions, (capturedOptions) =>
 		withLocalResidency(model, options ?? {}, (requestModel) => {
 			return start(
@@ -1146,7 +1176,10 @@ function streamCompletions<TOptions extends StreamOptions>(
 		failStream(stream, model, error),
 	);
 	const thinking = stripNeverReasoningFromStream(channels, model, resolved);
-	const sanitized = stripSentinelsFromStream(thinking, model, resolved);
+	// The sentinel stripper accumulates deltas and rewrites the partial from
+	// that sum, which is exactly wrong for a stream whose deltas are whole
+	// frames. A diffusion provider is a cloud endpoint with no sentinel leak.
+	const sanitized = diffusion ? thinking : stripSentinelsFromStream(thinking, model, resolved);
 	return guardMalformedToolCalls(withReasoningTokenEstimate(sanitized, model), model, resolvedRequestContext(context));
 }
 

@@ -1,4 +1,5 @@
 import { requestFits } from "../domains/context/budget/request-fit.js";
+import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { estimateInputTokensFromContext } from "../engine/apis/output-budget.js";
 import { resolvedRequestContext } from "../engine/context.js";
 import type { ContinuityController } from "./continuity-controller.js";
@@ -119,6 +120,18 @@ export type AssistantDeltaEvent =
 			contentIndex: number;
 			delta: string;
 			partialText: string;
+	  }
+	| {
+			/**
+			 * One whole frame from a diffusion model: the entire text so far, with
+			 * positions the model has not resolved yet still noise. Replaces the
+			 * streamed text rather than extending it.
+			 */
+			type: "text_frame";
+			contentIndex: number;
+			text: string;
+			/** 0 to 1 as reported by the provider. */
+			progress: number;
 	  }
 	| {
 			type: "thinking_delta";
@@ -944,12 +957,22 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				};
 				if (assistantEvent.type === "text_delta") {
 					const partialText = extractText(assistantEvent.partial);
-					deps.emit({
-						type: "text_delta",
-						contentIndex: assistantEvent.contentIndex ?? 0,
-						delta: assistantEvent.delta ?? "",
-						partialText,
-					});
+					const frame = readDiffusionFrame(assistantEvent);
+					if (frame) {
+						deps.emit({
+							type: "text_frame",
+							contentIndex: assistantEvent.contentIndex ?? 0,
+							text: frame.text,
+							progress: frame.progress,
+						});
+					} else {
+						deps.emit({
+							type: "text_delta",
+							contentIndex: assistantEvent.contentIndex ?? 0,
+							delta: assistantEvent.delta ?? "",
+							partialText,
+						});
+					}
 					const localToolRuntime = runtimeNarratesToolCalls(localRuntime.runtimeResolution.runtimeTier);
 					if (
 						localToolRuntime &&

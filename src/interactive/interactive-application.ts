@@ -28,6 +28,7 @@ import type { DecisionLedgerEntry } from "../domains/session/entries.js";
 import type { SessionContract, SessionEntry, TaskBoardSnapshot } from "../domains/session/index.js";
 import type { ShareContract } from "../domains/share/index.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
+import { setDiffusionFramesEnabled } from "../engine/apis/diffusion-frames.js";
 import { createAgentProgress } from "../engine/tui.js";
 import type { ImageContent } from "../engine/types.js";
 import type { AskUserHandler } from "../tools/ask-user.js";
@@ -710,6 +711,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		tui.requestRender();
 	};
 	const agentProgress = createAgentProgress(terminal);
+	// Only the interactive surface asks a diffusion provider for whole-response
+	// frames; it is the one consumer that can show noise settling into text.
+	setDiffusionFramesEnabled(process.stdout.isTTY === true);
 	// Desktop notifications are a protocol write on the terminal owner, issued
 	// outside any render transaction, so the sequence carries frameId null and
 	// never lands inside a frame. A non-TTY process never emits one even when

@@ -442,6 +442,8 @@ export function reduceStatus(prev: AgentStatus, event: StatusInputEvent, ctx: Re
 			if (CORE_ACTIVE_PHASES.has(base)) return { ...next, resumePhase: undefined };
 			return next;
 		}
+		// A diffusion frame is answer text arriving, whole rather than sliced.
+		case "text_frame":
 		case "text_delta": {
 			const base = activePhaseAfterStuck(prev);
 			const next = refreshMeaningful({ ...prev, phase: base, preparingToolCall: false }, ctx);

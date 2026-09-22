@@ -3,6 +3,7 @@ import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
+import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import { type Component, Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
@@ -119,6 +120,13 @@ type TextSegment = {
 	 * answer that was 5-22 ms per frame to reproduce identical rows.
 	 */
 	wrapCache?: { width: number; completedLines: number; lines: string[] };
+	/**
+	 * Live denoising state while a diffusion model streams whole frames. The
+	 * text before `settled` agreed between the last two frames and is shown as
+	 * settled prose; the rest is still noise and renders dim. Cleared when the
+	 * segment finalizes.
+	 */
+	diffusion?: { progress: number; settled: number };
 	/**
 	 * A protocol suggestion line and the answer prose beneath it, when the model
 	 * opened its reply with both in one segment (which is what the skills prompt
@@ -577,7 +585,33 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 	return split;
 }
 
+/**
+ * A denoising frame renders in two tones: settled text as it is, the unresolved
+ * remainder dim. Frames are few (Mercury settles a block in two or three) and
+ * each one rewrites arbitrary positions, so nothing here is cached.
+ */
+function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: number): string[] {
+	const head = seg.text.slice(0, settled);
+	const tail = seg.text.slice(settled);
+	const lines: string[] = [];
+	const headLines = head.split("\n");
+	const tailLines = tail.split("\n");
+	// The line the boundary falls on carries both tones.
+	const joinLine = `${headLines[headLines.length - 1] ?? ""}${tail.length > 0 ? `${DIM}${tailLines[0] ?? ""}${SGR_RESET}` : ""}`;
+	for (let i = 0; i < headLines.length - 1; i += 1) {
+		for (const line of wrapTextWithAnsi(headLines[i] ?? "", width)) lines.push(line);
+	}
+	for (const line of wrapTextWithAnsi(joinLine, width)) lines.push(line);
+	for (let i = 1; i < tailLines.length; i += 1) {
+		for (const line of wrapTextWithAnsi(`${DIM}${tailLines[i] ?? ""}${SGR_RESET}`, width)) lines.push(line);
+	}
+	return lines;
+}
+
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
+	if (!seg.finalized && seg.diffusion) {
+		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
+	}
 	if (!seg.finalized) {
 		const source = seg.text.split("\n");
 		// The final element is the live tail; everything before it is newline-
@@ -1095,6 +1129,52 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	/**
+	 * Replace this message's live text segment with one whole diffusion frame.
+	 * The wrap cache assumes append-only text and a frame rewrites anywhere, so
+	 * it is dropped; the settled prefix is what the previous frame and this one
+	 * agree on.
+	 *
+	 * The frame targets the message's frame segment wherever it sits, not the
+	 * tail. Mercury repeats the whole frame on every chunk that carries a
+	 * tool-call delta and sends the resolved text last, after the tool call has
+	 * begun, so a preamble's frames keep arriving while a tool segment is the
+	 * tail. Replacing only the tail left a noise frame above the tool line and
+	 * the resolved text in a second segment below it.
+	 */
+	const replaceTextFrame = (
+		entry: Extract<TranscriptEntry, { role: "assistant" }>,
+		text: string,
+		progress: number,
+	): void => {
+		invalidateEntryCache(entry);
+		closeOpenThinking(entry);
+		const messageStart = Math.min(entry.messageStartSegmentIndex ?? 0, entry.segments.length);
+		let live: TextSegment | undefined;
+		for (let index = entry.segments.length - 1; index >= messageStart; index -= 1) {
+			const segment = entry.segments[index];
+			if (segment?.kind === "text" && !segment.finalized && segment.diffusion) {
+				live = segment;
+				break;
+			}
+		}
+		const tail = entry.segments[entry.segments.length - 1];
+		if (!live && tail && tail.kind === "text" && !tail.finalized) live = tail;
+		if (live) {
+			const settled = progress >= 1 ? text.length : settledPrefixLength(live.text, text);
+			live.text = text;
+			delete live.wrapCache;
+			live.diffusion = { progress, settled };
+			return;
+		}
+		entry.segments.push({
+			kind: "text",
+			text,
+			finalized: false,
+			diffusion: { progress, settled: progress >= 1 ? text.length : 0 },
+		});
+	};
+
+	/**
 	 * Canonicalize the streamed text of a completed assistant message.
 	 *
 	 * The streamed text is wherever this message put it, not necessarily at the
@@ -1128,6 +1208,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		const finalize = (segment: TextSegment, value: string): void => {
 			segment.text = value;
 			segment.finalized = true;
+			delete segment.diffusion;
 			// The streaming wrap cache assumes append-only text. This is the one
 			// path that rewrites it wholesale, and finalized segments render through
 			// Markdown instead, so the cache is dead here either way.
@@ -1142,7 +1223,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		}
 		if (streamed.length === 1 && streamed[0] !== undefined) {
 			const only = streamed[0];
-			if (text.startsWith(only.text)) {
+			// A diffusion frame is the whole text so far, never a slice of it, so
+			// the settled message replaces it even when the last frame was noise.
+			if (only.diffusion || text.startsWith(only.text)) {
 				finalize(only, text);
 				return;
 			}
@@ -1480,6 +1563,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const assistant = ensureAssistant();
 				assistant.pending = true;
 				appendTextDelta(assistant, event.delta);
+				markDirty();
+				return;
+			}
+			if (event.type === "text_frame") {
+				const assistant = ensureAssistant();
+				assistant.pending = true;
+				replaceTextFrame(assistant, event.text, event.progress);
 				markDirty();
 				return;
 			}

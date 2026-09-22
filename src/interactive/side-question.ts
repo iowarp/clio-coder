@@ -19,6 +19,7 @@ import {
 	responseSchemaDialectFor,
 } from "../core/response-schema.js";
 import { stream } from "../engine/ai.js";
+import { readDiffusionFrame } from "../engine/apis/diffusion-frames.js";
 import { patchResponseSchemaPayloadForDialect } from "../engine/provider-payload.js";
 import type { AgentMessage, EngineModel, Usage } from "../engine/types.js";
 
@@ -212,7 +213,9 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	let text = "";
 	for await (const event of events) {
 		if (event.type === "text_delta") {
-			text = textFromMessage(event.partial);
+			// A diffusion frame carries the whole answer so far; the shared partial
+			// can already hold the next frame appended to it.
+			text = readDiffusionFrame(event)?.text ?? textFromMessage(event.partial);
 			input.onDelta?.(text);
 			continue;
 		}
