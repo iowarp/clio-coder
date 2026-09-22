@@ -27,6 +27,9 @@ import ts from "typescript";
 import { parse as parseYaml } from "yaml";
 import { DEFAULT_SETTINGS, DEFAULT_SETTINGS_YAML } from "../src/core/defaults.js";
 import { resolvePackageRoot } from "../src/core/package-root.js";
+import { ALL_TOOL_NAMES, type BuiltinToolName, ToolNames } from "../src/core/tool-names.js";
+import type { DispatchContract } from "../src/domains/dispatch/contract.js";
+import type { PanesOperations } from "../src/domains/mux/operations.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
 import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
@@ -1370,6 +1373,200 @@ function checkPiSurface(): void {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// tool-contract-coverage: every builtin tool names the contract tests that
+// exercise it. CI runs tests/contracts and never tests/extended, so a tool
+// whose only test lives elsewhere ships untested. The map is keyed by
+// BuiltinToolName, so a new tool fails typecheck until someone names its
+// test here. Each named file must exist under tests/contracts and reach the
+// tool in code, either by importing the module the registry records as the
+// tool's source or by building a registry and naming the tool in it. The
+// check reads the syntax tree, so a mention in a comment never counts.
+// ---------------------------------------------------------------------------
+const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> = {
+	[ToolNames.Read]: [
+		"tests/contracts/read-large-files.test.ts",
+		"tests/contracts/read-scope.test.ts",
+		"tests/contracts/physical-dotdot.test.ts",
+	],
+	[ToolNames.Evidence]: ["tests/contracts/evidence-tool.test.ts"],
+	[ToolNames.Grep]: ["tests/contracts/search-completeness.test.ts", "tests/contracts/read-scope.test.ts"],
+	[ToolNames.Find]: ["tests/contracts/search-completeness.test.ts", "tests/contracts/read-scope.test.ts"],
+	[ToolNames.Ls]: [
+		"tests/contracts/ls-tool.test.ts",
+		"tests/contracts/search-completeness.test.ts",
+		"tests/contracts/read-scope.test.ts",
+	],
+	[ToolNames.CodeNav]: ["tests/contracts/code-nav.test.ts", "tests/contracts/tool-boundaries.test.ts"],
+	[ToolNames.Context]: [
+		"tests/contracts/context-budget-surface.test.ts",
+		"tests/contracts/settings-awareness.test.ts",
+		"tests/contracts/skill-install.test.ts",
+	],
+	[ToolNames.SelfCompact]: ["tests/contracts/continuity-controller.test.ts"],
+	[ToolNames.CredentialPresent]: [
+		"tests/contracts/credential-present.test.ts",
+		"tests/contracts/gateway-surface.test.ts",
+	],
+	[ToolNames.ClioDocs]: ["tests/contracts/gateway-web-context.test.ts"],
+	[ToolNames.ClioLibrary]: ["tests/contracts/clio-library.test.ts", "tests/contracts/gateway-web-context.test.ts"],
+	[ToolNames.Data]: ["tests/contracts/data-tool.test.ts", "tests/contracts/gateway-corrections.test.ts"],
+	[ToolNames.Write]: [
+		"tests/contracts/mutation-atomicity.test.ts",
+		"tests/contracts/symlink-escape.test.ts",
+		"tests/contracts/physical-dotdot.test.ts",
+		"tests/contracts/admission-fs-ops.test.ts",
+	],
+	[ToolNames.Edit]: ["tests/contracts/mutation-atomicity.test.ts", "tests/contracts/admission-fs-ops.test.ts"],
+	[ToolNames.Bash]: ["tests/contracts/bash-output-cap.test.ts"],
+	[ToolNames.Git]: ["tests/contracts/git-tool.test.ts", "tests/contracts/gateway-authority.test.ts"],
+	[ToolNames.Verify]: ["tests/contracts/verify-numeric.test.ts"],
+	[ToolNames.RunScript]: ["tests/contracts/run-script.test.ts"],
+	[ToolNames.Dispatch]: ["tests/contracts/dispatch-admission.test.ts"],
+	[ToolNames.Monitor]: ["tests/contracts/monitor-steer-tools.test.ts"],
+	[ToolNames.Steer]: ["tests/contracts/monitor-steer-tools.test.ts"],
+	[ToolNames.Tasks]: ["tests/contracts/task-proposal-scope.test.ts"],
+	[ToolNames.Ledger]: ["tests/contracts/ledger-tool.test.ts"],
+	[ToolNames.Panes]: ["tests/contracts/panes-tool.test.ts"],
+	[ToolNames.Limitation]: ["tests/contracts/finish-contract-limitation.test.ts"],
+	[ToolNames.Decide]: ["tests/contracts/decide-tool.test.ts"],
+	[ToolNames.WebRead]: ["tests/contracts/tool-boundaries.test.ts", "tests/contracts/gateway-web-context.test.ts"],
+	[ToolNames.WebFetch]: ["tests/contracts/egress-remediation.test.ts", "tests/contracts/tool-boundaries.test.ts"],
+	[ToolNames.AskUser]: ["tests/contracts/ask-user-tool.test.ts"],
+	[ToolNames.Artifact]: ["tests/contracts/artifact-tool.test.ts", "tests/contracts/gateway-authority.test.ts"],
+	[ToolNames.Gateway]: [
+		"tests/contracts/gateway-surface.test.ts",
+		"tests/contracts/gateway-authority.test.ts",
+		"tests/contracts/gateway-mcp.test.ts",
+		"tests/contracts/gateway-capability-ranking.test.ts",
+	],
+};
+
+/** Importing one of these is how a test builds a registry it can call tools on. */
+const REGISTRY_BUILDERS = new Set([
+	"src/tools/bootstrap.ts",
+	"src/tools/core-bootstrap.ts",
+	"src/engine/worker-tools.ts",
+]);
+/** Keys whose string value names the tool a call or ledger entry is for. */
+const TOOL_CALL_KEYS = new Set(["tool", "capability", "name", "toolName"]);
+const RETRIEVE_SWITCHES = ["CLIO_CODER_DISABLE_RETRIEVE_TOOLS", "CLIO_CODER_NO_NETWORK_TOOLS"];
+
+/**
+ * The module each builtin was registered from, read off a registry with every
+ * optional surface switched on. The stand-ins below only switch surfaces on;
+ * registration never calls them. The retrieve switches are cleared for the
+ * duration so a hermetic shell still sees the whole builtin surface.
+ */
+async function registeredToolSources(): Promise<Map<string, string>> {
+	const [{ createRegistry }, { registerAllTools }, { createWorkerSafety }] = await Promise.all([
+		import("../src/tools/registry.js"),
+		import("../src/tools/bootstrap.js"),
+		import("../src/engine/worker-tools.js"),
+	]);
+	const saved = RETRIEVE_SWITCHES.map((key) => [key, process.env[key]] as const);
+	for (const key of RETRIEVE_SWITCHES) delete process.env[key];
+	const registry = createRegistry({ safety: createWorkerSafety({ cwd: root }) });
+	try {
+		registerAllTools(registry, {
+			mcpCapabilities: false,
+			dispatch: {} as DispatchContract,
+			panes: {} as PanesOperations,
+			askUser: async () => ({ answers: [] }),
+			requestSelfCompact: async () => "",
+			includeLedgerTools: true,
+		});
+	} finally {
+		for (const [key, value] of saved) if (value !== undefined) process.env[key] = value;
+	}
+	const sources = new Map<string, string>();
+	for (const spec of registry.listAll()) if (spec.sourceInfo) sources.set(spec.name, spec.sourceInfo.path);
+	return sources;
+}
+
+interface ToolReferences {
+	/** Repo-relative modules the file imports for their values, statically or dynamically. */
+	modules: Set<string>;
+	/** Builtin names the file spells in code as ToolNames.X or as a call key's string value. */
+	named: Set<string>;
+}
+
+function toolReferences(absolute: string): ToolReferences {
+	const source = ts.createSourceFile(absolute, readFileSync(absolute, "utf8"), ts.ScriptTarget.ESNext, true);
+	const byKey = new Map<string, string>(Object.entries(ToolNames));
+	const builtins = new Set<string>(ALL_TOOL_NAMES);
+	const modules = new Set<string>();
+	const named = new Set<string>();
+	const addModule = (specifier: string): void => {
+		if (!specifier.startsWith(".")) return;
+		const resolved = relative(root, resolve(dirname(absolute), specifier)).replaceAll("\\", "/");
+		modules.add(resolved.replace(/\.js$/, ".ts"));
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isImportDeclaration(node) && !node.importClause?.isTypeOnly && ts.isStringLiteral(node.moduleSpecifier)) {
+			addModule(node.moduleSpecifier.text);
+		} else if (
+			ts.isCallExpression(node) &&
+			node.expression.kind === ts.SyntaxKind.ImportKeyword &&
+			node.arguments[0] !== undefined &&
+			ts.isStringLiteral(node.arguments[0])
+		) {
+			addModule(node.arguments[0].text);
+		} else if (
+			ts.isPropertyAccessExpression(node) &&
+			ts.isIdentifier(node.expression) &&
+			node.expression.text === "ToolNames"
+		) {
+			const name = byKey.get(node.name.text);
+			if (name !== undefined) named.add(name);
+		} else if (
+			ts.isPropertyAssignment(node) &&
+			(ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
+			TOOL_CALL_KEYS.has(node.name.text) &&
+			ts.isStringLiteralLike(node.initializer) &&
+			builtins.has(node.initializer.text)
+		) {
+			named.add(node.initializer.text);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(source);
+	return { modules, named };
+}
+
+async function checkToolContractCoverage(): Promise<void> {
+	const sources = await registeredToolSources();
+	const references = new Map<string, ToolReferences>();
+	for (const tool of ALL_TOOL_NAMES) {
+		const files = TOOL_CONTRACT_TESTS[tool];
+		const module = sources.get(tool);
+		if (module === undefined) {
+			fail("tool-contract-coverage", `${tool} is not registered by registerAllTools, so its source module is unknown`);
+			continue;
+		}
+		if (files.length === 0) fail("tool-contract-coverage", `${tool} names no contract test`);
+		for (const file of files) {
+			if (!/^tests\/contracts\/[^/]+\.test\.ts$/.test(file)) {
+				fail("tool-contract-coverage", `${tool}: ${file} is not a tests/contracts/*.test.ts file`);
+				continue;
+			}
+			const absolute = join(root, file);
+			if (!existsSync(absolute)) {
+				fail("tool-contract-coverage", `${tool}: ${file} does not exist`);
+				continue;
+			}
+			const found = references.get(file) ?? toolReferences(absolute);
+			references.set(file, found);
+			const buildsRegistry = [...REGISTRY_BUILDERS].some((builder) => found.modules.has(builder));
+			if (found.modules.has(module) || (buildsRegistry && found.named.has(tool))) continue;
+			fail(
+				"tool-contract-coverage",
+				`${tool}: ${file} neither imports ${module} nor names ${tool} on a registry it builds from ${[...REGISTRY_BUILDERS].join(", ")}`,
+			);
+		}
+	}
+}
+
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["product-namespace", checkProductNamespace],
 	["export-hygiene", checkExportHygiene],
@@ -1387,6 +1584,7 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["prompts", checkPromptsDocLinks],
 	["docs-source", checkDocsSource],
 	["pi-surface", checkPiSurface],
+	["tool-contract-coverage", checkToolContractCoverage],
 ];
 
 const startedAt = performance.now();

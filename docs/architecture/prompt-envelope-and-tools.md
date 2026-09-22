@@ -192,6 +192,14 @@ the plane design, the safety classifier, and the registered specs fails loudly
 instead of shipping a surface that behaves differently from what the policy
 engine assumes.
 
+Every builtin also names the contract tests that exercise it, in the
+`TOOL_CONTRACT_TESTS` map in `scripts/check-hygiene.ts`. The map is keyed by
+the builtin name type, so a new tool fails typecheck until its test is named.
+`pnpm run lint` then fails when a named file is missing, lives outside
+`tests/contracts` (the only test directory CI runs besides three smoke files),
+or never reaches the tool in code by importing its registered module or naming
+it on a registry the test builds.
+
 | Plane | Tools | Action class | Concurrency |
 | --- | --- | --- | --- |
 | OBSERVE | `read`, `grep`, `find`, `ls`, `code_nav`, `context`, `credential_present`, `clio_docs`, `clio_library`, `data` | read | parallel |
