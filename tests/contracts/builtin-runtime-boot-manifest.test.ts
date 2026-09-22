@@ -1,7 +1,10 @@
 import { deepStrictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { BUILTIN_RUNTIME_BOOT_MANIFEST, type RuntimeBootMetadata } from "../../src/domains/providers/runtimes/boot-manifest.js";
+import {
+	BUILTIN_RUNTIME_BOOT_MANIFEST,
+	type RuntimeBootMetadata,
+} from "../../src/domains/providers/runtimes/boot-manifest.js";
 import { BUILTIN_RUNTIMES } from "../../src/domains/providers/runtimes/builtins.js";
 
 // The boot manifest is a hand-copied projection of the canonical descriptors,
