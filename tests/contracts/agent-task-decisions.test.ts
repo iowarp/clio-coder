@@ -1,8 +1,15 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { classifyAgentTask } from "../../src/domains/dispatch/agent-candidates.js";
+import type { AgentSpec } from "../../src/domains/agents/spec.js";
+import {
+	type AgentTaskFeatures,
+	agentRouteCandidates,
+	classifyAgentTask,
+} from "../../src/domains/dispatch/agent-candidates.js";
 import { classifyAgentTaskWithDecider } from "../../src/domains/dispatch/agent-task-decisions.js";
+import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
+import { deriveExecutionRole } from "../../src/domains/dispatch/execution-role.js";
 import type { Decider } from "../../src/domains/providers/decisions.js";
 import type { DecisionAnswer } from "../../src/domains/providers/types/inference.js";
 
@@ -159,5 +166,80 @@ describe("routing task classification", () => {
 		};
 		await classifyAgentTaskWithDecider("x".repeat(9000), decider);
 		strictEqual(sentTask.length, 4000);
+	});
+});
+
+describe("routing features and active selection", () => {
+	function spec(id: string, tags: string[], contract: string, capabilityClass: AgentSpec["capabilityClass"]): AgentSpec {
+		return {
+			id,
+			tools: ["read"],
+			toolRequirements: { required: ["read"], optional: [] },
+			capabilityClass,
+			latencyClass: "balanced",
+			projectContextTier: "none",
+			audience: "base",
+			skills: [],
+			tags,
+			resultContract: { kind: contract },
+			budget: { toolCalls: 10, readReserve: 1, synthesis: true },
+			body: id,
+		} as unknown as AgentSpec;
+	}
+	const specs = [
+		spec("scout", ["reconnaissance"], "scout-report", "read-only"),
+		spec("verifier", ["review", "verification"], "verifier-report", "verification"),
+	];
+	// The regex reads this as code_read, which favors scout.
+	const request = {
+		agentId: "scout",
+		task: "Explain how the footer renders",
+		agentSelection: { mode: "auto", baselineAgentId: "scout", approvedAuthorities: ["read-only", "verification"] },
+	} as unknown as DispatchRequest;
+	// A confident decision-model answer that would favor verifier instead.
+	const features: AgentTaskFeatures = {
+		taskType: "code_review",
+		complexity: "moderate",
+		domain: "frontend",
+		decomposable: false,
+		estimatedSubtasks: 1,
+		confidence: 0.95,
+	};
+	// Both recipes are enabled for active selection, so the priors decide.
+	const activeAgentRoles = specs.map((entry) => ({
+		agentId: entry.id,
+		executionRole: deriveExecutionRole({
+			attempt: 0,
+			capabilityClass: entry.capabilityClass,
+			resultContractKind: entry.resultContract.kind,
+		}),
+	}));
+	const priors = (mode: "shadow" | "active", withFeatures: boolean) =>
+		agentRouteCandidates({
+			specs,
+			request,
+			mode,
+			activeAgentRoles,
+			...(withFeatures ? { features } : {}),
+		}).evaluations.map((evaluation) => [
+			evaluation.agentId,
+			evaluation.rejections,
+			evaluation.priorReasons,
+			evaluation.coldPrior,
+		]);
+
+	// Active selection decides which recipe an auto dispatch runs. A decision
+	// model never picks for the main agent, so its features must not move it.
+	it("ignores decision-model features in active mode", () => {
+		deepStrictEqual(priors("active", true), priors("active", false));
+	});
+
+	it("keeps them as shadow evidence", () => {
+		const shadow = priors("shadow", true);
+		strictEqual(JSON.stringify(shadow) === JSON.stringify(priors("shadow", false)), false);
+		strictEqual(
+			shadow.some(([, , reasons]) => (reasons as string[]).includes("bounded-task-feature:code_review")),
+			true,
+		);
 	});
 });
