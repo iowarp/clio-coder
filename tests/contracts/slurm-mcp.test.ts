@@ -107,7 +107,13 @@ describe("Slurm through the clio-kit MCP server", () => {
 	it("lists the five Slurm tools as gateway capabilities with the unknown action class", async () => {
 		declare(process.execPath, [FIXTURE, journal]);
 		const { registry } = wire("auto-edit", false);
-		const found = await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "slurm" } });
+		// Nothing has recorded this server's tools yet, and an ordinary find no
+		// longer launches a server to fill that gap. The scoped refresh is the
+		// call that does.
+		const found = await registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "find", server: "slurm", refresh: true },
+		});
 		if (found.kind !== "ok" || found.result.kind !== "ok") throw new Error(JSON.stringify(found));
 		const listing = JSON.parse(found.result.output) as { capabilities: Array<{ name: string; actionClass: string }> };
 		const slurm = listing.capabilities.filter((entry) => entry.name.startsWith("mcp_slurm__"));
