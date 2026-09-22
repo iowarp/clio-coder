@@ -65,10 +65,11 @@ export type FleetAgentProfiles = Record<string, string>;
 /**
  * Harness decisions a System One model may answer instead of a chat model.
  * Each names a moment in the turn, not an agent: `routing` picks a worker at
- * dispatch, `skills` and `memory` narrow what the prompt carries, and
- * `toolRisk` rates a command's blast radius for the approval prompt.
+ * dispatch, `skills` and `memory` narrow what the prompt carries,
+ * `toolRisk` rates a command's blast radius for the approval prompt, and
+ * `drafts` picks the strongest of the candidates `/draft` generated.
  */
-export const DECISION_SITES = ["routing", "skills", "memory", "toolRisk"] as const;
+export const DECISION_SITES = ["routing", "skills", "memory", "toolRisk", "drafts"] as const;
 export type DecisionSite = (typeof DECISION_SITES)[number];
 
 /**

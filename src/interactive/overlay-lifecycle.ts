@@ -3,6 +3,7 @@ import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
 import type { LibraryEntryKind } from "../domains/resources/index.js";
 import { describeToolRisk as readToolRisk, toolRiskAdvisoryLine } from "../domains/safety/tool-risk.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
+import { judgeDrafts } from "./drafts.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
 import { showClioOverlayFrame } from "./overlay-frame.js";
@@ -27,6 +28,11 @@ import {
  * a card keeps a request alive before giving up on ever showing the line.
  */
 const TOOL_RISK_DECISION_TIMEOUT_MS = 5_000;
+/**
+ * Bound on the `/draft` judgment. The operator is watching the overlay for it,
+ * and a live three-candidate judgment answered in 264ms.
+ */
+const DRAFT_JUDGE_TIMEOUT_MS = 5_000;
 
 export * from "./overlay-key-routing.js";
 
@@ -161,6 +167,8 @@ export interface OverlayLifecycleController {
 	openViewOverlayState(initialFilter?: string): void;
 	/** `/btw <question>`: one side-question round rendered in its own overlay. */
 	openSideQuestionOverlayState(question: string): void;
+	/** `/draft [N] <request>`: parallel candidates judged by a decision model. */
+	openDraftOverlayState(request: string, count: number): void;
 	/** `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoffState(goal: string): void;
 	startFleetRunState(name: string, vars: Readonly<Record<string, string>>): void;
@@ -488,6 +496,36 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		...(openMemoryOverlayFactory ? { openMemoryOverlay: openMemoryOverlayFactory } : {}),
 		...(openViewOverlayFactory ? { openViewOverlay: openViewOverlayFactory } : {}),
 		askSideQuestion: (question, options) => deps.app.chat.askSideQuestion(question, options),
+		draftCandidates: (request, count, options) => deps.app.chat.draftCandidates(request, count, options),
+		/**
+		 * Read per call, like the toolRisk site, so binding or unbinding `drafts`
+		 * mid-session applies to the next draft.
+		 */
+		judgeDrafts: async (request, candidates, signal) => {
+			const settings = deps.app.getSettings?.();
+			if (!settings || !deps.app.providers) return { reason: "not judged: settings are not loaded" };
+			const status = inspectDecisionSite("drafts", {
+				settings,
+				providers: deps.app.providers,
+				ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS },
+			});
+			if (!status.bound) {
+				return {
+					reason:
+						status.reason === "unbound"
+							? "not judged: bind fleet.decisionProfiles.drafts to a System One profile"
+							: `not judged: ${status.detail}`,
+				};
+			}
+			const verdict = await judgeDrafts(
+				status.decider,
+				request,
+				candidates,
+				`${status.targetId}/${status.model ?? "default"}`,
+				signal,
+			);
+			return verdict ? { verdict } : { reason: `not judged: ${status.targetId} gave no usable answer` };
+		},
 		...(deps.app.agents ? { agents: deps.app.agents } : {}),
 		...(scheduling ? { getBudgetPreflight: () => scheduling.preflight() } : {}),
 		isTurnInFlight: () => deps.app.chat.isStreaming(),
@@ -506,6 +544,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 	const openMemoryOverlayState = overlayGeneralOpeners.openMemory;
 	const openViewOverlayState = overlayGeneralOpeners.openView;
 	const openSideQuestionOverlayState = overlayGeneralOpeners.openSideQuestion;
+	const openDraftOverlayState = overlayGeneralOpeners.openDraft;
 	const startFleetRunState = overlayGeneralOpeners.startFleetRun;
 	const startHandoffState = overlaySessions.startHandoff;
 	const toggleDispatchBoardOverlay = overlayGeneralOpeners.toggleDispatchBoard;
@@ -528,6 +567,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		openMemoryOverlayState,
 		openViewOverlayState,
 		openSideQuestionOverlayState,
+		openDraftOverlayState,
 		startFleetRunState,
 		startHandoffState,
 		openModelOverlayState: overlayModelSelectors.openModelOverlayState,

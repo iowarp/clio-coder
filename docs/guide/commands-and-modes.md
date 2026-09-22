@@ -247,6 +247,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
 | `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
+| `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
 | `/council` | `/council [--roster <name>] [--rounds <n>] [--synthesis <judge\|vote\|none>] <task>` | Ask a roster of read-only members the same task, with an optional vote or judge synthesis |
 | `/agents` | `/agents` | Open the Library on Agents. |
@@ -433,6 +434,25 @@ rather than queued, because a side question answered after the run it was asked
 during has already missed its moment. The round's token usage still shows in
 `/usage`, labeled as a side question, because it was a real call and cost real
 money; it is deliberately not counted as a turn.
+
+`/draft [N] <request>` runs N out-of-turn rounds for one request in parallel,
+two to four and three by default, and shows them side by side in an overlay. Each
+round reads the same history `/btw` reads, sends no tools, and runs at its own
+temperature, because the same request at the same temperature gives a model
+little reason to answer differently. It is built for a diffusion target such as
+Inception Mercury, where every candidate denoises in the overlay at once and all
+of them settle in about a second. When every candidate has settled, the decision
+model bound to `fleet.decisionProfiles.drafts` answers one `choice` over them and
+one correctness question per candidate. Each row then shows the probability mass
+the judge gave it, so the operator can see how decisive the pick was and not only
+which one won. A candidate the judge reads as wrong or incomplete is marked
+`judged unsound`, and the overlay opens on the pick. The arrows or the number keys
+move between candidates, the up and down arrows scroll, and Esc closes the overlay
+and cancels any round still running. Without a `drafts` binding the candidates are
+still shown and the overlay says why there are no bars. Like `/btw`, nothing
+reaches the session, a turn in flight refuses the command rather than queueing it,
+and each round's usage shows in `/usage` as a side question. Measured live, three
+Mercury drafts arrived in 454ms and jev-latest judged them in 264ms.
 
 `/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] <task>`
 asks a roster of two to five read-only members the same task and puts the group on
