@@ -62,6 +62,80 @@ describe("fleet.decisionProfiles validation", () => {
 	});
 });
 
+describe("decision site credentials", () => {
+	// A Jev target's key normally lives in the credential store under
+	// auth.apiKeyRef, and the sites pass only which env vars are set. Before the
+	// decider resolved the stored key, every request went out without it, got a
+	// 401, and every site silently fell back as if it were unbound.
+	it("sends the target's stored key on every decision", async () => {
+		const { settings } = settingsWith({ toolRisk: "system-one" });
+		const resolved: string[] = [];
+		const providers = {
+			getTarget: () => ({
+				id: "jev",
+				runtime: "typesafe-jev",
+				defaultModel: "jev-latest",
+				auth: { apiKeyRef: "target:jev" },
+			}),
+			getRuntime: () => typesafeJev,
+			auth: {
+				resolveForTarget: async (target: { id: string }) => {
+					resolved.push(target.id);
+					return { apiKey: "stored-key" };
+				},
+			},
+		} as unknown as ProvidersContract;
+		const status = inspectDecisionSite("toolRisk", { settings, providers, ctx });
+		ok(status.bound);
+		const seen: Array<string | null> = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			seen.push(new Headers(init?.headers).get("authorization"));
+			return new Response(JSON.stringify({ answers: { q: { type: "noul", noul: 0.9 } } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+		try {
+			await status.decider.ask(
+				{ task: "x" },
+				{ q: { type: "noul", instructions: "?", criteria: { true: "y", false: "n" } } },
+			);
+			await status.decider.ask(
+				{ task: "y" },
+				{ q: { type: "noul", instructions: "?", criteria: { true: "y", false: "n" } } },
+			);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		deepStrictEqual(seen, ["Bearer stored-key", "Bearer stored-key"]);
+		deepStrictEqual(resolved, ["jev", "jev"], "the key is read per call, so a rotation applies on the next one");
+	});
+
+	it("posts to the decision endpoint once when the target URL already names it", async () => {
+		const target = { id: "jev", runtime: "typesafe-jev", url: "https://api.typesafe.ai/v1/systemone/" };
+		const urls: string[] = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (url: unknown) => {
+			urls.push(String(url));
+			return new Response(JSON.stringify({ answers: { q: { type: "noul", noul: 0.9 } } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+		try {
+			await typesafeJev.decide?.(
+				target as never,
+				{ state: {}, questions: { q: { type: "noul", instructions: "?", criteria: { true: "y", false: "n" } } } },
+				ctx,
+			);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		deepStrictEqual(urls, ["https://api.typesafe.ai/v1/systemone"]);
+	});
+});
+
 describe("decision site resolution", () => {
 	// Null is the ordinary case, not a failure: it is what every caller sees
 	// until an operator binds the site.

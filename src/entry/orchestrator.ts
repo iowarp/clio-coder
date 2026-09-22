@@ -333,10 +333,12 @@ interface CompactionResolution {
 
 /**
  * Bound on the pre-turn relevance pass. It sits on the turn's critical path, so
- * it is short: a measured four-candidate batch answered in 274ms, and a target
- * that cannot beat this budget is one the turn is better off without.
+ * it is short. Live batches answered in 159ms and 274ms, and every jev-latest
+ * call measured for 0.5.4 finished within 315ms including a cold connection,
+ * so this leaves roughly five times the slowest observed call. A target that
+ * cannot beat it is one the turn is better off without.
  */
-const RELEVANCE_DECISION_TIMEOUT_MS = 3_000;
+const RELEVANCE_DECISION_TIMEOUT_MS = 1_500;
 
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;

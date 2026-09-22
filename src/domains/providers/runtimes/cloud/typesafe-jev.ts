@@ -52,8 +52,15 @@ function trimTrailingSlash(value: string): string {
 	return value.endsWith("/") && value.length > 1 ? value.slice(0, -1) : value;
 }
 
+/**
+ * The API root. An operator pasting the endpoint they read in the provider's
+ * docs writes `.../v1/systemone`, and the verb appends that segment itself, so
+ * a URL already ending in it is taken as the root it was meant to be rather
+ * than posted to `/systemone/systemone`.
+ */
 function targetBaseUrl(target: TargetDescriptor): string {
-	return trimTrailingSlash(target.url ?? TYPESAFE_BASE_URL);
+	const base = trimTrailingSlash(target.url ?? TYPESAFE_BASE_URL);
+	return base.endsWith("/systemone") ? base.slice(0, -"/systemone".length) : base;
 }
 
 function authHeaders(target: TargetDescriptor, ctx: ProbeContext): Record<string, string> {

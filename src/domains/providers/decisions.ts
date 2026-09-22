@@ -122,13 +122,22 @@ export interface Decider {
  * `decide()`, so a misconfigured target fails at the binding rather than
  * halfway through whatever the caller was gating.
  */
-export function createDecider(runtime: RuntimeDescriptor, target: TargetDescriptor, ctx: ProbeContext): Decider {
+export function createDecider(
+	runtime: RuntimeDescriptor,
+	target: TargetDescriptor,
+	ctx: ProbeContext,
+	resolveAuthToken?: (signal?: AbortSignal) => Promise<string | undefined>,
+): Decider {
 	const decide = runtime.decide;
 	if (!decide) {
 		throw new Error(`runtime '${runtime.id}' does not support decide()`);
 	}
-	const askDetailed: Decider["askDetailed"] = (state, questions, options = {}) =>
-		decide.call(
+	const askDetailed: Decider["askDetailed"] = async (state, questions, options = {}) => {
+		// Resolved per call rather than at binding: a decider outlives a key
+		// rotation, and an operator who stores a key mid-session is answered on
+		// the next question rather than at the next restart.
+		const authToken = ctx.authToken ?? (await resolveAuthToken?.(options.signal));
+		return decide.call(
 			runtime,
 			target,
 			{
@@ -137,8 +146,9 @@ export function createDecider(runtime: RuntimeDescriptor, target: TargetDescript
 				...(options.model !== undefined ? { model: options.model } : {}),
 				...(options.signal !== undefined ? { signal: options.signal } : {}),
 			},
-			ctx,
+			authToken ? { ...ctx, authToken } : ctx,
 		);
+	};
 	return {
 		askDetailed,
 		async ask(state, questions, options) {
