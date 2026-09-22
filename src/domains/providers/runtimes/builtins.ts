@@ -20,6 +20,7 @@ import bedrock from "./cloud/bedrock.js";
 import deepseek from "./cloud/deepseek.js";
 import google from "./cloud/google.js";
 import groq from "./cloud/groq.js";
+import inception from "./cloud/inception.js";
 import mistral from "./cloud/mistral.js";
 import openai from "./cloud/openai.js";
 import openaiCodex from "./cloud/openai-codex.js";
@@ -47,6 +48,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	deepseek,
 	google,
 	groq,
+	inception,
 	mistral,
 	openai,
 	openaiCodex,

@@ -126,6 +126,15 @@ export interface CatalogBackedSynthesisInput {
 	preferCatalogTransport?: boolean;
 	defaultBaseUrl: string;
 	defaultHeaders?: Record<string, string>;
+	/**
+	 * Wire quirks the runtime knows about its own endpoint, merged over whatever
+	 * the catalog entry declares. Needed where a provider is OpenAI-compatible
+	 * in shape but not in vocabulary — Inception rejects the `developer` role,
+	 * so without this every request carrying a system prompt is a 400.
+	 */
+	compat?: Model<"openai-completions">["compat"];
+	/** Default request-body params for every call to this runtime; per-request keys still win. */
+	samplingParams?: Record<string, unknown>;
 }
 
 export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput): Model<Api> {
@@ -177,6 +186,13 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 	const headers = { ...(input.defaultHeaders ?? {}), ...(builtin?.headers ?? {}), ...(targetHeaders ?? {}) };
 	if (Object.keys(headers).length > 0) {
 		model.headers = headers;
+	}
+	if (input.compat && api === "openai-completions") {
+		const merged = { ...(model.compat as object | undefined), ...input.compat };
+		(model as Model<"openai-completions">).compat = merged;
+	}
+	if (input.samplingParams) {
+		model.samplingParams = { ...input.samplingParams, ...(model.samplingParams ?? {}) };
 	}
 	return model;
 }
