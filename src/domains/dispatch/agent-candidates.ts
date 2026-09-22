@@ -141,6 +141,14 @@ export function agentRouteCandidates(input: {
 		expectedResultContractKind: ResultContract["kind"];
 		requestedAuthority: AgentAutomationAuthority;
 	};
+	/**
+	 * Features a caller already computed, which is how the `routing` decision
+	 * site reaches this path. Candidate evaluation is synchronous and sits deep
+	 * inside dispatch, so a System One answer is resolved before the request
+	 * gets here rather than by making this function await. Omitted, the regex
+	 * classifier runs exactly as it always has.
+	 */
+	features?: AgentTaskFeatures;
 }): { evaluations: AgentCandidateEvaluation[]; dimensions: AgentRouteDimension[] } {
 	const { request, specs } = input;
 	const byId = new Map(specs.map((spec) => [spec.id, spec]));
@@ -184,7 +192,7 @@ export function agentRouteCandidates(input: {
 		locality: request.routingIntent?.locality ?? "any",
 		localAgentIds: specs.map((spec) => spec.id),
 		allowedAgentIds,
-		features: classifyAgentTask(request.task),
+		features: input.features ?? classifyAgentTask(request.task),
 	});
 	const evaluations = candidates.evaluations.map((evaluation) => ({
 		...evaluation,
