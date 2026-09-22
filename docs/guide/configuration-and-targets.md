@@ -979,6 +979,9 @@ component:
 - `skills` answers which installed skills the listing carries, before the prompt
   is composed.
 - `memory` answers which durable records the prompt carries, at the same point.
+  The records sit in the system prompt, so a session keeps the first ranking it
+  applies until the approved records change, and a follow-up turn never
+  recompiles the prompt because the task moved.
 - `toolRisk` rates a command's blast radius for the approval prompt, when a tool
   call needs a decision from you.
 - `drafts` picks the strongest of the candidates `/draft` generated, and says

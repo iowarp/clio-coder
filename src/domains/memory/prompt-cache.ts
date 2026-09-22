@@ -60,6 +60,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 	const readStore = options.readStore ?? readMemoryStoreSnapshot;
 	let frame: { key: string; section: string } | null = null;
 	let selected: { key: string; section: string } | null = null;
+	let pinned: PinnedRanking | null = null;
 	return (request) => {
 		const dataDir = options.getDataDir();
 		const activeRepository = canonicalMemoryRepositoryIdentity(request.cwd);
@@ -82,10 +83,22 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 				activePaths: [...request.activePaths],
 				activeSymbols: [...(request.activeSymbols ?? [])],
 			};
+			// The section sits in the system prompt, so a ranking that moved with
+			// every turn's task would recompile the prompt and send the whole
+			// conversation through a cold prefill on each follow-up (26.6s at 64k
+			// tokens on a local 27B). The first ranking a session applies is kept
+			// until the approved records or the session's authority change.
+			const precomputed = pinRanking(
+				pinned,
+				request.precomputedRelevance,
+				{ authority: pinAuthority(authority, request.sessionAuthority), session: request.sessionAuthority },
+				snapshot.revision,
+			);
+			pinned = precomputed === undefined ? pinned : precomputed.pin;
 			// The score map is keyed, not just its presence: the same records under
-			// a new turn's scores select differently, and reusing the cached text
+			// a new ranking's scores select differently, and reusing the cached text
 			// would serve a section those scores no longer justify.
-			const precomputed = request.precomputedRelevance;
+			const ranking = precomputed?.ranking;
 			const key = createHash("sha256")
 				.update(
 					JSON.stringify([
@@ -96,7 +109,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 						experimentalRelevance,
 						MEMORY_RELEVANCE_VERSION,
 						MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
-						precomputed === undefined ? null : [precomputed.source, sortedScores(precomputed.scores)],
+						ranking === undefined ? null : [ranking.source, sortedScores(ranking.scores)],
 					]),
 				)
 				.digest("hex");
@@ -107,7 +120,7 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 					activeRepository,
 					activeRuntime: { kind: "runtime", key: request.runtimeId },
 					...(experimentalRelevance ? { relevance } : {}),
-					...(precomputed === undefined ? {} : { precomputedRelevance: precomputed }),
+					...(ranking === undefined ? {} : { precomputedRelevance: ranking }),
 				}).section;
 				selected = Object.freeze({ key, section });
 			}
@@ -118,4 +131,57 @@ export function createMemoryPromptReader(options: MemoryPromptReaderOptions): (r
 		frame = request.turnId === null ? null : Object.freeze({ key: frameKey, section });
 		return section;
 	};
+}
+
+interface PinnedRanking {
+	/** Reader authority without the session component, so a pending id can be matched. */
+	readonly authority: string;
+	/** Session authority the ranking was pinned under. */
+	readonly session: string;
+	readonly revision: string;
+	readonly ranking: PrecomputedMemoryRelevance;
+}
+
+function pinAuthority(authority: string, sessionAuthority: string): string {
+	return authority.replace(JSON.stringify(sessionAuthority), "");
+}
+
+/**
+ * A session's first turn can run before its id exists, under `pending:<n>`.
+ * The session that id becomes is the same session, so the pin carries over.
+ */
+function sameSession(pinned: string, current: string): boolean {
+	if (pinned === current) return true;
+	try {
+		const [pinnedEpoch, pinnedId] = JSON.parse(pinned) as [unknown, unknown];
+		const [currentEpoch] = JSON.parse(current) as [unknown, unknown];
+		return pinnedEpoch === currentEpoch && typeof pinnedId === "string" && pinnedId.startsWith("pending:");
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The ranking this turn's section uses: the session's pinned one while it
+ * still applies, even on a turn whose pass produced no scores, otherwise this
+ * turn's, which becomes the new pin. With no pin and no scores the section
+ * keeps its base order, which is every turn when the site is unbound.
+ */
+function pinRanking(
+	pinned: PinnedRanking | null,
+	fresh: PrecomputedMemoryRelevance | undefined,
+	identity: { authority: string; session: string },
+	revision: string,
+): { ranking: PrecomputedMemoryRelevance; pin: PinnedRanking } | undefined {
+	if (
+		pinned !== null &&
+		pinned.authority === identity.authority &&
+		pinned.revision === revision &&
+		sameSession(pinned.session, identity.session)
+	) {
+		return { ranking: pinned.ranking, pin: { ...pinned, session: identity.session } };
+	}
+	// An empty score map ranks nothing, so it must not claim the session's pin.
+	if (fresh === undefined || Object.keys(fresh.scores).length === 0) return undefined;
+	return { ranking: fresh, pin: { ...identity, revision, ranking: fresh } };
 }
