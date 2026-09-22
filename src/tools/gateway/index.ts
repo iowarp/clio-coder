@@ -26,10 +26,16 @@ import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.j
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 export {
 	createMcpCapabilitySource,
+	type McpCapabilityMetadata,
 	type McpCapabilitySource,
 	type McpCapabilitySourceOptions,
+	type McpCatalog,
+	type McpCatalogEntry,
+	type McpCatalogProvenance,
 	type McpCloseReport,
 	type McpListing,
+	type McpMetadataResult,
+	type McpRefreshResult,
 	type McpServerListing,
 	type McpTeardownReport,
 	mcpTrustRemedy,
@@ -76,6 +82,11 @@ export const gatewayToolSurface = {
 		op: StringEnum(GATEWAY_OPS, { description: "find, describe, or call." }),
 		capability: Type.Optional(Type.String({ description: "describe and call: the capability name from find." })),
 		query: Type.Optional(Type.String({ description: "find: case-insensitive filter over names and descriptions." })),
+		// The find payload names the exact refresh call for a server whose catalog
+		// is missing, so the remedy is taught where it is needed rather than
+		// carried in every turn's attached schema.
+		server: Type.Optional(Type.String({ description: "find: one MCP server id." })),
+		refresh: Type.Optional(Type.Boolean({ description: "find: list that server live." })),
 		args: Type.Optional(
 			Type.Record(Type.String(), Type.Unknown(), {
 				description: "call: the capability's arguments, matching its describe schema.",
@@ -182,7 +193,36 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 
 	const runFind = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
 		const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+		const server = typeof args.server === "string" ? args.server.trim() : "";
+		const refresh = args.refresh === true;
 		const allowed = allowedSet(options);
+		if (refresh && server.length === 0) {
+			return {
+				kind: "error",
+				message: 'gateway: refresh needs the server it applies to; call gateway(op="find", server="<id>", refresh=true)',
+			};
+		}
+		if (server.length > 0 || refresh) {
+			if (deps.mcp === undefined) {
+				return { kind: "error", message: "gateway: this session declares no local MCP servers" };
+			}
+			// A restricted surface already suppresses broad MCP discovery. Let it
+			// launch a server here and the recipe's tool ceiling would stop being
+			// a ceiling on what this run can start.
+			if (allowed !== null) {
+				return {
+					kind: "error",
+					message: `gateway: MCP discovery is not available on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe or explicit task scope excludes it`,
+				};
+			}
+			const declared = deps.mcp.declaredIds();
+			if (!declared.includes(server)) {
+				return {
+					kind: "error",
+					message: `gateway: no MCP server named "${server}" is declared${declared.length > 0 ? `; declared servers: ${[...declared].sort().join(", ")}` : ""}`,
+				};
+			}
+		}
 		const reservation = reserveObservation(GATEWAY_FIND_SELF_CAP_BYTES, options);
 		if (reservation.exhausted) {
 			return observationBudgetExhausted({
@@ -195,25 +235,52 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		}
 		commitObservationReservation(reservation);
 		try {
-			// Trusted MCP servers connect here, lazily, and register their tools
-			// before the registry listing below is taken. Untrusted and stale
-			// servers are described with their remedy and never launched.
+			// MCP metadata comes from recorded catalogs, so an ordinary find lists
+			// what this session offers without launching a single server. Only an
+			// explicit scoped refresh connects, and only to the server it names.
 			let servers: McpServerListing[] = [];
 			let diagnostics: string[] = [];
+			let missing: string[] = [];
+			let mcpEntries: GatewayCapabilityEntry[] = [];
+			let refreshNote: string | undefined;
+			// A named server narrows the whole answer to that server, so the
+			// registry's builtins and extensions are not part of it. The scoped
+			// form is rejected above on a restricted surface, so the two filters
+			// here never have to compose.
+			const scoped = server.length > 0;
+			const namespace = `mcp_${server}__`;
 			if (deps.mcp && allowed === null) {
-				const listing = await deps.mcp.list(options?.signal ? { signal: options.signal } : {});
-				servers = listing.servers;
-				diagnostics = listing.diagnostics;
+				if (refresh) {
+					const result = await deps.mcp.refresh(server, options?.signal ? { signal: options.signal } : {});
+					if (result.reason !== undefined) refreshNote = result.reason;
+				}
+				const catalog = deps.mcp.catalog();
+				servers = scoped ? catalog.servers.filter((entry) => entry.id === server) : catalog.servers;
+				diagnostics = catalog.diagnostics;
+				missing = scoped ? catalog.missing.filter((id) => id === server) : catalog.missing;
+				mcpEntries = catalog.entries
+					.filter((entry) => !scoped || entry.name.startsWith(namespace))
+					.map((entry) => ({
+						name: entry.name,
+						kind: gatewayCapabilityKind(entry.name),
+						description: firstSentence(entry.description),
+						actionClass: entry.actionClass,
+					}));
 			}
-			const entries: GatewayCapabilityEntry[] = registry
+			const registryEntries: GatewayCapabilityEntry[] = registry
 				.listGateway()
-				.filter((spec) => allowed === null || allowed.has(spec.name))
+				.filter((spec) => (scoped ? spec.name.startsWith(namespace) : allowed === null || allowed.has(spec.name)))
 				.map((spec) => ({
 					name: spec.name,
 					kind: gatewayCapabilityKind(spec.name),
 					description: firstSentence(spec.description),
 					actionClass: spec.baseActionClass,
-				}))
+				}));
+			// A registered spec is the live one; a cached descriptor of the same
+			// name is the older snapshot of it and must not displace it.
+			const byName = new Map(registryEntries.map((entry) => [entry.name, entry]));
+			for (const entry of mcpEntries) if (!byName.has(entry.name)) byName.set(entry.name, entry);
+			const entries = [...byName.values()]
 				.filter(
 					(entry) =>
 						query.length === 0 || entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query),
@@ -227,6 +294,14 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				count: shown.length,
 				total,
 				...(servers.length > 0 ? { servers } : {}),
+				...(missing.length > 0
+					? {
+							missingCatalogs: missing,
+							missingCatalogsNote:
+								'no recorded tool list for these servers; run gateway(op="find", server="<id>", refresh=true)',
+						}
+					: {}),
+				...(refreshNote !== undefined ? { refresh: refreshNote } : {}),
 				...(diagnostics.length > 0 ? { diagnostics } : {}),
 				...(truncated ? { note: "listing truncated; narrow it with query" } : {}),
 			};
@@ -249,22 +324,75 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		}
 	};
 
-	const runDescribe = async (
-		args: Record<string, unknown>,
-		options: ToolInvokeOptions | undefined,
-	): Promise<ToolResult> => {
+	/** Authority notes shared by a live spec and a cached MCP descriptor, which describe identically. */
+	const admissionNotes = (name: string, actionClass: ActionClass): string[] => [
+		`Runs through the same admission as a direct call, under its own name and action class (${actionClass}); the approval overlay, audit row, and ledger record name ${name}, not the gateway.`,
+		autonomyNote(actionClass),
+	];
+
+	/**
+	 * Describe an MCP capability the registry does not hold, from its recorded
+	 * catalog. This never launches the owning server: the schema shown here is a
+	 * snapshot, and the call path validates against the server's live listing,
+	 * so launching to describe would buy nothing and spend a process.
+	 */
+	const describeFromCatalog = (name: string): ToolResult => {
+		const found = deps.mcp?.metadata(name);
+		if (found?.metadata == null) {
+			return {
+				kind: "error",
+				message: `gateway: ${found?.reason ?? `unknown capability ${name}`}`,
+			};
+		}
+		const { metadata } = found;
+		const authority = [
+			...admissionNotes(metadata.name, metadata.actionClass),
+			"Recorded catalog, not a live listing: the server's current schema is what a call validates against, and a tool it no longer offers fails rather than running.",
+		];
+		if (metadata.truncated) {
+			authority.push(
+				`The catalog this came from is incomplete; list the server again with gateway(op="find", server="${metadata.serverId}", refresh=true).`,
+			);
+		}
+		const mcpNote = deps.mcp?.authorityNote(metadata.name);
+		if (mcpNote) authority.push(mcpNote);
+		return {
+			kind: "ok",
+			output: JSON.stringify({
+				name: metadata.name,
+				kind: "mcp",
+				description: metadata.description,
+				parameters: wireParameterSchema(metadata.parameters),
+				actionClass: metadata.actionClass,
+				executionMode: "sequential",
+				catalog: metadata.provenance,
+				authority,
+			}),
+			details: { op: "describe", described: metadata.name, catalog: metadata.provenance },
+		};
+	};
+
+	const runDescribe = (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): ToolResult => {
 		const name = typeof args.capability === "string" ? args.capability.trim() : "";
 		if (name.length === 0) return { kind: "error", message: 'gateway: op="describe" requires capability' };
 		const allowed = allowedSet(options);
 		if (allowed !== null && !allowed.has(name)) return outsideSurface(name, allowed);
-		const resolved = await resolveCapability(name, options);
-		if (resolved.spec === null) return { kind: "error", message: resolved.message };
-		const spec = resolved.spec;
+		const spec = registry.get(name as ToolName);
+		if (spec === undefined) {
+			if (isMcpToolName(name) && deps.mcp) return describeFromCatalog(name);
+			return {
+				kind: "error",
+				message: `gateway: unknown capability "${name}"; run gateway(op="find") to list the capabilities this session offers`,
+			};
+		}
+		if (toolSpecPlacement(spec) === "direct") {
+			return {
+				kind: "error",
+				message: `gateway: "${name}" is a direct tool with an attached schema; call it directly, not through the gateway`,
+			};
+		}
 		const kind = gatewayCapabilityKind(spec.name);
-		const authority = [
-			`Runs through the same admission as a direct call, under its own name and action class (${spec.baseActionClass}); the approval overlay, audit row, and ledger record name ${spec.name}, not the gateway.`,
-			autonomyNote(spec.baseActionClass),
-		];
+		const authority = admissionNotes(spec.name, spec.baseActionClass);
 		if (spec.name === ToolNames.WebFetch) {
 			authority.push(
 				"A non-GET method or a body is an outward action and asks at suggest and auto-edit; use web_read when a plain GET is enough.",
@@ -287,9 +415,16 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			parameters: wireParameterSchema(spec.parameters),
 			actionClass: spec.baseActionClass,
 			executionMode: spec.executionMode ?? "sequential",
+			// A registered MCP spec came from this session's own listing, so it
+			// carries the same provenance field a cached descriptor does.
+			...(kind === "mcp" ? { catalog: "live" } : {}),
 			authority,
 		};
-		return { kind: "ok", output: JSON.stringify(payload), details: { op: "describe", described: spec.name } };
+		return {
+			kind: "ok",
+			output: JSON.stringify(payload),
+			details: { op: "describe", described: spec.name, ...(kind === "mcp" ? { catalog: "live" } : {}) },
+		};
 	};
 
 	const runCall = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
@@ -337,6 +472,12 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		async run(rawArgs, options): Promise<ToolResult> {
 			const args = prepareGatewayArguments(rawArgs);
 			const op = typeof args.op === "string" ? args.op : "";
+			// Discovery scope belongs to find alone. Accepting it elsewhere would
+			// read as a way to launch a server from describe or call, which is
+			// exactly what those two paths no longer do on their own.
+			if (op !== "find" && (args.server !== undefined || args.refresh !== undefined)) {
+				return { kind: "error", message: `gateway: server and refresh apply to op="find", not op="${op}"` };
+			}
 			if (op === "find") return runFind(args, options);
 			if (op === "describe") return runDescribe(args, options);
 			if (op === "call") return runCall(args, options);
