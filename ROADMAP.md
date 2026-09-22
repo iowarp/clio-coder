@@ -1,20 +1,34 @@
 # Clio Coder roadmap
 
-Clio Coder v0.5.1 is released. The next release focus is context management,
-compaction, and memory: preserving task continuity, making context decisions
-understandable, and reducing the cost of long sessions. The terminal remains
-the primary coding interface.
+Clio Coder v0.5.2 is released and v0.5.3 is in development. The release focus
+remains context management, compaction, and memory: preserving task continuity,
+making context decisions understandable, and reducing the cost of long
+sessions. The terminal remains the primary coding interface.
 
 This roadmap describes priorities, not available features or delivery promises.
 For implemented behavior, use the [documentation](docs/README.md). Historical
 release changes are in [CHANGELOG.md](CHANGELOG.md); older development plans in
 git history are not current contracts.
 
-## v0.5.2 context and memory priorities
+## Landed on the v0.5.3 branch
 
-Development starts on the local `v052` branch with solution design and
-evaluation planning. The implementation sprint follows maintainer approval of
-the solution shape. These priorities describe intended work, not shipped features.
+Two provider surfaces are on the development branch, not in a tagged release.
+Both are documented in
+[configuration-and-targets.md](docs/guide/configuration-and-targets.md).
+
+- **Diffusion model support.** The `inception` runtime serves Inception's
+  Mercury models over chat and the existing fill-in-the-middle verb, in the
+  latency-sensitive slot a frontier model cannot fill.
+- **System One decision models.** The hidden `typesafe-jev` runtime and the
+  `decide()` contract verb return calibrated distributions over a closed answer
+  shape instead of prose. Four harness decision sites can be bound to one
+  through `fleet.decisionProfiles`. This is an alpha surface, opt-in by absence,
+  and the call sites that consume a binding are still being built.
+
+## Shipped in v0.5.2
+
+The context and memory priorities listed here as intended work are released.
+[CHANGELOG.md](CHANGELOG.md) records what each one became.
 
 - **Task continuity through compaction.** Let the active agent save a bounded
   handoff with its next action, preserve it verbatim, and recover interrupted
@@ -28,9 +42,8 @@ the solution shape. These priorities describe intended work, not shipped feature
   restoration and model calls, and evaluate task completion, context cost,
   cache effects, and recovery latency together.
 
-Threshold changes and wider memory automation depend on comparative evaluation.
-The first implementation slice is the shared context snapshot and deterministic
-pressure policy, followed by the recoverable handoff transaction.
+Threshold changes and wider memory automation still depend on comparative
+evaluation.
 
 ## v0.5.0 launch priorities
 
