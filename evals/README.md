@@ -9,6 +9,7 @@ and local campaigns belong outside this directory.
 | Inputs | What they measure | Execution |
 | --- | --- | --- |
 | `behavioral-machinery.yaml` | Production dispatch admission, prompt compilation, result contracts and receipt sealing with scripted workers | Offline, model-free; shared `tests/harness` isolation and dispatch fixtures |
+| `machinery/` | Dispatch admission authority, prompt layering, context budget enforcement, durable memory selection and continuity transactions, each pinned per scenario | Offline, model-free; isolated Clio home per task and scripted fixtures |
 | `behavioral-model.yaml`, negative control, `tool-surface-model.yaml` | Observed model behavior through the real Clio runner and event stream | Explicit model requests; pass your configured `--target` and optional `--model` |
 | `tool-bench/` | Production tool registry execution, behavior digests, admission decisions and resource measurements for edit, read, write, grep, find and bash | Offline; default correctness in contract tests, large profiles explicitly invoked |
 | `tracked-metrics-suite.yaml` | Ten coding tasks against a fixed historical source revision | Explicit model requests; Git clone and pnpm dependency setup per fresh workspace |
@@ -76,6 +77,46 @@ recorded scenarios exercise.
 No bash scenario removes a path or reaches the network, and a contract test
 enforces that. A bench that depends on the safety net to stop a destructive
 command is one admission change away from deleting the checkout it runs in.
+
+## Machinery baselines
+
+`evals/machinery/baselines/<suite>.json` records, per scenario, the two values
+that are a property of the harness rather than of the machine: `task.solved` and
+the `custom.digest.behavior` fingerprint of the observed behavior and post-state.
+There is no `fs_ops` row here, because these scenarios drive the machinery rather
+than the tool path. Five suites are covered: `dispatch-admission`,
+`prompt-compile`, `context-budget`, `memory-selection` and `continuity`, for 31
+pinned scenarios.
+
+```sh
+node dist/cli/index.js eval baseline check  --suite evals/machinery/dispatch-admission.yaml
+node dist/cli/index.js eval baseline record --suite evals/machinery/dispatch-admission.yaml
+```
+
+`check` is the loop worth running after touching dispatch admission, the prompt
+compiler, the budget accounting, the memory prompt cache or the continuity
+controller. It names the scenario whose behavior moved, and `eval run` performs
+the same check inline. When a change is intended, `record` rewrites the file and
+the diff is what a reviewer reads.
+
+Each suite is generated from the table in `evals/machinery/lib/suites.ts` by
+`suite-gen.ts`, one task per scenario, and a contract test fails when a committed
+file drifts from that table or when the pin list gains a metric that is not a
+harness property. Scenario implementations live beside the table, one module per
+suite, and `driver.ts` prints exactly one metric line.
+
+### The digest is a fingerprint of the behavior, not of the run
+
+Every scenario returns named facts and the expectations it checked against them.
+The driver replaces the scratch home, the checkout, the workspace and the temp
+root with fixed tokens, blanks the keys that carry time, serializes with sorted
+object keys, and hashes that. Two runs that did the same thing in different
+directories at different times digest the same; a changed observation or a broken
+expectation moves the digest, which is what makes the recorded line reviewable.
+
+Prompt text is fingerprinted the same way for the same reason: the identity
+fragment substitutes this checkout's docs, source and state paths, so hashing the
+raw bytes would pin where the repository was cloned.
 
 The former `behavioral-machinery-baseline.json` was historical output, not a gate.
 It is available in Git history. Generate fresh results through `clio-coder eval`
