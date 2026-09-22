@@ -10,7 +10,7 @@
  *
  * This module is the pure building block for the Clio equivalent. It:
  *   1. Declares the RetrySettings shape and sensible defaults.
- *   2. Routes generic provider classification through pi-ai 0.86.1's
+ *   2. Routes generic provider classification through pi-ai 0.87.1's
  *      `isRetryableAssistantError`, retaining only Clio's local-model delta.
  *   3. Computes the backoff delay for a given attempt (`computeRetryDelayMs`)
  *      with the cap the settings declare; callers schedule the wait.

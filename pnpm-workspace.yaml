@@ -17,4 +17,4 @@ onlyBuiltDependencies:
 overrides:
   esbuild: "0.28.1"
 patchedDependencies:
-  '@earendil-works/pi-tui@0.86.1': patches/@earendil-works__pi-tui@0.86.1.patch
+  '@earendil-works/pi-tui@0.87.1': patches/@earendil-works__pi-tui@0.87.1.patch

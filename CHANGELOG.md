@@ -29,6 +29,11 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add the `capabilities` decision site for `gateway` find. The find filter is one substring over name and description, so a paraphrased need returned nothing. Bound, a query with fewer than three matches keeps them and gains up to five `related` entries ranked by the decision model, and an unfiltered listing over 40 entries is ordered by fit with the turn's task. Nothing is ever removed, a query's own matches are never reordered, and worker gateways never rank. Against a 57-entry catalog with 24 paraphrased needs over two live runs, the substring filter found the right capability 2 times in 48, and 48 in 48 with related entries, at 165ms p50.
 - Add `scripts/decision-probe.ts`, which scores a site's wording against a labeled fixture through the production brief, live. It exists because jev-latest follows criteria text literally and wording is the quality lever; a shape question asked about the whole request read a delegate-then-summarize request as a sequence until it was scoped to the worker's own work.
 
+### Pi 0.87.1
+
+- Move to Pi 0.87.1. Subscriptions can now reach Claude Opus 5.5, GPT-6 Sol and GPT-6 Luna. Opus 5.5 was refused on the Anthropic subscription because the pinned client identified as Claude Code 2.1.251, and the model requires 2.1.280 or newer. The catalog now lists all three, so `targets use` accepts them. Opus 5.5 refuses disabled thinking, so a route to it needs a thinking level.
+- Keep the worker's terminal handoff to three requests when its repairs run out. Pi replaced `shouldStopAfterTurn` with `finishTurn`, which decides before `turn_end` is emitted, so the repair that ran on `turn_end` recorded the exhausted bound one request too late. The repair now runs inside `finishTurn`.
+
 ### Fixes
 
 - List `inception` and `typesafe-jev` in the runtime boot manifest. The TUI refused a Mercury chat target at startup because the manifest is read before the providers domain loads and neither row had been added; headless `run` hydrates the full registry and never hit the check. A contract test now diffs the manifest against the built-in runtimes in both directions. The v0.5.3 tag shipped with this defect.

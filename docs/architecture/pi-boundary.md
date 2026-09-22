@@ -1,6 +1,6 @@
 # Pi SDK Boundary
 
-Clio Coder pins Pi 0.86.1 as its provider, agent-loop, and terminal SDK. This
+Clio Coder pins Pi 0.87.1 as its provider, agent-loop, and terminal SDK. This
 page records where Pi owns a reusable primitive and where Clio deliberately
 keeps product behavior. Review this table on every Pi upgrade. An action marked
 `Keep` is an explicit boundary decision, not an invitation to replace the
@@ -51,6 +51,22 @@ Clio-owned surface during a dependency bump.
 | pi-tui capability overrides (`PI_HYPERLINKS`, `PI_IMAGE_PROTOCOL`, `PI_TRUE_COLOR`, `setCapabilityOverrides`) and `PI_TUI_ESC_TIMEOUT` (0.84.2, 0.84.4) | `src/interactive/theme/tokens.ts` truecolor detection | Decline. | These govern pi-tui's own image, hyperlink, and escape-sequence handling. Clio's theme detects truecolor from `COLORTERM` and `TERM` independently and does not consume pi-tui capability detection. |
 | pi-tui `TuiAltScreenOptions.copyOnSelect` / `copySelection` and transcript search (`tui.altScreen.search*`, 0.84.2, 0.84.4) | `src/interactive/interactive-shell.ts` alt-screen construction and `src/domains/config/keybindings.ts` | Inherit defaults. | Selection copy stays on by default. The tracked input-policy patch runs Clio's router before Pi's viewport listeners; `ctrl+g` advances a match only while the search overlay is focused, so the Clio leader chord is unavailable during a search and nowhere else. Locked by the engine lifecycle contract. |
 | pi-tui alternate-screen direct-row painting (0.84.2) | `src/engine/instrumented-tui.ts` | Inherit. | `compositeOverlays`, `extractCursorPosition`, and `applyLineResets` still run inside one `doRender`, so Clio's frame and phase measurements are unchanged. Locked by the engine lifecycle contract. |
+
+## 0.87.1 integration
+
+All three direct Pi dependencies are pinned to **0.87.1** in the manifest and
+lockfile. Only pi-tui is patched, and the 0.86.1 patch applies unchanged. The
+0.87.0 SDK breaks are mostly in the coding-agent package, which Clio does not
+consume. The ones that reach Clio are these.
+
+| Pi 0.87.1 surface | Clio adaptation and reason |
+| --- | --- |
+| `shouldStopAfterTurn` removed in favor of `finishTurn` | The worker's helper-result stop returns `{ action: "end" }` from `finishTurn`. Pi now calls it before `turn_end` and applies the decision afterwards. The predicate reads state that `message_end` and tool execution set, and both run earlier, so the stop point is unchanged. Pi also calls it for error and aborted responses; the predicate is pure, so that is harmless. |
+| `prepareRequest`, `peekQueuedMessages`, `AgentTurnDecision` `continue` | Not adopted. Clio's request assembly and follow-up scheduling stay Clio-owned. |
+| Anthropic OAuth client version 2.1.280 | Required by Claude Opus 5.5 on a subscription; 2.1.251 was refused with `claude_code_version_too_old`. |
+| Catalog: Claude Opus 5.5, GPT-6 Sol, GPT-6 Luna | Inherited through `listCatalogModelsForRuntime`, so `targets use` and the model picker accept them. Opus 5.5 refuses disabled thinking; select a thinking level for it. |
+| Unknown OpenAI-compatible endpoints default to `supportsStrictMode: false` | Clio declares no constrained sampling, so tool entries only lose their `"strict": false` field. Local runtimes already set the flag explicitly. |
+| Per-model image input limits (`inputLimits.images`) | Inherited from catalog entries; Clio configures none of its own. |
 
 ## 0.86.1 integration
 
@@ -139,7 +155,7 @@ Review these files first when Pi changes. They intentionally contain little
 behavior and should not grow another implementation of an SDK primitive.
 
 - `src/engine/api-registry.ts` owns Clio's ordered dispatcher using Pi's public lazy API factories and the provider catalogs selected in `src/engine/models.ts` for Clio's built-in runtimes. Its dynamic `/compat` bridge exists only for configured out-of-tree runtime plugins that require Pi's process-global registry identity.
-- `src/engine/env-api-keys.ts` pins Pi 0.86.1's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
+- `src/engine/env-api-keys.ts` pins Pi 0.87.1's synchronous environment-key and ambient-credential discovery behind a parity contract; revisit it on every Pi upgrade until Pi exports that helper directly.
 - `src/engine/apis/openai-completions.ts` maps compatibility flags, sampling parameters, and thinking budgets. Its Clio deltas are the local-runtime guards and sentinel, Harmony, and Gemma filters.
 - `src/engine/provider-payload.ts` retains only the OpenAI Responses reasoning-summary patch.
 - `src/engine/types.ts` and `src/engine/ai.ts` expose erased Pi types and `StringEnum` behind the engine boundary.

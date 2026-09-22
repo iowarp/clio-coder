@@ -63,7 +63,7 @@ function apiKeyEnvVars(provider: string): readonly string[] | undefined {
 	return name ? [name] : undefined;
 }
 
-/** Synchronous provider-key discovery pinned to pi-ai 0.86.1's public behavior. */
+/** Synchronous provider-key discovery pinned to pi-ai 0.87.1's public behavior. */
 export function findEngineEnvKeys(provider: string, env?: ProviderEnv): string[] | undefined {
 	const names = apiKeyEnvVars(provider);
 	if (!names) return undefined;

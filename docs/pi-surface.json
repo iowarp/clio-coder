@@ -2,7 +2,7 @@
 	"schemaVersion": 1,
 	"packages": {
 		"@earendil-works/pi-agent-core": {
-			"version": "0.86.1",
+			"version": "0.87.1",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -12,7 +12,7 @@
 						"AcquireLaneOptions": "ba8834c3ab6866e3c4b62e638c26b3dddad971f18bddfc69d0c71621d623c9cd",
 						"AfterToolCallContext": "099df42c940c2a48e6d311344ca5e0081b656d1e901bb974e1d5a62f68db438a",
 						"AfterToolCallResult": "711a3aa3ce02b021c9d7ca16453ccf265e78330077292b7dc25cd74590dfef94",
-						"Agent": "3b3ca33f478f5fe7ece56fef7920e1624d9c2fa12dc611b20b48ba5fb8deda3b",
+						"Agent": "444de385cbd2d1252706142fb38d7cbe461be04c7289a8e2e986205706f42486",
 						"AGENT_TELEMETRY_SCHEMAS": "547a1704958f615bd4e085bb185283be56ab8a35d02a340bde49d6be7ec2a7a5",
 						"AgentContext": "e06a0b7119b407c651a7d8bd78c8dd8b8dc950239ab0ff65379347767c120c54",
 						"AgentEvent": "146fec89ee4fcbeaca966a761c6ac823cc44ef75d70d2432b32e29d87fe51715",
@@ -31,16 +31,19 @@
 						"AgentInitialState": "f236d9b383de48e5c61f5da511e9e817fb5d43f8c42958b71c5e8797bcb50601",
 						"AgentLane": "741022bd1aff0816a34f819d1acacc69424f14e80a1fec8b618f4b1898ac2cce",
 						"agentLoop": "fb2687cd13f146a8a8a893b5102c9af11bf92e1b17b32eede434cea7ed567647",
-						"AgentLoopConfig": "705254022d8107b3bb79b5bdca79bf3b56ea58e861913022edeaff20acb1215d",
+						"AgentLoopConfig": "25dd51bb3e48f55eddfff960869a4c4d517718998f84b909c3790a96fb6b0496",
 						"agentLoopContinue": "04c0635636d42e6eaec0a9322548916b39622df3fad355039d35e186b76afadf",
 						"AgentLoopTurnUpdate": "1c5b7fbec24271ff70f84b53a25a886dd688e9f48126169b600fc2aa34c8fa51",
 						"AgentMessage": "99d179020fe5305d4038abfc7a3b02af2de6b1fa37df8b6187307833f0bde482",
-						"AgentOptions": "293f32796140c3dd46a78df2c2e0142ec13c6df3e744817d323fd10587f6e16a",
+						"AgentOptions": "2a9beb79d973231401bf442ec2dbd7286e69a36698bf9a456f17e6686edad544",
+						"AgentRequestUpdate": "90b1420f158d6d766ffb55981dfe22f272cb4569cd477878f8c19a7389d4eace",
 						"AgentState": "0aa36b9761a9920de6ce1eb469fabc7c2c93c1d87acf23e310ebc745cbd2e7a4",
 						"AgentTool": "d35b5c6696fea856d0362b2e1bd89c7c5ff8e983a9991e68c733ec906fb272be",
 						"AgentToolCall": "c90db9d5424071494c4d9b3dcef0c532565fa6f6730c92ee6c9412e0dde34c72",
 						"AgentToolResult": "eaa4c68f63f2a29c96e0e2e9a617a0bd7df883141ed82504747cbf126cc5cf6a",
 						"AgentToolUpdateCallback": "c51851ad37d053ecf8df8c79a0e3daac83c4bf03f78a7fe333b8871436bdd540",
+						"AgentTurnContext": "6b8d444d4c22fc7bb37a901c4685b284944a0485983c66e922f35e6b0484b679",
+						"AgentTurnDecision": "3a237054aa59fed033dac0d8855bd4801ffaf76f49458545dcdd55f5e220f9c6",
 						"AI_TELEMETRY_SCHEMA": "e1b32222d7b177cf9b7a6fc3d18b0a74a695552635b38a786032cc74137918c3",
 						"AiSpan": "23e0b3c589ab722e55364e80c85d2c2ce57cc9d027ec77f515726b55fb04454a",
 						"AiSpanAttributes": "e27c6879d5b94421de68a3806b2b88764aa40be8116f8e8df9f039bd04a41a62",
@@ -177,6 +180,7 @@
 						"FileSystem": "887769d23f9bef6c95e0fdaf562a7a93368d4f7ad2b662c62434d2aa04adf074",
 						"findCutPoint": "20aabd21f01e4a1345e09faee440623abb330e6f239e8b504ea47445dc97ffa0",
 						"findTurnStartIndex": "753db3df4b969977573a0643872a4065d8b2f27bc58aaa26c3a95bd53516455c",
+						"FinishTurn": "8d1010a8c3fdf172a8d5667adc4e42cbf5cc6f949ffba21bcb1081afa0627d0a",
 						"ForkCurrentStatePlan": "d161eb764fb96dd1d04f000ba37601803d02d128438c78d19c156a2aa13a81ff",
 						"ForkOptions": "df4aedd73e586ee9959b8cb19f2bb0155e0a45400d2848f8720b2e0342982af2",
 						"ForkSourceSnapshot": "37f9fd169017c3328a798eee2b4d6df29e6adece6ff377dbc51c10535cae7ca1",
@@ -310,7 +314,9 @@
 						"prepareBranchEntries": "795a93811ebc5c454761f4cb74214ba4c6d22736e5def9ae88113233dcf88fca",
 						"prepareCompaction": "e52ecc9abcb9897305e8c2751166b15dbb752b2d4862cae358007d2ba5f93afe",
 						"PreparedCommit": "e7c857b6414f954f3ab9eb56e0e2a5214718c8ab6bc2638692d3df63492b1b03",
-						"PrepareNextTurnContext": "e77a4b395dd169389d5d5007f0afc1743b152473f5040c8fefe60431e0a5d908",
+						"PrepareNextTurnContext": "4c0292c2b9d9d95df7861acf7176d108c328d346a409fc6a3f56bc92deb9bd3b",
+						"PrepareRequest": "63bccdac6eb9273a82d3b8193c80113d065ecaaadef72eb9fca6f4c9325df7cc",
+						"PrepareRequestContext": "c32020f1d47b9aedfe163ed72d35375349ca42ce050574ecae073851f6cb64d0",
 						"prepareStorageCommit": "d83635ab6c974b4e5253de8e65b60aad6c95df7daecfd2c743dbcc9389c712c1",
 						"projectForkCurrentStateWrite": "13ede69c4aa85495883866a9e6c7ad5d85cfaf62c486e9e8804bf94b8507de25",
 						"PromptTemplate": "7ed8f7e8c1b49b84cf8a7505040f3dea7cb2c80316e7acdad50657e41e10e24c",
@@ -379,7 +385,6 @@
 						"ShellOutputUpdate": "5f928c93a222f8be308fa98ae017331c721d4313cbbc3e9e1e7150cbd0fa2403",
 						"ShellOutputView": "4283e30f02069b0786270d2b926dd1877021bb12e822c248ed8f2ca5acd17644",
 						"shouldCompact": "776c4eb32639e09f689c73f56d2e88ee6c1b0c492ee59d7054d53f094afb1861",
-						"ShouldStopAfterTurnContext": "72fa6bc29acc6cabf91b35591c080cee152fdf706b324746da556f861f2ebdb2",
 						"Skill": "30549b0604d9eaada000f3c58d5607fa069844e9f3c2e77aab297aa9530f4a98",
 						"SkillDiagnostic": "0ca004498556746360c22991a65e8cb48f71bf39c6f0838dcbaa58423635417e",
 						"SkillDiagnosticCode": "88bc7d14eda67308bc4cfb486a2e40c732ba42edc3f26219b1ceb784284344b4",
@@ -474,7 +479,7 @@
 			}
 		},
 		"@earendil-works/pi-ai": {
-			"version": "0.86.1",
+			"version": "0.87.1",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",
@@ -545,7 +550,7 @@
 						"extractDiagnosticError": "4bae550d4bf55f3fb2f0276de1272a404f6f634d925e9ba631a405fe1259a265",
 						"fauxAssistantMessage": "b778e9f61407cfcb70a0b453bdea5a099b4b8b184c3108c0325c3cd5019abd4f",
 						"FauxContentBlock": "ebe7b3525211f99d8582e2b7d49a7e3f2403d2a3b5b1dfac4333ea57ca18e9f4",
-						"FauxModelDefinition": "aeb334c49dda794945777970e5af887711494c30e4463b51ce9a51f473252439",
+						"FauxModelDefinition": "4a377ec947505e3a4b113341432c62f727739cd82247c1cfb1c6724b955385c4",
 						"fauxProvider": "caa5c44f6d6877f8b2709368748204be66e3baa9d6ab5fdc8752958be68d1f04",
 						"FauxProviderHandle": "c0df8a1ff072d116ae773123959380945b3c0d1343740eec08cef5407ee19ba6",
 						"FauxProviderRegistration": "e422c365a789017e35fead9b87bc8dbb431ecf02c712064b41e246362ec4bd99",
@@ -605,11 +610,14 @@
 						"Message": "9577959798bc280417023b7c2177d86f1512632fdd5f4c8e13cc0000692724fc",
 						"MistralConversationsCompat": "a9785760868acedac27487a7e0e01ccc4dd2068894d4c55637fc1330126ef20c",
 						"MistralOptions": "b7bc954fe3e145e7429b4fd71a9ac5e9c313cee3f8fb34adad62e9efaa80c88e",
-						"Model": "2d72e7149a21ca78d251733c739d9ff7673543f392f4b2778415512ee72a7ead",
+						"Model": "38a9e91d2342f16a28f24823a34f236d4b77af915e6ebfdb068123d4f2513fd6",
 						"ModelAuth": "a98b3415466d9455a47dd1492cf5dc584c2ef86c7352810145926c08dc7fa5ba",
 						"ModelCost": "8704b4b33e5adcfde774875c716ebe7424babb80500bce63b78f00cff6b2e933",
 						"ModelCostRates": "47eb883d3ef694b360fc81399f03172264defacda0c579ca60f8d4ea7cb42df8",
 						"ModelCostTier": "465ad73399976dc945b456cbba176728c3c05a12ae4c4104f6480069ee7cd44e",
+						"ModelImageInputLimits": "b060c53dd021f96815d543330711b427ed6d161b767decf584e32c6d176271b3",
+						"ModelImageResizeOptions": "07ad57edc14fda665aa26cb954536a0c4323814aeeca2d545c4f1e0b7114b519",
+						"ModelInputLimits": "c4a095fe276257a68d5c77a2fc497720a912d83ac2427ab227b684f3b8a998fe",
 						"ModelPromptCache": "69f353656559e9afc0ba24a81873a4077a6155ebed1ba6d846c80a04cce4f6e6",
 						"Models": "58f37ed2b7da42dca417bd4ebf92e43c7cfc291ff6ae84365fc825047db7f494",
 						"ModelsApiStreamOptions": "9df4d3a7644e7419d5289128f13bd00604bcfd21a06c2b79fc3bba49d2259f0f",
@@ -799,7 +807,7 @@
 						"createFauxCore": "501f1271c83300ebb72bf48b36f6a5fe2c1a8d2529a3ef25f59547e44151b82c",
 						"fauxAssistantMessage": "b778e9f61407cfcb70a0b453bdea5a099b4b8b184c3108c0325c3cd5019abd4f",
 						"FauxContentBlock": "ebe7b3525211f99d8582e2b7d49a7e3f2403d2a3b5b1dfac4333ea57ca18e9f4",
-						"FauxModelDefinition": "aeb334c49dda794945777970e5af887711494c30e4463b51ce9a51f473252439",
+						"FauxModelDefinition": "4a377ec947505e3a4b113341432c62f727739cd82247c1cfb1c6724b955385c4",
 						"fauxProvider": "caa5c44f6d6877f8b2709368748204be66e3baa9d6ab5fdc8752958be68d1f04",
 						"FauxProviderHandle": "c0df8a1ff072d116ae773123959380945b3c0d1343740eec08cef5407ee19ba6",
 						"FauxProviderRegistration": "e422c365a789017e35fead9b87bc8dbb431ecf02c712064b41e246362ec4bd99",
@@ -864,7 +872,7 @@
 			}
 		},
 		"@earendil-works/pi-tui": {
-			"version": "0.86.1",
+			"version": "0.87.1",
 			"entryPoints": {
 				".": {
 					"declaration": "dist/index.d.ts",

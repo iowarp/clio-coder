@@ -156,7 +156,7 @@ describe("Pi provider metadata across Clio persistence", () => {
 	});
 });
 
-it("inherits Pi 0.86.1 overflow, transient-error classification and Meta environment keys", () => {
+it("inherits Pi 0.87.1 overflow, transient-error classification and Meta environment keys", () => {
 	strictEqual(isEngineContextOverflow("prompt too long"), true);
 	strictEqual(isEngineRetryableAssistantError("520 unknown error"), true);
 	strictEqual(isEngineRetryableAssistantError("503 Service Unavailable"), true);

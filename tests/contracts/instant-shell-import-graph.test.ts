@@ -50,7 +50,7 @@ test("production Stage 0 static closure stays within its measured bundle budget"
 			if (source.startsWith("src/")) clioBytes += contribution.bytesInOutput;
 		}
 	}
-	// Pi 0.86.1 bundled TUI: 13 chunks / 666,307 B, including 152,325 B of Clio.
+	// Pi 0.87.1 bundled TUI: 13 chunks / 670,404 B, including 156,272 B of Clio.
 	// Keep vendor bytes visible, with a separate cap so they cannot hide Clio growth.
 	ok(closure.size <= 16, `Stage 0 chunks: ${closure.size} > 16`);
 	ok(totalBytes <= 700_000, `Stage 0 bytes: ${totalBytes} > 700,000`);
