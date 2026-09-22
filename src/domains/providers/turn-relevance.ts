@@ -50,6 +50,8 @@ export interface TurnRelevanceStore {
 	get<T>(site: PreTurnSite<T>): T | undefined;
 	/** Every settled answer this turn. */
 	current(): PreTurnBrief;
+	/** The task text of the last refresh, for a mid-turn site that ranks against it. */
+	task(): string;
 	/** Every site this store asks, relevance sites first. */
 	readonly sites: ReadonlyArray<PreTurnSite<unknown>>;
 	/** Drop the answers, so a turn that never refreshed cannot read a stale one. */
@@ -67,9 +69,15 @@ export function createTurnRelevanceStore(options: TurnRelevanceStoreOptions): Tu
 		const answer = store.current().get(site);
 		return answer === undefined ? undefined : { scores: answer.value as RelevanceScores, source: answer.source };
 	};
+	let task = "";
 	return {
 		sites,
-		refresh: (evidence, signal) => store.refresh(typeof evidence === "string" ? { task: evidence } : evidence, signal),
+		task: () => task,
+		refresh: (evidence, signal) => {
+			const resolved = typeof evidence === "string" ? { task: evidence } : evidence;
+			task = resolved.task;
+			return store.refresh(resolved, signal);
+		},
 		memory: () => ranking("memory"),
 		skills: () => ranking("skills"),
 		get: (site) => store.get(site),

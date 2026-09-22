@@ -971,7 +971,7 @@ fleet:
     toolRisk: system-one
 ```
 
-Seven sites are accepted, and each names a moment in the session rather than a
+Eight sites are accepted, and each names a moment in the session rather than a
 component:
 
 - `routing` answers which worker takes a dispatch, at dispatch time.
@@ -988,6 +988,9 @@ component:
 - `dispatchForecast` judges, before each turn, whether the request suits
   workers and how the work would split, and says so in one line. The main agent
   still decides whether and how to dispatch.
+- `capabilities` ranks the gateway's capabilities against what a
+  `gateway(op="find")` call asked for, when the substring filter alone would
+  leave the model with a long unordered list or with nothing.
 
 A site with no entry resolves to nothing and its caller keeps the behavior it
 had before the site existed. The capability is therefore opt-in by absence, with
@@ -1044,7 +1047,7 @@ The features are host-resolved and never accepted from model arguments.
 `routeValidationProjection` strips the field on the same terms as the
 reservation, so a model cannot author the task features its own routing reads.
 
-All seven sites have call sites. Measured live against `jev-latest` for 0.5.4,
+All eight sites have call sites. Measured live against `jev-latest` for 0.5.4,
 routing answered in 315ms, four tool-risk ratings in 113 to 259ms, a batched
 memory and skills pass in 159ms, and a three-candidate draft judgment in 264ms.
 The pre-turn memory and skills pass is bounded at 1.5s because it sits on the
@@ -1096,11 +1099,36 @@ reader, the hint and the ledger summary. The pre-turn brief in
 `src/domains/providers/pre-turn-brief.ts` groups bound sites by answering
 model and sends one request per group. Wording is checked live against a
 labeled fixture with
-`node --import tsx scripts/decision-probe.ts evals/fixtures/decision-cases/turn-sites.json --profile <name>`,
+`node --import tsx scripts/decision-probe.ts tests/fixtures/decision-cases/turn-sites.json --profile <name>`,
 which calls the decision model and binds the fixture's sites to `<name>` for
 that run only. For 0.5.4, 26 labeled turns over two runs gave `turnScope` 52 of
 52 correct answers. `dispatchForecast` gave 48 of 52 on whether to delegate and
 8 of 10 on shape. Every miss was an abstention rather than a wrong answer.
+
+#### What `capabilities` changes
+
+MCP servers and extensions are reached through the gateway rather than carried
+as tool schemas, and `gateway(op="find")` filters them with one substring over
+name and description. A paraphrase misses. Asking for "open a PR" does not
+match a capability described as creating a pull request.
+
+Bound, the `capabilities` site ranks the catalog in one call when find needs
+it, and at no other time:
+
+- A find with no query that would list more than 40 entries comes back ordered
+  by fit with the turn's task. Every entry is still listed, and an `order` field
+  names the model that ranked it.
+- A query with fewer than three substring matches keeps those matches exactly
+  as they were. Up to five other entries that scored at least 0.5 are added in
+  a separate `related` array, with a note saying the query text did not match
+  them.
+
+Unbound, or when the model refuses, times out or has no opinion, the listing
+is byte-identical to the unranked one. Worker gateways never rank. Against a
+57-entry catalog shaped like common MCP servers, with 24 paraphrased needs over
+two live runs, the substring filter alone surfaced the right capability 2 times
+in 48, and 48 times in 48 once related entries were added. Calls took 165ms at
+p50 and 369ms at most, under the same 1.5s bound as the pre-turn brief.
 
 #### Turning the alpha on, end to end
 
