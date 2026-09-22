@@ -27,6 +27,7 @@ const SUITE_MODULES: Record<string, () => Promise<ScenarioModule>> = {
 	"prompt-compile": () => import("./prompt-compile.js"),
 	"context-budget": () => import("./context-budget.js"),
 	"memory-selection": () => import("./memory-selection.js"),
+	continuity: () => import("./continuity.js"),
 };
 
 function parseArgs(argv: ReadonlyArray<string>): { suite: string; scenario: string } {

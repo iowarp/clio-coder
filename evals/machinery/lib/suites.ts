@@ -89,6 +89,21 @@ export const MACHINERY_SUITES: ReadonlyArray<MachinerySuite> = [
 			"read-failure-revokes",
 		],
 	},
+	{
+		name: "continuity",
+		id: "machinery-continuity",
+		title: "Machinery, continuity handoff transactions",
+		description:
+			"self_compact handoff preparation, the summary and eviction checkpoints that reserve a commit before the durability barrier, and correlated continuation delivery.",
+		scenarios: [
+			"handoff-preparation",
+			"summary-checkpoint",
+			"eviction-checkpoint",
+			"continuation-delivery",
+			"receipt-authority",
+			"barrier-failure",
+		],
+	},
 ];
 
 export function machinerySuite(name: string): MachinerySuite {
