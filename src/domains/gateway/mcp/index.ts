@@ -46,6 +46,13 @@ export {
 	parseMcpConfigText,
 } from "./config.js";
 export {
+	type McpCachedTool,
+	type McpCatalogIdentity,
+	type McpServerCatalog,
+	readMcpServerCatalog,
+	writeMcpServerCatalog,
+} from "./metadata-cache.js";
+export {
 	classifyJsonRpcMessage,
 	createLineFramer,
 	DEFAULT_MAX_LINE_BYTES,
@@ -65,6 +72,7 @@ export {
 	parseJsonRpcLine,
 } from "./protocol.js";
 export {
+	canonicalProjectRoot,
 	MCP_TRUST_ACTION_CLASSES,
 	MCP_TRUST_CAPS,
 	MCP_TRUST_FILENAME,

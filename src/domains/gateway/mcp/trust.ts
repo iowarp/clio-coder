@@ -79,7 +79,12 @@ export function mcpTrustPath(configDir?: string): string {
 	return path.join(configDir ?? clioConfigDir(), MCP_TRUST_FILENAME);
 }
 
-function canonicalProjectRoot(cwd: string): string {
+/**
+ * The project identity a trust record binds to. The metadata cache keys on the
+ * same value so a declaration trusted in one checkout cannot be read back as a
+ * catalog for a different checkout of the same repository.
+ */
+export function canonicalProjectRoot(cwd: string): string {
 	const resolved = path.resolve(cwd);
 	try {
 		return realpathSync(resolved);
