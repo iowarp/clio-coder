@@ -24,7 +24,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/product-intent
-  eval-status: smoke-checked
   model-size: large
   agents:
     - main

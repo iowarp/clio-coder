@@ -35,9 +35,10 @@ import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 beforeEach(() => isolateDispatchState());
 afterEach(() => restoreDispatchState());
 
-const fixture = JSON.parse(
-	readFileSync(new URL("../../evals/fixtures/source-explanation.json", import.meta.url), "utf8"),
-) as { task: string; findings: Array<{ claim: string; path: string; line: number }> };
+const fixture = JSON.parse(readFileSync(new URL("../fixtures/source-explanation.json", import.meta.url), "utf8")) as {
+	task: string;
+	findings: Array<{ claim: string; path: string; line: number }>;
+};
 
 /**
  * The #361 deliverable as an explicit Coder would author it: the fixture's

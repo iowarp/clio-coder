@@ -299,7 +299,7 @@ test("every navigation entry is reachable from the palette", () => {
 	const source = readFileSync(fileURLToPath(new URL("../client/design/navigation.tsx", import.meta.url)), "utf8");
 	const table = source.slice(source.indexOf("export const navigation"), source.indexOf("] as const"));
 	const paths = [...table.matchAll(/path:\s*"([^"]+)"/g)].flatMap((match) => (match[1] ? [match[1]] : []));
-	assert.equal(paths.length, 11, "the navigation table changed; the palette destinations must follow");
+	assert.equal(paths.length, 10, "the navigation table changed; the palette destinations must follow");
 	const offered = new Set(DESTINATIONS.map((destination) => destination.path));
 	for (const path of paths) assert.ok(offered.has(path), `${path} is in the navigation but not in the palette`);
 });

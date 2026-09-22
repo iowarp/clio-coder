@@ -42,7 +42,6 @@ export const EvidenceOverview = Type.Object(
 		source: Type.Union([
 			Type.Object({ kind: Type.Literal("run"), runId: Id }, closed),
 			Type.Object({ kind: Type.Literal("session"), sessionId: Id }, closed),
-			Type.Object({ kind: Type.Literal("eval"), evalId: Id }, closed),
 		]),
 		generatedAt: Type.String(),
 		runIds: strings,

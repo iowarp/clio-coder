@@ -28,7 +28,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/tt-a1i/archify/tree/v2.16.0/archify
-  eval-status: scenarios-recorded
   model-size: any
   agents:
     - main

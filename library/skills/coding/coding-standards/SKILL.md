@@ -24,7 +24,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/dmmulroy/skills/tree/main/coding-standards
-  eval-status: scenarios-recorded
   model-size: any
   provisional: true
   agents:

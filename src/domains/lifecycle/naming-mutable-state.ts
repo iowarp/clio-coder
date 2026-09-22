@@ -70,8 +70,8 @@ function total(counts: MutableNamingCounts): number {
 
 /**
  * Rewrite only the audited mutable, unsealed JSON allowlist. Run/session
- * ledgers, receipts, evidence, evals, trace, gate decisions, protected
- * artifacts, and exported archives are deliberately unreachable here.
+ * ledgers, receipts, evidence, trace, gate decisions, protected artifacts, and
+ * exported archives are deliberately unreachable here.
  */
 export function migrateMutableNamingState(stateDir: string): MutableNamingStateReport[] {
 	const reports: MutableNamingStateReport[] = [];

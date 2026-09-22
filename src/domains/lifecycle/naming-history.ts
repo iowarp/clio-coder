@@ -23,8 +23,6 @@ const LEGACY_EVENT_TYPES = [
 ] as const;
 const LEGACY_HISTORY_LITERALS = [
 	...LEGACY_EVENT_TYPES,
-	"clio.eval.",
-	'"clio-run"',
 	"clio.runReceipt.integrity",
 	"clio.gateDecision.integrity",
 	"clio.gateDecision.pending",
@@ -35,7 +33,7 @@ const LEGACY_HISTORY_LITERALS = [
 	"identity.clio-worker",
 ] as const;
 
-export type NamingHistoryArea = "trace" | "sessions" | "evals" | "evidence" | "receipts";
+export type NamingHistoryArea = "trace" | "sessions" | "evidence" | "receipts";
 
 export interface NamingHistoryCount {
 	area: NamingHistoryArea;
@@ -146,7 +144,6 @@ export function inspectNamingHistory(options: InspectNamingHistoryOptions): Nami
 	return [
 		inspectTrace(join(options.stateDir, "trace.sqlite")),
 		inspectTextTree("sessions", join(options.stateDir, "sessions")),
-		inspectTextTree("evals", join(options.dataDir, "evals")),
 		inspectTextTree("evidence", join(options.dataDir, "evidence")),
 		inspectTextTree("receipts", join(options.stateDir, "receipts")),
 	];

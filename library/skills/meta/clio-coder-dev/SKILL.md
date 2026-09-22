@@ -13,7 +13,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-dev
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
   model-size: any
 ---
 
@@ -70,8 +69,8 @@ companions, not a recursive required-loading chain.
 
 Prefer meaningful regression tests for changed contracts. For a documentation
 or instruction-only edit, verify the facts, links, and package metadata without
-inventing runtime tests for prose. For skills, update the manifest version and
-realistic eval scenarios, then regenerate both skill and full-library pins.
+inventing runtime tests for prose. For skills, update the manifest version, then
+regenerate both skill and full-library pins.
 Active installed resource trees remain operator-managed: edit curated source
 under `library/`, not `.clio-coder/plugins`, config plugins, or a symlink to them.
 

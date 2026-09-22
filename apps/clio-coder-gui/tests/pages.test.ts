@@ -35,7 +35,7 @@ test("a reload of any routed page is answered with the application, not a 404", 
 	await writeFile(join(clientDir, "index.html"), "<!doctype html><html><body>Clio</body></html>");
 	const h = await harness({}, { clientDir });
 	try {
-		for (const path of ["/settings/effective", "/settings/why", "/system/interop", "/evals/some-report"]) {
+		for (const path of ["/settings/effective", "/settings/why", "/system/interop", "/evidence/some-bundle"]) {
 			const response = await h.request(path);
 			assert.equal(response.status, 200, path);
 			assert.match(await response.text(), /Clio/, path);

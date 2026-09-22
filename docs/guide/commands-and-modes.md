@@ -75,7 +75,6 @@ The compact footer remains two lines. A small Tip appears for about ten seconds,
 | `clio-coder dev components snapshot --out <path>` | Write a component snapshot JSON file. |
 | `clio-coder dev components diff --from <a> --to <b> [--json]` | Compare component snapshots. |
 | `clio-coder evidence build\|inspect\|list` | Build and inspect deterministic evidence artifacts. |
-| `clio-coder eval validate\|run\|report\|compare\|gate` | Validate, run, report, compare, and gate local evaluation suites (Suite v2). |
 | `clio-coder memory list\|propose\|promote\|approve\|reject\|prune` | Manage scoped, evidence-linked memory records. |
 | `clio-coder trace runs [--db PATH] [--limit N] [--json]` | List runs recorded in the durable trace mirror beside the ledger. |
 | `clio-coder trace inspect --json` | Emit the fixed, bounded recent accounting projection used by the graphical application. It accepts no path, identifier, or limit and omits request text, error prose, event payloads, process commands, PIDs, and hosts. |
@@ -1237,9 +1236,7 @@ Acceptance rows labeled Required declare expected checks and timeout limits; the
 
 Task-board guidance and ordinary continuation preserve proposal-only scope. Deferred implementation should be blocked or dropped while awaiting an explicit operator go-ahead. A skill-install decision is separate from implementation authorization, and full-auto capability does not expand the task. These are model instructions, not a guarantee of model adherence.
 
-## Package evals
-
-`clio-coder eval validate --package <path|kind:name> --eval <name>` validates a named package suite. `clio-coder eval run` with the same package flags runs it; `--user` or `--project` selects the installed copy. Materio declares `scripts` for its offline Python contracts. The experimental skill-scenario lane is `clio-coder eval skill <name|path> [--scenario <id>]`. See [Library packages](resource-library.md).
+## Library packages
 
 The old top-level CLI `skills` and `plugins` groups are retired; use `clio-coder library`. In the editor, `/library`, `/skills`, `/agents` and `/prompts` open the shared browser. `/resources` and `/plugins` give a replacement hint. `/skill <name>` activates a skill; `/interop` handles local-agent discovery and reviewed adoption.
 

@@ -60,7 +60,7 @@ A package is published there only when a peer host would load a real skill surfa
 
 Working, valid authoring templates for all five package kinds live in `library/_authoring/templates/`:
 
-- `library/_authoring/templates/skill/`: Single skill package with house metadata, triggers, and evals.
+- `library/_authoring/templates/skill/`: Single skill package with house metadata and triggers.
 - `library/_authoring/templates/agent/`: Standalone agent recipe with strict v1 format, custom audience, and `skills: []`.
 - `library/_authoring/templates/prompt/`: Reusable prompt with path-derived invocation and argument placeholders.
 - `library/_authoring/templates/fleet/`: Multi-agent coordination contract with a valid DAG and documented prerequisites.

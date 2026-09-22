@@ -1,13 +1,11 @@
 # Dispatch Architecture Rationale
 
-Why `src/domains/dispatch/` is one domain, why one import out of it looks
-irregular and is allowed to, and why the repository has no barrel-only import
-convention. No code moved as a result of this document. It exists so that a
+Why `src/domains/dispatch/` is one domain and why the repository has no
+barrel-only import convention. No code moved as a result of this document. It exists so that a
 later split is argued from invariants rather than from file counts.
 
 Counts verified against the current tree: 85 TypeScript files in
-`src/domains/dispatch/`, a 199-line barrel at `src/domains/dispatch/index.ts`,
-and one dispatch → eval import.
+`src/domains/dispatch/` and a 199-line barrel at `src/domains/dispatch/index.ts`.
 
 ---
 
@@ -71,28 +69,6 @@ nothing and needs only the existing tests. `route-quality.ts` and
 
 A genuine split, if it is ever wanted, should be argued from the wave contract
 outward, because that is the one seam the invariants above actually respect.
-
----
-
-## Dispatch reads an eval parser the eval barrel does not export
-
-`src/domains/dispatch/route-observer.ts` imports `parseEvalArtifactV4` from
-`../eval/artifacts/store.js`. The eval barrel does not export it. This is the
-only dispatch → eval import in the domain.
-
-This is coupling worth recording, not a violation. It breaks none of the six
-enforced boundary rules, and the direction is defensible: the routing quality
-reducer treats an eval artifact as evidence, so it must parse one, and
-`parseEvalArtifactV4` is the strict fail-closed parser rather than a convenience
-reader. Routing quality reading eval evidence through the artifact's own
-validating parser is better than routing quality inventing a second reader that
-could accept an artifact the eval domain would reject.
-
-Widening the eval barrel to export it would be a public-surface change made only
-to satisfy import form, which is exactly what the barrel decision below rejects.
-If the coupling is ever to be removed, the honest fix is for the eval domain to
-own a narrow "read an artifact as routing evidence" function and export that,
-which is a design change needing its own justification.
 
 ---
 

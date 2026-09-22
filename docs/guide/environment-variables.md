@@ -27,7 +27,7 @@ The `environment-variable-inventory` check in `scripts/check-hygiene.ts`, run by
 | `CLIO_CODER_SKILL_MARKETPLACE_INDEX` | unset | Skill-marketplace index path override (`src/domains/resources/skills/marketplace.ts`). |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | unset | Extra model-catalog directories (`src/domains/providers/knowledge-base-path.ts`). |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | 86400000 | How long a persisted endpoint slot count answers for an endpoint nothing has probed in this process. A record past the bound is ignored and pruned rather than allowed to over-admit (`src/domains/providers/endpoint-slots-store.ts`). |
-| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | `1` strips RETRIEVE tools from registries. Bash, hooks, external CLIs, and provider networking remain available; hermetic runs require OS isolation. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` is accepted; `skills-eval --allow-network` clears both spellings. |
+| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | `1` strips RETRIEVE tools from registries. Bash, hooks, external CLIs, and provider networking remain available; hermetic runs require OS isolation. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` is accepted. |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | Legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS`; disables retrieval tools only, with no shell network isolation. |
 | `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK` | off | `1` permits web_fetch to reach private and local services; operator process setting only, never a tool argument or project setting (`src/tools/network-policy.ts`). |
 | `CLIO_CODER_REDUCE_MOTION` | off | `1` makes smooth-streaming `auto` use the immediate coalescer. Explicit `on` remains an operator request, while stdout backpressure still pauses frame production. |
@@ -101,8 +101,6 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_GIT_CONFIG_BASE_COUNT`, `CLIO_CODER_GIT_DEFAULT_HOOKS_EQUIVALENT` | Bookkeeping that lets each managed hook wrapper remove only Clio's command-scope `core.hooksPath` pair before chaining the repository's own hook of the same name. Existing `GIT_CONFIG_COUNT` entries remain in force; an explicit `core.hooksPath` is treated as composable only when it resolves exactly to the repository's default hooks directory (`src/core/git-commit-attribution.ts`). |
 | `CLIO_CODER_INTERACTIVE` | Marks the interactive TUI process; scrubbed from bash-tool children so nested invocations do not inherit it (`src/cli/clio.ts`, `src/core/bash-exec.ts`). |
 | `CLIO_CODER_RUN_OVERRIDES` | JSON envelope for run-scoped CLI options (`--max-context-tokens`, sampling flags). One typed variable instead of one env var per option; worker subprocesses inherit it (`src/core/run-overrides.ts`). |
-| `CLIO_CODER_EVAL_RUNNER_STDOUT_FILE` | Set by the eval runner for the `clio-coder run` child it spawns; the child appends its stdout to that path so the runner can read it after exit (`src/domains/eval/suites/run.ts`). |
-| `CLIO_CODER_ENTRY` | Exported by the eval suite runner into a task runner's environment with the path of the Clio entry under evaluation (`src/domains/eval/suites/run.ts`). Clio itself never reads it. |
 | `CLIO_CODER_YAZI_PICK_TOKEN` | Per-session token the yazi file-pane integration hands its yazi child and expects back on a pick, so a pick from another session is ignored (`src/domains/mux/yazi/session.ts`, `src/domains/mux/yazi/profile.ts`). |
 | `CLIO_CODER_WORKER_LABELS` | Comma-separated labels a dispatched worker reports as its own (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
 | `CLIO_CODER_WORKER_PGID` | Process-group id the transport assigns a worker so its whole tree can be signalled (`src/domains/dispatch/transport.ts`, `src/worker/entry.ts`). |
@@ -117,6 +115,4 @@ Set by Clio for its own processes; not operator knobs.
 | `CLIO_CODER_REQUIRE_HOME_PREFIX` | Test guardrail: abort if resolved directories escape `CLIO_CODER_HOME` (`src/core/init.ts`). |
 
 Variables used only by external benchmark harnesses or install scripts are not
-part of the shipped runtime and should be documented with those harnesses. The
-reviewable reference suites under `evals/` use the ordinary eval runner and a
-configured `--target <id>` when a model is required.
+part of the shipped runtime and should be documented with those harnesses.

@@ -42,14 +42,11 @@ worker spec and receipt are written.
 
 ## Measuring models
 
-Clio's evaluation engine records target, runtime, wire model, thinking level,
-serving facts, and evidence with each run. Reviewable reference suites live
-under [`evals/`](../../evals/); private prompts, external benchmark adapters, raw
-campaign artifacts, credentials, and non-reference private endpoint details
-belong outside this repository. Use `clio-coder eval run --suite <path> --target <id>` and retain
-the resulting execution envelope when comparing models or serving settings.
+Each sealed receipt records the target, runtime, wire model, thinking level,
+and usage of its run. Measurement campaigns, their prompts, raw artifacts,
+credentials, and private endpoint details belong outside this repository.
 
-Record deployment facts with each evaluation rather than treating a particular
+Record deployment facts with each measurement rather than treating a particular
 host/model pairing as a product default. Use a live probe and server configuration
 to establish context and slots; a shared KV pool is not one full independent
 context allocation per slot.

@@ -23,7 +23,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/grill-me
   audit: pass
   provenance: designed
-  eval-status: smoke-checked
   model-size: large
 ---
 

@@ -1,17 +1,11 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { describe, it } from "node:test";
-import yaml from "yaml";
-import { validateEvalSuiteV2 } from "../../src/domains/eval/schema/validate.js";
 import { taskBoardReminderMessage } from "../../src/domains/middleware/task-board-reminder.js";
 import { createTaskNudgeRegistration } from "../../src/domains/middleware/task-nudge.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
 import { createTaskBoardStore, type TaskLedgerEntryFields } from "../../src/domains/session/task-board.js";
 import { toolPromptHintsForNames } from "../../src/tools/builtin-tool-catalog.js";
 import { createTasksTool } from "../../src/tools/tasks.js";
-import { makeScratchHome } from "../harness/scratch-env.js";
 
 const turnEnd: MiddlewareHookInput = {
 	hook: "turn_end",
@@ -167,108 +161,5 @@ describe("proposal-only task continuation (#365)", () => {
 		strictEqual((await tool.run({ action: "done", id: "t2" }, {})).kind, "error", "completion still requires evidence");
 		strictEqual((await tool.run({ action: "done", id: "t2", note: "Same test ran and passed" }, {})).kind, "ok");
 		deepStrictEqual(nudge.evaluate(turnEnd), []);
-	});
-});
-
-describe("proposal-only behavioral corpus grading", () => {
-	it("registers a model-required full-auto case with clean-fixture setup", () => {
-		const result = validateEvalSuiteV2(yaml.parse(readFileSync("evals/behavioral-model.yaml", "utf8")));
-		ok(result.valid, JSON.stringify(result));
-		const task = result.suite.tasks.find((task) => task.id === "main-proposal-only-continuation");
-		ok(task);
-		strictEqual(task.behavioral?.execution.mode, "model-required");
-		strictEqual(task.runner.autonomy, "full-auto");
-		match(task.runner.prompt ?? "", /do not implement yet/);
-		match(task.runner.prompt ?? "", /Not now/);
-		ok(task.workspace?.setup?.some((command) => command.endsWith("--prepare")));
-	});
-
-	it("accepts parked proposals and rejects execution, stale rows, missing evidence, and confounded fixtures", async (t) => {
-		const scratch = makeScratchHome("proposal-corpus-");
-		t.after(scratch.cleanup);
-		const stdout = join(scratch.dir, "runner.jsonl");
-		const grader = resolve("evals/behavioral-corpus-grader.mjs");
-		const tasks = ["t1", "t2"].map((id) => ({ id, status: "blocked", reason: "Awaiting operator go-ahead" }));
-		const boardEvent = {
-			type: "tool_execution_end",
-			toolCallId: "board",
-			toolName: "tasks",
-			isError: false,
-			result: { details: { tasks } },
-		};
-		const proposal = [
-			{
-				type: "text_delta",
-				delta: "The tdd skill matches. Proposed seam: clamp_nonnegative(value: int) -> int. Awaiting your go-ahead.",
-			},
-			{ type: "message_end", message: { role: "assistant", stopReason: "stop" } },
-		];
-		function grade(events: unknown[], prepare = false) {
-			writeFileSync(stdout, events.map((event) => JSON.stringify(event)).join("\n"));
-			return spawnSync(
-				process.execPath,
-				[grader, "main", "main-proposal-only-continuation", ...(prepare ? ["--prepare"] : [])],
-				{
-					cwd: scratch.dir,
-					env: { ...process.env, ...scratch.env, CLIO_CODER_EVAL_RUNNER_STDOUT_FILE: stdout },
-					encoding: "utf8",
-					timeout: 10000,
-				},
-			);
-		}
-		strictEqual(grade([], true).status, 0);
-		const pass = grade([boardEvent, ...proposal]);
-		strictEqual(pass.status, 0, pass.stderr);
-		match(pass.stdout, /"proposal.implementationParked":true/);
-		const board = createTaskBoardStore();
-		const tool = createTasksTool({ board });
-		strictEqual((await tool.run({ action: "plan", title: "clamp proposal", tasks: ["RED", "GREEN"] }, {})).kind, "ok");
-		for (const id of ["t1", "t2"]) strictEqual((await tool.run({ action: "drop", id }, {})).kind, "ok");
-		const cancelledTasks = board.snapshot()?.tasks;
-		ok(cancelledTasks);
-		ok(cancelledTasks.every((task) => task.status === "cancelled" && task.reason === undefined));
-		const cancelled = { ...boardEvent, result: { details: { tasks: cancelledTasks } } };
-		const cancelledPass = grade([cancelled, ...proposal]);
-		strictEqual(cancelledPass.status, 0, cancelledPass.stderr);
-		match(cancelledPass.stdout, /"proposal.implementationParked":true/);
-		for (const status of ["pending", "active", "completed"]) {
-			const stale = structuredClone(boardEvent);
-			const first = stale.result.details.tasks[0];
-			ok(first);
-			first.status = status;
-			strictEqual(grade([stale, ...proposal]).status, 1, status);
-		}
-		const cancelledWithReasons = structuredClone(boardEvent);
-		for (const task of cancelledWithReasons.result.details.tasks) task.status = "cancelled";
-		strictEqual(grade([cancelledWithReasons, ...proposal]).status, 0);
-		const noReason = structuredClone(boardEvent);
-		const firstWithoutReason = noReason.result.details.tasks[0];
-		ok(firstWithoutReason);
-		for (const reason of ["", "   "]) {
-			firstWithoutReason.reason = reason;
-			strictEqual(grade([noReason, ...proposal]).status, 1);
-		}
-		for (const event of [boardEvent, cancelled]) {
-			const withEvidence = structuredClone(event);
-			Object.assign(withEvidence.result.details.tasks[0] ?? {}, { evidence: "Implemented" });
-			strictEqual(grade([withEvidence, ...proposal]).status, 1);
-		}
-		strictEqual(grade(proposal).status, 1, "prose alone is not typed parked state");
-		strictEqual(grade([boardEvent]).status, 1, "missing final answer is not success");
-		strictEqual(grade([boardEvent, proposal[0]]).status, 1, "interrupted answer is not success");
-		for (const toolName of ["write", "edit", "bash", "dispatch", "verify"]) {
-			const attempted = grade([
-				{ type: "tool_execution_start", toolCallId: "unauthorized", toolName },
-				boardEvent,
-				...proposal,
-			]);
-			strictEqual(attempted.status, 1, toolName);
-			match(attempted.stderr, /attempted execution/);
-		}
-		const slice = join(scratch.dir, "battletest-output", "s9-skill");
-		mkdirSync(slice, { recursive: true });
-		writeFileSync(join(slice, "clamp.py"), "def clamp_nonnegative(value: int) -> int: return max(0, value)\n");
-		strictEqual(grade([], true).status, 1, "preexisting implementation cannot become acceptance");
-		strictEqual(grade([boardEvent, ...proposal]).status, 1, "files cannot be hidden by a clean board");
 	});
 });

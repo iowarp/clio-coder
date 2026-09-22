@@ -25,10 +25,10 @@ export interface BuildEvidenceTrustStatusInput {
 }
 
 /**
- * Compose every evidence-linked trust axis at one pure boundary. Both the
- * run/session and eval builders call this function, so the same authenticated
- * receipt and gate decision cannot project differently merely because the
- * receipt was bundled through a different entry point. Completion evidence
+ * Compose every evidence-linked trust axis at one pure boundary. The run and
+ * session builders both call this function, so the same authenticated receipt
+ * and gate decision cannot project differently merely because the receipt was
+ * bundled through a different entry point. Completion evidence
  * stays receipt-derived so an audit row cannot change one surface alone.
  */
 export function buildEvidenceTrustStatusFile(input: BuildEvidenceTrustStatusInput): EvidenceTrustStatusFile {

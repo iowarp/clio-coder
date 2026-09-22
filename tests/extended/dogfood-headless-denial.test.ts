@@ -15,7 +15,6 @@ import {
 } from "../../src/core/headless-permission.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { SafetyBlockedAttempt } from "../../src/domains/dispatch/types.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
 import { resolveAgentTools } from "../../src/tools/agent-tools.js";
@@ -30,6 +29,7 @@ import {
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const pivot =

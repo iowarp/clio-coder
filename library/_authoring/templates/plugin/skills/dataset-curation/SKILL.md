@@ -7,7 +7,6 @@ clio-coder:
   registry-id: dataset-curation
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/_authoring/templates/plugin
   provenance: designed
-  eval-status: scenarios-recorded
 triggers:
   - curate dataset
   - fair data check

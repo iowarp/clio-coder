@@ -24,7 +24,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/mattpocock/skills/tree/main/skills/engineering/prototype
-  eval-status: scenarios-recorded
   model-size: any
   agents:
     - main

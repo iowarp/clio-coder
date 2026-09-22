@@ -143,7 +143,7 @@ export interface MemoryPromptedStepInput {
 	task?: string;
 	/** Keep phase-one writes but yield the visible channel to a synchronous reminder. */
 	suppressIntervention?: boolean;
-	/** Internal/eval attribution; direct callers default to `manual`. */
+	/** Internal attribution; direct callers default to `manual`. */
 	triggerReasons?: ReadonlyArray<TaskMemoryTelemetryTrigger>;
 }
 

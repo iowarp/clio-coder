@@ -22,7 +22,7 @@
  * YAML cannot be parsed must never be silently pinned under its folder name.
  * The catalog publishing contract (library/skills/README.md) is enforced here too:
  * every catalog skill must carry the required provenance frontmatter with
- * `audit: pass` and ship an evals.md beside its SKILL.md.
+ * `audit: pass`.
  */
 
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -35,7 +35,7 @@ import { normalizedSkillHash } from "../src/domains/resources/skills/content-has
 /** Top-level frontmatter every published catalog skill must carry (library/skills/README.md). */
 const REQUIRED_CORE_KEYS = ["name", "description", "version", "license"] as const;
 /** Keys required inside the reserved nested `clio-coder:` block (library/skills/README.md). */
-const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance", "eval-status"] as const;
+const REQUIRED_CLIO_KEYS = ["registry-id", "source-url", "provenance"] as const;
 /** The provenance vocabulary library/skills/README.md defines; anything else is a typo, not a new category. */
 const PROVENANCE_VALUES = new Set(["designed", "adapted", "imported"]);
 /** Tool-surface keys whose values must name Clio tools in canonical spelling. */
@@ -316,9 +316,6 @@ function collectEntries(
 			}
 		}
 		errors.push(...toolSurfaceErrors(skillPath, fm));
-		if (!existsSync(path.join(catalogDir, relPath, "evals.md"))) {
-			errors.push(`${skillPath}: catalog skills must ship an evals.md beside SKILL.md`);
-		}
 		const category = path.dirname(relPath);
 		const remote = remotes.get(path.resolve(catalogDir, relPath)) ?? null;
 		if (remote) {

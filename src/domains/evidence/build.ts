@@ -1387,9 +1387,7 @@ function renderTranscript(
 }
 
 function formatEvidenceSource(source: EvidenceOverview["source"]): string {
-	if (source.kind === "run") return `run ${source.runId}`;
-	if (source.kind === "session") return `session ${source.sessionId}`;
-	return `eval ${source.evalId}`;
+	return source.kind === "run" ? `run ${source.runId}` : `session ${source.sessionId}`;
 }
 
 /**

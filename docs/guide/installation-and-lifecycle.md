@@ -138,7 +138,7 @@ The core files are created automatically during the first run. `credentials.yaml
 ## 3. Bootstrap Initialization
 
 When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `src/core/init.ts`) to bootstrap missing structures:
-1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence`/`evals` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
+1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
 4.  **Install Metadata**: Writes `install.json` with `installedAt` exactly once when no config, data, or state root existed before initialization. If Clio reconstructs missing metadata over a preexisting config, data, or state root, it writes `repairedAt` instead of inventing an installation time. A cache-only root does not count as a preexisting home for this decision. A later version, platform, or node change preserves whichever original timestamp exists and stamps `upgradedAt`; a version change also records the previous version as `upgradedFrom`.
@@ -346,7 +346,7 @@ inventory of what a level covers, because a remembered list drifts as soon as a
 new artifact is written into a root.
 
 *   `--state` *(Default)*: Deletes the state root only. It holds every session transcript and the audit trail beside it, so a reset is the end of `resume`, `/view`, and their history. This is the level a bare `clio-coder reset` selects, and it carries that note in its preview.
-*   `--data`: Deletes the data root only: memory, evidence, evals, and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
+*   `--data`: Deletes the data root only: memory, evidence, and any vendored external tools (durable products). The vendored tools are the one entry a reset cannot regenerate locally; `clio-coder tools install <id>` downloads them again.
 *   `--cache`: Deletes the cache root only.
 *   `--auth`: Deletes `credentials.yaml`. Removes all saved keys.
 *   `--config`: Deletes `settings.yaml` to revert preferences to default.

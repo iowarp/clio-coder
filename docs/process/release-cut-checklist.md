@@ -56,8 +56,7 @@ This runs:
 - One exact npm tarball install with normal lifecycle scripts, installed resources,
   lazy chunks, CLI and extension/library behavior, both web workers and a real Chrome
   boot/reconnect against that installed server.
-- Native invocation timing with delayed real HTTP headers, durable call timing and
-  eval first-call selection.
+- Native invocation timing with delayed real HTTP headers and durable call timing.
 
 No real model, npm login or publication occurs. An unavailable registry or advisory
 service fails qualification. Native search contracts require `rg` and `fd` (or

@@ -26,7 +26,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/architecture
-  eval-status: smoke-checked
   model-size: large
   agents:
     - main

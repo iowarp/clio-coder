@@ -3,22 +3,19 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
 import {
 	RESULT_CONTRACT_REPAIR_LIMIT,
 	resultContractRepairMessages,
 	validateResultContract,
 } from "../../src/domains/agents/result-contract.js";
 import { nodeResultContractFilesystem } from "../../src/domains/agents/result-contract-filesystem.js";
-import { loadEvalSuiteFile } from "../../src/domains/eval/suites/load.js";
 import type { Observation } from "../../src/tools/observation.js";
 import { readTool } from "../../src/tools/read.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const fixture = JSON.parse(
-	readFileSync(new URL("../../evals/fixtures/scout-citation-pipeline.json", import.meta.url), "utf8"),
+	readFileSync(new URL("../fixtures/scout-citation-pipeline.json", import.meta.url), "utf8"),
 ) as {
-	prompt: string;
 	files: Record<string, string>;
 	evidence: { sourceSha256: Record<string, string> };
 	findings: Array<{ claim: string; path: string; line: number }>;
@@ -111,13 +108,4 @@ test("Scout repair quotes the validator and inclusive ranges without inventing c
 	match(content, /remove that finding and keep the confirmed findings/u);
 	match(content, /Never shift a rejected citation into range/u);
 	ok(content.includes("findiff/interface.py:1-63"));
-});
-
-test("Scout pipeline is registered as a model-required corpus task with the retained prompt", async () => {
-	const loaded = await loadEvalSuiteFile(fileURLToPath(new URL("../../evals/behavioral-model.yaml", import.meta.url)));
-	const task = loaded.suite.tasks.find((entry) => entry.id === "main-scout-citation-pipeline");
-	ok(task);
-	strictEqual(task.behavioral?.execution.mode, "model-required");
-	ok(task.runner.kind === "clio-coder-run");
-	strictEqual(task.runner.prompt, fixture.prompt);
 });

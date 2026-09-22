@@ -126,7 +126,7 @@ Harness extensions register runtime tools through the [harness extension contrac
 
 Clio Coder provides working, valid authoring templates for all five package kinds in `library/_authoring/templates/`:
 
-- `library/_authoring/templates/skill/`: Standalone skill with house conventions, triggers, and recorded eval scenarios.
+- `library/_authoring/templates/skill/`: Standalone skill with house conventions and triggers.
 - `library/_authoring/templates/agent/`: Standalone agent recipe using strict v1 fields, `skills: []`, and `audience: custom`.
 - `library/_authoring/templates/prompt/`: Parameterized prompt with path-derived invocation (`/<name>`) and `$ARGUMENTS` expansion.
 - `library/_authoring/templates/fleet/`: Multi-agent coordination contract with a valid DAG and documented prerequisites.
@@ -152,7 +152,5 @@ Templates are reference models and are excluded from `library/registry.yaml`. Fo
    Push your topic branch to your fork and submit a PR against `main`.
 
 Package dependencies live in `extensions["ai.iowarp.clio"].requires`, such as `["skill:ship"]`; copy the same requirements into the index. They name packages, while component `requires` names files within one package. Neither declares an execution hook.
-
-Declare runnable eval suites using `"evals": {"scripts": "evals/scripts.yaml"}` in the Clio extension. Paths must identify contained files. Validate with `clio-coder eval validate --package ./lab-research --eval scripts` and run with `clio-coder eval run --package ./lab-research --eval scripts`. Use the standard version-2 eval suite schema. Materio's [worked suite](../../library/plugins/materio/evals/scripts.yaml) runs Python contracts in a temporary package copy; package installation never runs evals.
 
 See [Library packages](resource-library.md) for every lifecycle command and [Library architecture](../architecture/library.md) for identity, trust, pin and namespace invariants.

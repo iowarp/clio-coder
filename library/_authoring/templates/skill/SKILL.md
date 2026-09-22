@@ -7,7 +7,6 @@ clio-coder:
   registry-id: citation-check
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/_authoring/templates/skill
   provenance: designed
-  eval-status: scenarios-recorded
 triggers:
   - citation check
   - verify citations

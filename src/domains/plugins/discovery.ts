@@ -116,6 +116,9 @@ function components(value: unknown, root: string): PluginComponent[] {
 function clioConfiguration(value: unknown, root: string): ClioPluginConfiguration {
 	if (value !== undefined && !record(value)) throw new Error(`${PLUGIN_EXTENSION_KEY} must be an object`);
 	const raw = value ?? {};
+	// `evals` is retired: an installed manifest that still declares package
+	// suites keeps loading and the value is ignored. The key leaves this set in
+	// the v0.7.0 compatibility window.
 	requireKeys(
 		raw,
 		new Set(["manifestVersion", "kind", "requires", "evals", "compatibility", "resources", "components"]),
@@ -132,15 +135,6 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 			))
 	)
 		throw new Error("package requires must contain kind:name references");
-	const evals: Record<string, string> = {};
-	if (raw.evals !== undefined) {
-		if (!record(raw.evals)) throw new Error("package evals must map names to Suite v2 files");
-		for (const [id, file] of Object.entries(raw.evals)) {
-			if (!isPluginId(id) || typeof file !== "string" || !statSync(pluginResourcePath(root, file)).isFile())
-				throw new Error(`invalid package eval: ${id}`);
-			evals[id] = file;
-		}
-	}
 	let compatibility: ClioPluginConfiguration["compatibility"];
 	if (raw.compatibility !== undefined) {
 		if (!record(raw.compatibility)) throw new Error("compatibility must be an object");
@@ -228,7 +222,6 @@ function clioConfiguration(value: unknown, root: string): ClioPluginConfiguratio
 		resources,
 		components: inventory,
 		...(raw.requires ? { requires: raw.requires as LibraryRequirementRef[] } : {}),
-		...(raw.evals ? { evals } : {}),
 		...(compatibility ? { compatibility } : {}),
 	};
 }

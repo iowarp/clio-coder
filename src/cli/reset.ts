@@ -16,7 +16,7 @@ empty roots are recreated so the next run has somewhere to write.
 Levels (combinable except --all):
   --state       state root only (default). Holds every session transcript, so a
                 reset is the end of resume, /view, and the audit behind them.
-  --data        data root only: memory, evidence, evals, vendored tools (durable products)
+  --data        data root only: memory, evidence, vendored tools (durable products)
   --cache       cache root only
   --auth        credentials.yaml only
   --config      settings.yaml only
@@ -32,7 +32,7 @@ Safety:
 
 const ROOT_NOTES = {
 	state: "State holds every session transcript and the audit trail; resume and /view lose their history.",
-	data: "Data holds memory, evidence, evals, and vendored tools; the tools have to be downloaded again.",
+	data: "Data holds memory, evidence, and vendored tools; the tools have to be downloaded again.",
 	config: "Settings return to their defaults.",
 	auth: "Saved API keys are gone; each target has to be authenticated again.",
 	cache: "Cache is disposable and rebuilds itself.",

@@ -24,7 +24,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/workflow-distiller
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
   model-size: large
 ---
 

@@ -8,7 +8,7 @@ test("every panel eyebrow names a scope and a mutability", () => {
 		"EVIDENCE BUNDLES · INSTALLATION-WIDE · READ ONLY",
 	);
 	const panels = Object.entries(PANELS);
-	assert.ok(panels.length >= 22, `expected the inspector panels to be registered, saw ${panels.length}`);
+	assert.ok(panels.length >= 19, `expected the inspector panels to be registered, saw ${panels.length}`);
 	const mutabilities = new Set(MUTABILITIES.map((word) => word.toUpperCase()));
 	for (const [id, panel] of panels) {
 		const segments = panel.eyebrow.split(" · ");

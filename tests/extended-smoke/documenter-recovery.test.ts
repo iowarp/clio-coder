@@ -6,8 +6,8 @@ import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { test } from "node:test";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import { closeServer, readRequestBody, seedOpenAICompatToolOrchestrator } from "../harness/openai-compat-fixture.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;

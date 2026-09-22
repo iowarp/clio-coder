@@ -38,7 +38,6 @@ import {
 	planLibraryLifecycle,
 	releaseLibraryLifecycle,
 } from "../../src/domains/resources/library-actions.js";
-import { resolveLibraryEval } from "../../src/domains/resources/library-evals.js";
 import { discoverMarketplaceSkills } from "../../src/domains/resources/skills/marketplace.js";
 import { LIBRARY_TABS } from "../../src/interactive/overlays/library-tabs.js";
 import { createSlashCommandAutocompleteProvider } from "../../src/interactive/slash-autocomplete.js";
@@ -423,8 +422,10 @@ describe("plugin library lifecycle", () => {
 		equal(libraryEntryInstalled(item), false);
 	});
 
-	it("registers scoped pins, preserves all copies after index removal, and resolves only declared evals", async () => {
+	it("registers scoped pins, preserves all copies after index removal, and still loads a retired evals key", async () => {
 		const source = bundle();
+		// Package evals are retired; a manifest that still declares them must keep
+		// registering and installing until the v0.7.0 compatibility window.
 		mkdirSync(path.join(source, "evals"));
 		writeFileSync(path.join(source, "evals/check.yaml"), "version: 2\n");
 		const file = path.join(source, "plugin.json");
@@ -436,17 +437,10 @@ describe("plugin library lifecycle", () => {
 		throws(() => registerLibraryPackage(source, { scope: "project" }), /already registered/);
 		equal((await captureCli(["install", "plugin:fixture", "--project"])).code, 0);
 		equal((await captureCli(["install", source, "--user"])).code, 0);
-		const evaluated = resolveLibraryEval("plugin:fixture", "check", { scope: "project" });
-		match(evaluated.path, /evals[/\\]check.yaml$/);
-		equal(evaluated.provenance.sha256, registered.sha256);
-		throws(() => resolveLibraryEval("plugin:fixture", "unknown"), /declared package eval/);
 		rmSync(path.join(root, ".clio-coder/library.yaml"));
 		equal(libraryWorkspace().entries.find((e) => e.name === "fixture")?.installed.length, 2);
 		equal((await captureCli(["disable", "plugin:fixture", "--project"])).code, 0);
-		throws(() => resolveLibraryEval("plugin:fixture", "check", { scope: "project" }), /not active and verified/);
 		equal((await captureCli(["enable", "plugin:fixture", "--project"])).code, 0);
-		writeFileSync(evaluated.path, "changed eval");
-		throws(() => resolveLibraryEval("plugin:fixture", "check", { scope: "project" }), /not active and verified/);
 		equal((await captureCli(["remove", "plugin:fixture", "--project"])).code, 0);
 		equal(libraryWorkspace().entries.find((e) => e.name === "fixture")?.installed.length, 1);
 	});

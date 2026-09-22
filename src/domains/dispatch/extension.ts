@@ -5078,7 +5078,7 @@ export function createDispatchBundle(
 					const outcome = receipt.outcome ?? (receipt.exitCode === 0 ? "succeeded" : "failed");
 					const assignmentId = assignmentRootFor(receipt.runId);
 					const quality = reduceRouteQuality({
-						subject: { receipt, envelope, assignmentId },
+						subject: { receipt, envelope },
 						receipts: [{ receipt, envelope }],
 					});
 					routeObserver.recordOutcome(observation.id, {

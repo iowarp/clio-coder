@@ -54,8 +54,6 @@ export interface ClioPluginConfiguration {
 	/** Absent in portable bundles means plugin. All kinds share the package lifecycle. */
 	kind?: LibraryEntryKind;
 	requires?: LibraryRequirementRef[];
-	/** Contained Suite v2 files, selected explicitly by `clio-coder eval`. */
-	evals?: Record<string, string>;
 	compatibility?: { clio?: string };
 	resources: PluginResources;
 	components: PluginComponent[];

@@ -60,24 +60,6 @@ export const PANELS = {
 		boundary:
 			"A decision is reproduced from the bundle on this machine, exactly as the coordinator sealed it. Nothing here re-runs a gate, and an intact decision authenticates the record rather than the work it describes.",
 	},
-	evalReports: {
-		eyebrow: eyebrow("Eval reports", "installation-wide", READ_ONLY),
-		title: "Evals",
-		boundary:
-			"Reports are read from the eval store on this machine. This page runs no evaluation and writes no report; every figure is what the run recorded when it finished.",
-	},
-	evalReport: {
-		eyebrow: eyebrow("Eval report", "one suite", READ_ONLY),
-		title: "Evaluation results",
-		boundary:
-			"Every figure is what this run recorded when it finished. Opening the report runs nothing and changes nothing in the eval store on this machine.",
-	},
-	evalTrials: {
-		eyebrow: eyebrow("Trials", "one report", READ_ONLY),
-		title: "Trials",
-		boundary:
-			"Trial attachments, transcripts and prompts stay in the report on this machine. What this panel shows is each trial's recorded verdict and its measurements.",
-	},
 	usage: {
 		eyebrow: eyebrow("Recorded usage", "30-day window", READ_ONLY),
 		title: "Usage",

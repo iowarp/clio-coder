@@ -7,12 +7,11 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | Entry point | Purpose | Writes / external access | Gate |
 | --- | --- | --- | --- |
 | `pnpm build`, `pnpm dev` | `build.ts` wraps tsup; `build-codewiki-asset.ts` uses the production indexer and npm file list | Build output in `dist/`; no model calls | CI build |
-| `pnpm lint` | `check-hygiene.ts`: source boundaries, documentation/configuration consistency, library and eval validation, packaging and Pi API checks | Temporary fixtures and installer dry runs; no model calls | Routine CI |
-| `pnpm evals:check` | Validate committed eval suites with the production loader | Reads only; never runs suites or models | Included in lint |
+| `pnpm lint` | `check-hygiene.ts`: source boundaries, documentation/configuration consistency, library validation, packaging and Pi API checks | Temporary fixtures and installer dry runs; no model calls | Routine CI |
 | `pnpm library:pin` / `library:check` | `pin-library.ts`, `pin-skills.ts`, `generate-library-marketplace.ts`: validate packages and generate catalogs | Pin rewrites versioned catalogs; check only reads | Check included in lint |
 | `pnpm skills:pin` / `skills:check` | Skill-only authoring commands; use library:pin to refresh the complete catalog after changes | Same as above | Via library check |
 | `pnpm pi:surface-diff` / `pi:surface-snapshot` | Compare / deliberately refresh the consumed dependency API snapshot | Snapshot writes `docs/pi-surface.json` | Comparison included in lint, including same-version patches |
-| `pnpm test:maintenance` | Focused keyboard/patch and tool-surface grader contracts | Isolated deterministic fixtures; no model calls | Routine CI |
+| `pnpm test:maintenance` | Focused keyboard routing and draft contracts | Isolated deterministic fixtures; no model calls | Routine CI |
 | `pnpm ci:release` | `release-candidate.mjs`: clean committed source, CI, package audit, installed-package checks, exact tarball qualification | npm registry audit; scratch installs; receipt and tarball in user cache | Release qualification |
 | `pnpm release:preflight` | Check source, Node version, age and package digest against the qualified artifact | Temporary tarball; no rebuild | Publication |
 | `node scripts/check-release.mjs` | Package contents, budgets, versions, recipe contracts and dependency advisories | npm pack dry run and registry audit | Called by qualification |

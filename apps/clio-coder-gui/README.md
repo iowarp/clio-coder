@@ -31,7 +31,7 @@ accessible names and keyboard focus feedback.
 
 The application exposes Clio through a browser or installed local PWA.
 It includes toolchain management, sessions, traces, documentation, settings and
-routing inspection, target operations, fleet history, evidence, evals and usage,
+routing inspection, target operations, fleet history, evidence, usage,
 library discovery, interop and system health. These views use typed REST APIs
 and event streams backed by Clio's existing runtime seams and fixed CLI commands.
 The CLI, TUI, and ACP continue to run independently.
@@ -201,21 +201,14 @@ still have written a report containing integrity findings; refresh before retryi
 Evidence reads enforce containment and 8 MiB per file, with a 10,000-directory /
 64 MiB overview inventory ceiling. They never parse the build command's prose.
 
-Evaluation history is at `/evals` and `/api/evals`, with cursor pagination and
-`/api/evals/:id` for trial outcomes, measurements and stored verdicts. The worker
-uses `listEvalReports` and `loadEvalArtifactV4`; it reaches beyond the CLI's eight
-report summary window. Unreadable or retired files are counted, and absent token
-measurements remain absent. Transcript attachments are counted without exposing
-their contents. Inventory limits are 10,000 files / 64 MiB total / 8 MiB per file.
-
 `/usage` reads `GET /api/workspaces/:id/usage` through the fixed
 `usage report --repo <canonical-workspace> --days 30 --json` command. Its actual
 JSON Lines stream is decoded strictly under the runner's existing output bounds.
 The API retains every fact and suggestion, labels the source schema experimental,
 and distinguishes missing stores and unknown usage from measured zero. Clio
 filters sessions and dispatches to the workspace; audit, evidence and memory
-facts retain the CLI's installation-wide scope. Refreshing either view executes
-no evaluations or suggested actions.
+facts retain the CLI's installation-wide scope. Refreshing the view runs no
+suggested action.
 
 The workspace library is at `/library`. REST reads under
 `/api/workspaces/:id/library` expose canonical packages, installed copies, recipe

@@ -123,7 +123,6 @@ export {
 	type SkillCatalogView,
 	type SkillCatalogViewInput,
 } from "./skills/catalog-view.js";
-export { parseSkillEvals, type SkillEvalParseResult, type SkillEvalScenario } from "./skills/evals.js";
 export {
 	type InstallSkillInput,
 	type InstallSkillResult,

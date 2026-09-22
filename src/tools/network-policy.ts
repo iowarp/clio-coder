@@ -2,7 +2,7 @@
  * Process-wide registration switch for the RETRIEVE tool plane (web_fetch).
  * This removes retrieval tools from main and worker registries. It does not
  * restrict bash, hooks, external CLIs, or provider traffic. Hermetic execution
- * requires an OS network sandbox supplied by the operator or eval harness.
+ * requires an OS network sandbox supplied by the operator or an outer harness.
  * The environment setting propagates to child registries without per-run wiring.
  */
 export const NO_NETWORK_TOOLS_ENV = "CLIO_CODER_DISABLE_RETRIEVE_TOOLS";

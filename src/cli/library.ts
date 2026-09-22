@@ -80,7 +80,6 @@ availability and invocation; --all adds internal diagnostic agents. Nothing in
 these reads fetches a remote source or activates a recipe.
 Skills lists discovered runtime skills, including unmanaged local files.
 Inventory is the fixed, body-free skill read for GUI hosts.
-Package evals run with clio-coder eval run --package <kind:name> --eval <name>.
 `;
 /** One short operator label per origin; details stay in the JSON record. */
 function originLabel(origin: LibraryOrigin): string {

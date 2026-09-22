@@ -150,7 +150,7 @@ function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>):
 
 /**
  * Durable bounded history. Upserts are keyed by terminal receipt digest, so a
- * later authenticated gate/eval source refines the same sample instead of
+ * later authenticated gate source refines the same sample instead of
  * double-counting it. Replaying an unchanged source set is idempotent.
  */
 export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions = {}): RouteHistoryStore {

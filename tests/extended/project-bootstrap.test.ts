@@ -81,7 +81,7 @@ describe("project bootstrap boundary", () => {
 		writeFileSync(join(root, "AGENTS.md"), "- Always keep calibration data.\n");
 		writeFileSync(join(root, ".claude", "CLAUDE.md"), "- Never publish scratch reports.\n");
 		const scoped = "Clio owns the agent loop and pi-ai.\nEngine boundary.\n- Always use the ticket example.\n";
-		for (const file of ["SKILL.md", "evals.md", "CLAUDE.md"]) {
+		for (const file of ["SKILL.md", "notes.md", "CLAUDE.md"]) {
 			writeFileSync(join(root, ".claude", "skills", "ticket", file), scoped);
 		}
 		writeFileSync(join(root, "nested", "AGENTS.md"), scoped);

@@ -20,7 +20,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/skill-craft
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
   model-size: large
 ---
 
@@ -28,9 +27,8 @@ clio-coder:
 
 A skill exists to wrangle predictability out of a stochastic system: the same
 process every run, not the same output. Every rule below is a lever on that
-one virtue. A disputed line is settled by running the skill, not by debate;
-in Clio that means `clio-coder eval skill`, and a shipped skill's `evals.md`
-Expected bullets are its completion criteria.
+one virtue. A disputed line is settled by running the skill on a real task,
+not by debate.
 
 ## Format and Location
 
@@ -69,11 +67,11 @@ Frontmatter contract (Agent Skills compatible):
   missing. Reference an installed skill by name instead of restating its job.
 - `clio-coder:`: the reserved publication block (`registry-id`, `source-url`,
   `audit`, `provenance` designed|adapted|imported with `origin` when not
-  designed, `eval-status`, optional `model-size` and `agents`). Required for
-  catalog skills; approval is judged against it (library/skills/README.md).
+  designed, optional `model-size` and `agents`). Required for catalog skills;
+  approval is judged against it (library/skills/README.md).
 
-Sibling files (`references/*.md`, `evals.md`, scripts) ride along in the
-folder and load only when the body points at them.
+Sibling files (`references/*.md`, scripts) ride along in the folder and load
+only when the body points at them.
 
 ## Invocation: Choose Which Load You Pay
 
@@ -133,7 +131,5 @@ Before finishing any skill, pass the body line by line:
   load.
 
 Done when: the description is one sentence plus routing clauses and the
-triggers carry the phrases, every step has a checkable
-completion criterion, no line fails the relevance/duplication/no-op pass, and
-an `evals.md` records at least one RED-GREEN scenario distinguishing
-with-skill from without.
+triggers carry the phrases, every step has a checkable completion criterion,
+and no line fails the relevance/duplication/no-op pass.

@@ -6,18 +6,17 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse, stringify } from "yaml";
 import { RESULT_CONTRACT_REPAIR_LIMIT } from "../../src/domains/agents/result-contract.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import {
 	closeServer,
 	seedOpenAICompatToolOrchestrator,
 	startOpenAICompatFixture,
 } from "../harness/openai-compat-fixture.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
-const GRADER = fileURLToPath(new URL("../../evals/behavioral-corpus-grader.mjs", import.meta.url));
 const CLI = fileURLToPath(new URL("../../dist/cli/index.js", import.meta.url));
 const fixture = JSON.parse(
-	readFileSync(new URL("../../evals/fixtures/scout-citation-pipeline.json", import.meta.url), "utf8"),
+	readFileSync(new URL("../fixtures/scout-citation-pipeline.json", import.meta.url), "utf8"),
 ) as {
 	prompt: string;
 	dispatch: Record<string, unknown>;
@@ -58,11 +57,11 @@ function report(line = 62): string {
 		proposedSubtasks: [],
 	});
 }
-function run(args: string[], cwd: string, env: NodeJS.ProcessEnv, entry = CLI) {
+function run(args: string[], cwd: string, env: NodeJS.ProcessEnv) {
 	return new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
 		execFile(
 			process.execPath,
-			[entry, ...args],
+			[CLI, ...args],
 			{ cwd, env, timeout: 45_000, maxBuffer: 4_000_000 },
 			(error, stdout, stderr) => {
 				if (error && typeof error.code !== "number") return reject(error);
@@ -133,8 +132,8 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 				NODE_ENV: "test",
 				CLIO_CODER_TEST_OPENAI_KEY: "fixture-key",
 			};
-			const prepared = await run(["main", "main-scout-citation-pipeline", "--prepare"], workspace, env, GRADER);
-			strictEqual(prepared.code, 0, prepared.stderr);
+			mkdirSync(join(workspace, "findiff"));
+			for (const [path, content] of Object.entries(fixture.files)) writeFileSync(join(workspace, path), content);
 			const doctor = await run(["doctor", "--fix"], workspace, env);
 			strictEqual(doctor.code, 0, doctor.stderr);
 			seedOpenAICompatToolOrchestrator(join(scratch.dir, "config"), server.url, "full-auto");
@@ -221,16 +220,6 @@ for (const scenario of ["first-pass", "repaired", "exhausted"] as const) {
 			}
 			for (const [path, content] of Object.entries(fixture.files))
 				strictEqual(readFileSync(join(workspace, path), "utf8"), content);
-			const stdoutPath = join(scratch.dir, "runner.ndjson");
-			writeFileSync(stdoutPath, result.stdout);
-			const graded = await run(
-				["main", "main-scout-citation-pipeline"],
-				workspace,
-				{ ...env, CLIO_CODER_EVAL_RUNNER_STDOUT_FILE: stdoutPath },
-				GRADER,
-			);
-			strictEqual(graded.code, succeeded ? 0 : 1, graded.stderr);
-			match(graded.stdout, succeeded ? /"pipeline.completed":true/u : /"pipeline.completed":false/u);
 			context.diagnostic(
 				JSON.stringify({
 					scenario,

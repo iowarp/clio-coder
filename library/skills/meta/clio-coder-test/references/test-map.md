@@ -44,7 +44,7 @@ pnpm run test:file -- --test-name-pattern='cancellation' tests/extended/compacti
 ## Skill and package edits
 
 Update `SKILL.md` version/description and `plugin.json` consistently. Supporting
-references and eval scenarios participate in full-tree integrity too.
+references participate in full-tree integrity too.
 
 ```bash
 pnpm run skills:pin

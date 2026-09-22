@@ -1,19 +1,12 @@
-import { deepStrictEqual, match, ok, strictEqual, throws } from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
-import { join, relative } from "node:path";
+import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { parse as parseYaml } from "yaml";
-import {
-	loadEvalArtifactV4,
-	parseEvalArtifactV4,
-	writeEvalArtifactV4,
-} from "../../src/domains/eval/artifacts/store.js";
-import type { EvalCompareV4Summary } from "../../src/domains/eval/compare/compare.js";
-
 import { formatUserTaskHandoff } from "../../src/domains/user-tasks/handoff.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -339,167 +332,6 @@ describe("smoke/built CLI core", { concurrency: false }, () => {
 			strictEqual(unknown.code, 2);
 			strictEqual(unknown.stdout, "");
 			match(unknown.stderr, /unknown subcommand: not-a-command/u);
-		} finally {
-			scratch.cleanup();
-		}
-	});
-
-	it("reports custom eval artifacts using the printed command without importing or changing bytes", async () => {
-		const scratch = home("clio-coder-eval-custom-");
-		try {
-			// Artifact location does not require rerunning every recipe. Keep the
-			// positive/adversarial comparison in its dedicated test below.
-			const suite = parseYaml(readFileSync(join(ROOT, "evals/behavioral-machinery.yaml"), "utf8"));
-			suite.tasks = [suite.tasks[0]];
-			suite.tasks[0].workspace = { kind: "local", path: ROOT };
-			const suitePath = join(scratch.root, "custom-report-suite.json");
-			writeFileSync(suitePath, JSON.stringify(suite));
-			for (const out of [
-				relative(ROOT, join(scratch.root, "custom output's $literal")),
-				join(scratch.root, "named artifact.json"),
-			]) {
-				const run = await runCli(["eval", "run", "--suite", suitePath, "--out", out, "--clio-coder-entry", CLI], {
-					env: scratch.env,
-					timeoutMs: 60_000,
-				});
-				strictEqual(run.code, 0, run.stdout + run.stderr);
-				const evalId = /^eval: (\S+)$/mu.exec(run.stdout)?.[1];
-				const artifactPath = /^artifact: (.+)$/mu.exec(run.stdout)?.[1];
-				ok(evalId, run.stdout);
-				ok(artifactPath, run.stdout);
-				const bytes = readFileSync(artifactPath);
-				const missing = await runCli(["eval", "report", evalId], { env: scratch.env });
-				strictEqual(missing.code, 1, missing.stdout + missing.stderr);
-				match(missing.stderr, /eval artifact not found/u);
-				const command = /^report: (.+)$/mu.exec(run.stdout)?.[1];
-				ok(command, run.stdout);
-				const report = execFileSync("sh", ["-c", `alias clio-coder='"$CLIO_TEST_NODE" "$CLIO_TEST_ENTRY"'\n${command}`], {
-					cwd: scratch.root,
-					env: { ...scratch.env, CLIO_TEST_NODE: process.execPath, CLIO_TEST_ENTRY: CLI },
-					encoding: "utf8",
-					timeout: 20_000,
-				});
-				ok(report.startsWith(`# Eval ${evalId}\n`), report);
-				match(report, /Pass rate: 100\.00%/u);
-				deepStrictEqual(readFileSync(artifactPath), bytes);
-				strictEqual(existsSync(join(scratch.root, "data", "evals", `${evalId}.json`)), false);
-				const corrupted = JSON.parse(bytes.toString("utf8"));
-				corrupted.results[0].executionEnvelope.target = "conflicting-target";
-				const corruptPath = join(scratch.root, "corrupted.json");
-				writeFileSync(corruptPath, JSON.stringify(corrupted));
-				const rejected = await runCli(["eval", "report", "--artifact", corruptPath], { env: scratch.env });
-				strictEqual(rejected.code, 1, rejected.stdout + rejected.stderr);
-				match(rejected.stderr, /executionEnvelope: conflicts with result target or behavioral corpus/u);
-				const ambiguous = await runCli(["eval", "report", evalId, "--artifact", artifactPath], { env: scratch.env });
-				strictEqual(ambiguous.code, 2, ambiguous.stdout + ambiguous.stderr);
-			}
-		} finally {
-			scratch.cleanup();
-		}
-	});
-
-	it("round-trips positive and adversarial eval results through report and comparison", async () => {
-		const scratch = home("clio-coder-eval-machinery-");
-		try {
-			const suite = parseYaml(readFileSync(join(ROOT, "evals/behavioral-machinery.yaml"), "utf8"));
-			suite.tasks = suite.tasks.slice(0, 2);
-			for (const task of suite.tasks) task.workspace = { kind: "local", path: ROOT };
-			const suitePath = join(scratch.root, "comparison.json");
-			writeFileSync(suitePath, JSON.stringify(suite));
-			const run = await runCli(["eval", "run", "--suite", suitePath, "--clio-coder-entry", CLI], {
-				env: scratch.env,
-				timeoutMs: 300_000,
-			});
-			strictEqual(run.code, 0, run.stdout + run.stderr);
-			const evalId = /^eval: (\S+)$/mu.exec(run.stdout)?.[1];
-			ok(evalId, run.stdout);
-
-			const report = await runCli(["eval", "report", evalId, "--format", "md"], { env: scratch.env });
-			strictEqual(report.code, 0, report.stderr);
-			ok(report.stdout.startsWith(`# Eval ${evalId}\n`), report.stdout);
-			match(report.stdout, /Pass rate: 100\.00%/u);
-
-			const artifact = await loadEvalArtifactV4(join(scratch.root, "data"), evalId);
-			strictEqual(artifact.summary.runs, 2);
-			strictEqual(artifact.summary.passed, 2);
-			strictEqual(artifact.summary.failed, 0);
-			const roles = ["architect"];
-			deepStrictEqual(
-				artifact.results.map((result) => result.taskId),
-				roles.flatMap((role) => [`${role}-positive`, `${role}-adversarial`]),
-			);
-			for (const result of artifact.results) {
-				strictEqual(result.pass, true, result.taskId);
-				strictEqual(result.failureClass, null, result.taskId);
-				strictEqual(result.verdict?.outcome, "pass", result.taskId);
-				strictEqual(result.verdict.machinery, "ok", result.taskId);
-				strictEqual(result.verdict.reason, null, result.taskId);
-				strictEqual(result.behavioral?.outcome, "pass", result.taskId);
-				ok(result.executionEnvelope, result.taskId);
-				strictEqual(result.executionEnvelope.target, result.target.id, result.taskId);
-				deepStrictEqual(result.executionEnvelope.corpus, result.behavioral?.corpus, result.taskId);
-				ok(report.stdout.includes(`| ${result.taskId} |`), result.taskId);
-			}
-
-			const compared = await runCli(["eval", "compare", evalId, evalId, "--format", "json"], { env: scratch.env });
-			strictEqual(compared.code, 0, compared.stderr);
-			const comparison = JSON.parse(compared.stdout) as EvalCompareV4Summary;
-			strictEqual(comparison.baselineEvalId, evalId);
-			strictEqual(comparison.candidateEvalId, evalId);
-			strictEqual(comparison.hardGate.pass, true);
-			strictEqual(comparison.configDrift, false);
-			strictEqual(comparison.passRateDelta, 0);
-			deepStrictEqual(comparison.envelopeMismatches, []);
-
-			const routeBaseline = structuredClone(artifact);
-			routeBaseline.evalId = `${evalId}-route-baseline`;
-			routeBaseline.matrix.dimensions = ["target", "wireModel", "runtime", "thinkingLevel"];
-			const routeCandidate = structuredClone(routeBaseline);
-			routeCandidate.evalId = `${evalId}-route-candidate`;
-			routeCandidate.matrix.target = "fixture-candidate";
-			routeCandidate.matrix.model = "fixture-model";
-			routeCandidate.matrix.thinking = "high";
-			for (const result of routeCandidate.results) {
-				ok(result.executionEnvelope);
-				ok(result.behavioralMetrics);
-				result.target = { id: "fixture-candidate", model: "fixture-model", thinking: "high" };
-				result.behavioralMetrics.target = { id: "fixture-candidate", model: "fixture-model" };
-				result.executionEnvelope.target = "fixture-candidate";
-				result.executionEnvelope.wireModel = "fixture-model";
-				result.executionEnvelope.runtime = "fixture-runtime";
-				result.executionEnvelope.thinkingLevel = "high";
-			}
-			await writeEvalArtifactV4(join(scratch.root, "data"), routeBaseline);
-			await writeEvalArtifactV4(join(scratch.root, "data"), routeCandidate);
-			const routesCompared = await runCli(
-				["eval", "compare", routeBaseline.evalId, routeCandidate.evalId, "--allow-config-drift", "--format", "json"],
-				{ env: scratch.env },
-			);
-			strictEqual(routesCompared.code, 0, routesCompared.stdout + routesCompared.stderr);
-			const routesComparison = JSON.parse(routesCompared.stdout) as EvalCompareV4Summary;
-			strictEqual(routesComparison.hardGate.pass, true);
-			strictEqual(routesComparison.behavioralMetrics.length, comparison.behavioralMetrics.length);
-			deepStrictEqual(routesComparison.envelopeMismatches, []);
-			ok(routesComparison.behavioralMetrics.every((row) => row.comparability.comparable));
-			for (const row of routesComparison.behavioralMetrics) {
-				deepStrictEqual(row.baselineTargets, [row.target]);
-				deepStrictEqual(row.candidateTargets, [{ id: "fixture-candidate", model: "fixture-model" }]);
-			}
-			deepStrictEqual(await loadEvalArtifactV4(join(scratch.root, "data"), evalId), artifact);
-
-			for (const field of ["target", "corpus.id", "corpus.version"] as const) {
-				const inconsistent = structuredClone(artifact);
-				const envelope = inconsistent.results[0]?.executionEnvelope;
-				ok(envelope);
-				if (field === "target") envelope.target = "conflicting-target";
-				else if (field === "corpus.id") envelope.corpus.id = "conflicting-corpus";
-				else envelope.corpus.version = "0.0.0";
-				throws(
-					() => parseEvalArtifactV4(inconsistent, evalId),
-					/results\[0\]\.executionEnvelope: conflicts with result target or behavioral corpus/u,
-					field,
-				);
-			}
 		} finally {
 			scratch.cleanup();
 		}

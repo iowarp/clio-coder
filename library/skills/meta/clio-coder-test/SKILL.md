@@ -13,7 +13,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/meta/clio-coder-test
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
   model-size: any
 ---
 

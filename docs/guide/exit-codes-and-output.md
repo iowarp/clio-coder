@@ -13,10 +13,9 @@ Clio Coder follows a deterministic exit code taxonomy across all commands:
 | Exit Code | Meaning | Typical Causes & Conditions |
 | :--- | :--- | :--- |
 | **`0`** | **Success** | Successful command execution, clean run settlement, `--version`, `--help` invocation, or missing trace database notice without an explicit `--db` flag. |
-| **`1`** | **Operational Failure** | Execution error, model target unreachable, doctor diagnosis with unresolved issues, explicit `--db` path not found, or evaluation rubric failure (`fail` or `error` verdict). |
+| **`1`** | **Operational Failure** | Execution error, model target unreachable, doctor diagnosis with unresolved issues, or explicit `--db` path not found. |
 | **`2`** | **Syntax / Usage Error** | Unknown subcommand, invalid flag, missing required positional arguments, global flag placed after subcommand, or data mutation SQL keyword passed to `clio-coder trace sql`. |
 | **`124`** | **Run Timeout** | `clio-coder run --timeout <seconds>` elapsed. The run took the coordinated shutdown path a SIGTERM takes: the turn was aborted, a running bash tool's process group was signalled, and the receipt was sealed with outcome `timed_out` and run status `failed`, the status a dispatched worker's `timed_out` receipt seals with. The code matches `timeout(1)`. An external SIGTERM still exits 143 with outcome `canceled`. A timeout that fires during boot, before the turn starts, exits 124 with no receipt. |
-| **`3`** | **Unmeasured / Harness State** | Specific to `clio-coder eval skill` (formerly `clio-coder skills eval`): rubric could not be evaluated due to unparseable judge output, timeout, or evidence archive write failure (distinct from a failure/regression). Package eval commands (`clio-coder eval run --package`) and suite evaluations return 1 on failure. |
 
 ---
 
@@ -49,7 +48,6 @@ In headless execution (`clio-coder run`):
    clio-coder run cannot confirm permission requests; rerun interactively to approve this action.
    ```
    The denial is delivered to the model so it can recover through permitted work or report a limitation. An unresolved block with no successful write exits `1` with receipt outcome `failed` and `outcomeDetail: "noop"`; this does not require `--fail-on-noop`. A later substantive success of the same action class can resolve a block. A successful `limitation` call fails with detail `limitation`. `--fail-on-noop` also rejects runs whose attempted tools all failed without a block. See [Headless No-op Runs](commands-and-modes.md#headless-no-op-runs).
-4. **No-op Runs Under `eval run`**: `clio-coder eval run` fails a task whose `clio-coder run` sealed `noop: true`, with failure class `noop`, even when the task's verifier passes on the untouched workspace. The suite runner reads the main-agent receipt from the item's own state journal, matched to the run by the session id in its `--json` header, and does not pass `--fail-on-noop`, so a nonzero runner exit still reports `runner_failed`. The result carries `result.noop` (absent when no matching receipt records the flag), and `artifacts.failureReason` names the blocked tool calls and their reasons, or says no mutating tool call succeeded. `eval run` prints that reason as a `failure:` line, the JUnit report puts it in the failure body, and the verdict records `machinery: "ok"` with reason `noop`, because the harness worked and the agent changed nothing.
 
 ---
 

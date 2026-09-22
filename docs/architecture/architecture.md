@@ -35,7 +35,6 @@ or CLI-owned feature areas.
 | config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
-| eval | `src/domains/eval/**` | Local evaluation harness, suites, JUnit/SWE-bench reports. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
 | evolution | `src/domains/evolution/**` | Authority-tiered self-edit manifests and gates. |
 | extensions | `src/domains/extensions/**` | Extension discovery, packaging, and lifecycle. |
@@ -255,7 +254,7 @@ Core data paths:
 3. The chat loop resolves model/runtime state and visible tools for the selected target and request intent.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
 5. Tool calls enter `src/tools/registry.ts`, which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
-6. Fleet dispatch writes run ledger entries and receipts; evidence/memory/eval domains consume those artifacts later.
+6. Fleet dispatch writes run ledger entries and receipts; evidence and memory domains consume those artifacts later.
 
 ---
 

@@ -14,7 +14,6 @@ reproduced; the presentation decisions recorded here are what the new GUI still 
 | config (16K) | `contracts/settings.ts` + `settings-safe.ts` | yes: `ConfigEntry.contextCostTokens` and `reloadClass` are on the wire |
 | decisions (12K) | `contracts/evidence.ts` (`gate`) | yes, but shape is opaque (`JSON.stringify(gate)` at evidence.tsx:226) |
 | dispatch (8K) | `contracts/fleet.ts` | yes |
-| eval (24K) | `contracts/reports.ts` | yes |
 | evidence (17K) | `contracts/evidence.ts` | yes |
 | fleet (25K) | `contracts/fleet.ts` + `fleet-events.ts` | yes |
 | interop (11K) | `contracts/system.ts` | yes: `wiring`, `decisionStale` and `decidedAt` are on the wire, derived by the core's own `interopProposals` |
@@ -26,7 +25,7 @@ reproduced; the presentation decisions recorded here are what the new GUI still 
 
 **The empty-state grammar — the most reusable thing here.** Every panel distinguished four states and used different words for each. Reproduce this everywhere:
 1. *Not read in this session* — `"The durable evidence inventory has not been read in this session."` / `"No diagnostic sweep has run in this desktop session. Nothing is inferred from a successful conversation."`
-2. *Store missing* — `"This installation has never run an evaluation, so it has no eval store at all. That is a missing store, not an empty one."` A dash in a figure means the store was not found: `"A dash means Clio Coder could not find that local history store. It does not mean zero activity."`
+2. *Store missing* — `"This installation has never built evidence, so it has no evidence store at all. That is a missing store, not an empty one."` A dash in a figure means the store was not found: `"A dash means Clio Coder could not find that local history store. It does not mean zero activity."`
 3. *Store present, nothing in it* — `"Clio Coder has built no evidence bundles on this installation. This is an empty record, not a health claim."`
 4. *Record predates the schema* — `"This bundle predates the canonical trust projection, so it records no axes to open."`
 
@@ -42,11 +41,11 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 - **interop** → summary (detected of known kinds, wired as peers, would be offered, detected-at), then one row per agent with the wiring sentence. Boundary: detection reads files only, starts no agent, and the version shown is the last one Clio recorded — `"opening this panel cannot become 'execute every coding agent installed on this machine'"`.
 - **routing** → target selector (targets derived client-side from the model rows, deduped and `localeCompare`-sorted), then a filtered model grid. Filter is a `useDeferredValue` over the lowercased query, matched against `[modelId, runtimeId, residency, ...capabilities]`. Zero values render `"Not reported"`, never `0`.
 - **dispatch** → installation-wide, explicitly not project-scoped and not a live stream: `"This is global installation state, not a fact about the selected project and not a live event stream."`
-- **recovery**, **evidence**, **fleet**, **eval**, **decisions** → see their own artifacts.
+- **recovery**, **evidence**, **fleet**, **decisions** → see their own artifacts.
 
 **Shared idioms worth extracting into `client/design/`:**
 - `<StatusMark tone label>` — a glyph + label pair with tones `success | warning | error | neutral | info | action`. Used by every panel; there is no other status primitive.
-- A `PanelHeading` with `eyebrow` (all-caps, wide-tracked), `title`, optional action slot. Every panel opens with an eyebrow that names the data's *scope and mutability*: `EVIDENCE BUNDLES · INSTALLATION-WIDE`, `DURABLE ACCOUNTING · TRACE DATABASE`, `EVAL REPORTS · INSTALLATION-WIDE · READ ONLY`, `INSTALLATION · REDACTED DIAGNOSTICS`, `MODELS · WORKER ROUTING`, `GATE DECISIONS · SEALED COORDINATOR VERDICTS`, `COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS`, `APPROVAL NEEDED · ONE USE`.
+- A `PanelHeading` with `eyebrow` (all-caps, wide-tracked), `title`, optional action slot. Every panel opens with an eyebrow that names the data's *scope and mutability*: `EVIDENCE BUNDLES · INSTALLATION-WIDE`, `DURABLE ACCOUNTING · TRACE DATABASE`, `INSTALLATION · REDACTED DIAGNOSTICS`, `MODELS · WORKER ROUTING`, `GATE DECISIONS · SEALED COORDINATOR VERDICTS`, `COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS`, `APPROVAL NEEDED · ONE USE`.
 - A closing **boundary paragraph** on every panel naming exactly what stays on the host. These are not boilerplate; each one is specific and each should survive.
 - Formatters: `formatTokens(v) = v === null ? "not recorded" : v.toLocaleString("en-US")`; `formatCostUsd(v) = v === null ? "not recorded" : "$" + v.toFixed(v > 0 && v < 0.01 ? 4 : 2)` — **exactly zero prints as `$0.00`, not "free", because a local runtime that prices at zero and a run whose cost was never recorded are different facts and only the second is null**. `client/api/clock.ts` already has `formatCost` and `formatTokens` matching this; keep them.
 
@@ -58,7 +57,7 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 | catalog | `/library`: a `tablist` with arrow, Home and End keys; agent cards in the fact order above; skill cards led by the reach sentence; free text across every string field | `client/pages/library-model.ts`, `tests/library-model.test.ts` |
 | interop | `/system/interop`: summary, one card per kind with the wiring sentence | `client/pages/interop-model.ts`, `tests/interop-model.test.ts`, `tests/system-http.test.ts` |
 | dispatch | `/fleet`, which carries the installation-wide sentence as `DISPATCH_SCOPE` | `client/design/panel-model.ts` |
-| usage, trace, toolchain, routing, evidence, eval, decisions | unchanged since the previous sprint | `usage-model.ts`, `trace-model.ts`, `toolchain-model.ts` |
+| usage, trace, toolchain, routing, evidence, decisions | unchanged since the previous sprint | `usage-model.ts`, `trace-model.ts`, `toolchain-model.ts` |
 
 Every page now opens with a `PanelHeading` from the `PANELS` registry and closes with its own `Boundary`. An eyebrow ends in one word from `MUTABILITIES`, and `tests/panel-model.test.ts` holds the registry to that list.
 

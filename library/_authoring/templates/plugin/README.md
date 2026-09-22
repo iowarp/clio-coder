@@ -13,7 +13,6 @@ data-curation/
   skills/
     dataset-curation/
       SKILL.md                              # Bound skill
-      evals.md                              # Skill evaluation scenarios
   agents/
     data-curator.md                         # Agent binding dataset-curation skill
   prompts/

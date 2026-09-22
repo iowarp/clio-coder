@@ -127,7 +127,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `DispatchRequest` in `src/domains/dispatch/contract.ts`.
 
 ### 31. Run Ledger
-- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `fleet.history.maxRuns`. It is what the fleet board, `clio-coder fleet status`, and eval linking read.
+- **Definition**: The durable dispatch run list at `runs.json` in the state directory, retention-capped by `fleet.history.maxRuns`. It is what the fleet board and `clio-coder fleet status` read.
 - **Owning Type**: `RunEnvelope` in `src/domains/dispatch/types.ts`, persisted by `src/domains/dispatch/state.ts`.
 
 ### 32. Agent Ledger
@@ -135,7 +135,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `AgentLedgerEntry` in `src/worker/protocol.ts`, stored by `src/domains/dispatch/agent-ledger-store.ts`.
 
 ### 33. Session Ledger
-- **Definition**: The JSONL record of one session's turns, written per session and referenced by eval artifacts as `sessionLedgers`. It is what `/resume`, `/fork`, and replay read.
+- **Definition**: The JSONL record of one session's turns, written per session. It is what `/resume`, `/fork`, and replay read.
 - **Owning Type**: `SessionEntry` in `src/domains/session/entries.ts`.
 
 ### 34. Task Ledger
@@ -191,7 +191,7 @@ This document defines the 50 core architectural concepts and terminology used th
 - **Owning Type**: `CanonicalTrustStatus` in `src/domains/evidence/trust-status.ts`.
 
 ### 47. Trust Projection
-- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in six fixed clauses (`sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Alt+W board, the receipt view, the eval bridge, and the ACP wire all print from it.
+- **Definition**: The one rendering of the canonical trust status every operator surface prints. The compact human line answers who claims the result, what was observed, what was independently checked, and what is still unknown, in six fixed clauses (`sealed; grounded by host-verification; not independently reviewed; mediated; context recorded; completion evidenced`). The machine projection is the same answer as a bounded, versioned record with references to the detailed artifacts. Dispatch and monitor output, `evidence inspect`, `findings.md`, the Alt+W board, the receipt view, and the ACP wire all print from it.
 - **Owning Type**: `formatTrustSummary` and `TrustSummaryProjection` in `src/domains/evidence/trust-projection.ts`.
 
 ### 48. Trust Verdict
