@@ -6,7 +6,7 @@
  * two ways gets answered the way it reads. Every wording change is therefore
  * reviewed against this probe's before-and-after numbers.
  *
- *   node --import tsx scripts/decision-probe.ts tests/fixtures/decision-cases/turn-sites.json [--profile system-one] [--runs 2] [--json]
+ *   node --import tsx scripts/decision-probe.ts tests/fixtures/decision-cases/turn-sites.json [--profile system-one] [--runs 2] [--json] [--cases]
  *
  * It runs each fixture turn through the production pre-turn brief, with the
  * operator's own settings and the key stored for the bound target, so it
@@ -14,6 +14,9 @@
  * model** and is never part of CI. The sites named by the fixture must be bound
  * in `fleet.decisionProfiles`, or `--profile` binds them to an existing
  * `fleet.profiles` entry for this run only, without touching the settings file.
+ *
+ * `--cases` also writes each turn's values to stderr as JSON lines, which is
+ * what a threshold is placed against.
  *
  * Fixture keys name `<site>.<field>` of the site's value. A boolean label is
  * graded against the field's probability, abstaining inside 0.4..0.6 as the
@@ -90,7 +93,7 @@ function argValue(flag: string): string | undefined {
 async function main(): Promise<void> {
 	const path = process.argv[2];
 	if (path === undefined || path.startsWith("--")) {
-		process.stderr.write("usage: decision-probe.ts <fixture.json> [--profile NAME] [--runs N] [--json]\n");
+		process.stderr.write("usage: decision-probe.ts <fixture.json> [--profile NAME] [--runs N] [--json] [--cases]\n");
 		process.exit(2);
 	}
 	const parsed = JSON.parse(readFileSync(path, "utf8")) as Fixture | CapabilityFixture;
@@ -211,6 +214,13 @@ async function probeTurnSites(
 				...(turn.previous !== undefined ? { previous: turn.previous } : {}),
 			});
 			latencies.push(performance.now() - startedAt);
+			// Per-turn values, for placing a threshold between the labeled groups.
+			if (process.argv.includes("--cases")) {
+				const values = Object.fromEntries(sites.map((site) => [site.site, brief.get(site.site)?.value ?? null]));
+				process.stderr.write(
+					`${JSON.stringify({ run, expect: turn.expect, values, task: turn.task.slice(0, 80), previous: turn.previous !== undefined })}\n`,
+				);
+			}
 			for (const [key, expected] of Object.entries(turn.expect)) {
 				const [site, field] = key.split(".") as [DecisionSite, string];
 				const value = brief.get(site)?.value as Record<string, unknown> | undefined;

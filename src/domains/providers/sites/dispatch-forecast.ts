@@ -21,12 +21,14 @@ import type { PreTurnSite } from "../pre-turn-brief.js";
 export const DISPATCH_FORECAST_VERSION = "dispatchforecast-v1";
 
 /**
- * Probability at or above which the hint is given. Requests that warranted
- * workers measured 0.84 to 0.96 and the rest at most 0.16, with two borderline
- * prompts near 0.5. An unwarranted dispatch is one of the costs this site
- * exists to avoid, so the bar sits above the borderline.
+ * Probability at or above which the hint is given. Over the labeled fixture,
+ * requests that warranted workers measured 0.81 to 0.95 apart from two
+ * borderline prompts near 0.5, and the rest at most 0.25; the highest live
+ * negative in the scenario runs was 0.54. "explore this repo fully" measured
+ * 0.74 to 0.82, so a bar at 0.85 never hinted the case the site exists for.
+ * An unwarranted dispatch is still a cost, so the bar sits above 0.54.
  */
-const HINT_THRESHOLD = 0.85;
+const HINT_THRESHOLD = 0.7;
 
 /** Below this certainty the shape is left out of the hint rather than guessed. */
 const SHAPE_MIN_CONFIDENCE = 0.5;
@@ -57,7 +59,10 @@ export interface DispatchForecast {
 export function dispatchForecastHint(value: DispatchForecast): string | null {
 	if (value.dispatch < HINT_THRESHOLD) return null;
 	const shape = value.shape === null ? "" : `; ${SHAPE_PHRASES[value.shape]}`;
-	return `[Plan] This reads as work suited to workers${shape}. Whether and how to dispatch stays your call.`;
+	// Naming the rule and its timing is what moved qwopus3.8-27b: with only the
+	// first sentence it explored with 40 or more of its own calls in two of two
+	// runs; with the second it sent four parallel scouts first in two of two.
+	return `[Plan] This reads as work suited to workers${shape}. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.`;
 }
 
 export const dispatchForecastSite: PreTurnSite<DispatchForecast> = {
