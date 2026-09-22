@@ -239,16 +239,24 @@ function workerApprovalRequestView(entry: WorkerEscalationEntry): ApprovalReques
  */
 function advisorySlot(deps: OverlayPermissionLifecycleDeps, subject: ToolRiskSubject): PermissionAdvisoryReader {
 	let line = "";
-	deps
-		.describeToolRisk?.(subject)
-		.then((text) => {
-			if (typeof text !== "string" || text.length === 0) return;
-			line = text;
-			deps.requestRender();
-		})
-		.catch(() => {
-			// An outage costs the card one sentence and nothing else.
-		});
+	// This runs before the dialog is opened, so a synchronous throw here would
+	// stop the card from ever reaching the operator. An injected dependency that
+	// throws instead of rejecting, or hands back something that is not a
+	// promise, must cost the card its one sentence and nothing more.
+	try {
+		const pending = deps.describeToolRisk?.(subject);
+		void Promise.resolve(pending)
+			.then((text) => {
+				if (typeof text !== "string" || text.length === 0) return;
+				line = text;
+				deps.requestRender();
+			})
+			.catch(() => {
+				// An outage costs the card one sentence and nothing else.
+			});
+	} catch {
+		// Same outcome as a rejection: the card renders without the line.
+	}
 	return () => line;
 }
 
