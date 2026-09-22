@@ -24,6 +24,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Recalibrate the tool-risk ladder around what changes where. Its top rung said "reaches another machine", and jev-latest followed that literally: a plain `curl` GET rated irreversible, so the approval card cried wolf on every download. The rungs now separate reading from changing, and changing this workspace from changing another machine. Against twelve commands spanning the four rungs, the old wording agreed with the intended rung on nine and abstained on `npm install`; the new one agreed on all twelve in two consecutive live runs.
 - Bound the pre-turn memory and skills pass at 1.5s instead of 3s. Every jev-latest call measured for this release finished within 315ms including a cold connection.
 - Correct the configuration guide, which still said only `routing` had a call site and that the key had to come from the environment.
+- Ask every pre-turn site in one request. The memory and skills relevance pass is now two definitions in a pre-turn brief that groups bound sites by answering model, so a new pre-turn case adds questions to the call the turn already makes. Latency depends on the call, not the question count: 24 to 256 questions answered in 116 to 367ms. The relevance request body is unchanged.
 
 ### Fixes
 

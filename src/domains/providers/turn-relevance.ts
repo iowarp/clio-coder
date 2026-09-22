@@ -1,11 +1,12 @@
 /**
- * Per-turn holder for the relevance scores the pre-turn pass resolved.
+ * Per-turn holder for every pre-turn decision, with typed readers for the two
+ * relevance sites.
  *
- * It exists because the pass is async and both its readers are not. The prompt
- * builder wants memory's scores while it is composing the system prompt, and
- * the skills listing wants its own later in the same turn, inside a
- * synchronous tool handler. One awaited call at the turn boundary fills this,
- * and both readers take what is there.
+ * The brief is async and its readers are not. The prompt builder wants
+ * memory's scores while it is composing the system prompt, the skills listing
+ * wants its own later in the same turn inside a synchronous tool handler, and
+ * turn_start middleware wants every hint. One awaited call at the turn
+ * boundary fills this, and every reader takes what is there.
  *
  * Subjects are supplied by the composition root rather than read here, so this
  * module stays clear of the memory store and the skill loader and can be
@@ -13,8 +14,14 @@
  */
 
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
-import { inspectDecisionSite, type ResolveDeciderInput } from "./decision-sites.js";
-import { type RelevanceSubject, scoreTurnRelevance } from "./relevance-pass.js";
+import type { ResolveDeciderInput } from "./decision-sites.js";
+import {
+	createPreTurnBriefStore,
+	type PreTurnBrief,
+	type PreTurnEvidence,
+	type PreTurnSite,
+} from "./pre-turn-brief.js";
+import { type RelevanceScores, type RelevanceSubject, relevanceSite } from "./relevance-pass.js";
 
 export interface TurnRelevanceStoreOptions {
 	/**
@@ -26,59 +33,47 @@ export interface TurnRelevanceStoreOptions {
 	listMemory: () => ReadonlyArray<RelevanceSubject>;
 	/** Rankable installed skills; called only when a site is bound. */
 	listSkills: () => ReadonlyArray<RelevanceSubject>;
+	/** Every other pre-turn site. They join the same request as memory and skills. */
+	sites?: ReadonlyArray<PreTurnSite<unknown>>;
 }
 
 export interface TurnRelevanceStore {
 	/**
-	 * Resolve this turn's scores. Awaited at the turn boundary, so it is the one
-	 * place the harness pays for the pass, and it always settles: every failure
-	 * clears the store rather than rejecting.
+	 * Resolve this turn's answers. Awaited at the turn boundary, so it is the one
+	 * place the harness pays for the brief, and it always settles: every failure
+	 * clears the store rather than rejecting. A bare string is the task alone.
 	 */
-	refresh(taskText: string, signal?: AbortSignal): Promise<void>;
+	refresh(evidence: string | PreTurnEvidence, signal?: AbortSignal): Promise<void>;
 	memory(): PrecomputedRanking | undefined;
 	skills(): PrecomputedRanking | undefined;
-	/** Drop the scores, so a turn that never refreshed cannot read a stale ranking. */
+	/** This turn's value for any registered site. */
+	get<T>(site: PreTurnSite<T>): T | undefined;
+	/** Every settled answer this turn. */
+	current(): PreTurnBrief;
+	/** Every site this store asks, relevance sites first. */
+	readonly sites: ReadonlyArray<PreTurnSite<unknown>>;
+	/** Drop the answers, so a turn that never refreshed cannot read a stale one. */
 	clear(): void;
 }
 
 export function createTurnRelevanceStore(options: TurnRelevanceStoreOptions): TurnRelevanceStore {
-	let memory: PrecomputedRanking | undefined;
-	let skills: PrecomputedRanking | undefined;
-	const clear = (): void => {
-		memory = undefined;
-		skills = undefined;
+	const sites: ReadonlyArray<PreTurnSite<unknown>> = [
+		relevanceSite("memory", options.listMemory),
+		relevanceSite("skills", options.listSkills),
+		...(options.sites ?? []),
+	];
+	const store = createPreTurnBriefStore({ resolve: options.resolve, sites });
+	const ranking = (site: "memory" | "skills"): PrecomputedRanking | undefined => {
+		const answer = store.current().get(site);
+		return answer === undefined ? undefined : { scores: answer.value as RelevanceScores, source: answer.source };
 	};
 	return {
-		memory: () => memory,
-		skills: () => skills,
-		clear,
-		async refresh(taskText, signal) {
-			// Last turn's scores are wrong for this one, so they go before the new
-			// ones arrive rather than after. A pass that fails leaves both sites
-			// ranking the way they did before the sites existed.
-			clear();
-			try {
-				const input = options.resolve();
-				if (input === null) return;
-				// Binding is checked before either catalog is read. Reading the memory
-				// store and loading every skill are the expensive part of this, and an
-				// operator who bound nothing must not pay for them once a turn.
-				const wantsMemory = inspectDecisionSite("memory", input).bound;
-				const wantsSkills = inspectDecisionSite("skills", input).bound;
-				if (!wantsMemory && !wantsSkills) return;
-				const result = await scoreTurnRelevance(input, {
-					task: taskText,
-					memory: wantsMemory ? options.listMemory() : [],
-					skills: wantsSkills ? options.listSkills() : [],
-					...(signal !== undefined ? { signal } : {}),
-				});
-				memory = result.memory ?? undefined;
-				skills = result.skills ?? undefined;
-			} catch {
-				// Reading settings, the registry or either catalog can throw. None of
-				// that is worth a turn.
-				clear();
-			}
-		},
+		sites,
+		refresh: (evidence, signal) => store.refresh(typeof evidence === "string" ? { task: evidence } : evidence, signal),
+		memory: () => ranking("memory"),
+		skills: () => ranking("skills"),
+		get: (site) => store.get(site),
+		current: () => store.current(),
+		clear: () => store.clear(),
 	};
 }
