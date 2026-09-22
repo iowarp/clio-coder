@@ -1,18 +1,19 @@
 # Clio Coder roadmap
 
-Clio Coder v0.5.3 is released. The next release focus is context management,
-compaction, and memory: preserving task continuity, making context decisions
-understandable, and reducing the cost of long sessions. The terminal remains
-the primary coding interface.
+Clio Coder v0.5.2 is released and v0.5.3 is in development. The release focus
+remains context management, compaction, and memory: preserving task continuity,
+making context decisions understandable, and reducing the cost of long
+sessions. The terminal remains the primary coding interface.
 
 This roadmap describes priorities, not available features or delivery promises.
 For implemented behavior, use the [documentation](docs/README.md). Historical
 release changes are in [CHANGELOG.md](CHANGELOG.md); older development plans in
 git history are not current contracts.
 
-## Shipped in v0.5.3
+## Landed on the v0.5.3 branch
 
-Two provider surfaces landed in this release and are documented in
+Two provider surfaces are on the development branch, not in a tagged release.
+Both are documented in
 [configuration-and-targets.md](docs/guide/configuration-and-targets.md).
 
 - **Diffusion model support.** The `inception` runtime serves Inception's
@@ -20,8 +21,9 @@ Two provider surfaces landed in this release and are documented in
   latency-sensitive slot a frontier model cannot fill.
 - **System One decision models.** The hidden `typesafe-jev` runtime and the
   `decide()` contract verb return calibrated distributions over a closed answer
-  shape instead of prose. This is an alpha surface: the wire contract ships, and
-  the harness call sites that consume it do not exist yet.
+  shape instead of prose. Four harness decision sites can be bound to one
+  through `fleet.decisionProfiles`. This is an alpha surface, opt-in by absence,
+  and the call sites that consume a binding are still being built.
 
 ## Shipped in v0.5.2
 

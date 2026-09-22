@@ -850,8 +850,9 @@ key read from `INCEPTION_API_KEY`, and it defaults to
 
 Mercury is a diffusion LLM. It denoises whole blocks of tokens in parallel
 rather than emitting them left to right, which is what makes it fast enough to
-sit in a latency-sensitive slot a frontier model cannot fill. Inception prices
-Mercury at $0.04 per million input tokens and $0.15 per million output tokens.
+sit in a latency-sensitive slot a frontier model cannot fill. Clio ships no
+rates for these models; cost accounting reads the target's own
+`targets[].pricing` block exactly as it does for any other configured target.
 
 ```yaml
 targets:
@@ -925,15 +926,82 @@ at low confidence it is an abstention, and a caller gating on the result has to
 be able to tell the two apart. `src/domains/providers/decisions.ts` holds the
 readers that do, returning `null` rather than `false` below a confidence floor.
 
+The two axes are not carried the same way on the wire. `choice` and `score`
+return a `confidence` field directly. A `noul` returns none at all, so its
+certainty is derived rather than read: a `noul` is a two-outcome distribution,
+and the provider's own peakedness formula `(n * max - 1) / (n - 1)` reduces at
+`n = 2` to the probability's distance from the coin-flip. A `noul` of 0.65
+therefore reports 0.30, the same certainty a two-option `choice` at that mass
+reports. Reading the absent field as zero instead made every `minConfidence`
+check abstain unconditionally.
+
 A missing or unrecognised answer throws rather than defaulting. Callers index by
 the question ids they submitted, so a dropped answer is a contract break and not
 a soft failure, and a caller gating dispatch must never receive a decision the
 model did not make.
 
+#### Binding a decision site
+
+A decision model is a provider, not an agent, so it reaches the harness through
+the fleet profile machinery that already validates a target and a model rather
+than through a namespace of its own. Declare the route as an ordinary
+`fleet.profiles` entry, then bind the sites that should use it:
+
+```yaml
+fleet:
+  profiles:
+    system-one:
+      target: jev
+      model: jev-latest
+  decisionProfiles:
+    routing: system-one
+    toolRisk: system-one
+```
+
+Four sites are accepted, and each names a moment in the turn rather than a
+component:
+
+- `routing` answers which worker takes a dispatch, at dispatch time.
+- `skills` answers which installed skills the listing carries, before the prompt
+  is composed.
+- `memory` answers which durable records the prompt carries, at the same point.
+- `toolRisk` rates a command's blast radius for the approval prompt, when a tool
+  call needs a decision from you.
+
+A site with no entry resolves to nothing and its caller keeps the behavior it
+had before the site existed. The capability is therefore opt-in by absence, with
+no enable flag to retire when it leaves alpha, and a site that misbehaves can be
+unbound on its own without giving up the other three. Abstention below the
+confidence floor and a provider failure both land in that same path, so a bound
+site that cannot answer degrades to the unbound behavior instead of failing the
+turn.
+
+Both halves of a binding are validated where they are written. An unknown site
+name and a profile that `fleet.profiles` does not define are settings errors,
+because either would otherwise sit silently inert and leave you debugging a
+feature you believe you enabled. `inspectDecisionSite` in
+`src/domains/providers/decision-sites.ts` separates an operator who configured
+nothing from one who configured something broken, and it checks that the
+resolved runtime implements the `decide` verb rather than trusting the declared
+capability, since a target bound here by mistake is likelier to be an ordinary
+chat model than a broken decision runtime.
+
+The settings rows for these keys are in the
+[settings inventory](#settings-inventory) and the
+[configuration reference](configuration-reference.md).
+
 > [!NOTE]
-> This is an alpha provider surface. The harness call sites that consume
-> `decide()` are not documented here yet, and no settings keys for them are
-> published. This section covers the provider and the concept only.
+> This is an alpha surface. The harness call sites that consume a binding are
+> still being built, so what each site does with an answer is not documented
+> here yet. Binding a site today is safe precisely because an unconsumed
+> binding is indistinguishable from an unbound one.
+
+`decide()` is provider-shaped rather than Jev-shaped. The three primitives are a
+contract about answer shapes, not about one vendor: Laya, for instance, is a
+local Apache-2.0 encoder model that exposes the same three, so adding a second
+decision provider would need a runtime descriptor and no new contract verb.
+Nothing in this repository implements Laya and it is not a supported runtime;
+the point is only that the seam is drawn at the primitive, not at TypeSafe.
 
 ---
 
