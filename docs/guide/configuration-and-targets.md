@@ -971,7 +971,7 @@ fleet:
     toolRisk: system-one
 ```
 
-Four sites are accepted, and each names a moment in the turn rather than a
+Five sites are accepted, and each names a moment in the session rather than a
 component:
 
 - `routing` answers which worker takes a dispatch, at dispatch time.
@@ -980,11 +980,14 @@ component:
 - `memory` answers which durable records the prompt carries, at the same point.
 - `toolRisk` rates a command's blast radius for the approval prompt, when a tool
   call needs a decision from you.
+- `drafts` picks the strongest of the candidates `/draft` generated, and says
+  how decisive the pick was. See
+  [commands and modes](commands-and-modes.md) for the command.
 
 A site with no entry resolves to nothing and its caller keeps the behavior it
 had before the site existed. The capability is therefore opt-in by absence, with
 no enable flag to retire when it leaves alpha, and a site that misbehaves can be
-unbound on its own without giving up the other three. Abstention below the
+unbound on its own without giving up the others. Abstention below the
 confidence floor and a provider failure both land in that same path, so a bound
 site that cannot answer degrades to the unbound behavior instead of failing the
 turn.
@@ -1036,11 +1039,13 @@ The features are host-resolved and never accepted from model arguments.
 `routeValidationProjection` strips the field on the same terms as the
 reservation, so a model cannot author the task features its own routing reads.
 
-> [!NOTE]
-> `routing` is the only site with a call site today. `skills`, `memory`, and
-> `toolRisk` validate and bind, but nothing consumes a binding yet, so binding
-> one of those three currently behaves exactly like leaving it unbound. They are
-> still landing.
+All five sites have call sites. Measured live against `jev-latest` for 0.5.4,
+routing answered in 315ms, four tool-risk ratings in 113 to 259ms, a batched
+memory and skills pass in 159ms, and a three-candidate draft judgment in 264ms.
+The pre-turn memory and skills pass is bounded at 1.5s because it sits on the
+turn's critical path; routing is bounded at 3s beside a worker spawn, and the
+tool-risk and draft judgments at 5s because nothing waits on them but the
+overlay.
 
 #### Turning the alpha on, end to end
 
@@ -1062,6 +1067,9 @@ shape and reads the variable at call time, which is the recommended path on a
 shared machine. `clio-coder auth login typesafe-jev --api-key <literal>` is the
 alternative, and it writes the key to `credentials.yaml` in plaintext at mode
 `0600`. See [credential storage](#credential-storage-and-its-limits).
+Decision sites resolve the key per call through the same credential path target
+probes use, so a key stored this way, or under the target's `auth.apiKeyRef` by
+the configure wizard, is sent on the next decision without a restart.
 
 **2. Add the target.** Jev is a hidden runtime, so `clio-coder configure` does
 not offer it in the wizard and Quick Connect will not find it. Write the target
@@ -1077,7 +1085,9 @@ targets:
 ```
 
 `jev-preview` is the other known wire model. The `url` key is optional and
-defaults to `https://api.typesafe.ai/v1`.
+defaults to `https://api.typesafe.ai/v1`. The runtime appends `/systemone`
+itself, and a URL that already ends in it, as the provider's documented endpoint
+does, is read as the same root.
 
 **3. Define a profile.** A decision model reaches the harness through the same
 `fleet.profiles` machinery as a worker route, so the binding in the next step
@@ -1332,7 +1342,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.profiles` | `{}` | map of profile name to target/model/thinking/optional-node routes | next dispatch |
 | `fleet.rosters` | `{}` | map of roster name to council members | next dispatch |
 | `fleet.agentProfiles` | `{}` | map of native agent id to an existing fleet profile | next dispatch |
-| `fleet.decisionProfiles` | `{}` | map of `routing`, `skills`, `memory`, `toolRisk` to an existing fleet profile | next turn |
+| `fleet.decisionProfiles` | `{}` | map of `routing`, `skills`, `memory`, `toolRisk`, `drafts` to an existing fleet profile | next turn |
 | `fleet.nodes` | `[]` | list of validated local/SSH node descriptors | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | subset of `researcher`, `verifier`, `reviewer`, `judge` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | subset of `quality`, `balanced`, `latency`, `economy` | next dispatch |

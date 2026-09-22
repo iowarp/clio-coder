@@ -12,10 +12,23 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Count a frame as generated text. A frame empties its delta so accumulating consumers see no append, which also hid it from the first-token clock: time to first token was never recorded, the footer said "Waiting for model" through the whole stream, and the stall watchdog stayed on the first-token budget. The footer now reads "Writing" on the first frame, and `/btw` previews read the frame rather than the shared block.
 - No denoising gauge ships. The live API reports `diffusion_progress` as 0 on every frame and 1 on the last, so it is a completion flag rather than a ramp.
 
+### Drafts judged by a decision model
+
+- Add `/draft [N] <request>`. It runs two to four out-of-turn rounds for one request in parallel against the session's target, each at its own temperature, and shows them side by side in an overlay. On Inception Mercury every candidate denoises at once; measured live, three drafts arrived in 454ms. Nothing reaches the session, a turn in flight refuses the command rather than queueing it, and each round bills to `/usage` as a side question.
+- Add the `drafts` decision site. Once every candidate has settled, the System One model bound to it answers one `choice` over the candidates and one correctness question per candidate, and each row shows the probability mass it received, so the operator sees how decisive the pick was and not only which candidate won. A candidate read as wrong or incomplete is marked `judged unsound`. Live, jev-latest judged three drafts in 264ms, gave a planted wrong answer 0% of the pick, and read it as unsound. The judge runs only after every candidate settles, because a `choice` over half-denoised text is a judgment about noise, and without a binding the overlay shows the candidates and says why there are no bars.
+
+### System One decision sites
+
+- Authenticate decision sites with the target's stored key. The TypeSafe runtime read its key only from the probe context's token or from `TYPESAFE_API_KEY`, and the sites passed neither, so a Jev target with its key in the credential store sent every decision unauthenticated and every site fell back silently, exactly as an unbound one would. The decider now resolves the key per call through the providers auth contract.
+- Read a TypeSafe target URL that already ends in `/systemone` as the API root instead of posting to `/systemone/systemone`.
+- Recalibrate the tool-risk ladder around what changes where. Its top rung said "reaches another machine", and jev-latest followed that literally: a plain `curl` GET rated irreversible, so the approval card cried wolf on every download. The rungs now separate reading from changing, and changing this workspace from changing another machine. Against twelve commands spanning the four rungs, the old wording agreed with the intended rung on nine and abstained on `npm install`; the new one agreed on all twelve in two consecutive live runs.
+- Bound the pre-turn memory and skills pass at 1.5s instead of 3s. Every jev-latest call measured for this release finished within 315ms including a cold connection.
+- Correct the configuration guide, which still said only `routing` had a call site and that the key had to come from the environment.
+
 ### Fixes
 
 - List `inception` and `typesafe-jev` in the runtime boot manifest. The TUI refused a Mercury chat target at startup because the manifest is read before the providers domain loads and neither row had been added; headless `run` hydrates the full registry and never hit the check. A contract test now diffs the manifest against the built-in runtimes in both directions. The v0.5.3 tag shipped with this defect.
-- Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff ranked first for "In v0.5.0, how do I configure a different model for workers?", ahead of the configuration guide that answers it.
+- Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff outranked the configuration guide on an ordinary question about choosing a worker model.
 - Stop the skills listing from claiming a relevance order when the decision model abstained on every row it shows. The catalog order was untouched, so the sentence credited an order nothing made.
 
 ## 0.5.3 - 2026-09-22
