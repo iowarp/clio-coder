@@ -93,6 +93,8 @@ export interface McpCatalog extends McpListing {
 /** One MCP capability's full metadata, enough to describe it without a connection. */
 export interface McpCapabilityMetadata {
 	name: string;
+	/** The declared server that owns the name, by the longest-prefix rule. */
+	serverId: string;
 	description: string;
 	parameters: Record<string, unknown>;
 	actionClass: McpTrustActionClass;
@@ -348,8 +350,8 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 	 */
 	const publishCatalog = (state: ServerState, listing: McpToolListing): void => {
 		writeMcpServerCatalog(catalogIdentity(state.declaration), listing);
-		// The live listing is now the session's view; drop any memo of the older file.
-		state.catalog = null;
+		// Drop the memo of whatever the file said before this listing replaced it.
+		state.catalog = undefined;
 	};
 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
@@ -620,6 +622,7 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				return {
 					metadata: {
 						name: registered.name,
+						serverId: declaration.id,
 						description: registered.description,
 						parameters: registered.parameters as Record<string, unknown>,
 						actionClass,
@@ -628,23 +631,40 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					},
 				};
 			}
+			if (owner.failure !== null) {
+				return { metadata: null, reason: `mcp server ${declaration.id} failed: ${owner.failure}` };
+			}
 			const toolName = name.slice(`mcp_${declaration.id}__`.length);
-			const catalog = cachedCatalog(owner);
-			const tool = catalog?.tools.find((entry) => entry.name === toolName);
-			if (catalog === null || tool === undefined) {
+			// A connected server's own listing is the session's answer; its
+			// catalog file describes the same connection and adds nothing.
+			if (owner.client !== null) {
+				const offered = owner.tools.find((entry) => entry.name === toolName);
 				return {
 					metadata: null,
 					reason:
-						owner.failure !== null
-							? `mcp server ${declaration.id} failed: ${owner.failure}`
-							: catalog === null
-								? `no recorded catalog for mcp server ${declaration.id}; list its tools with ${catalogRemedy(declaration.id)}`
-								: `mcp server ${declaration.id} records no tool named ${toolName}${catalog.truncated ? `, and its catalog is incomplete: list it again with ${catalogRemedy(declaration.id)}` : ""}`,
+						offered === undefined
+							? `mcp server ${declaration.id} offers no tool named ${toolName}`
+							: `mcp server ${declaration.id} offers ${toolName}, but ${name} is not carried as a capability name; another declared server owns that name`,
+				};
+			}
+			const catalog = cachedCatalog(owner);
+			if (catalog === null) {
+				return {
+					metadata: null,
+					reason: `no recorded catalog for mcp server ${declaration.id}; list its tools with ${catalogRemedy(declaration.id)}`,
+				};
+			}
+			const tool = catalog.tools.find((entry) => entry.name === toolName);
+			if (tool === undefined) {
+				return {
+					metadata: null,
+					reason: `mcp server ${declaration.id} records no tool named ${toolName}${catalog.truncated ? `, and its catalog is incomplete: list it again with ${catalogRemedy(declaration.id)}` : ""}`,
 				};
 			}
 			return {
 				metadata: {
 					name,
+					serverId: declaration.id,
 					description: describeTool(declaration, tool),
 					parameters: tool.inputSchema,
 					actionClass,

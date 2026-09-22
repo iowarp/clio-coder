@@ -22,6 +22,18 @@ import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js"
 /** The attached-schema total the handoff measured before this change, panes included. */
 const HANDOFF_TOTAL_BYTES = 33_195;
 
+/**
+ * Bytes the gateway's `server` and `refresh` inputs add to that surface,
+ * measured as this test measures everything else. They are the entire attached
+ * cost of offline MCP discovery, which stops an unrestricted find from
+ * launching every trusted server to answer a query it may then filter out.
+ * The remedy sentence for a missing catalog rides in the find payload instead
+ * of in this schema, so it is paid for only when a find asks for it.
+ */
+const MCP_DISCOVERY_INPUT_BYTES = 142;
+
+const ATTACHED_BUDGET_BYTES = HANDOFF_TOTAL_BYTES + MCP_DISCOVERY_INPUT_BYTES;
+
 describe("gateway in the session prompt", () => {
 	let env: IsolatedClioEnv;
 	beforeEach(async () => {
@@ -155,7 +167,10 @@ describe("gateway in the session prompt", () => {
 			console.log(
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
-			ok(total < HANDOFF_TOTAL_BYTES, `attached bytes ${total} must stay below the handoff's ${HANDOFF_TOTAL_BYTES}`);
+			ok(
+				total < ATTACHED_BUDGET_BYTES,
+				`attached bytes ${total} must stay below the handoff's ${HANDOFF_TOTAL_BYTES} plus the ${MCP_DISCOVERY_INPUT_BYTES} bytes of MCP discovery inputs`,
+			);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
 			doesNotMatch(

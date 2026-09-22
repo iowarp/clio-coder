@@ -264,6 +264,64 @@ describe("MCP catalog source", () => {
 		strictEqual(next.clients.length, 0);
 	});
 
+	it("carries truncation across publication for both the tool cap and the page cap", async () => {
+		// Completeness must come from the client's flag, never from counting what
+		// was recorded. The page-cap case records 100 tools, far under the
+		// 500-tool cap, so code that inferred completeness from the count would
+		// call it complete and pass every other test in this file.
+		for (const shape of [
+			{ id: "toolcap", perPage: 100, expected: 500 },
+			{ id: "pagecap", perPage: 1, expected: 100 },
+		]) {
+			const scene = scenario();
+			const server = join(scene.project, `${shape.id}-server.mjs`);
+			writeFileSync(
+				server,
+				`
+				import {createInterface} from 'node:readline';
+				createInterface({input: process.stdin}).on('line', line => {
+					const req = JSON.parse(line);
+					const reply = result => process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:req.id,result})+'\\n');
+					if (req.method === 'initialize') reply({protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'endless',version:'1'}});
+					if (req.method === 'tools/list') {
+						const page = Number(req.params?.cursor ?? 0);
+						const tools = Array.from({length: ${shape.perPage}}, (_, i) => ({
+							name: 't' + (page * ${shape.perPage} + i),
+							description: 'endless',
+							inputSchema: {type: 'object'},
+						}));
+						reply({tools, nextCursor: String(page + 1)});
+					}
+				});
+			`,
+			);
+			writeFileSync(
+				join(scene.project, ".clio-coder", "mcp.yaml"),
+				`version: 1\nservers:\n  - id: fake\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(server)}]\n`,
+			);
+			ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+			const first = wire(scene);
+			open.push(first.source);
+			const refreshed = await first.source.refresh("fake");
+			strictEqual(refreshed.listing?.truncated, true, `${shape.id}: the live listing is partial`);
+			strictEqual(refreshed.listing.catalogCount, shape.expected, `${shape.id}: recorded tool count`);
+			await first.source.close();
+
+			const second = wire(scene);
+			open.push(second.source);
+			const fake = second.source.catalog().servers.find((entry) => entry.id === "fake");
+			deepStrictEqual(
+				{ catalog: fake?.catalog, truncated: fake?.truncated, count: fake?.catalogCount },
+				{ catalog: "cached", truncated: true, count: shape.expected },
+				`${shape.id}: a known-partial catalog reads back partial`,
+			);
+			const metadata = second.source.metadata("mcp_fake__t0").metadata;
+			strictEqual(metadata?.provenance, "cached", `${shape.id}: describe reads the catalog`);
+			strictEqual(metadata.truncated, true, `${shape.id}: describe says its catalog is incomplete`);
+			strictEqual(second.clients.length, 0, `${shape.id}: none of this constructed a client`);
+		}
+	});
+
 	it("keeps a live call working when the catalog cannot be written", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
