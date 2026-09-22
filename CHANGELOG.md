@@ -2,6 +2,32 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.5.3 - 2026-09-22
+
+### Diffusion model support
+
+- Add the `inception` cloud runtime for Inception's Mercury diffusion models, authenticated from `INCEPTION_API_KEY` against `https://api.inceptionlabs.ai/v1`, with `mercury-2.5`, `mercury-2`, and `mercury-edit-2` as its known wire models. Mercury denoises whole blocks of tokens in parallel instead of emitting them left to right, which is what makes it fast enough for a latency-sensitive slot a frontier model cannot fill. No rates ship for these models; cost accounting reads the target's own `targets[].pricing` block as it does for any other configured target.
+- Wire two surfaces. Chat runs at `/v1/chat/completions` through the ordinary pi-ai transport with tool calling and `json-schema` structured outputs. Fill-in-the-middle runs at `/v1/fim/completions` through the existing `infill()` verb, so callers reach it exactly as they reach llama.cpp's, and a target that names no `defaultModel` infills with the edit-tuned `mercury-edit-2`. `/v1/edit/completions` is left out; its next-edit prediction needs a contract verb of its own and its context-tag request format is not covered by the published reference.
+- Declare reasoning false and pin `reasoning_effort: instant`. Mercury accepts the field, but above `instant` the response carries `content: null` with `reasoning_summary: null` and the streaming path leaks a raw `<|think_end|>` token, so there is nothing to show the operator. Omitting the field is worse than pinning it: Mercury then reasons by default, spends the whole token budget on hidden reasoning, and returns an empty completion with `finish_reason: "length"`.
+- Give catalog-backed model synthesis `compat` and `samplingParams` passthrough, so a runtime can declare the wire quirks it knows about its own endpoint over whatever the catalog entry says. Inception rejects the `developer` role, so without it every request carrying a system prompt is a 400. A provider can be OpenAI-compatible in shape without being compatible in vocabulary.
+- Correct capabilities from the live `/models` listing, reading `context_length` and `max_output_length` per model over the pre-probe placeholder, and fail the probe by name when a configured model is not in the listing rather than attempting it.
+
+### System One decision models
+
+- Add the hidden `typesafe-jev` cloud runtime, authenticated from `TYPESAFE_API_KEY` against `https://api.typesafe.ai/v1`, with `jev-latest` and `jev-preview` as its known wire models. A System One model does not generate prose: every question names a closed answer shape up front and the model returns a calibrated distribution over it, which makes it a substrate for the harness's micro-decisions where a chat model is both slower and unparseable. The descriptor declares `chat: false`, so Jev never appears as a conversational target and the configure wizard does not offer it.
+- Add `decide()` to `RuntimeDescriptor`. It answers a batch of independent typed questions against one body of evidence in a single round trip and covers the three primitives the API exposes: `noul` for a truth probability, `choice` for an option with its distribution, and `score` for a position on a criteria ladder. A question's `criteria` carries what each answer means, so the caller defines the scale rather than hoping a prompt implies it.
+- Parse confidence as a separate axis from the answer, because they are different questions. A `noul` of 0.5 at high confidence is a decided coin-flip; at low confidence it is an abstention, and a caller gating on the result must be able to tell them apart. The readers in `decisions.ts` return `null` rather than `false` below a confidence floor.
+- Derive a `noul`'s certainty rather than reading it. The wire response omits `confidence` on a `noul` entirely, so reading the absent field as zero made every `minConfidence` check abstain unconditionally. A `noul` is a two-outcome distribution and the provider's own peakedness formula reduces at `n = 2` to the probability's distance from the coin-flip, so a `noul` of 0.65 now reports the same certainty as a two-option `choice` at the same mass.
+- Throw on a missing or unrecognised answer rather than defaulting one. Callers index by the ids they submitted, so a dropped answer is a contract break, and a caller gating dispatch must never receive a decision the model did not make.
+- Bind harness decision sites through `fleet.decisionProfiles`, a map from site to an existing `fleet.profiles` name. A decision model is a provider rather than an agent, so it reaches the harness through the profile machinery that already validates a target and a model instead of through a namespace of its own. Four sites name moments in a turn: `routing` picks a worker at dispatch, `skills` and `memory` narrow what the prompt carries, and `toolRisk` rates a command's blast radius for the approval prompt.
+- Leave every site off until it is bound. A site with no entry resolves to nothing and its caller keeps the behavior it had before the site existed, so the capability is opt-in by absence with no enable flag to retire when it leaves alpha, and a site that misbehaves can be unbound without giving up the other three. Abstention and provider failure take that same path.
+- Reject an unknown site name and a profile `fleet.profiles` does not define at validation time, because either would sit silently inert and leave the operator debugging a feature they believe they enabled. `inspectDecisionSite` separates an operator who configured nothing from one who configured something broken, and checks the `decide` verb rather than the declared capability, since a target bound here by mistake is likelier to be an ordinary chat model.
+- The wire contract is pinned against a recorded live response. The call sites that consume a binding are not in this release, so a bound site is currently indistinguishable from an unbound one.
+
+### Harness eval baselines
+
+- TBD, owned by the evals agent.
+
 ## 0.5.2 - 2026-09-21
 
 ### Context continuity and memory

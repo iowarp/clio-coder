@@ -841,6 +841,167 @@ never cancels the turn, and a turn aborted before the check emits none.
 Interactive sessions show it as a notice, and headless runs and workers write
 it to stderr.
 
+### Inception Mercury (diffusion)
+
+The runtime id is `inception`. It is a cloud runtime authenticated with an API
+key read from `INCEPTION_API_KEY`, and it defaults to
+`https://api.inceptionlabs.ai/v1`. The known wire models are `mercury-2.5`,
+`mercury-2`, and `mercury-edit-2`.
+
+Mercury is a diffusion LLM. It denoises whole blocks of tokens in parallel
+rather than emitting them left to right, which is what makes it fast enough to
+sit in a latency-sensitive slot a frontier model cannot fill. Clio ships no
+rates for these models; cost accounting reads the target's own
+`targets[].pricing` block exactly as it does for any other configured target.
+
+```yaml
+targets:
+  - id: mercury
+    runtime: inception
+    defaultModel: mercury-2.5
+    auth:
+      apiKeyEnvVar: INCEPTION_API_KEY
+```
+
+Two surfaces are wired. Chat runs at `/v1/chat/completions` through the ordinary
+pi-ai transport, OpenAI-compatible with tool calling and `json-schema`
+structured outputs. Fill-in-the-middle runs at `/v1/fim/completions` and is
+exposed through the existing `infill()` verb, so callers reach it exactly as
+they reach llama.cpp's. FIM is served by the edit-tuned model rather than the
+chat default, so a target that names no `defaultModel` infills with
+`mercury-edit-2`. `/v1/edit/completions` is deliberately not implemented; its
+next-edit prediction needs a contract verb of its own and its context-tag
+request format is not covered by the published reference.
+
+Reasoning is declared `false` for this runtime. Mercury accepts
+`reasoning_effort`, but above `instant` the response carries `content: null`
+with `reasoning_summary: null`, and the streaming path leaks a raw
+`<|think_end|>` token into the text. Nothing can be shown to the operator, so
+the capability is declared false and the effort is pinned to `instant` in the
+request body. Omitting the field is not neutral: Mercury then reasons by default
+and spends the whole token budget on hidden reasoning, returning an empty
+completion with `finish_reason: "length"`.
+
+Inception accepts only the `assistant`, `function`, `system`, `tool`, and `user`
+roles, so a system prompt sent as `developer` is rejected outright and every
+request carrying one is a 400. Catalog-backed model synthesis therefore gained
+`compat` and `samplingParams` passthrough, which lets a runtime declare wire
+quirks it knows about its own endpoint on top of whatever the catalog entry
+says. A provider can be OpenAI-compatible in shape without being compatible in
+vocabulary, and this is where that difference is recorded.
+
+The pre-probe capability placeholder is a 260,000-token window with 65,536
+output tokens, which is `mercury-2.5`'s shape. `mercury-2` and `mercury-edit-2`
+are 128k. The live probe reads `context_length` and `max_output_length` per
+model from `/models` and corrects both numbers, and a `defaultModel` that the
+listing does not return fails the probe by name rather than being attempted.
+
+### System One decision models (TypeSafe Jev)
+
+A System One model does not generate prose. Every question names a closed answer
+shape up front, and the model returns a calibrated distribution over that shape.
+That makes it a substrate for the harness's micro-decisions, where a chat model
+is both slower and unparseable.
+
+The runtime id is `typesafe-jev`, authenticated with an API key read from
+`TYPESAFE_API_KEY` against `https://api.typesafe.ai/v1`. The known wire models
+are `jev-latest` and `jev-preview`. The descriptor is hidden and declares
+`chat: false`, so Jev never appears as a conversational target and the configure
+wizard does not offer it. Reach it through `RuntimeDescriptor.decide()`, which
+answers a batch of independent typed questions against one body of evidence in a
+single round trip.
+
+Three answer primitives are covered:
+
+- `noul` returns a truth probability for a proposition.
+- `choice` returns one option from a declared set, with the distribution over
+  the whole set.
+- `score` returns a position on a criteria ladder. The question's `criteria`
+  carries what each answer means, so the caller defines the scale rather than
+  hoping a prompt implies it.
+
+Confidence is parsed as a separate axis from the answer, because they are
+different questions. A `noul` of 0.5 at high confidence is a decided coin-flip;
+at low confidence it is an abstention, and a caller gating on the result has to
+be able to tell the two apart. `src/domains/providers/decisions.ts` holds the
+readers that do, returning `null` rather than `false` below a confidence floor.
+
+The two axes are not carried the same way on the wire. `choice` and `score`
+return a `confidence` field directly. A `noul` returns none at all, so its
+certainty is derived rather than read: a `noul` is a two-outcome distribution,
+and the provider's own peakedness formula `(n * max - 1) / (n - 1)` reduces at
+`n = 2` to the probability's distance from the coin-flip. A `noul` of 0.65
+therefore reports 0.30, the same certainty a two-option `choice` at that mass
+reports. Reading the absent field as zero instead made every `minConfidence`
+check abstain unconditionally.
+
+A missing or unrecognised answer throws rather than defaulting. Callers index by
+the question ids they submitted, so a dropped answer is a contract break and not
+a soft failure, and a caller gating dispatch must never receive a decision the
+model did not make.
+
+#### Binding a decision site
+
+A decision model is a provider, not an agent, so it reaches the harness through
+the fleet profile machinery that already validates a target and a model rather
+than through a namespace of its own. Declare the route as an ordinary
+`fleet.profiles` entry, then bind the sites that should use it:
+
+```yaml
+fleet:
+  profiles:
+    system-one:
+      target: jev
+      model: jev-latest
+  decisionProfiles:
+    routing: system-one
+    toolRisk: system-one
+```
+
+Four sites are accepted, and each names a moment in the turn rather than a
+component:
+
+- `routing` answers which worker takes a dispatch, at dispatch time.
+- `skills` answers which installed skills the listing carries, before the prompt
+  is composed.
+- `memory` answers which durable records the prompt carries, at the same point.
+- `toolRisk` rates a command's blast radius for the approval prompt, when a tool
+  call needs a decision from you.
+
+A site with no entry resolves to nothing and its caller keeps the behavior it
+had before the site existed. The capability is therefore opt-in by absence, with
+no enable flag to retire when it leaves alpha, and a site that misbehaves can be
+unbound on its own without giving up the other three. Abstention below the
+confidence floor and a provider failure both land in that same path, so a bound
+site that cannot answer degrades to the unbound behavior instead of failing the
+turn.
+
+Both halves of a binding are validated where they are written. An unknown site
+name and a profile that `fleet.profiles` does not define are settings errors,
+because either would otherwise sit silently inert and leave you debugging a
+feature you believe you enabled. `inspectDecisionSite` in
+`src/domains/providers/decision-sites.ts` separates an operator who configured
+nothing from one who configured something broken, and it checks that the
+resolved runtime implements the `decide` verb rather than trusting the declared
+capability, since a target bound here by mistake is likelier to be an ordinary
+chat model than a broken decision runtime.
+
+The settings rows for these keys are in the
+[settings inventory](#settings-inventory) and the
+[configuration reference](configuration-reference.md).
+
+> [!NOTE]
+> This is an alpha surface. The harness call sites that consume a binding are
+> still being built, so what each site does with an answer is not documented
+> here yet. Binding a site today is safe precisely because an unconsumed
+> binding is indistinguishable from an unbound one.
+
+`decide()` is provider-shaped rather than Jev-shaped. The three primitives are a
+contract about answer shapes, not about one vendor: Laya, for instance, is a
+local Apache-2.0 encoder model that exposes the same three, so adding a second
+decision provider would need a runtime descriptor and no new contract verb.
+Nothing in this repository implements Laya and it is not a supported runtime;
+the point is only that the seam is drawn at the primitive, not at TypeSafe.
 
 ---
 
@@ -1506,8 +1667,8 @@ Representative built-in runtime IDs:
 
 | Category | Runtime IDs |
 | --- | --- |
-| Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
-| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
+| Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs configured with the appropriate base URL and credentials. |
+| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `inception`, `mistral`, `openai`, `openrouter` |
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for structured `agy` external delegation |
 | Local native | `llamacpp`, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
