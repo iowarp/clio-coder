@@ -1,17 +1,23 @@
 import type { TSchema } from "typebox";
 import { type DynamicToolName, mcpToolName } from "../../core/tool-names.js";
 import {
+	canonicalProjectRoot,
 	createMcpStdioClient,
+	type McpCatalogIdentity,
 	type McpClient,
 	type McpClientOptions,
 	McpError,
+	type McpServerCatalog,
 	type McpServerSpec,
 	type McpTeardownOutcome,
 	type McpToolCallResult,
 	type McpToolDescriptor,
+	type McpToolListing,
 	type McpTrustActionClass,
 	type ResolvedMcpServer,
+	readMcpServerCatalog,
 	resolveMcpServers,
+	writeMcpServerCatalog,
 } from "../../domains/gateway/mcp/index.js";
 import type { ClassifierCall } from "../../domains/safety/action-classifier.js";
 import type { ImageContent } from "../../engine/types.js";
@@ -29,6 +35,14 @@ const MCP_RESULT_CONTEXT_BYTES = 16 * 1024;
  * session end. Launching a server does not sandbox it; the trust record is the
  * operator's explicit acceptance of that.
  */
+
+/**
+ * Where a server's tool metadata came from. Deliberately separate from
+ * `status`: a catalog read off disk says nothing about whether a process is
+ * running, and conflating the two would let an offline answer look like a live
+ * connection.
+ */
+export type McpCatalogProvenance = "live" | "cached" | "missing";
 
 /** What the gateway's find listing says about one declared server. */
 export interface McpServerListing {
@@ -49,12 +63,57 @@ export interface McpServerListing {
 	truncated?: boolean;
 	/** Tool names the server offered that cannot be carried as registry names. */
 	unregistrable?: string[];
+	/** Provenance of this server's tool metadata, for a trusted server only. */
+	catalog?: McpCatalogProvenance;
+	/** Tools this server's catalog records; the names themselves are in the capability list. */
+	catalogCount?: number;
+	/** The command that lists this server's tools when its catalog is missing. */
+	catalogRemedy?: string;
 }
 
 export interface McpListing {
 	servers: McpServerListing[];
 	/** Config and trust-file problems, verbatim. */
 	diagnostics: string[];
+}
+
+/** One MCP capability as discovery lists it, from a live listing or a cached catalog. */
+export interface McpCatalogEntry {
+	name: DynamicToolName;
+	description: string;
+	actionClass: McpTrustActionClass;
+}
+
+export interface McpCatalog extends McpListing {
+	entries: McpCatalogEntry[];
+	/** Trusted servers with no usable catalog, so discovery can name what it could not answer. */
+	missing: string[];
+}
+
+/** One MCP capability's full metadata, enough to describe it without a connection. */
+export interface McpCapabilityMetadata {
+	name: string;
+	/** The declared server that owns the name, by the longest-prefix rule. */
+	serverId: string;
+	description: string;
+	parameters: Record<string, unknown>;
+	actionClass: McpTrustActionClass;
+	provenance: "live" | "cached";
+	/** The catalog this came from recorded only part of the server's tools. */
+	truncated: boolean;
+}
+
+export interface McpMetadataResult {
+	metadata: McpCapabilityMetadata | null;
+	/** Why the metadata is unavailable when `metadata` is null. */
+	reason?: string;
+}
+
+export interface McpRefreshResult {
+	/** The server's listing after the attempt, or null when no such server is declared. */
+	listing: McpServerListing | null;
+	/** Why the refresh listed nothing new. */
+	reason?: string;
 }
 
 export interface McpEnsureResult {
@@ -78,6 +137,18 @@ export interface McpCapabilitySourceOptions {
 export interface McpCapabilitySource {
 	/** Launch every trusted server not yet launched, register its tools, and describe every declared server. */
 	list(options?: { signal?: AbortSignal }): Promise<McpListing>;
+	/**
+	 * Every declared server and the capabilities its metadata records, without
+	 * constructing a client. A trusted server that has neither been launched this
+	 * session nor left a valid catalog is reported as missing, not launched.
+	 */
+	catalog(): McpCatalog;
+	/** One capability's metadata from the registry or the catalog, again without constructing a client. */
+	metadata(name: string): McpMetadataResult;
+	/** Launch one declared trusted server, register its tools, and publish its catalog. */
+	refresh(id: string, options?: { signal?: AbortSignal }): Promise<McpRefreshResult>;
+	/** Ids of every declared server, trusted or not, for validating a scoped discovery request. */
+	declaredIds(): string[];
 	/** Make `name`'s server available (launching it when trusted) and return its registered spec. */
 	ensure(name: string, options?: { signal?: AbortSignal }): Promise<McpEnsureResult>;
 	/** One sentence of provenance and authority for describe, or null for a name this source does not own. */
@@ -116,6 +187,36 @@ interface ServerState {
 	registered: DynamicToolName[];
 	unregistrable: string[];
 	failure: string | null;
+	/**
+	 * The catalog read for this declaration, or null for a miss. Undefined until
+	 * looked up. Memoized for the same reason the declarations themselves are
+	 * snapshotted: one session answers discovery from one consistent view, and a
+	 * find is not the place to re-stat every cache file.
+	 */
+	catalog: McpServerCatalog | null | undefined;
+}
+
+/** The one call that fills a missing catalog, named so the model does not guess at a broader one. */
+function catalogRemedy(id: string): string {
+	return `gateway(op="find", server="${id}", refresh=true)`;
+}
+
+interface NamedTool {
+	name: string;
+	description: string;
+}
+
+function objectiveOf(tool: NamedTool): string {
+	return tool.description.trim().length > 0 ? tool.description.trim() : `MCP tool ${tool.name}`;
+}
+
+/**
+ * The description a registered spec and a cached descriptor both carry, so
+ * discovery reads identically whether the metadata came off a live listing or
+ * off disk and a caller can never tell the two apart by shape alone.
+ */
+function describeTool(declaration: ResolvedMcpServer, tool: NamedTool): string {
+	return `${objectiveOf(tool)}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${declaration.trust.actionClass}; launching it does not sandbox it.`;
 }
 
 /** Remedies name the CLI first: it exists in every session, interactive or not. */
@@ -206,10 +307,51 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 					registered: [],
 					unregistrable: [],
 					failure: null,
+					catalog: undefined,
 				},
 			]),
 		);
 		return states;
+	};
+
+	// realpathSync touches disk, and every catalog identity in this session must
+	// resolve to the same project the trust record bound to.
+	let projectRoot: string | null = null;
+	const catalogIdentity = (declaration: ResolvedMcpServer): McpCatalogIdentity => {
+		projectRoot ??= canonicalProjectRoot(options.cwd);
+		return {
+			projectRoot,
+			scope: declaration.scope,
+			declarationPath: declaration.path,
+			serverId: declaration.id,
+			digest: declaration.digest,
+			cwd: declaration.cwd,
+		};
+	};
+
+	/**
+	 * The recorded catalog for a trusted declaration, read once per session for
+	 * the same reason the declarations themselves are snapshotted: one session
+	 * answers discovery from one consistent view. An untrusted or stale
+	 * declaration never reads one, because a catalog is not an authority record
+	 * and listing its tools would suggest they are reachable.
+	 */
+	const cachedCatalog = (state: ServerState): McpServerCatalog | null => {
+		if (state.catalog !== undefined) return state.catalog;
+		state.catalog =
+			state.declaration.trust.status === "trusted" ? readMcpServerCatalog(catalogIdentity(state.declaration)) : null;
+		return state.catalog;
+	};
+
+	/**
+	 * Record a live listing so a later session answers find and describe without
+	 * launching this server. Best effort by design: a cache that cannot be
+	 * written must never fail the connection that produced it.
+	 */
+	const publishCatalog = (state: ServerState, listing: McpToolListing): void => {
+		writeMcpServerCatalog(catalogIdentity(state.declaration), listing);
+		// Drop the memo of whatever the file said before this listing replaced it.
+		state.catalog = undefined;
 	};
 
 	const makeSpec = (state: ServerState, tool: McpToolDescriptor, name: DynamicToolName): ToolSpec => {
@@ -218,14 +360,14 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		const timeoutMs = declaration.timeoutMs ?? options.requestTimeoutMs;
 		const spec: ToolSpec = {
 			name,
-			description: `${tool.description.trim().length > 0 ? tool.description.trim() : `MCP tool ${tool.name}`}\nLocal MCP server ${declaration.id} (${declaration.scope} scope), trusted with action class ${trustClass}; launching it does not sandbox it.`,
+			description: describeTool(declaration, tool),
 			parameters: tool.inputSchema as TSchema,
 			baseActionClass: trustClass,
 			executionMode: "sequential",
 			placement: "gateway",
 			sourceInfo: { path: declaration.path, scope: "domain" },
 			metadata: {
-				objective: tool.description.trim().length > 0 ? tool.description.trim() : `MCP tool ${tool.name}`,
+				objective: objectiveOf(tool),
 				uiLabel: `${declaration.id}/${tool.name}`,
 				retrySafety: "unknown",
 				// The session cap alone (64 KiB) let one search result spend a sixth
@@ -314,6 +456,10 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				const listing = await client.listTools();
 				state.tools = listing.tools;
 				state.truncated = listing.truncated;
+				// An abort that landed while the listing was in flight already set
+				// the failure and closed the client. Publishing here would persist
+				// a catalog from discovery that did not complete.
+				if (state.failure === null) publishCatalog(state, listing);
 				for (const tool of listing.tools) {
 					const name = mcpToolName(declaration.id, tool.name);
 					if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) {
@@ -371,12 +517,27 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 			return {
 				...base,
 				status: "connected",
+				catalog: "live",
+				catalogCount: state.registered.length,
 				tools: [...state.registered],
 				...(state.truncated ? { truncated: true } : {}),
 				...(state.unregistrable.length > 0 ? { unregistrable: [...state.unregistrable] } : {}),
 			};
 		}
-		return { ...base, status: "trusted" };
+		// A trusted server that was never launched is still only trusted. Its
+		// catalog provenance is a separate field precisely so a cache hit can
+		// never read as a running process.
+		const catalog = cachedCatalog(state);
+		if (catalog === null) {
+			return { ...base, status: "trusted", catalog: "missing", catalogRemedy: catalogRemedy(declaration.id) };
+		}
+		return {
+			...base,
+			status: "trusted",
+			catalog: "cached",
+			catalogCount: catalog.tools.length,
+			...(catalog.truncated ? { truncated: true } : {}),
+		};
 	};
 
 	const ownerOf = (name: string): ServerState | null => {
@@ -395,6 +556,35 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 		return owner;
 	};
 
+	/**
+	 * Every capability a server's metadata records, live or cached. A cached
+	 * name goes through the same ownership rule a live one does, so a tool whose
+	 * composed name belongs to a longer-named server is dropped here exactly as
+	 * `connect()` drops it, and cache load order can never decide routing.
+	 */
+	const entriesFor = (state: ServerState): McpCatalogEntry[] => {
+		const { declaration } = state;
+		const actionClass = declaration.trust.actionClass;
+		if (declaration.trust.status !== "trusted" || state.failure !== null) return [];
+		if (state.client !== null) {
+			return state.registered.flatMap((name) => {
+				const spec = registry.get(name);
+				return spec === undefined ? [] : [{ name, description: spec.description, actionClass }];
+			});
+		}
+		const catalog = cachedCatalog(state);
+		if (catalog === null) return [];
+		const entries: McpCatalogEntry[] = [];
+		for (const tool of catalog.tools) {
+			const name = mcpToolName(declaration.id, tool.name);
+			// A name the registry already holds is served by that live spec instead;
+			// a cached descriptor must never shadow a connected one.
+			if (name === null || ownerOf(name) !== state || registry.get(name) !== undefined) continue;
+			entries.push({ name, description: describeTool(declaration, tool), actionClass });
+		}
+		return entries;
+	};
+
 	return {
 		async list(invokeOptions) {
 			if (invokeOptions?.signal?.aborted) throw new McpError("aborted", "MCP discovery aborted");
@@ -404,6 +594,110 @@ export function createMcpCapabilitySource(options: McpCapabilitySourceOptions): 
 				if (result.status === "rejected") throw result.reason;
 			}
 			return { servers: all.map(listingFor), diagnostics: [...diagnostics] };
+		},
+		catalog() {
+			const all = [...resolveStates().values()];
+			const servers = all.map(listingFor);
+			return {
+				servers,
+				entries: all.flatMap(entriesFor),
+				diagnostics: [...diagnostics],
+				missing: servers.filter((server) => server.catalog === "missing").map((server) => server.id),
+			};
+		},
+		metadata(name) {
+			const owner = ownerOf(name);
+			if (owner === null) return { metadata: null, reason: `no declared MCP server owns ${name}` };
+			const { declaration } = owner;
+			const actionClass = declaration.trust.actionClass;
+			if (declaration.trust.status !== "trusted") {
+				const remedy = mcpTrustRemedy(declaration.id);
+				return {
+					metadata: null,
+					reason: `mcp server ${declaration.id} is ${declaration.trust.status} (${declaration.trust.reason}); it is never launched until trusted: run ${remedy.remedy} (${remedy.interactiveRemedy} in an interactive session)`,
+				};
+			}
+			const registered = registry.get(name as DynamicToolName);
+			if (registered !== undefined && owner.registered.includes(registered.name as DynamicToolName)) {
+				return {
+					metadata: {
+						name: registered.name,
+						serverId: declaration.id,
+						description: registered.description,
+						parameters: registered.parameters as Record<string, unknown>,
+						actionClass,
+						provenance: "live",
+						truncated: owner.truncated,
+					},
+				};
+			}
+			if (owner.failure !== null) {
+				return { metadata: null, reason: `mcp server ${declaration.id} failed: ${owner.failure}` };
+			}
+			const toolName = name.slice(`mcp_${declaration.id}__`.length);
+			// A connected server's own listing is the session's answer; its
+			// catalog file describes the same connection and adds nothing.
+			if (owner.client !== null) {
+				const offered = owner.tools.find((entry) => entry.name === toolName);
+				return {
+					metadata: null,
+					reason:
+						offered === undefined
+							? `mcp server ${declaration.id} offers no tool named ${toolName}`
+							: `mcp server ${declaration.id} offers ${toolName}, but ${name} is not carried as a capability name; another declared server owns that name`,
+				};
+			}
+			const catalog = cachedCatalog(owner);
+			if (catalog === null) {
+				return {
+					metadata: null,
+					reason: `no recorded catalog for mcp server ${declaration.id}; list its tools with ${catalogRemedy(declaration.id)}`,
+				};
+			}
+			const tool = catalog.tools.find((entry) => entry.name === toolName);
+			if (tool === undefined) {
+				return {
+					metadata: null,
+					reason: `mcp server ${declaration.id} records no tool named ${toolName}${catalog.truncated ? `, and its catalog is incomplete: list it again with ${catalogRemedy(declaration.id)}` : ""}`,
+				};
+			}
+			return {
+				metadata: {
+					name,
+					serverId: declaration.id,
+					description: describeTool(declaration, tool),
+					parameters: tool.inputSchema,
+					actionClass,
+					provenance: "cached",
+					truncated: catalog.truncated,
+				},
+			};
+		},
+		async refresh(id, invokeOptions) {
+			if (invokeOptions?.signal?.aborted) throw new McpError("aborted", "MCP discovery aborted");
+			const state = resolveStates().get(id);
+			if (state === undefined) return { listing: null, reason: `no MCP server named '${id}' is declared` };
+			const trust = state.declaration.trust;
+			if (trust.status !== "trusted") {
+				const remedy = mcpTrustRemedy(id);
+				return {
+					listing: listingFor(state),
+					reason: `mcp server ${id} is ${trust.status} (${trust.reason}); it is never launched until trusted: run ${remedy.remedy} (${remedy.interactiveRemedy} in an interactive session)`,
+				};
+			}
+			// A server that already failed this session stays failed. Refresh is a
+			// scoped discovery request, not a reconnect policy.
+			if (state.failure !== null) {
+				return { listing: listingFor(state), reason: `mcp server ${id} failed: ${state.failure}` };
+			}
+			await discover(state, invokeOptions?.signal);
+			return {
+				listing: listingFor(state),
+				...(state.failure !== null ? { reason: `mcp server ${id} failed: ${state.failure}` } : {}),
+			};
+		},
+		declaredIds() {
+			return [...resolveStates().keys()];
 		},
 		async ensure(name, invokeOptions) {
 			if (invokeOptions?.signal?.aborted) throw new McpError("aborted", "MCP discovery aborted");

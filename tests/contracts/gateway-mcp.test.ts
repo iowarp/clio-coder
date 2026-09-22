@@ -5,7 +5,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
-import { ToolNames } from "../../src/core/tool-names.js";
+import { type ToolName, ToolNames } from "../../src/core/tool-names.js";
 import {
 	createMcpStdioClient,
 	type McpClient,
@@ -14,6 +14,7 @@ import {
 } from "../../src/domains/gateway/mcp/index.js";
 import type { AutonomyLevel } from "../../src/domains/safety/autonomy.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
+import { resolveAgentTools } from "../../src/tools/agent-tools.js";
 import { registerCoreTools } from "../../src/tools/core-bootstrap.js";
 import { createMcpCapabilitySource, type McpCapabilitySource } from "../../src/tools/gateway/index.js";
 import { createRegistry, type ToolRegistry } from "../../src/tools/registry.js";
@@ -470,7 +471,7 @@ describe("gateway MCP capabilities", () => {
 		strictEqual(source.teardownReports().length, 1);
 	});
 
-	it("never launches an untrusted server, lists it with the trust remedy, and launches a trusted one lazily", async () => {
+	it("never launches an untrusted server, lists it with the trust remedy, and launches a trusted one on a scoped refresh", async () => {
 		const scene = scenario();
 		const trusted = trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" });
 		ok(trusted.ok, trusted.ok ? "" : trusted.message);
@@ -481,23 +482,37 @@ describe("gateway MCP capabilities", () => {
 		deepStrictEqual(source.connectedIds({ readyOnly: true }), []);
 		strictEqual(clients.length, 0, "dashboard connection sampling must not start MCP clients");
 
-		const listing = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "mcp" } }));
+		const cold = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "mcp" } }));
+		strictEqual(clients.length, 0, "an ordinary find launches nothing, not even for a trusted server");
+		deepStrictEqual(cold.missingCatalogs, ["fake"], "the cold catalog is named, not filled behind the model's back");
+		ok(String(cold.missingCatalogsNote).includes('gateway(op="find", server="<id>", refresh=true)'));
+
+		const listing = payloadOf(
+			await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } }),
+		);
 		const servers = listing.servers as Array<Record<string, unknown>>;
-		const marker = servers.find((server) => server.id === "marker");
+		strictEqual(servers.length, 1, "a scoped find answers about the server it named");
+		strictEqual(existsSync(scene.markerPath), false, "the other declared server was never spawned");
+		const fake = servers.find((server) => server.id === "fake");
+		strictEqual(fake?.status, "connected");
+		strictEqual(fake.catalog, "live");
+		ok((fake.tools as string[]).includes(ECHO));
+		strictEqual(clients.length, 1, "exactly the named server launched, once");
+		deepStrictEqual(source.connectedIds(), ["fake"]);
+		const capabilities = listing.capabilities as Array<Record<string, unknown>>;
+		const echo = capabilities.find((entry) => entry.name === ECHO);
+		deepStrictEqual({ kind: echo?.kind, actionClass: echo?.actionClass }, { kind: "mcp", actionClass: "read" });
+
+		const unscoped = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", query: "mcp" } }));
+		const marker = (unscoped.servers as Array<Record<string, unknown>>).find((server) => server.id === "marker");
 		deepStrictEqual(
 			{ status: marker?.status, remedy: marker?.remedy, interactive: marker?.interactiveRemedy },
 			{ status: "untrusted", remedy: "clio-coder mcp trust marker", interactive: "/mcp trust marker" },
 		);
 		ok(typeof marker?.reason === "string" && marker.reason.length > 0, "the listing says why");
-		strictEqual(existsSync(scene.markerPath), false, "the untrusted server was never spawned");
-		const fake = servers.find((server) => server.id === "fake");
-		strictEqual(fake?.status, "connected");
-		ok((fake?.tools as string[]).includes(ECHO));
-		strictEqual(clients.length, 1, "exactly the trusted server launched, once");
-		deepStrictEqual(source.connectedIds(), ["fake"]);
-		const capabilities = listing.capabilities as Array<Record<string, unknown>>;
-		const echo = capabilities.find((entry) => entry.name === ECHO);
-		deepStrictEqual({ kind: echo?.kind, actionClass: echo?.actionClass }, { kind: "mcp", actionClass: "read" });
+		strictEqual(marker.catalog, undefined, "an untrusted server has no catalog to offer");
+		strictEqual(existsSync(scene.markerPath), false);
+		strictEqual(clients.length, 1);
 
 		const described = payloadOf(
 			await registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }),
@@ -551,6 +566,186 @@ describe("gateway MCP capabilities", () => {
 		);
 		strictEqual(clients.length, 0, "a stale trust record launches nothing");
 		ok(!(listing.capabilities as Array<{ name: string }>).some((entry) => entry.name.startsWith("mcp_")));
+	});
+
+	it("answers find and describe from a recorded catalog and still validates a call against the live schema", async () => {
+		const scene = scenario();
+		// One declaration whose server reports a different tool set per generation.
+		// The declaration digest never changes, so the catalog identity holds and
+		// only the server's answer moves underneath it.
+		const generation = join(scene.project, "generation");
+		const server = join(scene.project, "shifting-server.mjs");
+		writeFileSync(
+			server,
+			`
+			import {createInterface} from 'node:readline';
+			import {readFileSync} from 'node:fs';
+			const gen = () => readFileSync(${JSON.stringify(generation)}, 'utf8').trim();
+			createInterface({input: process.stdin}).on('line', line => {
+				const req = JSON.parse(line);
+				const reply = result => process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:req.id,result})+'\\n');
+				if (req.method === 'initialize') reply({protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'shift',version:'1'}});
+				if (req.method === 'tools/list') {
+					const first = gen() === '1';
+					const probe = {name:'probe', description:'Probe the server.', inputSchema:{type:'object', properties: first ? {old:{type:'string'}} : {fresh:{type:'string'}}, required:[first ? 'old' : 'fresh']}};
+					reply({tools: first ? [probe, {name:'gone', description:'Removed later.', inputSchema:{type:'object'}}] : [probe]});
+				}
+				if (req.method === 'tools/call') reply({content:[{type:'text', text: JSON.stringify(req.params.arguments)}]});
+			});
+		`,
+		);
+		writeFileSync(generation, "1");
+		writeFileSync(
+			join(scene.project, ".clio-coder", "mcp.yaml"),
+			`version: 1\nservers:\n  - id: shift\n    command: ${JSON.stringify(process.execPath)}\n    args: [${JSON.stringify(server)}]\n`,
+		);
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "shift", actionClass: "read" }).ok);
+		const first = wire(scene);
+		open.push(first.source);
+		await first.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "shift", refresh: true } });
+		strictEqual(first.clients.length, 1);
+		await first.source.close();
+
+		writeFileSync(generation, "2");
+		const second = wire(scene);
+		open.push(second.source);
+		const listing = payloadOf(await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find" } }));
+		strictEqual(second.clients.length, 0, "a new session lists the catalog without a process");
+		const shift = (listing.servers as Array<Record<string, unknown>>).find((entry) => entry.id === "shift");
+		deepStrictEqual(
+			{ status: shift?.status, catalog: shift?.catalog, count: shift?.catalogCount },
+			{ status: "trusted", catalog: "cached", count: 2 },
+		);
+		const names = (listing.capabilities as Array<{ name: string }>).map((entry) => entry.name);
+		ok(names.includes("mcp_shift__probe") && names.includes("mcp_shift__gone"));
+
+		const described = payloadOf(
+			await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: "mcp_shift__probe" } }),
+		);
+		strictEqual(described.catalog, "cached");
+		strictEqual(second.clients.length, 0, "describe reads the catalog rather than launching the server");
+		deepStrictEqual(Object.keys((described.parameters as { properties: Record<string, unknown> }).properties), ["old"]);
+		ok(
+			(described.authority as string[]).some((note) =>
+				note.includes("the server's current schema is what a call validates"),
+			),
+		);
+
+		// The call path resolves the owner live, so the stale schema the model
+		// just read is not what its arguments are checked against.
+		const stale = await second.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: "mcp_shift__probe", args: { old: "value" } },
+		});
+		ok(stale.kind === "ok" && stale.result.kind === "error", JSON.stringify(stale));
+		ok(stale.result.message.includes("arguments rejected"), stale.result.message);
+		strictEqual(second.clients.length, 1, "the call launched exactly the owning server");
+
+		const live = await second.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: "mcp_shift__probe", args: { fresh: "value" } },
+		});
+		ok(live.kind === "ok" && live.result.kind === "ok", JSON.stringify(live));
+		deepStrictEqual(JSON.parse(live.result.output), { fresh: "value" });
+
+		const removed = await second.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: "mcp_shift__gone", args: {} },
+		});
+		ok(removed.kind === "ok" && removed.result.kind === "error", JSON.stringify(removed));
+		ok(removed.result.message.includes("offers no tool named gone"), removed.result.message);
+	});
+
+	it("carries a filled catalog across sessions and connects only the owner on the first call", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const first = wire(scene);
+		open.push(first.source);
+		await first.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } });
+		strictEqual(first.clients.length, 1);
+		await first.source.close();
+
+		const second = wire(scene);
+		open.push(second.source);
+		const listed = payloadOf(await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find" } }));
+		ok(
+			(listed.capabilities as Array<{ name: string }>).some((entry) => entry.name === ECHO),
+			"the catalog is in find",
+		);
+		strictEqual(second.registry.get(ECHO as ToolName), undefined, "a cached descriptor is not a registry entry");
+		ok(!second.registry.listRegistered().includes(ECHO as ToolName));
+		const attached = resolveAgentTools({ registry: second.registry }).map((tool) => tool.name);
+		ok(!attached.some((name) => name.startsWith("mcp_")), "no cached schema becomes an attached agent tool");
+
+		const described = payloadOf(
+			await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }),
+		);
+		strictEqual(described.catalog, "cached");
+		strictEqual(second.clients.length, 0, "find and describe ran the whole way with no server process");
+
+		const called = await second.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { text: "after the cache" } },
+		});
+		ok(called.kind === "ok" && called.result.kind === "ok", JSON.stringify(called));
+		deepStrictEqual(JSON.parse(called.result.output), { text: "after the cache" });
+		strictEqual(second.clients.length, 1, "the first call connected exactly one server");
+		deepStrictEqual(second.source.connectedIds(), ["fake"]);
+		strictEqual(existsSync(scene.markerPath), false, "the other declared server was never launched");
+		strictEqual(
+			payloadOf(await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }))
+				.catalog,
+			"live",
+			"once connected, describe reports the session's own listing",
+		);
+	});
+
+	it("rejects a refresh without a server, for an undeclared server, and on describe or call", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, clients, source } = wire(scene);
+		open.push(source);
+		const errorOf = async (args: Record<string, unknown>): Promise<string> => {
+			const verdict = await registry.invoke({ tool: ToolNames.Gateway, args });
+			if (verdict.kind !== "ok" || verdict.result.kind !== "error") throw new Error(JSON.stringify(verdict));
+			return verdict.result.message;
+		};
+		ok((await errorOf({ op: "find", refresh: true })).includes("refresh needs the server it applies to"));
+		const undeclared = await errorOf({ op: "find", server: "nope", refresh: true });
+		ok(undeclared.includes('no MCP server named "nope" is declared'), undeclared);
+		ok(undeclared.includes("fake, marker"), "the error names what is declared");
+		ok(
+			(await errorOf({ op: "describe", capability: ECHO, refresh: true })).includes(
+				'server and refresh apply to op="find"',
+			),
+		);
+		ok((await errorOf({ op: "call", capability: ECHO, args: {}, server: "fake" })).includes('not op="call"'));
+		strictEqual(clients.length, 0, "no rejected request launched anything");
+		strictEqual(existsSync(scene.markerPath), false);
+	});
+
+	it("refuses scoped MCP discovery on a restricted tool surface", async () => {
+		const scene = scenario();
+		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
+		const { registry, clients, source } = wire(scene);
+		open.push(source);
+		const restricted = { allowedTools: [ToolNames.Gateway, ECHO] as ToolName[] };
+		const refused = await registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } },
+			restricted,
+		);
+		ok(refused.kind === "ok" && refused.result.kind === "error", JSON.stringify(refused));
+		ok(refused.result.message.includes("not available on this run's admitted tool surface"), refused.result.message);
+		strictEqual(clients.length, 0, "a restricted run cannot launch a server it was not given");
+		const listing = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find" } }, restricted));
+		strictEqual(listing.servers, undefined, "a restricted find still reports no MCP servers");
+		// An admitted exact capability still reaches its server through the call path.
+		const called = await registry.invoke(
+			{ tool: ToolNames.Gateway, args: { op: "call", capability: ECHO, args: { text: "admitted" } } },
+			restricted,
+		);
+		ok(called.kind === "ok" && called.result.kind === "ok", JSON.stringify(called));
+		strictEqual(clients.length, 1);
 	});
 
 	it("takes the capability's action class from the trust record: unknown asks everywhere and read-only denies it", async () => {
