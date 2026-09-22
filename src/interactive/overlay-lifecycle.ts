@@ -274,9 +274,9 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "auto-edit",
 		getOverlayState: () => overlayTransitions.state,
-		openPermissionOverlay: (view, inspect, invocation) => {
+		openPermissionOverlay: (view, inspect, invocation, advisory) => {
 			if (overlayTransitions.state === "permission-confirm") return false;
-			const body = createPermissionOverlayBody(view, inspect, invocation);
+			const body = createPermissionOverlayBody(view, inspect, invocation, advisory);
 			permissionBody = body;
 			const handle = showOverlayFrame(tui, body, {
 				...permissionOverlayPlacement(tui, editor, footer.view),
