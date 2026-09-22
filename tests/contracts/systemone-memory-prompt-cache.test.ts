@@ -48,16 +48,75 @@ function request(over: Partial<MemoryPromptRequest> = {}): MemoryPromptRequest {
 }
 
 describe("memory prompt cache under precomputed relevance", () => {
-	// A new pass that reused the previous turn's cached section would serve a
-	// selection those scores no longer justify. That is a correctness bug.
-	it("re-selects when the scores change, with the store unchanged", () => {
+	// The section sits in the system prompt. A selection that moved with each
+	// turn's scores would recompile the prompt and send a local model's whole
+	// conversation through a cold prefill on every follow-up, so a session keeps
+	// the first ranking it applied.
+	it("keeps the session's first ranking when a later turn scores differently", () => {
 		const reads = { count: 0 };
 		const read = readerOver(RECORDS, reads);
 		const first = read(request({ precomputedRelevance: { source: "jev", scores: { alpha: 0.9, bravo: 0.1 } } }));
 		const second = read(request({ precomputedRelevance: { source: "jev", scores: { alpha: 0.1, bravo: 0.9 } } }));
 		ok(first.includes("[alpha]"));
-		ok(second.includes("[bravo]"));
-		strictEqual(first === second, false);
+		strictEqual(second, first);
+	});
+
+	it("keeps the pinned ranking on a turn whose pass produced no scores", () => {
+		const reads = { count: 0 };
+		const read = readerOver(RECORDS, reads);
+		const first = read(request({ precomputedRelevance: { source: "jev", scores: { bravo: 0.9, alpha: 0.1 } } }));
+		ok(first.includes("[bravo]"));
+		strictEqual(read(request()), first);
+	});
+
+	it("re-selects for a new session", () => {
+		const reads = { count: 0 };
+		const read = readerOver(RECORDS, reads);
+		read(request({ precomputedRelevance: { source: "jev", scores: { alpha: 0.9, bravo: 0.1 } } }));
+		const next = read(
+			request({
+				sessionAuthority: "session-2",
+				precomputedRelevance: { source: "jev", scores: { alpha: 0.1, bravo: 0.9 } },
+			}),
+		);
+		ok(next.includes("[bravo]"));
+	});
+
+	// The first turn can run before the session id exists; the session it
+	// becomes is the same session and keeps the pin.
+	it("carries the pin from a pending session id to the id it becomes", () => {
+		const reads = { count: 0 };
+		const read = readerOver(RECORDS, reads);
+		const first = read(
+			request({
+				sessionAuthority: JSON.stringify([0, "pending:1"]),
+				precomputedRelevance: { source: "jev", scores: { alpha: 0.9, bravo: 0.1 } },
+			}),
+		);
+		const second = read(
+			request({
+				sessionAuthority: JSON.stringify([0, "s-abc"]),
+				precomputedRelevance: { source: "jev", scores: { alpha: 0.1, bravo: 0.9 } },
+			}),
+		);
+		strictEqual(second, first);
+	});
+
+	it("re-selects when the approved records change", () => {
+		const reads = { count: 0 };
+		let revision = "rev-1";
+		const read = createMemoryPromptReader({
+			getDataDir: () => "/data",
+			selection: { maxItems: 1 },
+			readStore: (() => {
+				reads.count += 1;
+				return { revision, records: [...RECORDS] };
+			}) as never,
+		});
+		read(request({ precomputedRelevance: { source: "jev", scores: { alpha: 0.9, bravo: 0.1 } } }));
+		revision = "rev-2";
+		const next = read(request({ precomputedRelevance: { source: "jev", scores: { alpha: 0.1, bravo: 0.9 } } }));
+		ok(next.includes("[bravo]"));
 	});
 
 	it("re-selects when the same scores come from a different target", () => {
