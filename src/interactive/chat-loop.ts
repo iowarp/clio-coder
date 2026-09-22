@@ -1348,7 +1348,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// The one place a turn pays for the decision pass. It runs after the
 			// task text is known and before the prompt is built, because both of
 			// its readers are synchronous and cannot fetch their own scores.
-			if (deps.refreshTurnRelevance) await deps.refreshTurnRelevance(text);
+			//
+			// Guarded even though the store never rejects: this is an injected
+			// dependency on the turn's critical path, and no ranking is worth a
+			// turn. Both sites read an empty store as no ranking.
+			if (deps.refreshTurnRelevance) {
+				try {
+					await deps.refreshTurnRelevance(text);
+				} catch {
+					// Ranking degrades to the order each site had before the pass.
+				}
+			}
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
 			// fresh /skill this turn replaces the armed surface; otherwise the
