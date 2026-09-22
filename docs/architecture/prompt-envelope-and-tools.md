@@ -25,7 +25,7 @@ The remaining layers contain conditional role guidance, safety, the factual tool
 
 The composition root snapshots the ready-skill count by workspace, prompt-source epoch, trust/discovery settings, and explicit skill paths, sharing it with the reminder rather than rescanning files on each compile check. Ready-skill count zero omits activation instructions. The once-per-session skills reminder requires a ready model-visible skill; marketplace entries alone do not arm it. Answer/proposal modes, disabled skills, and tool restrictions suppress both the reminder and its suggestion-wait continuation. When enabled, discovery is conditional on a useful workflow rather than a mandatory first step. Explicit skill requests continue through the existing activation/admission channel.
 
-Native Pi 0.86.1 transcript semantics remain unchanged. Warming and actual requests must compare their effective prompt and ordered schema identities after public transforms and payload hooks. A boot warm cannot predict a future task's narrower surface: such a change is an expected prefix disturbance, not proof of cache failure.
+Native Pi 0.87.1 transcript semantics remain unchanged. Warming and actual requests must compare their effective prompt and ordered schema identities after public transforms and payload hooks. A boot warm cannot predict a future task's narrower surface: such a change is an expected prefix disturbance, not proof of cache failure.
 
 `Context window: N` is the window Clio budgets this turn against. It is a
 resolved figure, not proof of backend capacity: `contextWindowSource`

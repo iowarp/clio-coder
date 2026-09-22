@@ -1,14 +1,15 @@
 # Dependency patches
 
-## Pi TUI 0.86.1: why the patch remains
+## Pi TUI 0.87.1: why the patch remains
 
-`@earendil-works__pi-tui@0.86.1.patch` is the sole Pi dependency patch, applied
+`@earendil-works__pi-tui@0.87.1.patch` is the sole Pi dependency patch, applied
 by pnpm's exact `patchedDependencies` entry. **pi-agent-core and pi-ai are
-unpatched.** The patch was checked against the published, unmodified 0.86.1
-package; that release does not provide these public APIs. The previous 0.85.1
-patch still applies without changes to its implementation.
+unpatched.** The patch was checked against the published, unmodified 0.87.1
+package; that release does not provide these public APIs. The 0.86.1 patch
+applies without changes; 0.87.1 changes only the alternate-screen
+scroll-to-end indicator's centering.
 
-| Added API | Required behavior | Why stock 0.86.1 is insufficient |
+| Added API | Required behavior | Why stock 0.87.1 is insufficient |
 | --- | --- | --- |
 | `TuiBase.setApplicationInputPolicy` | Clio's single keyboard owner runs before viewport shortcuts and focused widgets. Key releases are ignored; bracketed-paste contents remain literal data. The returned disposer removes only its own policy. | Public `addInputListener` appends to a listener set. The alternate-screen viewport installs its listener during construction, so later application listeners cannot consume conflicting keys first. There is no public prepend/priority option. |
 | `Editor.applyEdit` and `Input.applyEdit` | Invoke undo and deletion directly after Clio resolves a semantic keyboard action, without passing through submission or a second keybinding lookup. Input clear retains undo and kill-ring behavior. | The underlying edit operations are private and `handleInput` interprets bytes against configurable bindings. `setText` / `setValue` alone do not express the same undo, cursor and kill-ring semantics. |

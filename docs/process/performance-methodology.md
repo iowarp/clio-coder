@@ -448,8 +448,8 @@ The instant-shell slice uses one `TerminalLease`; Stage 1 does not start a
 second terminal or reconstruct editor state. The built Stage 0 static closure
 is measured from the production esbuild metafile by
 `tests/contracts/instant-shell-import-graph.test.ts`, after `pnpm build`.
-With bundled Pi TUI 0.86.1, the measured baseline is 13 JavaScript chunks and
-666,307 bytes, including 152,325 bytes attributed to Clio source. The regression
+With bundled Pi TUI 0.87.1, the measured baseline is 13 JavaScript chunks and
+670,404 bytes, including 156,272 bytes attributed to Clio source. The regression
 limits are 16 chunks, 700,000 total bytes, and 165,000 Clio source bytes.
 The separate Clio cap prevents the vendor bundle from masking application growth.
 The closure excludes the orchestrator, provider/agent engines, tools, workers,

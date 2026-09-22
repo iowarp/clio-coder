@@ -743,7 +743,31 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			toolCall.name === INTERNAL_HELPER_RESULT_TOOL && (result.details as { kind?: string } | undefined)?.kind === "error"
 				? { isError: true }
 				: undefined,
-		shouldStopAfterTurn: () => helperSchema !== null && (acceptedHelperResult !== null || workerBoundFailure !== null),
+		// Pi decides the turn boundary here, before `turn_end` is emitted, so a
+		// terminal-handoff repair that exhausts its budget must run here too.
+		// Run from a `turn_end` subscriber, the exhausted bound arrived after the
+		// decision and cost one extra provider request.
+		finishTurn: ({ toolResults }) => {
+			if (
+				helperSchema !== null &&
+				acceptedHelperResult === null &&
+				toolResults.length > 0 &&
+				(helperTerminalPhase || synthesisToolLock)
+			) {
+				const error = toolResults.find((result) => result.isError);
+				const reason =
+					helperTurnFailure ??
+					error?.content
+						.filter((block) => block.type === "text")
+						.map((block) => block.text)
+						.join("\n") ??
+					"The terminal handoff was not accepted.";
+				repairHelperResult(reason);
+			}
+			return helperSchema !== null && (acceptedHelperResult !== null || workerBoundFailure !== null)
+				? { action: "end" }
+				: undefined;
+		},
 		streamFn: (currentModel, transcript, streamOptions) => {
 			const currentContext = resolvedRequestContext(transcript);
 			const helperPrompt =
@@ -959,23 +983,6 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				reason = "The internal result must be a JSON object conforming to the declared contract.";
 			}
 			if (reason !== null) repairHelperResult(reason);
-		}
-		if (
-			helperSchema !== null &&
-			event.type === "turn_end" &&
-			acceptedHelperResult === null &&
-			event.toolResults.length > 0 &&
-			(helperTerminalPhase || synthesisToolLock)
-		) {
-			const error = event.toolResults.find((result) => result.isError);
-			const reason =
-				helperTurnFailure ??
-				error?.content
-					.filter((block) => block.type === "text")
-					.map((block) => block.text)
-					.join("\n") ??
-				"The terminal handoff was not accepted.";
-			repairHelperResult(reason);
 		}
 		if (
 			helperSchema === null &&
