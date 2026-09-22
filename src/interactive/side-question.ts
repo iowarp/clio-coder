@@ -87,6 +87,8 @@ export interface OutOfTurnRoundInput extends Omit<SideQuestionInput, "question">
 	responseSchema?: { name: string; schema: Record<string, unknown> };
 	/** Resolved runtime id, which is what decides the wire dialect. */
 	runtimeId?: string;
+	/** Sampling temperature; absent leaves the provider's default. `/draft` spreads it across candidates. */
+	temperature?: number;
 }
 
 export interface SideQuestionResult {
@@ -189,6 +191,7 @@ async function runRound(input: OutOfTurnRoundInput, binding: SchemaBinding | nul
 	const options: Record<string, unknown> = { maxTokens: input.maxTokens ?? SIDE_QUESTION_MAX_TOKENS };
 	if (input.apiKey !== undefined) options.apiKey = input.apiKey;
 	if (input.signal !== undefined) options.signal = input.signal;
+	if (input.temperature !== undefined) options.temperature = input.temperature;
 	if (binding !== null) {
 		options.onPayload = (payload: unknown): unknown | undefined =>
 			patchResponseSchemaPayloadForDialect(payload, binding.dialect, binding.schema, binding.name);

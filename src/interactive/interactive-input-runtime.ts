@@ -551,6 +551,7 @@ function overlayScopeLabel(state: OverlayState): string {
 		interop: "Interop",
 		"skills-hub": "Library",
 		"side-question": "Side question",
+		draft: "Drafts",
 		"handoff-review": "Handoff review",
 		"fleet-run-approval": "Run approval",
 	};

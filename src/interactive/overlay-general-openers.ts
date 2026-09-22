@@ -22,12 +22,14 @@ import { filterEntriesToActivePath } from "../domains/session/tree/active-path.j
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
+import type { DraftOutcome } from "./chat-loop.js";
 import { type OpenContextOverlayOptions, openContextOverlay } from "./context-overlay.js";
 import {
 	type createDispatchBoardView,
 	isDispatchBoardRowCancellable,
 	isDispatchBoardRowSteerable,
 } from "./dispatch-board.js";
+import type { DraftVerdict } from "./drafts.js";
 import { compileFleetRunPreview, type FleetRunPreview, type FleetRunPreviewInput } from "./fleet-run-preview.js";
 import { openMemoryOverlay } from "./memory-overlay.js";
 import { buildResponsiveHint, type HintEntry, showClioOverlayFrame } from "./overlay-frame.js";
@@ -38,6 +40,7 @@ import {
 	openContextResetOverlay,
 } from "./overlays/context-reset.js";
 import { formatDecisionCorrectionTurn, openDecisionsOverlay } from "./overlays/decisions.js";
+import { openDraftOverlay } from "./overlays/draft.js";
 import { openFleetRunApprovalOverlay } from "./overlays/fleet-run-approval.js";
 import { openSideQuestionOverlay } from "./overlays/side-question.js";
 import type { ContextClearCommandOptions } from "./slash-commands.js";
@@ -120,6 +123,22 @@ export interface OverlayGeneralOpenersDeps {
 		| { status: "refused"; reason: string }
 		| { status: "failed"; reason: string }
 	>;
+	/** Run the `/draft` candidate rounds. Absent on a host with no chat loop. */
+	draftCandidates?: (
+		request: string,
+		count: number,
+		options: { signal: AbortSignal; onCandidate: (index: number, partialText: string) => void },
+	) => Promise<DraftOutcome>;
+	/**
+	 * Judge settled drafts with the `drafts` decision site. Resolves to the
+	 * verdict, or to the sentence explaining why there is none.
+	 */
+	judgeDrafts?: (
+		request: string,
+		candidates: ReadonlyArray<string>,
+		signal: AbortSignal,
+	) => Promise<{ verdict: DraftVerdict } | { reason: string }>;
+	openDraftOverlay?: typeof openDraftOverlay;
 }
 
 export interface OverlayGeneralOpeners {
@@ -133,6 +152,8 @@ export interface OverlayGeneralOpeners {
 	openView(initialFilter?: string): void;
 	toggleDispatchBoard(): void;
 	openSideQuestion(question: string): void;
+	/** `/draft [N] <request>`: N candidates in parallel, judged by a decision model. */
+	openDraft(request: string, count: number): void;
 	/** `/fleet run <name> [--var k=v ...]`: preview the plan, then dispatch on approval. */
 	startFleetRun(name: string, vars: Readonly<Record<string, string>>): void;
 }
@@ -409,6 +430,72 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	};
 
 	/**
+	 * `/draft [N] <request>`: N candidate rounds in parallel, then one judgment.
+	 *
+	 * The judge runs only once every candidate has settled, because a `choice`
+	 * over half-denoised text is a judgment about noise. A failed candidate is
+	 * left out of the judgment rather than failing it, and fewer than two
+	 * drafted candidates leaves nothing to choose between.
+	 */
+	const openDraft = (request: string, count: number): void => {
+		if (deps.transitions.state !== "closed") return;
+		const run = deps.draftCandidates;
+		if (!run) {
+			deps.notify("error", "/draft is not wired in this session", "draft:unavailable");
+			return;
+		}
+		const controller = new AbortController();
+		deps.transitions.state = "draft";
+		const session = (deps.openDraftOverlay ?? openDraftOverlay)(deps.tui, {
+			request,
+			count,
+			columns: deps.terminal.columns,
+			rows: process.stdout.rows ?? 40,
+			onEscape: () => deps.closeOverlay(),
+			onClose: () => controller.abort(),
+		});
+		deps.transitions.handle = session;
+		deps.requestRender();
+		void (async () => {
+			const outcome = await run(request, count, {
+				signal: controller.signal,
+				onCandidate: (index, partialText) => session.setCandidate(index, { kind: "streaming", text: partialText }),
+			});
+			if (outcome.status === "refused") {
+				session.refuse(outcome.reason);
+				return;
+			}
+			outcome.candidates.forEach((candidate, index) => {
+				session.setCandidate(
+					index,
+					candidate.status === "drafted"
+						? { kind: "drafted", text: candidate.text }
+						: { kind: "failed", reason: candidate.reason },
+				);
+			});
+			if (outcome.aborted) return;
+			const drafted = outcome.candidates.flatMap((candidate) =>
+				candidate.status === "drafted" && candidate.text.trim().length > 0 ? [candidate.text] : [],
+			);
+			if (drafted.length !== outcome.candidates.length) {
+				session.setJudge({ kind: "unjudged", reason: "not judged: a draft failed or came back empty" });
+				return;
+			}
+			if (!deps.judgeDrafts) {
+				session.setJudge({ kind: "unjudged", reason: "not judged: no decision model is wired in this session" });
+				return;
+			}
+			session.setJudge({ kind: "judging" });
+			const judged = await deps.judgeDrafts(request, drafted, controller.signal);
+			session.setJudge(
+				"verdict" in judged ? { kind: "judged", verdict: judged.verdict } : { kind: "unjudged", reason: judged.reason },
+			);
+		})().catch((error: unknown) => {
+			session.refuse(error instanceof Error ? error.message : String(error));
+		});
+	};
+
+	/**
 	 * `/fleet run <name>`: compile the plan, show it, and dispatch only what the
 	 * operator accepted.
 	 *
@@ -539,6 +626,7 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 		openView,
 		toggleDispatchBoard,
 		openSideQuestion,
+		openDraft,
 		startFleetRun,
 	};
 }

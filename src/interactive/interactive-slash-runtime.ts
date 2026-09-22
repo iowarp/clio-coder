@@ -141,6 +141,8 @@ export interface InteractiveSlashRuntimeDeps {
 	openUsage: () => void;
 	/** Run one `/btw` side question in its own overlay. */
 	openSideQuestion: (question: string) => void;
+	/** Run one `/draft` in its own overlay. */
+	openDraft: (request: string, count: number) => void;
 	/** Run one `/handoff <goal>`: extract, review, and seed a successor session. */
 	startHandoff: (goal: string) => void;
 	/** Run one `/fleet run <name>`: approval preview first, dispatch only on accept. */
@@ -474,6 +476,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		},
 		openUsage: deps.openUsage,
 		openSideQuestion: deps.openSideQuestion,
+		openDraft: deps.openDraft,
 		// `/oracle` is refused, never queued, while a turn streams: the digest it
 		// packs describes the record as it stands.
 		isTurnInFlight: () => deps.chat.isStreaming(),

@@ -93,10 +93,11 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import type { runPrewarmRound } from "./prewarm.js";
-import { runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
+import { runOutOfTurnRound, runSideQuestion, type SideQuestionResult, sideQuestionUsage } from "./side-question.js";
 import type { AgentStatusEvent } from "./status/types.js";
 import { createTurnContext, type LiveContextUsage } from "./turn-context.js";
 import { createTurnMiddleware } from "./turn-middleware.js";
@@ -289,6 +290,20 @@ export interface SideQuestionOptions {
 	onDelta?: (partialText: string) => void;
 }
 
+export interface DraftOptions {
+	/** Cancels every candidate round. */
+	signal?: AbortSignal;
+	/** One candidate's streamed text, by index in start order. */
+	onCandidate?: (index: number, partialText: string) => void;
+}
+
+/** One `/draft` candidate: its text, or why its round produced none. */
+export type DraftCandidate = { status: "drafted"; text: string } | { status: "failed"; reason: string };
+
+export type DraftOutcome =
+	| { status: "drafted"; candidates: DraftCandidate[]; aborted: boolean }
+	| { status: "refused"; reason: string };
+
 export interface HandoffRoundOptions extends SideQuestionOptions {
 	/**
 	 * Run the second and last extraction round, quoting the parser's complaint
@@ -393,6 +408,16 @@ export interface ChatLoop {
 	 */
 	askSideQuestion(question: string, options?: SideQuestionOptions): Promise<SideQuestionOutcome>;
 	/**
+	 * `/draft`: run `count` candidate rounds for one request in parallel against
+	 * the session's active target, each at its own temperature.
+	 *
+	 * Out of turn exactly as a side question is: the history is read and never
+	 * mutated, nothing reaches the session, and each round's usage is billed to
+	 * `/usage` as a side question. A round that fails reports why in its slot
+	 * rather than failing the others.
+	 */
+	draftCandidates(request: string, count: number, options?: DraftOptions): Promise<DraftOutcome>;
+	/**
 	 * `/handoff`: run the extraction round for a goal against the same target,
 	 * model, and compiled message history, and return its raw JSON answer.
 	 *
@@ -467,6 +492,8 @@ export interface CreateChatLoopDeps {
 	runSideQuestion?: typeof runSideQuestion;
 	/** The `/handoff` extraction round. Injectable for the same reason. */
 	runHandoffRound?: typeof runHandoffRound;
+	/** The `/draft` candidate round. Injectable for the same reason. */
+	runDraftRound?: typeof runOutOfTurnRound;
 	/**
 	 * Append one priced out-of-turn call to the durable out-of-turn usage store.
 	 * Defaults to the real writer under the state dir. Contracts inject a spy so
@@ -642,6 +669,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const createAgent = deps.createAgent ?? createEngineAgent;
 	const sideQuestionRound = deps.runSideQuestion ?? runSideQuestion;
 	const handoffRound = deps.runHandoffRound ?? runHandoffRound;
+	const draftRound = deps.runDraftRound ?? runOutOfTurnRound;
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().chat.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
@@ -1827,6 +1855,48 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
 			return result.aborted ? { status: "aborted", text: result.text } : { status: "answered", text: result.text };
+		},
+
+		async draftCandidates(request: string, count: number, options: DraftOptions = {}): Promise<DraftOutcome> {
+			const text = request.trim();
+			if (text.length === 0) return { status: "refused", reason: "a draft needs a request" };
+			if (!Number.isInteger(count) || count < 1 || count > DRAFT_TEMPERATURES.length) {
+				return { status: "refused", reason: `draft count must be 1 to ${DRAFT_TEMPERATURES.length}` };
+			}
+			// Refused, never queued, for the side question's reason: the drafts
+			// answer the session as it stands now.
+			const prepared = await prepareOutOfTurnRound(
+				"a turn is in flight; /draft runs beside the session, not in its queue",
+				options.signal,
+			);
+			if (!prepared.ok) return { status: "refused", reason: prepared.reason };
+			const candidates = await Promise.all(
+				DRAFT_TEMPERATURES.slice(0, count).map(async (temperature, index): Promise<DraftCandidate> => {
+					try {
+						// One endpoint slot per round: each is a full request against the
+						// same scheduler, and capacity has to count every one of them.
+						const result = await withEndpointSlot(prepared.runtime, () =>
+							draftRound({
+								model: prepared.runtime.agent.state.model,
+								// Read-only, exactly as the side-question round treats it.
+								messages: prepared.runtime.agent.state.messages,
+								systemPrompt: DRAFT_SYSTEM_PROMPT,
+								userText: text,
+								maxTokens: DRAFT_MAX_TOKENS,
+								temperature,
+								...(prepared.apiKey !== undefined ? { apiKey: prepared.apiKey } : {}),
+								...(options.signal ? { signal: options.signal } : {}),
+								...(options.onCandidate ? { onDelta: (partial: string) => options.onCandidate?.(index, partial) } : {}),
+							}),
+						);
+						recordOutOfTurnUsage(prepared.runtime, result.usage, "side-question");
+						return { status: "drafted", text: result.text };
+					} catch (err) {
+						return { status: "failed", reason: err instanceof Error ? err.message : String(err) };
+					}
+				}),
+			);
+			return { status: "drafted", candidates, aborted: options.signal?.aborted === true };
 		},
 
 		async extractHandoff(goal: string, options: HandoffRoundOptions = {}): Promise<SideQuestionOutcome> {

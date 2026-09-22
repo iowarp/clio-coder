@@ -592,6 +592,7 @@ function headlessContext(
 		shutdown: () => unreachable("shutdown"),
 		openUsage: () => unreachable("openUsage"),
 		openSideQuestion: () => unreachable("openSideQuestion"),
+		openDraft: () => unreachable("openDraft"),
 		startHandoff: () => unreachable("startHandoff"),
 		openContextView: () => unreachable("openContextView"),
 		openTasks: () => unreachable("openTasks"),

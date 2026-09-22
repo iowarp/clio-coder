@@ -61,6 +61,7 @@ import {
 	isCouncilSynthesisMode,
 	resolveCouncilRoster,
 } from "./council.js";
+import { parseDraftArgs } from "./drafts.js";
 import {
 	formatOracleAnswer,
 	ORACLE_AGENT_ID,
@@ -170,6 +171,8 @@ type SlashCommandVariant =
 	| { kind: "delegate"; agentId: string; task: string; source: string; share?: boolean }
 	| { kind: "delegate-usage" }
 	| { kind: "btw"; question: string }
+	| { kind: "draft"; request: string; count: number }
+	| { kind: "draft-usage"; error?: string }
 	| { kind: "btw-usage" }
 	/** `/oracle <question>`: one read-only advisory run briefed on the record, never on the transcript. */
 	| { kind: "oracle"; question: string }
@@ -725,6 +728,8 @@ export interface SlashCommandContext {
 	 * answer.
 	 */
 	openSideQuestion: (question: string) => void;
+	/** `/draft [N] <request>`: N candidates side by side, judged by a decision model. */
+	openDraft: (request: string, count: number) => void;
 	/**
 	 * The record `/oracle` briefs its advisor on: settled decisions, the task
 	 * board, and the last compaction summary. Absent on a host with no session,
@@ -1573,6 +1578,31 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			}
 			if (command.kind !== "btw") return;
 			ctx.openSideQuestion(command.question);
+		},
+	},
+	{
+		name: "draft",
+		description: "Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest",
+		group: "Work",
+		kinds: ["draft", "draft-usage"],
+		args: {
+			positionals: [{ name: "request", required: true, rest: true }],
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "draft-usage" };
+			const read = parseDraftArgs(parsed.rest ?? "");
+			if ("error" in read) return { kind: "draft-usage", error: read.error };
+			return { kind: "draft", request: read.request, count: read.count };
+		},
+		handle(command, ctx) {
+			if (command.kind === "draft-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "draft");
+				if (command.error) ctx.notice("warn", `/draft: ${command.error}`);
+				if (entry) ctx.notice("info", usageNotice(entry));
+				return;
+			}
+			if (command.kind !== "draft") return;
+			ctx.openDraft(command.request, command.count);
 		},
 	},
 	{
@@ -2658,6 +2688,7 @@ const COMMAND_ORDER = [
 	"council",
 	"oracle",
 	"btw",
+	"draft",
 	"share",
 	"skill",
 	"agents",

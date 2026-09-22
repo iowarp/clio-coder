@@ -27,6 +27,7 @@ export type OverlayState =
 	| "interop"
 	| "skills-hub"
 	| "side-question"
+	| "draft"
 	| "handoff-review"
 	| "fleet-run-approval";
 
@@ -274,6 +275,8 @@ export function routeOverlayKey(
 		routeReadOnlyOverlayKey(data, deps);
 		return true;
 	}
+	// The draft overlay owns the arrows, the number keys, and Esc itself.
+	if (overlayState === "draft") return false;
 	// The handoff review overlay owns Enter, `e`, the arrows, and Esc itself, so
 	// every key goes to its own focus box rather than through the router.
 	if (overlayState === "handoff-review") return false;
