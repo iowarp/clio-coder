@@ -24,6 +24,7 @@ type ScenarioModule = { SCENARIOS: Record<string, MachineryScenario> };
  */
 const SUITE_MODULES: Record<string, () => Promise<ScenarioModule>> = {
 	"dispatch-admission": () => import("./dispatch-admission.js"),
+	"prompt-compile": () => import("./prompt-compile.js"),
 };
 
 function parseArgs(argv: ReadonlyArray<string>): { suite: string; scenario: string } {

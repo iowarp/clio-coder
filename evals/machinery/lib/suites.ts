@@ -44,6 +44,21 @@ export const MACHINERY_SUITES: ReadonlyArray<MachinerySuite> = [
 			"sealed-autonomy-enforcement",
 		],
 	},
+	{
+		name: "prompt-compile",
+		id: "machinery-prompt-compile",
+		title: "Machinery, prompt compilation layering",
+		description:
+			"Prompt layer ordering, the layout version its manifest records, and the capability and role guidance that renders only when the surface carries the tool it describes.",
+		scenarios: [
+			"section-order-volatility",
+			"layout-version",
+			"conditional-capability-guidance",
+			"stable-prefix-invariance",
+			"skill-activation-policy",
+			"worker-prompt-layers",
+		],
+	},
 ];
 
 export function machinerySuite(name: string): MachinerySuite {
