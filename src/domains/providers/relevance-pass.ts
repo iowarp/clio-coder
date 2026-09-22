@@ -37,7 +37,24 @@ const MIN_CERTAINTY = 0.2;
 const MAX_TASK_CHARS = 600;
 /** Code points of one candidate's summary. */
 const MAX_SUMMARY_CHARS = 240;
-/** Candidates per site in one pass, so a large store cannot size the request. */
+
+/**
+ * Candidates per site in one pass.
+ *
+ * State carries each candidate's text once and the questions reference it by
+ * id, so a pass costs roughly `task + sum(summaries)` rather than repeating the
+ * evidence per question. That is linear in the catalog, not quadratic, but
+ * still linear: a measured four-candidate pass spent 593 input tokens, almost
+ * all of it candidate text, so the request grows at roughly 60 tokens per
+ * additional candidate at the summary bound above.
+ *
+ * 24 per site keeps a worst-case pass near 2k input tokens and inside one
+ * round trip, which is the point of batching. A store larger than that is
+ * already being cut by the token budget and the item limit downstream, so the
+ * candidates past this bound would be ranked and then discarded anyway. They
+ * are dropped before the request instead, and they rank as abstentions, which
+ * leaves them exactly where the caller's own order put them.
+ */
 const MAX_SUBJECTS = 24;
 
 /** The sites this pass answers for. Routing resolves its own, on the dispatch path. */
@@ -45,7 +62,15 @@ const PASS_SITES = ["memory", "skills"] as const;
 type PassSite = (typeof PASS_SITES)[number];
 
 export interface RelevanceSubject {
-	/** Stable key the caller ranks by; scores come back under it. */
+	/**
+	 * Stable key the caller ranks by; scores come back under it.
+	 *
+	 * The score follows the text behind the id, which a control run confirmed by
+	 * swapping two summaries and watching their scores swap with them. The id is
+	 * not inert, though: the same text scored differently under two ids, so
+	 * nothing here may assume ids are semantically neutral. Callers pass the
+	 * identifier they already rank by and do not invent a synthetic one.
+	 */
 	readonly id: string;
 	/** One short line saying what the candidate is. Never file contents. */
 	readonly summary: string;

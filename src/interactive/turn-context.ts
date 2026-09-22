@@ -27,6 +27,7 @@ import {
 } from "../core/cache-telemetry.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
+import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { residencyTargetKey } from "../core/residency-target-key.js";
 import type { PendingSkillToolPolicy } from "../core/skill-activation.js";
 import type { ToolName } from "../core/tool-names.js";
@@ -147,6 +148,8 @@ export interface TurnContextDeps {
 	/** Test seam for the eviction planner; production uses `planEviction` from the working-set engine. */
 	planEviction?: typeof planEviction;
 	getMemorySection?: ((request: MemoryPromptRequest) => string) | undefined;
+	/** This turn's memory scores, or undefined when the site is unbound or the pass failed. */
+	getMemoryRelevance?: (() => PrecomputedRanking | undefined) | undefined;
 	getReadySkillCount?: (() => number) | undefined;
 	/**
 	 * Optional continuity projections carried into the live budget view. They
@@ -1862,6 +1865,9 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 			};
 			if (deps.getMemorySection) {
 				try {
+					// The scores rank the records; they never admit one. Every
+					// eligibility gate still runs inside the selection below.
+					const relevance = deps.getMemoryRelevance?.();
 					if (memoryTurn !== null && memoryTurn.sessionId !== (sessionId || null)) {
 						memoryAuthorityEpoch += 1;
 						memoryTurn = null;
@@ -1875,6 +1881,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 						modelId: agentRuntime.wireModelId,
 						taskText: memoryTurn?.taskText ?? "",
 						activePaths: memoryTurn?.activePaths ?? [],
+						...(relevance === undefined ? {} : { precomputedRelevance: relevance }),
 					});
 					if (memorySection.length > 0) sessionInputs.memorySection = memorySection;
 				} catch (err) {
