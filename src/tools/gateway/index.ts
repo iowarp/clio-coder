@@ -26,10 +26,16 @@ import type { McpCapabilitySource, McpServerListing } from "./mcp-capabilities.j
 export { GATEWAY_FIND_SELF_CAP_BYTES } from "./caps.js";
 export {
 	createMcpCapabilitySource,
+	type McpCapabilityMetadata,
 	type McpCapabilitySource,
 	type McpCapabilitySourceOptions,
+	type McpCatalog,
+	type McpCatalogEntry,
+	type McpCatalogProvenance,
 	type McpCloseReport,
 	type McpListing,
+	type McpMetadataResult,
+	type McpRefreshResult,
 	type McpServerListing,
 	type McpTeardownReport,
 	mcpTrustRemedy,
