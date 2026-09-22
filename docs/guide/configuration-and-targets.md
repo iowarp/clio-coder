@@ -990,11 +990,46 @@ The settings rows for these keys are in the
 [settings inventory](#settings-inventory) and the
 [configuration reference](configuration-reference.md).
 
+#### What `routing` changes
+
+Binding `fleet.decisionProfiles.routing` replaces how dispatch reads a task
+before it picks a worker. Unbound, `classifyAgentTask` reads the task with an
+ordered regex list and reports a confidence of either 0.3 or 0.7, depending only
+on whether its first rule matched. That number is a placeholder rather than a
+measurement, and routing keys off it.
+
+The rules also miss whenever the wording differs from the pattern. On the task
+"Review the auth middleware for timing attacks, then fix anything you find and
+add regression tests", the word-count ladder returns `simple` and the
+conjunction rule returns indivisible. Both are wrong. The live provider returns
+complexity 1.86 of 3 and decomposable 0.81 for the same task, using 718 input
+and 188 output tokens in 249ms. Those answers are pinned in
+`tests/contracts/agent-task-decisions.test.ts`.
+
+Bound, the site answers four questions about the task in one call, because they
+are independent and batching them costs nothing: what kind of work it asks for,
+which area of the system it touches, how much work it requires, and whether it
+contains more than one independently completable piece. The confidence that
+reaches routing is then the model's own rather than a constant.
+
+Each field falls back to the regex value on its own. An abstention on complexity
+does not discard a confident answer on domain, and an answer outside the option
+keys the question supplied is treated as an abstention rather than widening the
+enum. An unbound site, a provider outage, and an uncertain answer all produce
+the same result, and dispatch cannot tell them apart: the regex classification
+it had before the site existed. A failure leaves a diagnostic and nothing else.
+
+The features are host-resolved and never accepted from model arguments.
+`routeValidationProjection` strips the field on the same terms as the
+reservation, so a model cannot author the task features its own routing reads.
+
 > [!NOTE]
-> This is an alpha surface. The harness call sites that consume a binding are
-> still being built, so what each site does with an answer is not documented
-> here yet. Binding a site today is safe precisely because an unconsumed
-> binding is indistinguishable from an unbound one.
+> `routing` is the only site with a call site today. `skills`, `memory`, and
+> `toolRisk` validate and bind, but nothing consumes a binding yet, so binding
+> one of those three currently behaves exactly like leaving it unbound. They are
+> still landing.
+
+#### A second decision provider needs no new verb
 
 `decide()` is provider-shaped rather than Jev-shaped. The three primitives are a
 contract about answer shapes, not about one vendor: Laya, for instance, is a
