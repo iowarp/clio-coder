@@ -22,6 +22,58 @@ export interface RankedMemoryCandidate {
 	readonly fallback: boolean;
 }
 
+/** Versioned alongside the lexical heuristic so caches invalidate on either. */
+export const MEMORY_PRECOMPUTED_RELEVANCE_VERSION = "precomputed-v1";
+
+/**
+ * Per-record relevance produced ahead of selection. Prompt-build selection is
+ * synchronous and a System One call is not, so a model-scored ranking has to
+ * arrive as values an async pre-turn pass already resolved.
+ */
+export interface PrecomputedMemoryRelevance {
+	/** Names the pass that produced these scores so callers can key a cache on it. */
+	readonly source: string;
+	/** Record ID to score, higher ranks first. An absent or non-finite entry is an abstention. */
+	readonly scores: Readonly<Record<string, number>>;
+}
+
+export interface PrecomputedMemoryCandidate {
+	readonly record: MemoryRecord;
+	/** Null when the pass abstained on this record, which is not the same as a zero. */
+	readonly score: number | null;
+	readonly source: string;
+}
+
+/**
+ * Reorder only the records the scoring pass had an opinion about.
+ *
+ * An abstention is not evidence of irrelevance, so a record with no score must
+ * not sink to the bottom of the ranking. Scored records are redistributed
+ * across the slots they already occupied between the unscored ones, which
+ * leaves every abstention at the position the incoming order gave it. The
+ * input order therefore still decides everything the pass did not speak to,
+ * whether that order is legacy priority or a lexical ranking.
+ */
+export function rankMemoryByPrecomputedScore(
+	candidates: ReadonlyArray<MemoryRecord>,
+	input: PrecomputedMemoryRelevance,
+): PrecomputedMemoryCandidate[] {
+	const scored = candidates.map((record): PrecomputedMemoryCandidate => {
+		const raw = input.scores[record.id];
+		const score = typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+		return { record, score, source: input.source };
+	});
+	const slots = scored.flatMap((candidate, index) => (candidate.score === null ? [] : [index]));
+	const ordered = slots
+		.map((index) => ({ index, candidate: scored[index] as PrecomputedMemoryCandidate }))
+		.sort((a, b) => (b.candidate.score ?? 0) - (a.candidate.score ?? 0) || a.index - b.index);
+	const out = [...scored];
+	for (const [position, slot] of slots.entries()) {
+		out[slot] = ordered[position]?.candidate as PrecomputedMemoryCandidate;
+	}
+	return out;
+}
+
 const STOP_WORDS = new Set(["and", "are", "for", "from", "into", "the", "this", "that", "with", "use", "when"]);
 
 function normalized(value: string): string {
