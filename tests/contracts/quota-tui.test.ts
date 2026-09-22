@@ -255,7 +255,8 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(text, /no subscription window consumed/);
 
 		const codex = text.slice(text.indexOf("Codex"), text.indexOf("Antigravity"));
-		doesNotMatch(codex, /5h/);
+		// The row label, not any "5h": a weekly reset rendered as "4d 15h" also contains it.
+		doesNotMatch(codex, /│ 5h · /);
 		quota = accounts().map((entry) =>
 			entry.providerId === "codex" ? { ...entry, stale: true, message: "refresh failed", retryAfterSeconds: 30 } : entry,
 		);
