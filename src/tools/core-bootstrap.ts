@@ -24,7 +24,7 @@ import { evidenceTool } from "./evidence.js";
 import { findTool } from "./find.js";
 import { clioDocsToolSurface, clioLibraryToolSurface } from "./gateway/clio-context-surface.js";
 import { dataToolSurface, prepareDataAdmissionArguments } from "./gateway/data-surface.js";
-import { createGatewayTool, type McpCapabilitySource } from "./gateway/index.js";
+import { createGatewayTool, type GatewayCapabilityRanker, type McpCapabilitySource } from "./gateway/index.js";
 import { grepTool } from "./grep.js";
 import { lazyTool } from "./lazy-tool.js";
 import { createLedgerTool } from "./ledger.js";
@@ -84,6 +84,11 @@ export interface CoreToolBootstrapDeps {
 	 * reaches builtin and extension capabilities only.
 	 */
 	mcpCapabilities?: McpCapabilitySource;
+	/**
+	 * Ranks gateway find results from the `capabilities` decision site. Only the
+	 * session binds it; without it find lists exactly as it always has.
+	 */
+	rankCapabilities?: GatewayCapabilityRanker;
 }
 
 export interface CoreToolRegistration {
@@ -266,10 +271,17 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	// The gateway itself: direct, one fixed schema, reaching every
 	// gateway-placed spec above through the registry's own admission.
 	registry.register({
-		...builtin(createGatewayTool({ registry, ...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}) }), {
-			path: "src/tools/gateway/index.ts",
-			scope: "core",
-		}),
+		...builtin(
+			createGatewayTool({
+				registry,
+				...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
+				...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
+			}),
+			{
+				path: "src/tools/gateway/index.ts",
+				scope: "core",
+			},
+		),
 	});
 	// The coordination board exists only inside a dispatch: a worker process
 	// binds the port, the session never does, and without a port the tool can

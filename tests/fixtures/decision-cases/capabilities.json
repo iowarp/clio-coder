@@ -1,0 +1,356 @@
+{
+	"description": "Gateway capability catalog modeled on common MCP servers plus Clio's gateway builtins. Each case is a find query phrased the way a model paraphrases a need, with the turn's task, labeled with the capability that serves it. Descriptions are written for this fixture, not copied from any server.",
+	"site": "capabilities",
+	"catalog": [
+		{
+			"name": "mcp_github__create_pull_request",
+			"description": "Create a new pull request that merges a head branch into a base branch."
+		},
+		{
+			"name": "mcp_github__list_pull_requests",
+			"description": "List pull requests in a repository, filtered by state."
+		},
+		{
+			"name": "mcp_github__merge_pull_request",
+			"description": "Merge an open pull request using merge, squash or rebase."
+		},
+		{
+			"name": "mcp_github__create_issue",
+			"description": "Open a new issue in a repository with a title and body."
+		},
+		{
+			"name": "mcp_github__search_issues",
+			"description": "Search issues and pull requests across repositories with GitHub query syntax."
+		},
+		{
+			"name": "mcp_github__add_issue_comment",
+			"description": "Add a comment to an existing issue or pull request."
+		},
+		{
+			"name": "mcp_github__get_file_contents",
+			"description": "Get the contents of a file or directory from a repository at a ref."
+		},
+		{
+			"name": "mcp_github__create_branch",
+			"description": "Create a new branch from an existing ref."
+		},
+		{
+			"name": "mcp_github__list_workflow_runs",
+			"description": "List recent CI workflow runs and their conclusions."
+		},
+		{
+			"name": "mcp_github__get_job_logs",
+			"description": "Download the logs of a failed CI job."
+		},
+		{
+			"name": "mcp_github__create_release",
+			"description": "Draft and publish a tagged release with notes."
+		},
+		{
+			"name": "mcp_slack__post_message",
+			"description": "Send a message to a channel or thread."
+		},
+		{
+			"name": "mcp_slack__list_channels",
+			"description": "List public channels in the workspace."
+		},
+		{
+			"name": "mcp_slack__get_channel_history",
+			"description": "Read recent messages from a channel."
+		},
+		{
+			"name": "mcp_slack__add_reaction",
+			"description": "Add an emoji reaction to a message."
+		},
+		{
+			"name": "mcp_slack__get_user_profile",
+			"description": "Look up a member's profile, title and time zone."
+		},
+		{
+			"name": "mcp_slack__search_messages",
+			"description": "Search message text across channels the bot can read."
+		},
+		{
+			"name": "mcp_linear__create_ticket",
+			"description": "File a new ticket in a team's tracker with priority and labels."
+		},
+		{
+			"name": "mcp_linear__update_ticket_state",
+			"description": "Move a ticket to another workflow state such as In Progress or Done."
+		},
+		{
+			"name": "mcp_linear__list_my_tickets",
+			"description": "List tickets assigned to the current user."
+		},
+		{
+			"name": "mcp_linear__add_ticket_comment",
+			"description": "Comment on a ticket."
+		},
+		{
+			"name": "mcp_linear__list_cycles",
+			"description": "List a team's sprints with their dates."
+		},
+		{
+			"name": "mcp_postgres__query",
+			"description": "Run a read-only SQL statement and return rows."
+		},
+		{
+			"name": "mcp_postgres__list_tables",
+			"description": "List tables and views in a schema."
+		},
+		{
+			"name": "mcp_postgres__describe_table",
+			"description": "Show a table's columns, types, indexes and constraints."
+		},
+		{
+			"name": "mcp_postgres__explain",
+			"description": "Show the planner's execution plan for a statement."
+		},
+		{
+			"name": "mcp_browser__navigate",
+			"description": "Open a URL in a headless browser tab."
+		},
+		{
+			"name": "mcp_browser__screenshot",
+			"description": "Capture a PNG of the current page or an element."
+		},
+		{
+			"name": "mcp_browser__click",
+			"description": "Click an element matched by a selector."
+		},
+		{
+			"name": "mcp_browser__fill_form",
+			"description": "Type values into form fields on the current page."
+		},
+		{
+			"name": "mcp_browser__console_logs",
+			"description": "Return the page's JavaScript console output."
+		},
+		{
+			"name": "mcp_calendar__list_events",
+			"description": "List events on a calendar between two dates."
+		},
+		{
+			"name": "mcp_calendar__create_event",
+			"description": "Schedule an event with attendees and a time."
+		},
+		{
+			"name": "mcp_calendar__find_free_slot",
+			"description": "Find a time when all listed attendees are free."
+		},
+		{
+			"name": "mcp_mail__send",
+			"description": "Send an email to one or more recipients."
+		},
+		{
+			"name": "mcp_mail__search",
+			"description": "Search the mailbox by sender, subject or text."
+		},
+		{
+			"name": "mcp_drive__search_files",
+			"description": "Search stored documents by name or content."
+		},
+		{
+			"name": "mcp_drive__upload_file",
+			"description": "Upload a local file to shared storage."
+		},
+		{
+			"name": "mcp_drive__share_file",
+			"description": "Grant another person access to a stored file."
+		},
+		{
+			"name": "mcp_sentry__list_errors",
+			"description": "List recent unresolved errors reported by the application."
+		},
+		{
+			"name": "mcp_sentry__get_error_details",
+			"description": "Show the stack trace and breadcrumbs of one reported error."
+		},
+		{
+			"name": "mcp_grafana__query_metrics",
+			"description": "Query a time series metric over a range."
+		},
+		{
+			"name": "mcp_pagerduty__list_incidents",
+			"description": "List open incidents and who is on call for them."
+		},
+		{
+			"name": "mcp_npm__package_info",
+			"description": "Show a published package's versions, dependencies and maintainers."
+		},
+		{
+			"name": "mcp_docker__list_containers",
+			"description": "List running containers with their images and ports."
+		},
+		{
+			"name": "mcp_docker__container_logs",
+			"description": "Read the output of a running container."
+		},
+		{
+			"name": "mcp_k8s__get_pods",
+			"description": "List pods in a namespace with their status and restarts."
+		},
+		{
+			"name": "mcp_k8s__rollout_restart",
+			"description": "Restart a deployment's pods one at a time."
+		},
+		{
+			"name": "artifact",
+			"description": "Write a terminal plan, review or report document."
+		},
+		{
+			"name": "web_read",
+			"description": "Read a web page over GET and return its text."
+		},
+		{
+			"name": "web_fetch",
+			"description": "Make a full HTTP request with method, headers and body."
+		},
+		{
+			"name": "git",
+			"description": "Read-only repository status, diff and log."
+		},
+		{
+			"name": "evidence",
+			"description": "Record or inspect evidence for claims made in this session."
+		},
+		{
+			"name": "credential_present",
+			"description": "Report whether a named credential is configured, never its value."
+		},
+		{
+			"name": "clio_docs",
+			"description": "Search Clio's bundled documentation."
+		},
+		{
+			"name": "clio_library",
+			"description": "Browse and install packages from the Clio library."
+		},
+		{
+			"name": "data",
+			"description": "Inspect CSV, TSV, JSON and JSONL files."
+		}
+	],
+	"cases": [
+		{
+			"query": "open a PR for my branch",
+			"task": "ship the fix on this branch",
+			"expect": "mcp_github__create_pull_request"
+		},
+		{
+			"query": "why did CI fail",
+			"task": "the build is red on main",
+			"expect": "mcp_github__get_job_logs"
+		},
+		{
+			"query": "tell the team in chat",
+			"task": "let the team know the deploy finished",
+			"expect": "mcp_slack__post_message"
+		},
+		{
+			"query": "what did people say in #eng today",
+			"task": "catch up on the discussion",
+			"expect": "mcp_slack__get_channel_history"
+		},
+		{
+			"query": "file a bug",
+			"task": "track the crash we just found",
+			"expect": "mcp_linear__create_ticket"
+		},
+		{
+			"query": "mark ticket done",
+			"task": "close out the work item",
+			"expect": "mcp_linear__update_ticket_state"
+		},
+		{
+			"query": "columns of users table",
+			"task": "write a migration for the users table",
+			"expect": "mcp_postgres__describe_table"
+		},
+		{
+			"query": "why is this query slow",
+			"task": "speed up the report query",
+			"expect": "mcp_postgres__explain"
+		},
+		{
+			"query": "take a picture of the page",
+			"task": "check the landing page renders",
+			"expect": "mcp_browser__screenshot"
+		},
+		{
+			"query": "js errors on the page",
+			"task": "debug the broken signup form",
+			"expect": "mcp_browser__console_logs"
+		},
+		{
+			"query": "when is everyone available",
+			"task": "set up a design review",
+			"expect": "mcp_calendar__find_free_slot"
+		},
+		{
+			"query": "book a meeting",
+			"task": "set up a design review with Ana and Luke",
+			"expect": "mcp_calendar__create_event"
+		},
+		{
+			"query": "latest production exceptions",
+			"task": "triage what is breaking in prod",
+			"expect": "mcp_sentry__list_errors"
+		},
+		{
+			"query": "stack trace for that crash",
+			"task": "debug the checkout exception",
+			"expect": "mcp_sentry__get_error_details"
+		},
+		{
+			"query": "who is on call",
+			"task": "escalate the outage",
+			"expect": "mcp_pagerduty__list_incidents"
+		},
+		{
+			"query": "what versions of react exist",
+			"task": "upgrade the frontend dependency",
+			"expect": "mcp_npm__package_info"
+		},
+		{
+			"query": "restart the service",
+			"task": "roll out the config change",
+			"expect": "mcp_k8s__rollout_restart"
+		},
+		{
+			"query": "output of the api container",
+			"task": "debug the local stack",
+			"expect": "mcp_docker__container_logs"
+		},
+		{
+			"query": "download a web page",
+			"task": "summarize the vendor's changelog page",
+			"expect": "web_read"
+		},
+		{
+			"query": "is the openai key set",
+			"task": "configure a new target",
+			"expect": "credential_present"
+		},
+		{
+			"query": "look at this csv",
+			"task": "analyze the benchmark results file",
+			"expect": "data"
+		},
+		{
+			"query": "give access to Luke",
+			"task": "share the design doc",
+			"expect": "mcp_drive__share_file"
+		},
+		{
+			"query": "tag a new version",
+			"task": "cut the 1.2 release",
+			"expect": "mcp_github__create_release"
+		},
+		{
+			"query": "cpu usage last hour",
+			"task": "investigate the latency spike",
+			"expect": "mcp_grafana__query_metrics"
+		}
+	]
+}

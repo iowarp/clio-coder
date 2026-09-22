@@ -60,7 +60,7 @@ describe("fleet.decisionProfiles validation", () => {
 	it("names every site the harness knows", () => {
 		deepStrictEqual(
 			[...DECISION_SITES],
-			["routing", "skills", "memory", "toolRisk", "drafts", "turnScope", "dispatchForecast"],
+			["routing", "skills", "memory", "toolRisk", "drafts", "turnScope", "dispatchForecast", "capabilities"],
 		);
 	});
 });

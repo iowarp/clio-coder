@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { rankByPrecomputedScore } from "../../core/precomputed-rank.js";
 import { isMcpToolName, type ToolName, ToolNames } from "../../core/tool-names.js";
 import type { ActionClass } from "../../domains/safety/action-classifier.js";
 import { StringEnum, validateEngineToolArguments } from "../../engine/ai.js";
@@ -66,10 +67,36 @@ export interface GatewayCapabilityEntry {
 	actionClass: ActionClass;
 }
 
+/** Entries an unfiltered listing must exceed before a ranker is asked to order it. */
+export const GATEWAY_RANK_MIN_LISTING = 40;
+/** A query with fewer lexical hits than this asks the ranker for related entries. */
+export const GATEWAY_RELATED_BELOW_HITS = 3;
+/** Related entries a find adds beside a query's own hits. */
+export const GATEWAY_RELATED_MAX = 5;
+/** Probability at or above which a ranked entry counts as related. */
+const GATEWAY_RELATED_MIN_SCORE = 0.5;
+
+/** Scores for capability names, and who produced them. */
+export interface GatewayCapabilityRanking {
+	scores: Readonly<Record<string, number>>;
+	source: string;
+}
+
+/**
+ * Ranks capabilities against what find was asked for, or returns null when it
+ * has no opinion. Bound only on the session registry, from the `capabilities`
+ * decision site; a worker's gateway and an unbound session never rank.
+ */
+export type GatewayCapabilityRanker = (
+	request: { query: string; entries: ReadonlyArray<{ name: string; description: string }> },
+	signal?: AbortSignal,
+) => Promise<GatewayCapabilityRanking | null>;
+
 export interface GatewayToolDeps {
 	registry: ToolRegistry;
 	/** Local MCP servers, present on the session registry only. */
 	mcp?: McpCapabilitySource;
+	rankCapabilities?: GatewayCapabilityRanker;
 }
 
 const DESCRIPTION =
@@ -191,8 +218,29 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 		message: `gateway: capability "${name}" is not on this run's admitted tool surface (${[...allowed].sort().join(", ")}); the recipe or explicit task scope excludes it`,
 	});
 
+	/**
+	 * Ask the ranker, never letting it cost the find. Every failure is the
+	 * listing the substring filter already produced.
+	 */
+	const rank = async (
+		query: string,
+		entries: ReadonlyArray<GatewayCapabilityEntry>,
+		signal: AbortSignal | undefined,
+	): Promise<GatewayCapabilityRanking | null> => {
+		if (deps.rankCapabilities === undefined || entries.length === 0) return null;
+		try {
+			return await deps.rankCapabilities(
+				{ query, entries: entries.map((entry) => ({ name: entry.name, description: entry.description })) },
+				signal,
+			);
+		} catch {
+			return null;
+		}
+	};
+
 	const runFind = async (args: Record<string, unknown>, options: ToolInvokeOptions | undefined): Promise<ToolResult> => {
-		const query = typeof args.query === "string" ? args.query.trim().toLowerCase() : "";
+		const rawQuery = typeof args.query === "string" ? args.query.trim() : "";
+		const query = rawQuery.toLowerCase();
 		const server = typeof args.server === "string" ? args.server.trim() : "";
 		const refresh = args.refresh === true;
 		const allowed = allowedSet(options);
@@ -283,12 +331,35 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 			// name is the older snapshot of it and must not displace it.
 			const byName = new Map(registryEntries.map((entry) => [entry.name, entry]));
 			for (const entry of mcpEntries) if (!byName.has(entry.name)) byName.set(entry.name, entry);
-			const entries = [...byName.values()]
-				.filter(
-					(entry) =>
-						query.length === 0 || entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query),
-				)
-				.sort((left, right) => left.name.localeCompare(right.name));
+			const catalogEntries = [...byName.values()].sort((left, right) => left.name.localeCompare(right.name));
+			let entries = catalogEntries.filter(
+				(entry) =>
+					query.length === 0 || entry.name.toLowerCase().includes(query) || entry.description.toLowerCase().includes(query),
+			);
+			// A ranking only ever reorders an unfiltered listing or adds related
+			// entries beside a query's own hits. The hits keep their order, nothing
+			// is removed, and a scoped find is the one server the caller named.
+			let rankedBy: string | undefined;
+			let related: GatewayCapabilityEntry[] = [];
+			let relatedBy: string | undefined;
+			if (!scoped && query.length === 0 && entries.length > GATEWAY_RANK_MIN_LISTING) {
+				const ranking = await rank("", entries, options?.signal);
+				if (ranking !== null) {
+					entries = rankByPrecomputedScore(entries, (entry) => entry.name, ranking.scores).map((ranked) => ranked.item);
+					rankedBy = ranking.source;
+				}
+			} else if (!scoped && query.length > 0 && entries.length < GATEWAY_RELATED_BELOW_HITS) {
+				const hits = new Set(entries.map((entry) => entry.name));
+				const others = catalogEntries.filter((entry) => !hits.has(entry.name));
+				const ranking = await rank(rawQuery, others, options?.signal);
+				if (ranking !== null) {
+					related = others
+						.filter((entry) => (ranking.scores[entry.name] ?? 0) >= GATEWAY_RELATED_MIN_SCORE)
+						.sort((left, right) => (ranking.scores[right.name] ?? 0) - (ranking.scores[left.name] ?? 0))
+						.slice(0, GATEWAY_RELATED_MAX);
+					if (related.length > 0) relatedBy = ranking.source;
+				}
+			}
 			const total = entries.length;
 			const shown = entries.slice(0, GATEWAY_FIND_MAX_ENTRIES);
 			const truncated = shown.length < total;
@@ -307,6 +378,15 @@ export function createGatewayTool(deps: GatewayToolDeps): ToolSpec {
 				...(refreshNote !== undefined ? { refresh: refreshNote } : {}),
 				...(diagnostics.length > 0 ? { diagnostics } : {}),
 				...(truncated ? { note: "listing truncated; narrow it with query" } : {}),
+				...(rankedBy !== undefined
+					? { order: `ranked by ${rankedBy} against this turn's task; every capability is still listed` }
+					: {}),
+				...(relatedBy !== undefined
+					? {
+							related,
+							relatedNote: `not matched by the query text; judged related to it by ${relatedBy}`,
+						}
+					: {}),
 			};
 			return finalizeObservation({
 				tool: ToolNames.Gateway,

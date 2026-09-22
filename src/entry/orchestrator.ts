@@ -140,6 +140,7 @@ import { preTurnHints, preTurnRecord } from "../domains/providers/pre-turn-brief
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
 import { TURN_SITES } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import {
@@ -1920,6 +1921,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	});
 	const toolBootstrap = registerAllTools(toolRegistry, {
 		getSkillRelevance: () => turnRelevance.skills(),
+		// Gateway find asks the `capabilities` site mid-turn, bounded like the
+		// pre-turn brief because the model is waiting on the listing.
+		rankCapabilities: (request, signal) =>
+			rankCapabilities(
+				{
+					settings: getCurrentSettings(),
+					providers,
+					ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS },
+				},
+				{ query: request.query, task: turnRelevance.task() },
+				request.entries,
+				signal,
+			),
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),
