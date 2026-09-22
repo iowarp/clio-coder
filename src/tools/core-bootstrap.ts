@@ -1,5 +1,6 @@
 import type { ContextRecalledPayload } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
+import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
@@ -71,6 +72,12 @@ export interface CoreToolBootstrapDeps {
 		"trustProjectCompatRoots" | "disableDiscovery" | "explicitSkillPaths"
 	>;
 	skillMarketplace?: boolean;
+	/**
+	 * This turn's per-skill relevance scores, when a decision site is bound.
+	 * They order the skills listing and never shorten it, so a worker registry
+	 * that carries none simply lists in catalog order.
+	 */
+	getSkillRelevance?: () => PrecomputedRanking | undefined;
 	/**
 	 * Local MCP servers the gateway may launch. The session bootstrap builds
 	 * one per process; worker registries carry none, so a worker's gateway
@@ -173,6 +180,7 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		getCwd: () => deps.session?.current()?.cwd ?? process.cwd(),
 		...(deps.getSkillLoaderOptions ? { getSkillLoaderOptions: deps.getSkillLoaderOptions } : {}),
 		...(deps.skillMarketplace !== undefined ? { skillMarketplace: deps.skillMarketplace } : {}),
+		...(deps.getSkillRelevance ? { getSkillRelevance: deps.getSkillRelevance } : {}),
 	};
 	if (deps.askUser) {
 		registry.register({
