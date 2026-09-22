@@ -914,8 +914,6 @@ function shipsUnder(packageFiles: string[], dir: string): boolean {
 
 const NPM_IMPLICIT_FILES = new Set(["package.json"]);
 const ROOT_ONLY_RESOLVERS = new Set([
-	// Runs `git rev-parse HEAD` with the package root as cwd.
-	"src/domains/eval/provenance.ts",
 	// Hands the root to the component scanner, which walks whatever is present.
 	"src/cli/components.ts",
 ]);
@@ -1040,7 +1038,7 @@ function gitIgnored(paths: ReadonlyArray<string>): Set<string> {
 function checkPackaging(): void {
 	const manifest = JSON.parse(readRoot("scripts/release-manifest.json")) as ReleaseManifest;
 	const packageFiles = (JSON.parse(readRoot("package.json")) as { files: string[] }).files;
-	for (const prefix of ["evals", "patches", "scripts", "tests"]) {
+	for (const prefix of ["patches", "scripts", "tests"]) {
 		if (shippedBy(packageFiles, `${prefix}/probe.ts`)) fail("packaging", `${prefix}/ is checkout-only`);
 	}
 
@@ -1378,13 +1376,6 @@ const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],
 	["library-pin", checkLibraryPin],
-	[
-		"eval-suites",
-		async () => {
-			const result = await runProcess("node", ["--import", "tsx", "scripts/check-evals.ts"], {});
-			if (result.status !== 0) fail("eval-suites", result.output.trim());
-		},
-	],
 	["defaults-yaml", checkDefaultsYaml],
 	["settings-inventory", checkSettingsInventory],
 	["environment-variable-inventory", checkEnvironmentVariableInventory],

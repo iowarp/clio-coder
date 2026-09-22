@@ -26,7 +26,6 @@ const KIND_ORDER: ReadonlyArray<ComponentKind> = [
 	"doc-spec",
 	"middleware",
 	"memory",
-	"eval-suite",
 ];
 
 const AUTHORITY_BY_KIND: Record<ComponentKind, ComponentAuthority> = {
@@ -42,7 +41,6 @@ const AUTHORITY_BY_KIND: Record<ComponentKind, ComponentAuthority> = {
 	"session-schema": "runtime-critical",
 	"receipt-schema": "runtime-critical",
 	memory: "advisory",
-	"eval-suite": "descriptive",
 	"doc-spec": "descriptive",
 };
 
@@ -59,7 +57,6 @@ const RELOAD_BY_KIND: Record<ComponentKind, ComponentReloadClass> = {
 	"session-schema": "restart-required",
 	"receipt-schema": "restart-required",
 	memory: "hot",
-	"eval-suite": "static",
 	"doc-spec": "static",
 };
 
@@ -76,7 +73,6 @@ const OWNER_BY_KIND: Record<ComponentKind, string> = {
 	"session-schema": "session",
 	"receipt-schema": "dispatch",
 	memory: "memory",
-	"eval-suite": "eval",
 	"doc-spec": "docs",
 };
 

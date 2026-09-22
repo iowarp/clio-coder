@@ -250,9 +250,11 @@ it("continues passing Scout quality into the intended Documenter and delivers it
 it("preserves explicit Coder and delivers its bounded explanation through the compiled recipe", {
 	timeout: 15_000,
 }, async () => {
-	const fixture = JSON.parse(
-		readFileSync(new URL("../../evals/fixtures/source-explanation.json", import.meta.url), "utf8"),
-	) as { shortExplanation: string; task: string; findings: Array<{ claim: string; path: string; line: number }> };
+	const fixture = JSON.parse(readFileSync(new URL("../fixtures/source-explanation.json", import.meta.url), "utf8")) as {
+		shortExplanation: string;
+		task: string;
+		findings: Array<{ claim: string; path: string; line: number }>;
+	};
 	const explanation = fixture.findings
 		.map((finding) => `${finding.claim} (${finding.path}:${finding.line})`)
 		.join("\n\n");

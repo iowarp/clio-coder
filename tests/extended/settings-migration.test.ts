@@ -379,25 +379,21 @@ integrations:
 
 	it("doctor counts legacy immutable history without rewriting it, including under --fix", () => {
 		const sessionPath = join(stateDir, "sessions", "cwd", "session", "current.jsonl");
-		const evalPath = join(scratch.dir, "data", "evals", "legacy.json");
 		const receiptPath = join(stateDir, "receipts", "legacy.json");
 		mkdirSync(join(sessionPath, ".."), { recursive: true });
-		mkdirSync(join(evalPath, ".."), { recursive: true });
 		mkdirSync(join(receiptPath, ".."), { recursive: true });
 		writeFileSync(sessionPath, '{"type":"clio_tool_start"}\n', "utf8");
-		writeFileSync(evalPath, '{"schema":"clio.eval.verdict.v1","clio":{"version":"0.4.0"}}\n', "utf8");
 		writeFileSync(receiptPath, '{"clioVersion":"0.4.0","contract":"clio.runReceipt.integrity"}\n', "utf8");
-		const snapshots = [sessionPath, evalPath, receiptPath].map((path) => readFileSync(path, "utf8"));
+		const snapshots = [sessionPath, receiptPath].map((path) => readFileSync(path, "utf8"));
 		for (const fix of [false, true]) {
 			const finding = namingFootprintFindings({ cwd: scratch.dir, fix }).find(
 				(entry) => entry.name === "naming immutable history",
 			);
 			strictEqual(finding?.level, "warn");
 			ok(finding?.detail.includes("sessions=1"));
-			ok(finding?.detail.includes("evals=2"));
 			ok(finding?.detail.includes("receipts=2"));
 			deepStrictEqual(
-				[sessionPath, evalPath, receiptPath].map((path) => readFileSync(path, "utf8")),
+				[sessionPath, receiptPath].map((path) => readFileSync(path, "utf8")),
 				snapshots,
 			);
 		}

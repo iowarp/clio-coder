@@ -21,7 +21,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/arxiv-literature
   audit: pass
   provenance: designed
-  eval-status: smoke-checked
   model-size: any
   agents:
     - researcher

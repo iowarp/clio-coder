@@ -58,15 +58,11 @@ export const VIEW_GUIDE: Readonly<Record<NavPath, { title: string; meaning: stri
 	"/fleet": {
 		title: "Fleet",
 		meaning:
-			"Recent durable runs across the installation: their event spines, receipt trust, fleet lineage, gate verdicts, evidence bundles, and completed evaluations.",
+			"Recent durable runs across the installation: their event spines, receipt trust, fleet lineage, gate verdicts, and evidence bundles.",
 	},
 	"/evidence": {
 		title: "Evidence",
 		meaning: "Sealed records of durable work, with the trust check that says whether the bytes still authenticate.",
-	},
-	"/evals": {
-		title: "Evals",
-		meaning: "Stored evaluation reports, their scores, and the artifacts each run left behind.",
 	},
 	"/library": {
 		title: "Library",

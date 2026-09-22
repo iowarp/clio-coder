@@ -23,7 +23,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/workflow/design-council
   audit: pass
   provenance: designed
-  eval-status: smoke-checked
   model-size: large
   agents:
     - scout

@@ -99,8 +99,7 @@
 		"test:package": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/smoke/installed-package.test.ts tests/smoke/native-call-timing.test.ts",
 		"release:preflight": "node scripts/release-candidate.mjs preflight",
 		"test:gui:full": "pnpm --filter @iowarp/clio-coder-gui test:full",
-		"evals:check": "node --import tsx scripts/check-evals.ts",
-		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts tests/extended/eval-tool-surface-model.test.ts"
+		"test:maintenance": "pnpm run test:file -- tests/extended/keyboard-routing.test.ts tests/extended/keyboard-drafts.test.ts"
 	},
 	"optionalDependencies": {
 		"@anthropic-ai/claude-agent-sdk": "0.3.186"

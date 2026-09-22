@@ -23,8 +23,6 @@ export const PAGE_PATHS = [
 	"/fleet/dispatches/:id",
 	"/evidence",
 	"/evidence/:id",
-	"/evals",
-	"/evals/:id",
 	"/usage",
 	"/library",
 	"/system",

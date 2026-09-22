@@ -46,7 +46,6 @@ function wrapperSkill(body = "Wrapper body that never runs an update check."): s
 		"  audit: pass",
 		"  provenance: adapted",
 		`  origin: ${UPSTREAM_URL}`,
-		"  eval-status: scenarios-recorded",
 		"---",
 		"",
 		body,
@@ -73,7 +72,6 @@ function writeCatalogPackage(root: string, options: { remote: boolean }): { pack
 			"  source-url: https://github.com/example/catalog/tree/main/skills/coding/plain",
 			"  audit: pass",
 			"  provenance: designed",
-			"  eval-status: untested",
 			"---",
 			"",
 			"Plain body.",
@@ -81,11 +79,10 @@ function writeCatalogPackage(root: string, options: { remote: boolean }): { pack
 		].join("\n"),
 		"utf8",
 	);
-	writeFileSync(join(plain, "evals.md"), "# Evals\n", "utf8");
 	const overlay = join(catalog, "planning", "mapper");
 	mkdirSync(overlay, { recursive: true });
 	writeFileSync(join(overlay, "SKILL.md"), wrapperSkill(), "utf8");
-	writeFileSync(join(overlay, "evals.md"), "# Evals\n", "utf8");
+	writeFileSync(join(overlay, "notes.md"), "# Notes\n", "utf8");
 	if (options.remote) {
 		writeFileSync(
 			join(catalog, "remote.yaml"),
@@ -205,7 +202,7 @@ describe("remote marketplace entries", () => {
 		const installed = join(project, ".clio-coder", "skills", "mapper");
 		strictEqual(result.path, join(installed, "SKILL.md"));
 		ok(existsSync(join(installed, "bin", "mapper.mjs")));
-		ok(existsSync(join(installed, "evals.md")));
+		ok(existsSync(join(installed, "notes.md")));
 		strictEqual(existsSync(join(installed, "test")), false);
 		strictEqual(existsSync(join(installed, "package-lock.json")), false);
 		ok(existsSync(join(installed, "renderers", "test", "keep.mjs")), "only top-level names are excluded");

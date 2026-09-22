@@ -20,7 +20,7 @@ entries:
       - visualize the architecture
     version: 0.1.0
     sourceUrl: skills/planning/archify
-    sha256: 9f4d748ab34bda2c7253f678f36ef0c48f049adfbe13e1a79280fd811c303929
+    sha256: ea50624a7226ff9789d9a2ba7ff4a2c9024ab5272c6d86dc8893428fe5bf309f
     provides:
       - kind: skill
         name: archify
@@ -46,7 +46,7 @@ entries:
       - compare architecture options
     version: 0.4.1
     sourceUrl: skills/planning/architecture
-    sha256: 47ad4039ac2029e6190a43b09a3d137ee8017ee6948fa06b380b74a3472f2ee6
+    sha256: bc9faad61629216669e52aa7d5657072b52a4bc42064239e8f4783e8d9086ec6
     provides:
       - kind: skill
         name: architecture
@@ -69,7 +69,7 @@ entries:
       - build a literature survey
     version: 0.5.1
     sourceUrl: skills/research/arxiv-literature
-    sha256: a4bfdeb4b84486dfddc2ba3f98f67a0028842d4093fcecc45bdb2a251eafc452
+    sha256: ebda3bed06d5226aee6cabb612a70ca4a2e504dec5f5333b0e7c61322cd20225
     provides:
       - kind: skill
         name: arxiv-literature
@@ -91,7 +91,7 @@ entries:
       - grep returns too much noise
     version: 0.3.0
     sourceUrl: skills/coding/ast-grep
-    sha256: a722fb6b5974f2863e623a20b8b61f3a7d5bae803da611526fc2eb2432417be6
+    sha256: 6cd6d96273cca6876df4ea91cd89ffc8674c725286c7acca21ba516d3f928ff9
     provides:
       - kind: skill
         name: ast-grep
@@ -114,7 +114,7 @@ entries:
       - create GitHub issues from this architecture
     version: 0.4.1
     sourceUrl: skills/planning/backlog
-    sha256: 3b75a6ff84afe3a2900d35ed05c2dbb679ef3bdbbdc46a84d95da59e5ff448b5
+    sha256: e99be1d35ef2d7d28a90674178bafbde10f37cc43221f32401646514bdfb31ff
     provides:
       - kind: skill
         name: backlog
@@ -138,7 +138,7 @@ entries:
       - branch-closeout
     version: 0.1.0
     sourceUrl: skills/git/branch-closeout
-    sha256: 374f181d586e9cad92caa0e8a4387dee7e6b299a07e1613274b9e76546f15f1e
+    sha256: c6ebc46191609b22180eefdd06c3f912cb2bd92b213c86f11983f385ab12351c
     provides:
       - kind: skill
         name: branch-closeout
@@ -161,7 +161,7 @@ entries:
       - edit Clio skills tools or prompts
     version: 0.5.0
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: a2a9558348234ef5fb5fe821651ef57b8f6430473bd48818a1d468b405c1f61a
+    sha256: 0a8a620d3f5e3b94352506bedd37eae3fe680f4eb8624bba2d32a7989e6a92ca
     provides:
       - kind: skill
         name: clio-coder-dev
@@ -184,7 +184,7 @@ entries:
       - choose Clio test gates
     version: 0.4.0
     sourceUrl: skills/meta/clio-coder-test
-    sha256: 6a4748d77d27be81da75ae8359cde2c44f76db83f025920b102a8aa309e17208
+    sha256: 20b4fa08cfbef5cf9afce099394680be1051ce9fb77a64963df2d0cf23b44771
     provides:
       - kind: skill
         name: clio-coder-test
@@ -208,7 +208,7 @@ entries:
       - functional core imperative shell
     version: 0.4.0
     sourceUrl: skills/coding/coding-standards
-    sha256: acc6fba9b167f5aed949bbe35924d7f4be45afec69941561642e585b76236c68
+    sha256: b69c352371cc095ed90b7326be4aab7732a7f5248acdf39a7dbae3daa5af33a2
     provides:
       - kind: skill
         name: coding-standards
@@ -232,7 +232,7 @@ entries:
       - write a continuation brief
     version: 0.5.1
     sourceUrl: skills/context/context-handoff
-    sha256: 64fc4593679735a9e827d8753183595c48fc38ce031902af2d17da7f747a68b1
+    sha256: 6e98870efb2c885026a52aa91d981943e6bd705c780acaa51fe196e9e2e76191
     provides:
       - kind: skill
         name: context-handoff
@@ -255,7 +255,7 @@ entries:
       - resume repository work after a break
     version: 0.4.1
     sourceUrl: skills/context/context-prime
-    sha256: a8f36ad128279eaccbd8d8dddfcbc25319367af61fc2e1e415d80229dc761b78
+    sha256: 273d69234ff6751281f432d7460e2325e7fb396ed7fe0ad50c1931680bb28600
     provides:
       - kind: skill
         name: context-prime
@@ -280,7 +280,7 @@ entries:
       - secret leaked
     version: 0.2.0
     sourceUrl: skills/meta/credentials
-    sha256: ff99f5be5773b767cc384772caf9b87d57a8ffd884e1acc002e60b0ebf185953
+    sha256: 02f9083a3345bc5495d06efae617a13c5001c3a41d6778323cee32aacffbfe81
     provides:
       - kind: skill
         name: credentials
@@ -304,7 +304,7 @@ entries:
       - write dependency-ordered vertical slices
     version: 0.4.1
     sourceUrl: skills/workflow/cut-it
-    sha256: 0d096a8d2125216a57494918c652e823baa6b4957090727146a8fcbe43ecda41
+    sha256: 794d5e105e63c0c2fbc99515b65fecd92615b484604d845443084d732a4751b6
     provides:
       - kind: skill
         name: cut-it
@@ -329,7 +329,7 @@ entries:
       - what would experts say
     version: 0.6.0
     sourceUrl: skills/workflow/design-council
-    sha256: 9dce47b705e4df1cc8992522d7a1597b50e8d221a7357161ef8a3cffab018216
+    sha256: aadb7a8c1d21a0d8dd296ed1ea2058603e0b890e4d51c515702c18eeaee93897
     provides:
       - kind: skill
         name: design-council
@@ -354,7 +354,7 @@ entries:
       - compare solver accuracy
     version: 0.3.1
     sourceUrl: skills/research/experiment-protocol
-    sha256: aa3f692a48ef8a4a7e027cc98bc63a0bc629f2f24546f8bf2e4edaeebde15b52
+    sha256: 6fe0b845be3b6b486902e90801a69d65393b0354667d62b854cf16802cc2e385
     provides:
       - kind: skill
         name: experiment-protocol
@@ -379,7 +379,7 @@ entries:
       - create a tracker issue
     version: 0.3.0
     sourceUrl: skills/git/file-ticket
-    sha256: b7a86e89817323e28aea0432a93f8457da18b1fc372c2e886278669c968a77d6
+    sha256: a6fac226653d5dd2e452a980da6d6f1176dd0ca4e43502f3236f2dc3791d2881
     provides:
       - kind: skill
         name: file-ticket
@@ -402,7 +402,7 @@ entries:
       - search the skills marketplace
     version: 0.2.1
     sourceUrl: skills/meta/find-skills
-    sha256: e04b432bbdac8bfc5d47b4e089ab74e07cc01789b848d3c0227f0b0147cf015c
+    sha256: 0069df36f0e897e512fa45c4326a6d6a983c471ff876550f11ed3392af23c8a5
     provides:
       - kind: skill
         name: find-skills
@@ -425,7 +425,7 @@ entries:
       - fix a GitHub issue end to end
     version: 0.3.1
     sourceUrl: skills/git/fix-issue
-    sha256: 2ac7dd53397fff8a12f829f3e9241c839c08e23dcf80d435c323add6b0cd03c2
+    sha256: 28de5bac590e06da65a50b8a13076cba00010afc419c8df38d8f6ba2b6680174
     provides:
       - kind: skill
         name: fix-issue
@@ -449,7 +449,7 @@ entries:
       - clarify this plan one question at a time
     version: 0.5.1
     sourceUrl: skills/workflow/grill-me
-    sha256: 2ad71505b8f114ffc34385dce03d6327c8479033165f152b0c876b002b244a07
+    sha256: 87988e219601763aea20b866806f8cf1b562ac6340f95292de131648eb836dfa
     provides:
       - kind: skill
         name: grill-me
@@ -473,7 +473,7 @@ entries:
       - drive a command in a Herdr workspace
     version: 0.2.0
     sourceUrl: skills/meta/herdr
-    sha256: 8d0d0337dbc716074b070453e0feae1420faa344283e3044101e43acfd1d08b5
+    sha256: 80e163956eba2143d64f673e53b058e3f931312eb20e80f30758378f1fb3ac2d
     provides:
       - kind: skill
         name: herdr
@@ -487,7 +487,7 @@ entries:
       lab feasibility, task execution and verified paper handoff."
     version: 0.1.0
     sourceUrl: plugins/materio
-    sha256: dfc6cb2fbd8f52245e80e79de51c1c5207c3fcc474001b503590231d2f811105
+    sha256: 73e31326ad2d008563f2d184709109e056b63a6336ba94793710e348bee78e4a
     provides:
       - kind: agent
         name: materio-lab-definer
@@ -618,7 +618,7 @@ entries:
       - create milestone prompts
     version: 0.4.1
     sourceUrl: skills/planning/prd
-    sha256: 1e20b78445516f9f5386ce697cf25cf0ef1402038deffff038e37e751ef77eee
+    sha256: 90409e0d4497f3ae6096ab56d5e9dd8197b3179fc2a37b71ca1d7ab228231b1f
     provides:
       - kind: skill
         name: prd
@@ -643,7 +643,7 @@ entries:
       - greenfield product intent
     version: 0.4.1
     sourceUrl: skills/planning/product-intent
-    sha256: e1b6b18cf22697dfed8d177926f88913989450ce23c7f635a01fbdb25a19f8e2
+    sha256: 310eaa625a1f97839f65796ed8b917c8306a2ffdb90d2d424c5c4d177d2c55fe
     provides:
       - kind: skill
         name: product-intent
@@ -667,7 +667,7 @@ entries:
       - what should this UI look like
     version: 0.4.0
     sourceUrl: skills/coding/prototype
-    sha256: c05a4f272858095842ceaed952649969ec08fd00e953a2c6998ef93b57ed17ad
+    sha256: 3f745548ecb23495fc5d381e06862ef2da788dfd4585f843552761b20ddc3f60
     provides:
       - kind: skill
         name: prototype
@@ -691,7 +691,7 @@ entries:
       - resolve conflict markers
     version: 0.4.0
     sourceUrl: skills/git/resolve-merge-conflicts
-    sha256: c1c0999db9e664ecab27d16760c5fe883f468e0c8ba6df9ed97fc28ac01f1414
+    sha256: 9b67d2fab7d24817b97231774e0aaf79f4cfe43b83e6af6b8fdd2fc66f339e3b
     provides:
       - kind: skill
         name: resolve-merge-conflicts
@@ -717,7 +717,7 @@ entries:
       - scientific root cause
     version: 0.3.1
     sourceUrl: skills/research/scientific-debugging
-    sha256: fc77eed8b58a1c3e02920c2d591b0ee4c6139d5a9a4f1f4331b015bed0e26c6c
+    sha256: d5c71a894e0a97e27941811275d623092a757f52df4690e29880ec8b912b4433
     provides:
       - kind: skill
         name: scientific-debugging
@@ -745,7 +745,7 @@ entries:
       - preserve scientific parity
     version: 0.4.1
     sourceUrl: skills/research/scientific-modernization
-    sha256: 9b6e995b76aadff8c509995fd3e21291b4c62d476a4d6c3bb017ca44820facc6
+    sha256: c8875d8484be2b69d5774948152c9fde13256574a5e032ee4f9efd5d7f3cce72
     provides:
       - kind: skill
         name: scientific-modernization
@@ -769,7 +769,7 @@ entries:
       - get this up for review
     version: 0.5.1
     sourceUrl: skills/git/ship
-    sha256: cb65a5b59d98ac2d6105a9aa52446c7e4a97c33a9a5a240d74f82f2447b56534
+    sha256: b2832a62a85bc11840a02d7d95fd60e5e072296510ce8241198a7330d6ab3417
     provides:
       - kind: skill
         name: ship
@@ -792,7 +792,7 @@ entries:
       - prune a skill body
     version: 0.3.1
     sourceUrl: skills/meta/skill-craft
-    sha256: 03fe426b34c7cf39096cde9cdbb2c7770524aad39de3e3e968e7684fb08e2201
+    sha256: 5d71551d7507506f7e0802828aec570621d712221441d3e3165518c4f613c5b4
     provides:
       - kind: skill
         name: skill-craft
@@ -816,7 +816,7 @@ entries:
       - is the queue busy
     version: 0.1.0
     sourceUrl: skills/research/slurm-jobs
-    sha256: d57b83965e1a1dbc46adbad605d755a7a69368c4f4e63e1e181a416a876dce40
+    sha256: 8e4f9a37e2fd53094e70bcc859d1157bf8f86c195f51e763af5edf183ad6baa5
     provides:
       - kind: skill
         name: slurm-jobs
@@ -839,7 +839,7 @@ entries:
       - reproduce the bug with a test
     version: 0.4.0
     sourceUrl: skills/coding/tdd
-    sha256: ddc1ba867bb277acb8056180370968a521243d90a850a56d3faa0c11103e402e
+    sha256: e446a01a02ef857bcd7b26349c019ecc476c380502283823f370bd120d41c6a3
     provides:
       - kind: skill
         name: tdd
@@ -862,7 +862,7 @@ entries:
       - specify execution flows
     version: 0.3.1
     sourceUrl: skills/planning/tech-spec
-    sha256: 666b93ae62bcb1e5d9d2ffd2260ac442860eeafafa8dd63244dcffb65034eb41
+    sha256: ca31ad7313689a57e9ca7cc60d897f77364a08aa8f9ea2a0d8ba66cd13862f2f
     provides:
       - kind: skill
         name: tech-spec
@@ -886,7 +886,7 @@ entries:
       - create a skill from this session
     version: 0.4.2
     sourceUrl: skills/workflow/workflow-distiller
-    sha256: 5a58318ef207cf379aad6af3a057053c068bb960794025545e7db110740c9937
+    sha256: 0dde4acec4566b6541796e5df7be29bf684c06e94a65e7b54217eb545cda28df
     provides:
       - kind: skill
         name: workflow-distiller
@@ -909,7 +909,7 @@ entries:
       - prepare parallel worktrees
     version: 0.6.0
     sourceUrl: skills/git/worktree-create
-    sha256: baa4c4aba06d4b0b95faf67882f24f8e162ddf0197945e2896fd3b6cd502f5f7
+    sha256: 812c09c65c10f45a37bcabcd5d6abaafb1ba653ebbb7ee7d4d91bfa03418b690
     provides:
       - kind: skill
         name: worktree-create
@@ -933,7 +933,7 @@ entries:
       - land finished worktrees
     version: 0.6.0
     sourceUrl: skills/git/worktree-merge
-    sha256: f62b643dc900d26d19b5ba4c4e5f2fc7f4669963d506a10234084dd99159936e
+    sha256: bb83fbe1686acfeb9a72db6c2f02e310595402f76dfa50255aee02fdb8bd6dc1
     provides:
       - kind: skill
         name: worktree-merge

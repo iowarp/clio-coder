@@ -25,7 +25,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/research/experiment-protocol
   audit: pass
   provenance: designed
-  eval-status: smoke-checked
   model-size: any
 ---
 

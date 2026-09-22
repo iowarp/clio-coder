@@ -126,11 +126,4 @@ clio-coder library recipes --source core --all
 
 Clio reads the same inventory through `gateway(op="call", capability="clio_library", args={})`. That capability is a read: bounded `kind`, `query` and `ref` selection with `limit`/`offset` pages, tagged rows for loaded resources, catalog hints and install targets, and no activation, installation, registration or pin write anywhere in it. Skill activation stays under `context(scope="skills")` and `/skill <name>`. A hint row names its installable owner and that member's honest state and never carries an invocation, because nothing has loaded it. Internal and shadow agents, untrusted resources and instruction bodies are not in the model's view at all, and a worker run has no library projection of its own. See [tool usage](tool-usage.md) for the argument surface and the row shapes.
 
-A package declares named suite paths in `extensions["ai.iowarp.clio"].evals`. Run the same eval interface for every kind:
-
-```bash
-clio-coder eval validate --package plugin:materio --eval scripts --project
-clio-coder eval run --package plugin:materio --eval scripts --project
-```
-
-Evals run only when explicitly requested. Installed packages must be active and verified; local authoring directories can be tested directly. The resulting suite provenance includes the package reference, version, digest and eval name. Materio's `scripts` suite runs its offline Python contracts in a temporary copy; it measures script behavior, not model output quality. The separate experimental `eval skill <name|path>` lane runs authored `evals.md` baseline/treatment/judge scenarios.
+A manifest that still declares the retired `extensions["ai.iowarp.clio"].evals` map keeps loading, and Clio ignores it. The key is accepted until the v0.7.0 compatibility window.

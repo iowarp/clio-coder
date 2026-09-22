@@ -30,7 +30,7 @@ const h = await harness(
 await seedSettings(h.home.path, h.home.env);
 await seedFleet(h.home.path, h.home.env);
 await seedEvidence(h.home.path, h.home.env);
-const reportsSeed = await seedReports(h.home.path, h.home.env);
+await seedReports(h.home.path, h.home.env);
 await seedLibrary(h.home.path, h.home.env);
 const fixture = traceFixture(join(h.home.path, "state"));
 fixture.finish();
@@ -225,13 +225,6 @@ try {
 				await page.screenshot({ path: join(output, `${name}-inspectors-${width}.png`), fullPage: true });
 		};
 		await openInspectors("evidence-detail");
-		await navigate("Evals");
-		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).waitFor();
-		await check("evals");
-		await page.locator(`a[href="/evals/${reportsSeed.ids.at(-1)}"]`).click();
-		await page.getByRole("heading", { name: "Trials", exact: true }).waitFor();
-		await check("eval-detail");
-		await openInspectors("eval-detail");
 		await navigate("Docs");
 		await page.locator(".docs-page .markdown").waitFor();
 		await check("docs-map");

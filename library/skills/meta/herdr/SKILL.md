@@ -19,7 +19,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/herdrdev/herdr/tree/master/skills/herdr
-  eval-status: scenarios-recorded
   model-size: any
   agents:
     - main

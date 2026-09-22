@@ -150,7 +150,7 @@ function enterRunCwd(value: string): string | null {
 	}
 }
 
-/** timeout(1)'s status, and the one code-step and the eval runners already use for a timeout. */
+/** timeout(1)'s status, and the one code-step already uses for a timeout. */
 const RUN_TIMEOUT_EXIT_CODE = 124;
 
 /**

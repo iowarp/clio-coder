@@ -45,7 +45,6 @@ It does not execute scanned files.
 | `doc-spec` | currently `docs/specs/**/*.md` if present | descriptive |
 | `middleware` | reserved kind | enforcing |
 | `memory` | reserved kind | advisory |
-| `eval-suite` | reserved kind | descriptive |
 
 > [!WARNING]
 > The current scanner still looks for `doc-spec` files under `docs/specs/`.

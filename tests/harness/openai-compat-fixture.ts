@@ -1,8 +1,8 @@
 /**
  * In-process mock OpenAI-compatible provider for smoke tests that drive the
  * built binary against a fake fleet endpoint, plus the settings.yaml seeders
- * that point a scratch config at it. Extracted from cli.test.ts so eval-fleet
- * and any future binary-driving test can reuse the same fixture.
+ * that point a scratch config at it. Extracted from cli.test.ts so any
+ * binary-driving test can reuse the same fixture.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";

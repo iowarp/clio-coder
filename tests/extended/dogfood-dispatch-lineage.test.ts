@@ -9,10 +9,8 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { AgentsContract } from "../../src/domains/agents/contract.js";
 import type { DispatchPreparationOptions, DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
-import { reduceRouteQuality } from "../../src/domains/dispatch/route-quality.js";
 import type { RunLineage } from "../../src/domains/dispatch/types.js";
 import type { SpawnedWorker, SpawnedWorkerResult, WorkerSpec } from "../../src/domains/dispatch/worker-spawn.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import type { ProvidersContract, RuntimeDescriptor } from "../../src/domains/providers/index.js";
 import { EMPTY_CAPABILITIES } from "../../src/domains/providers/index.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
@@ -24,6 +22,7 @@ import { createMonitorTool } from "../../src/tools/monitor.js";
 import { createRegistry, type ToolInvokeOptions } from "../../src/tools/registry.js";
 import { makeDispatchBundle } from "../harness/dispatch.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 let env: IsolatedClioEnv;
@@ -492,64 +491,6 @@ it("hosted sibling route-history rows retain their own logical assignment links"
 			const row = history.records.find((row) => row.receiptDigest === receipt.integrity.digest);
 			ok(row);
 			strictEqual(row.assignmentId, f.bundle.contract.assignments?.getStored(receipt.runId)?.assignmentId);
-		}
-	} finally {
-		await f.bundle.extension.stop?.();
-	}
-});
-
-it("routing evaluation matches an authenticated hosted attempt to its logical assignment and digest", async () => {
-	const f = await fixture();
-	try {
-		await f.tool.run({ agent: "scout", task: "Inspect input.txt", cwd: process.cwd() }, { hostRun });
-		const journal = readRunJournal(join(env.dir, "state"));
-		ok(journal);
-		const receipt = journal.receipts[0];
-		ok(receipt);
-		const envelope = journal.envelopes.get(receipt.runId);
-		ok(envelope);
-		const assignmentId = f.bundle.contract.assignments?.getStored(receipt.runId)?.assignmentId;
-		ok(assignmentId);
-		for (const scenario of [
-			{
-				label: "matching assignment and digest",
-				explicit: true,
-				assignmentId,
-				digest: receipt.integrity.digest,
-				expected: 1,
-			},
-			{
-				label: "wrong assignment",
-				explicit: true,
-				assignmentId: hostRun.lineage.rootRunId,
-				digest: receipt.integrity.digest,
-				expected: 0,
-			},
-			{ label: "wrong digest", explicit: true, assignmentId, digest: "f".repeat(64), expected: 0 },
-			{
-				label: "legacy caller retains ancestry fallback",
-				explicit: false,
-				assignmentId: receipt.lineage?.rootRunId ?? receipt.runId,
-				digest: receipt.integrity.digest,
-				expected: 1,
-			},
-		]) {
-			const subject = { receipt, envelope, ...(scenario.explicit ? { assignmentId } : {}) };
-			const quality = reduceRouteQuality({
-				subject,
-				receipts: [subject],
-				evalArtifacts: [
-					{
-						digest: "e".repeat(64),
-						artifact: {
-							version: 4,
-							evalId: "fixture",
-							results: [{ assignmentId: scenario.assignmentId, terminalReceiptDigest: scenario.digest, pass: true }],
-						},
-					},
-				],
-			});
-			strictEqual(quality.checks.filter((check) => check.kind === "evaluation").length, scenario.expected, scenario.label);
 		}
 	} finally {
 		await f.bundle.extension.stop?.();

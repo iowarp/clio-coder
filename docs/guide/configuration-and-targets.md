@@ -40,7 +40,7 @@ Default config file:
 <configDir>/settings.yaml
 ```
 
-Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, evals, vendored external tools); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.
+Role contents: config holds user-authored files (settings, credentials, agents, skills, prompts, extensions, runtimes); data holds durable artifacts (memory, evidence, vendored external tools); state holds machine-produced session state (sessions, audit, receipts, runs.json, recent-models.json, install.json, interop.json, interviews, scratch); cache holds disposable derived files.
 
 The `integrations.library` settings block configures the private resource
 catalog. `integrations.library.catalog` is an optional path and defaults to

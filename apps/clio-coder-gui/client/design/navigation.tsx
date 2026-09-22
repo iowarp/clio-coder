@@ -19,7 +19,6 @@ export const navigation = [
 	{ label: "Settings", path: "/settings", icon: "settings" },
 	{ label: "Fleet", path: "/fleet", icon: "fleet" },
 	{ label: "Evidence", path: "/evidence", icon: "evidence" },
-	{ label: "Evals", path: "/evals", icon: "evals" },
 	{ label: "Library", path: "/library", icon: "library" },
 	{ label: "System", path: "/system", icon: "system" },
 ] as const;

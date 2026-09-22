@@ -23,7 +23,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/coleam00/skills/tree/main/.claude/skills/backlog
-  eval-status: smoke-checked
   model-size: any
   agents:
     - main

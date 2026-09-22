@@ -1248,8 +1248,8 @@ function headlessDenialGuidance(decision: SafetyDecision, reason: string): strin
  *
  * A headless answer is the exception: nobody will ever approve it, so the detail
  * carries the policy cause and rule, a terminal settlement statement, and any
- * recovery guidance. The denial sentence stays the detail's prefix, which the
- * skill-eval permission-wall recognizer depends on.
+ * recovery guidance. The denial sentence stays the detail's prefix, so the
+ * stable marker still recognizes a headless denial.
  */
 function parkAnsweredBlockedVerdict(
 	decision: SafetyDecision,

@@ -30,7 +30,7 @@ export function normalizeClioCoderEventRecord(record: Record<string, unknown>): 
 
 /**
  * Normalize legacy event discriminators in an in-memory decoded history tree.
- * This never writes the source session/eval/evidence file.
+ * This never writes the source session or evidence file.
  */
 export function normalizeClioCoderEventTree(value: unknown): unknown {
 	if (Array.isArray(value)) {

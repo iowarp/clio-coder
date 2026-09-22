@@ -209,13 +209,6 @@ test("turn cancellation does not wait indefinitely for DNS", async () => {
 	await rejects(pending, { name: "AbortError" });
 });
 
-test("skills eval explicit retrieval opt-in clears current and legacy switches", async () => {
-	const { evalChildEnv } = await import("../../src/cli/skills-eval.js");
-	const env = { CLIO_CODER_DISABLE_RETRIEVE_TOOLS: "1", CLIO_CODER_NO_NETWORK_TOOLS: "1" };
-	strictEqual(networkToolsDisabled(evalChildEnv(true, env)), false);
-	strictEqual(networkToolsDisabled(evalChildEnv(false, {})), true);
-});
-
 test("remote success and HTTP error previews carry the shared untrusted banner", async () => {
 	const { createServer } = await import("node:http");
 	const { UNTRUSTED_CONTENT_BANNER } = await import("../../src/core/untrusted-content.js");

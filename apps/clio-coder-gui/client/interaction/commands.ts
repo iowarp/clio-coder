@@ -49,7 +49,6 @@ export const DESTINATIONS: readonly Destination[] = [
 	{ label: "Settings", path: "/settings", keywords: ["configuration", "preferences"] },
 	{ label: "Fleet", path: "/fleet", keywords: ["dispatch", "workers", "runs"] },
 	{ label: "Evidence", path: "/evidence", keywords: ["receipts", "trust"] },
-	{ label: "Evals", path: "/evals", keywords: ["evaluation", "reports"] },
 	{ label: "Library", path: "/library", keywords: ["packages", "skills", "recipes"] },
 	{ label: "System", path: "/system", keywords: ["doctor", "health", "paths"] },
 	{ label: "Usage report", path: "/usage", keywords: ["tokens", "cost", "spend"] },

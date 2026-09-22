@@ -370,7 +370,7 @@ render `0` for unknown.
 ## Shell and wayfinding
 
 The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet,
-Evidence, Evals, Library and System. The `--masthead-height` masthead carries the Clio logo, a
+Evidence, Library and System. The `--masthead-height` masthead carries the Clio logo, a
 discreet connection indicator, and icon controls with accessible names. App preferences hold the
 reported version, PWA installation and browser connection controls. There is no page footer; the
 application gives that space to the work.

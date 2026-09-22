@@ -28,7 +28,7 @@ import {
 import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
-import { EvalDetail, EvalPage, UsageReport } from "./reports.js";
+import { UsageReport } from "./reports.js";
 import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
@@ -165,20 +165,6 @@ export const routes = {
 		params: operationParams,
 		response: LibraryVerifiers,
 		summary: "Verifier discovery without executing checks",
-	}),
-	evals: defineRoute({
-		...get,
-		path: "/api/evals",
-		query: FleetPageQuery,
-		response: EvalPage,
-		summary: "Paginated current-format evaluation reports",
-	}),
-	evalDetail: defineRoute({
-		...get,
-		path: "/api/evals/:id",
-		params: operationParams,
-		response: EvalDetail,
-		summary: "Stored evaluation outcomes and metrics",
 	}),
 	usage: defineRoute({
 		...get,

@@ -13,7 +13,7 @@ owners; inspect callers and current schemas before assuming behavior.
 | Session persistence | `src/domains/session/`, `src/engine/session.ts` | Append/flush/checkpoint, active path, fork/archive/export, cancellation and resume |
 | Providers and workers | `src/domains/providers/`, `src/domains/dispatch/`, `src/worker/` | Engine adapters, route identity, endpoint capacity, usage, result evidence and receipt |
 | TUI and GUI | `src/interactive/`, `apps/clio-coder-gui/` | Typed events, ACP boundary, narrow layouts, cancellation, capability limits |
-| Curated resources | `library/`, `scripts/pin-skills.ts`, `scripts/pin-library.ts` | Manifest metadata, body/reference/eval bytes, generated registries and peer marketplace |
+| Curated resources | `library/`, `scripts/pin-skills.ts`, `scripts/pin-library.ts` | Manifest metadata, body and reference bytes, generated registries and peer marketplace |
 
 ## Lifecycle changes deserve explicit state transitions
 

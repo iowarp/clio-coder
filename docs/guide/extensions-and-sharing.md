@@ -167,19 +167,7 @@ clio-coder library install <path|kind:name|name> [--user|--project] [--force] [-
 clio-coder library update <kind:name|name> [--user|--project] [--force] [--json]
 clio-coder library sync
 clio-coder library skills [--all] [--json]
-clio-coder eval skill <name|path> [--scenario <id>] [--target <id>] [--workspace <path>] [--timeout <seconds>] [--trust-fixtures] [--allow-network] [--json]
 ```
-
-`eval skill` (experimental) executes a skill's `evals.md` RED-GREEN scenarios with
-baseline, treatment, and judge runs; see
-[skills-marketplace.md](skills-marketplace.md) for the catalog contract it
-verifies. Fixture commands in an `evals.md` are real shell and only run with
-`--trust-fixtures`.
-
-Every arm runs hermetic in a disposable workspace: the network tool plane is stripped from child runs so a scenario measures the skill against its workspace and not against the open web. Baseline and treatment arms run with `full-auto` autonomy; the judge does not receive that flag. `--allow-network` keeps the web tools, and the run reports which network policy was in force. The per-arm execution timeout is set with `--timeout <seconds>`.
-
-Exit code is 1 when a treatment bullet fails. Exit code is 3 when a scenario goes unmeasured, such as when judge output is truncated, missing, or unparseable, or when a run dies at a permission wall. Permission-wall deaths and harness infrastructure failures are classified as unmeasured infrastructure errors rather than negative verdicts on the skill.
-
 
 Headless runs also accept `--no-skills` to disable discovery and repeatable `--skill <path>` to load one explicit `SKILL.md` file or skill directory for that run. Explicit `--skill` paths are honored even when `--no-skills` is set.
 

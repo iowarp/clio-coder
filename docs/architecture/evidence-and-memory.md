@@ -1,6 +1,6 @@
 # Evidence Corpus and Long-Term Memory
 
-Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. In evaluations such as [SWE-bench](https://www.swebench.com), capturing granular execution evidence is essential for validating agent claims. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, audits, and eval artifacts. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
+Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 
 Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, and `src/cli/memory.ts`.
 
@@ -11,7 +11,6 @@ Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/ev
 ```bash
 clio-coder evidence build --run <runId>
 clio-coder evidence build --session <sessionId>
-clio-coder evidence build --eval <evalId>
 clio-coder evidence inspect <evidenceId> [--json]
 clio-coder evidence list
 clio-coder evidence inventory --json
@@ -30,7 +29,6 @@ Evidence IDs are deterministic:
 | --- | --- |
 | Run | `run-<runId>` |
 | Session | `session-<sessionId>` |
-| Eval | `eval-<evalId>` |
 
 Rebuilding the same evidence ID rewrites the same directory under `<dataDir>/evidence/`.
 
@@ -57,17 +55,15 @@ Run/session evidence files:
 └── findings.md
 ```
 
-Eval evidence adds `eval-result.json` and uses empty receipt/protected-artifact placeholders when no linked receipts exist.
-
 ### Core files
 
 | File | Purpose |
 | --- | --- |
 | `overview.json` | Stable summary: source, runs, sessions, statuses, tasks, models, totals, tags, and file list. |
-| `transcript.md` | Human-readable run/session/eval transcript. |
-| `trace.raw.jsonl` | Raw run ledger/receipt/eval rows. |
+| `transcript.md` | Human-readable run or session transcript. |
+| `trace.raw.jsonl` | Raw run ledger and receipt rows. |
 | `trace.cleaned.jsonl` | Compact normalized rows plus findings. |
-| `tool-events.jsonl` | Tool summaries from session entries, audit rows, receipts, or eval commands. |
+| `tool-events.jsonl` | Tool summaries from session entries, audit rows, or receipts. |
 | `audit-linked.jsonl` | Audit rows linked to run/session context when available. |
 | `receipt.json` | Receipt bundle (`{ version: 1, receipts: [...] }`); only receipts that pass integrity verification contribute verified fields. |
 | `gate-decisions.json` | Integrity-verified review verdicts, compete winner selections, and winner confirmations discovered from linked receipt ids. |
@@ -89,7 +85,7 @@ Session evidence retains the two operator-facing bookkeeping ledgers instead of 
 
 ## Evidence Tag Taxonomy and Failure Causes
 
-Clio Coder classifies every run, session, and eval record using a closed set of 29 canonical tags. These tags distinguish general execution characteristics, such as lineage linkages, from actual failure causes.
+Clio Coder classifies every run and session record using a closed set of 29 canonical tags. These tags distinguish general execution characteristics, such as lineage linkages, from actual failure causes.
 
 ### Complete Taxonomy
 
@@ -249,8 +245,7 @@ intent path provenance and resolved path scope while retaining SHA-256 sealing.
 status is turned into words. Every operator surface prints from it, so the
 same canonical input renders the same verdict on the dispatch run line, in a
 monitor block, under `clio-coder evidence inspect`, in `findings.md`, on the
-Alt+W board, in the `/view` receipt header, in eval metrics, and on the ACP
-wire.
+Alt+W board, in the `/view` receipt header, and on the ACP wire.
 
 The compact human line has six fixed clauses in a fixed order and answers the
 four operator questions without receipt internals:
@@ -441,7 +436,7 @@ Only the field matching the record scope is present.
 
 ## Recommended workflow
 
-1. Build evidence from the run/session/eval that taught the lesson.
+1. Build evidence from the run or session that taught the lesson.
 2. Inspect the evidence and findings.
 3. Propose memory from the evidence, or promote selected public task memory from `/memory` or a redacted handoff.
 4. Review the proposed lesson, source provenance, redaction facts, and exact scope.

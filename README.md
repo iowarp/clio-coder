@@ -41,9 +41,9 @@ your laptop, your lab's inference gateway, or a cloud API, and start with one
 conversation. Workers, fleets, skills, and MCP servers are there when a task
 grows past what one agent should do alone.
 
-**v0.5.3 adds committed eval baselines for Clio's own harness, diffusion model
-support with fill-in-the-middle, an alpha System One decision surface, and MCP
-tool discovery that no longer launches a server to answer a question.**
+**v0.5.3 adds diffusion model support with fill-in-the-middle, an alpha System
+One decision surface, and MCP tool discovery that no longer launches a server to
+answer a question.**
 The terminal is the primary interface. The bundled browser app renders the
 documentation and previews the wider graphical experience. Clio is pre-1.0
 software: review her changes and validate scientific results against your own
@@ -107,7 +107,6 @@ For the bootstrap installer, source builds, upgrades, and removal, see
 | **Reach your tools** | Local MCP servers through one gateway with cached discovery, Slurm through clio-kit, pinned external programs, and terminal panes beside the session. | [MCP and the gateway](docs/guide/tool-usage.md#gateway-discover-and-call-secondary-capabilities) · [Slurm](docs/guide/slurm.md) |
 | **Add domain knowledge** | A library of skills, prompts, agents, plugins, and fleets with a marketplace, integrity pins, and portable share archives. Resources from Claude Code, Codex, Copilot CLI, and OpenCode can be adopted in place. | [Library](library/README.md) · [Interop](docs/guide/interop.md) |
 | **Inspect what happened** | Tool activity, usage and cost, traces, recorded decisions, evidence bundles, worker receipts, and evidence-aware Git commit trailers. | [Observability](docs/architecture/observability.md) |
-| **Measure the harness itself** | A local eval runner with suites, baselines, comparisons, and gates, plus reviewable reference suites in the source checkout. | [Eval runner](docs/process/eval-runner.md) |
 | **Know what you have left** | `/usage` shows subscription headroom for connected accounts beside this session's tokens, cost, per-model shares, and worker accounting. | [Quota and usage](docs/guide/commands-and-modes.md#subscription-quota-and-session-usage) |
 
 These capabilities compose. A worker result is a lead you can inspect, a

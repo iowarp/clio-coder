@@ -282,8 +282,6 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_DATA_DIR` | `platform default (`$XDG_DATA_HOME/clio-coder`, else `~/.local/share/clio-coder`)` | Absolute path for the data root; beats `CLIO_CODER_HOME/data` and the platform default, and the fleet-view pane child re-pins it from argv. | env > `CLIO_CODER_HOME/data` > `XDG_DATA_HOME` or platform default |
 | `CLIO_CODER_DEBUG_SHUTDOWN` | `unset (disabled)` | Exactly `1` prints timed `[clio-coder:shutdown]` phase lines and full stack traces of failing domain `stop()` hooks to stderr during shutdown. |  |
 | `CLIO_CODER_ENDPOINT_SLOTS_TTL_MS` | `86400000` | Positive integer milliseconds a persisted endpoint slot count stays valid for an endpoint this process has not probed; older records are ignored and pruned. | env > built-in default (no settings key) |
-| `CLIO_CODER_ENTRY` | `unset` | Exported by the eval suite runner into a task runner's environment with the path of the Clio entry under evaluation (`src/domains/eval/suites/run.ts`). Clio itself never reads it. |  |
-| `CLIO_CODER_EVAL_RUNNER_STDOUT_FILE` | `unset` | Set by the eval suite runner to the path of the captured runner stdout JSONL for a task's measure step; read only by external graders (evals/behavioral-corpus-grader.mjs), never by src. |  |
 | `CLIO_CODER_FORCE_COMPACT` | `unset (disabled)` | Exactly `1` on the interactive process forces the pre-submit compaction to run on every turn while set, regardless of the context threshold. |  |
 | `CLIO_CODER_GIT_COMMITS_ENABLED` | `unset (in-process reads treat it as enabled; the hook requires exactly `1`)` | Set by Clio to `1`/`0` from `integrations.git.commitAttribution` for itself and child seams; the managed hook exits unless it is exactly `1`, while absent counts as enabled in process. | `integrations.git.commitAttribution` writes it; env is the transport, not an operator override |
 | `CLIO_CODER_GIT_CONFIG_BASE_COUNT` | `unset` | Set by Clio to the `GIT_CONFIG_COUNT` value before it appended its `core.hooksPath` pair; the hook wrapper and nested seams use it to strip only that pair. |  |
@@ -302,7 +300,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `CLIO_CODER_LMSTUDIO_CORESIDENT_CONTEXT` | `131072` | Positive integer ceiling on the context length requested when loading an LM Studio model next to another resident model; `off`, `0`, or `false` disables the clamp. |  |
 | `CLIO_CODER_MEMORY_TRACE` | `unset (disabled)` | File path for a JSONL trace of proactive task-memory step envelopes including up to 8000 chars of model text per step; off when unset or empty. |  |
 | `CLIO_CODER_MODEL_CATALOG_DIRS` | `unset` | PATH-delimited list of extra model-catalog overlay directories, applied after the user and project overlays with the highest precedence. |  |
-| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | Exactly `1` removes RETRIEVE tools from registries; `clio-coder eval skill` sets it for child arms. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` remains accepted. | `eval skill --allow-network` clears both spellings for child arms |
+| `CLIO_CODER_DISABLE_RETRIEVE_TOOLS` | off | Exactly `1` removes RETRIEVE tools from registries. Bash, hooks, external CLIs, and provider networking remain available; OS isolation is required for hermetic runs. Legacy `CLIO_CODER_NO_NETWORK_TOOLS=1` remains accepted. |  |
 | `CLIO_CODER_NO_NETWORK_TOOLS` | off | Legacy alias of `CLIO_CODER_DISABLE_RETRIEVE_TOOLS`; disables retrieval tools only, with no shell network isolation. | env only |
 | `CLIO_CODER_PROVIDER_DUMP_PATH` | `unset` | Read per native provider call: absolute path for private JSONL request-body and terminal-response diagnostics. Parent must exist; the file must be operator-owned, regular, mode `0600`, and not a symlink. Known credentials are redacted; prompt and tool content remain. | env only |
 | `CLIO_CODER_WEB_FETCH_ALLOW_PRIVATE_NETWORK` | off | Exactly `1` allows web_fetch to reach private and local services. This operator process opt-in is not accepted from model arguments or project settings. | env only |
@@ -338,7 +336,7 @@ Read from the process environment at boot unless the row says otherwise.
 | `HERDR_ENV` | `unset` | Must be exactly `1` for Clio to treat itself as running inside a herdr pane host; otherwise pane detection reports none. | `interface.panes.enabled` gates the probe first; then env |
 | `HERDR_SESSION` | `unset` | Names the herdr session whose socket (`<herdr config>/sessions/<id>/herdr.sock`) is tried after `HERDR_SOCKET_PATH` and before the global socket. |  |
 | `HERDR_SOCKET_PATH` | `unset` | Explicit herdr socket path tried first when connecting to the pane host. |  |
-| `HOME` | `unset (os.homedir() where a fallback exists)` | Home directory used to strip the home prefix from eval artifacts, to collapse displayed paths to `~`, and as the herdr config base when `XDG_CONFIG_HOME` is unset. |  |
+| `HOME` | `unset (os.homedir() where a fallback exists)` | Home directory used to collapse displayed paths to `~`, and as the herdr config base when `XDG_CONFIG_HOME` is unset. |  |
 | `LOCALAPPDATA` | `~\AppData\Local` | Windows-only base directory for the state and cache roots (`%LOCALAPPDATA%\clio-coder\state`, `%LOCALAPPDATA%\clio-coder\cache`); ignored on other platforms. |  |
 | `LOGNAME` | `unknown` | Fallback user name for run identity when `os.userInfo()` throws and `USER` is empty; otherwise `unknown`. |  |
 | `LSB_JOBID` | `unset` | Non-empty value records an LSF job in the run identity (`scheduler: lsf`), checked after the SLURM and PBS job ids. |  |
@@ -511,41 +509,10 @@ Grouped by command. Global flags appear under `global`.
 | `--tools-timeout` | With `--deep`, the tool probe's generation timeout in seconds (default 120). |
 | `-h` | Short form of --help. |
 
-### `eval`
-
-| Flag | Controls |
-|---|---|
-| `--allow-config-drift` | For `eval compare`, proceed when the two artifacts' configs differ and label the comparison as config drift allowed. |
-| `--allow-network` | For `eval skill`, keep the network tool plane available to the child runs instead of stripping it. |
-| `--baseline` | For `eval gate`, the baseline eval id the candidate is gated against (required). |
-| `--clio-coder-entry` | For `eval run`, path to the clio-coder CLI entry the runner executes; a relative path is pinned to the invoking directory. |
-| `--eval` | For `eval validate --package` and `eval run --package`, the named evaluation to run. |
-| `--format` | For `eval report`: `text`, `json`, `md`, `swe-jsonl`, or `junit`; for `eval compare`: `text`, `json`, `md`, or `junit`. |
-| `--help` | Print the command's usage and exit. |
-| `--json` | Emit machine-readable JSON output for `eval inventory` or `eval skill`. |
-| `--metric` | For `eval compare`, the behavioral metric or metric family the comparison is scored on. |
-| `--model` | For `eval run`, wire model id that overrides the suite's model. |
-| `--out` | For `eval run`, path where the eval artifact is written. |
-| `--package` | For `eval validate` and `eval run`, package reference or path (`<path|kind:name>`). |
-| `--project` | For `eval validate --package` and `eval run --package`, target project scope. |
-| `--repeat` | For `eval run --task-file`, positive integer repetitions per v1 task. |
-| `--scenario` | For `eval skill`, the evals.md scenario id (or bare number) to run instead of every scenario. |
-| `--suite` | For `eval validate` and `eval run`, path to the Suite v2 YAML; run takes exactly one of `--suite` or `--task-file`. |
-| `--target` | For `eval run` and `eval skill`, target id overriding the default target. |
-| `--task-file` | For `eval run`, path to a compatibility v1 task file loaded as a suite. |
-| `--thresholds` | For `eval gate`, path to a thresholds file replacing the built-in gate thresholds. |
-| `--timeout` | For `eval skill`, positive integer seconds allowed per child run. |
-| `--trials` | For `eval run`, positive integer overriding the suite's `matrix.repeats` and requesting a fresh workspace per matrix item. |
-| `--trust-fixtures` | For `eval skill`, allow the fixture shell commands declared in evals.md to execute in the seed workspace. |
-| `--user` | For `eval validate --package` and `eval run --package`, target user scope. |
-| `--workspace` | For `eval skill`, existing checkout copied into the throwaway seed workspace; the source is never mutated. |
-| `-h` | Short form of --help. |
-
 ### `evidence`
 
 | Flag | Controls |
 |---|---|
-| `--eval` | For `evidence build`, the eval id to build evidence from. |
 | `--help` | Print the command's usage and exit. |
 | `--json` | Emit JSON for `evidence inspect`; for `evidence inventory` it is the only accepted argument. |
 | `--run` | For `evidence build`, the run id to build evidence from. |
@@ -729,7 +696,7 @@ Exit codes are 0 for success, 1 for operational failure, and 2 for invalid usage
 | `--auth` | Reset credentials.yaml only; combinable with the other level flags. |
 | `--cache` | Reset the cache root only; combinable with the other level flags. |
 | `--config` | Reset settings.yaml only; combinable with the other level flags. |
-| `--data` | Reset the data root only (memory, evidence, evals, vendored tools); combinable with the other level flags. |
+| `--data` | Reset the data root only (memory, evidence, vendored tools); combinable with the other level flags. |
 | `--dry-run` | Print the listing of what each selected root holds and change nothing. |
 | `--force` | Required for destructive execution; without it the command lists and refuses. |
 | `--help` | Print the command's usage and exit. |

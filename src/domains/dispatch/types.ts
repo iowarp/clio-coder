@@ -846,9 +846,7 @@ export interface RunReceipt {
 	 * that no worker process produced: the print-mode main-agent receipt
 	 * (src/cli/modes/print.ts), which runs in the orchestrator process, and ACP
 	 * delegation receipts, whose external agent never sends an announce frame.
-	 * The eval process invariants (src/domains/eval/metrics/invariants.ts) rely
-	 * on that absence to skip the main-agent path when counting orphaned
-	 * workers. Contract tests that stub the spawn also leave it absent.
+	 * Contract tests that stub the spawn also leave it absent.
 	 */
 	attestation?: RunReceiptAttestation;
 	/** Dead-node failover hops, oldest first; absent when the run was never rerouted. */

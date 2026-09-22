@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyReceiptIntegrity } from "../../src/domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../src/domains/dispatch/types.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
+import { readRunJournal } from "./run-journal.js";
 
 const ROOT = new URL("../..", import.meta.url).pathname;
 const CLI = join(ROOT, "dist", "cli", "index.js");

@@ -39,7 +39,6 @@ Markdown.
 | Tool-result and harness scratch | XDG state `scratch/`, with tool offloads grouped by session | Agent-to-agent |
 | Evidence bundles | XDG data `evidence/` | Human transient (`clio-coder evidence`) |
 | Approved memory | XDG data `memory/` | Human transient (`clio-coder memory`) |
-| Eval artifacts | XDG data `evals/` | Human transient (`clio-coder eval`) |
 | Session ledgers | XDG state `sessions/` | Agent-to-agent |
 | Dispatch receipts | XDG state `receipts/` | Human transient (`clio-coder trace`) |
 | Audit records | XDG state `audit/` | Human transient |

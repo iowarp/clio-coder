@@ -31,10 +31,6 @@ serveWorker(async (call) => {
 		const { readLibrary } = await import("../clio/adapters/library.js");
 		return readLibrary(call.params);
 	}
-	if (call.method === "evals.read") {
-		const { readEvals } = await import("../clio/adapters/evals.js");
-		return readEvals(call.params);
-	}
 	if (call.method === "evidence.read") {
 		const { readEvidence } = await import("../clio/adapters/evidence.js");
 		return readEvidence(call.params);

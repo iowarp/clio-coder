@@ -25,7 +25,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/TheOrcDev/skills
-  eval-status: smoke-checked
   model-size: any
   agents:
     - architect

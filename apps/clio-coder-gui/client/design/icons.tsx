@@ -7,7 +7,6 @@ const paths = {
 	settings: "M4 7h9m4 0h3M4 17h3m4 0h9M13 4v6M7 14v6",
 	fleet: "M12 8v5M5 16v-3h14v3M9 2h6v6H9zM2 16h6v6H2zM16 16h6v6h-6z",
 	evidence: "M8 3H5v18h14V3h-3M8 2h8v4H8zM8 12l2 2 5-5M8 18h8",
-	evals: "M4 3v18h17M8 17v-5m5 5V7m5 10V4",
 	library: "M3 3h4v18H3zM10 3h4v18h-4zM17 4l3-1 3 17-3 1z",
 	system: "M3 4h18v13H3zM8 21h8m-4-4v4M6 8l3 3-3 3m6 0h5",
 	sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5",

@@ -26,7 +26,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: buildermethods/bm-prd-creator
-  eval-status: smoke-checked
   model-size: large
 ---
 

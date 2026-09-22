@@ -4,8 +4,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
-import { readEvalLedgerSnapshot } from "../../src/domains/eval/metrics/tracked.js";
 import { startGatewayThinkingFixture } from "../harness/gateway-thinking-fixture.js";
+import { readSessionLedgerEntries } from "../harness/run-journal.js";
 import { makeScratchHome } from "../harness/scratch-env.js";
 
 const CLI = new URL("../../dist/cli/index.js", import.meta.url).pathname;
@@ -71,8 +71,8 @@ test("built Clio preserves declared gateway thinking controls through startup an
 			!fixture.paths.some((path) => path.startsWith("/api/")),
 			"a gateway must not gain native LM Studio residency operations",
 		);
-		const snapshot = await readEvalLedgerSnapshot(join(home.dir, "state"));
-		const assistant = snapshot.entries.flatMap((entry) =>
+		const entries = await readSessionLedgerEntries(join(home.dir, "state"));
+		const assistant = entries.flatMap((entry) =>
 			entry.kind === "message" && entry.role === "assistant" ? [entry.payload] : [],
 		);
 		strictEqual(assistant.length, 1);

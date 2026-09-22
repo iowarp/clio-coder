@@ -4,7 +4,6 @@ import type { DocsRequest } from "../../contracts/docs.js";
 import type { EvidenceRequest } from "../../contracts/evidence.js";
 import type { FleetRequest } from "../../contracts/fleet.js";
 import type { LibraryPlanRequest } from "../../contracts/library.js";
-import type { EvalRequest } from "../../contracts/reports.js";
 import type { SettingWrite } from "../../contracts/settings-controls.js";
 import type { Tool } from "../../contracts/toolchain.js";
 import type { TraceRequest } from "../../contracts/traces.js";
@@ -28,7 +27,6 @@ export interface Methods {
 	"system.read": { params: Record<string, never>; result: unknown };
 	"interop.read": { params: { cwd: string; probe: boolean }; result: unknown };
 	"library.read": { params: { cwd: string; kind: "inventory" | "extensions" }; result: unknown };
-	"evals.read": { params: EvalRequest; result: unknown };
 	"evidence.read": { params: EvidenceRequest; result: unknown };
 	"fleet.read": { params: FleetRequest; result: unknown };
 	"settings.read": { params: { cwd: string }; result: unknown };

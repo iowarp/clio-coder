@@ -2,7 +2,7 @@
  * POSIX single-quote escaping for one shell word.
  *
  * Every consumer here builds a command string that a POSIX shell will parse:
- * an eval runner's `sh -c`, the SSH transport's remote command, and an
+ * the fleet preflight probe, the SSH transport's remote command, and an
  * external editor launched through `$SHELL -lc`. The escaping a
  * single-quoted POSIX word needs is fixed by the shell grammar rather than
  * chosen per caller, so there is one rule and it cannot drift per consumer

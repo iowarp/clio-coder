@@ -1,22 +1,14 @@
-import type { Static, TSchema } from "typebox";
 import { Value } from "typebox/value";
-import { type EvalRequest, UsageReport } from "../../contracts/reports.js";
-import type { WorkerHost } from "../worker/host.js";
+import { UsageReport } from "../../contracts/reports.js";
 import type { CliRunner } from "./cli-runner.js";
 import { AppProblem } from "./problem.js";
 import type { WorkspaceService } from "./workspaces.js";
 
 export class ReportsService {
 	constructor(
-		private readonly reads: WorkerHost,
 		private readonly runner: CliRunner,
 		private readonly workspaces: WorkspaceService,
 	) {}
-	async evals<S extends TSchema>(input: EvalRequest, schema: S): Promise<Static<S>> {
-		const value = Value.Clean(schema, await this.reads.call("evals.read", input));
-		if (!Value.Check(schema, value)) throw new AppProblem("unavailable", "Eval storage returned an invalid projection.");
-		return value;
-	}
 	async usage(workspaceId: string): Promise<UsageReport> {
 		const workspace = await this.workspaces.get(workspaceId);
 		const rows = await this.runner.run({ kind: "usage.report" }, workspace.path);

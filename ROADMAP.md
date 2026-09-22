@@ -85,10 +85,6 @@ correctness across every model, platform, or scientific workload.
 - **Repository maps:** improve the `context map` → archify workflow, verify cited
   paths, and measure diagram quality on representative repositories. Explore
   browsing generated maps in the graphical app.
-- **Evaluation campaigns:** use the existing eval engine for named, reproducible
-  campaigns with recorded routes, environments, and decision criteria. Potential
-  external benchmarks include SWE-bench, Terminal-Bench, SciCode, and
-  ScienceAgentBench; these names are plans, not published scores or completed adapters.
 - **Library coherence:** keep auditing skills, prompts, recipes, and plugins for
   stale guidance, duplicate responsibilities, installation ownership, and
   compatibility with peer hosts.

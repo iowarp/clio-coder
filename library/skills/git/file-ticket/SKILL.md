@@ -23,7 +23,6 @@ clio-coder:
   source-url: https://github.com/iowarp/clio-coder/tree/main/library/skills/git/file-ticket
   audit: pass
   provenance: designed
-  eval-status: scenarios-recorded
   model-size: any
   agents:
     - main

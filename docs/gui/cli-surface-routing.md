@@ -23,13 +23,12 @@ Keep that promise. When a command family is added to `src/cli/index.ts`, add a r
 | 11 | `context` | status, init, refresh, wiki, reset, index, replay, working-set | Context Observatory; read-only JSON adapters first, mutations after typed progress/events. |
 | 12 | `agents` | User-facing/all recipes, JSON | Read-only catalog wired; addressable execution still needs typed dispatch operations and events. |
 | 13 | `fleet` | list/new/validate/graph/commands init/run/status/drain/resume | Installation-wide read-only status aggregate wired; plans, runs, mutations, and live events remain absent. |
-| 14 | `evidence` | build by run/session/eval, inspect, list | Evidence library after stable machine projection. |
-| 15 | `eval` | validate/run/report/compare/gate | Experiment surface. |
+| 14 | `evidence` | build by run/session, inspect, list | Evidence library after stable machine projection. |
 | 16 | `memory` | list/propose/promote/approve/reject/prune | Memory review inbox. |
 | 17 | `usage report` | repository/window filters, JSON facts and opportunities | Project-filtered 30-day Usage record wired; broader audit and evidence discovery remain absent. |
 | 18 | `trace` | runs/phases/tail/procs/sql/ui | Bounded trace explorer; **never expose arbitrary SQL as the default non-engineer path.** |
 | 19 | `extensions` | list/discover/install/enable/disable/remove, scopes, JSON | Installed inventory wired; reviewed lifecycle mutations remain absent. |
-| 20 | `skills` | list/search/inspect/validate/install/update/sync/eval | Installed inventory wired; deeper inspection and reviewed lifecycle mutations remain absent. |
+| 20 | `skills` | list/search/inspect/validate/install/update/sync | Installed inventory wired; deeper inspection and reviewed lifecycle mutations remain absent. |
 | 21 | `library` | list/search/add/use/sync/push/remote confirm | Inventory and the reviewed lifecycle (install, update, enable, disable, remove) are wired for catalog refs. Import, register, pin, drift, sync and push remain terminal operations. |
 | 22 | `verifiers` | discover/author/validate/dry-run/add/edit/rename/remove | Typed discovery is absent; the GUI names this boundary and does not scrape formatted output. |
 | 23 | `docs` | topic server, no-open | The desktop app carries its own searchable reference (views, keys, vocabulary); Clio Coder topic docs stay external. |
@@ -41,7 +40,7 @@ Keep that promise. When a command family is added to `src/cli/index.ts`, add a r
 
 ## DRIFT, verified against `src/cli/index.ts` COMMAND_HANDLERS (2026-09-20)
 
-The live registry, in registration order: `acp, auth, config, configure, targets, models, agents, components, evidence, eval, memory, usage, trace, evolve, dev, extensions (alias ext), fleet, library, tasks, mcp, verifiers, gui, docs, share, export, import, context, run, tools, interop, panes, doctor, paths, reset, uninstall, upgrade, version, worker`.
+The live registry, in registration order: `acp, auth, config, configure, targets, models, agents, components, evidence, memory, usage, trace, evolve, dev, extensions (alias ext), fleet, library, tasks, mcp, verifiers, gui, docs, share, export, import, context, run, tools, interop, panes, doctor, paths, reset, uninstall, upgrade, version, worker`.
 
 Plus `dev` re-dispatches to `components`, `evolve`, `share`.
 Plus three **retired subcommand tombstones** that are deliberately not dispatchable but stay command-shaped "so top-level value flags cannot consume them and accidentally boot another mode": `context-init`, `context-index`, `context-clear`.
@@ -106,8 +105,6 @@ One library of packages: plugin, skill, agent, prompt, fleet.
 > Recipes is the versioned, body-free read of actual discovered recipes across core, installed packages and loose user/project files, with owner, origin, availability and invocation; `--all` adds internal diagnostic agents. **Nothing in these reads fetches a remote source or activates a recipe.**
 >
 > Skills lists discovered runtime skills, including unmanaged local files. **Inventory is the fixed, body-free skill read for GUI hosts.**
->
-> Package evals run with `clio-coder eval run --package <kind:name> --eval <name>`.
 
 **Design consequences for the GUI marketplace page:**
 
@@ -137,7 +134,6 @@ The outcome view reports disk and recipe admission per package, and always state
 | --- | --- |
 | 13 `fleet` | `inspect --json`, `decisions --json`, `verify <runId> --json`, `view <runId\|fleetRootId>`, `preflight`. Full list: list, new, validate, graph, commands init, run, status, inspect, decisions, view, verify, preflight, drain, resume. |
 | 14 `evidence` | `evidence inventory --json` (plus `src/cli/evidence-detail.ts`). |
-| 15 `eval` | `eval skill <name\|path>`, `--package <path\|kind:name>`, `--suite`, `--task-file`, `--trials/--repeat`, `--format text\|json\|md\|swe-jsonl\|junit`, `compare … [--allow-config-drift]`, `gate --baseline --thresholds`, `inventory --json`. |
 | 18 `trace` | `inspect --json` ("a fixed bounded window with no request text"), `code-steps <rootId> --json` ("deterministic code steps of one fleet root"), `prune [--max-age-days N] [--max-bytes N] [--json]`. |
 | 19 `extensions` | `extensions run <id> <command> [--json] -- [arguments]`. |
 | 22 `verifiers` | `inspect --json`, `baseline <id>`. |

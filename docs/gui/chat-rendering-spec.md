@@ -38,7 +38,7 @@ sites.
 
 The prior audit's claim was correct on data but wrong in emphasis. Every inspector's *payload*
 is reproduced by the new route table, but the workbench's value was never the payload: it was
-~40 closed label taxonomies (gate reasons, eval failure classes, evidence trust axes, customization
+~40 closed label taxonomies (gate reasons, evidence trust axes, customization
 categories, recovery sections, verifier rejections), a consistent tone function per domain, and a
 rigorously-worked empty-state grammar that distinguishes "not read yet" from "store missing" from
 "store present but empty" from "record predates this schema". Those taxonomies are the part of this
@@ -1023,7 +1023,6 @@ const FLEET_STATE_LABELS = { queued: "queued", running: "running", progress: "wo
 | config (16K) | `contracts/settings.ts` + `settings-safe.ts` | partial: `WireCustomizationEntry.contextCostTokens` and `reloadClass` have no counterpart — add them |
 | decisions (12K) | `contracts/evidence.ts` (`gate`) | yes, but shape is opaque (`JSON.stringify(gate)` at evidence.tsx:226) |
 | dispatch (8K) | `contracts/fleet.ts` | yes |
-| eval (24K) | `contracts/reports.ts` | yes |
 | evidence (17K) | `contracts/evidence.ts` | yes |
 | fleet (25K) | `contracts/fleet.ts` + `fleet-events.ts` | yes |
 | interop (11K) | `contracts/targets.ts` + `targets-cli.ts` | partial: the four wiring states (configured / not-ACP / proposed / decided) are not modelled |
@@ -1035,7 +1034,7 @@ const FLEET_STATE_LABELS = { queued: "queued", running: "running", progress: "wo
 
 **The empty-state grammar — the most reusable thing here.** Every panel distinguished four states and used different words for each. Reproduce this everywhere:
 1. *Not read in this session* — `"The durable evidence inventory has not been read in this session."` / `"No diagnostic sweep has run in this desktop session. Nothing is inferred from a successful conversation."`
-2. *Store missing* — `"This installation has never run an evaluation, so it has no eval store at all. That is a missing store, not an empty one."` A dash in a figure means the store was not found: `"A dash means Clio Coder could not find that local history store. It does not mean zero activity."`
+2. *Store missing* — `"This installation has never built evidence, so it has no evidence store at all. That is a missing store, not an empty one."` A dash in a figure means the store was not found: `"A dash means Clio Coder could not find that local history store. It does not mean zero activity."`
 3. *Store present, nothing in it* — `"Clio Coder has built no evidence bundles on this installation. This is an empty record, not a health claim."`
 4. *Record predates the schema* — `"This bundle predates the canonical trust projection, so it records no axes to open."`
 
@@ -1052,13 +1051,13 @@ And a fifth, for every bounded list: `"Older evidence bundles are outside this b
 - **interop** → summary (detected of known kinds, wired as peers, would be offered, detected-at), then one row per agent with the wiring sentence. Boundary: detection reads files only, starts no agent, and the version shown is the last one Clio recorded — `"opening this panel cannot become 'execute every coding agent installed on this machine'"`.
 - **routing** → target selector (targets derived client-side from the model rows, deduped and `localeCompare`-sorted), then a filtered model grid. Filter is a `useDeferredValue` over the lowercased query, matched against `[modelId, runtimeId, residency, ...capabilities]`. Zero values render `"Not reported"`, never `0`.
 - **dispatch** → installation-wide, explicitly not project-scoped and not a live stream: `"This is global installation state, not a fact about the selected project and not a live event stream."`
-- **recovery**, **evidence**, **fleet**, **eval**, **decisions** → see their own artifacts.
+- **recovery**, **evidence**, **fleet**, **decisions** → see their own artifacts.
 
 </details>
 
 **Shared idioms worth extracting into `client/design/`:**
 - `<StatusMark tone label>` — a glyph + label pair with tones `success | warning | error | neutral | info | action`. Used by every panel; there is no other status primitive.
-- A `PanelHeading` with `eyebrow` (all-caps, wide-tracked), `title`, optional action slot. Every panel opens with an eyebrow that names the data's *scope and mutability*: `EVIDENCE BUNDLES · INSTALLATION-WIDE`, `DURABLE ACCOUNTING · TRACE DATABASE`, `EVAL REPORTS · INSTALLATION-WIDE · READ ONLY`, `INSTALLATION · REDACTED DIAGNOSTICS`, `MODELS · WORKER ROUTING`, `GATE DECISIONS · SEALED COORDINATOR VERDICTS`, `COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS`, `APPROVAL NEEDED · ONE USE`.
+- A `PanelHeading` with `eyebrow` (all-caps, wide-tracked), `title`, optional action slot. Every panel opens with an eyebrow that names the data's *scope and mutability*: `EVIDENCE BUNDLES · INSTALLATION-WIDE`, `DURABLE ACCOUNTING · TRACE DATABASE`, `INSTALLATION · REDACTED DIAGNOSTICS`, `MODELS · WORKER ROUTING`, `GATE DECISIONS · SEALED COORDINATOR VERDICTS`, `COUNCIL TOPOLOGY · SEATED VOICES AND ROUNDS`, `APPROVAL NEEDED · ONE USE`.
 - A closing **boundary paragraph** on every panel naming exactly what stays on the host. These are not boilerplate; each one is specific and each should survive.
 - Formatters: `formatTokens(v) = v === null ? "not recorded" : v.toLocaleString("en-US")`; `formatCostUsd(v) = v === null ? "not recorded" : "$" + v.toFixed(v > 0 && v < 0.01 ? 4 : 2)` — **exactly zero prints as `$0.00`, not "free", because a local runtime that prices at zero and a run whose cost was never recorded are different facts and only the second is null**. `client/api/clock.ts` already has `formatCost` and `formatTokens` matching this; keep them.
 
@@ -1229,12 +1228,12 @@ export function gateIndependenceText(decision: { correlation: { independent: boo
 
 ---
 
-## Config, recovery, eval and verifier taxonomies
+## Config, recovery and verifier taxonomies
 
 - priority: must-keep
 - from: apps/workbench/src/App.tsx:332-397, 400-430, 7212-7264, 4847-4855, 2686-2760
-- to: apps/clio-coder-gui/client/pages/settings.tsx, system.tsx, reports.tsx, library.tsx
-- value: Four more closed taxonomies with their descriptions. settings.tsx:107 currently renders setting values as `JSON.stringify(row.value)`, reports.tsx:113 dumps the whole eval report, library.tsx:173 dumps skill detail. Without these tables the panels are unreadable enum soup.
+- to: apps/clio-coder-gui/client/pages/settings.tsx, system.tsx, library.tsx
+- value: Three more closed taxonomies with their descriptions. settings.tsx:107 currently renders setting values as `JSON.stringify(row.value)`, library.tsx:173 dumps skill detail. Without these tables the panels are unreadable enum soup.
 
 <details>
 <summary>Customization categories, reload classes, setting sources, and scope labels</summary>
@@ -1301,34 +1300,6 @@ export const RECOVERY_CHECK_PRESENTATION: Record<string, { label: string; tone: 
 ```
 
 Each section is a `<details>` that **opens itself when `failures > 0 || warnings > 0`** — that is the row the operator came here to read. Section summary right-hand text: `` `${passed}/${checks} passed${warnings ? ` · ${warnings} warn` : ""}${failures ? ` · ${failures} fail` : ""}` ``. Verdict banner: `NO FAILURES` vs `ATTENTION REQUIRED`, with the headline `"All reported checks passed"` / `"${n} reported warning(s)"` / `"${n} reported failure(s)"`. Sub-line: `` `Inspected ${ts} · ${projectContext ? "selected-project context" : "installation context"}` ``. Versions strip: Clio Coder / Node / Platform / `Resolved roots ${pathsResolved}/4`, each `"not reported"` when absent. Boundary: the check crosses as name and verdict only, `"a check whose name is not name-shaped arrives unnamed rather than blanking the sweep"`, and the sweep passes no `--fix` flag.
-
-</details>
-
-<details>
-<summary>`EVAL_FAILURE_CLASS_LABEL` and how `evalPassTone` reads a report summary</summary>
-
-**Eval failure classes** — every one is a sentence, not an identifier:
-```ts
-export const EVAL_FAILURE_CLASS_LABEL: Record<string, string> = {
-	budget_exhausted: "Cost ceiling reached before the item ran",
-	runner_failed: "The runner exited nonzero",
-	grader_failed: "The grader declared the task unsolved",
-	verifier_failed: "A machinery verifier failed",
-	forbidden_path: "The item wrote outside its declared boundary",
-	assertion_unresolved: "A threshold's metric was never measured",
-	assertion_failed: "A declared threshold was not met",
-	setup_failed: "The workspace fixture never came up",
-	command_error: "A command could not be run at all",
-	other: "A class this build does not name",
-};
-export function evalPassTone(report: { summary: { runs: number; failed: number }; results: { machineryFailures: number } }): string {
-	if (report.summary.runs === 0) return "neutral";
-	if (report.results.machineryFailures > 0) return "error";   // machinery failure outranks a failed scenario
-	return report.summary.failed === 0 ? "success" : "warning";
-}
-```
-
-Report card facts in order: Route (`target · model · runtime`, each falling back to `"unrecorded"`/`"no model"`), Comparable set (`Group ${servingGroup}` + `" · matrix only"` when not observed), Tokens (`"${total} over ${measuredRuns} of ${runs} runs"` or `"No run reported provider usage"`), Wall time, Built by (`Clio Coder ${version} · ${commit.slice(0,12)}`), Host attachments (`"${n} kept on the host · ${m} declared metrics"`). Panel boundary, which is the reason this panel is worded so carefully: `"A report also holds the whole session transcript its runner attached, the prompts inside it, and the workspace it ran in; those stay on the host and are counted here rather than shown."`
 
 </details>
 

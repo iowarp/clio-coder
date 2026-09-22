@@ -14,7 +14,7 @@ Source of truth:
 
 ## 1. Spawning Sequence & Environment Isolation
 
-When the orchestrator dispatches a task to a fleet agent (such as via the `dispatch` tool or `clio-coder eval` execution), it spins up a child process running the compiled worker entry.
+When the orchestrator dispatches a task to a fleet agent (such as via the `dispatch` tool or `clio-coder run --agent`), it spins up a child process running the compiled worker entry.
 
 1. **Child Process Creation:**
    The parent process spawns a Node.js subprocess pointing to `dist/worker/entry.js`.

@@ -11,7 +11,6 @@ export const COMPONENT_KINDS = [
 	"session-schema",
 	"receipt-schema",
 	"memory",
-	"eval-suite",
 	"doc-spec",
 ] as const;
 

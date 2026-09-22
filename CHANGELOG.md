@@ -35,6 +35,17 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff outranked the configuration guide on an ordinary question about choosing a worker model.
 - Stop the skills listing from claiming a relevance order when the decision model abstained on every row it shows. The catalog order was untouched, so the sentence credited an order nothing made.
 
+### Removed
+
+- Remove the evaluation engine (`src/domains/eval`) and every `clio-coder eval` subcommand: `validate`, `run`, `report`, `compare`, `gate`, `baseline`, `inventory` and `skill`.
+- Remove the source-checkout suites under `evals/`, including the tool bench, the machinery suites and their baselines, the behavioral corpus, and the tracked-metrics suite.
+- Remove `clio-coder evidence build --eval` and the `eval` evidence source kind. Run and session evidence are unchanged.
+- Remove the routing-quality reader of stored eval artifacts. Route history is reconciled from authenticated receipts and gate decisions only.
+- Remove the Evals page, its `/api/evals` routes and its navigation entry from the graphical app. The usage report stays at `/usage`.
+- Remove package-manifest evals. A manifest that still declares `extensions["ai.iowarp.clio"].evals` keeps loading, and the value is ignored until the v0.7.0 compatibility window removes the key.
+- Remove the `evals.md` scenario files from every library skill and template, the `eval-status` publication key, and the `skills:pin` requirement for both. Library pins are regenerated.
+- The `data/evals/` directory is no longer created. Existing artifacts there are left in place and nothing reads them.
+
 ## 0.5.3 - 2026-09-22
 
 ### Diffusion model support

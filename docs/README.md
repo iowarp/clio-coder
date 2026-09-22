@@ -124,16 +124,12 @@ validation, reference data, or human scientific judgment.
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |
 
-## Evaluation and measurement
+## Measurement
 
 | Topic | Guide |
 | --- | --- |
-| Local Suite v2 files, artifacts, reports, comparisons, and gates | [Eval Runner](process/eval-runner.md) |
-| Private suite handling and measurement design | [Internal Evals](process/evals-internal.md) |
 | Correct render, startup, import-graph, and streaming measurements | [Performance Methodology](process/performance-methodology.md) |
 | Falsifiable change manifests and `clio-coder evolve` | [Evolution](process/evolution.md) |
-
-Reviewable reference suites are available in the source checkout under [`evals/`](../evals/) (omitted from the published package tarball). They are explicit operator measurements, not hidden CI steps. Private prompts, credentials, endpoints, raw campaign artifacts, and proprietary datasets belong outside the repository.
 
 ## Architecture and contributing
 

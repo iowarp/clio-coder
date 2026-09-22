@@ -4,10 +4,10 @@
  * call below `full-auto` is denied with this sentence.
  *
  * It lives here rather than inline at the deny site because two surfaces read
- * it: the orchestrator writes it, and the skill-eval harness recognizes it in
- * an arm transcript to tell "the skill did not do the work" apart from "the
- * harness never let it try". A recognizer holding its own copy of the sentence
- * would silently stop matching the day the wording changed.
+ * it: the orchestrator writes it, and the tool registry recognizes its stable
+ * clause to settle a parked call as a headless denial. A recognizer holding its
+ * own copy of the sentence would silently stop matching the day the wording
+ * changed.
  */
 export const HEADLESS_PERMISSION_DENIED_REASON =
 	"clio-coder run cannot confirm permission requests; rerun interactively to approve this action.";

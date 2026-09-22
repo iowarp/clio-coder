@@ -7,7 +7,6 @@ import { runHeadlessMainAgent } from "../../src/cli/modes/print.js";
 import { BusChannels } from "../../src/core/bus-events.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { ToolNames } from "../../src/core/tool-names.js";
-import { readRunJournal } from "../../src/domains/eval/metrics/invariants.js";
 import {
 	EMPTY_CAPABILITIES,
 	type ProvidersContract,
@@ -30,6 +29,7 @@ import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { readRunJournal } from "../harness/run-journal.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 const PARTIAL = "CANCEL_PARTIAL_ONCE";

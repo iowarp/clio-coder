@@ -39,19 +39,17 @@ Model-visible skills must be trusted and permit model invocation. Loose compatib
 
 For duplicate skill names or paths, trusted candidates take precedence over untrusted candidates. An untrusted `.claude/skills` or `.agents/skills` copy cannot hide a trusted Library installation. Normal scope precedence still decides between trusted copies, including imported packages that the operator explicitly trusts. A named load of an untrusted or manual-only skill reports that restriction instead of claiming the skill is unknown.
 
-## Matching, authoring and evals
+## Matching and authoring
 
 Authored whole-phrase triggers rank before incidental name or description overlap. Matches are lexical suggestions, not evidence that a model will offer or successfully use a skill. Headless sessions emit passive library-install guidance and do not open an interview. Interactive offers require a bound operator answer.
 
-House skills live in `library/skills/<category>/<name>/`, with `SKILL.md`, a package `plugin.json`, and authored `evals.md` scenarios. `skills:check` checks authoring metadata and normalized audit evidence; `library:check` verifies the distributable's complete tree. Only the latter is an installation pin. Explicit catalog-directory and old skill-index probes remain available to authoring utilities for unmanaged source audits; automatic library installation does not use those as a separate installer.
-
-Named suite evals use `clio-coder eval run --package skill:<name> --eval <suite>`. The experimental `clio-coder eval skill <name|path>` runs `evals.md` baseline, treatment and model-judge scenarios. Fixture commands require `--trust-fixtures`; network tools remain off unless `--allow-network` is requested. Those measurements are separate from deterministic package validation.
+House skills live in `library/skills/<category>/<name>/`, with `SKILL.md` and a package `plugin.json`. `skills:check` checks authoring metadata and normalized audit evidence; `library:check` verifies the distributable's complete tree. Only the latter is an installation pin. Explicit catalog-directory and old skill-index probes remain available to authoring utilities for unmanaged source audits; automatic library installation does not use those as a separate installer.
 
 ## Publishing a skill
 
 To publish a skill, prepare a complete skill package with `SKILL.md` and a portable root `plugin.json`. Declare kind `skill`, an explicit Semantic Version, the skill resource root and one public skill component. Validate the package with `clio-coder library validate ./my-skill`, then register its local source with `clio-coder library register ./my-skill --project`. Registration records its full-tree digest without installing it. Install the candidate with `clio-coder library install skill:<name> --project` and verify its behavior before sharing.
 
-For a curated contribution, add the reviewed package beneath `library/skills/<category>/<name>/`, include authored eval scenarios, and regenerate both the skill authoring records (`pnpm skills:pin`) and complete library package pins (`pnpm library:pin`). A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. The [package authoring guide](authoring-plugins.md) defines the manifest and index fields; publishing does not itself install or activate the skill for another operator.
+For a curated contribution, add the reviewed package beneath `library/skills/<category>/<name>/` and regenerate both the skill authoring records (`pnpm skills:pin`) and complete library package pins (`pnpm library:pin`). A shared remote index must name an explicit supported GitHub tree source, version and full-tree SHA-256. The [package authoring guide](authoring-plugins.md) defines the manifest and index fields; publishing does not itself install or activate the skill for another operator.
 
 The model-facing `context(scope="skills")` inventory separates Clio-local/plugin skills, discovered compatibility or explicit-path skills, and uninstalled marketplace entries. Discovered entries retain their source, scope, and file path. Availability through another agent’s skill root does not mean Clio installed or copied that skill; resetting Clio does not remove those external files.
 

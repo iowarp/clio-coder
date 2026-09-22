@@ -482,10 +482,7 @@
 					"path": "assets/scripts/project_plugin.py",
 					"requires": []
 				}
-			],
-			"evals": {
-				"scripts": "evals/scripts.yaml"
-			}
+			]
 		},
 		"ai.iowarp.portability": {
 			"version": 1,

@@ -32,10 +32,7 @@ interface SettingsNamingInspection {
 	error: string | null;
 }
 
-const LEGACY_ENVIRONMENT_NAMES = [
-	["CLIO_EVAL_RUNNER_STDOUT_FILE", "CLIO_CODER_EVAL_RUNNER_STDOUT_FILE"],
-	["CLIO_YAZI_PICK_TOKEN", "CLIO_CODER_YAZI_PICK_TOKEN"],
-] as const;
+const LEGACY_ENVIRONMENT_NAMES = [["CLIO_YAZI_PICK_TOKEN", "CLIO_CODER_YAZI_PICK_TOKEN"]] as const;
 
 function namingEnvironmentFindings(
 	yaziEnabled: boolean,

@@ -69,7 +69,7 @@ Verbatim:
 
 > Durable trace accounting is keyed by the same run ids the run journal already lists, which looks like the fleet-root case, but it is not: **the ledger and the trace database are separate durable stores with separate failure modes, and an installation that never enabled tracing has no trace database at all.** Folding that read into `fleet.inspect` would have made a missing trace file a failure of the run journal. It gets its own command, its own event, and an **explicit `available` flag**, because **"tracing was never on" and "the database holds no runs" are different answers and an operator is entitled to both.**
 
-The new app honours this with `/api/traces/status`. Extend the same treatment to every store the GUI reads: evidence, evals, usage, the decision store. **Three states, always: unavailable / available-and-empty / available-with-rows.** Never collapse the first two into an empty list.
+The new app honours this with `/api/traces/status`. Extend the same treatment to every store the GUI reads: evidence, usage, the decision store. **Three states, always: unavailable / available-and-empty / available-with-rows.** Never collapse the first two into an empty list.
 
 ## 6. A new surface finds bugs — that is part of its value
 

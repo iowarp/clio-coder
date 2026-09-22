@@ -28,7 +28,6 @@ clio-coder:
   audit: pass
   provenance: adapted
   origin: https://github.com/dmmulroy/skills/tree/main/tech-spec
-  eval-status: smoke-checked
   model-size: large
   provisional: true
   agents:

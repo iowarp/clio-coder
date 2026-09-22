@@ -73,7 +73,7 @@ There is no hidden `transformContext` injection.
 | Phase 2 intervene or stay silent | One advisory `inject_reminder` effect or explicit silence |
 | Fixed memory cadence | Deterministic decay signals plus a coarse interval floor |
 | Learned intervention calibration | Structural authority gate: spontaneous reminders must cite a bank entry; deterministic triggers may be uncited |
-| Passive and always-on ablations | A/B harness compares baseline, rules, and LLM tiers and flags always-noisy ties as regressions |
+| Passive and always-on ablations | Not shipped; baseline, rules, and LLM tiers are compared by an explicit external measurement campaign |
 
 <details>
 <summary>The two-line envelope grammar and what the parser tolerates</summary>
@@ -620,34 +620,10 @@ latency cost. Injecting at least once per task while merely tying or losing to
 baseline is a regression, even when every reminder is cited, and one anecdotal
 task is not evidence.
 
-<details>
-<summary>How the A/B harness runs, what it reports, and how to compare live</summary>
-
-`src/domains/eval/proactive-memory.ts` exports a fixed three-task, matched A/B
-harness. It executes `baseline`, `rules`, and `llm` variants in stable order and
-accepts any `{ id, model }` target. A runner adapter owns isolated task execution
-and returns action tokens/latency plus the exact telemetry rows emitted for that
-trial. The report provides:
-
-- pass rate;
-- injected and cited reminder counts;
-- reminders per task and citation rate;
-- total and baseline-relative added tokens and latency;
-- an `alwaysNoisyRegression` verdict.
-
-The source-level harness remains available to a runner adapter, and the eval
-platform remains active. Its former dedicated contract test was retired, and
-the current test tree has no direct reference to `runProactiveMemoryEval`.
-There is therefore no maintained direct test coverage or standalone
-`pnpm run test:file` invocation for this harness. Treat a live comparison as an
-explicit measurement campaign.
-
-For a live local comparison, an adapter should route only the `llm` variant
-through the request's target/model (e.g., using a dedicated local memory target
-such as `memory-dedicated` / `ornith1.5-35b-moe`), keep baseline memory telemetry
-empty, and run all nine trials in equivalent isolated workspaces.
-
-</details>
+Clio ships no A/B harness for this comparison. Run baseline, rules, and `llm`
+variants as an explicit measurement campaign in equivalent isolated workspaces,
+routing only the `llm` variant through a dedicated memory target and keeping
+baseline memory telemetry empty.
 
 ## Worker growth path
 
