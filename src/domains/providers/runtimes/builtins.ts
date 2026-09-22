@@ -25,6 +25,7 @@ import mistral from "./cloud/mistral.js";
 import openai from "./cloud/openai.js";
 import openaiCodex from "./cloud/openai-codex.js";
 import openrouter from "./cloud/openrouter.js";
+import typesafeJev from "./cloud/typesafe-jev.js";
 import lemonadeAnthropic from "./local-native/lemonade-anthropic.js";
 import lemonadeOpenai from "./local-native/lemonade-openai.js";
 import llamacpp from "./local-native/llamacpp.js";
@@ -53,6 +54,7 @@ const BUILTIN_RUNTIMES: ReadonlyArray<RuntimeDescriptor> = [
 	openai,
 	openaiCodex,
 	openrouter,
+	typesafeJev,
 	lemonadeAnthropic,
 	lemonadeOpenai,
 	llamacpp,

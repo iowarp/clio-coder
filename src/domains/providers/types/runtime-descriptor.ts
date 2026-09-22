@@ -1,7 +1,15 @@
 import type { Api, Model } from "../../../engine/types.js";
 import type { CapabilityFlags } from "./capability-flags.js";
 import type { ContextWindowSlots } from "./context-window-slots.js";
-import type { CompleteOptions, CompletionChunk, EmbedResult, InfillOptions, RerankResult } from "./inference.js";
+import type {
+	CompleteOptions,
+	CompletionChunk,
+	DecideOptions,
+	DecideResult,
+	EmbedResult,
+	InfillOptions,
+	RerankResult,
+} from "./inference.js";
 import type { KnowledgeBaseHit } from "./knowledge-base.js";
 import type { TargetDescriptor } from "./target-descriptor.js";
 
@@ -219,4 +227,11 @@ export interface RuntimeDescriptor {
 	infill?(target: TargetDescriptor, opts: InfillOptions, ctx: ProbeContext): AsyncIterable<CompletionChunk>;
 	embed?(target: TargetDescriptor, input: string | string[], ctx: ProbeContext): Promise<EmbedResult>;
 	rerank?(target: TargetDescriptor, query: string, documents: string[], ctx: ProbeContext): Promise<RerankResult>;
+	/**
+	 * Answer closed-form typed questions against a body of evidence. Unlike
+	 * `complete`/`infill` this never returns tokens, so callers that route,
+	 * classify, or gate on the result read a distribution rather than parsing
+	 * prose. Every question is independent, so a batch costs one round trip.
+	 */
+	decide?(target: TargetDescriptor, opts: DecideOptions, ctx: ProbeContext): Promise<DecideResult>;
 }
