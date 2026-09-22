@@ -25,6 +25,7 @@ export {
 	MEMORY_PROMPT_DEFAULT_MAX_ITEMS,
 	MEMORY_PROMPT_DEFAULT_SCOPES,
 	MEMORY_PROMPT_DEFAULT_TOKEN_BUDGET,
+	type MemoryPromptDecision,
 	type MemoryPromptOptions,
 	renderMemoryPromptSection,
 	selectMemoryForPrompt,
@@ -34,6 +35,12 @@ export {
 	memoryRecordFromEvidence,
 	proposeMemoryFromEvidence,
 } from "./proposal.js";
+export {
+	MEMORY_PRECOMPUTED_RELEVANCE_VERSION,
+	type PrecomputedMemoryCandidate,
+	type PrecomputedMemoryRelevance,
+	rankMemoryByPrecomputedScore,
+} from "./relevance.js";
 export {
 	loadMemoryRecords,
 	loadMemoryRecordsSync,
