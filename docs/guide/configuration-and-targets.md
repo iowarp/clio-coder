@@ -978,6 +978,7 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.profiles` | `{}` | map of profile name to target/model/thinking/optional-node routes | next dispatch |
 | `fleet.rosters` | `{}` | map of roster name to council members | next dispatch |
 | `fleet.agentProfiles` | `{}` | map of native agent id to an existing fleet profile | next dispatch |
+| `fleet.decisionProfiles` | `{}` | map of `routing`, `skills`, `memory`, `toolRisk` to an existing fleet profile | next turn |
 | `fleet.nodes` | `[]` | list of validated local/SSH node descriptors | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | subset of `researcher`, `verifier`, `reviewer`, `judge` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | subset of `quality`, `balanced`, `latency`, `economy` | next dispatch |
