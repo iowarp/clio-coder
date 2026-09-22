@@ -656,12 +656,13 @@ describe("gateway MCP capabilities", () => {
 		ok(removed.result.message.includes("offers no tool named gone"), removed.result.message);
 	});
 
-	it("keeps a cached capability out of the registry and off the agent's attached tools", async () => {
+	it("carries a filled catalog across sessions and connects only the owner on the first call", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
 		const first = wire(scene);
 		open.push(first.source);
 		await first.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "fake", refresh: true } });
+		strictEqual(first.clients.length, 1);
 		await first.source.close();
 
 		const second = wire(scene);
@@ -675,7 +676,28 @@ describe("gateway MCP capabilities", () => {
 		ok(!second.registry.listRegistered().includes(ECHO as ToolName));
 		const attached = resolveAgentTools({ registry: second.registry }).map((tool) => tool.name);
 		ok(!attached.some((name) => name.startsWith("mcp_")), "no cached schema becomes an attached agent tool");
-		strictEqual(second.clients.length, 0);
+
+		const described = payloadOf(
+			await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }),
+		);
+		strictEqual(described.catalog, "cached");
+		strictEqual(second.clients.length, 0, "find and describe ran the whole way with no server process");
+
+		const called = await second.registry.invoke({
+			tool: ToolNames.Gateway,
+			args: { op: "call", capability: ECHO, args: { text: "after the cache" } },
+		});
+		ok(called.kind === "ok" && called.result.kind === "ok", JSON.stringify(called));
+		deepStrictEqual(JSON.parse(called.result.output), { text: "after the cache" });
+		strictEqual(second.clients.length, 1, "the first call connected exactly one server");
+		deepStrictEqual(second.source.connectedIds(), ["fake"]);
+		strictEqual(existsSync(scene.markerPath), false, "the other declared server was never launched");
+		strictEqual(
+			payloadOf(await second.registry.invoke({ tool: ToolNames.Gateway, args: { op: "describe", capability: ECHO } }))
+				.catalog,
+			"live",
+			"once connected, describe reports the session's own listing",
+		);
 	});
 
 	it("rejects a refresh without a server, for an undeclared server, and on describe or call", async () => {
