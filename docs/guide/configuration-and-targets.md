@@ -1029,6 +1029,151 @@ reservation, so a model cannot author the task features its own routing reads.
 > one of those three currently behaves exactly like leaving it unbound. They are
 > still landing.
 
+#### Turning the alpha on, end to end
+
+Four things have to exist: a credential, a target, a profile, and a binding.
+Validation checks the last three against each other, and both a missing profile
+and a profile whose target does not exist surface as one settings error on the
+binding. Work in this order, so a failure has only one possible cause.
+
+**1. Put the key in the environment.** Get an API key from TypeSafe and export
+it. The runtime reads `TYPESAFE_API_KEY` by default:
+
+```bash
+export TYPESAFE_API_KEY='...'
+```
+
+A target names its own variable through `auth.apiKeyEnvVar`, so any name works
+as long as the target says which one to read. Clio stores nothing for this
+shape and reads the variable at call time, which is the recommended path on a
+shared machine. `clio-coder auth login typesafe-jev --api-key <literal>` is the
+alternative, and it writes the key to `credentials.yaml` in plaintext at mode
+`0600`. See [credential storage](#credential-storage-and-its-limits).
+
+**2. Add the target.** Jev is a hidden runtime, so `clio-coder configure` does
+not offer it in the wizard and Quick Connect will not find it. Write the target
+into `settings.yaml` by hand:
+
+```yaml
+targets:
+  - id: jev
+    runtime: typesafe-jev
+    defaultModel: jev-latest
+    auth:
+      apiKeyEnvVar: TYPESAFE_API_KEY
+```
+
+`jev-preview` is the other known wire model. The `url` key is optional and
+defaults to `https://api.typesafe.ai/v1`.
+
+**3. Define a profile.** A decision model reaches the harness through the same
+`fleet.profiles` machinery as a worker route, so the binding in the next step
+names a profile rather than a target:
+
+```yaml
+fleet:
+  profiles:
+    system-one:
+      target: jev
+      model: jev-latest
+```
+
+A profile whose `target` does not match a configured target id is dropped at
+validation, and the binding that names it then fails with `profile 'system-one'
+is not defined in fleet.profiles`. If you see that message and the profile is
+clearly in the file, the target id is the thing to check.
+
+**4. Bind the site.**
+
+```yaml
+fleet:
+  decisionProfiles:
+    routing: system-one
+```
+
+Settings validation rejects an unknown site name and a profile that
+`fleet.profiles` does not define, so a binding that survives startup at least
+names something real.
+
+Steps 3 and 4 are two keys of one `fleet:` block, shown separately here. In the
+file they sit together:
+
+```yaml
+fleet:
+  profiles:
+    system-one:
+      target: jev
+      model: jev-latest
+  decisionProfiles:
+    routing: system-one
+```
+
+#### Confirming a routing binding
+
+Two things are checkable today and one is not. The credential and the endpoint
+have real commands:
+
+```bash
+clio-coder auth status jev
+clio-coder targets --probe
+clio-coder models --target jev
+```
+
+`auth status` resolves a target id or a runtime id and prints whether the
+credential is present and where it came from, exiting 1 when it is not. Name the
+target explicitly: hidden runtimes are filtered out of the bare
+`clio-coder auth list` and of `auth status` with no argument, so Jev's absence
+from those listings is not a credential problem, and
+`clio-coder configure --list --all` is the listing that includes it.
+
+`targets --probe` and `models --target jev` go to the provider's `/models`
+listing, so a successful listing showing `jev-latest` and `jev-preview` proves
+the key, the URL, and the model id are all good.
+
+The binding itself has no verification command. Nothing in the CLI or in
+`clio-coder doctor` reports which decision sites are bound or whether a bound
+site resolves to a working decider. `inspectDecisionSite` in
+`src/domains/providers/decision-sites.ts` exists to answer exactly that question
+and separates an operator who configured nothing from one who configured
+something broken, but no surface calls it yet. What you can rely on instead is
+that settings validation refuses a binding naming a profile that does not
+exist, so a session that starts has a structurally sound binding.
+
+That leaves the effect itself mostly invisible from the outside. Dispatch is
+built so an unbound site, a provider outage, and an uncertain answer are
+indistinguishable, which is what makes the alpha safe to switch on, and it is
+also what makes a working binding hard to observe. The one thing you will see is
+a failure: a provider that errors writes
+
+```text
+[clio-coder:dispatch] routing decision unavailable, using rules: <message>
+```
+
+to the session's diagnostic channel, or to stderr in a headless run, and the
+dispatch continues on the regex classification. Silence therefore means either
+that the site answered or that it was never bound, and the two look alike.
+
+The features themselves are not printed as a readout. The classified task type
+reaches candidate scoring as a `bounded-task-feature:<type>` reason, and the
+confidence scales a candidate's score without being reported as a number
+anywhere, so there is no line to read the answer off. A task the regex
+classifies visibly wrong is the practical test: give a bound session the kind of
+task that defeats the rules, such as one whose separable pieces are joined by
+prose rather than enumerated, and watch whether dispatch treats it as one piece
+of work. That is a behavioral check rather than a reported one.
+
+#### What a routing call costs
+
+One routing call against `jev-latest` used 718 input and 188 output tokens in
+249ms. That is one call per dispatch, resolved once during admission while
+admission is already waiting on capacity, and it is bounded at three seconds so
+a hung provider costs a dispatch a couple of seconds rather than the run. All
+four questions ride in that single call because they are independent and
+batching them costs nothing.
+
+Clio ships no rates for TypeSafe, so a bound site records tokens without a cost
+figure unless you set `targets[].pricing` on the `jev` target yourself.
+
 #### A second decision provider needs no new verb
 
 `decide()` is provider-shaped rather than Jev-shaped. The three primitives are a
