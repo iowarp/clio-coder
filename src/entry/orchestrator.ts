@@ -79,6 +79,7 @@ import {
 	taskMemoryTracePath,
 } from "../domains/memory/index.js";
 import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
+import { loadMemoryRecordsSync } from "../domains/memory/store.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
 import { createDemoGuidanceRegistration } from "../domains/middleware/demo-guidance.js";
@@ -111,6 +112,7 @@ import { ObservabilityDomainModule } from "../domains/observability/index.js";
 import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index.js";
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
+import { credentialsPresent } from "../domains/providers/credentials.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
@@ -136,6 +138,7 @@ import { memoryInterventionModelMaxTokens } from "../domains/providers/model-run
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -327,6 +330,13 @@ interface CompactionResolution {
 	headers?: Record<string, string>;
 	apiKey?: string;
 }
+
+/**
+ * Bound on the pre-turn relevance pass. It sits on the turn's critical path, so
+ * it is short: a measured four-candidate batch answered in 274ms, and a target
+ * that cannot beat this budget is one the turn is better off without.
+ */
+const RELEVANCE_DECISION_TIMEOUT_MS = 3_000;
 
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
@@ -1871,7 +1881,38 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					getCwd: () => process.cwd(),
 				})
 			: null;
+	/**
+	 * This turn's decision-model relevance scores, resolved once at the turn
+	 * boundary and read twice: by the prompt builder for memory, and by the
+	 * skills listing whenever the model asks for it later in the same turn.
+	 *
+	 * Both readers are synchronous, so neither can fetch its own. The pass is
+	 * awaited at the boundary instead, on a bounded timeout, and every failure
+	 * leaves both sites ranking the way they did before the sites existed.
+	 */
+	const turnRelevance = createTurnRelevanceStore({
+		resolve: () => ({
+			settings: getCurrentSettings(),
+			providers,
+			ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS },
+		}),
+		listMemory: () =>
+			loadMemoryRecordsSync(clioDataDir()).map((record) => ({
+				id: record.id,
+				// The lesson is what the model is being asked about. Evidence refs and
+				// identities are provenance for the prompt, not signal for a ranking.
+				summary: record.lesson,
+			})),
+		listSkills: () =>
+			resources === undefined
+				? []
+				: modelVisibleSkills(resources.skills(process.cwd()).items).map((entry) => ({
+						id: entry.name,
+						summary: entry.description,
+					})),
+	});
 	const toolBootstrap = registerAllTools(toolRegistry, {
+		getSkillRelevance: () => turnRelevance.skills(),
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),
@@ -2262,6 +2303,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
+		refreshTurnRelevance: (taskText) => turnRelevance.refresh(taskText),
+		getMemoryRelevance: () => turnRelevance.memory(),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");
