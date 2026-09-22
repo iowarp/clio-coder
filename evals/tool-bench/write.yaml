@@ -165,3 +165,6 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario write.search.err-readonly-parent --seed 1 --split search
     metrics: *metrics
     timeoutMs: 60000
+baseline:
+  file: baselines/write.search.json
+  pin: [task.solved, custom.digest.behavior, custom.counters.fs_ops]

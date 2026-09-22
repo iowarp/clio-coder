@@ -1,0 +1,82 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "tool-bench-find-holdout",
+	"recordedAt": "2026-09-22T01:18:10.585Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "c3594c95a6d66304104acb5ba45e136545537fdf"
+	},
+	"pin": ["task.solved", "custom.digest.behavior", "custom.counters.fs_ops"],
+	"tasks": {
+		"find.holdout.dirs-and-files": {
+			"custom.counters.fs_ops": 29,
+			"custom.digest.behavior": "312fa3be8033df84fc3bb5add723f92d8a2a42993166b64340aebd56981ee67d",
+			"task.solved": true
+		},
+		"find.holdout.empty-result-1k": {
+			"custom.counters.fs_ops": 14,
+			"custom.digest.behavior": "74308bba2d4b28c4b14663c97013021cb789cbf6ff979dc389f7850f7ffef5b7",
+			"task.solved": true
+		},
+		"find.holdout.err-missing-root": {
+			"custom.counters.fs_ops": 18,
+			"custom.digest.behavior": "a47d6d6bda0ee5eec55ae4a5d72a7ee11a1a656578a7b30342e78b664b3b6d4c",
+			"task.solved": true
+		},
+		"find.holdout.err-symlink-outside-path": {
+			"custom.counters.fs_ops": 25,
+			"custom.digest.behavior": "213f7b56f499c5fc9fba25da157f5606ebcc54457b465e2d14df19d189cc96ad",
+			"task.solved": true
+		},
+		"find.holdout.extension-1k": {
+			"custom.counters.fs_ops": 114,
+			"custom.digest.behavior": "7bcfcc2fb2fcb51fb2341ff4f1b182b9eacf8eff537d3247ea24d6c445fc4f93",
+			"task.solved": true
+		},
+		"find.holdout.hidden-files": {
+			"custom.counters.fs_ops": 29,
+			"custom.digest.behavior": "490856768381c5c925e3256a903c0812244e6251660d14d2e3fd3d9cbdfbfd24",
+			"task.solved": true
+		},
+		"find.holdout.ignored-dirs": {
+			"custom.counters.fs_ops": 19,
+			"custom.digest.behavior": "a51660d438cc532f3d04bdff93d2630c42736cb5dff724a2946793ed92d87e22",
+			"task.solved": true
+		},
+		"find.holdout.name-100": {
+			"custom.counters.fs_ops": 29,
+			"custom.digest.behavior": "5ddecee5d023b8d8c195cde4c3a40763fc991600af4447f4f10759928eb0bbed",
+			"task.solved": true
+		},
+		"find.holdout.nested-depth-12": {
+			"custom.counters.fs_ops": 29,
+			"custom.digest.behavior": "0fc300b4b2f6e59b27fea248eef2a8d20c1c9f5b8f86d68c2d10bcaab0be5fc5",
+			"task.solved": true
+		},
+		"find.holdout.order-200": {
+			"custom.counters.fs_ops": 1014,
+			"custom.digest.behavior": "2fb9f49d6a9575030b9d09a2924b094c9fba5d6c14bd7b2f7aa1b69b18d64528",
+			"task.solved": true
+		},
+		"find.holdout.symlink-dir-outside": {
+			"custom.counters.fs_ops": 64,
+			"custom.digest.behavior": "fd79a2c2d258c05539798db0e9d91d45b358398d9016ab7c7e929cf289169ed9",
+			"task.solved": true
+		},
+		"find.holdout.symlink-loop": {
+			"custom.counters.fs_ops": 287,
+			"custom.digest.behavior": "ff1c1b32048f2b4aef0346b6b44a1d545fcb26f4a2e12f6169b4b427376b18ec",
+			"task.solved": true
+		},
+		"find.holdout.tree-10": {
+			"custom.counters.fs_ops": 24,
+			"custom.digest.behavior": "e7a1a9d117221202607debd239a7448ce9a8edc9b8f468ea1f964149bda283f1",
+			"task.solved": true
+		},
+		"find.holdout.tree-10k": {
+			"custom.counters.fs_ops": 39,
+			"custom.digest.behavior": "b8fcffa7dba1bc4d27f21a166af1803fcebe57d80c1ef262366fe6fc80c60e6f",
+			"task.solved": true
+		}
+	}
+}

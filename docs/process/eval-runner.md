@@ -20,6 +20,7 @@ clio-coder eval run --task-file <tasks.yaml> [--repeat <n>] [--out <path>] [--cl
 clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
 clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
 clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+clio-coder eval baseline record|check --suite <suite.yaml> [--artifact <path>] [--clio-coder-entry <path>]
 clio-coder eval inventory --json
 ```
 
@@ -35,6 +36,7 @@ clio-coder eval inventory --json
   * `junit`: XML report for CI/CD integration.
 * **`compare`**: Compares two evaluation artifacts (baseline and candidate) by matching tasks.
 * **`gate`**: Compares candidate metrics against baseline and absolute thresholds. Correctness and safety regressions fail independently of informational budgets.
+* **`baseline`**: Records or checks the committed per-task baseline a suite declares. `record` runs the suite and writes the file; `check` runs it and names every pinned value that moved. `--artifact` reads an existing artifact instead of running the suite again.
 * **`inventory`**: Prints the fixed machine-readable inventory used by GUI hosts. It includes stored report identity, provenance, serving facts, accounting, and per-scenario outcomes without report attachments.
 
 Exit codes:
@@ -495,6 +497,44 @@ same typed predicates and reports every firing budget or missing measurement,
 but never changes the exit status. `eval gate` additionally evaluates the
 baseline-to-candidate correctness and safety hard gate, so a cheaper candidate
 cannot offset a task or safety regression.
+
+### Committed per-task baselines
+
+A threshold applies one bound to every run in the suite, so it can bound
+`custom.counters.fs_ops` across the matrix but cannot say that one named
+scenario must reproduce one exact value. A baseline can. A suite declares one:
+
+```yaml
+baseline:
+  file: baselines/read.search.json
+  pin: [task.solved, custom.digest.behavior, custom.counters.fs_ops]
+```
+
+`file` is resolved against the suite's directory and must stay inside it. `pin`
+names the metric keys recorded per task; only metrics that are a property of the
+harness belong there. Wall time, RSS and CPU are properties of the machine, so
+pinning them would fail the check on a busier laptop and teach everyone to
+ignore it.
+
+`eval baseline record` runs the suite and writes the file. It refuses to write
+when a pinned metric is absent from a task or disagrees across repeats: an
+unstable value is not a baseline, and recording one makes the next check fail
+for a reason nobody can act on. `eval baseline check` runs the suite and reports
+every task whose pinned value moved, disappeared, or became unstable, and exits
+nonzero. A task the run produced but the baseline does not record is a notice,
+not a failure; the corpus change that added it is already visible in the suite's
+own diff.
+
+`eval run` performs the same check on any suite that declares a baseline, for
+the reason it also evaluates thresholds inline: a reference only a later command
+consults leaves the run that broke it exiting zero. A declared baseline whose
+file has never been recorded fails the run, because the suite names a reference
+that does not exist.
+
+The recorded file is sorted by task and by metric with one value per line, so
+`git diff` on it is the behavioral changelog: a change to the harness that moves
+one tool's result shape shows up as that scenario's `custom.digest.behavior`
+line changing, and the review question becomes whether that change was intended.
 
 ### `--trials N`
 

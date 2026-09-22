@@ -1,0 +1,127 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "tool-bench-bash-holdout",
+	"recordedAt": "2026-09-22T01:36:38.276Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "c3594c95a6d66304104acb5ba45e136545537fdf"
+	},
+	"pin": ["task.solved", "custom.digest.behavior", "custom.counters.fs_ops"],
+	"tasks": {
+		"bash.holdout.append-file": {
+			"custom.counters.fs_ops": 35,
+			"custom.digest.behavior": "10a0f4529c96ff9eb1bc35f431f624f9e268518ad38656731a17ac02adbcfa4c",
+			"task.solved": true
+		},
+		"bash.holdout.binary-output": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "73010296e704fa19212dae20e90a307b765129d2747b7fdffcabf4c3bbfcf5e2",
+			"task.solved": true
+		},
+		"bash.holdout.both-streams": {
+			"custom.counters.fs_ops": 25,
+			"custom.digest.behavior": "94e0a510ef545fb9d71c59bdfc72c28275781acb9dd914b0ec459c8bea27f97d",
+			"task.solved": true
+		},
+		"bash.holdout.cwd-inside": {
+			"custom.counters.fs_ops": 17,
+			"custom.digest.behavior": "a99fd02d00dc0f0f7f0979dcaef35bb2823598a1837b31225eac8127a3bd7fc8",
+			"task.solved": true
+		},
+		"bash.holdout.err-cwd-escape": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "42c46ba060196a21b35b98ad34e0a7fde2850ab5a20c264bf30d6eab2c346f1c",
+			"task.solved": true
+		},
+		"bash.holdout.err-empty-command": {
+			"custom.counters.fs_ops": 2,
+			"custom.digest.behavior": "169238ec52c5e48c790dc9b9fb0f2a58739f54d77c4ed0776f0aa55f5d411211",
+			"task.solved": true
+		},
+		"bash.holdout.err-not-found": {
+			"custom.counters.fs_ops": 7,
+			"custom.digest.behavior": "e38afef9cd24d78a2a4e34bc1ec3f7433982899ebf07521432090f96c094f0c8",
+			"task.solved": true
+		},
+		"bash.holdout.err-timeout": {
+			"custom.counters.fs_ops": 19,
+			"custom.digest.behavior": "8f1299794fc7ea3285ab9531cfce0eebfc41277755c4837288c602cf948b8904",
+			"task.solved": true
+		},
+		"bash.holdout.exit-1": {
+			"custom.counters.fs_ops": 19,
+			"custom.digest.behavior": "cf0d8301d1ab34fe215a8e31177a3a2423a94385dfb524c4d48a05d88f7c6eef",
+			"task.solved": true
+		},
+		"bash.holdout.exit-42": {
+			"custom.counters.fs_ops": 19,
+			"custom.digest.behavior": "ec567a9191a9bec2ec44b907394481af1a0707cefd9684200003c3cdcb782836",
+			"task.solved": true
+		},
+		"bash.holdout.no-final-newline": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "67db84e8de73d473a595203efcf27db5da09f652882b2521b1354d650522addc",
+			"task.solved": true
+		},
+		"bash.holdout.parked-at-auto-edit": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "0e70387e6078b6187dc0d07c6f1211275bae1db1a67a65ab4004e3832c2d3c3a",
+			"task.solved": true
+		},
+		"bash.holdout.parked-read-only": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "f9f85ca921f2dffe206d6bbd66c2ffd4156ef194ad48693d719e15d5e03bccac",
+			"task.solved": true
+		},
+		"bash.holdout.policy-bounded-4m": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "4995f8884901ff3d4243874ae913b9808e9c10050aa16ba8d9a5b860bc84365e",
+			"task.solved": true
+		},
+		"bash.holdout.policy-full-1k": {
+			"custom.counters.fs_ops": 8,
+			"custom.digest.behavior": "10b70cb340c645169a2275a19fa52e82a002e059d8284ab00f9c56c66a8376c3",
+			"task.solved": true
+		},
+		"bash.holdout.policy-metadata-only-4m": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "5a479a0171684b4470ed34526b87612a99919955320bb0d70b8692d614678f38",
+			"task.solved": true
+		},
+		"bash.holdout.policy-summary-4m": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "e496fe2ff698e316269a39aa73c47c0a7af8e8a0f0dfbc2ba3e5f732541625d6",
+			"task.solved": true
+		},
+		"bash.holdout.read-input-64k": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "367a7d866b4f1d110428413558342964c98bd9802f78446a2e2fa0f19fe20930",
+			"task.solved": true
+		},
+		"bash.holdout.read-input-900k": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "88507d53b282865bb4ac31d91759027dea08970c89d3f8c30e1e4a45503554ae",
+			"task.solved": true
+		},
+		"bash.holdout.stderr-plain": {
+			"custom.counters.fs_ops": 16,
+			"custom.digest.behavior": "009ee8d21d8de57ae5b00ce1bc952454c65ab5993aedb54cf49b3db6f96148d3",
+			"task.solved": true
+		},
+		"bash.holdout.stdout-plain": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "d71b6752cd23cbb50708ecb7a579584ab3703fbf75728c735d8b4a2dc8edd3cb",
+			"task.solved": true
+		},
+		"bash.holdout.utf8-multibyte-16k": {
+			"custom.counters.fs_ops": 10,
+			"custom.digest.behavior": "28028edac7cab1be7651718def702cdee8039782b3dc39162e06f921454cf841",
+			"task.solved": true
+		},
+		"bash.holdout.write-file": {
+			"custom.counters.fs_ops": 43,
+			"custom.digest.behavior": "717fe8d042c85819bcb6f193a7b7e2ed836ad900f8a5466a30ad0676c0b4ec54",
+			"task.solved": true
+		}
+	}
+}

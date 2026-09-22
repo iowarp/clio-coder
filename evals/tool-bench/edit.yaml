@@ -210,3 +210,6 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario edit.search.err-mixed-eol --seed 1 --split search
     metrics: *metrics
     timeoutMs: 60000
+baseline:
+  file: baselines/edit.search.json
+  pin: [task.solved, custom.digest.behavior, custom.counters.fs_ops]

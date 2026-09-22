@@ -1,9 +1,19 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { InvalidIdError } from "../core/safe-id.js";
 import { shellQuote } from "../core/shell-quote.js";
 import { clioDataDir } from "../core/xdg.js";
 import { loadEvalArtifactV4, parseEvalArtifactV4, writeEvalArtifactV4 } from "../domains/eval/artifacts/store.js";
+import {
+	buildEvalBaseline,
+	checkEvalBaseline,
+	EVAL_BASELINE_SCHEMA_V1,
+	type EvalBaselineFileV1,
+	loadEvalBaselineFile,
+	renderEvalBaselineFinding,
+	serializeEvalBaseline,
+} from "../domains/eval/compare/baseline.js";
 import { compareEvalArtifactsV4 } from "../domains/eval/compare/compare.js";
 import { evaluateGate, renderGateFailure, renderInformationalBudget } from "../domains/eval/compare/gates.js";
 import { loadThresholds } from "../domains/eval/compare/thresholds.js";
@@ -33,7 +43,14 @@ Commands:
   clio-coder eval report <evalId> --format text|json|md|swe-jsonl|junit
 	  clio-coder eval compare <baselineEvalId> <candidateEvalId> [--metric <name>] [--format text|json|md|junit] [--allow-config-drift]
   clio-coder eval gate <candidateEvalId> --baseline <baselineEvalId> [--thresholds <file>]
+	  clio-coder eval baseline record|check --suite <suite.yaml> [--artifact <path>] [--clio-coder-entry <path>]
   clio-coder eval inventory --json
+
+baseline pins the per-task values a suite declares under its baseline block
+into a committed file, so a harness change that moves one scenario's behavior
+names that scenario instead of shifting a suite average. record runs the suite
+and writes the file; check runs it and reports every pinned value that moved.
+Pass --artifact to read an existing artifact instead of running the suite again.
 
 inventory is the fixed machine-readable read a GUI host may run. Unlike report
 and compare it names no eval id, so the process it starts cannot be steered to a
@@ -42,11 +59,13 @@ provenance, serving facts, accounting, and per-scenario outcomes, and none of
 the runner attachments a report holds.
 `;
 
-type EvalCommand = "validate" | "run" | "report" | "compare" | "gate";
+type EvalCommand = "validate" | "run" | "report" | "compare" | "gate" | "baseline";
 type EvalReportFormat = "text" | "json" | "md" | "swe-jsonl" | "junit";
+type EvalBaselineMode = "record" | "check";
 
 interface ParsedEvalArgs {
 	command?: EvalCommand;
+	baselineMode?: EvalBaselineMode;
 	suite?: string;
 	taskFile?: string;
 	repeat: number;
@@ -85,11 +104,33 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 			continue;
 		}
 		if (parsed.command === undefined) {
-			if (arg === "validate" || arg === "run" || arg === "report" || arg === "compare" || arg === "gate") {
+			if (
+				arg === "validate" ||
+				arg === "run" ||
+				arg === "report" ||
+				arg === "compare" ||
+				arg === "gate" ||
+				arg === "baseline"
+			) {
 				parsed.command = arg;
 				continue;
 			}
 			throw new Error(`unknown eval command: ${arg}`);
+		}
+		if (parsed.command === "baseline") {
+			if (parsed.baselineMode === undefined) {
+				if (arg !== "record" && arg !== "check") throw new Error("eval baseline requires record or check");
+				parsed.baselineMode = arg;
+				continue;
+			}
+			if (arg === "--suite" || arg === "--artifact" || arg === "--clio-coder-entry") {
+				const value = requiredValue(args, index++, arg);
+				if (arg === "--suite") parsed.suite = value;
+				else if (arg === "--artifact") parsed.artifact = value;
+				else parsed.clioEntry = value;
+				continue;
+			}
+			throw new Error(`unknown eval baseline flag: ${arg}`);
 		}
 		if (parsed.command === "validate" || parsed.command === "run") {
 			if (arg === "--package" || arg === "--eval") {
@@ -228,6 +269,10 @@ function parseEvalArgs(args: ReadonlyArray<string>): ParsedEvalArgs {
 	if (parsed.command === "compare" && parsed.compareIds.length !== 2) {
 		throw new Error("compare requires <baselineEvalId> <candidateEvalId>");
 	}
+	if (parsed.command === "baseline") {
+		if (parsed.baselineMode === undefined) throw new Error("eval baseline requires record or check");
+		if (parsed.suite === undefined) throw new Error("eval baseline requires --suite");
+	}
 	if (parsed.command === "gate" && (parsed.evalId === undefined || parsed.baseline === undefined)) {
 		throw new Error("gate requires <candidateEvalId> --baseline <baselineEvalId>");
 	}
@@ -259,6 +304,7 @@ export async function runEvalCommand(args: ReadonlyArray<string>): Promise<numbe
 	if (parsed.command === "report") return runEvalReportCommand(parsed);
 	if (parsed.command === "compare") return runEvalCompareCommand(parsed);
 	if (parsed.command === "gate") return runEvalGateCommand(parsed);
+	if (parsed.command === "baseline") return runEvalBaselineCommand(parsed);
 	printError("eval requires a command");
 	return 2;
 }
@@ -316,7 +362,15 @@ async function runEvalRun(parsed: ParsedEvalArgs): Promise<number> {
 			process.stdout.write(`informational budgets: ${gate.informational.length} notice\n`);
 			for (const finding of gate.informational) process.stdout.write(renderInformationalBudget(finding));
 		}
-		return artifact.summary.failed === 0 && (gate === null || gate.pass) ? 0 : 1;
+		// Same reason the gate runs here: a suite that declares a baseline and is
+		// only checked against it by a later command still exits zero on the run
+		// that moved it. A declared baseline whose file is absent fails too; the
+		// suite claims a reference that does not exist.
+		const baselineStatus =
+			suite.baseline === undefined
+				? 0
+				: checkBaseline(artifact, suite.baseline.pin, resolve(loaded.baseDir, suite.baseline.file));
+		return artifact.summary.failed === 0 && (gate === null || gate.pass) && baselineStatus === 0 ? 0 : 1;
 	} catch (error) {
 		return handleEvalLoadError(error, 1);
 	}
@@ -354,6 +408,97 @@ async function runEvalCompareCommand(parsed: ParsedEvalArgs): Promise<number> {
 		printError(error instanceof Error ? error.message : String(error));
 		return error instanceof InvalidIdError ? 2 : 1;
 	}
+}
+
+/**
+ * Record or check a suite's committed per-task baseline. The artifact comes
+ * from a fresh run unless --artifact names one, so the same run can be checked
+ * and then recorded without paying for the suite twice.
+ */
+async function runEvalBaselineCommand(parsed: ParsedEvalArgs): Promise<number> {
+	try {
+		const loaded = await loadEvalSuiteFile(parsed.suite ?? "");
+		const spec = loaded.suite.baseline;
+		if (spec === undefined) {
+			printError(`suite ${loaded.suite.suite.id} declares no baseline block`);
+			return 2;
+		}
+		const baselinePath = resolve(loaded.baseDir, spec.file);
+		const artifact =
+			parsed.artifact === undefined
+				? await runSuiteForBaseline(loaded, parsed)
+				: parseEvalArtifactV4(JSON.parse(await readFile(parsed.artifact, "utf8")) as unknown, parsed.artifact);
+		if (artifact.suite.id !== loaded.suite.suite.id) {
+			printError(`artifact is for suite ${artifact.suite.id}, not ${loaded.suite.suite.id}`);
+			return 2;
+		}
+		if (parsed.baselineMode === "record") return recordBaseline(artifact, spec.pin, baselinePath);
+		return checkBaseline(artifact, spec.pin, baselinePath);
+	} catch (error) {
+		return handleEvalLoadError(error, 1);
+	}
+}
+
+async function runSuiteForBaseline(
+	loaded: Awaited<ReturnType<typeof loadEvalSuiteFile>>,
+	parsed: ParsedEvalArgs,
+): Promise<EvalArtifactV4> {
+	const suite = resolveSuiteForRun(loaded.suite, {
+		...(parsed.target === undefined ? {} : { target: parsed.target }),
+		...(parsed.model === undefined ? {} : { model: parsed.model }),
+	});
+	const clioEntry = resolve(parsed.clioEntry ?? process.argv[1] ?? "dist/cli/index.js");
+	return runEvalSuiteV2({ ...loaded, suite }, { clioEntry });
+}
+
+function recordBaseline(artifact: EvalArtifactV4, pin: ReadonlyArray<string>, path: string): number {
+	const { tasks, findings } = buildEvalBaseline(artifact, pin);
+	// A metric that is absent or unstable across repeats has no value worth
+	// pinning, and recording one anyway would make the next check fail for a
+	// reason the operator cannot act on. Refuse to write instead.
+	if (findings.length > 0) {
+		process.stdout.write(`baseline: not recorded (${findings.length} unpinnable ${plural(findings.length, "metric")})\n`);
+		for (const finding of findings) process.stdout.write(renderEvalBaselineFinding(finding));
+		return 1;
+	}
+	const file: EvalBaselineFileV1 = {
+		schema: EVAL_BASELINE_SCHEMA_V1,
+		suite: artifact.suite.id,
+		recordedAt: new Date().toISOString(),
+		clioCoder: { version: artifact.clioCoder.version, commit: artifact.clioCoder.commit },
+		pin: [...pin],
+		tasks,
+	};
+	mkdirSync(dirname(path), { recursive: true });
+	writeFileSync(path, serializeEvalBaseline(file), "utf8");
+	const count = Object.keys(tasks).length;
+	process.stdout.write(`baseline: recorded ${count} ${plural(count, "task")} to ${path}\n`);
+	return 0;
+}
+
+function checkBaseline(artifact: EvalArtifactV4, pin: ReadonlyArray<string>, path: string): number {
+	const baseline = loadEvalBaselineFile(path);
+	const result = checkEvalBaseline(artifact, baseline, pin);
+	if (result.pinDrift) {
+		process.stdout.write(
+			`baseline: pin list changed since ${baseline.recordedAt || "record time"}; re-record to pin the new keys\n`,
+		);
+	}
+	for (const notice of result.notices) process.stdout.write(renderEvalBaselineFinding(notice));
+	if (result.pass) {
+		process.stdout.write(`baseline: pass (${result.matched} ${plural(result.matched, "task")} match ${path})\n`);
+		return 0;
+	}
+	process.stdout.write(
+		`baseline: fail (${result.failures.length} ${plural(result.failures.length, "change")}, ${result.matched} unchanged)\n`,
+	);
+	for (const failure of result.failures) process.stdout.write(renderEvalBaselineFinding(failure));
+	process.stdout.write(`re-record with: clio-coder eval baseline record --suite <suite.yaml>\n`);
+	return 1;
+}
+
+function plural(count: number, word: string): string {
+	return count === 1 ? word : `${word}s`;
 }
 
 async function runEvalGateCommand(parsed: ParsedEvalArgs): Promise<number> {

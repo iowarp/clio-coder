@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import type { ToolSpec } from "../../../src/tools/registry.js";
 import {
 	type BenchTool,
+	DEFAULT_AUTONOMY,
 	type ExpectedEntry,
 	generateScenario,
 	materializeScenario,
@@ -60,6 +61,7 @@ const { createWorkerSafety, createWorkerToolRegistry } = await import("../../../
 const { invokeRegisteredTool } = await import("../../../src/tools/agent-tools.js");
 
 const TOOL_NAMES = {
+	bash: ToolNames.Bash,
 	edit: ToolNames.Edit,
 	read: ToolNames.Read,
 	write: ToolNames.Write,
@@ -252,7 +254,7 @@ async function invokeOnce(
 			createWorkerSafety({ cwd: realRoot }),
 			{ noSkills: true },
 			[],
-			"auto-edit",
+			scenario.autonomy ?? DEFAULT_AUTONOMY,
 		);
 		const toolName = TOOL_NAMES[scenario.tool];
 		if (options.replaceTool !== undefined) {

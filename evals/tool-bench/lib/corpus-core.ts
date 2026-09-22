@@ -12,7 +12,7 @@ export type Split = (typeof SPLITS)[number];
 export const PROFILES = ["default", "full"] as const;
 export type Profile = (typeof PROFILES)[number];
 export const DEFAULT_SEED = 1;
-export const TOOLS = ["edit", "read", "write", "grep", "find"] as const;
+export const TOOLS = ["edit", "read", "write", "grep", "find", "bash"] as const;
 export type BenchTool = (typeof TOOLS)[number];
 
 export type CorpusEntry =
@@ -36,6 +36,18 @@ export interface ScenarioExpect {
 	output?: { includes: string[]; excludes: string[] };
 }
 
+export type BenchAutonomy = "read-only" | "suggest" | "auto-edit" | "full-auto";
+
+/**
+ * The autonomy a scenario's call runs at. It defaults to auto-edit, which is
+ * what every observe and mutate scenario measures. An execute-plane call parks
+ * for confirmation there, so a scenario that measures what bash does rather
+ * than what admission does declares full-auto, and a scenario that measures the
+ * park itself keeps the default. It is not part of the behavior document: the
+ * digest is compared per scenario id, and the scenario id already fixes it.
+ */
+export const DEFAULT_AUTONOMY: BenchAutonomy = "auto-edit";
+
 export interface ScenarioBase {
 	id: string;
 	tool: BenchTool;
@@ -45,6 +57,7 @@ export interface ScenarioBase {
 	profile: Profile;
 	files: CorpusEntry[];
 	args: object;
+	autonomy?: BenchAutonomy;
 	expect: ScenarioExpect;
 }
 
