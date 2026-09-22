@@ -2,6 +2,7 @@ import { type Dirent, readdirSync } from "node:fs";
 import path from "node:path";
 import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
+import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
 import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
@@ -98,6 +99,13 @@ export interface ContextToolDeps {
 	 * invite a load the pending-skill policy rejects. Undefined means true.
 	 */
 	skillMarketplace?: boolean;
+	/**
+	 * Per-skill relevance scores this turn's pre-turn decision pass resolved, or
+	 * undefined when the `skills` site is unbound and whenever the pass produced
+	 * nothing usable. This handler is synchronous, so the scores have to already
+	 * exist by the time it runs; they order the listing and never shorten it.
+	 */
+	getSkillRelevance?: () => PrecomputedRanking | undefined;
 }
 
 function cwdFromDeps(deps?: ContextToolDeps): string {
@@ -441,6 +449,14 @@ function runSkillsScope(
 						cwdFromDeps(deps),
 						deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
 					);
+		// A ranking that cannot be read is simply no ranking; the listing is the
+		// model's map of its own capabilities and must render either way.
+		let relevance: PrecomputedRanking | undefined;
+		try {
+			relevance = deps.getSkillRelevance?.();
+		} catch {
+			relevance = undefined;
+		}
 		// The catalog is bounded but not small, and it has to fit the per-call cap
 		// like any observation. It is cut by whole rows with the reply protocol
 		// reserved first, rather than by head-truncating the finished string:
@@ -459,6 +475,7 @@ function runSkillsScope(
 			limit: typeof args.limit === "number" ? args.limit : undefined,
 			offset: typeof args.offset === "number" ? args.offset : 0,
 			capBytes: reservation.callCapBytes,
+			...(relevance === undefined ? {} : { relevance }),
 		});
 		// Shown rows are selected by the row's own stable key, not by its name. An
 		// installed standalone skill has a ready row and a package row under one
