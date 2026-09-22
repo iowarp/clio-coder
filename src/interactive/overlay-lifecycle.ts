@@ -1,4 +1,7 @@
+import { credentialsPresent } from "../domains/providers/credentials.js";
+import { inspectDecisionSite } from "../domains/providers/decision-sites.js";
 import type { LibraryEntryKind } from "../domains/resources/index.js";
+import { describeToolRisk as readToolRisk, toolRiskAdvisoryLine } from "../domains/safety/tool-risk.js";
 import { appendInterviewRecord, appendNotice } from "./command-output.js";
 import { createOverlayAskUserLifecycle, type OverlayAskUserLifecycle } from "./overlay-ask-user-lifecycle.js";
 import { createOverlayAuthLifecycle } from "./overlay-auth-lifecycle.js";
@@ -18,6 +21,12 @@ import {
 	permissionOverlayTitle,
 	permissionOverlayTone,
 } from "./permission-overlay.js";
+
+/**
+ * Bound on the advisory request. Nothing waits on it, so this is only how long
+ * a card keeps a request alive before giving up on ever showing the line.
+ */
+const TOOL_RISK_DECISION_TIMEOUT_MS = 5_000;
 
 export * from "./overlay-key-routing.js";
 
@@ -273,6 +282,28 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 		bus: deps.app.bus,
 		dispatch: deps.app.dispatch,
 		getAutonomy: () => deps.app.getSettings?.().safety.autonomy ?? "auto-edit",
+		/**
+		 * The blast-radius sentence for one parked call, or nothing at all.
+		 *
+		 * Resolved here rather than in the composition root because the binding is
+		 * read per call: an operator who unbinds the site mid-session stops seeing
+		 * the line on the next approval instead of at the next restart. Every path
+		 * that cannot produce a sentence returns the empty string, and the caller
+		 * never waits on this.
+		 */
+		describeToolRisk: async (subject) => {
+			const settings = deps.app.getSettings?.();
+			if (!settings || !deps.app.providers) return "";
+			const status = inspectDecisionSite("toolRisk", {
+				settings,
+				providers: deps.app.providers,
+				ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: TOOL_RISK_DECISION_TIMEOUT_MS },
+			});
+			if (!status.bound) return "";
+			return toolRiskAdvisoryLine(
+				await readToolRisk(status.decider, subject, `${status.targetId}/${status.model ?? "default"}`),
+			);
+		},
 		getOverlayState: () => overlayTransitions.state,
 		openPermissionOverlay: (view, inspect, invocation, advisory) => {
 			if (overlayTransitions.state === "permission-confirm") return false;
