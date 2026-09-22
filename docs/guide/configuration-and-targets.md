@@ -841,6 +841,99 @@ never cancels the turn, and a turn aborted before the check emits none.
 Interactive sessions show it as a notice, and headless runs and workers write
 it to stderr.
 
+### Inception Mercury (diffusion)
+
+The runtime id is `inception`. It is a cloud runtime authenticated with an API
+key read from `INCEPTION_API_KEY`, and it defaults to
+`https://api.inceptionlabs.ai/v1`. The known wire models are `mercury-2.5`,
+`mercury-2`, and `mercury-edit-2`.
+
+Mercury is a diffusion LLM. It denoises whole blocks of tokens in parallel
+rather than emitting them left to right, which is what makes it fast enough to
+sit in a latency-sensitive slot a frontier model cannot fill. Inception prices
+Mercury at $0.04 per million input tokens and $0.15 per million output tokens.
+
+```yaml
+targets:
+  - id: mercury
+    runtime: inception
+    defaultModel: mercury-2.5
+    auth:
+      apiKeyEnvVar: INCEPTION_API_KEY
+```
+
+Two surfaces are wired. Chat runs at `/v1/chat/completions` through the ordinary
+pi-ai transport, OpenAI-compatible with tool calling and `json-schema`
+structured outputs. Fill-in-the-middle runs at `/v1/fim/completions` and is
+exposed through the existing `infill()` verb, so callers reach it exactly as
+they reach llama.cpp's. FIM is served by the edit-tuned model rather than the
+chat default, so a target that names no `defaultModel` infills with
+`mercury-edit-2`. `/v1/edit/completions` is deliberately not implemented; its
+next-edit prediction needs a contract verb of its own and its context-tag
+request format is not covered by the published reference.
+
+Reasoning is declared `false` for this runtime. Mercury accepts
+`reasoning_effort`, but above `instant` the response carries `content: null`
+with `reasoning_summary: null`, and the streaming path leaks a raw
+`<|think_end|>` token into the text. Nothing can be shown to the operator, so
+the capability is declared false and the effort is pinned to `instant` in the
+request body. Omitting the field is not neutral: Mercury then reasons by default
+and spends the whole token budget on hidden reasoning, returning an empty
+completion with `finish_reason: "length"`.
+
+Inception accepts only the `assistant`, `function`, `system`, `tool`, and `user`
+roles, so a system prompt sent as `developer` is rejected outright and every
+request carrying one is a 400. Catalog-backed model synthesis therefore gained
+`compat` and `samplingParams` passthrough, which lets a runtime declare wire
+quirks it knows about its own endpoint on top of whatever the catalog entry
+says. A provider can be OpenAI-compatible in shape without being compatible in
+vocabulary, and this is where that difference is recorded.
+
+The pre-probe capability placeholder is a 260,000-token window with 65,536
+output tokens, which is `mercury-2.5`'s shape. `mercury-2` and `mercury-edit-2`
+are 128k. The live probe reads `context_length` and `max_output_length` per
+model from `/models` and corrects both numbers, and a `defaultModel` that the
+listing does not return fails the probe by name rather than being attempted.
+
+### System One decision models (TypeSafe Jev)
+
+A System One model does not generate prose. Every question names a closed answer
+shape up front, and the model returns a calibrated distribution over that shape.
+That makes it a substrate for the harness's micro-decisions, where a chat model
+is both slower and unparseable.
+
+The runtime id is `typesafe-jev`, authenticated with an API key read from
+`TYPESAFE_API_KEY` against `https://api.typesafe.ai/v1`. The known wire models
+are `jev-latest` and `jev-preview`. The descriptor is hidden and declares
+`chat: false`, so Jev never appears as a conversational target and the configure
+wizard does not offer it. Reach it through `RuntimeDescriptor.decide()`, which
+answers a batch of independent typed questions against one body of evidence in a
+single round trip.
+
+Three answer primitives are covered:
+
+- `noul` returns a truth probability for a proposition.
+- `choice` returns one option from a declared set, with the distribution over
+  the whole set.
+- `score` returns a position on a criteria ladder. The question's `criteria`
+  carries what each answer means, so the caller defines the scale rather than
+  hoping a prompt implies it.
+
+Confidence is parsed as a separate axis from the answer, because they are
+different questions. A `noul` of 0.5 at high confidence is a decided coin-flip;
+at low confidence it is an abstention, and a caller gating on the result has to
+be able to tell the two apart. `src/domains/providers/decisions.ts` holds the
+readers that do, returning `null` rather than `false` below a confidence floor.
+
+A missing or unrecognised answer throws rather than defaulting. Callers index by
+the question ids they submitted, so a dropped answer is a contract break and not
+a soft failure, and a caller gating dispatch must never receive a decision the
+model did not make.
+
+> [!NOTE]
+> This is an alpha provider surface. The harness call sites that consume
+> `decide()` are not documented here yet, and no settings keys for them are
+> published. This section covers the provider and the concept only.
 
 ---
 
@@ -1506,8 +1599,8 @@ Representative built-in runtime IDs:
 
 | Category | Runtime IDs |
 | --- | --- |
-| Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs, including APIs such as InceptionAI when configured with the appropriate base URL and credentials. |
-| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `mistral`, `openai`, `openrouter` |
+| Protocol-compatible | `openai-compat`, `anthropic-compat` generic surfaces for additional OpenAI-compatible or Anthropic-compatible APIs configured with the appropriate base URL and credentials. |
+| Cloud | `alcf`, `anthropic`, `bedrock`, `deepseek`, `google`, `groq`, `inception`, `mistral`, `openai`, `openrouter` |
 | Subscription and worker harnesses | `openai-codex` for ChatGPT OAuth, `anthropic-max` for Anthropic OAuth, `claude-sdk` for Claude Agent SDK workers, `claude-code` for `claude -p` subprocess workers, and `antigravity-code` for structured `agy` external delegation |
 | Local native | `llamacpp`, `lmstudio`, `ollama`, `vllm`, `sglang`, `lemonade`, `lemonade-anthropic` |
 
