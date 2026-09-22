@@ -974,7 +974,8 @@ fleet:
 Eight sites are accepted, and each names a moment in the session rather than a
 component:
 
-- `routing` answers which worker takes a dispatch, at dispatch time.
+- `routing` reads what kind of work a dispatch asks for, at dispatch time. Its
+  answer is shadow evidence and never selects the worker.
 - `skills` answers which installed skills the listing carries, before the prompt
   is composed.
 - `memory` answers which durable records the prompt carries, at the same point.
@@ -1016,8 +1017,11 @@ The settings rows for these keys are in the
 
 #### What `routing` changes
 
-Binding `fleet.decisionProfiles.routing` replaces how dispatch reads a task
-before it picks a worker. Unbound, `classifyAgentTask` reads the task with an
+Binding `fleet.decisionProfiles.routing` replaces how the shadow route
+observation reads a task. It never changes which worker runs: active adaptive
+routing (`fleet.adaptiveRouting.agentRoles`) always classifies with the rules
+below, because a decision model gives the main agent hints and never picks for
+it. Unbound, `classifyAgentTask` reads the task with an
 ordered regex list and reports a confidence of either 0.3 or 0.7, depending only
 on whether its first rule matched. That number is a placeholder rather than a
 measurement, and routing keys off it.

@@ -147,6 +147,10 @@ export function agentRouteCandidates(input: {
 	 * inside dispatch, so a System One answer is resolved before the request
 	 * gets here rather than by making this function await. Omitted, the regex
 	 * classifier runs exactly as it always has.
+	 *
+	 * Honored in shadow mode only. In active mode the cold priors decide which
+	 * recipe an `auto` dispatch runs, and a decision model never picks for the
+	 * main agent, so active selection always classifies with the regex rules.
 	 */
 	features?: AgentTaskFeatures;
 }): { evaluations: AgentCandidateEvaluation[]; dimensions: AgentRouteDimension[] } {
@@ -192,7 +196,7 @@ export function agentRouteCandidates(input: {
 		locality: request.routingIntent?.locality ?? "any",
 		localAgentIds: specs.map((spec) => spec.id),
 		allowedAgentIds,
-		features: input.features ?? classifyAgentTask(request.task),
+		features: (input.mode === "shadow" ? input.features : undefined) ?? classifyAgentTask(request.task),
 	});
 	const evaluations = candidates.evaluations.map((evaluation) => ({
 		...evaluation,
