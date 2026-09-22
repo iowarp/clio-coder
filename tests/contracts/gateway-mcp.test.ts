@@ -254,6 +254,53 @@ describe("gateway MCP capabilities", () => {
 		}
 	});
 
+	// A scoped find used to filter on the `mcp_<id>__` prefix, which is not the
+	// ownership rule: with declarations `a` and `a__b`, `mcp_a__b__echo` starts
+	// with `mcp_a__` while `a__b` owns it. Asking for `a` then listed a
+	// capability its own server summary did not claim. Both the registered path
+	// and the cached path have to agree with `ownerIdOf`.
+	it("scopes a find to the owning server rather than the name prefix", async () => {
+		for (const cached of [false, true]) {
+			const scene = scenario();
+			writeFileSync(
+				join(scene.configDir, "mcp.yaml"),
+				JSON.stringify({
+					version: 1,
+					servers: ["a", "a__b"].map((id) => ({ id, command: process.execPath, args: [FIXTURE, "normal"] })),
+				}),
+			);
+			const first = wire(scene);
+			open.push(first.source);
+			await first.registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "a__b", refresh: true } });
+			strictEqual(first.source.ownerIdOf("mcp_a__b__echo"), "a__b");
+			strictEqual(first.source.ownerIdOf("mcp_a__echo"), "a");
+
+			// The cached pass reads the published catalog through a fresh source,
+			// so the filter is exercised without a registered spec to fall back on.
+			let registry = first.registry;
+			if (cached) {
+				await first.source.close();
+				const second = wire(scene);
+				open.push(second.source);
+				registry = second.registry;
+			}
+
+			const scoped = payloadOf(await registry.invoke({ tool: ToolNames.Gateway, args: { op: "find", server: "a" } }));
+			const names = (scoped.capabilities as Array<Record<string, unknown>>).map((entry) => entry.name);
+			strictEqual(
+				names.includes("mcp_a__b__echo"),
+				false,
+				`server "a" must not claim a__b's capability (cached=${cached})`,
+			);
+			const servers = (scoped.servers as Array<Record<string, unknown>> | undefined) ?? [];
+			deepStrictEqual(
+				servers.map((entry) => entry.id),
+				["a"],
+				"the summary already scoped to one server, so the capability list must agree with it",
+			);
+		}
+	});
+
 	it("never signals after ESRCH when the exit backstop runs before teardown settlement", async () => {
 		const scene = scenario();
 		ok(trustMcpServer({ cwd: scene.project, configDir: scene.configDir, id: "fake", actionClass: "read" }).ok);
