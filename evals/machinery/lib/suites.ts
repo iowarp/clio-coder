@@ -74,6 +74,21 @@ export const MACHINERY_SUITES: ReadonlyArray<MachinerySuite> = [
 			"pressure-policy-resolution",
 		],
 	},
+	{
+		name: "memory-selection",
+		id: "machinery-memory-selection",
+		title: "Machinery, durable memory selection",
+		description:
+			"Durable memory selection frozen across one prepared turn and its continuations, re-read on a new attempt, and revoked when the bounded store cannot be read.",
+		scenarios: [
+			"frozen-within-turn",
+			"continuation-inherits-frame",
+			"authority-change-rereads",
+			"prewarm-never-freezes",
+			"selection-reuse-across-turns",
+			"read-failure-revokes",
+		],
+	},
 ];
 
 export function machinerySuite(name: string): MachinerySuite {
