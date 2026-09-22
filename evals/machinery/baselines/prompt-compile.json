@@ -1,0 +1,36 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "machinery-prompt-compile",
+	"recordedAt": "2026-09-22T15:34:24.337Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "6bd96b964ae865a55e28d05bb9dccad1f45fbbbc"
+	},
+	"pin": ["task.solved", "custom.digest.behavior"],
+	"tasks": {
+		"prompt-compile.conditional-capability-guidance": {
+			"custom.digest.behavior": "654c845301039aeebfc5fabf52558d8190a0a101c618e8e8431333795fb40b05",
+			"task.solved": true
+		},
+		"prompt-compile.layout-version": {
+			"custom.digest.behavior": "9b2bd386ae9074877cda5141d9178cddba40e053e4550b8676fd51b5dd8c894a",
+			"task.solved": true
+		},
+		"prompt-compile.section-order-volatility": {
+			"custom.digest.behavior": "96a278f3e0b25a01726d20426ab838772d2fb513f0cfe9716c6cac4b6cbd6f53",
+			"task.solved": true
+		},
+		"prompt-compile.skill-activation-policy": {
+			"custom.digest.behavior": "0535249c59064b1b65cc101d6364ed80391358483bc053f6208e12683946207c",
+			"task.solved": true
+		},
+		"prompt-compile.stable-prefix-invariance": {
+			"custom.digest.behavior": "cb0cff8d8a122d2fbc401511bf9b0976f37b1efca4954b9c2da0bdab6ae79ed3",
+			"task.solved": true
+		},
+		"prompt-compile.worker-prompt-layers": {
+			"custom.digest.behavior": "acd8fceb3fd312d1c2f88a3fdde99b5d15aead72f7bb14bf255237c41c350357",
+			"task.solved": true
+		}
+	}
+}

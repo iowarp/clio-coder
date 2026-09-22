@@ -1,0 +1,36 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "machinery-continuity",
+	"recordedAt": "2026-09-22T15:34:11.496Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "6bd96b964ae865a55e28d05bb9dccad1f45fbbbc"
+	},
+	"pin": ["task.solved", "custom.digest.behavior"],
+	"tasks": {
+		"continuity.barrier-failure": {
+			"custom.digest.behavior": "10449cab03562b90c24475d514d41a9aedfe6ff370e0257b7a8936ffb91eb516",
+			"task.solved": true
+		},
+		"continuity.continuation-delivery": {
+			"custom.digest.behavior": "0a3c86692c35afc238f1def4766ccc749751474dc41fa0781e91908b759d48d1",
+			"task.solved": true
+		},
+		"continuity.eviction-checkpoint": {
+			"custom.digest.behavior": "d620aa80d2b130c2b52e933b35a7b0cbac473aeb9edc9e2b90f24254d4539857",
+			"task.solved": true
+		},
+		"continuity.handoff-preparation": {
+			"custom.digest.behavior": "9410ba5c10a8658e33967d2dc1a8afe670842e09fa6b21579eabcba7819e9fcb",
+			"task.solved": true
+		},
+		"continuity.receipt-authority": {
+			"custom.digest.behavior": "98f664313fb181dfb922eb9d61cc6d561c567007df143540d8dfd4df14ed89fc",
+			"task.solved": true
+		},
+		"continuity.summary-checkpoint": {
+			"custom.digest.behavior": "cd54bfdd00c03fb1202f55a5b9a97e655b2956f369bacd25a32daf95efa5185f",
+			"task.solved": true
+		}
+	}
+}
