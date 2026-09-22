@@ -106,6 +106,8 @@ describe("clio_docs and clio_library", () => {
 				!workerResults.slice(0, 3).some((result) => result.file === "docs/process/configure-tree-proposal.md"),
 				JSON.stringify(workerResults),
 			);
+			// A release handoff is a dated record of one cut, not operator guidance.
+			ok(!workerResults.slice(0, 3).some((result) => /handoff/u.test(result.file)), JSON.stringify(workerResults));
 			ok(
 				workerResults.some((result) => result.file === "docs/guide/configuration-and-targets.md"),
 				JSON.stringify(workerResults),

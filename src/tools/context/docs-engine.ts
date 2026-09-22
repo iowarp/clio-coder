@@ -25,9 +25,9 @@ const EXPANDED_TERM_WEIGHT = 0.45;
 const NONCURRENT_REFERENCE_WEIGHT = 0.25;
 
 const NONCURRENT_REFERENCE_PATH =
-	/^docs\/(?:history\/|gui\/(?!readme\.md$)|process\/[^/]*(?:proposal|audit-v\d|battletest-\d{4})[^/]*\.md$)/iu;
+	/^docs\/(?:history\/|gui\/(?!readme\.md$)|process\/[^/]*(?:proposal|handoff|audit-v\d|battletest-\d{4})[^/]*\.md$)/iu;
 const EXPLICIT_NONCURRENT_INTENT =
-	/\b(?:histor(?:y|ical|ic)|archives?|archived|proposal|proposed|blueprints?|design|spec(?:ification)?s?|roadmaps?|audits?|legacy|previous|older|old)\b/iu;
+	/\b(?:histor(?:y|ical|ic)|archives?|archived|proposal|proposed|blueprints?|design|spec(?:ification)?s?|roadmaps?|audits?|legacy|previous|older|old|handoffs?)\b/iu;
 
 const STOP_WORDS = new Set([
 	"a",
