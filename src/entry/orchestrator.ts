@@ -82,6 +82,7 @@ import { createMemoryPromptReader } from "../domains/memory/prompt-cache.js";
 import { loadMemoryRecordsSync } from "../domains/memory/store.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
+import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
 import { createDemoGuidanceRegistration } from "../domains/middleware/demo-guidance.js";
 import {
 	createDetachedDispatchNudgeRegistration,
@@ -135,9 +136,11 @@ import {
 } from "../domains/providers/index.js";
 import { hasLiveModelCatalog, modelResidencyForStatus } from "../domains/providers/model-discovery.js";
 import { memoryInterventionModelMaxTokens } from "../domains/providers/model-runtime-capabilities.js";
+import { preTurnHints, preTurnRecord } from "../domains/providers/pre-turn-brief.js";
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { TURN_SITES } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import {
 	createResourcesDomainModule,
@@ -1912,6 +1915,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						id: entry.name,
 						summary: entry.description,
 					})),
+		// Turn-level sites join the same request; each one only asks when bound.
+		sites: TURN_SITES,
 	});
 	const toolBootstrap = registerAllTools(toolRegistry, {
 		getSkillRelevance: () => turnRelevance.skills(),
@@ -2281,6 +2286,15 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	if (!options.headless && !options.acp) {
 		middleware.registerHook(createDemoGuidanceRegistration(() => getCurrentSettings().interface.demo));
 	}
+	// Pre-turn decision hints for the main agent. Registered on every surface
+	// that runs a chat turn; with no site bound the store holds nothing and the
+	// registration contributes nothing.
+	middleware.registerHook(
+		createDecisionHintsRegistration({
+			getHints: () => preTurnHints(turnRelevance.sites, turnRelevance.current()),
+			getTurnConstraints: () => chat.currentTurnConstraints?.(),
+		}),
+	);
 	const chat = createChatLoop({
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
@@ -2305,8 +2319,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
-		refreshTurnRelevance: (taskText) => turnRelevance.refresh(taskText),
+		refreshTurnRelevance: (taskText, previous) => turnRelevance.refresh({ task: taskText, previous }),
 		getMemoryRelevance: () => turnRelevance.memory(),
+		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
 		getTaskMemoryHandoffSource: () => {
 			const meta = session?.current();
 			if (!meta) throw new Error("task memory handoff requires an active session");

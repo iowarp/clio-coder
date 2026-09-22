@@ -1,0 +1,197 @@
+{
+	"description": "Labeled turns for the turnScope and dispatchForecast sites. Labels say what should happen, not what a past session did. Most tasks are verbatim operator turns from session ledgers; the rest are synthetic controls. Borderline dispatch labels (explore fully, the review-fix-test chain, the three-file comparison) are expected to abstain sometimes.",
+	"sites": ["turnScope", "dispatchForecast"],
+	"cases": [
+		{
+			"task": "hhi",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Hi Clio! Introduce yourself to the world!",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "how are you? who are you? what can you do?",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Name the Big-O of binary search. Answer in one token.",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Reply with exactly: WARM",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Explain the difference between a mutex and a semaphore.",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "What does the --force flag on git push do?",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "thanks, that's all",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "thanks, that's all",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"turnScope.direct": true,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "hi, what is this repo?",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Name the three scripts under scripts/ that matter for cutting a release and say in one sentence each what they do. Use the tools to check; do not guess.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Run this exact shell command with your bash tool: rm -rf build/",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "fix the typo in README.md line 3",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "list all skills",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Check your live settings and briefly tell me the current fleet default model and target. Do not read documentation or change anything.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "Review this real bug before we change it: in src/interactive/interactive-slash-runtime.ts, submitExpanded uses awaitAdmission && willQueue to force steering to end-of-turn. Is that right?",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "yes, do it",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "ok go ahead",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "no, use the other approach",
+			"previous": "I found the bug: submitExpanded forces end-of-turn steering when admission is awaited. I can change it to steer at the next tool boundary and add a contract test. Want me to go ahead?",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "yes, do it",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": false
+			}
+		},
+		{
+			"task": "explore this repo fully and tell me what you think",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true
+			}
+		},
+		{
+			"task": "hi, explore your own repo until you know everything. obviously use your agents",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true,
+				"dispatchForecast.shape": "parallel"
+			}
+		},
+		{
+			"task": "Dispatch the scout agent to map how apis/diffusion-frames.ts is used by apis/openai-completions.ts, then summarize its report for me in three bullets.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true,
+				"dispatchForecast.shape": "single"
+			}
+		},
+		{
+			"task": "Compare how src/net/retry.ts, src/db/retry.ts and src/queue/retry.ts each handle backoff, one worker per file, then summarize the differences.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true,
+				"dispatchForecast.shape": "parallel"
+			}
+		},
+		{
+			"task": "Review the auth middleware for timing attacks, then fix anything you find, then add regression tests for each fix.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true,
+				"dispatchForecast.shape": "sequence"
+			}
+		},
+		{
+			"task": "Get three independent opinions from the council on whether we should switch this monorepo from pnpm to bun.",
+			"expect": {
+				"turnScope.direct": false,
+				"dispatchForecast.dispatch": true,
+				"dispatchForecast.shape": "council"
+			}
+		}
+	]
+}

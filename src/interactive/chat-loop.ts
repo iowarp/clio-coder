@@ -87,6 +87,7 @@ import {
 	detectOverflowFromState,
 	detectTerminalFailureFromState,
 	explainInterruptedAssistant,
+	extractText,
 	notConfiguredNotice,
 	noticeMessage,
 	pendingSkillRequestPreamble,
@@ -590,8 +591,14 @@ export interface CreateChatLoopDeps {
 	 * from inside a tool handler. It always settles, so a provider outage costs
 	 * ordering rather than the turn.
 	 */
-	refreshTurnRelevance?: (taskText: string) => Promise<void>;
+	refreshTurnRelevance?: (taskText: string, previous: string) => Promise<void>;
 	getMemoryRelevance?: () => PrecomputedRanking | undefined;
+	/**
+	 * This turn's pre-turn decisions as ledger rows, recorded once after the user
+	 * turn is appended so an answer can later be compared with what the turn did.
+	 * Empty when no recorded site is bound, which writes nothing.
+	 */
+	getTurnBriefRecord?: () => ReadonlyArray<unknown>;
 	getReadySkillCount?: () => number;
 	/** Structured, redacted task-bank export supplied only to an explicit context-handoff skill request. */
 	getTaskMemoryHandoffSource?: () => string;
@@ -1382,7 +1389,17 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// turn. Both sites read an empty store as no ranking.
 			if (deps.refreshTurnRelevance) {
 				try {
-					await deps.refreshTurnRelevance(text);
+					// The last assistant message is evidence for a short follow-up: "ok go
+					// ahead" is an action after a proposal and a pleasantry without one.
+					let previous = "";
+					const messages = agentRuntime.agent.state.messages;
+					for (let index = messages.length - 1; index >= 0; index -= 1) {
+						if (messages[index]?.role === "assistant") {
+							previous = extractText(messages[index]);
+							break;
+						}
+					}
+					await deps.refreshTurnRelevance(text, previous);
 				} catch {
 					// Ranking degrades to the order each site had before the pass.
 				}
@@ -1513,6 +1530,22 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					...(options.display ? { display: options.display } : {}),
 				});
 			context.logPromptCompileIfPending();
+			if (deps.getTurnBriefRecord && deps.session?.current()) {
+				try {
+					const sites = deps.getTurnBriefRecord();
+					if (sites.length > 0) {
+						deps.session.appendEntry({
+							kind: "custom",
+							customType: "decisionBrief",
+							parentTurnId: state.lastTurnId,
+							display: false,
+							data: { sites },
+						});
+					}
+				} catch {
+					// Recording a forecast is best effort and never costs the turn.
+				}
+			}
 			const previousThinkingLevel = previousRunSnapshot?.runtimeResolution?.effectiveThinkingLevel;
 			if (
 				previousThinkingLevel !== undefined &&

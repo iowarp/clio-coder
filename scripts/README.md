@@ -18,6 +18,7 @@ Use Node >=22.19 and the pnpm version pinned in `package.json`.
 | `node scripts/check-release.mjs` | Package contents, budgets, versions, recipe contracts and dependency advisories | npm pack dry run and registry audit | Called by qualification |
 | `bash scripts/install.sh --dry-run` | Preview public npm installer | Actual install accesses npm and selected prefix; dry run previews | Installer contract checks in routine CI |
 | `pnpm install:local --dry-run` | Preview checkout installation | Actual install can sync dependencies, build, replace launcher symlink and run doctor repair | Dry-run/launcher checks in lint |
+| `node --import tsx scripts/decision-probe.ts <fixture> --profile <name>` | Score a decision site's wording against its labeled fixture under `evals/fixtures/decision-cases/` | **Calls the configured decision model**; binds the fixture's sites to the profile in memory only | Explicit operator run only |
 | `pnpm smoke:real-home --target <id>` | Manual smoke with an isolated copy of operator settings | **Calls the configured model**, copies credentials to private scratch, cleans up | Explicit operator run only |
 | `bash scripts/verify-portable-hosts.sh [output-directory]` | Exercise installed Claude/Codex host interoperability | Requires host CLIs; isolated homes, local package install and saved evidence; no model calls | Optional integration evidence |
 
