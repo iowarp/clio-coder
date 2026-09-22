@@ -20,7 +20,6 @@ import type { ClioSettings } from "../../core/config.js";
 import type { DecisionSite } from "../../core/defaults.js";
 import type { ProvidersContract } from "./contract.js";
 import { createDecider, type Decider } from "./decisions.js";
-import { resolveRuntimeTarget } from "./runtime-resolution.js";
 import type { ProbeContext } from "./types/runtime-descriptor.js";
 
 export type { DecisionSite } from "../../core/defaults.js";
@@ -52,20 +51,28 @@ export function inspectDecisionSite(site: DecisionSite, input: ResolveDeciderInp
 		return { bound: false, reason: "profile-missing", detail: `fleet.profiles.${profileName} is not defined` };
 	}
 
-	const resolution = resolveRuntimeTarget(input.providers, {
-		targetId: profile.target,
-		wireModelId: profile.model ?? null,
-	});
-	if (!resolution.ok) {
-		const first = resolution.diagnostics.find((entry) => entry.severity === "error");
+	// Resolved directly rather than through resolveRuntimeTarget, which is the
+	// conversational target resolver: it rejects any target that does not
+	// advertise chat, and a System One model advertises exactly the opposite.
+	// Routing a decision binding through it made every Jev target unresolvable.
+	const targetId = profile.target?.trim();
+	const target = targetId ? input.providers.getTarget(targetId) : null;
+	if (!target) {
 		return {
 			bound: false,
 			reason: "target-unresolved",
-			detail: first?.message ?? `target '${profile.target}' did not resolve`,
+			detail: `target '${profile.target ?? ""}' not found in settings.targets`,
+		};
+	}
+	const runtime = input.providers.getRuntime(target.runtime);
+	if (!runtime) {
+		return {
+			bound: false,
+			reason: "target-unresolved",
+			detail: `runtime '${target.runtime}' is not registered`,
 		};
 	}
 
-	const { runtime, target } = resolution.target;
 	// Declaring the capability and implementing the verb are separate claims, and
 	// a target bound here by mistake is likelier to be an ordinary chat model
 	// than a broken decision runtime. Check the verb, which is what gets called.
