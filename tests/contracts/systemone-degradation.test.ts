@@ -202,12 +202,15 @@ describe("degradation: the skills site", () => {
 		const failed = buildSkillCatalogView({ ...BASE });
 		const abstained = buildSkillCatalogView({ ...BASE, relevance: { source: "jev", scores: {} } });
 		strictEqual(failed.text, unbound.text);
-		strictEqual(abstained.text.includes("Ordered by relevance"), true);
-		// An abstaining pass still says it ranked, because it did run; what it
-		// must not do is move a row or drop one.
+		// A pass that abstained on every row left the catalog order alone, so it
+		// has no order to take credit for and the listing does not mention it.
+		strictEqual(abstained.text, unbound.text);
+		strictEqual(abstained.rankedBy, null);
 		strictEqual(abstained.rows.map((row) => row.name).join(), unbound.rows.map((row) => row.name).join());
 		strictEqual(abstained.total, unbound.total);
 		strictEqual(unbound.rankedBy, null);
+		const judged = buildSkillCatalogView({ ...BASE, relevance: { source: "jev", scores: { charlie: 0.9 } } });
+		strictEqual(judged.text.includes("Ordered by relevance to this task, judged by jev"), true);
 	});
 
 	it("never loses a row to a decision model, whatever it answers", () => {

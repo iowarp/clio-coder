@@ -386,7 +386,16 @@ export function buildSkillCatalogView(input: SkillCatalogViewInput): SkillCatalo
 	// paged, so an unscored row holds its position in the list the caller sees
 	// rather than in one the filter already changed.
 	const matching = input.relevance === undefined ? selected.rows : rankRows(selected.rows, input.relevance);
-	const rankedBy = input.relevance === undefined ? null : boundName(input.relevance.source);
+	// Named only when the pass had an opinion on a row the caller is about to
+	// see. A ranking in which every row abstained left the catalog order intact,
+	// and claiming a relevance order for it would explain an order nothing made.
+	const scores = input.relevance?.scores;
+	const rankedBy =
+		input.relevance !== undefined &&
+		scores !== undefined &&
+		selected.rows.some((row) => Number.isFinite(scores[row.name]))
+			? boundName(input.relevance.source)
+			: null;
 	const total = matching.length;
 	const offset = clampOffset(input.offset);
 	const limit = clampLimit(input.limit, total);
