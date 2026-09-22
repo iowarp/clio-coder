@@ -28,6 +28,12 @@ export interface CapabilityFlags {
 	embeddings: boolean;
 	rerank: boolean;
 	fim: boolean;
+	/**
+	 * Answers closed-form typed questions through `RuntimeDescriptor.decide()`
+	 * instead of generating text. Optional so the 30-odd existing capability
+	 * literals stay valid; absent reads as false.
+	 */
+	decisions?: boolean;
 	contextWindow: number;
 	maxTokens: number;
 	/** Request slots reported by the endpoint probe. This is deployment capacity, not a model trait. */
