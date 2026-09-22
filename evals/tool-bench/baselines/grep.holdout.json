@@ -1,0 +1,97 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "tool-bench-grep-holdout",
+	"recordedAt": "2026-09-22T01:17:37.246Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "c3594c95a6d66304104acb5ba45e136545537fdf"
+	},
+	"pin": ["task.solved", "custom.digest.behavior", "custom.counters.fs_ops"],
+	"tasks": {
+		"grep.holdout.binary-nul": {
+			"custom.counters.fs_ops": 18,
+			"custom.digest.behavior": "ac662835e37b7e750312fd1426080dc2ee9c47820f756b6eeaca3e7413127b0c",
+			"task.solved": true
+		},
+		"grep.holdout.byte-cap-4m": {
+			"custom.counters.fs_ops": 5015,
+			"custom.digest.behavior": "ccdd67637c387dcbabe5acd273d78c421c715bbbb773a5eb113b482f40f8be9e",
+			"task.solved": true
+		},
+		"grep.holdout.err-invalid-regex": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "2e04b8869ffcb072b2e245dd42d091a5ea0fcec216d2cafd8c045316a65ae963",
+			"task.solved": true
+		},
+		"grep.holdout.err-missing-path": {
+			"custom.counters.fs_ops": 18,
+			"custom.digest.behavior": "0b682b8e16b9f91e43af0b5657c633691fe3f7df4d2db34af8b2c799bbc8792d",
+			"task.solved": true
+		},
+		"grep.holdout.err-symlink-outside-path": {
+			"custom.counters.fs_ops": 25,
+			"custom.digest.behavior": "08c50d8539d1f3b61043c2b0ea28de8c2c3030066557947d11f14425b1e2e56d",
+			"task.solved": true
+		},
+		"grep.holdout.every-file-50": {
+			"custom.counters.fs_ops": 263,
+			"custom.digest.behavior": "b56de65acc6ed1b70d85c7c2fbcb04bb0da84ffaf2cda0deda4251dfb7e5a14b",
+			"task.solved": true
+		},
+		"grep.holdout.gitignore": {
+			"custom.counters.fs_ops": 23,
+			"custom.digest.behavior": "b5b5130dde8da112a3ddfa9fc751aeb419f205d9db0b5ad3daf3846f4f91d3ef",
+			"task.solved": true
+		},
+		"grep.holdout.huge-file-limit-16m": {
+			"custom.counters.fs_ops": 513,
+			"custom.digest.behavior": "716fffe81b2eb5d6432347139b225a1bfcd8bf69868e0a8a5109e1ac7cf27091",
+			"task.solved": true
+		},
+		"grep.holdout.ignore-case-100": {
+			"custom.counters.fs_ops": 33,
+			"custom.digest.behavior": "0d0080c9407b0d186ff0590f0480dfb896d8a3e514cb58b4c2c3a32f24dd2298",
+			"task.solved": true
+		},
+		"grep.holdout.invalid-utf8": {
+			"custom.counters.fs_ops": 23,
+			"custom.digest.behavior": "8ff24e40d5de18f3ceb3b75e64d6a324a13e29e3eeca3e3dbc67e48b868f5a61",
+			"task.solved": true
+		},
+		"grep.holdout.literal-10": {
+			"custom.counters.fs_ops": 28,
+			"custom.digest.behavior": "94f8974694ad9842e8dfd6dc50d3dc6ad9cb515335e5a3a20a016521384b7019",
+			"task.solved": true
+		},
+		"grep.holdout.long-line-256k": {
+			"custom.counters.fs_ops": 18,
+			"custom.digest.behavior": "0e5a932cfde9085e81dc9e2def3d0296a162161fec41414023c6c4d107897283",
+			"task.solved": true
+		},
+		"grep.holdout.no-match-1k": {
+			"custom.counters.fs_ops": 13,
+			"custom.digest.behavior": "7f274a00956ebc42cc8b0c4c587cd70c86f42d4b7aa241c056a5be17f8c87be0",
+			"task.solved": true
+		},
+		"grep.holdout.regex-100": {
+			"custom.counters.fs_ops": 33,
+			"custom.digest.behavior": "9ecc05feb98dccea8e172f302263f63b0f44210f19f22764f1361eea4657e3f2",
+			"task.solved": true
+		},
+		"grep.holdout.symlink-dir-inside": {
+			"custom.counters.fs_ops": 18,
+			"custom.digest.behavior": "bf523f1fb17cef8628c042f1b393dcb1a39b127b41f45d741949fdaafbe1b0d9",
+			"task.solved": true
+		},
+		"grep.holdout.symlink-dir-outside": {
+			"custom.counters.fs_ops": 23,
+			"custom.digest.behavior": "f7c1196769318415b3994079b00cdc956cfab0a049e1bf980a1221be83ec63bc",
+			"task.solved": true
+		},
+		"grep.holdout.tree-10k": {
+			"custom.counters.fs_ops": 38,
+			"custom.digest.behavior": "e40c7f6c537f6a384cdbe0cfe68048cc4ffb03792db208845982480ac172fa63",
+			"task.solved": true
+		}
+	}
+}

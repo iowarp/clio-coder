@@ -32,6 +32,7 @@ export function validateEvalSuiteV2(value: unknown): EvalSuiteValidationResult {
 	const matrix = readMatrix(value.matrix, "$.matrix", issues);
 	const tasks = readTasks(value.tasks, "$.tasks", issues);
 	const thresholds = readThresholds(value.thresholds, "$.thresholds", issues);
+	const baseline = readBaseline(value.baseline, "$.baseline", issues);
 	if (issues.length > 0 || suite === null || matrix === null || tasks === null) return { valid: false, issues };
 	return {
 		valid: true,
@@ -41,6 +42,7 @@ export function validateEvalSuiteV2(value: unknown): EvalSuiteValidationResult {
 			matrix,
 			tasks,
 			...(thresholds === undefined ? {} : { thresholds }),
+			...(baseline === undefined ? {} : { baseline }),
 		},
 	};
 }
@@ -298,6 +300,30 @@ function readThresholds(
 		fail: readAssertions(value.fail, `${path}.fail`, issues),
 		informational: readAssertions(value.informational, `${path}.informational`, issues),
 	};
+}
+
+function readBaseline(
+	value: unknown,
+	path: string,
+	issues: EvalValidationIssue[],
+): EvalSuiteV2["baseline"] | undefined {
+	if (value === undefined) return undefined;
+	if (!isRecord(value)) {
+		issues.push({ path, message: "expected object" });
+		return undefined;
+	}
+	const file = readNonEmptyString(value, path, "file", issues);
+	// The path is resolved against the suite's directory, so an absolute or
+	// escaping path would let a suite pin a file outside the checkout it
+	// describes and make the recorded baseline unreviewable alongside it.
+	if (file !== null && (file.startsWith("/") || file.split("/").includes(".."))) {
+		issues.push({ path: `${path}.file`, message: "expected a relative path inside the suite directory" });
+		return undefined;
+	}
+	const pin = readOptionalStringArray(value, "pin", `${path}.pin`, issues);
+	if (pin.length === 0) issues.push({ path: `${path}.pin`, message: "expected at least one metric key" });
+	if (file === null || pin.length === 0) return undefined;
+	return { file, pin };
 }
 
 function readAssertions(value: unknown, path: string, issues: EvalValidationIssue[]): EvalMetricAssertion[] {

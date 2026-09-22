@@ -1,0 +1,97 @@
+{
+	"schema": "clio-coder.eval.baseline.v1",
+	"suite": "tool-bench-write-holdout",
+	"recordedAt": "2026-09-22T01:16:57.523Z",
+	"clioCoder": {
+		"version": "0.5.2",
+		"commit": "c3594c95a6d66304104acb5ba45e136545537fdf"
+	},
+	"pin": ["task.solved", "custom.digest.behavior", "custom.counters.fs_ops"],
+	"tasks": {
+		"write.holdout.create-16m": {
+			"custom.counters.fs_ops": 46,
+			"custom.digest.behavior": "939444128203a4aed4d2746668cfe7f43f3a4d7423a349a2ead13b55ca5f4f1c",
+			"task.solved": true
+		},
+		"write.holdout.create-1k": {
+			"custom.counters.fs_ops": 46,
+			"custom.digest.behavior": "61752b3954a19087ec65ab23ad77666d70a270e89b7abcb23b1b619e2a1e2a05",
+			"task.solved": true
+		},
+		"write.holdout.create-900k": {
+			"custom.counters.fs_ops": 46,
+			"custom.digest.behavior": "45f74ae0ec6dab67ad08a9458ba303d908af14fad5107555ed370f4ee99f5014",
+			"task.solved": true
+		},
+		"write.holdout.create-nested-64k": {
+			"custom.counters.fs_ops": 61,
+			"custom.digest.behavior": "7cc3c5137d65da72145282fb35c598f93ce2225aacd7d677fe6b86addf273878",
+			"task.solved": true
+		},
+		"write.holdout.crlf-64k": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "deccdd60f52854e60958e4f21ab81bd847649c926d05463b86c5df51fbb4ae48",
+			"task.solved": true
+		},
+		"write.holdout.empty-content": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "96b5cc76fc062b5a4e366b14daade5cbcd905b2304079c3495ce38e2c1169858",
+			"task.solved": true
+		},
+		"write.holdout.err-directory": {
+			"custom.counters.fs_ops": 24,
+			"custom.digest.behavior": "a0fa4b7883bab4dd987204f2ae85276b927750dab0bbd07a90ca89f0d7b37b63",
+			"task.solved": true
+		},
+		"write.holdout.err-dotdot-link-escape": {
+			"custom.counters.fs_ops": 26,
+			"custom.digest.behavior": "331303e090a1dbf10f98424e7c5d1bdbba3d9694077b547e2faa2bb95d1bc3df",
+			"task.solved": true
+		},
+		"write.holdout.err-escape": {
+			"custom.counters.fs_ops": 25,
+			"custom.digest.behavior": "6e8b579912a0730cbaf433256594b2eaca3a0458942b9f1231c8e3217e3b3237",
+			"task.solved": true
+		},
+		"write.holdout.err-readonly-parent": {
+			"custom.counters.fs_ops": 41,
+			"custom.digest.behavior": "235b673ec2a1df5497159fce5eb47f4fff725986fbc848e2a928606a37dca3dd",
+			"task.solved": true
+		},
+		"write.holdout.err-symlink-escape": {
+			"custom.counters.fs_ops": 30,
+			"custom.digest.behavior": "4144e38cbdd3e969eea54a26919991db76b8a5ea09a893f0082dc99f4629fdd3",
+			"task.solved": true
+		},
+		"write.holdout.mode-755-overwrite": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "243439f9c2511acea7bf9272308666e432890c57f540b64696fc322f16b19aa3",
+			"task.solved": true
+		},
+		"write.holdout.no-final-newline-1k": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "b8715127c3f43c485c5b803cbd1fb867a3b1550c0123970e1af6a73b2f2fabb1",
+			"task.solved": true
+		},
+		"write.holdout.overwrite-same-64k": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "504d774724ba259e4df88c8b88c52e5a22f195c734752610c4e39d1673433fb3",
+			"task.solved": true
+		},
+		"write.holdout.overwrite-shrink-4m": {
+			"custom.counters.fs_ops": 37,
+			"custom.digest.behavior": "dbeb5d712bad16741c0b89d739e203e0a325d2f77c28d9c3ffcb305d0bc779c9",
+			"task.solved": true
+		},
+		"write.holdout.symlink-target-64k": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "a3c280e7198920902b3216c7ff500739939e94db76b605a74519c7c71132920e",
+			"task.solved": true
+		},
+		"write.holdout.utf8-multibyte-64k": {
+			"custom.counters.fs_ops": 40,
+			"custom.digest.behavior": "da8ed9014f5325a6e02a338b47efefab190f8c305637d196d8e48155013e8be8",
+			"task.solved": true
+		}
+	}
+}

@@ -20,6 +20,7 @@ import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { BASH_TEMPLATES, type BashScenario, generateBashScenario } from "./corpus-bash.js";
 import { type BenchTool, DEFAULT_SEED, PROFILES, type Profile, SPLITS, type Split, TOOLS } from "./corpus-core.js";
 import { EDIT_TEMPLATES, type EditScenario, generateEditScenario } from "./corpus-edit.js";
 import { FIND_TEMPLATES, type FindScenario, generateFindScenario } from "./corpus-find.js";
@@ -27,6 +28,7 @@ import { GREP_TEMPLATES, type GrepScenario, generateGrepScenario } from "./corpu
 import { generateReadScenario, READ_TEMPLATES, type ReadScenario } from "./corpus-read.js";
 import { generateWriteScenario, WRITE_TEMPLATES, type WriteScenario } from "./corpus-write.js";
 
+export { BASH_TEMPLATES, type BashCall, type BashScenario } from "./corpus-bash.js";
 export * from "./corpus-core.js";
 export { EDIT_TEMPLATES, type EditCall, type EditScenario } from "./corpus-edit.js";
 export { FIND_TEMPLATES, type FindCall, type FindScenario } from "./corpus-find.js";
@@ -34,7 +36,7 @@ export { GREP_TEMPLATES, type GrepCall, type GrepScenario } from "./corpus-grep.
 export { READ_TEMPLATES, type ReadCall, type ReadScenario } from "./corpus-read.js";
 export { WRITE_TEMPLATES, type WriteCall, type WriteScenario } from "./corpus-write.js";
 
-export type Scenario = EditScenario | ReadScenario | WriteScenario | GrepScenario | FindScenario;
+export type Scenario = EditScenario | ReadScenario | WriteScenario | GrepScenario | FindScenario | BashScenario;
 
 interface ToolCorpus {
 	templates: ReadonlyArray<{ key: string; profile: Profile }>;
@@ -53,6 +55,7 @@ export const CORPORA: Readonly<Record<BenchTool, ToolCorpus>> = {
 	write: { templates: WRITE_TEMPLATES, generate: generateWriteScenario },
 	grep: { templates: GREP_TEMPLATES, generate: generateGrepScenario },
 	find: { templates: FIND_TEMPLATES, generate: generateFindScenario },
+	bash: { templates: BASH_TEMPLATES, generate: generateBashScenario },
 };
 
 const SCENARIO_ID = new RegExp(`^(${TOOLS.join("|")})\\.(${SPLITS.join("|")})\\.([a-z0-9-]+)$`, "u");

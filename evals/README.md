@@ -10,8 +10,8 @@ and local campaigns belong outside this directory.
 | --- | --- | --- |
 | `behavioral-machinery.yaml` | Production dispatch admission, prompt compilation, result contracts and receipt sealing with scripted workers | Offline, model-free; shared `tests/harness` isolation and dispatch fixtures |
 | `behavioral-model.yaml`, negative control, `tool-surface-model.yaml` | Observed model behavior through the real Clio runner and event stream | Explicit model requests; pass your configured `--target` and optional `--model` |
-| `tool-bench/` | Production tool registry execution, behavior digests and resource measurements | Offline; default correctness in contract tests, large profiles explicitly invoked |
-| `tracked-metrics-baseline.yaml` | Ten coding tasks against a fixed historical source revision | Explicit model requests; Git clone and pnpm dependency setup per fresh workspace |
+| `tool-bench/` | Production tool registry execution, behavior digests, admission decisions and resource measurements for edit, read, write, grep, find and bash | Offline; default correctness in contract tests, large profiles explicitly invoked |
+| `tracked-metrics-suite.yaml` | Ten coding tasks against a fixed historical source revision | Explicit model requests; Git clone and pnpm dependency setup per fresh workspace |
 | `scalar-decision-machinery.ts` and its Python grader | Decision/commit attribution with a NumPy scalar fixture | Optional offline integration run with an existing Python + NumPy interpreter |
 
 `src/domains/eval` owns suite validation, workspace preparation, runners,
@@ -39,6 +39,43 @@ requires Git, pnpm and network access; it can be substantially slower than local
 suites. The candidate Clio binary is selected with `--clio-coder-entry` and does
 not come from the historical checkout. Updating the source pin changes the
 benchmark and must be reviewed as a corpus change.
+
+## Tool-bench baselines
+
+`evals/tool-bench/baselines/<tool>.<split>.json` records, per scenario, the
+three values that are a property of the harness rather than of the machine:
+`task.solved`, the `custom.digest.behavior` fingerprint of the tool call's
+result and post-state, and `custom.counters.fs_ops`. The default-profile suites
+declare them; the full profiles carry the largest cases, are invoked
+deliberately and stay unpinned. Six tools are covered: `edit`, `read`, `write`,
+`grep`, `find` and `bash`, for 232 pinned scenarios across both splits.
+
+```sh
+node dist/cli/index.js eval baseline check  --suite evals/tool-bench/read.yaml
+node dist/cli/index.js eval baseline record --suite evals/tool-bench/read.yaml
+```
+
+`check` is the loop worth running after touching `src/tools` or anything the
+tool path reaches. It names the scenarios whose behavior moved instead of
+reporting a suite average, and `eval run` performs the same check inline. When
+a change is intended, `record` rewrites the file and the diff is what a reviewer
+reads. The file is sorted and one value per line for exactly that reason.
+
+### Autonomy is a property of the scenario
+
+An execute-plane call parks for confirmation below `full-auto`, so a bash
+scenario that measured what the tool does would measure the park instead. Each
+scenario therefore declares the autonomy its call runs at, defaulting to
+`auto-edit`, which is what every observe and mutate scenario has always used.
+The bash suite runs its execution scenarios at `full-auto` and keeps
+`parked-at-auto-edit` and `parked-read-only` at lower levels, so the admission
+decision an execute call receives is itself pinned. Raising the driver's
+autonomy globally instead would have silently changed what all 186 previously
+recorded scenarios exercise.
+
+No bash scenario removes a path or reaches the network, and a contract test
+enforces that. A bench that depends on the safety net to stop a destructive
+command is one admission change away from deleting the checkout it runs in.
 
 The former `behavioral-machinery-baseline.json` was historical output, not a gate.
 It is available in Git history. Generate fresh results through `clio-coder eval`

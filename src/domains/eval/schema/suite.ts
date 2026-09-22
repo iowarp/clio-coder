@@ -274,12 +274,26 @@ export interface EvalSuiteThresholdsV2 {
 	informational?: EvalMetricAssertion[];
 }
 
+/**
+ * Per-task expected values recorded in a committed file. Thresholds express one
+ * bound applied to every run, which cannot say "this scenario digests to this
+ * value". A baseline can, so it is what detects a behavior change in one named
+ * scenario rather than a drift in the suite average.
+ */
+export interface EvalSuiteBaselineSpecV1 {
+	/** Baseline file path, resolved against the suite's directory. */
+	file: string;
+	/** Metric keys pinned per task. Only deterministic metrics belong here. */
+	pin: string[];
+}
+
 export interface EvalSuiteV2 {
 	version: 2;
 	suite: EvalSuiteInfoV2;
 	matrix: EvalSuiteMatrixV2;
 	tasks: EvalSuiteTaskV2[];
 	thresholds?: EvalSuiteThresholdsV2;
+	baseline?: EvalSuiteBaselineSpecV1;
 }
 
 export interface LoadedEvalSuiteV2 {

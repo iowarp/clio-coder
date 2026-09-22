@@ -60,6 +60,22 @@ export const WORKSPACE_EXCLUDES = [
 	"tests",
 ];
 
+/**
+ * Metrics the driver reports that are a property of the harness rather than of
+ * the machine it ran on. Wall time, RSS and CPU are none of those, so they stay
+ * out: pinning them would fail the check on a busier laptop and teach everyone
+ * to ignore it.
+ */
+export const BASELINE_PIN = ["task.solved", "custom.digest.behavior", "custom.counters.fs_ops"];
+
+/** Baseline file for a suite, or null for the full profiles, which are not recorded. */
+export function baselineFileFor(tool: BenchTool, split: Split, profile: Profile): string | null {
+	// The full profiles carry the 100 MB cases and are invoked deliberately, not
+	// on every change. Declaring a baseline they have never recorded would fail
+	// every run of them fail-closed, so they stay unpinned until someone records one.
+	return profile === "full" ? null : `baselines/${tool}.${split}.json`;
+}
+
 export function renderSuite(tool: BenchTool, split: Split, profile: Profile, seed: number = DEFAULT_SEED): string {
 	const suffix = profile === "full" ? "-full" : "";
 	const large = templatesFor(tool, "full").filter((template) => template.key.includes("100m")).length;
@@ -94,6 +110,10 @@ export function renderSuite(tool: BenchTool, split: Split, profile: Profile, see
 			`    metrics: ${first ? "&metrics {collect: [task.solved]}" : "*metrics"}`,
 			`    timeoutMs: ${timeout}`,
 		);
+	}
+	const baselineFile = baselineFileFor(tool, split, profile);
+	if (baselineFile !== null) {
+		lines.push("baseline:", `  file: ${baselineFile}`, `  pin: [${BASELINE_PIN.join(", ")}]`);
 	}
 	return `${lines.join("\n")}\n`;
 }

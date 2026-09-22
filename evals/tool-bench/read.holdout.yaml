@@ -210,3 +210,6 @@ tasks:
         - node --import tsx evals/tool-bench/lib/driver.ts --scenario read.holdout.err-dotdot-link-escape --seed 1 --split holdout
     metrics: *metrics
     timeoutMs: 60000
+baseline:
+  file: baselines/read.holdout.json
+  pin: [task.solved, custom.digest.behavior, custom.counters.fs_ops]
