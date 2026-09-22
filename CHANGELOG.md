@@ -2,6 +2,22 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow Semantic Versioning; pre-1.0 minor releases may include incompatible changes.
 
+## 0.5.4 - Unreleased
+
+### Diffusion frames
+
+- Stream Inception Mercury's answers as diffusion frames in the TUI. With `diffusing: true` each SSE chunk carries the whole response so far, with unresolved positions still noise, and pi-ai appends every `delta.content`, so frames concatenated into garbage without intervention. The adapter recognizes each frame on the wire in the same byte path the SDK reads, marks the matching `text_delta`, and rewrites the shared text block to the frame, so the agent's context and the final message always hold exactly one frame. The transcript replaces the live answer per frame, renders the unsettled remainder dim, and hands the settled message to Markdown. Measured live, a long code answer arrived as five to eleven frames over one to three seconds.
+- Request frames only from the interactive surface. Headless `run`, ACP, JSONL and dispatched workers keep ordinary deltas, and the check is per request, so a `/model` switch away from `inception` stops frames on the next call.
+- Keep a preamble's frames in one segment when the response ends in a tool call. Mercury repeats the whole frame on every chunk that carries a tool-call argument delta and sends the resolved text after the tool call has begun, so replacing only the transcript's tail left a noise frame above the tool line and the resolved text in a second segment below it.
+- Count a frame as generated text. A frame empties its delta so accumulating consumers see no append, which also hid it from the first-token clock: time to first token was never recorded, the footer said "Waiting for model" through the whole stream, and the stall watchdog stayed on the first-token budget. The footer now reads "Writing" on the first frame, and `/btw` previews read the frame rather than the shared block.
+- No denoising gauge ships. The live API reports `diffusion_progress` as 0 on every frame and 1 on the last, so it is a completion flag rather than a ramp.
+
+### Fixes
+
+- List `inception` and `typesafe-jev` in the runtime boot manifest. The TUI refused a Mercury chat target at startup because the manifest is read before the providers domain loads and neither row had been added; headless `run` hydrates the full registry and never hit the check. A contract test now diffs the manifest against the built-in runtimes in both directions. The v0.5.3 tag shipped with this defect.
+- Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff ranked first for "In v0.5.0, how do I configure a different model for workers?", ahead of the configuration guide that answers it.
+- Stop the skills listing from claiming a relevance order when the decision model abstained on every row it shows. The catalog order was untouched, so the sentence credited an order nothing made.
+
 ## 0.5.3 - 2026-09-22
 
 ### Diffusion model support
