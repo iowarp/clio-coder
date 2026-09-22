@@ -23,7 +23,7 @@ In the current source tree, `src/tools/agent-tools.ts` serves as the single agen
 
 ## gateway: discover and call secondary capabilities
 
-One direct tool exposes `op="find"|"describe"|"call"`, optional `query`, `capability`, and `args`. Source: `src/tools/gateway/index.ts`. `find` filters names and descriptions case-insensitively and returns at most 300 capability rows within a 32 KiB observation allowance, with `name`, `kind` (`builtin`, `extension`, `mcp`), description, and action class. `describe` returns the full description, wire parameter schema, and authority notes. `call` validates `args` and invokes the capability through the registry under its own authority. Direct tools cannot be called through the gateway.
+One direct tool exposes `op="find"|"describe"|"call"`, optional `query`, `capability`, `args`, `server`, and `refresh`. Source: `src/tools/gateway/index.ts`. `find` filters names and descriptions case-insensitively and returns at most 300 capability rows within a 32 KiB observation allowance, with `name`, `kind` (`builtin`, `extension`, `mcp`), description, and action class. `describe` returns the full description, wire parameter schema, and authority notes. `call` validates `args` and invokes the capability through the registry under its own authority. Direct tools cannot be called through the gateway.
 
 | Placement | Capabilities |
 | --- | --- |
@@ -34,7 +34,19 @@ One direct tool exposes `op="find"|"describe"|"call"`, optional `query`, `capabi
 
 Placement is defined by `src/tools/surface.ts`. The gateway does not grant additional permission. Inner admission preserves safety policy, skill restrictions, approvals, action class, cancellation, result shaping, and evidence. The outer call is counted once; `details.capability` lets ledger consumers recover the underlying tool. A gateway artifact preserves its terminal result and completes the turn. Native workers whose recipe names a gateway capability attach and attest `gateway`, while the admitted capability list still limits find, describe, and call. Worker registries do not receive an MCP source in this release.
 
-Trusted local stdio MCP servers connect lazily. `find` discovers trusted servers; `describe` or `call` connects only the owning server. Untrusted project servers are listed with the `clio-coder mcp trust <id>` or `/mcp trust <id>` remedy and are never launched. Cancelling discovery closes the shared connection, fails other waiters, and does not restart it silently during that session. See [MCP configuration](configuration-reference.md#local-stdio-mcp-configuration-and-trust).
+Trusted local stdio MCP servers connect lazily. Untrusted project servers are listed with the `clio-coder mcp trust <id>` or `/mcp trust <id>` remedy and are never launched. Cancelling discovery closes the shared connection, fails other waiters, and does not restart it silently during that session. See [MCP configuration](configuration-reference.md#local-stdio-mcp-configuration-and-trust).
+
+`find` and `describe` read MCP tool metadata from a recorded catalog and launch nothing. Only `call` and an explicit `refresh` connect, and each connects only the owning or named server. Each server summary carries `catalog`, separate from `status`, so a catalog read off disk is never mistaken for a running process:
+
+| `catalog` | Meaning |
+| --- | --- |
+| `live` | The tools were listed by this session's own connection. `status` is `connected`. |
+| `cached` | The tools come from a recorded catalog. `status` stays `trusted`; nothing is running. |
+| `missing` | No usable catalog, and nothing was launched to make one. `catalogRemedy` names the call that fills it. |
+
+An untrusted, stale, or failed server reports no `catalog` at all. `gateway(op="find", server="<id>", refresh=true)` launches that one server, lists its tools, and records the result; `gateway(op="find", server="<id>")` narrows the listing to that server without launching it. `refresh` without `server`, either input on `describe` or `call`, and either input on a run with a restricted tool surface are all refused. An ordinary `call` of an admitted capability still works on a restricted surface.
+
+A catalog is a snapshot and confers no authority. Trust is resolved from the trust file on every session and is never read back from a catalog; a call validates its arguments against the server's live schema, so a tool the server no longer offers fails rather than running against stale metadata. Catalog identity binds the canonical project root, declaration scope and path, server id, declaration digest, and resolved execution directory, so two checkouts of one repository never share a catalog. A catalog whose listing stopped at the 500-tool or 100-page client cap is recorded as incomplete and reads back incomplete. A live listing also replaces the catalog, so ordinary use fills it without an explicit refresh. Metadata within one session is a snapshot: a server's `notifications/tools/list_changed` is not consumed, so a catalog does not converge during a session.
 
 When server IDs contain `__`, the longest declared server prefix owns the capability name, regardless of discovery order or trust status. For servers `a` and `a__b`, `mcp_a__b__echo` belongs to `a__b`; server `a` cannot register its own `b__echo` tool under that name and reports it as unregistrable. Rename the conflicting server or tool to expose both.
 
@@ -46,6 +58,7 @@ Results with an empty content array and structured content render that object as
 gateway(op="find", query="data")
 gateway(op="describe", capability="data")
 gateway(op="call", capability="data", args={op: "inspect", path: "results.csv"})
+gateway(op="find", server="analysis", refresh=true)
 ```
 
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
