@@ -22,34 +22,37 @@
 
 <p align="center">
   <a href="#get-started">Get started</a> ·
-  <a href="#what-you-can-do">Capabilities</a> ·
+  <a href="#what-clio-can-do">Capabilities</a> ·
   <a href="#choose-your-models">Models</a> ·
   <a href="#documentation-you-can-ask-about">Documentation</a> ·
   <a href="#contribute">Contribute</a>
 </p>
 
-Clio Coder is an open-source agent for working in real repositories from your
-terminal. Explain a codebase, investigate a failing test, implement a change, or
-coordinate several workers. Follow the tool calls, inspect the diff, and check
-the evidence behind the result.
+Clio Coder is an open-source coding agent that lives in your terminal and works
+in your real repositories. Ask her to explain a codebase, chase a failing test,
+implement a change, or hand pieces of a job to a fleet of workers. Every tool
+call is visible, every diff is yours to read, and every result comes with the
+evidence behind it.
 
-Built for scientific software and high-performance computing, Clio works with
-simulation kernels, numerical libraries, data pipelines, and everyday software
-engineering. Connect a model on your workstation, your institution's gateway,
-or a cloud service. Start with one conversation; add workers and specialized
-workflows when the task calls for them.
+Clio was built for scientific software and high-performance computing, where
+the code is old, the builds are strange, and being wrong is expensive. She is
+just as at home with everyday software engineering. Point her at a model on
+your laptop, your lab's inference gateway, or a cloud API, and start with one
+conversation. Workers, fleets, skills, and MCP servers are there when a task
+grows past what one agent should do alone.
 
 **v0.5.3 adds committed eval baselines for Clio's own harness, diffusion model
-support, and an alpha System One decision surface.**
-The terminal is the primary working interface, and the bundled browser app
-provides documentation and an early preview of the wider graphical experience.
-Clio is pre-1.0 software. Review changes and validate scientific results with your
-own reference checks.
+support with fill-in-the-middle, an alpha System One decision surface, and MCP
+tool discovery that no longer launches a server to answer a question.**
+The terminal is the primary interface. The bundled browser app renders the
+documentation and previews the wider graphical experience. Clio is pre-1.0
+software: review her changes and validate scientific results against your own
+reference checks.
 
 ## Get started
 
-You need **Node.js 22.19 or newer** and a model service. Linux and macOS are the
-primary terminal platforms; Windows support is best effort.
+You need **Node.js 22.19 or newer** and a model to talk to. Linux and macOS are
+the primary terminal platforms; Windows support is best effort.
 
 ```bash
 npm install -g @iowarp/clio-coder
@@ -59,18 +62,18 @@ clio-coder
 ```
 
 Choose **Quick Connect** in the configuration launcher. Paste your endpoint,
-provide credentials if required, select a model, and review the connection.
-For example, LM Studio commonly listens at `localhost:1234` and Ollama at
+provide credentials if the server needs them, pick a model, and review the
+connection. LM Studio commonly listens at `localhost:1234` and Ollama at
 `localhost:11434`. For subscription sign-in or other provider-specific setup,
 use **Settings → Connections**.
 
-Then give Clio a concrete task:
+Then give Clio something concrete:
 
 > Explain how this repository builds and tests its solver. Find the main entry
 > points and suggest one small, useful verification task before changing code.
 
 The default **auto-edit** mode allows workspace edits and recognized test
-commands. Other commands and protected operations may ask for approval.
+commands. Other commands and protected operations ask for approval first.
 [Configure permissions and limits](docs/guide/configuration-and-targets.md)
 when you need a different balance.
 
@@ -93,28 +96,30 @@ For the bootstrap installer, source builds, upgrades, and removal, see
 
 </details>
 
-## What you can do
+## What Clio can do
 
-| Workflow | What Clio provides | Learn more |
+| You want to… | Clio brings… | Read more |
 | --- | --- | --- |
-| **Understand a repository** | File and symbol navigation, a project handbook, bounded search, and a structural code index. | [Project context](docs/architecture/context-engine.md) |
-| **Make and verify changes** | File edits and diffs, shell execution, declared checks, numerical comparisons, and performance budgets. | [Tools](docs/guide/tool-usage.md) |
-| **Delegate focused work** | Coding, testing, review, and research recipes; separate worker models; bounded assignments and recorded results. | [Workers and fleets](docs/guide/fleet-dispatch.md) |
-| **Keep long tasks moving** | Context accounting, compaction, task memory, durable conversation history, and fork/resume navigation. | [Memory](docs/guide/proactive-memory.md) |
-| **Add domain knowledge** | Operator-activated skills, prompt templates, plugins, harness extensions, and local MCP tool servers. | [Library](library/README.md) |
-| **Inspect what happened** | Tool activity, usage, traces, decisions, evidence, and worker receipts. | [Observability](docs/architecture/observability.md) |
-| **Know what you have left** | `/usage` gathers subscription headroom for your connected accounts beside this session's tokens, cost, per-model shares, and worker accounting. | [Quota and usage](docs/guide/commands-and-modes.md#subscription-quota-and-session-usage) |
+| **Understand a repository** | File, symbol, and structure navigation over a code index, bounded search with ripgrep, and a generated project handbook (`clio-coder context init`). | [Context engine](docs/architecture/context-engine.md) |
+| **Make and prove a change** | Exact edits and diffs, shell execution, streamed scientific processing steps, declared verification checks, numerical comparisons, and performance budgets. | [Tools](docs/guide/tool-usage.md) |
+| **Delegate and supervise** | Built-in coding, testing, review, and research recipes; separate worker models; multi-node fleets with placement, gates, steering, and receipts. | [Fleet dispatch](docs/guide/fleet-dispatch.md) |
+| **Keep a long task alive** | Context accounting and compaction, a non-destructive working set, proactive task memory, durable history, and fork, resume, and handoff between sessions. | [Context continuity](docs/guide/context-continuity.md) |
+| **Reach your tools** | Local MCP servers through one gateway with cached discovery, Slurm through clio-kit, pinned external programs, and terminal panes beside the session. | [MCP and the gateway](docs/guide/tool-usage.md#gateway-discover-and-call-secondary-capabilities) · [Slurm](docs/guide/slurm.md) |
+| **Add domain knowledge** | A library of skills, prompts, agents, plugins, and fleets with a marketplace, integrity pins, and portable share archives. Resources from Claude Code, Codex, Copilot CLI, and OpenCode can be adopted in place. | [Library](library/README.md) · [Interop](docs/guide/interop.md) |
+| **Inspect what happened** | Tool activity, usage and cost, traces, recorded decisions, evidence bundles, worker receipts, and evidence-aware Git commit trailers. | [Observability](docs/architecture/observability.md) |
+| **Measure the harness itself** | A local eval runner with suites, baselines, comparisons, and gates, plus reviewable reference suites in the source checkout. | [Eval runner](docs/process/eval-runner.md) |
+| **Know what you have left** | `/usage` shows subscription headroom for connected accounts beside this session's tokens, cost, per-model shares, and worker accounting. | [Quota and usage](docs/guide/commands-and-modes.md#subscription-quota-and-session-usage) |
 
-These capabilities work together. A worker result is a lead you can inspect;
-a successful command is evidence of that command's outcome; neither substitutes
-for scientific validation.
+These capabilities compose. A worker result is a lead you can inspect, a
+passing command is evidence of that command's outcome, and neither replaces
+scientific validation.
 
 ### Work in the terminal
 
 The TUI keeps the conversation, tool activity, diffs, and permission decisions
-in one place. Its footer shows the active model, its remaining weekly
-subscription headroom where a connected account reports one, and context use;
-dashboards provide more detail without taking over the conversation.
+in one place. Its footer shows the active model, remaining subscription
+headroom where a connected account reports one, and context use. Dashboards
+provide more detail without taking over the conversation.
 
 | Want to… | Use… |
 | --- | --- |
@@ -122,21 +127,19 @@ dashboards provide more detail without taking over the conversation.
 | Choose a model or change settings | `/model`, `/settings` |
 | Attach a project file | Type `@` and choose a path |
 | Inspect context, memory, or usage | `/context`, `/memory`, `/usage` |
-| Browse skills and recipes | `/library` or `Alt+L` |
+| Browse skills, agents, prompts, and fleets | `/library` or `Alt+L`, `/skills` |
 | Inspect workers | `Alt+W` |
 | Manage the task board | `/tasks` |
 | Branch or recover a conversation | `/tree`, `/fork`, `/resume` |
 | Leave the session | `/quit` |
 
 With the default bindings, **Enter** steers an active turn, **Ctrl+Q** queues a
-follow-up, and **Escape** interrupts. Permission cards provide separate **Deny**
-and **Stop** actions. For the main agent, deny skips the displayed invocation;
-stop ends the turn. Worker cards explain when identical calls in the same run
-can reuse a permission decision.
+follow-up, and **Escape** interrupts. Permission cards offer separate **Deny**
+and **Stop** actions: deny skips the displayed invocation, stop ends the turn.
+Worker cards explain when identical calls in the same run can reuse a decision.
 
 Clio includes contextual guidance by default. Use `clio-coder --no-demo` for a
-quieter session, or change `interface.demo` in `/settings`. Guidance does not
-automatically run demonstrations. See the full
+quieter session, or change `interface.demo` in `/settings`. See the full
 [command and shortcut reference](docs/guide/commands-and-modes.md).
 
 ### Start small, then delegate
@@ -152,9 +155,10 @@ When an independent second pass would help, run a worker explicitly:
 /run verifier Review the current diff and run the relevant existing checks. Do not edit files.
 ```
 
-Configure a different worker model under **Settings → Fleet**, or build
-repeatable multi-step workflows with fleets. Local workers are enough to get
-started; [SSH placement](docs/guide/fleet-dispatch.md) is optional.
+Configure a different worker model under **Settings → Fleet**, or author
+repeatable multi-step workflows as fleets with `clio-coder fleet`. Local workers
+are enough to get started; [SSH placement](docs/guide/fleet-dispatch.md) across
+nodes is optional.
 
 ### Use the same harness in automation
 
@@ -165,26 +169,29 @@ clio-coder acp
 ```
 
 Headless text mode writes the final answer to stdout and diagnostics to stderr;
-`--json` emits JSONL events. ACP connects compatible editor hosts. Headless runs
-cannot answer interactive permission prompts. See
-[output and exit codes](docs/guide/exit-codes-and-output.md) and
+`--json` emits JSONL events. `acp` serves Clio to compatible editor hosts over
+the Agent Client Protocol. Headless runs cannot answer interactive permission
+prompts. See [output and exit codes](docs/guide/exit-codes-and-output.md) and
 [ACP integration](docs/architecture/acp.md).
 
 ## Choose your models
 
 A saved connection is a **target**. Chat, workers, and optional model-assisted
-memory can use different targets and models.
+memory can use different targets and models, so a small fast model can do the
+routine work while a stronger one reviews it.
 
 | Where the model runs | Examples |
 | --- | --- |
 | **Your workstation or server** | Ollama, LM Studio, llama.cpp, vLLM, SGLang, Lemonade |
 | **A gateway or compatible API** | LiteLLM, OpenAI-compatible and Anthropic-compatible endpoints |
-| **Cloud APIs** | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock |
+| **Cloud APIs** | OpenAI, Anthropic, Google, OpenRouter, Groq, Mistral, DeepSeek, Amazon Bedrock, Inception Mercury |
 | **Subscription sign-in** | ChatGPT through `openai-codex`; Claude through `anthropic-max` |
 | **Institutional inference** | Argonne ALCF Sophia and Metis through Globus OAuth |
 
-Model capabilities vary. Check tool calling, context capacity, and reasoning
-support for the route you choose. Subscription integrations depend on vendor
+Model capabilities vary. Clio probes tool calling, context capacity, and
+reasoning support per route and records what it measured. Diffusion models such
+as Mercury also serve fill-in-the-middle completions through the same
+`infill()` path as llama.cpp. Subscription integrations depend on vendor
 sign-in support and terms; a gateway controls its own backend placement.
 
 The [connection guide](docs/guide/configuration-and-targets.md) covers setup,
@@ -212,15 +219,15 @@ clio-coder docs safety
 
 The browser app renders the bundled Markdown with navigation and page outlines.
 It runs locally and is also the preview home for Clio's graphical features.
-The terminal remains the primary coding interface for this release.
 See [browser app documentation](docs/gui/README.md) for launch and lifecycle details.
 
 | Looking for… | Start here |
 | --- | --- |
 | A map of the documentation | [Documentation index](docs/README.md) |
 | First connection and effective settings | [Configuration and targets](docs/guide/configuration-and-targets.md) |
+| Every settings key, flag, and environment variable | [Configuration reference](docs/guide/configuration-reference.md) |
 | Commands and keyboard controls | [Commands and modes](docs/guide/commands-and-modes.md) |
-| Connection or installation trouble | [Troubleshooting](docs/guide/troubleshooting.md) |
+| Connection or installation trouble | [Troubleshooting](docs/guide/troubleshooting.md) and `clio-coder doctor` |
 | Scientific checks and measurements | [Scientific validation](docs/process/scientific-validation.md) |
 | How to extend the harness | [Extensions](docs/guide/harness-extensions.md) and [plugins](docs/guide/authoring-plugins.md) |
 
@@ -229,12 +236,13 @@ See [browser app documentation](docs/gui/README.md) for launch and lifecycle det
 Clio offers **read-only**, **suggest**, **auto-edit** (the default), and
 **full-auto** modes. Full-auto removes routine autonomy prompts; it does not
 disable safety-net checks, protected-path rules, or explicit task constraints.
-Workers remain bounded by the authority and scope of their assignment.
+Workers remain bounded by the authority and scope of their assignment, and a
+recipe's tool ceiling is a ceiling on what its run can start.
 
 Clio is **not a general operating-system sandbox**. Tool admission, receipts,
 and validation help you supervise work; they cannot establish scientific
 correctness or make arbitrary shell programs safe. The tracked dollar budget
-also depends on available usage and pricing data and is not a provider billing cap.
+depends on available usage and pricing data and is not a provider billing cap.
 
 Read the [safety model](docs/architecture/safety-model.md), use reference tests,
 and review changes before delivery. Report security problems privately through
