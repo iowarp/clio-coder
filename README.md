@@ -39,7 +39,8 @@ engineering. Connect a model on your workstation, your institution's gateway,
 or a cloud service. Start with one conversation; add workers and specialized
 workflows when the task calls for them.
 
-**v0.5.2 adds durable self-compaction, context budgeting, and memory restoration.**
+**v0.5.3 adds committed eval baselines for Clio's own harness, diffusion model
+support, and an alpha System One decision surface.**
 The terminal is the primary working interface, and the bundled browser app
 provides documentation and an early preview of the wider graphical experience.
 Clio is pre-1.0 software. Review changes and validate scientific results with your
@@ -248,12 +249,12 @@ bootstrap installer, upgrades, selective resets, and removal.
 <details>
 <summary><strong>Build and install a published release from source</strong></summary>
 
-From source, pin the release you intend to run. The following selects v0.5.2
+From source, pin the release you intend to run. The following selects v0.5.3
 once its release tag is published; for development before the tag, use the
 [contributor checkout instructions](CONTRIBUTING.md#set-up-a-checkout).
 
 ```bash
-git clone --branch v0.5.2 https://github.com/iowarp/clio-coder.git
+git clone --branch v0.5.3 https://github.com/iowarp/clio-coder.git
 cd clio-coder
 corepack enable pnpm
 pnpm run install:local
