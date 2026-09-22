@@ -8,6 +8,7 @@ import type { AgentAutomationAuthority, AgentSpec } from "../agents/spec.js";
 import type { WorkerContextSeed } from "../context/worker/contract.js";
 import type { CostProvenance } from "../providers/index.js";
 import type { ProtectedArtifactState } from "../safety/protected-artifacts.js";
+import type { AgentTaskFeatures } from "./agent-candidates.js";
 import type { AssignmentId, DispatchAssignment } from "./assignment.js";
 import type { DurableAssignmentRecord } from "./assignment-store.js";
 import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-store.js";
@@ -92,6 +93,14 @@ export interface DispatchRequest extends JobSpec {
 	routeApproval?: ApprovedAssignmentRoute;
 	/** Resolver-authored active decision for this approved recovery attempt. */
 	routeAttemptDecision?: ApprovedAssignmentRoute["decision"];
+	/**
+	 * Calibrated task features from the `routing` decision site, resolved once
+	 * while admission is still async and read by the synchronous candidate path.
+	 * Absent when the site is unbound or the provider did not answer, and the
+	 * regex classifier then runs exactly as it always has. Host-resolved; never
+	 * accepted from model arguments.
+	 */
+	routingFeatures?: AgentTaskFeatures;
 	/**
 	 * The agent ledger this run coordinates on. Set by the dispatch modes that
 	 * run two or more concurrent peers; absent everywhere else, and its absence

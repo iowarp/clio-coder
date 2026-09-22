@@ -32,6 +32,10 @@ export function routeValidationProjection(
 		agentSelection,
 		routeApproval,
 		routeAttemptDecision,
+		// Host-resolved from the `routing` decision site while admission was
+		// still async. Stripped on the same terms as the reservation: a model
+		// must not be able to author the task features its own routing reads.
+		routingFeatures,
 		assignmentDeadlineAt,
 		// Orchestrator-minted, never model-authored: the ledger reference is
 		// stripped before validation for the same reason the reservation is.
@@ -65,6 +69,7 @@ export function routeValidationProjection(
 			...(agentSelection !== undefined ? { agentSelection } : {}),
 			...(routeApproval !== undefined ? { routeApproval } : {}),
 			...(routeAttemptDecision !== undefined ? { routeAttemptDecision } : {}),
+			...(routingFeatures !== undefined ? { routingFeatures } : {}),
 			...(assignmentDeadlineAt !== undefined ? { assignmentDeadlineAt } : {}),
 			...(ledger !== undefined ? { ledger } : {}),
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),

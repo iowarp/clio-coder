@@ -96,6 +96,7 @@ import {
 	type CapabilityFlags,
 	canonicalEndpointKey,
 	canonicalizeWireModelId,
+	credentialsPresent,
 	type EndpointCapacity,
 	endpointCapacityFor,
 	endpointCapacityForStatus,
@@ -105,6 +106,7 @@ import {
 	type ResolvedRuntimeTarget,
 	type RuntimeApiFamily,
 	type RuntimeDescriptor,
+	resolveDecider,
 	resolveEndpointCapacities,
 	resolveModelCapabilities,
 	resolveRuntimeTarget,
@@ -134,7 +136,7 @@ import {
 } from "./active-route-planner.js";
 import { admit, createCapacityAdmissionController, createLeaseSlotGuard } from "./admission.js";
 import { AdmissionCanceledError } from "./admission-error.js";
-import { agentRouteCandidates } from "./agent-candidates.js";
+import { type AgentTaskFeatures, agentRouteCandidates } from "./agent-candidates.js";
 import { AGENT_LEDGER_PROMPT_MAX_CHARS, renderAgentLedger } from "./agent-ledger.js";
 import { publishAgentLedgerEntry, subscribeAgentLedger } from "./agent-ledger-hub.js";
 import {
@@ -145,6 +147,7 @@ import {
 	readAgentLedger,
 } from "./agent-ledger-store.js";
 import { materializeAgentPlanSelection } from "./agent-plan-adapter.js";
+import { classifyAgentTaskWithDecider } from "./agent-task-decisions.js";
 import { AssignmentRegistry, applyActiveRouteSelection, asAssignmentId } from "./assignment.js";
 import type { AssignmentAttemptStartEvent } from "./assignment-events.js";
 import { reconcileOrphanAssignments } from "./assignment-reconcile.js";
@@ -465,6 +468,13 @@ interface ProbeClaim {
 }
 /** ACP event-inactivity stall window (Symphony §5.3.6 semantics); <= 0 disables. */
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
+/**
+ * A System One answer is a sub-second call, and admission is already waiting on
+ * capacity behind it. The bound is generous enough that an ordinary slow
+ * response still lands, and short enough that a hung provider costs a dispatch
+ * a couple of seconds rather than the run.
+ */
+const ROUTING_DECISION_TIMEOUT_MS = 3_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
@@ -2614,6 +2624,28 @@ export function createDispatchBundle(
 	const prompts: PromptsContract = maybePrompts;
 	const config = context.getContract<ConfigContract>("config");
 	const getEffectiveSettings = (): EffectiveSettings => options?.getSettings?.() ?? config?.get();
+
+	/**
+	 * Calibrated task features for the `routing` site, or null to leave the
+	 * request on the regex classifier. Null is the ordinary case: it is what an
+	 * unbound site, a provider outage, and an uncertain answer all produce, and
+	 * dispatch must not be able to tell the difference between them.
+	 */
+	async function resolveRoutingFeatures(
+		req: DispatchRequest,
+		settings: EffectiveSettings,
+	): Promise<AgentTaskFeatures | null> {
+		if (!settings) return null;
+		const decider = resolveDecider("routing", {
+			settings,
+			providers,
+			ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: ROUTING_DECISION_TIMEOUT_MS },
+		});
+		if (!decider) return null;
+		return await classifyAgentTaskWithDecider(req.task, decider, {
+			onError: (error) => reportDispatchDiagnostic("routing decision unavailable, using rules", error),
+		});
+	}
 	const getProtectedArtifactState = (): ProtectedArtifactState =>
 		frozenProtectedArtifactState(options?.getProtectedArtifactState?.());
 	// Optional: absent in minimal test bundles. Workers just get no project
@@ -5004,6 +5036,15 @@ export function createDispatchBundle(
 			throw new Error(`dispatch: invalid spec: ${validated.errors.join("; ")}`);
 		}
 		req = validation.restore(validated.spec);
+		// Candidate evaluation is synchronous and sits well below here, so the
+		// `routing` site is answered once while admission can still await, and
+		// the result rides the request down. An unbound site or a provider that
+		// did not answer leaves the field absent, and the regex classifier runs
+		// exactly as it did before the site existed.
+		if (req.routingFeatures === undefined) {
+			const routingFeatures = await resolveRoutingFeatures(req, settings);
+			if (routingFeatures !== null) req = { ...req, routingFeatures };
+		}
 		// A top-level run needs its stable identity before it can wait for
 		// capacity. The board can then render the assignment as queued and the
 		// same id becomes the ledger row once its slot opens.
@@ -6745,6 +6786,7 @@ export function createDispatchBundle(
 			mode,
 			activeAgentRoles: settings?.fleet.adaptiveRouting.agentRoles ?? [],
 			...(agentIntent === undefined ? {} : { intentOverride: agentIntent }),
+			...(req.routingFeatures === undefined ? {} : { features: req.routingFeatures }),
 		});
 		const settingsFingerprint = computeSettingsFingerprint(settings ?? null);
 		const fixedDelegation = resolution.runtimeId === "acp";
