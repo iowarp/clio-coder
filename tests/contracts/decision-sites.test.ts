@@ -6,6 +6,7 @@ import { DECISION_SITES } from "../../src/core/defaults.js";
 import { inspectDecisionSite, resolveDecider } from "../../src/domains/providers/decision-sites.js";
 import { chosen, isTrue, rating } from "../../src/domains/providers/decisions.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
+import typesafeJev from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 
 const ctx: ProbeContext = { credentialsPresent: new Set(), httpTimeoutMs: 5000 };
@@ -89,6 +90,48 @@ describe("decision site resolution", () => {
 		const status = inspectDecisionSite("routing", { settings, providers, ctx });
 		strictEqual(status.bound, false);
 		strictEqual(status.bound === false ? status.reason : null, "target-unresolved");
+	});
+
+	it("reports a runtime the registry does not know", () => {
+		const { settings } = settingsWith({ routing: "system-one" });
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev" }),
+			getRuntime: () => null,
+		} as unknown as ProvidersContract;
+		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		strictEqual(status.bound, false);
+		strictEqual(status.bound === false ? status.reason : null, "target-unresolved");
+	});
+
+	// A System One model advertises `chat: false` by construction, so resolving a
+	// decision binding through the conversational target resolver made every Jev
+	// target unresolvable and the whole setting inert.
+	it("binds a target that does not advertise chat", () => {
+		const { settings } = settingsWith({ routing: "system-one" });
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => typesafeJev,
+		} as unknown as ProvidersContract;
+		strictEqual(typesafeJev.defaultCapabilities.chat, false);
+		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		strictEqual(status.bound, true);
+		strictEqual(status.bound === true ? status.targetId : null, "jev");
+		strictEqual(status.bound === true ? status.model : null, "jev-latest");
+		ok(resolveDecider("routing", { settings, providers, ctx }));
+	});
+
+	// Declaring the capability and implementing the verb are separate claims, and
+	// a target bound here by mistake is likelier to be an ordinary chat model.
+	it("refuses a runtime that declares decisions but has no decide verb", () => {
+		const { decide: _decide, ...withoutVerb } = typesafeJev;
+		const { settings } = settingsWith({ routing: "system-one" });
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev" }),
+			getRuntime: () => withoutVerb,
+		} as unknown as ProvidersContract;
+		const status = inspectDecisionSite("routing", { settings, providers, ctx });
+		strictEqual(status.bound, false);
+		strictEqual(status.bound === false ? status.reason : null, "runtime-cannot-decide");
 	});
 });
 
