@@ -971,7 +971,7 @@ fleet:
     toolRisk: system-one
 ```
 
-Five sites are accepted, and each names a moment in the session rather than a
+Seven sites are accepted, and each names a moment in the session rather than a
 component:
 
 - `routing` answers which worker takes a dispatch, at dispatch time.
@@ -983,6 +983,11 @@ component:
 - `drafts` picks the strongest of the candidates `/draft` generated, and says
   how decisive the pick was. See
   [commands and modes](commands-and-modes.md) for the command.
+- `turnScope` judges, before each turn, whether the request can be answered
+  without looking at the workspace, and says so to the main agent in one line.
+- `dispatchForecast` judges, before each turn, whether the request suits
+  workers and how the work would split, and says so in one line. The main agent
+  still decides whether and how to dispatch.
 
 A site with no entry resolves to nothing and its caller keeps the behavior it
 had before the site existed. The capability is therefore opt-in by absence, with
@@ -1039,13 +1044,63 @@ The features are host-resolved and never accepted from model arguments.
 `routeValidationProjection` strips the field on the same terms as the
 reservation, so a model cannot author the task features its own routing reads.
 
-All five sites have call sites. Measured live against `jev-latest` for 0.5.4,
+All seven sites have call sites. Measured live against `jev-latest` for 0.5.4,
 routing answered in 315ms, four tool-risk ratings in 113 to 259ms, a batched
 memory and skills pass in 159ms, and a three-candidate draft judgment in 264ms.
 The pre-turn memory and skills pass is bounded at 1.5s because it sits on the
 turn's critical path; routing is bounded at 3s beside a worker spawn, and the
 tool-risk and draft judgments at 5s because nothing waits on them but the
 overlay.
+
+#### What the pre-turn hints change
+
+`turnScope` and `dispatchForecast` inform the main agent and nothing else. The
+main agent stays responsible for every choice: no tool is removed, no call is
+gated, and no worker is started or picked on its behalf.
+
+Both sites ask their questions before the turn, in the same request as the
+memory and skills relevance pass, so binding them alongside either of those
+costs no extra round trip. Bound alone, they add one call, measured at a p50 of
+130ms and a maximum of 322ms, under the same 1.5s bound. The evidence is the
+turn's text and the tail of the previous assistant message. The tail matters
+because a short follow-up such as an approval reads as small talk without the
+proposal it answers.
+
+A confident answer becomes one line in the submitted user message, where every
+turn_start reminder goes:
+
+- `turnScope` adds `[Scope] This reads as answerable without inspecting the
+  workspace...` when the answer is at least 0.8. It targets conversational turns
+  that the main model tends to explore anyway. Session ledgers showed a
+  self-introduction question spending 40 tool calls and a dispatch.
+- `dispatchForecast` adds `[Plan] This reads as work suited to workers...` when
+  the answer is at least 0.85. The line also names the shape the work reads
+  as (one worker, independent pieces in parallel, dependent steps in order, or
+  independent opinions) when that answer is confident.
+
+The hint goes into the message rather than into the tool list or the system
+prompt, because both of those sit in the cached prefix. A narrower tool surface
+records `tool_surface_change` as a cold reason on every tier, and on a local
+27B target a cold 15.5k-token prefix measured 9.3s to first token against 0.56s
+warm. No hint is given on a continuation turn, or when the host scoped the turn
+with explicit constraints.
+
+Each answer is recorded in the session ledger as a `decisionBrief` entry, with
+the site, its wording version, the answering target and model, the latency, and
+the probabilities. The ledger's own tool calls for the same turn show what the
+main agent did, so the hint's precision on real work can be read back from
+sessions.
+
+Each site is one definition in `src/domains/providers/sites/`: its questions, a
+reader, the hint and the ledger summary. The pre-turn brief in
+`src/domains/providers/pre-turn-brief.ts` groups bound sites by answering
+model and sends one request per group. Wording is checked live against a
+labeled fixture with
+`node --import tsx scripts/decision-probe.ts evals/fixtures/decision-cases/turn-sites.json --profile <name>`,
+which calls the decision model and binds the fixture's sites to `<name>` for
+that run only. For 0.5.4, 26 labeled turns over two runs gave `turnScope` 52 of
+52 correct answers. `dispatchForecast` gave 48 of 52 on whether to delegate and
+8 of 10 on shape. Every miss was an abstention rather than a wrong answer.
 
 #### Turning the alpha on, end to end
 
