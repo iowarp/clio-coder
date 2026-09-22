@@ -49,7 +49,7 @@ three values that are a property of the harness rather than of the machine:
 result and post-state, and `custom.counters.fs_ops`. The default-profile suites
 declare them; the full profiles carry the largest cases, are invoked
 deliberately and stay unpinned. Six tools are covered: `edit`, `read`, `write`,
-`grep`, `find` and `bash`, for 232 pinned scenarios across both splits.
+`grep`, `find` and `bash`, for 230 pinned scenarios across both splits.
 
 ```sh
 node dist/cli/index.js eval baseline check  --suite evals/tool-bench/read.yaml
