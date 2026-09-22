@@ -84,9 +84,24 @@ export function inspectDecisionSite(site: DecisionSite, input: ResolveDeciderInp
 		};
 	}
 
+	// The caller's context names which environment variables are set, which is
+	// all a chat request needs. A decision target's key usually lives in the
+	// credential store under `auth.apiKeyRef`, and without resolving it here
+	// every request went out unauthenticated and every site fell back.
+	const auth = input.providers.auth;
+	const resolveAuthToken = auth
+		? async (signal?: AbortSignal): Promise<string | undefined> => {
+				try {
+					const resolution = await auth.resolveForTarget(target, runtime, signal ? { signal } : undefined);
+					return resolution.apiKey ?? undefined;
+				} catch {
+					return undefined;
+				}
+			}
+		: undefined;
 	return {
 		bound: true,
-		decider: createDecider(runtime, target, input.ctx),
+		decider: createDecider(runtime, target, input.ctx, resolveAuthToken),
 		targetId: target.id,
 		model: profile.model ?? null,
 	};
