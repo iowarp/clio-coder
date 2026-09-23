@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Rank installed skills beyond the first 24 names. The loader orders skills alphabetically, and the old shared 24-candidate cap left every later name unscored even though the listing can page it. The skills site now asks about up to 200 names in the same batched request; memory keeps its 24-record bound.
 - Apply one certainty floor across Jev and Laya choice and score answers. Jev reports distribution peakedness while Laya reports normalized entropy as `confidence`, so reading the field directly could admit an uncertain answer or reject a decisive one. Readers now derive peakedness from the returned distribution when present; Noul continues to derive it from its yes probability.
 - Count credential resolution against a decision site's timeout. The HTTP timer started only after resolving a stored key, so a slow refresh could hold the pre-turn brief past its 1.5s bound. A deadline now covers both steps and prevents a late key from starting a request after timeout.
 - Reject decision answers that do not match the question's shape or range. A `choice` returned for a `noul` question could pass the certainty floor and make `consult` claim it had answered while reporting a zero probability. Such malformed replies now fall back to no usable answer.

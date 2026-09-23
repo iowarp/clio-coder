@@ -36,7 +36,7 @@ const MIN_CERTAINTY = 0.2;
 const MAX_SUMMARY_CHARS = 240;
 
 /**
- * Candidates per site in one pass.
+ * Memory candidates in one pass.
  *
  * State carries each candidate's text once and the questions reference it by
  * id, so a pass costs roughly `task + sum(summaries)` rather than repeating the
@@ -45,14 +45,17 @@ const MAX_SUMMARY_CHARS = 240;
  * all of it candidate text, so the request grows at roughly 60 tokens per
  * additional candidate at the summary bound above.
  *
- * 24 per site keeps a worst-case pass near 2k input tokens and inside one
- * round trip, which is the point of batching. A store larger than that is
- * already being cut by the token budget and the item limit downstream, so the
- * candidates past this bound would be ranked and then discarded anyway. They
- * are dropped before the request instead, and they rank as abstentions, which
- * leaves them exactly where the caller's own order put them.
+ * 24 memory records keep that part of a worst-case pass near 2k input tokens.
+ * A larger memory store is already cut by the prompt budget downstream. A
+ * larger skill catalog is different: its listing can page every installed
+ * skill, so cutting it at 24 leaves later names unable to reach the first page.
+ * Jev has been measured with 256 questions in one request, and TypeSafe's
+ * published skill-ranking example sends a 182-skill roster in one request.
+ * A 200-skill cap leaves room for memory and turn-site questions in that
+ * measured batch size.
  */
-const MAX_SUBJECTS = 24;
+const MAX_MEMORY_SUBJECTS = 24;
+const MAX_SKILL_SUBJECTS = 200;
 
 type RelevanceSite = "memory" | "skills";
 
@@ -98,8 +101,8 @@ function bounded(value: string, maxCodePoints: number): string {
  * instruction would send the same evidence once per question and make the
  * request grow with the square of the catalog.
  */
-function askFor(subjects: ReadonlyArray<RelevanceSubject>): PreTurnAsk | null {
-	const bound = subjects.slice(0, MAX_SUBJECTS);
+function askFor(subjects: ReadonlyArray<RelevanceSubject>, limit: number): PreTurnAsk | null {
+	const bound = subjects.slice(0, limit);
 	if (bound.length === 0) return null;
 	const questions: Record<string, DecisionQuestion> = {};
 	const candidates: Record<string, string> = {};
@@ -148,7 +151,7 @@ export function relevanceSite(
 	return {
 		site,
 		version: RELEVANCE_PASS_VERSION,
-		prepare: () => askFor(listSubjects()),
+		prepare: () => askFor(listSubjects(), site === "skills" ? MAX_SKILL_SUBJECTS : MAX_MEMORY_SUBJECTS),
 		read(answers, ask) {
 			const scores = scoresFrom(answers, ask);
 			return Object.keys(scores).length > 0 ? scores : null;

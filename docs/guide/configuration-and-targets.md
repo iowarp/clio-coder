@@ -979,7 +979,9 @@ component:
 - `routing` is retired. A binding still validates, is never asked, and is named
   in one startup notice; see [what `routing` changes](#what-routing-changes).
 - `skills` answers which installed skills the listing carries, before the prompt
-  is composed.
+  is composed. It scores up to 200 model-visible skills in one request, so a
+  38-skill catalog is ranked in full rather than cutting off at the first 24
+  alphabetical names.
 - `memory` answers which durable records the prompt carries, at the same point.
   The records sit in the system prompt, so a session keeps the first ranking it
   applies until the approved records change, and a follow-up turn never
