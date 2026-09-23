@@ -196,7 +196,39 @@ function signalProcessGroup(child: ChildProcess, signal: NodeJS.Signals): void {
 	}
 }
 
+/** Start the worker process itself. The spec, and with it the approved identity, comes later. */
+function launchWorkerChild(
+	command: string,
+	args: ReadonlyArray<string>,
+	opts?: Pick<WorkerProcessOptions, "cwd" | "env">,
+): ChildProcess {
+	return spawn(command, [...args], {
+		stdio: ["pipe", "pipe", "pipe"],
+		cwd: opts?.cwd,
+		env: withClioAgentEnvironment(opts?.env ?? process.env),
+		// The worker leads its own process group so abort escalation covers the
+		// descendants a runtime spawned, not only the immediate child.
+		detached: true,
+	});
+}
+
 export function spawnWorkerProcess(
+	command: string,
+	args: ReadonlyArray<string>,
+	spec: WorkerSpec,
+	opts?: WorkerProcessOptions,
+): SpawnedWorker {
+	return attachWorkerChannel(launchWorkerChild(command, args, opts), command, args, spec, opts);
+}
+
+/**
+ * Write the spec to a running worker child and wire both protocol lanes. The
+ * approved identity is derived from this spec here, so a child that was
+ * started before its spec existed is held to exactly the identity a cold
+ * spawn of the same spec would be.
+ */
+function attachWorkerChannel(
+	child: ChildProcess,
 	command: string,
 	args: ReadonlyArray<string>,
 	spec: WorkerSpec,
@@ -207,15 +239,6 @@ export function spawnWorkerProcess(
 	const now = opts?.now ?? Date.now;
 	const monotonicNow = opts?.monotonicNow ?? (() => performance.now());
 	const approved = opts?.approvedIdentity ?? approvedIdentityForSpec(spec);
-
-	const child: ChildProcess = spawn(command, [...args], {
-		stdio: ["pipe", "pipe", "pipe"],
-		cwd: opts?.cwd,
-		env: withClioAgentEnvironment(opts?.env ?? process.env),
-		// The worker leads its own process group so abort escalation covers the
-		// descendants a runtime spawned, not only the immediate child.
-		detached: true,
-	});
 	const pid = child.pid ?? null;
 
 	// One wall anchor plus a monotonic span keeps the persisted/display instant
@@ -631,6 +654,92 @@ export function spawnWorkerProcess(
 		lastChannelFailure: () => channelFailure,
 		attestation: () => attestation,
 	};
+}
+
+/**
+ * A worker process started before its spec exists, for speculative dispatch.
+ *
+ * The child boots, loads the worker's module graph and blocks reading stdin,
+ * which is the whole of what a prewarm buys. Nothing about the run is decided
+ * here: `adopt` writes the spec and derives the approved identity from it at
+ * that moment, so attestation is exactly as strong as a cold spawn's, and a
+ * child that announces anything before its spec arrives fails attestation.
+ *
+ * While held, the child and its pipes do not keep this process alive, and a
+ * held child whose parent dies reads end-of-file on stdin and exits, so a
+ * crash cannot leave one behind.
+ */
+export interface HeldWorkerProcess {
+	readonly pid: number | null;
+	/** True while the child is running and still waiting for its spec. */
+	alive(): boolean;
+	/** Write the spec and hand back the worker, or null when the held child is gone. */
+	adopt(spec: WorkerSpec, opts?: WorkerProcessOptions): SpawnedWorker | null;
+	/** Kill the held child's process group. A no-op once adopted or discarded. */
+	discard(): void;
+}
+
+function setChildReferenced(child: ChildProcess, referenced: boolean): void {
+	const streams = [child.stdin, child.stdout, child.stderr] as Array<{ ref?: () => void; unref?: () => void } | null>;
+	for (const stream of streams) {
+		if (referenced) stream?.ref?.();
+		else stream?.unref?.();
+	}
+	if (referenced) child.ref();
+	else child.unref();
+}
+
+export function spawnHeldWorkerProcess(
+	command: string,
+	args: ReadonlyArray<string>,
+	opts?: Pick<WorkerProcessOptions, "cwd" | "env">,
+): HeldWorkerProcess {
+	const child = launchWorkerChild(command, args, opts);
+	let state: "held" | "adopted" | "discarded" = "held";
+	let gone = false;
+	child.once("exit", () => {
+		gone = true;
+	});
+	child.once("error", () => {
+		gone = true;
+	});
+	// The pipe raises EPIPE asynchronously when a held child dies; without a
+	// listener that is an unhandled stream error in the orchestrator.
+	child.stdin?.on("error", () => {
+		gone = true;
+	});
+	setChildReferenced(child, false);
+	const alive = (): boolean =>
+		state === "held" && !gone && child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+	return {
+		pid: child.pid ?? null,
+		alive,
+		adopt(spec, adoptOptions) {
+			if (!alive()) return null;
+			state = "adopted";
+			setChildReferenced(child, true);
+			return attachWorkerChannel(child, command, args, spec, adoptOptions);
+		},
+		discard() {
+			if (state !== "held") return;
+			state = "discarded";
+			try {
+				child.stdin?.end();
+			} catch {
+				// Already closed.
+			}
+			signalProcessGroup(child, "SIGKILL");
+		},
+	};
+}
+
+/** The native worker entry, held for its spec. Same argv and environment as `spawnNativeWorker`. */
+export function spawnHeldNativeWorker(opts?: Pick<SpawnOptions, "cwd" | "env" | "workerEntryPath">): HeldWorkerProcess {
+	const workerEntry = opts?.workerEntryPath ?? join(resolvePackageRoot(), "dist/worker/entry.js");
+	return spawnHeldWorkerProcess(process.execPath, ["--disable-warning=ExperimentalWarning", workerEntry], {
+		...(opts?.cwd !== undefined ? { cwd: opts.cwd } : {}),
+		env: withCompileCacheEnvironment(opts?.env ?? process.env),
+	});
 }
 
 export function spawnNativeWorker(spec: WorkerSpec, opts?: SpawnOptions): SpawnedWorker {

@@ -491,6 +491,10 @@ const EXTRA_HELP: Record<string, [string, string]> = {
 		"Task worktree storage",
 		"Where isolated task worktrees are created. Use disk for the normal location, tmpfs for memory-backed storage, auto to prefer tmpfs when available, or an absolute directory you control.",
 	],
+	"fleet.speculativeDispatch": [
+		"Speculative dispatch (experimental)",
+		"With the dispatchForecast decision site bound, start the worker a confident forecast predicts before the main agent dispatches it, and hold it until a matching dispatch adopts it or the turn ends. The agent's dispatch never changes.",
+	],
 	"fleet.retry.breakerThreshold": [
 		"Failures before cooldown",
 		"Consecutive route failures before Clio temporarily stops sending work to that route. A healthy request clears the failure count.",

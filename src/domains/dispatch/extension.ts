@@ -171,7 +171,12 @@ import {
 import { type BatchState, createBatch, onRunComplete, snapshotBatch } from "./batch-tracker.js";
 import { type RunToolBudgetEnvelope, resolveToolBudgetEnvelope } from "./budget-envelope.js";
 import { assessCapabilityMismatch, type CapabilityMismatch } from "./capability-match.js";
-import { capacityLeaseUsage, capacityLeaseUsageAsync, createNodeLeaseUsageReader } from "./capacity-lease.js";
+import {
+	capacityLeaseUsage,
+	capacityLeaseUsageAsync,
+	createNodeLeaseUsageReader,
+	endpointCapacityUsage,
+} from "./capacity-lease.js";
 import { acquireCheckoutWriterLease, type CheckoutWriterLease } from "./checkout-writer-lease.js";
 import type {
 	DispatchAdmissionObserver,
@@ -183,7 +188,13 @@ import type {
 } from "./contract.js";
 import { createWorkerOutputCapture, startDispatchEventPump, workerOutputCaptureBytes } from "./event-pump.js";
 import type { ExecutionHandoff } from "./execution-handoff.js";
-import { dispatchResultContract, routeCorrelationFactsForRun, withAttemptRole } from "./execution-role.js";
+import {
+	agentRoleFactsResolver,
+	dispatchResultContract,
+	requestExecutionRole,
+	routeCorrelationFactsForRun,
+	withAttemptRole,
+} from "./execution-role.js";
 import {
 	affectsTargetBreaker,
 	classifyFailure,
@@ -203,6 +214,7 @@ import {
 	type HeartbeatStatus,
 	heartbeatMonotonicAt,
 } from "./heartbeat.js";
+import { createHeldWorkerPool, type HeldWorkerKey, type HeldWorkerPool } from "./held-workers.js";
 import {
 	type BatchVerificationGate,
 	createBatchVerificationGate,
@@ -328,8 +340,10 @@ import {
 	type WorkerModelLoad,
 } from "./worker-protocol.js";
 import {
+	type HeldWorkerProcess,
 	type SpawnedWorker,
 	type SpawnedWorkerResult,
+	spawnHeldNativeWorker,
 	spawnNativeWorker,
 	type SpawnOptions as WorkerSpawnOptions,
 	type WorkerSpec,
@@ -424,6 +438,12 @@ export interface DispatchNodePlacement {
 
 export interface DispatchBundleOptions {
 	spawnWorker?: (spec: WorkerSpec, opts?: WorkerSpawnOptions) => SpawnedWorker;
+	/**
+	 * Start a worker held for its spec, for speculative dispatch. Defaults to the
+	 * native worker entry when this bundle also spawns native workers itself; a
+	 * bundle given its own `spawnWorker` holds nothing unless it passes this too.
+	 */
+	spawnHeldWorker?: (key: HeldWorkerKey) => HeldWorkerProcess;
 	/** Resolve the attested node and transport before capacity admission; absent means local. */
 	resolveNode?: (req: DispatchRequest) => DispatchNodePlacement | null;
 	/** Side-effect-free companion to resolveNode, primarily for alternate fleet backends and deterministic tests. */
@@ -468,6 +488,8 @@ interface ProbeClaim {
 const DEFAULT_ACP_STALL_TIMEOUT_MS = 300_000;
 const ADMISSION_INPUT_TOKEN_ESTIMATE = 4096;
 const ACP_TOOL_SIGNATURE = "acp:unobservable";
+/** Task text a speculative route preview is resolved with; it never reaches a worker. */
+const SPECULATIVE_TASK = "speculative dispatch route preview";
 const ACP_SPEC_FINGERPRINT = "acp:unobservable";
 /**
  * Where the worker process ran when no fleet placement chose a node. This is the
@@ -2651,6 +2673,13 @@ export function createDispatchBundle(
 	});
 	// Durable evidence owner used by shadow observation and active readiness.
 	const routeObserver: RouteObserver = options?.routeObserver ?? createRouteObserver({});
+	const heldWorkers: HeldWorkerPool | null =
+		options?.spawnHeldWorker !== undefined || options?.spawnWorker === undefined
+			? createHeldWorkerPool({
+					spawnHeld: options?.spawnHeldWorker ?? ((key) => spawnHeldNativeWorker({ cwd: key.cwd })),
+					onDiagnostic: (message) => reportDispatchDiagnostic("speculative dispatch", message),
+				})
+			: null;
 
 	let ledger: Ledger | null = null;
 	let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
@@ -5292,21 +5321,41 @@ export function createDispatchBundle(
 			});
 		};
 		let worker: SpawnedWorker;
+		let adoptedHeldWorker = false;
 		try {
 			preparation?.signal?.throwIfAborted();
-			worker = (placement?.spawn ?? spawnWorker)(spec, {
+			const spawnOptions = {
 				cwd: lifecycle.cwd,
 				now,
 				monotonicNow,
 				onModelLoaded,
 				...(agentLedgerId !== null ? { onLedgerPost } : {}),
-			});
+			};
+			// Speculative dispatch: a process started on this turn's forecast is used
+			// only for exactly the recipe, target, model, runtime and directory it
+			// was started for. The spec, the options and the attestation it is held
+			// to are this dispatch's own, so an adopted run is the same run a cold
+			// spawn would have started.
+			const held =
+				heldWorkers !== null && placement?.spawn === undefined && lifecycle.runtimeKind === "http"
+					? heldWorkers.take({
+							agentId: req.agentId,
+							targetId: lifecycle.target.target.id,
+							wireModelId: lifecycle.target.wireModelId,
+							runtimeId: lifecycle.target.runtime.id,
+							cwd: lifecycle.cwd,
+						})
+					: null;
+			const adopted = held?.adopt(spec, spawnOptions) ?? null;
+			adoptedHeldWorker = adopted !== null;
+			worker = adopted ?? (placement?.spawn ?? spawnWorker)(spec, spawnOptions);
 		} catch (error) {
 			leaseSlot.release();
 			if (req.lineage === undefined) await failQueuedAssignment(capacityLease.assignmentId);
 			throw error;
 		}
 		timing.workerSpawnedAt = new Date(now()).toISOString();
+		if (adoptedHeldWorker) timing.heldWorkerAdoptedAt = timing.workerSpawnedAt;
 		const pid = worker.pid;
 		const abort = () => worker.abort();
 		const sendToWorker = worker.send?.bind(worker);
@@ -6882,6 +6931,45 @@ export function createDispatchBundle(
 		});
 	}
 
+	/**
+	 * Hold worker processes for a forecast recipe. Asked only with
+	 * `fleet.speculativeDispatch` on; the recipe's route is resolved the way a
+	 * dispatch naming only the recipe would resolve it, and nothing is held for a
+	 * remote node, a non-native runtime, or an endpoint or fleet already at its
+	 * limit. Never throws and never waits on anything but a local spawn.
+	 */
+	const speculate: NonNullable<DispatchContract["speculate"]> = (prediction) => {
+		try {
+			const settings = getEffectiveSettings();
+			if (heldWorkers === null || settings?.fleet?.speculativeDispatch !== true || draining) return 0;
+			// The request a dispatch naming only this recipe would carry, so the route
+			// resolves exactly as the agent's own call would.
+			const executionRole = requestExecutionRole({
+				agentId: prediction.agentId,
+				resolveFacts: agentRoleFactsResolver((agentId) => agents.getSpec(agentId)),
+			});
+			const planned = previewFixed({ agentId: prediction.agentId, executionRole, task: SPECULATIVE_TASK }, settings);
+			if (planned.node.id !== "local") return 0;
+			if (providers.getRuntime(planned.runtimeId)?.kind !== "http") return 0;
+			if (active.size >= configuredGlobalCapacity(settings)) return 0;
+			if (planned.endpoint !== undefined && (endpointCapacityUsage()[planned.endpoint.key] ?? 0) >= planned.endpoint.limit)
+				return 0;
+			return heldWorkers.hold(
+				{
+					agentId: planned.agentId,
+					targetId: planned.targetId,
+					wireModelId: planned.wireModelId,
+					runtimeId: planned.runtimeId,
+					cwd: process.cwd(),
+				},
+				prediction.count,
+			);
+		} catch (error) {
+			reportDispatchDiagnostic("speculative dispatch", error);
+			return 0;
+		}
+	};
+
 	const planAgentSelection: DispatchContract["planAgentSelection"] = (input) =>
 		materializeAgentPlanSelection(input, {
 			resolve: (request, mode, intent) =>
@@ -7228,6 +7316,7 @@ export function createDispatchBundle(
 			probeEndpointsAtDefaultBound();
 		},
 		async stop() {
+			heldWorkers?.releaseAll("session end");
 			// Shutdown is process-local. The durable machine-wide drain belongs to
 			// the operator: setting it here would deny admission in every sibling
 			// Clio process, and a crash before the clearing write would wedge the
@@ -7458,6 +7547,9 @@ export function createDispatchBundle(
 			get: getDispatchReservation,
 		},
 		costCeilingUsd: () => scheduling.ceilingUsd(),
+		speculate,
+		releaseSpeculative: (reason) => heldWorkers?.releaseAll(reason) ?? 0,
+		speculativeStats: () => heldWorkers?.stats() ?? { held: 0, adopted: 0, discarded: 0, live: 0 },
 		protectedArtifactState: () => getProtectedArtifactState(),
 		dispatch,
 		dispatchBatch,

@@ -10,12 +10,20 @@
  */
 
 import type { PreTurnSite } from "../pre-turn-brief.js";
-import { dispatchForecastSite } from "./dispatch-forecast.js";
+import {
+	createDispatchForecastSite,
+	type DispatchForecastSiteOptions,
+	dispatchForecastSite,
+} from "./dispatch-forecast.js";
 import { turnScopeSite } from "./turn-scope.js";
 
 export {
+	createDispatchForecastSite,
 	type DispatchForecast,
+	type DispatchForecastSiteOptions,
+	type DispatchRecipeOption,
 	type DispatchShape,
+	dispatchForecastConfident,
 	dispatchForecastHint,
 	dispatchForecastSite,
 } from "./dispatch-forecast.js";
@@ -25,3 +33,12 @@ export const TURN_SITES: ReadonlyArray<PreTurnSite<unknown>> = [
 	turnScopeSite as PreTurnSite<unknown>,
 	dispatchForecastSite as PreTurnSite<unknown>,
 ];
+
+/**
+ * The turn sites a host asks. `recipes` reaches `dispatchForecast` only; a host
+ * passes it when `fleet.speculativeDispatch` is on, and without it the list is
+ * the same sites `TURN_SITES` holds.
+ */
+export function turnSites(options: DispatchForecastSiteOptions = {}): ReadonlyArray<PreTurnSite<unknown>> {
+	return [turnScopeSite as PreTurnSite<unknown>, createDispatchForecastSite(options) as PreTurnSite<unknown>];
+}
