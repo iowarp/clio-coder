@@ -296,8 +296,9 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 				</CodeViewport>
 			)}
 			{status !== null && (
-				<figcaption className="diagram__status" role={state === "failed" ? "alert" : "status"}>
-					{status}
+				// A figcaption may not carry a live-region role, so the words it announces sit inside it.
+				<figcaption className="diagram__status">
+					<span role={state === "failed" ? "alert" : "status"}>{status}</span>
 				</figcaption>
 			)}
 		</figure>

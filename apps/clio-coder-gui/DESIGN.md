@@ -308,10 +308,13 @@ with `el.scrollTop = el.scrollHeight` inside the same rAF callback that delivers
    60 Hz headless compositor and bound per-frame work; they do not demonstrate 120 Hz behaviour. This
    app's own numbers belong in `PERFORMANCE.md` with the exact workload that produced them.
 
-Reference budgets to beat, measured on `apps/workbench` at 60 Hz headless over ~16 KB of Markdown
-streamed in 5-char chunks: keystroke→`input` p95 2-3 ms; keystroke→next frame p95 15-19 ms;
-event→paint p50 25-27 ms and p95 33-35 ms; zero tasks over 50 ms during the stream. At 120 Hz the
-frame budget halves to 8.3 ms, so the target is keystroke→next frame p95 under 10 ms.
+Reference budgets to beat, measured on `apps/workbench` at 60 Hz headless over 6.7 KB of Markdown
+streamed in 1,358 five-character chunks (the workbench called it ~16 KB, which its own event count
+contradicts): keystroke→`input` p95 2-3 ms; keystroke→next frame p95 15-19 ms; event→paint p50
+25-27 ms and p95 33-35 ms; zero tasks over 50 ms during the stream. At 120 Hz the frame budget halves
+to 8.3 ms, so the target is keystroke→next frame p95 under 10 ms. `pnpm run perf` streams that same
+answer, or a 16.7 KB extension of it, and `PERFORMANCE.md` holds this app's results; the smoke
+asserts on every run that streamed deltas leave the composer unrendered.
 
 ## Untrusted Markdown, code and diagrams
 

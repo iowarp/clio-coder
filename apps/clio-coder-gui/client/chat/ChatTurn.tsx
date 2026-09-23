@@ -23,6 +23,7 @@ import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
+import { countRender } from "../render/render-probe.js";
 import { ActivityGroup } from "./ActivityGroup.js";
 import { isAwaitingAnswer } from "./approval.js";
 import {
@@ -127,6 +128,7 @@ export const ChatTurnView = memo(function ChatTurnView({
 	workspaceRoot,
 	liveWorkers,
 }: ChatTurnProps) {
+	countRender(turn.settled ? "turn.settled" : "turn.live");
 	const reported = liveStatus(turn, row, pending, stopping, liveWorkers);
 	const last = turn.items.at(-1);
 	// The chip names the running call the way its row does ("Run python3 analyze.py"), not by tool id.

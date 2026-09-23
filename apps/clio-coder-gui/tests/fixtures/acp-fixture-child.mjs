@@ -3,6 +3,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as delay } from "node:timers/promises";
+import { streamWorkload } from "./stream-workload.mjs";
 
 const scenario = process.env.CLIO_CODER_WEB_FIXTURE_SCENARIO ?? "text";
 let sessionId = randomUUID(),
@@ -325,15 +326,21 @@ async function handle(frame) {
 						? "permission"
 						: scenario === "markdown" && promptText.includes("[stream]")
 							? "loop"
-							: STEERING && promptText.includes("[fleet]")
-								? "held-worker"
-								: scenario;
+							: scenario === "markdown" && promptText.includes("[workload")
+								? "workload"
+								: STEERING && promptText.includes("[fleet]")
+									? "held-worker"
+									: scenario;
 				cancelled = false;
 				if (scenario === "crash") process.exit(9);
 				if (turnScenario.startsWith("permission")) await permission();
 				else if (turnScenario === "held-worker") await heldWorker();
 				else if (turnScenario === "slow") {
 					while (!cancelled) await delay(100);
+				} else if (turnScenario === "workload") {
+					// `[workload 16384]` asks for an answer of at least that many bytes.
+					const bytes = Number(/\[workload (\d+)\]/.exec(promptText)?.[1] ?? 0);
+					await streamWorkload({ update, text, delay, cancelled: () => cancelled, bytes });
 				} else if (turnScenario === "loop") {
 					for (let i = 0; i < 1400 && !cancelled; i++) {
 						text(`${i} `);

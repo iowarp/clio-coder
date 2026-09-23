@@ -72,6 +72,8 @@ let failedPage: { screenshot(options: { path: string; fullPage: boolean }): Prom
 try {
 	for (const width of widths) {
 		const context = await browser.newContext({ viewport: { width, height: 1050 }, reducedMotion: "reduce" });
+		// Turns on `client/render/render-probe.ts`, so the stream check below can count composer renders.
+		await context.addInitScript("globalThis.__clioRenderCounts = {};");
 		await context.route("**/*", async (route) => {
 			const url = new URL(route.request().url());
 			if (url.origin === origin) await route.continue();
@@ -751,6 +753,21 @@ try {
 		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
 		assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
 		assert.equal(await page.locator(".live-workers").count(), 0, "a settled run leaves the live strip");
+		// Streamed deltas never render the composer: its props are scalars and a route memoized on
+		// settings and health. Count across the middle of the workload stream, well after the send's own
+		// renders, through Markdown, code, tool bursts and a failed call.
+		const composerRenders = () =>
+			page.evaluate(
+				() => (globalThis as unknown as { __clioRenderCounts: Record<string, number> }).__clioRenderCounts.composer ?? 0,
+			);
+		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[workload] Audit the convergence notes.");
+		await page.getByRole("button", { name: "Send", exact: true }).click();
+		const workload = page.locator(".chat-turn").last();
+		await workload.getByRole("heading", { name: "Results", exact: true }).waitFor();
+		const rendersBefore = await composerRenders();
+		await workload.getByRole("heading", { name: "How the levels relate", exact: true }).waitFor();
+		assert.equal(await composerRenders(), rendersBefore, "a streamed delta rendered the composer");
+		await page.waitForFunction(() => document.querySelector(".session-status")?.textContent?.includes("Ready"));
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
