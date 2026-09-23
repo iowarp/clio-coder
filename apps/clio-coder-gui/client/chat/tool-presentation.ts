@@ -14,7 +14,7 @@
 
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
-import { type DiffPanel, diffPanel } from "./diff.js";
+import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff.js";
 
 /** Ported from the workbench's clio-host.ts generic-label table. */
 export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {
@@ -301,6 +301,17 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
  */
 export function applyPartialFrame(_previous: string | undefined, frame: string | undefined): string | undefined {
 	return frame;
+}
+
+/**
+ * Whether the runtime settled this call at its approval gate. The sentence is the producer's own
+ * (see NOT_APPROVED_NOTE), so it holds for every tool, and it proves only that no approval arrived.
+ */
+export function notApproved(
+	item: Pick<TimelineItem, "status">,
+	wire: Pick<ToolWire, "resultText" | "isError">,
+): boolean {
+	return (item.status === "failed" || wire.isError) && (wire.resultText?.includes(NOT_APPROVED_NOTE) ?? false);
 }
 
 export function isSettledStatus(status: string): boolean {
@@ -769,9 +780,15 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		facts.push({ label: "still running", value: formatDuration(elapsedSeconds), tone: "warn" });
 
 	const output = outputPane(item, wire);
-	const excerpt = failed ? failureExcerpt(output.text) : null;
-	const digest =
-		excerpt === null ? digestFor(kind.body, facts, diff, matches, settled) : { text: excerpt, tone: "fail" as const };
+	// A call that never got its approval did not break, so its row says that instead of echoing the
+	// last line of the refusal, which is an instruction to the model ("Do not retry the same call.").
+	const refused = notApproved(item, wire);
+	const excerpt = failed && !refused ? failureExcerpt(output.text) : null;
+	const digest = refused
+		? { text: null, tone: null }
+		: excerpt === null
+			? digestFor(kind.body, facts, diff, matches, settled)
+			: { text: excerpt, tone: "fail" as const };
 	return {
 		chip: kind.chip,
 		verb: VERBS[kind.chip] ?? "Tool",
@@ -782,7 +799,11 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		body: kind.body,
 		tone: toneFor(item.status, wire.isError),
 		// A result that reports an error is a failure even when its frame said completed.
-		statusLabel: wire.isError && item.status === "completed" ? "Failed" : (STATUS_LABEL[item.status] ?? item.status),
+		statusLabel: refused
+			? "Not approved"
+			: wire.isError && item.status === "completed"
+				? "Failed"
+				: (STATUS_LABEL[item.status] ?? item.status),
 		settled,
 		failed,
 		facts,

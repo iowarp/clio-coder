@@ -16,7 +16,8 @@
  *    the call settles; the operator was reading it.
  * 3. A failure is never hidden behind a closed line: the folded row carries the
  *    last line the call printed, as the terminal does, and the group around it
- *    opens.
+ *    opens. A call that was not approved says so instead of printing the
+ *    refusal's last line, which is written for the model.
  * 4. Status meaning never rides on colour. The glyph's shape differs per state
  *    and every state other than done is also written out; done is written for
  *    assistive technology.
@@ -170,7 +171,15 @@ function RawDisclosure({ item }: { item: TimelineItem }) {
 function Body({ card }: { card: ToolPresentation }) {
 	switch (card.body) {
 		case "diff":
-			return card.failed ? <OutputBlock pane={card.output} /> : card.diff === null ? null : <DiffView panel={card.diff} />;
+			// A change that did not land keeps the proposal on screen, labelled as not applied or unverified,
+			// with the error under it. Dropping the proposal erased what the operator had just turned down.
+			if (!card.failed) return card.diff === null ? null : <DiffView panel={card.diff} />;
+			return (
+				<>
+					{card.diff?.diff ? <DiffView panel={card.diff} /> : null}
+					<OutputBlock pane={card.output} />
+				</>
+			);
 		case "terminal":
 			return <OutputBlock pane={card.output} />;
 		case "matches":

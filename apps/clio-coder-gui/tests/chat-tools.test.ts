@@ -200,7 +200,7 @@ test("a refused write arrives as failed and still shows what was refused", () =>
 		isError: true,
 	});
 	assert.equal(panel.provenance, "rejected");
-	assert.equal(panel.label, "Not applied · you rejected this");
+	assert.equal(panel.label, "Not applied · not approved");
 	assert.match(panel.note ?? "", /Nothing was written/);
 	assert.equal(panel.diff?.adds, 1);
 });
@@ -658,4 +658,30 @@ test("rows fold like Clio Coder's terminal: diffs stay visible, failures carry t
 	assert.equal(failed.digestTone, "fail");
 	assert.equal(failureExcerpt("   \n"), null);
 	assert.equal(failureExcerpt("x".repeat(200))?.length, FAILURE_EXCERPT_MAX);
+});
+
+// The registry's refusal ends with a line addressed to the model. The folded row must not echo it as
+// the call's one fact, and a refusal is not a tool fault.
+test("a call that was not approved says so on its row instead of echoing the refusal", () => {
+	const refused = presentTool(
+		toolItem({
+			title: "write",
+			toolKind: "edit",
+			status: "failed",
+			rawInput: { path: "/repo/fixture.txt", content: "approved\n" },
+			rawOutput: {
+				result: {
+					kind: "error",
+					message:
+						"write blocked: write was not approved\nThis call was denied; no approval is pending.\nDo not retry the same call.",
+				},
+				isError: true,
+			},
+		}),
+	);
+	assert.equal(refused.statusLabel, "Not approved");
+	assert.equal(refused.digest, null);
+	assert.equal(refused.diff?.provenance, "rejected");
+	assert.equal(refused.diff?.diff?.adds, 1, "the refused change stays readable");
+	assert.equal(refused.failed, true);
 });

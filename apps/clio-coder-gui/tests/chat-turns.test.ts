@@ -591,6 +591,28 @@ test("a malformed payload never throws and never invents a value", () => {
 	assert.equal(summary.contextWarning, null, "a non-string warning is not a warning");
 });
 
+test("a group only says it changed a file when the change landed", () => {
+	const change = (id: string, title: string, path: string, status: string, rawOutput?: Record<string, unknown>) =>
+		item({ id, turnId: "t", kind: "tool", title, status, rawInput: { path }, ...(rawOutput ? { rawOutput } : {}) });
+	const refusal = {
+		result: { kind: "error", message: "write blocked: write was not approved" },
+		isError: true,
+	};
+	const broke = { result: { kind: "error", message: "EACCES: permission denied" }, isError: true };
+	assert.equal(
+		activityDigest([change("a", "edit", "a.py", "completed"), change("b", "write", "b.py", "completed")]),
+		"changed 2 files",
+		"edits and writes share one phrase",
+	);
+	assert.equal(activityDigest([change("a", "write", "a.py", "failed", refusal)]), "1 change not approved");
+	assert.equal(activityDigest([change("a", "write", "a.py", "failed", broke)]), "1 change failed");
+	assert.equal(activityDigest([change("a", "edit", "a.py", "cancelled")]), "1 change stopped");
+	assert.equal(
+		activityDigest([change("a", "edit", "a.py", "completed"), change("b", "write", "b.py", "failed", refusal)]),
+		"changed 1 file, 1 change not approved",
+	);
+});
+
 test("a group says what it did in words, counting files once and leaving reasoning out", () => {
 	const call = (id: string, title: string, path?: string) =>
 		item({ id, turnId: "t", kind: "tool", title, status: "completed", ...(path ? { rawInput: { path } } : {}) });
