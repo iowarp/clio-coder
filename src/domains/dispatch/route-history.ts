@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, renameSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { withStateFileLockSync } from "../../core/state-file-lock.js";
 import { clioStateDir } from "../../core/xdg.js";
@@ -141,6 +141,16 @@ function retireHistory(path: string, version: unknown): void {
 	);
 }
 
+/** Inode, size and mtime; every write is tmp-and-rename, so a rewrite always moves it. */
+function fileIdentity(path: string): string {
+	try {
+		const stats = statSync(path);
+		return `${stats.ino}:${stats.size}:${stats.mtimeMs}`;
+	} catch {
+		return "missing";
+	}
+}
+
 function writeHistory(path: string, records: ReadonlyArray<RouteHistoryRecord>): void {
 	atomicWrite(
 		path,
@@ -157,13 +167,27 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 	const path = historyPath(options.stateDir ?? clioStateDir());
 	const maxRecords = Math.max(1, Math.floor(options.maxRecords ?? DEFAULT_MAX_RECORDS));
 	let records = readHistory(path);
+	let loaded = fileIdentity(path);
 
 	const reload = (): void => {
 		records = readHistory(path);
+		loaded = fileIdentity(path);
+	};
+	// Other Clio processes append to the same file. Reads pick up their writes
+	// when the file's identity moved, which costs one stat per read.
+	const refresh = (): void => {
+		if (fileIdentity(path) === loaded) return;
+		try {
+			reload();
+		} catch {
+			// An unreadable rewrite keeps the last good view; the next upsert
+			// reloads under the lock and reports the error there.
+		}
 	};
 
 	return {
 		recordsFor(route) {
+			refresh();
 			const key = routeCapabilityKey(route);
 			const current = routeDriftGuard(route);
 			return records
@@ -174,6 +198,7 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 				.map(clone);
 		},
 		all() {
+			refresh();
 			return records.map(clone);
 		},
 		upsert(input) {
@@ -187,10 +212,12 @@ export function createRouteHistoryStore(options: CreateRouteHistoryStoreOptions 
 					records[index] = record;
 					writeHistory(path, records.slice(-maxRecords));
 					records = records.slice(-maxRecords);
+					loaded = fileIdentity(path);
 					return "updated";
 				}
 				records = [...records, record].sort(compareRecords).slice(-maxRecords);
 				writeHistory(path, records);
+				loaded = fileIdentity(path);
 				return "inserted";
 			});
 		},

@@ -67,7 +67,19 @@ function compareStrings(left: string, right: string): number {
  */
 const integrityVerdicts = new WeakMap<object, boolean>();
 
-function authenticated(source: RouteQualityReceiptSource): boolean {
+/** Gate artifacts are verified under the same object-identity rule as receipts. */
+const gateVerdicts = new WeakMap<object, boolean>();
+
+function gateAuthenticated(artifact: GateDecisionArtifact): boolean {
+	const cached = gateVerdicts.get(artifact);
+	if (cached !== undefined) return cached;
+	const verdict = verifyGateDecisionArtifact(artifact).ok;
+	gateVerdicts.set(artifact, verdict);
+	return verdict;
+}
+
+/** Cached integrity verdict for one receipt object and the envelope it was read with. */
+export function receiptSourceAuthenticated(source: RouteQualityReceiptSource): boolean {
 	const cached = integrityVerdicts.get(source.receipt);
 	if (cached !== undefined) return cached;
 	const verdict = verifyReceiptIntegrity(source.receipt, source.envelope).ok;
@@ -80,7 +92,7 @@ function receiptSourcesByRunId(
 ): Map<string, RouteQualityReceiptSource> {
 	const result = new Map<string, RouteQualityReceiptSource>();
 	for (const source of sources) {
-		if (!authenticated(source)) continue;
+		if (!receiptSourceAuthenticated(source)) continue;
 		result.set(source.receipt.runId, source);
 	}
 	return result;
@@ -131,7 +143,7 @@ function gateCorrelation(
  * so replaying the same authenticated inputs is byte-identical.
  */
 export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQualityReduction {
-	if (!authenticated(input.subject)) {
+	if (!receiptSourceAuthenticated(input.subject)) {
 		return { label: "unmeasured", checks: [], correlatedGates: [], sourceDigests: [] };
 	}
 
@@ -158,7 +170,7 @@ export function reduceRouteQuality(input: ReduceRouteQualityInput): RouteQuality
 	}
 
 	for (const artifact of input.gateArtifacts ?? []) {
-		if (!verifyGateDecisionArtifact(artifact).ok || !gateReferencesMatch(artifact, receipts)) continue;
+		if (!gateAuthenticated(artifact) || !gateReferencesMatch(artifact, receipts)) continue;
 		const verdict = gateOutcome(artifact);
 		if (verdict === null || artifact.decider === undefined) continue;
 		const subjectReference = artifact.subjects.find(

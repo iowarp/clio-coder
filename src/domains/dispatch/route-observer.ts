@@ -16,12 +16,16 @@
  * prior. It never contributes a hard constraint or durable raw task text.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { clioStateDir } from "../../core/xdg.js";
 import { type AgentTaskType, classifyAgentTask } from "./agent-candidates.js";
-import { readGateDecisionArtifacts } from "./gate-decisions.js";
-import { verifyReceiptIntegrity } from "./receipt-integrity.js";
+import {
+	createDurableQualitySourceCache,
+	type DurableQualitySourceCache,
+	type DurableQualitySources,
+	type DurableReceiptSource,
+} from "./durable-quality-sources.js";
 import {
 	type CandidateEvaluation,
 	evaluateRouteDecision,
@@ -35,7 +39,7 @@ import {
 } from "./route-decision.js";
 import { createRouteHistoryStore, type RouteHistoryStore } from "./route-history.js";
 import { type RouteObservation, routeObservationFromHistory } from "./route-policy.js";
-import { type RouteQualityReduction, reduceRouteQuality } from "./route-quality.js";
+import { type RouteQualityReduction, receiptSourceAuthenticated, reduceRouteQuality } from "./route-quality.js";
 import type { RunEnvelope, RunReceipt } from "./types.js";
 
 // ---------------------------------------------------------------------------
@@ -213,30 +217,24 @@ export interface CreateRouteObserverOptions {
 	stateDir?: string;
 }
 
-function durableQualitySources(stateDir: string): {
-	receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }>;
-	gates: ReturnType<typeof readGateDecisionArtifacts>[number]["artifact"][];
-} {
-	const runsPath = join(stateDir, "runs.json");
-	if (!existsSync(runsPath)) return { receipts: [], gates: [] };
-	try {
-		const parsed = JSON.parse(readFileSync(runsPath, "utf8")) as unknown;
-		if (!Array.isArray(parsed)) return { receipts: [], gates: [] };
-		const receipts: Array<{ receipt: RunReceipt; envelope: RunEnvelope }> = [];
-		for (const envelope of parsed) {
-			if (typeof envelope !== "object" || envelope === null || Array.isArray(envelope)) continue;
-			const run = envelope as RunEnvelope;
-			const path = run.receiptPath ?? join(stateDir, "receipts", `${run.id}.json`);
-			if (!existsSync(path)) continue;
-			const receipt = JSON.parse(readFileSync(path, "utf8")) as unknown;
-			if (typeof receipt === "object" && receipt !== null && !Array.isArray(receipt)) {
-				receipts.push({ receipt: receipt as RunReceipt, envelope: run });
-			}
-		}
-		return { receipts, gates: readGateDecisionArtifacts(undefined, stateDir).map((entry) => entry.artifact) };
-	} catch {
-		return { receipts: [], gates: [] };
+/**
+ * Identity of everything a history record's quality reduction can read beyond
+ * its own receipt. Gates are the only path by which another receipt matters,
+ * so with no gate artifacts the key is empty and a reduction depends on the
+ * subject alone.
+ */
+function gateEvidenceKey(sources: DurableQualitySources, serialOf: (value: object) => number): string {
+	if (sources.gates.length === 0) return "";
+	const referenced = new Set<string>();
+	for (const gate of sources.gates) {
+		for (const subject of gate.subjects) referenced.add(subject.runId);
+		if (gate.decider !== undefined) referenced.add(gate.decider.runId);
 	}
+	const parts = sources.gates.map((gate) => `g${serialOf(gate)}`);
+	for (const source of sources.receipts) {
+		if (referenced.has(source.receipt.runId)) parts.push(`r${serialOf(source)}`);
+	}
+	return parts.join(",");
 }
 
 function appendObservationLine(dir: string, record: Record<string, unknown>): void {
@@ -279,32 +277,75 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 	let totalObservations = 0;
 	let sequence = 0;
 	const logDir = (): string => options.logDir ?? join(clioStateDir(), "route-decisions");
-	const reconcileHistory = (): void => {
-		const sources = durableQualitySources(options.stateDir ?? clioStateDir());
+	let qualitySources: DurableQualitySourceCache | undefined;
+	const readSources = (): DurableQualitySources => {
+		qualitySources ??= createDurableQualitySourceCache({ stateDir: options.stateDir ?? clioStateDir() });
+		return qualitySources.read();
+	};
+	const serials = new WeakMap<object, number>();
+	let nextSerial = 0;
+	const serialOf = (value: object): number => {
+		let serial = serials.get(value);
+		if (serial === undefined) {
+			nextSerial += 1;
+			serial = nextSerial;
+			serials.set(value, serial);
+		}
+		return serial;
+	};
+	// Per receipt digest: the inputs of the last reconciliation and the record it
+	// left behind. Matching inputs and an unchanged record skip the reduction and
+	// the locked history write, so a dispatch pays only for new evidence.
+	const reconciled = new Map<string, { subject: DurableReceiptSource; gateKey: string; recordJson: string }>();
+	let indexed: { version: number; byDigest: Map<string, DurableReceiptSource> } | null = null;
+	const digestIndex = (sources: DurableQualitySources): Map<string, DurableReceiptSource> => {
+		if (indexed?.version !== sources.version) {
+			indexed = {
+				version: sources.version,
+				byDigest: new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source])),
+			};
+		}
+		return indexed.byDigest;
+	};
+	const reconcileHistory = (sources: DurableQualitySources): void => {
 		if (sources.receipts.length === 0) return;
-		const byDigest = new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source]));
+		const byDigest = digestIndex(sources);
+		const gateKey = gateEvidenceKey(sources, serialOf);
 		for (const record of history.all()) {
 			const subject = byDigest.get(record.receiptDigest);
 			if (subject === undefined) continue;
+			const recordJson = JSON.stringify(record);
+			const previous = reconciled.get(record.receiptDigest);
+			if (
+				previous !== undefined &&
+				previous.subject === subject &&
+				previous.gateKey === gateKey &&
+				previous.recordJson === recordJson
+			) {
+				continue;
+			}
 			const quality = reduceRouteQuality({
 				subject,
 				receipts: sources.receipts,
 				gateArtifacts: sources.gates,
 			});
 			const completed = record.reliability === "success" && quality.label !== "fail";
-			history.upsert({
+			const next = {
 				...record,
 				qualityLabel: quality.label,
 				completedCostUsd: completed ? record.completedCostUsd : null,
 				completedPhaseTiming: completed ? record.completedPhaseTiming : null,
 				sourceDigests: quality.sourceDigests,
-			});
+			};
+			const nextJson = JSON.stringify(next);
+			if (nextJson !== recordJson) history.upsert(next);
+			reconciled.set(record.receiptDigest, { subject, gateKey, recordJson: nextJson });
 		}
 	};
 	const readinessWindow = (): RouteReadinessEvidenceWindow => {
-		reconcileHistory();
-		const sources = durableQualitySources(options.stateDir ?? clioStateDir());
-		const byDigest = new Map(sources.receipts.map((source) => [source.receipt.integrity.digest, source]));
+		const sources = readSources();
+		reconcileHistory(sources);
+		const byDigest = digestIndex(sources);
 		return {
 			forRoute(candidate, current) {
 				const records = history.recordsFor(candidate);
@@ -314,11 +355,7 @@ export function createRouteObserver(options: CreateRouteObserverOptions): RouteO
 				for (const record of records) {
 					const source = byDigest.get(record.receiptDigest);
 					const decision = source?.receipt.routeDecision;
-					if (
-						source === undefined ||
-						decision === undefined ||
-						!verifyReceiptIntegrity(source.receipt, source.envelope).ok
-					) {
+					if (source === undefined || decision === undefined || !receiptSourceAuthenticated(source)) {
 						integrityFailures += 1;
 						continue;
 					}
