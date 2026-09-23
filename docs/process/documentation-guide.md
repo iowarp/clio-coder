@@ -88,19 +88,7 @@ Classify claims clearly:
 | [tool-audit-v0.4.9.md](tool-audit-v0.4.9.md) | `src/tools/**`, `src/core/safe-exec.ts`, `src/domains/gateway/mcp/**` | Individual tool purpose, placement, contracts, implementation bounds, scientific integrity, and landed disposition. |
 | [scientific-validation.md](scientific-validation.md) | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract.ts` | Advisory validation-contract patterns for scientific artifacts and HPC assumptions. |
 | [evolution.md](evolution.md) | `src/domains/evolution/**`, `src/cli/evolve.ts` | Falsifiable Change Manifest JSON templates, evidence-linked validation, and `clio-coder evolve`. |
-| [gui/README.md](../gui/README.md) | `apps/clio-coder-gui/**`, `dist/gui/**` | Early GUI preview reference: browser documentation, workspace inspection, REST routes, and parity roadmap. |
-| [boundary-doctrine.md](../gui/boundary-doctrine.md) | `apps/clio-coder-gui/**` | Architectural invariants and boundary principles governing GUI client-server interactions. |
-| [chat-rendering-spec.md](../gui/chat-rendering-spec.md) | `apps/clio-coder-gui/**` | Conversation view blueprint, card taxonomy, diff rendering, and inspector presentations. |
-| [cli-surface-routing.md](../gui/cli-surface-routing.md) | `apps/clio-coder-gui/**`, `src/cli/**` | Mapping of CLI commands to GUI routing destinations and REST adapters. |
-| [delivery-order.md](../gui/delivery-order.md) | `apps/clio-coder-gui/**` | Ordered delivery sequence and implementation dependencies for GUI capabilities. |
-| [event-bus-coverage.md](../gui/event-bus-coverage.md) | `apps/clio-coder-gui/**`, `src/core/bus-events.ts` | Event taxonomy and ACP boundary filtering for real-time frontend updates. |
-| [inspector-presentation.md](../gui/inspector-presentation.md) | `apps/clio-coder-gui/**` | Inspector layouts, card ordering, and presentation models for telemetry and state. |
-| [parity/01-cli-surface.md](../gui/parity/01-cli-surface.md) | `apps/clio-coder-gui/**`, `src/cli/**` | Command-line surface parity audit and route coverage status. |
-| [parity/02-slash-and-surfaces.md](../gui/parity/02-slash-and-surfaces.md) | `apps/clio-coder-gui/**`, `src/interactive/slash-commands.ts` | Interactive slash command and overlay parity audit. |
-| [parity/03-domains-and-plan.md](../gui/parity/03-domains-and-plan.md) | `apps/clio-coder-gui/**` | Runtime domain roster and GUI implementation roadmap. |
-| [performance-baseline.md](../gui/performance-baseline.md) | `apps/clio-coder-gui/**` | Rendering benchmarks, latency baselines, and performance budgets. |
-| [settings-write-surface.md](../gui/settings-write-surface.md) | `apps/clio-coder-gui/**`, `src/core/settings-controls.ts` | Schema v2 settings write coverage and form generation. |
-| [workflow-coverage.md](../gui/workflow-coverage.md) | `apps/clio-coder-gui/**` | Operator workflow matrix and human interaction patterns. |
+| [gui/README.md](../gui/README.md) | `apps/clio-coder-gui/**`, `dist/gui/**` | Opt-in alpha graphical application: its commands, lifecycle and model picker. |
 | [battletest-2026-09-20-fixes.md](battletest-2026-09-20-fixes.md) | `src/**`, `tests/**` | Historical record of the Pi 0.86.1 battletest verification and defect resolutions. |
 | [configure-tree-proposal.md](configure-tree-proposal.md) | `src/core/defaults.ts` | Historical design proposal for configure and `/settings` information architecture. |
 | [config-knobs-audit.md](../history/config-knobs-audit.md) | `src/cli/config.ts` | Point-in-time inventory of legacy environment variables (Historical Appendix). |

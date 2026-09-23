@@ -314,16 +314,17 @@ with `el.scrollTop = el.scrollHeight` inside the same rAF callback that delivers
    is coalesced to `requestAnimationFrame`, the surface already runs at whatever the display does;
    there is no 60 Hz constant to raise.
 7. **Never restate a display rate that was not measured.** The reference budgets below came from a
-   60 Hz headless compositor and bound per-frame work; they do not demonstrate 120 Hz behaviour. This
-   app's own numbers belong in `PERFORMANCE.md` with the exact workload that produced them.
+   60 Hz headless compositor and bound per-frame work; they do not demonstrate 120 Hz behaviour.
 
 Reference budgets to beat, measured on `apps/workbench` at 60 Hz headless over 6.7 KB of Markdown
-streamed in 1,358 five-character chunks (the workbench called it ~16 KB, which its own event count
-contradicts): keystroke→`input` p95 2-3 ms; keystroke→next frame p95 15-19 ms; event→paint p50
-25-27 ms and p95 33-35 ms; zero tasks over 50 ms during the stream. At 120 Hz the frame budget halves
-to 8.3 ms, so the target is keystroke→next frame p95 under 10 ms. `pnpm run perf` streams that same
-answer, or a 16.7 KB extension of it, and `PERFORMANCE.md` holds this app's results; the smoke
-asserts on every run that streamed deltas leave the composer unrendered.
+streamed in 1,358 five-character chunks: keystroke→`input` p95 2-3 ms; keystroke→next frame p95
+15-19 ms; event→paint p50 25-27 ms and p95 33-35 ms; zero tasks over 50 ms during the stream. At
+120 Hz the frame budget halves to 8.3 ms, so the target is keystroke→next frame p95 under 10 ms.
+`pnpm run perf` streams that same answer (or, with `--bytes 16384`, a 16.7 KB extension of it)
+into a production build and writes a JSON report. On 2026-09-23, on an AMD Ryzen AI MAX+ PRO 395
+with 24 logical CPUs under WSL2 and Chrome 153, whose headless and WSLg compositors both measured
+60 Hz, 21 recorded turns showed no task over 50 ms, keystroke→`input` p95 at most 1.4 ms and
+event→paint p95 of 30-32 ms; one earlier exploratory run saw a single 53 ms task that did not recur. The smoke asserts on every run that streamed deltas leave the composer unrendered.
 
 ## Untrusted Markdown, code and diagrams
 

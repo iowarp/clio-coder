@@ -20,14 +20,14 @@ docs/
 ├── guide/          Operator and user workflows
 ├── architecture/   Runtime contracts and design
 ├── process/        Development, validation, and release practice
-├── gui/            Early GUI preview and browser docs
+├── gui/            Opt-in alpha graphical application
 └── history/        Dated records that are not current guidance
 ```
 
 For the v0.5.0 launch, Clio Coder is first and foremost a terminal coding agent.
-Browser documentation and workspace inspection are provided via an early GUI
-preview (`clio-coder docs [topic]`, `clio-coder gui [--open]`), explicitly without
-claiming production GUI parity. Start with the [release notes](../CHANGELOG.md),
+An opt-in alpha graphical application (`clio-coder gui`, and `clio-coder docs` for
+reading these pages in a browser) is available for power users; nothing starts it
+unless you run it, and it claims no parity with the terminal. Start with the [release notes](../CHANGELOG.md),
 [configuration and target guide](guide/configuration-and-targets.md), and
 [pre-release checks](process/release-cut-checklist.md#working-tree-pre-release-checks).
 The current guides describe the working implementation, not a promise that the
@@ -80,7 +80,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
-| Early GUI preview: browser docs, REST routes, boundaries, and parity roadmap | [GUI Reference](gui/README.md) |
+| The opt-in alpha graphical application and browser docs | [GUI Reference](gui/README.md) |
 
 ## Safety, evidence, and reproducibility
 

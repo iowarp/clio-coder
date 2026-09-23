@@ -44,10 +44,8 @@ grows past what one agent should do alone.
 **v0.5.3 adds diffusion model support with fill-in-the-middle, an alpha System
 One decision surface, and MCP tool discovery that no longer launches a server to
 answer a question.**
-The terminal is the primary interface. The bundled browser app renders the
-documentation and previews the wider graphical experience. Clio is pre-1.0
-software: review her changes and validate scientific results against your own
-reference checks.
+The terminal is the primary interface. Clio is pre-1.0 software: review her
+changes and validate scientific results against your own reference checks.
 
 ## Get started
 
@@ -216,9 +214,9 @@ clio-coder docs
 clio-coder docs safety
 ```
 
-The browser app renders the bundled Markdown with navigation and page outlines.
-It runs locally and is also the preview home for Clio's graphical features.
-See [browser app documentation](docs/gui/README.md) for launch and lifecycle details.
+The pages are rendered locally from the bundled Markdown, with navigation and page
+outlines. See the [GUI reference](docs/gui/README.md) for how that local server
+starts and stops.
 
 | Looking for… | Start here |
 | --- | --- |
