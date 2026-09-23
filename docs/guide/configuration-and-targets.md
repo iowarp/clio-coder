@@ -967,15 +967,15 @@ fleet:
       target: jev
       model: jev-latest
   decisionProfiles:
-    routing: system-one
+    memory: system-one
     toolRisk: system-one
 ```
 
 Eight sites are accepted, and each names a moment in the session rather than a
 component:
 
-- `routing` reads what kind of work a dispatch asks for, at dispatch time. Its
-  answer is shadow evidence and never selects the worker.
+- `routing` is accepted and not consulted. Dispatch routes with its rules and
+  never waits on a decision model; see [what `routing` changes](#what-routing-changes).
 - `skills` answers which installed skills the listing carries, before the prompt
   is composed.
 - `memory` answers which durable records the prompt carries, at the same point.
@@ -1020,46 +1020,24 @@ The settings rows for these keys are in the
 
 #### What `routing` changes
 
-Binding `fleet.decisionProfiles.routing` replaces how the shadow route
-observation reads a task. It never changes which worker runs: active adaptive
-routing (`fleet.adaptiveRouting.agentRoles`) always classifies with the rules
-below, because a decision model gives the main agent hints and never picks for
-it. Unbound, `classifyAgentTask` reads the task with an
-ordered regex list and reports a confidence of either 0.3 or 0.7, depending only
-on whether its first rule matched. That number is a placeholder rather than a
-measurement, and routing keys off it.
+Nothing. Dispatch admission never awaits a decision model: it classifies every
+task with `classifyAgentTask`, the ordered regex rules, whether or not `routing`
+is bound. Until 0.5.4 a bound site was asked about each dispatch's task during
+admission, for up to 3s, and its answer fed only the shadow route observation.
+A dispatch is the main agent's call, and a decision model that could delay it or
+change its route would be deciding on the agent's behalf, so the call was
+removed. A bound `routing` entry still validates and is otherwise ignored.
 
-The rules also miss whenever the wording differs from the pattern. On the task
-"Review the auth middleware for timing attacks, then fix anything you find and
-add regression tests", the word-count ladder returns `simple` and the
-conjunction rule returns indivisible. Both are wrong. The live provider returns
-complexity 1.86 of 3 and decomposable 0.81 for the same task, using 718 input
-and 188 output tokens in 249ms. Those answers are pinned in
-`tests/contracts/agent-task-decisions.test.ts`.
+Task features are host-resolved and never accepted from model arguments.
+`routeValidationProjection` strips `routingFeatures` from a dispatch request on
+the same terms as the reservation, so a model cannot author the features its
+own routing reads.
 
-Bound, the site answers four questions about the task in one call, because they
-are independent and batching them costs nothing: what kind of work it asks for,
-which area of the system it touches, how much work it requires, and whether it
-contains more than one independently completable piece. The confidence that
-reaches routing is then the model's own rather than a constant.
-
-Each field falls back to the regex value on its own. An abstention on complexity
-does not discard a confident answer on domain, and an answer outside the option
-keys the question supplied is treated as an abstention rather than widening the
-enum. An unbound site, a provider outage, and an uncertain answer all produce
-the same result, and dispatch cannot tell them apart: the regex classification
-it had before the site existed. A failure leaves a diagnostic and nothing else.
-
-The features are host-resolved and never accepted from model arguments.
-`routeValidationProjection` strips the field on the same terms as the
-reservation, so a model cannot author the task features its own routing reads.
-
-All eight sites have call sites. Measured live against `jev-latest` for 0.5.4,
-routing answered in 315ms, four tool-risk ratings in 113 to 259ms, a batched
-memory and skills pass in 159ms, and a three-candidate draft judgment in 264ms.
-The pre-turn memory and skills pass is bounded at 1.5s because it sits on the
-turn's critical path; routing is bounded at 3s beside a worker spawn, and the
-tool-risk and draft judgments at 5s because nothing waits on them but the
+Seven of the eight sites have call sites. Measured live against `jev-latest`
+for 0.5.4, four tool-risk ratings took 113 to 259ms, a batched memory and skills
+pass 159ms, and a three-candidate draft judgment 264ms. The pre-turn memory and
+skills pass is bounded at 1.5s because it sits on the turn's critical path, and
+the tool-risk and draft judgments at 5s because nothing waits on them but the
 overlay.
 
 #### What the pre-turn hints change
@@ -1204,7 +1182,7 @@ clearly in the file, the target id is the thing to check.
 ```yaml
 fleet:
   decisionProfiles:
-    routing: system-one
+    memory: system-one
 ```
 
 Settings validation rejects an unknown site name and a profile that
@@ -1221,10 +1199,10 @@ fleet:
       target: jev
       model: jev-latest
   decisionProfiles:
-    routing: system-one
+    memory: system-one
 ```
 
-#### Confirming a routing binding
+#### Confirming a binding
 
 Two things are checkable today and one is not. The credential and the endpoint
 have real commands:
@@ -1255,37 +1233,9 @@ something broken, but no surface calls it yet. What you can rely on instead is
 that settings validation refuses a binding naming a profile that does not
 exist, so a session that starts has a structurally sound binding.
 
-That leaves the effect itself mostly invisible from the outside. Dispatch is
-built so an unbound site, a provider outage, and an uncertain answer are
-indistinguishable, which is what makes the alpha safe to switch on, and it is
-also what makes a working binding hard to observe. The one thing you will see is
-a failure: a provider that errors writes
-
-```text
-[clio-coder:dispatch] routing decision unavailable, using rules: <message>
-```
-
-to the session's diagnostic channel, or to stderr in a headless run, and the
-dispatch continues on the regex classification. Silence therefore means either
-that the site answered or that it was never bound, and the two look alike.
-
-The features themselves are not printed as a readout. The classified task type
-reaches candidate scoring as a `bounded-task-feature:<type>` reason, and the
-confidence scales a candidate's score without being reported as a number
-anywhere, so there is no line to read the answer off. A task the regex
-classifies visibly wrong is the practical test: give a bound session the kind of
-task that defeats the rules, such as one whose separable pieces are joined by
-prose rather than enumerated, and watch whether dispatch treats it as one piece
-of work. That is a behavioral check rather than a reported one.
-
-#### What a routing call costs
-
-One routing call against `jev-latest` used 718 input and 188 output tokens in
-249ms. That is one call per dispatch, resolved once during admission while
-admission is already waiting on capacity, and it is bounded at three seconds so
-a hung provider costs a dispatch a couple of seconds rather than the run. All
-four questions ride in that single call because they are independent and
-batching them costs nothing.
+A bound site's answers are recorded where they act: pre-turn sites write a
+`decisionBrief` entry to the session ledger, and the tool-risk and draft
+overlays show the rating or the pick they received.
 
 Clio ships no rates for TypeSafe, so a bound site records tokens without a cost
 figure unless you set `targets[].pricing` on the `jev` target yourself.

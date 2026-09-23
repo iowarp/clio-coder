@@ -8,7 +8,7 @@
  *   fleet:
  *     profiles:
  *       system-one: { target: jev, model: jev-latest }
- *     decisionProfiles: { routing: system-one, toolRisk: system-one }
+ *     decisionProfiles: { memory: system-one, toolRisk: system-one }
  *
  * A site with no binding resolves to null and its caller keeps its existing
  * behavior. That makes the whole capability opt-in by absence, with no flag to
