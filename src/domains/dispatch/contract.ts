@@ -94,11 +94,10 @@ export interface DispatchRequest extends JobSpec {
 	/** Resolver-authored active decision for this approved recovery attempt. */
 	routeAttemptDecision?: ApprovedAssignmentRoute["decision"];
 	/**
-	 * Calibrated task features from the `routing` decision site, resolved once
-	 * while admission is still async and read by the synchronous candidate path.
-	 * Absent when the site is unbound or the provider did not answer, and the
-	 * regex classifier then runs exactly as it always has. Host-resolved; never
-	 * accepted from model arguments.
+	 * Retired with the `routing` decision site and no longer read: routing
+	 * always classifies a task with the rules. Kept so validation keeps
+	 * stripping it, which means a model can never author the features routing
+	 * reads. Never accepted from model arguments.
 	 */
 	routingFeatures?: AgentTaskFeatures;
 	/**

@@ -6776,7 +6776,6 @@ export function createDispatchBundle(
 			mode,
 			activeAgentRoles: settings?.fleet.adaptiveRouting.agentRoles ?? [],
 			...(agentIntent === undefined ? {} : { intentOverride: agentIntent }),
-			...(req.routingFeatures === undefined ? {} : { features: req.routingFeatures }),
 		});
 		const settingsFingerprint = computeSettingsFingerprint(settings ?? null);
 		const fixedDelegation = resolution.runtimeId === "acp";

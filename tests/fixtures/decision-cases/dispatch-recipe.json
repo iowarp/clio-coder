@@ -1,0 +1,109 @@
+{
+	"description": "Labeled turns for the recipe prediction behind speculative dispatch: which installed recipe the main agent's first dispatch will name. Every turn warrants workers. Labels say which recipe should run, not what a past session did. Turns marked verbatim are operator turns from session ledgers, where every dispatching turn launched scout unless the operator named another agent; the rest are synthetic controls, one or more per recipe family, so a predictor that always answers scout scores 9 of 24.",
+	"sites": ["dispatchForecast"],
+	"cases": [
+		{
+			"task": "explore this repo fully and tell me what you think",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "hi, explore your own repo until you know everything. obviously use your agents",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "Dispatch the scout agent to map how apis/diffusion-frames.ts is used by apis/openai-completions.ts, then summarize its report for me in three bullets.",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "help me understand this repo. what is it and how can i use it locally?",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "explore this repo and help me understand how clio-agent accepts integrations with other agent frameworks like clio-coder or claude code",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "make a new branch v051 and let's orient in this repo extension system and agent plugin system and the library and marketplace. report ready when oriented",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "In the clio-coder repo, report the runtime and credential landscape needed to add quota adapters. List every registered runtime id and where credentials are read, with file:line for each.",
+			"expect": { "dispatchForecast.recipe": "scout" },
+			"source": "verbatim"
+		},
+		{
+			"task": "Compare how src/net/retry.ts, src/db/retry.ts and src/queue/retry.ts each handle backoff, one worker per file, then summarize the differences.",
+			"expect": { "dispatchForecast.recipe": "scout" }
+		},
+		{
+			"task": "Find every place that reads the session ledger outside the session domain, and hand me the list with file and line.",
+			"expect": { "dispatchForecast.recipe": "scout" }
+		},
+		{
+			"task": "The tests in tests/extended/dispatch-worker-signal.test.ts started failing after the last merge with a SIGKILL timeout. Have a worker find out why before we touch anything.",
+			"expect": { "dispatchForecast.recipe": "debugger" }
+		},
+		{
+			"task": "Use the coder agent to add a --json flag to clio-coder agents that prints each recipe as one JSON object per line.",
+			"expect": { "dispatchForecast.recipe": "coder" }
+		},
+		{
+			"task": "Hand this off to a worker: add a retry with exponential backoff to the webhook sender in src/notify/webhook.ts and keep its behavior identical otherwise.",
+			"expect": { "dispatchForecast.recipe": "coder" }
+		},
+		{
+			"task": "Before I tag the release, have a worker run the lint, typecheck, test and build gates and report each one separately.",
+			"expect": { "dispatchForecast.recipe": "verifier" }
+		},
+		{
+			"task": "Get a worker to add regression tests covering the three footer notice bugs we fixed today.",
+			"expect": { "dispatchForecast.recipe": "tester" }
+		},
+		{
+			"task": "Have a worker check what the official OpenAI Responses API documentation says about parallel tool calls while streaming, with links to the pages.",
+			"expect": { "dispatchForecast.recipe": "researcher" }
+		},
+		{
+			"task": "Design the move from our unversioned YAML settings to a versioned schema with a rollback path, and slice it into a sprint of tasks.",
+			"expect": { "dispatchForecast.recipe": "architect" }
+		},
+		{
+			"task": "Delegate a user guide page for the new /draft command, with examples taken from the source.",
+			"expect": { "dispatchForecast.recipe": "documenter" }
+		},
+		{
+			"task": "Have a worker squash the last five commits on this branch into two logical commits with good messages and prepare the pull request.",
+			"expect": { "dispatchForecast.recipe": "git-master" }
+		},
+		{
+			"task": "What is the ecosystem saying right now about bun against pnpm for large monorepos? Get a worker to survey it and bring back sources.",
+			"expect": { "dispatchForecast.recipe": "world-knowledge" }
+		},
+		{
+			"task": "Before we commit to dropping the evals tree, have a worker challenge that decision against what we decided in earlier sessions.",
+			"expect": { "dispatchForecast.recipe": "oracle" }
+		},
+		{
+			"task": "Pull the receipts and diffs for yesterday's failed scout runs and have a worker lay out the evidence of what went wrong.",
+			"expect": { "dispatchForecast.recipe": "provenance" }
+		},
+		{
+			"task": "Have a worker check whether the introduction section of my paper actually delivers the claims its plan promised.",
+			"expect": { "dispatchForecast.recipe": "wtfp-argument-verifier" }
+		},
+		{
+			"task": "Plan the whole materials-science workflow for our electrolyte screening study around the instruments and compute we actually have, and send it to a worker.",
+			"expect": { "dispatchForecast.recipe": "materio-workflow-planner" }
+		},
+		{
+			"task": "Ask Claude Code over ACP to take a pass at refactoring the settings overlay.",
+			"expect": { "dispatchForecast.recipe": "claude-code" }
+		}
+	]
+}
