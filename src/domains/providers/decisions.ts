@@ -49,9 +49,10 @@ export interface ReadThresholds {
 
 /**
  * How peaked the answer's distribution is, on the same 0..1 axis for every
- * primitive. `choice` and `score` carry the figure directly. A live `noul` does
- * not: the wire response omits `confidence` entirely, so reading it as zero
- * made every `minConfidence` check abstain unconditionally.
+ * primitive. Providers disagree on the `confidence` scale for `choice` and
+ * `score`, so use their probability distribution when it is available. Jev
+ * reports peakedness directly; Laya reports normalized entropy. A live `noul`
+ * carries no confidence field, so its probability supplies the measure.
  *
  * A noul is a two-outcome distribution, and the provider's own peakedness
  * formula `(n * max - 1) / (n - 1)` reduces at n=2 to `|2p - 1|`, which is the
@@ -59,9 +60,12 @@ export interface ReadThresholds {
  * 0.65 reports 0.30, exactly as a two-option `choice` at the same mass would.
  */
 export function answerCertainty(answer: DecisionAnswer): number {
-	if (answer.confidence !== undefined) return answer.confidence;
 	if (answer.type === "noul" && answer.noul !== undefined) return Math.abs(answer.noul * 2 - 1);
-	return 0;
+	const masses = Object.values(answer.probabilities ?? {});
+	if (masses.length >= 2 && masses.every((mass) => Number.isFinite(mass) && mass >= 0 && mass <= 1)) {
+		return Math.max(0, Math.min(1, (masses.length * Math.max(...masses) - 1) / (masses.length - 1)));
+	}
+	return answer.confidence ?? 0;
 }
 
 function confident(answer: DecisionAnswer, minConfidence: number | undefined): boolean {
