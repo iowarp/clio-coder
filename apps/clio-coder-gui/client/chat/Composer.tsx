@@ -12,7 +12,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
@@ -37,6 +37,17 @@ import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
 const focusHandlers = new Map<string, () => void>();
+const ENTER_SENDS_KEY = "clio-coder-enter-sends";
+
+function initialEnterSends(): boolean {
+	try {
+		const saved = localStorage.getItem(ENTER_SENDS_KEY);
+		if (saved === "true" || saved === "false") return saved === "true";
+	} catch {
+		// The choice still works for this page when browser storage is unavailable.
+	}
+	return typeof matchMedia !== "function" || matchMedia("(pointer: fine)").matches;
+}
 
 /** Grow with the draft until CSS applies its cap; after that, keep scrolling inside the field. */
 function fitComposerField(field: HTMLTextAreaElement | null): void {
@@ -75,6 +86,7 @@ export const Composer = memo(function Composer({
 	const sending = useRef(false);
 	const fieldId = useId();
 	const hintId = useId();
+	const [enterSends, setEnterSends] = useState(initialEnterSends);
 	const layerOwned = useLayersActive();
 	const running = runningTurnId !== null;
 	const params = { params: { id: sessionId }, query: {}, body: {} };
@@ -98,6 +110,13 @@ export const Composer = memo(function Composer({
 		window.addEventListener("resize", fit);
 		return () => window.removeEventListener("resize", fit);
 	}, []);
+	useEffect(() => {
+		try {
+			localStorage.setItem(ENTER_SENDS_KEY, String(enterSends));
+		} catch {
+			// The in-memory choice remains usable.
+		}
+	}, [enterSends]);
 
 	// Read once per session and keep. Every steering route answers 409 when the
 	// agent announced nothing, so this decides what is rendered at all.
@@ -234,7 +253,7 @@ export const Composer = memo(function Composer({
 							metaKey: event.metaKey,
 							shiftKey: event.shiftKey,
 						},
-						{ layerOwned, composing: event.nativeEvent.isComposing },
+						{ layerOwned, composing: event.nativeEvent.isComposing, plainEnterSends: enterSends },
 					);
 					if (action !== "send") return;
 					event.preventDefault();
@@ -274,8 +293,16 @@ export const Composer = memo(function Composer({
 			) : null}
 			<div className="composer__actions">
 				<p className="composer__hint" id={hintId}>
-					Enter sends · Shift+Enter adds a line
+					{enterSends ? "Enter sends · Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
 				</p>
+				<button
+					className="composer__enter-mode"
+					type="button"
+					aria-pressed={enterSends}
+					onClick={() => setEnterSends((current) => !current)}
+				>
+					Enter to send: {enterSends ? "On" : "Off"}
+				</button>
 				{running ? (
 					<>
 						{steering.interrupt ? (
