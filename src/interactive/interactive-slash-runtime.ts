@@ -127,6 +127,11 @@ export interface InteractiveSlashRuntimeDeps {
 	shutdown: () => void | Promise<void>;
 	requestRender: () => void;
 	beforeSemanticSubmit?: () => void;
+	/**
+	 * Record an operator command's echo in the session, so `/resume` states it
+	 * above the run it started. Absent hosts do not persist it.
+	 */
+	recordOperatorCommand?: (text: string) => void;
 	settleVisibleFrame?: (reason: string) => Promise<void>;
 	refreshFooter: () => void;
 	dismissContextBootstrapNotices: () => void;
@@ -423,6 +428,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
 				requestRender: deps.requestRender,
 			});
+			deps.recordOperatorCommand?.(text);
 		},
 		showReference: (card) => {
 			appendReferenceCard(card, {

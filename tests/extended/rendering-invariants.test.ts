@@ -175,6 +175,127 @@ describe("Clio rendering invariants", () => {
 		match(folded, /tool-command/u);
 	});
 
+	/** A thinking model's turn: reasoning before every call, then reasoning before the answer. */
+	const thinkingTurn = (
+		style: OutputStyle,
+		steps: ReadonlyArray<readonly [thinking: string | null, call: string | null]>,
+	) => {
+		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+		panel.appendUser("Find the flaky test");
+		panel.applyEvent({ type: "agent_start" } as never);
+		const messages: unknown[] = [];
+		const message = (thinking: string | null, text?: string) => {
+			panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+			if (thinking !== null)
+				panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: thinking, partialThinking: thinking });
+			const content = [
+				...(thinking === null ? [] : [{ type: "thinking", thinking }]),
+				...(text === undefined ? [] : [{ type: "text", text }]),
+			];
+			const settled = {
+				role: "assistant",
+				content,
+				stopReason: text === undefined ? "toolUse" : "stop",
+				usage: { input: 100, output: 20, cacheRead: 0, cacheWrite: 0, reasoning: 40 },
+			};
+			panel.applyEvent({ type: "message_end", message: settled } as never);
+			messages.push(settled);
+		};
+		const calls: Record<string, [string, unknown, unknown]> = {
+			read: [
+				"read",
+				{ path: "src/retry.js" },
+				{
+					content: [{ type: "text", text: "x" }],
+					details: { observation: { unit: "lines", shownCount: 3, totalCount: 3 } },
+				},
+			],
+			grep: [
+				"grep",
+				{ pattern: "Math.random" },
+				{
+					content: [{ type: "text", text: "x" }],
+					details: { observation: { unit: "matches", shownCount: 1, totalCount: 1 } },
+				},
+			],
+			test: [
+				"read",
+				{ path: "tests/retry.test.js" },
+				{
+					content: [{ type: "text", text: "x" }],
+					details: { observation: { unit: "lines", shownCount: 3, totalCount: 3 } },
+				},
+			],
+			bash: ["bash", { command: "npm test" }, { content: [{ type: "text", text: "ok" }], details: { exitCode: 0 } }],
+		};
+		steps.forEach(([thinking, call], index) => {
+			if (thinking !== null) message(thinking);
+			// A model call that returned only reasoning leaves two stretches side by side.
+			if (call === null) return;
+			const [toolName, args, result] = calls[call] ?? [];
+			const id = `c${index}`;
+			panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName, args } as never);
+			panel.applyEvent({
+				type: "tool_execution_end",
+				toolCallId: id,
+				toolName,
+				result,
+				isError: false,
+				durationMs: 5,
+			} as never);
+		});
+		message("summarize the cause", "The jitter was real randomness.");
+		panel.applyEvent({ type: "agent_end", messages } as never);
+		return plainRender(panel, 100);
+	};
+	const markerRows = (rendered: string) => rendered.split("\n").filter((row) => row.startsWith("│ Thinking · /view"));
+
+	it("folds a thinking model's explorations across its reasoning in Compact, one marker per run", () => {
+		const rendered = thinkingTurn("compact", [
+			["read the module", "read"],
+			["search for the jitter", "grep"],
+			["check the test", "test"],
+			["run it", "bash"],
+		]);
+		// One fold for the three explorations: the reasoning between them does not split it.
+		strictEqual(rendered.match(/explored/gu)?.length, 1, rendered);
+		match(rendered, /▸ explored 2 files, 1 search ✓\n {2}│ src\/retry\.js · `Math\.random` · tests\/retry\.test\.js/u);
+		// A marker ahead of the fold, one ahead of the command, and one ahead of the answer.
+		deepStrictEqual(markerRows(rendered), [
+			"│ Thinking · /view",
+			"│ Thinking · /view",
+			"│ Thinking · /view · 200 tokens",
+		]);
+		ok(rendered.indexOf("· 200 tokens") < rendered.indexOf("The jitter was real randomness."), rendered);
+	});
+
+	it("keeps a Compact fold's inner reasoning as the one marker ahead of it, with the turn's count", () => {
+		const rendered = thinkingTurn("compact", [
+			[null, "read"],
+			["search for the jitter", "grep"],
+		]);
+		strictEqual(rendered.match(/explored/gu)?.length, 1, rendered);
+		const rows = rendered.split("\n");
+		const marker = rows.findIndex((row) => row.startsWith("│ Thinking · /view"));
+		ok(marker >= 0 && marker < rows.findIndex((row) => row.startsWith("▸ explored")), rendered);
+		// The answer's own reasoning keeps its marker, which carries the turn's count.
+		deepStrictEqual(markerRows(rendered), ["│ Thinking · /view", "│ Thinking · /view · 80 tokens"]);
+	});
+
+	it("shows Standard's reasoning tail before Clio's words and a marker before an action", () => {
+		const rendered = thinkingTurn("standard", [
+			["read the module", "read"],
+			["the test is next", null],
+			["run it", "bash"],
+		]);
+		doesNotMatch(rendered, /read the module|the test is next|run it/u);
+		// Stretches of reasoning that nothing visible separates are one run and one marker.
+		strictEqual(markerRows(rendered).length, 2, rendered);
+		match(rendered, /│ summarize the cause\n\n✦ The jitter was real randomness\./u);
+		const detailed = thinkingTurn("detailed", [["read the module", "read"]]);
+		match(detailed, /│ read the module\n\n▸ read src\/retry\.js/u);
+	});
+
 	it("replaces cumulative partials and re-expands at the latest state", () => {
 		let style: OutputStyle = "detailed";
 		const panel = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
@@ -1419,6 +1540,51 @@ describe("transcript block grammar", () => {
 		match(render("detailed"), /last: read a\.ts/u);
 		doesNotMatch(render("compact"), /last:/u);
 	});
+
+	it("lists a settled card's calls oldest first in the past tense, and a running card's last call alone", () => {
+		const recentActions = [
+			{ tool: "limitation" },
+			{ tool: "read", descriptor: { verb: "reading", object: "docs/retry.md" } },
+			{ tool: "grep", descriptor: { verb: "searching", object: "retry|options" } },
+			{ tool: "git", descriptor: { verb: "git" } },
+		];
+		const entry = (pending: boolean) =>
+			({
+				assignmentId: "a",
+				runId: "run-3",
+				origin: "agent",
+				agentId: "scout",
+				runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+				text: "Found it.",
+				droppedLines: 0,
+				tools: ["git", "grep", "read", "limitation"],
+				attempts: [{ runId: "run-3", targetLabel: "blade" }],
+				pending,
+				...(pending ? {} : { receipt: { outcome: "succeeded", durationMs: 9_000, toolCalls: 4 } }),
+				progress: {
+					revision: 1,
+					phase: "tool",
+					tailText: "",
+					droppedLines: 0,
+					droppedBytes: 0,
+					currentAction: pending ? { tool: "bash", descriptor: { verb: "running", object: "npm test" } } : null,
+					recentActions,
+					toolNames: ["git", "grep", "read", "limitation"],
+					settled: !pending,
+				},
+			}) as unknown as WorkerEntryState;
+		const trail = (pending: boolean) =>
+			renderWorkerEntryLines(entry(pending), 80, { detail: transcriptDetail("detailed") })
+				.map(stripTerminalSequences)
+				.filter((row) => row.startsWith(`  │ ${GLYPH.phaseTool}`));
+		deepStrictEqual(trail(false), [
+			`  │ ${GLYPH.phaseTool} git`,
+			`  │ ${GLYPH.phaseTool} searched retry|options`,
+			`  │ ${GLYPH.phaseTool} read docs/retry.md`,
+			`  │ ${GLYPH.phaseTool} limitation`,
+		]);
+		deepStrictEqual(trail(true), [`  │ ${GLYPH.phaseTool} running npm test`, `  │ ${GLYPH.phaseTool} last: limitation`]);
+	});
 });
 
 describe("tool classes", () => {
@@ -1785,6 +1951,20 @@ describe("tool classes", () => {
 			strictEqual(plain.match(/not sent to model/gu)?.length, 1, plain);
 			doesNotMatch(plain, /context/u);
 		}
+	});
+
+	it("counts a listing's entries and never its bytes, while a read keeps the size it returned", () => {
+		// The ls tool's own observation: a count of entries and the bytes of the listing text.
+		const listing = text("a.ts\nb.ts\nsrc/\ntests/\nREADME.md\npackage.json\n.git/", {
+			observation: { unit: "entries", shownCount: 7, totalCount: 7, shownBytes: 55, totalBytes: 55 },
+		});
+		deepStrictEqual(rows(settled("ls", {}, listing)), [`${GLYPH.toolHeader} listed workspace · 7 entries ✓ · 42ms`]);
+		const read = text("x", {
+			observation: { unit: "lines", shownCount: 40, totalCount: 120, shownBytes: 1_434, totalBytes: 4_403 },
+		});
+		deepStrictEqual(rows(settled("read", { path: "src/net/retry.ts" }, read)), [
+			`${GLYPH.toolHeader} read src/net/retry.ts · lines 1-40 of 120 · 1.4KB of 4.3KB ✓ · 42ms`,
+		]);
 	});
 
 	it("folds explorations, lookups and changes by class in Compact and never folds commands or failures", () => {

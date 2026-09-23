@@ -9,11 +9,18 @@ import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivi
 import { formatFooterTokens } from "../footer-panel.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import { clioTheme, formatCompactMs, GLYPH, rule } from "../theme/index.js";
+import { clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
-import { activityQuadrant, contextOccupancyBar, contextQuadrant, contextUsageText, zipColumns } from "./widgets.js";
+import {
+	activityQuadrant,
+	contextOccupancyBar,
+	contextQuadrant,
+	contextUsagePercent,
+	contextUsageText,
+	zipColumns,
+} from "./widgets.js";
 
 export const DASHBOARD_PAGES = ["Activity", "Context", "Status"] as const;
 export type DashboardPage = (typeof DASHBOARD_PAGES)[number];
@@ -267,6 +274,21 @@ function contextPage(state: FooterDashboardRenderState, width: number): string[]
 	return out;
 }
 
+/** The fewest cells a shortened target and model identity reads in (`blade…q4_k_m`). */
+const IDENTITY_MIN_CELLS = 12;
+
+/**
+ * As many whole names as fit `room` after `prefix`, closing on `…` when some
+ * did not; the first name is cut only when it alone does not fit.
+ */
+function fitNames(prefix: string, names: readonly string[], room: number): string {
+	for (let kept = names.length; kept > 0; kept -= 1) {
+		const candidate = `${prefix}${names.slice(0, kept).join(", ")}${kept < names.length ? "…" : ""}`;
+		if (visibleWidth(candidate) <= room) return candidate;
+	}
+	return truncateToWidth(`${prefix}${names[0] ?? ""}`, Math.max(1, room), "…");
+}
+
 /** Model and context above; persistent workspace and a rotating hint area below. */
 export function renderCompactDashboard(state: FooterDashboardRenderState, width: number): string[] {
 	const theme = clioTheme();
@@ -275,16 +297,23 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const ledger = state.context.ledger;
 	const workers = state.dispatchRows.filter((row) => ACTIVE_AGENT_STATUSES.has(row.status)).length;
 	const phase = state.agent.statusText ?? "Ready";
-	const activity = `${theme.fg("accent", phase)}${workers ? theme.fg("agent", ` · ${workers} active`) : ""}`;
+	const workerText = workers ? ` · ${workers} active` : "";
 	const identity = clean(state.session.target ?? "No model selected");
 	const thinking = theme.fg("reason", `think ${clean(state.session.thinking ?? "off")}`);
 	const usage = contextUsageText(state.context);
-	const context = `${ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : ""} ${usage}`;
-	const rightWidth = Math.min(Math.floor(w * 0.48), visibleWidth(context));
+	const meter = ledger || state.context.budget ? contextOccupancyBar(state.context, w >= 100 ? 14 : 8, theme) : "";
+	// A narrow row drops the absolute token counts before it would cut a number
+	// in half, and keeps the percent. The segmented meter states its percent;
+	// the ledger meter states only counts, so its percent joins it here.
+	const rightBudget = Math.floor(w * 0.48);
+	const percent = state.context.budget || !ledger ? "" : ` ${formatContextPercent(contextUsagePercent(state.context))}`;
+	const withCounts = `${meter} ${usage}`;
+	const context =
+		meter.length === 0 || visibleWidth(withCounts) <= rightBudget ? withCounts : `${meter}${percent}`.trimEnd();
+	const rightWidth = Math.min(rightBudget, visibleWidth(context));
 
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	const leftRoom = Math.max(1, w - rightWidth - 3);
-	const activityLabel = fit(activity, Math.min(visibleWidth(activity), Math.max(5, Math.floor(leftRoom / 3))));
 	// An armed skill narrows the tools every turn uses until `/skill off`, so it
 	// rides next to the activity and outranks the identity, the quota badge and
 	// the thinking level. Where `skill <names>` does not fit, the knowledge mark
@@ -292,7 +321,6 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const skills = state.session.activeSkills ?? [];
 	const skillBudget = Math.max(5, Math.floor(leftRoom / 3));
 	const skillWords = `skill ${clean(skills.join(", "))}`;
-	const skillMark = `${GLYPH.classKnowledge} ${clean(skills.join(", "))}`;
 	const skill =
 		skills.length === 0
 			? ""
@@ -300,22 +328,38 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 					"muted",
 					visibleWidth(skillWords) <= skillBudget
 						? skillWords
-						: fit(skillMark, Math.min(visibleWidth(skillMark), skillBudget)),
+						: fitNames(`${GLYPH.classKnowledge} `, skills.map(clean), skillBudget),
 				);
 	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
+	// The phase and the worker count are the live facts: the activity takes the
+	// room it needs beside the skill badge, before the identity, the quota badge
+	// and the thinking level get theirs. A row too narrow for both drops the
+	// worker count before it cuts the phase.
+	const activityRoom = Math.max(5, leftRoom - skillRoom);
+	const activity =
+		visibleWidth(`${phase}${workerText}`) <= activityRoom
+			? `${theme.fg("accent", phase)}${theme.fg("agent", workerText)}`
+			: theme.fg("accent", truncateToWidth(phase, activityRoom, "…"));
+	const activityWidth = visibleWidth(activity);
 	const badge =
-		weekly && leftRoom - visibleWidth(activityLabel) - skillRoom - visibleWidth(weekly.label) >= 16
+		weekly && leftRoom - activityWidth - skillRoom - visibleWidth(weekly.label) >= 16
 			? theme.fg(
 					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
 					weekly.label,
 				)
 			: "";
-	const baseRoom = leftRoom - visibleWidth(activityLabel) - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - 5;
-	const showThinking = baseRoom - visibleWidth(thinking) - 3 >= 12;
+	const baseRoom = leftRoom - activityWidth - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - 5;
+	// Too narrow for a readable identity: drop it rather than cut it to a stub
+	// such as `bl…_m`, which names neither the target nor the model. The
+	// thinking level takes the room an identity leaves, or the room it drops.
+	const identityMin = Math.min(visibleWidth(identity), IDENTITY_MIN_CELLS);
+	const readable = baseRoom >= identityMin;
+	const showThinking = readable
+		? baseRoom - visibleWidth(thinking) - 3 >= identityMin
+		: baseRoom + 5 >= visibleWidth(thinking) + 3;
 	const identityRoom = Math.max(1, baseRoom - (showThinking ? visibleWidth(thinking) + 3 : 0));
-	// Too narrow for a readable identity: drop it rather than cut the row mid-label.
-	const shownIdentity = identityRoom >= 4 ? `  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : "";
-	const left = `${activityLabel}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
+	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : "";
+	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)

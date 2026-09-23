@@ -275,6 +275,82 @@ test("the inspector wraps full text, accepts search letters, and supports Enter 
 	strictEqual(closed, true);
 });
 
+test("/view titles each act with what its row states and ages it from when it happened", async () => {
+	let clock = 1_000_000;
+	const panel = createChatPanel({ now: () => clock });
+	panel.appendUser("Fix the test");
+	const act = (id: string, toolName: string, args: unknown, result: unknown, isError = false) => {
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName, args } as never);
+		clock += 5_000;
+		panel.applyEvent({ type: "tool_execution_end", toolCallId: id, toolName, result, isError, durationMs: 5 } as never);
+	};
+	act(
+		"qCIlqk4AJdRA8xNITNIgw",
+		"bash",
+		{ command: "npm test" },
+		{ content: [{ type: "text", text: "not ok 1\n\nCommand exited with code 1" }], details: {} },
+		true,
+	);
+	clock += 60_000;
+	act(
+		"e1",
+		"edit",
+		{ path: "src/net/retry.js" },
+		{ content: [{ type: "text", text: "ok" }], details: { diff: "-1 a\n+1 b" } },
+	);
+	clock += 60_000;
+	panel.applyEvent({ type: "notice", level: "info", surface: "transcript", text: "interrupt refused: queued" } as never);
+	clock += 60_000;
+	const titles = panel
+		.inspectionArtifacts()
+		.map((artifact) => [artifact.title, Math.round((clock - artifact.timestamp) / 1_000)] as const);
+	deepStrictEqual(titles, [
+		["$ ran `npm test` · exit 1", 190],
+		["± edited src/net/retry.js · +1 -1", 125],
+		["ℹ interrupt refused: queued", 60],
+	]);
+	// The call id stays searchable though it is no longer the title.
+	const [bash] = panel.inspectionArtifacts();
+	ok(bash?.searchText?.includes("qCIlqk4AJdRA8xNITNIgw"));
+});
+
+test("/view renders a transcript block at the preview's width, rail and hanging indent intact", async () => {
+	const panel = createChatPanel();
+	const command = `node scripts/check.js --reporter spec ${"--verbose ".repeat(6)}`;
+	panel.applyEvent({ type: "tool_execution_start", toolCallId: "b", toolName: "bash", args: { command } } as never);
+	panel.applyEvent({
+		type: "tool_execution_end",
+		toolCallId: "b",
+		toolName: "bash",
+		result: {
+			content: [{ type: "text", text: "a line of output long enough to wrap inside a narrow preview pane" }],
+			details: { exitCode: 0 },
+		},
+		isError: false,
+	} as never);
+	const [artifact] = panel.inspectionArtifacts();
+	ok(artifact);
+	const view = new ViewOverlayView({
+		providers: [{ category: "transcript", list: async () => [artifact] }],
+		getBodyHeight: () => 30,
+		onClose: () => {},
+	});
+	view.refresh();
+	await new Promise((resolve) => setImmediate(resolve));
+	view.handleInput("\r");
+	view.render(40);
+	await new Promise((resolve) => setImmediate(resolve));
+	const rows = view.render(40).map(stripTerminalSequences);
+	const body = rows.slice(rows.findIndex((row) => row.startsWith("$ ran")) + 1).filter((row) => row.trim().length > 0);
+	ok(body.length > 4, rows.join("\n"));
+	// Every wrapped row stays in the content column under its rail, as the transcript renders it.
+	for (const row of body) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
+	ok(
+		body.some((row) => row.startsWith("  │ ") && row.includes("narrow")),
+		rows.join("\n"),
+	);
+});
+
 test("fresh worker output clears the silence timer while waiting for dispatch", () => {
 	const stalled = {
 		...INITIAL_STATUS,

@@ -14,6 +14,7 @@ import {
 
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
+import type { WorkerAction } from "../../domains/observability/worker-progress.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
@@ -339,8 +340,8 @@ function workerMetrics(entry: WorkerEntryState): string[] {
 	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
 	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
 	if (tokens !== undefined) metrics.push(`${formatFooterTokens(tokens)} tokens processed`);
-	if (entry.progress?.contextTokens !== undefined)
-		metrics.push(`context ${formatFooterTokens(entry.progress.contextTokens)}`);
+	const context = entry.progress?.contextTokens ?? entry.contextTokens;
+	if (context !== undefined) metrics.push(`context ${formatFooterTokens(context)}`);
 	if (calls !== undefined) metrics.push(`${calls} tool calls`);
 	return metrics;
 }
@@ -353,6 +354,40 @@ const PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, words: st
 	writing: [GLYPH.phaseWriting, "writing"],
 	tool: [GLYPH.phaseTool, "between calls"],
 };
+
+/**
+ * The descriptor vocabulary's progressive verbs in the past tense. A verb that
+ * names a tool rather than an act (`git`, `context`, `gateway`, `tasks`) reads
+ * the same either way.
+ */
+const FINISHED_VERBS: Readonly<Record<string, string>> = {
+	reading: "read",
+	editing: "edited",
+	writing: "wrote",
+	listing: "listed",
+	running: "ran",
+	searching: "searched",
+	finding: "found",
+	fetching: "fetched",
+	verifying: "verified",
+	navigating: "navigated",
+	inspecting: "inspected",
+	monitoring: "monitored",
+	steering: "steered",
+	dispatching: "dispatched",
+	deleting: "deleted",
+	moving: "moved",
+	thinking: "thought",
+	calling: "called",
+};
+
+/** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
+function finishedAction(action: WorkerAction): string {
+	const descriptor = action.descriptor;
+	if (descriptor === undefined) return action.tool;
+	const verb = FINISHED_VERBS[descriptor.verb] ?? descriptor.verb;
+	return descriptor.object === undefined ? verb : `${verb} ${descriptor.object}`;
+}
 
 /** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
 function describedAction(entry: WorkerEntryState): string | null {
@@ -498,30 +533,19 @@ export function renderWorkerEntryLines(
 			: bodySourceLines(entry).flatMap((line) =>
 					railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
 				);
-	// Current work leads the bounded preview; completed calls remain explicitly historical.
-	const current = isPending(entry) ? entry.progress?.currentAction : null;
-	const actions = [
-		...(current ? [{ action: current, label: "now" }] : []),
-		...(entry.progress?.recentActions ?? []).map((action) => ({ action, label: "last" })),
-	];
-	const trail = actions.flatMap(({ action, label }) =>
-		railLines(
-			`${GLYPH.phaseTool} ${label}: ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
-			"muted",
-			safeWidth,
-		),
-	);
-	// A running card says what it is doing on one live line in every style;
-	// Detailed adds the calls it already finished beneath it.
+	// A running card says what it is doing on its one live line in every style,
+	// and Detailed adds the call it finished last. A settled card in Detailed
+	// lists the calls it made, oldest first and in the past tense, because they
+	// are finished work, not activity.
 	const pending = isPending(entry);
-	const history = actions.filter(({ label }) => label === "last");
-	const lastTrail = history.flatMap(({ action }) =>
-		railLines(
-			`${GLYPH.phaseTool} last: ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
-			"muted",
-			safeWidth,
-		),
-	);
+	const recent = entry.progress?.recentActions ?? [];
+	const trail = pending
+		? recent
+				.slice(0, 1)
+				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "muted", safeWidth))
+		: [...recent]
+				.reverse()
+				.flatMap((action) => railLines(`${GLYPH.phaseTool} ${finishedAction(action)}`, "muted", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
 		failureLines(entry, safeWidth),
@@ -554,9 +578,7 @@ export function renderWorkerEntryLines(
 			: []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, dim(RAIL), RAIL_WIDTH),
 		...(tools ? [tools] : []),
-		...(detail.workerActivity
-			? previewRows(pending ? lastTrail : trail, budget(4), safeWidth, false, dim(RAIL), RAIL_WIDTH)
-			: []),
+		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, true, dim(RAIL), RAIL_WIDTH) : []),
 		...failure,
 		...(presented ? railLines(presented, "muted", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),

@@ -84,6 +84,7 @@ interface LoadedContent {
 	status: "loading" | "loaded" | "error";
 	lines: string[];
 	format: ViewArtifactFormat;
+	render?: (width: number) => string[];
 	error?: string;
 	renderWidth?: number;
 	renderedLines?: string[];
@@ -541,7 +542,13 @@ export class ViewOverlayView implements Component {
 			try {
 				const loaded = await Promise.resolve().then(() => artifact.load());
 				if (token !== this.loadToken) return;
-				this.content = { key, status: "loaded", lines: loaded.lines, format: loaded.format };
+				this.content = {
+					key,
+					status: "loaded",
+					lines: loaded.lines,
+					format: loaded.format,
+					...(loaded.render === undefined ? {} : { render: loaded.render }),
+				};
 			} catch (err) {
 				if (token !== this.loadToken) return;
 				const message = err instanceof Error ? err.message : String(err);
@@ -578,9 +585,11 @@ export class ViewOverlayView implements Component {
 		if (content.status === "error") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 		if (content.renderedLines && content.renderWidth === width) return content.renderedLines;
 		const rendered =
-			content.format === "markdown"
-				? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
-				: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+			content.render !== undefined
+				? content.render(Math.max(1, width))
+				: content.format === "markdown"
+					? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
+					: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
 		content.renderWidth = width;
 		content.renderedLines = rendered;
 		return rendered;

@@ -2,7 +2,12 @@ import { BusChannels, type DispatchRunIdentity } from "../core/bus-events.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { readWorkerReceiptFacts } from "./worker-receipts.js";
-import { type WorkerRunEntryFields, workerRunEntryFields } from "./worker-replay.js";
+import {
+	type WorkerRunEntryFields,
+	type WorkerSettledFields,
+	workerRunEntryFields,
+	workerSettledFields,
+} from "./worker-replay.js";
 import {
 	createWorkerStream,
 	type WorkerEntryState,
@@ -36,6 +41,11 @@ export interface InteractiveSubscriptionsDeps {
 	 * attempt it was handed.
 	 */
 	recordWorkerRun?: (fields: WorkerRunEntryFields) => void;
+	/**
+	 * Record what a settled run's stream knew and its receipt does not (the
+	 * context its last call occupied), so a resumed card states the same spend.
+	 */
+	recordWorkerSettled?: (fields: WorkerSettledFields) => void;
 	/** Sealed-receipt reader, injected by tests. Defaults to `<state>/receipts/<runId>.json`. */
 	readWorkerReceipt?: WorkerReceiptReader;
 	/**
@@ -96,6 +106,10 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 		deps.renderTaskIsland();
 		deps.requestRender();
 	};
+	const recordSettled = (change: WorkerStreamChange): void => {
+		const fields = workerSettledFields(change.entry);
+		if (fields !== null) deps.recordWorkerSettled?.(fields);
+	};
 	/** Fold one lifecycle payload into its worker block, place the block, then repaint. */
 	const folded =
 		<P>(reduce: (payload: P) => WorkerStreamChange | null, after?: (change: WorkerStreamChange) => void) =>
@@ -125,15 +139,15 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 				return workers.progress(payload);
 			}),
 		),
-		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted)),
+		deps.bus.on(BusChannels.RunAborted, folded(workers.aborted, recordSettled)),
 		deps.bus.on(BusChannels.DispatchCompleted, (payload) => {
 			helperNotice(payload, "completed");
-			folded(workers.completed)(payload);
+			folded(workers.completed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
 		deps.bus.on(BusChannels.DispatchFailed, (payload) => {
 			helperNotice(payload, "failed");
-			folded(workers.failed)(payload);
+			folded(workers.failed, recordSettled)(payload);
 			deps.onDispatchSettled?.();
 		}),
 		deps.bus.on(BusChannels.ContextActivity, () => {

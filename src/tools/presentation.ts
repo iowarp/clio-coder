@@ -162,6 +162,11 @@ export interface ToolRowSpec {
 	scope?: (args: ToolRowArgs, context: ToolRowContext) => string | null;
 	/** Argument fields the row states, so they are never repeated inline or as `key ›` rows. */
 	consumes: readonly string[];
+	/**
+	 * False when a settled observation's size is not a fact worth stating. A
+	 * listing counts its entries; the bytes of the listing text say nothing.
+	 */
+	statesSize?: false;
 	/** What a folded Compact row counts this call as; the class supplies it when absent. */
 	nouns?: readonly [singular: string, plural: string];
 	/**
@@ -410,6 +415,7 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		nouns: ["directory", "directories"],
 		object: (args) => plain(text(args, "path") ?? "workspace"),
 		consumes: ["path"],
+		statesSize: false,
 	},
 	[ToolNames.Data]: {
 		class: "observe",

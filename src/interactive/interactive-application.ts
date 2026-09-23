@@ -37,7 +37,7 @@ import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./applica
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
 import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
-import { appendNotice } from "./command-output.js";
+import { appendNotice, OPERATOR_COMMAND_ENTRY } from "./command-output.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
 import { createDispatchSteering } from "./dispatch-steering.js";
 import { createEditorSubmitController, EDITOR_BASH_SHUTDOWN_MS } from "./editor-submit.js";
@@ -67,6 +67,7 @@ import type {
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
 import type { TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
+import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
 import type { createYaziBridge, YaziBridge } from "./yazi-bridge.js";
 
@@ -818,6 +819,23 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			appendUser: (text, status) => chatRenderer.mutate(() => chatPanel.appendUser(text, status), "user-submit"),
 		},
 		beforeSemanticSubmit: () => chatRenderer.flush(),
+		// A `/run` or `/delegate` echo is recorded like the run it starts, so a
+		// resumed session states the command above its card. Best effort, and
+		// never model context.
+		recordOperatorCommand: (text) => {
+			try {
+				sessionTranscript.ensureSessionForLocalEntry();
+				if (!deps.session?.current()) return;
+				deps.session.appendEntry({
+					kind: "custom",
+					customType: OPERATOR_COMMAND_ENTRY,
+					parentTurnId: deps.session.tree().leafId ?? null,
+					data: { text },
+				});
+			} catch {
+				// Best effort; the live echo already rendered.
+			}
+		},
 		settleVisibleFrame: (reason) => chatRenderer.flushAndCommit(reason),
 		...(deps.resources ? { resources: deps.resources } : {}),
 		...(deps.extensions ? { extensions: deps.extensions } : {}),
@@ -1170,6 +1188,20 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				deps.session.appendEntry({ ...fields, parentTurnId: deps.session.tree().leafId ?? null });
 			} catch {
 				// Best effort; the live block already rendered.
+			}
+		},
+		recordWorkerSettled: (fields) => {
+			try {
+				if (!deps.session?.current()) return;
+				deps.session.appendEntry({
+					kind: "custom",
+					customType: WORKER_SETTLED_ENTRY,
+					parentTurnId: deps.session.tree().leafId ?? null,
+					display: false,
+					data: fields,
+				});
+			} catch {
+				// Best effort; a resumed card then omits the context fact.
 			}
 		},
 	});

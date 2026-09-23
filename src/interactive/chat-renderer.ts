@@ -57,6 +57,7 @@ import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { hasStructuredToolCall, isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
+import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { type NoticeMark, renderNoticeRow } from "./renderers/notice.js";
@@ -72,7 +73,7 @@ import {
 } from "./stream-pacer.js";
 import type { TranscriptDetailPolicy } from "./transcript-detail.js";
 import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
-import { workerEntriesFromRunEntries } from "./worker-replay.js";
+import { WORKER_SETTLED_ENTRY, workerEntriesFromRunEntries, workerSettledFromData } from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
 
 const DEFAULT_COALESCE_MS = 16;
@@ -939,6 +940,7 @@ function rendersCustomEntry(entry: CustomEntry): boolean {
 	if (entry.display === false) return false;
 	if (entry.customType === "retryStatus") return true;
 	if (entry.customType === SKILL_SURFACE_ENTRY) return isSkillSurfaceChange(entry.data) && entry.data.state !== "loaded";
+	if (entry.customType === OPERATOR_COMMAND_ENTRY) return operatorCommandText(entry.data) !== null;
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") return true;
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE || entry.customType === HANDOFF_NOTE_CUSTOM_TYPE) return true;
 	return entry.display === true;
@@ -955,6 +957,8 @@ function renderCustomEntry(
 	if (entry.customType === SKILL_SURFACE_ENTRY && isSkillSurfaceChange(entry.data)) {
 		return renderSkillSurfaceRow(entry.data, width);
 	}
+	const command = entry.customType === OPERATOR_COMMAND_ENTRY ? operatorCommandText(entry.data) : null;
+	if (command !== null) return renderOperatorCommandRows(command, width);
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
 		return renderNoticeRow(`[handoff] carried from session ${entry.data.fromSessionId}`, "info", width);
 	}
@@ -970,6 +974,12 @@ function renderCustomEntry(
 	const body = stringifyPreview(entry.data);
 	const suffix = body.length > 0 ? ` ${body}` : "";
 	return wrapTextWithAnsi(`custom:${entry.customType}${suffix}`, width);
+}
+
+/** The command line an `operatorCommand` entry recorded; null when it holds none. */
+function operatorCommandText(data: unknown): string | null {
+	const text = payloadObject(data)?.text;
+	return typeof text === "string" && text.trim().length > 0 ? text : null;
 }
 
 function renderReminderMessageEntry(entry: CustomEntry, width: number): string[] {
@@ -1339,6 +1349,18 @@ export function rehydrateChatPanelFromTurns(
 	turns: ReadonlyArray<SessionEntry>,
 	options: RehydrateChatPanelOptions = {},
 ): void {
+	try {
+		replayEntries(chatPanel, turns, options);
+	} finally {
+		chatPanel.replayAt?.(undefined);
+	}
+}
+
+function replayEntries(
+	chatPanel: ChatPanel,
+	turns: ReadonlyArray<SessionEntry>,
+	options: RehydrateChatPanelOptions,
+): void {
 	const pendingToolIds: string[] = [];
 	let runAssistantMessages: AgentMessage[] = [];
 	// What the live receipt measured, recovered from the ledger: the run's
@@ -1355,12 +1377,22 @@ export function rehydrateChatPanelFromTurns(
 	// One block per assignment, drawn where its first attempt started. Later
 	// attempts of the same assignment fold into that block as `↻` rail lines, so
 	// a failover replays as the one run it was rather than as two.
+	// What a settled run's live stream knew and its receipt does not.
+	const settledContext = new Map<string, number>();
+	for (const entry of selected) {
+		if (entry.kind !== "custom" || entry.customType !== WORKER_SETTLED_ENTRY) continue;
+		const settled = workerSettledFromData(entry.data);
+		if (settled !== null) settledContext.set(settled.runId, settled.contextTokens);
+	}
 	const workerStates = workerEntriesFromRunEntries(
 		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
 		options.readWorkerReceipt ?? readWorkerReceiptFactsForReplay,
+		settledContext,
 	);
 	const placedAssignments = new Set<string>();
 	for (const entry of selected) {
+		// What this entry appends carries the time the ledger recorded it.
+		chatPanel.replayAt?.(timestampMillis(entry.timestamp));
 		switch (entry.kind) {
 			case "message": {
 				if (entry.role === "user") {

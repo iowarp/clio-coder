@@ -20,7 +20,7 @@ import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
-import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import {
 	CLASS_NOUNS,
 	classifyResourceRead,
@@ -465,7 +465,7 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 			const count = observation === null ? null : countSummary(observation);
 			if (range !== null) parts.push(range);
 			else if (count !== null) parts.push(count);
-			if (row.spec.class === "observe") parts.push(...sizeFacts(finished));
+			if (row.spec.class === "observe" && row.spec.statesSize !== false) parts.push(...sizeFacts(finished));
 			break;
 		}
 		case "mutate": {
@@ -1416,6 +1416,17 @@ export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinish
 	// the row states the outcome once and never excerpts the body onto itself.
 	const parts = sublineParts(call, status, meta, width);
 	return wrapSublineWithTail(parts.lead, parts.tail, width);
+}
+
+/**
+ * What a call's row states, as one line of plain text with its class mark and
+ * without its outcome tail: `$ ran \`npm test\` · exit 1`. `/view` titles the
+ * call with it, so the list reads like the transcript.
+ */
+export function toolRowTitle(call: ToolExecutionStart | ToolExecutionFinished): string {
+	const status = sublineStatus(call);
+	const meta: StatusMeta = "result" in call ? { outcome: call.outcome } : {};
+	return stripTerminalSequences(sublineParts(call, status, meta).lead);
 }
 
 /**

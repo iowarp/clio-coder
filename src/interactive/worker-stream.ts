@@ -142,6 +142,12 @@ export interface WorkerEntryState {
 	tools: string[];
 	/** Canonical live projection. Absent only on receipt-based session replay. */
 	progress?: WorkerProgressSnapshot;
+	/**
+	 * The context the run's last model call occupied, as the session recorded it
+	 * when the run settled. Replay only: a live block reads it from `progress`,
+	 * and the sealed receipt carries no per-call usage.
+	 */
+	contextTokens?: number;
 	/** Every attempt of this assignment, oldest first. */
 	attempts: WorkerAttempt[];
 	pending: boolean;

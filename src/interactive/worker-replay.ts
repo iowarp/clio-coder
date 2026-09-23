@@ -34,6 +34,34 @@ export type WorkerRunEntryInput = Extract<SessionEntryInput, { kind: "workerRun"
 export type WorkerRunEntryFields = Omit<WorkerRunEntryInput, "parentTurnId">;
 
 /**
+ * The custom session entry that records what a settled run's live stream knew
+ * and its receipt does not: the context its last model call occupied. Never
+ * rendered, never model context; replay reads it back onto the block.
+ */
+export const WORKER_SETTLED_ENTRY = "workerSettled";
+
+export interface WorkerSettledFields {
+	runId: string;
+	contextTokens: number;
+}
+
+/** What a settled block records for replay; null when its stream reported no context. */
+export function workerSettledFields(state: WorkerEntryState): WorkerSettledFields | null {
+	const contextTokens = state.progress?.contextTokens;
+	if (contextTokens === undefined || !Number.isFinite(contextTokens) || contextTokens <= 0) return null;
+	return { runId: state.runId, contextTokens };
+}
+
+/** A recorded settled-run fact, from a custom entry's data; null when it is not one. */
+export function workerSettledFromData(data: unknown): WorkerSettledFields | null {
+	if (data === null || typeof data !== "object") return null;
+	const { runId, contextTokens } = data as Record<string, unknown>;
+	return typeof runId === "string" && typeof contextTokens === "number" && Number.isFinite(contextTokens)
+		? { runId, contextTokens }
+		: null;
+}
+
+/**
  * One attempt's durable identity, read off the live block at the moment it
  * starts. Called on every DispatchStarted for a transcript-bound run, so a
  * failover writes a second entry under the same assignment rather than
@@ -75,6 +103,8 @@ export function workerRunEntryFields(state: WorkerEntryState): WorkerRunEntryFie
 export function workerEntriesFromRunEntries(
 	entries: ReadonlyArray<WorkerRunEntry>,
 	readReceipt: WorkerReceiptReader,
+	/** The context each settled run's last call occupied, by run id, from `workerSettled` entries. */
+	settledContext: ReadonlyMap<string, number> = new Map(),
 ): Map<string, WorkerEntryState> {
 	const byAssignment = new Map<string, WorkerRunEntry[]>();
 	for (const entry of entries) {
@@ -89,6 +119,7 @@ export function workerEntriesFromRunEntries(
 		if (last === undefined) continue;
 		const facts = readReceipt(last.runId);
 		const bounded = boundSettledText(facts?.text ?? "");
+		const contextTokens = settledContext.get(last.runId);
 		const trail: WorkerAttempt[] = attempts.map((attempt) => ({
 			runId: attempt.runId,
 			targetLabel: workerTargetLabel(attempt.runtime),
@@ -108,6 +139,7 @@ export function workerEntriesFromRunEntries(
 			attempts: trail,
 			pending: false,
 			receipt: workerReceiptSummary(facts),
+			...(contextTokens !== undefined ? { contextTokens } : {}),
 			...(last.parentToolCallId !== undefined ? { parentToolCallId: last.parentToolCallId } : {}),
 		});
 	}
