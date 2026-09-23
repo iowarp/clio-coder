@@ -154,3 +154,51 @@ test("the oldest timeline entries are dropped once the entry bound is passed", (
 	assert.equal(snapshot.timeline[0]?.id, "turn:tool:52");
 	assert.equal(snapshot.timeline.at(-1)?.id, "turn:tool:2099");
 });
+
+test("narrative written after a tool call becomes a new passage below it, in wire order", () => {
+	let revision = 0;
+	const worker = [{ version: 1 as const, role: "worker" as const, agentId: "scout", runId: "r1" }];
+	let snapshot = streamed(0).snapshot;
+	revision = snapshot.revision;
+	const narrate = (type: "turn.text" | "turn.thought", text: string, provenance?: typeof worker) => {
+		snapshot = applySessionDelta(snapshot, {
+			type,
+			payload: {
+				resource: "session",
+				revision: ++revision,
+				turnId: "turn",
+				text,
+				origin: "live",
+				...(provenance ? { provenance } : {}),
+			},
+		});
+	};
+	narrate("turn.thought", "Plan. ");
+	narrate("turn.text", "Looking. ");
+	narrate("turn.text", "Still looking. ");
+	snapshot = applySessionDelta(snapshot, toolDelta(snapshot, ++revision, 1));
+	narrate("turn.text", "Found it. ", worker);
+	narrate("turn.text", "Confirmed. ");
+	narrate("turn.text", "Worker detail.", worker);
+	narrate("turn.thought", "Next. ");
+	narrate("turn.text", "Done.");
+	assert.deepEqual(
+		snapshot.timeline.map((item) => [item.kind, item.text]),
+		[
+			["thought", "Plan. "],
+			["text", "Looking. Still looking. "],
+			["tool", "Tool 1"],
+			["text", "Found it. Worker detail."],
+			["text", "Confirmed. "],
+			["thought", "Next. "],
+			["text", "Done."],
+		],
+	);
+	assert.equal(new Set(snapshot.timeline.map((item) => item.id)).size, snapshot.timeline.length);
+	assert.equal(snapshot.timeline[1]?.id, "turn:text");
+	// A browser that applies the same deltas to an earlier snapshot must agree on every id.
+	assert.deepEqual(
+		snapshot.timeline.map((item) => item.sequence),
+		snapshot.timeline.map((_item, index) => index + 1),
+	);
+});
