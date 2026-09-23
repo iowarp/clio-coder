@@ -56,10 +56,10 @@ import type { AgentMessage } from "../engine/types.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { hasStructuredToolCall, isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
-import type { ChatPanel } from "./chat-panel.js";
+import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
-import { styleTaggedNotice } from "./renderers/notice.js";
+import { type NoticeMark, renderNoticeRow } from "./renderers/notice.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import { renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
@@ -712,6 +712,13 @@ function replayedUserText(entry: MessageEntry): string {
 	return stripInjectedPreamble(extractTurnText(entry.payload));
 }
 
+/** The expected-cold reasons an assistant entry's prompt-cache record carries. */
+function persistedColdReasons(entry: MessageEntry): string[] {
+	const promptCache = payloadObject(payloadObject(entry.payload)?.promptCache);
+	const reasons = promptCache?.expectedColdReasons;
+	return Array.isArray(reasons) ? reasons.filter((reason): reason is string => typeof reason === "string") : [];
+}
+
 function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted"; errorMessage: string } | null {
 	const obj = payloadObject(entry.payload);
 	if (!obj) return null;
@@ -851,15 +858,14 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 	};
 }
 
-function renderReplayLine(text: string, width: number): string[] {
-	// Style a leading bracketed tag (`[skill]`, `[checkpoint]`, ...) dim with a
-	// muted body; free-form lines such as `system:` prefixes pass through
-	// unchanged so only bracketed notices pick up the treatment.
-	return wrapTextWithAnsi(styleTaggedNotice(text), width);
+/** A replayed system line (`[checkpoint]`, `[continuity]`, `system:`) as the info notice it is. */
+function appendReplayNotice(chatPanel: ChatPanel, text: string): void {
+	chatPanel.appendReplayBlock((width) => renderNoticeRow(truncateReplayText(text), "info", width));
 }
 
-function appendReplayLine(chatPanel: ChatPanel, text: string): void {
-	chatPanel.appendReplayBlock((width) => renderReplayLine(truncateReplayText(text), width));
+/** Middleware reminder severities as notice marks: advice informs, a warning or a hard stop warns. */
+function reminderMark(severity: unknown): NoticeMark {
+	return severity === "warn" || severity === "hard-block" ? "warning" : "info";
 }
 
 function renderBashExecutionEntry(
@@ -894,7 +900,7 @@ function renderRetryStatusEntry(
 	terminalRows: number,
 ): string[] {
 	const data = payloadObject(entry.data);
-	if (!data) return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
+	if (!data) return renderNoticeRow("provider retry", "retry", width);
 	const rawPhase = data.phase;
 	if (
 		rawPhase !== "scheduled" &&
@@ -904,11 +910,11 @@ function renderRetryStatusEntry(
 		rawPhase !== "exhausted" &&
 		rawPhase !== "recovered"
 	) {
-		return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
+		return renderNoticeRow("provider retry", "retry", width);
 	}
 	const attempt = typeof data.attempt === "number" ? data.attempt : null;
 	const maxAttempts = typeof data.maxAttempts === "number" ? data.maxAttempts : null;
-	if (attempt === null || maxAttempts === null) return wrapTextWithAnsi(styleTaggedNotice("[retry] status"), width);
+	if (attempt === null || maxAttempts === null) return renderNoticeRow("provider retry", "retry", width);
 	const status: RetryStatusPayload = {
 		phase: rawPhase,
 		attempt,
@@ -950,10 +956,10 @@ function renderCustomEntry(
 		return renderSkillSurfaceRow(entry.data, width);
 	}
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
-		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] carried from session ${entry.data.fromSessionId}`), width);
+		return renderNoticeRow(`[handoff] carried from session ${entry.data.fromSessionId}`, "info", width);
 	}
 	if (entry.customType === HANDOFF_NOTE_CUSTOM_TYPE && isHandoffNoteData(entry.data)) {
-		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] handed off to session ${entry.data.toSessionId}`), width);
+		return renderNoticeRow(`[handoff] handed off to session ${entry.data.toSessionId}`, "info", width);
 	}
 	// "finishContractAdvisory" is the pre-middleware name for the same entry
 	// shape; older session ledgers still carry it.
@@ -969,21 +975,21 @@ function renderCustomEntry(
 function renderReminderMessageEntry(entry: CustomEntry, width: number): string[] {
 	const data = payloadObject(entry.data);
 	const message = typeof data?.message === "string" && data.message.length > 0 ? data.message : "middleware reminder";
-	return wrapTextWithAnsi(message, width);
+	return renderNoticeRow(message, reminderMark(data?.severity), width);
 }
 
 function renderModelChangeEntry(entry: ModelChangeEntry, width: number): string[] {
 	const target = entry.target ? `${entry.target}/` : "";
-	return wrapTextWithAnsi(styleTaggedNotice(`[model] ${target}${entry.provider}/${entry.modelId}`), width);
+	return renderNoticeRow(`[model] ${target}${entry.provider}/${entry.modelId}`, "info", width);
 }
 
 function renderThinkingChangeEntry(entry: ThinkingLevelChangeEntry, width: number): string[] {
-	return wrapTextWithAnsi(styleTaggedNotice(`[thinking] ${entry.thinkingLevel}`), width);
+	return renderNoticeRow(`[thinking] ${entry.thinkingLevel}`, "info", width);
 }
 
 function renderFileEntry(entry: FileEntryEntry, width: number): string[] {
 	const bytes = typeof entry.bytes === "number" ? `, ${entry.bytes} bytes` : "";
-	return wrapTextWithAnsi(styleTaggedNotice(`[file ${entry.operation}] ${entry.path}${bytes}`), width);
+	return renderNoticeRow(`[file ${entry.operation}] ${entry.path}${bytes}`, "info", width);
 }
 
 function renderProtectedArtifactEntry(entry: ProtectedArtifactEntry, width: number): string[] {
@@ -991,16 +997,13 @@ function renderProtectedArtifactEntry(entry: ProtectedArtifactEntry, width: numb
 		entry.artifact.validationCommand === undefined
 			? ""
 			: ` after ${entry.artifact.validationCommand}${entry.artifact.validationExitCode === undefined ? "" : ` exit ${entry.artifact.validationExitCode}`}`;
-	return wrapTextWithAnsi(
-		styleTaggedNotice(`[protected] ${entry.artifact.path}${validation}: ${entry.artifact.reason}`),
-		width,
-	);
+	return renderNoticeRow(`[protected] ${entry.artifact.path}${validation}: ${entry.artifact.reason}`, "info", width);
 }
 
 function renderSessionInfoEntry(entry: SessionInfoEntry, width: number): string[] {
-	if (entry.name) return wrapTextWithAnsi(styleTaggedNotice(`[session] ${entry.name}`), width);
+	if (entry.name) return renderNoticeRow(`[session] ${entry.name}`, "info", width);
 	if (entry.label && entry.targetTurnId) {
-		return wrapTextWithAnsi(styleTaggedNotice(`[label] ${entry.targetTurnId}: ${entry.label}`), width);
+		return renderNoticeRow(`[label] ${entry.targetTurnId}: ${entry.label}`, "info", width);
 	}
 	return [];
 }
@@ -1338,6 +1341,11 @@ export function rehydrateChatPanelFromTurns(
 ): void {
 	const pendingToolIds: string[] = [];
 	let runAssistantMessages: AgentMessage[] = [];
+	// What the live receipt measured, recovered from the ledger: the run's
+	// duration from its prompt's timestamp to its last answer's, and the reasons
+	// its first call recorded for an expected cold prompt cache.
+	let runStartedAtMs: number | undefined;
+	let runColdReasons: string[] = [];
 	const selected = selectReplayEntries(turns, options);
 	// The transcript shows the ledger, never the projection: an evicted result
 	// still renders its full body here, tagged with the reason it left the
@@ -1357,6 +1365,9 @@ export function rehydrateChatPanelFromTurns(
 			case "message": {
 				if (entry.role === "user") {
 					runAssistantMessages = [];
+					runColdReasons = [];
+					const startedAt = Date.parse(entry.timestamp);
+					runStartedAtMs = Number.isFinite(startedAt) ? startedAt : undefined;
 					const text = replayedUserText(entry);
 					if (text.length > 0) chatPanel.appendUser(text);
 					break;
@@ -1380,7 +1391,21 @@ export function rehydrateChatPanelFromTurns(
 						if (continues) chatPanel.applyEvent({ type: "message_start", message });
 						chatPanel.applyEvent({ type: "message_end", message });
 						runAssistantMessages.push(message);
-						if (!continues) chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages });
+						for (const reason of persistedColdReasons(entry)) {
+							if (!runColdReasons.includes(reason)) runColdReasons.push(reason);
+						}
+						if (!continues) {
+							const endedAt = Date.parse(entry.timestamp);
+							const elapsedMs =
+								runStartedAtMs !== undefined && Number.isFinite(endedAt) && endedAt >= runStartedAtMs
+									? endedAt - runStartedAtMs
+									: undefined;
+							const replayed: ReplayedRunFacts = {
+								...(elapsedMs === undefined ? {} : { elapsedMs }),
+								...(runColdReasons.length > 0 ? { coldReasons: [...runColdReasons] } : {}),
+							};
+							chatPanel.applyEvent({ type: "agent_end", messages: runAssistantMessages, replayed } as ChatLoopEvent);
+						}
 					}
 					break;
 				}
@@ -1441,12 +1466,12 @@ export function rehydrateChatPanelFromTurns(
 				}
 				if (entry.role === "system") {
 					const text = textBlockFromEntry(entry);
-					if (text.length > 0) appendReplayLine(chatPanel, `system: ${text}`);
+					if (text.length > 0) appendReplayNotice(chatPanel, `system: ${text}`);
 					break;
 				}
 				if (entry.role === "checkpoint") {
 					const text = textBlockFromEntry(entry);
-					appendReplayLine(chatPanel, text.length > 0 ? `[checkpoint] ${text}` : "[checkpoint]");
+					appendReplayNotice(chatPanel, text.length > 0 ? `[checkpoint] ${text}` : "[checkpoint]");
 					break;
 				}
 				break;
@@ -1475,8 +1500,9 @@ export function rehydrateChatPanelFromTurns(
 			case "protectedArtifact":
 				chatPanel.appendReplayBlock((width) => renderProtectedArtifactEntry(entry, width));
 				break;
+			// The load's own row states the skill and who asked for it; the
+			// activation record is provenance, not a second transcript line.
 			case "skillActivation":
-				appendReplayLine(chatPanel, `[skill] ${entry.activation.name} ${entry.activation.triggeredBy}`);
 				break;
 			case "branchSummary":
 				if (entry.summary.trim().length > 0) {
@@ -1507,13 +1533,13 @@ export function rehydrateChatPanelFromTurns(
 			// happened and where it stands; the note itself is rendered once,
 			// below, under its own label, rather than once per record.
 			case "handoffTransaction":
-				appendReplayLine(
+				appendReplayNotice(
 					chatPanel,
 					`[continuity] ${entry.event.phase} handoff=${entry.identity.handoffId} seq=${entry.transition.sequence} attempt=${entry.transition.attempt}`,
 				);
 				break;
 			case "continuityCommit":
-				appendReplayLine(
+				appendReplayNotice(
 					chatPanel,
 					`[continuity] commit handoff=${entry.continuity.identity.handoffId} outcome=${entry.continuity.commit.outcome} tokens=${entry.continuity.commit.tokensBefore}->${entry.continuity.commit.tokensAfter}`,
 				);
@@ -1535,7 +1561,8 @@ export function rehydrateChatPanelFromTurns(
 	// when it is labelled, and the exact bytes stay in the ledger and in the
 	// model replay the same blocks feed.
 	for (const block of options.continuityBlocks ?? []) {
-		for (const line of block.split("\n")) appendReplayLine(chatPanel, line);
+		for (const line of block.split("\n"))
+			chatPanel.appendReplayBlock((width) => wrapTextWithAnsi(truncateReplayText(line), width));
 	}
 	for (const pendingId of pendingToolIds) {
 		chatPanel.applyEvent({

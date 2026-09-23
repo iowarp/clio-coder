@@ -25,6 +25,7 @@ import {
 } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
 import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
+import { appendNotice } from "../../src/interactive/command-output.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
@@ -1078,6 +1079,90 @@ describe("transcript block grammar", () => {
 		});
 	}
 
+	it("marks every transcript notice in the gutter by level and hangs its wrapped rows", () => {
+		const panel = createChatPanel({ now: () => 1_000 });
+		const notice = (level: "info" | "success" | "warning" | "error", text: string) =>
+			panel.applyEvent({ type: "notice", level, surface: "transcript", text } as never);
+		notice("info", "[Clio Coder] interrupt refused: a dispatch is attached. Queued for the next slot instead.");
+		notice("warning", "[/context compact] auto-compaction failed: the summary exceeded its budget");
+		notice("error", "[Clio Coder] context overflow persisted after compaction");
+		notice("success", "session saved");
+		// A footer notice is the footer's; the transcript never shows it.
+		panel.applyEvent({ type: "notice", level: "info", surface: "footer", text: "cache may be cold" } as never);
+		const rows = panel.render(40).map(stripTerminalSequences);
+		const plain = rows.join("\n");
+		doesNotMatch(plain, /\[Clio Coder\]|cache may be cold/u);
+		match(plain, /^ℹ interrupt refused: a dispatch is/mu);
+		match(plain, /^⚠ \[\/context compact\] auto-compaction/mu, "a subsystem tag stays");
+		match(plain, /^✗ context overflow persisted after/mu);
+		match(plain, /^✓ session saved$/mu);
+		for (const row of rows.filter((line) => line.length > 0 && !/^[ℹ⚠✗✓] /u.test(line))) {
+			ok(row.startsWith("  "), `a wrapped notice row left the content column: ${row}`);
+		}
+		for (const row of rows) ok(visibleWidth(row) <= 40, row);
+	});
+
+	it("hangs a wrapped command reply in the content column beside its mark", () => {
+		const blocks: Array<(width: number) => string[]> = [];
+		appendNotice(
+			"success",
+			"[/export] wrote 2301 lines to /tmp/scratchpad/demo-repo/.clio-coder/exports/1t6ygqmc7kuu-2026-09-23.html",
+			{ appendReplayBlock: (block) => blocks.push(block), requestRender() {} },
+		);
+		const rows = (blocks[0]?.(40) ?? []).map(stripTerminalSequences);
+		ok(rows[0]?.startsWith("✓ [/export] wrote 2301 lines"), rows.join("\n"));
+		ok(rows.length > 1, rows.join("\n"));
+		for (const row of rows.slice(1)) ok(row.startsWith("  "), `continuation left the gutter: ${row}`);
+	});
+
+	it("states guidance middleware attached for the model as one note, never as tool output", () => {
+		const listing = {
+			toolCallId: "l",
+			toolName: "ls",
+			args: { path: "." },
+			result:
+				"README.md\nsrc\n\n[middleware:info] Demo guidance: use the evidence you are gathering to identify one useful next step.\n[middleware:warn] Second note.",
+			isError: false,
+		};
+		const detailed = stripTerminalSequences(renderToolPreview(listing, 100, transcriptDetail("detailed")).join("\n"));
+		match(detailed, /│ README\.md\n {2}│ src\n {2}│ note to model · Demo guidance: use the evidence/u);
+		match(detailed, /· \+1 more$/u);
+		doesNotMatch(detailed, /\[middleware:/u);
+		// The full result in /view is what the model read, notes included.
+		const full = stripTerminalSequences(renderToolExecution(listing, 100, { unbounded: true }).join("\n"));
+		match(full, /\[middleware:info\] Demo guidance/u);
+		// Output that only quotes the tag mid-line stays output.
+		const quoting = { ...listing, result: 'const warning = "[middleware:warn] " + TEXT;\nexport {}' };
+		match(
+			stripTerminalSequences(renderToolPreview(quoting, 100, transcriptDetail("detailed")).join("\n")),
+			/const warning = "\[middleware:warn\] "/u,
+		);
+	});
+
+	it("hangs a wrapped diff row under its content, past the sign and line number", () => {
+		const edit = {
+			toolCallId: "e",
+			toolName: "edit",
+			args: { path: "src/net/retry.js" },
+			result: {
+				content: [{ type: "text", text: "ok" }],
+				details: {
+					diff:
+						'-24       console.debug("retry " + (attempt + 1) + " after " + Math.round(jitter) + "ms jitter");\n+24       console.debug(formatRetryMessage(attempt + 1, Math.round(jitter), "ms jitter", options));',
+				},
+			},
+			isError: false,
+		};
+		for (const width of [40, 65]) {
+			const rows = renderToolPreview(edit, width, transcriptDetail("standard")).map(stripTerminalSequences).slice(1);
+			const removed = rows.findIndex((row) => row.startsWith("  │ -24 "));
+			ok(removed >= 0 && rows[removed + 1]?.startsWith("  │     "), rows.join("\n"));
+			for (const row of rows) ok(visibleWidth(row) <= width, row);
+			for (const row of rows.filter((line) => !/^ {2}│ ([-+]24 |… \d+ rows)/u.test(line)))
+				ok(/^ {2}│ {5}\S/u.test(row), `a continuation left the content column: ${row}`);
+		}
+	});
+
 	it("closes a run split by a worker with exactly one receipt, after the last output", () => {
 		for (const style of ["standard", "detailed"] as const) {
 			const panel = createChatPanel({ getOutputStyle: () => style });
@@ -1102,7 +1187,7 @@ describe("transcript block grammar", () => {
 			say(panel, "The reviewer found nothing.");
 			panel.applyEvent({ type: "agent_end", messages: [assistantMessage("The reviewer found nothing.")] } as never);
 			const plain = plainRender(panel, 100);
-			const receipt = style === "standard" ? /Done/gu : /turn · in/gu;
+			const receipt = style === "standard" ? /Done/gu : /Done · \S+ · in 10 · out 5/gu;
 			strictEqual((plain.match(receipt) ?? []).length, 1, plain);
 			ok(plain.lastIndexOf("found nothing") < plain.search(receipt), plain);
 		}

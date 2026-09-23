@@ -111,6 +111,7 @@ import {
 	toolNamesFromAgentState,
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
+import { coldReasonText } from "./cold-reasons.js";
 import { buildModelReplayAgentMessagesFromTurns, continuityContextFromSession } from "./model-session-replay.js";
 import { resolveTurnOutputReserve } from "./output-reserve.js";
 import { attachedToolSchemasFromState, mainPromptCacheIdentity } from "./prompt-cache-identity.js";
@@ -161,6 +162,13 @@ export interface TurnContextDeps {
 	getLastOutcome?: (() => LiveBudgetOutcomeProjection | null) | undefined;
 	middleware: TurnMiddleware;
 	emitNotice: (text: string) => void;
+	/**
+	 * Report that the next response's prompt cache may be cold, and why. It is
+	 * telemetry about the run rather than the conversation: the footer's notice
+	 * slot shows it, and the Detailed receipt names the reasons beside the reuse
+	 * the provider reported. A host without it gets the old transcript notice.
+	 */
+	emitCacheNotice?: (reasons: ReadonlyArray<string>) => void;
 }
 
 export interface LiveContextEstimate {
@@ -498,6 +506,13 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 	const stampsOnTier = (reason: ExpectedColdReason, runtimeId: string | undefined): boolean =>
 		TIER_INDEPENDENT_COLD_REASONS.has(reason) ||
 		(runtimeId !== undefined && deps.providers.getRuntime(runtimeId)?.tier === "local-native");
+	// An expected cold cache is telemetry about the next response: it goes to
+	// the footer's notice slot, and the Detailed receipt names the reasons with
+	// the reuse the provider actually reported.
+	const noteExpectedCold = (reasons: ReadonlyArray<string>): void => {
+		if (deps.emitCacheNotice) deps.emitCacheNotice(reasons);
+		else deps.emitNotice(`[context engine] cache may be cold: ${reasons.map(coldReasonText).join(", ")}`);
+	};
 	const noteColdReason = (reason: ExpectedColdReason): void => {
 		if (!state.streaming) {
 			pendingColdReasons.add(reason);
@@ -507,7 +522,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 		if (!runExpectedColdReasons.includes(reason)) runExpectedColdReasons.push(reason);
 		if (nextAssistantColdReasons.includes(reason)) return;
 		nextAssistantColdReasons.push(reason);
-		deps.emitNotice(`[context engine] ${reason} may affect cache reuse; actual reuse is reported with the response.`);
+		noteExpectedCold(nextAssistantColdReasons);
 	};
 	const unsubscribeColdReasonSources = [
 		...[BusChannels.DispatchStarted, BusChannels.DispatchCompleted, BusChannels.DispatchFailed].map(
@@ -2143,9 +2158,7 @@ export function createTurnContext(deps: TurnContextDeps): TurnContext {
 				if (reasons.length > 0) {
 					runExpectedColdReasons = reasons;
 					nextAssistantColdReasons = reasons;
-					deps.emitNotice(
-						`[context engine] ${reasons.join(", ")} may affect cache reuse; actual reuse is reported with the response.`,
-					);
+					noteExpectedCold(reasons);
 				}
 			}
 		},

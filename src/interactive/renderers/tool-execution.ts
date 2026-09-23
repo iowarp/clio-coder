@@ -1129,6 +1129,34 @@ function isEmptyResult(result: unknown): boolean {
  * carriage returns inside a row break the diff renderer's one-row-per-line
  * accounting, so everything but the line structure is neutralized here.
  */
+/**
+ * Lines middleware attaches to a tool result for the model (`[middleware:info]
+ * …`), split from the output they lead or trail. Only whole lines at the start
+ * or the end of the text count, so output that merely quotes the tag stays put.
+ */
+const MODEL_NOTE_LINE = /^\[middleware:[a-z-]+\] (.+)$/u;
+
+function splitModelNotes(text: string): { body: string; notes: string[] } {
+	const lines = text.split("\n");
+	const leading: string[] = [];
+	while (lines.length > 0) {
+		const note = MODEL_NOTE_LINE.exec(lines[0] ?? "")?.[1];
+		if (note === undefined) break;
+		leading.push(note);
+		lines.shift();
+		while (lines.length > 0 && (lines[0] ?? "").trim().length === 0) lines.shift();
+	}
+	const trailing: string[] = [];
+	while (lines.length > 0) {
+		const note = MODEL_NOTE_LINE.exec(lines[lines.length - 1] ?? "")?.[1];
+		if (note === undefined) break;
+		trailing.unshift(note);
+		lines.pop();
+	}
+	if (trailing.length > 0) while (lines.length > 0 && (lines[lines.length - 1] ?? "").trim().length === 0) lines.pop();
+	return { body: lines.join("\n"), notes: [...leading, ...trailing] };
+}
+
 function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string {
 	const text = typeof result === "string" ? result : jsonStringifySafe(result);
 	return truncate(sanitizeMultilineDisplayText(text).text, limit);
@@ -1705,7 +1733,7 @@ export function renderToolPreview(
 		// worker card sits under it leaves the outcome to the card.
 		// A failed command's status line is on its row as `exit N`; the body keeps the output.
 		const shown = failure && command ? withoutCommandStatus(result) : result;
-		const text = resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY);
+		const { body: text, notes } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
 		if (text.trim().length > 0) {
 			const body = indentAndWrap(redactSecretString(text), width, failure);
 			rows.push(
@@ -1717,6 +1745,14 @@ export function renderToolPreview(
 					failure ? RAIL_ERROR : RAIL_DIM,
 					BODY_INDENT_VISIBLE_WIDTH,
 				),
+			);
+		}
+		// Guidance middleware attached for the model is not the tool's output: it
+		// states as one dim row, and /view keeps the result as the model read it.
+		if (notes.length > 0) {
+			const more = notes.length > 1 ? ` · +${notes.length - 1} more` : "";
+			rows.push(
+				`${failure ? RAIL_ERROR : RAIL_DIM}${dim(truncateToWidth(sanitizeCallTargetText(`note to model · ${notes[0]}`), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH - more.length), GLYPH.ellipsis))}${dim(more)}`,
 			);
 		}
 	}

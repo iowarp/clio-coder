@@ -7,6 +7,7 @@ import type { WorkingSetView } from "../domains/context/working-set/contract.js"
 import { formatContextWindowSlots } from "../domains/providers/index.js";
 import type { ContextLedger, ContextLedgerGroup } from "../domains/session/context-ledger.js";
 import { type OverlayHandle, Text, type TUI, truncateToWidth, visibleWidth } from "../engine/tui.js";
+import { coldReasonText } from "./cold-reasons.js";
 import { contextCategorySwatch, renderContextMeterGrid, renderEvictedTokensLine } from "./context-meter.js";
 import { buildHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { abbreviateModelId, type ClioToken, clioTheme, formatContextPercent } from "./theme/index.js";
@@ -93,35 +94,6 @@ function evictedTokens(view: WorkingSetView): number {
 function formatChurn(view: WorkingSetView): string {
 	if (view.itemsEvicted === 0) return "n/a";
 	return (view.recalls / view.itemsEvicted).toFixed(2);
-}
-
-/**
- * Prose for one cache-disturbance reason. The wire values are stamped by
- * `noteColdReason` in turn-context.ts and persisted on the assistant entry's
- * `promptCache.expectedColdReasons`; the overlay reads them back, so an unknown
- * reason renders as itself rather than disappearing.
- */
-function coldReasonLabel(reason: string): string {
-	switch (reason) {
-		case "working_set_evict":
-			return "working-set eviction";
-		case "compaction":
-			return "compaction";
-		case "dispatch":
-			return "dispatch traffic";
-		case "residency":
-			return "residency change";
-		case "thinking_change":
-			return "thinking-level change";
-		case "tool_surface_change":
-			return "tool-surface change";
-		case "prompt_recompiled":
-			return "prompt recompile";
-		case "background_memory":
-			return "background memory step";
-		default:
-			return reason;
-	}
 }
 
 /** The operator's working-set configuration, as `/context` states it. */
@@ -268,7 +240,7 @@ function renderContextLedgerLines(
 			lines.push(theme.fg("dim", prefill));
 		}
 		if (coldReasons.length > 0) {
-			const reasons = coldReasons.map(coldReasonLabel).join(", ");
+			const reasons = coldReasons.map(coldReasonText).join(", ");
 			lines.push(theme.fg("dim", `last cache-affecting events: ${reasons} (reuse measured separately)`));
 		}
 	}

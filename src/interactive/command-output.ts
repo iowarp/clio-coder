@@ -30,8 +30,11 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 				token = "error";
 				break;
 		}
-		const prefix = `${theme.fg(token, glyph)} `;
-		return wrapTextWithAnsi(`${prefix}${normalized}`, width);
+		// The mark holds the gutter and a wrapped reply hangs in the content
+		// column, like every other transcript block.
+		return wrapTextWithAnsi(normalized, Math.max(1, width - 2)).map((row, index) =>
+			index === 0 ? `${theme.fg(token, glyph)} ${row}` : `  ${row}`,
+		);
 	});
 	sink.requestRender();
 }

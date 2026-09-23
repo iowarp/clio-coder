@@ -253,3 +253,126 @@ test("a refused skill load reads the same live and on replay, from its persisted
 	] as SessionEntry[]);
 	assert.deepEqual(plain(replayed.render(120)), plain(live.render(120)));
 });
+
+test("a replayed receipt states the duration and cold-cache reasons the live one did", () => {
+	const plainRows = (panel: ReturnType<typeof createChatPanel>) =>
+		panel
+			.render(120)
+			.map(stripTerminalSequences)
+			.filter((line) => line.length > 0);
+	const final = {
+		role: "assistant" as const,
+		content: [{ type: "text", text: "Answer" }],
+		stopReason: "stop",
+		usage,
+	};
+	// Live: the run measures its own clock, and the chat loop's footer cache
+	// notice hands the transcript the reasons it expected a cold cache for.
+	let clock = 1_000;
+	const live = createChatPanel({ now: () => clock, getOutputStyle: () => "detailed" });
+	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.applyEvent({
+		type: "notice",
+		level: "info",
+		surface: "footer",
+		text: "cache may be cold: prompt recompiled",
+		key: "context.cache.cold",
+		coldReasons: ["prompt_recompiled"],
+	} as ChatLoopEvent);
+	live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
+	clock += 5_000;
+	live.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
+	const liveRows = plainRows(live);
+	assert.equal(liveRows.at(-1), "✓ Done · 5.0s · in 7 · out 5 · cold: prompt recompiled");
+	assert.doesNotMatch(liveRows.join("\n"), /cache may be cold/u, "the notice itself stays in the footer");
+
+	// Replay: the same facts from the ledger's timestamps and prompt-cache record.
+	const replayed = createChatPanel({ getOutputStyle: () => "detailed" });
+	rehydrateChatPanelFromTurns(replayed, [
+		{
+			turnId: "u",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00.000Z",
+			kind: "message",
+			role: "user",
+			payload: { text: "Question" },
+		},
+		{
+			turnId: "a",
+			parentTurnId: "u",
+			timestamp: "2026-09-17T00:00:05.000Z",
+			kind: "message",
+			role: "assistant",
+			payload: {
+				...final,
+				promptCache: { input: 7, cacheRead: 0, cacheWrite: 0, expectedColdReasons: ["prompt_recompiled"] },
+			},
+		},
+	] as SessionEntry[]);
+	assert.equal(plainRows(replayed).at(-1), liveRows.at(-1));
+
+	// A cache that served tokens was not cold: the receipt states the reuse instead.
+	const warm = createChatPanel({ getOutputStyle: () => "detailed" });
+	const cached = { ...final, usage: { ...usage, cacheRead: 68_608 } };
+	rehydrateChatPanelFromTurns(warm, [
+		{
+			turnId: "u",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			kind: "message",
+			role: "user",
+			payload: { text: "Q" },
+		},
+		{
+			turnId: "a",
+			parentTurnId: "u",
+			timestamp: "2026-09-17T00:01:36Z",
+			kind: "message",
+			role: "assistant",
+			payload: { ...cached, promptCache: { expectedColdReasons: ["dispatch"] } },
+		},
+	] as SessionEntry[]);
+	assert.equal(plainRows(warm).at(-1), "✓ Done · 1m36s · in 7 · out 5 · cached 68.6k");
+});
+
+test("a middleware reminder reads the same live and on replay, and a skill activation adds no line", () => {
+	const message = "[Clio Coder] This turn used 9+ read-only exploration calls without a successful Scout dispatch.";
+	const rows = (panel: ReturnType<typeof createChatPanel>) =>
+		panel
+			.render(60)
+			.map(stripTerminalSequences)
+			.filter((line) => line.length > 0);
+	const live = createChatPanel();
+	live.applyEvent({ type: "notice", level: "info", surface: "transcript", text: message } as ChatLoopEvent);
+	const replayed = createChatPanel();
+	rehydrateChatPanelFromTurns(replayed, [
+		{
+			turnId: "r",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			kind: "custom",
+			customType: "middlewareReminder",
+			display: true,
+			data: { message, severity: "advisory" },
+		},
+		{
+			turnId: "s",
+			parentTurnId: "r",
+			timestamp: "2026-09-17T00:00:01Z",
+			kind: "skillActivation",
+			activation: {
+				name: "tdd",
+				filePath: "/skills/tdd/SKILL.md",
+				hash: "a".repeat(64),
+				source: "clio-coder",
+				triggeredBy: "tool",
+				turnId: "s",
+				drift: "match",
+			},
+		},
+	] as SessionEntry[]);
+	assert.equal(rows(live)[0], "ℹ This turn used 9+ read-only exploration calls without a");
+	assert.deepEqual(rows(replayed), rows(live));
+	assert.doesNotMatch(rows(replayed).join("\n"), /\[skill\]/u);
+});
