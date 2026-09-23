@@ -61,7 +61,20 @@ export interface InteractiveSubscriptions {
  */
 export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDeps): InteractiveSubscriptions {
 	const workers = createWorkerStream({ readReceipt: deps.readWorkerReceipt ?? readWorkerReceiptFacts });
-	const helperNotice = (payload: DispatchRunIdentity, status: "working" | "completed" | "failed"): void => {
+	/**
+	 * One notice per assignment, not per run. A failed attempt's warning never
+	 * expires and outranks a success, so keyed by run it stayed on the footer
+	 * after its retry settled the assignment `succeeded`. Keyed by assignment,
+	 * each attempt replaces the last and the footer ends on the terminal state.
+	 */
+	const assignmentOfRun = new Map<string, string>();
+	const helperNotice = (
+		payload: DispatchRunIdentity & { assignmentId?: string },
+		status: "working" | "completed" | "failed",
+	): void => {
+		if (payload.assignmentId !== undefined) assignmentOfRun.set(payload.runId, payload.assignmentId);
+		const assignment = assignmentOfRun.get(payload.runId) ?? payload.runId;
+		if (status !== "working") assignmentOfRun.delete(payload.runId);
 		if (
 			payload.agentAudience !== "shadow" &&
 			payload.agentAudience !== "internal" &&
@@ -75,7 +88,7 @@ export function createInteractiveSubscriptions(deps: InteractiveSubscriptionsDep
 				.replace(/^./, (letter) =>
 					letter.toUpperCase(),
 				)} · ${status} · run ${sanitizeCallTargetText(payload.runId).slice(0, 80)}`,
-			`helper:${payload.runId}:${status}`,
+			`helper:${assignment}`,
 		);
 	};
 	const repaint = (): void => {
