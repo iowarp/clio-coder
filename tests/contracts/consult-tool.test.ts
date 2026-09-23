@@ -107,7 +107,10 @@ describe("contracts/consult tool", () => {
 			findNames(listing),
 		);
 		ok(boundNames.includes(ToolNames.Consult));
-		match(String(bound.get(ToolNames.Gateway)?.metadata?.promptHint), /consult \(typed questions/);
+		match(
+			String(bound.get(ToolNames.Gateway)?.metadata?.promptHint),
+			/consult \(when a diff leaves two plausible fixes or migration risk unclear, ask yesNo\/pick\/rate questions over evidence you supply; its probabilities are advice\)/,
+		);
 	});
 
 	it("returns the distribution, the model and the latency, never a chosen option", async () => {
