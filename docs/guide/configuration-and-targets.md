@@ -1157,6 +1157,8 @@ A question below the 0.2 certainty floor comes back as abstained. A refused
 connection, a timeout, a 401, a malformed body and an answer in which every
 question abstained all come back as `answered: false` with a note to proceed on
 the agent's own judgment.
+When a batched reply contains both valid and malformed answers, only the
+malformed questions abstain; the valid questions still reach their sites.
 
 A turn gets three calls. A fourth, a call with more than four questions and a
 call with more than 2 KB of state are refused with a message naming the limit,
