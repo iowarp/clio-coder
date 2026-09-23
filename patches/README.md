@@ -18,6 +18,7 @@ scroll-to-end indicator's centering.
 | Unchanged rows inside the rewritten range | The differential loop steps over a row that is identical to the one on screen instead of clearing and rewriting it. | A streamed token that also changed the footer rewrote every row between them. |
 | `wrapTextWithAnsi` whitespace tokens | A space token that carries the closing codes of the styled word before it is treated as whitespace, and its codes apply before the next row opens. | A styled word that exactly filled a row stranded the following space at the start of the next row. |
 | `lexMarkdownBlocks` | The top-level block tokens `Markdown` renders, from the same lexer and LaTeX extension, tabs expanded. | The block lexer is module-private; the transcript renders streamed answers block by block and must split them exactly where the renderer does. |
+| `Container.render` exact-size copy | A container returns its children's rows as one exact-size copy: one `slice` for a single child, one `concat` for several. | Stock 0.87.1 grows a fresh array one row at a time on every render. Under a 22,800-row transcript that was most of the garbage each streamed frame produced: measured with Clio's split transcript, 1,832 KB per frame on the regular screen and 1,080 KB fullscreen, against 231 KB and 405 KB with the patch. The collector paid for it with a 5–10 ms scavenge about every 55 ms of streaming. |
 
 The semantic operations call Pi's existing editing and search implementation;
 they do not replace it. Consumers are the terminal lease, input router,

@@ -124,6 +124,21 @@ export interface ChatPanelRenderMetrics {
 	entriesRendered: number;
 }
 
+/**
+ * One transcript frame in two parts. `prefix` holds the rows of the settled
+ * leading entries and stays the same array from frame to frame until another
+ * entry settles or the layout changes; `tail` holds every row after it,
+ * rendered for this frame. A caller that keeps its own row buffer copies the
+ * prefix only when its identity changes. Neither array is mutated after it is
+ * returned, and a frame with nothing new returns the same object.
+ */
+export interface ChatPanelRegions {
+	prefix: readonly string[];
+	tail: readonly string[];
+}
+
+const NO_ROWS: readonly string[] = Object.freeze([]);
+
 type TextSegment = {
 	kind: "text";
 	text: string;
@@ -341,6 +356,8 @@ export interface ChatPanel extends Component {
 	inspectionArtifacts(): ViewArtifact[];
 	/** Whether the current preset shows supplied reasoning, for stream pacing. */
 	isThinkingExpanded(): boolean;
+	/** The frame `render` would return, split at the settled prefix. */
+	renderRegions(width: number): ChatPanelRegions;
 	/** Clears the visible transcript. /new uses this after rotating the session. */
 	reset(): void;
 }
@@ -1235,7 +1252,9 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	let runStartIndex: number | undefined;
 	let cachedWidth: number | undefined;
-	let cachedLines: string[] = [];
+	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
+	/** The last frame concatenated, built on first request; null until someone asks for it. */
+	let cachedLines: string[] | null = [];
 	let cachedDetail: TranscriptDetailPolicy | undefined;
 	let cachedTick = 0;
 	let cachedTerminalRows = 0;
@@ -1586,7 +1605,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			!entry.pending &&
 			!entry.segments.some((segment) => segment.kind === "tool" && !segment.finished));
 
-	const render = (width: number): string[] => {
+	/**
+	 * One frame: every row the transcript shows, as the settled prefix the frame
+	 * reused and the rows it rendered after it. The prefix is the frozen array
+	 * itself, so a streamed token copies no settled row until a consumer asks
+	 * for the whole frame.
+	 */
+	const renderFrame = (width: number): { prefix: readonly string[]; tail: string[] } => {
 		const startedAt = performance.now();
 		const detail = currentDetail();
 		const terminalRows = options.getTerminalRows?.() ?? 40;
@@ -1607,19 +1632,21 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			cachedTick === tick
 		) {
 			options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: true, entriesRendered: 0 });
-			return cachedLines;
+			return cachedRegions;
 		}
 		// Stable entries cache by width, height budget, and preset.
 		const baseKey = `${width}|${terminalRows}|${detail.style}`;
 		const capacity = entryCacheCapacity();
 		if (frozen !== null && frozen.key !== baseKey) frozen = null;
-		const out: string[] = frozen === null ? [] : frozen.lines.slice();
+		const prefix = frozen === null ? NO_ROWS : frozen.lines;
+		const out: string[] = [];
 		const startIndex = frozen === null ? 0 : frozen.through;
 		// The freeze extends over the contiguous run of stable leading
-		// entries; it is captured after the loop from what this frame rendered.
+		// entries; it grows after the loop by the rows this frame rendered for
+		// the entries that joined it.
 		let freezeThrough = startIndex;
-		let freezeLineCount = out.length;
-		let freezeOpen = frozen !== null || startIndex === 0;
+		let freezeTailRows = 0;
+		let freezeOpen = true;
 		let entriesRendered = 0;
 		// Only entries at or past `startIndex` can hold a running tool: the frozen
 		// prefix is by construction a run of stable entries, and stable means no
@@ -1663,13 +1690,22 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			if (freezeOpen && i === freezeThrough && entryIsStable(entry)) {
 				freezeThrough = i + 1;
-				freezeLineCount = out.length;
+				freezeTailRows = out.length;
 			} else {
 				freezeOpen = false;
 			}
 		}
-		frozen = freezeThrough > 0 ? { lines: out.slice(0, freezeLineCount), through: freezeThrough, key: baseKey } : null;
-		cachedLines = out;
+		// The freeze only grows when an entry settles. An unchanged freeze keeps
+		// its array, which is what lets a root that holds the prefix skip it.
+		if (freezeThrough > startIndex) {
+			frozen = {
+				lines: prefix.concat(freezeTailRows === out.length ? out : out.slice(0, freezeTailRows)),
+				through: freezeThrough,
+				key: baseKey,
+			};
+		}
+		cachedRegions = { prefix, tail: out };
+		cachedLines = null;
 		cachedWidth = width;
 		cachedDetail = detail;
 		cachedTerminalRows = terminalRows;
@@ -1677,7 +1713,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		renderedRunningTool = sawRunningTool;
 		dirty = false;
 		options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: false, entriesRendered });
-		return out;
+		return cachedRegions;
+	};
+
+	/**
+	 * The whole frame as one array, built once per changed frame with a single
+	 * exact-size copy. A cache hit returns the same array, which callers use as
+	 * the signal that nothing moved.
+	 */
+	const render = (width: number): string[] => {
+		const regions = renderFrame(width);
+		cachedLines ??= regions.prefix.length === 0 ? regions.tail : regions.prefix.concat(regions.tail);
+		return cachedLines;
 	};
 
 	return {
@@ -2162,6 +2209,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 		},
 		render,
+		renderRegions: renderFrame,
 		invalidate(): void {
 			markDirty();
 		},
