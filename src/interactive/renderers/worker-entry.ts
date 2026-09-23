@@ -18,7 +18,15 @@ import type { WorkerAction } from "../../domains/observability/worker-progress.j
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
-import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
+import {
+	type ClioToken,
+	clioTheme,
+	fitUnits,
+	formatCompactMs,
+	GLYPH,
+	joinFacts,
+	releaseSpaces,
+} from "../theme/index.js";
 import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
@@ -28,18 +36,17 @@ const dim = (text: string): string => theme.fg("dim", text);
 // sits in the gutter and the card's body nests under it in the content column.
 const RAIL = "  │ ";
 const RAIL_WIDTH = 4;
-const FOOTER = "  └ ";
 const ATTEMPT = "↻ ";
 const SEPARATOR = " · ";
-
-/** Rows of worker prose an expanded block shows before it defers to `/view`. */
-const BODY_LINE_LIMIT = 80;
 
 export interface WorkerEntryRenderOptions {
 	nowMs?: number;
 	detail?: TranscriptDetailPolicy;
 	terminalRows?: number;
-	/** Render the full body without the line cap; `/export` sets this. */
+	/**
+	 * Inspect the card whole, as `/view` and `/export` do: the Detailed card with
+	 * every budget lifted and the answer exactly as the run returned it.
+	 */
 	unbounded?: boolean;
 	/**
 	 * `continues` when this card follows a card of the same council round, so
@@ -84,11 +91,6 @@ function identityUnits(entry: WorkerEntryState): string[] {
 	];
 }
 
-/** Whole header units, closing on a dim ellipsis rather than cutting a unit mid-word. */
-function headerLine(entry: WorkerEntryState, width: number): string {
-	return fitUnits(theme, `${originGlyph(entry)} `, identityUnits(entry), width);
-}
-
 /**
  * The gutter mark and the row a council round opens with. Its members follow
  * in the content column, each under its roster label, so the round reads as
@@ -111,10 +113,10 @@ function cardPrefix(entry: WorkerEntryState): string {
  * outcome code, so it reads as a ledger-side finding instead of the ordinary
  * heartbeat-timeout `stalled` a sealed receipt reports.
  */
-function outcomeUnit(receipt: WorkerReceiptSummary, word: boolean): string {
+function outcomeUnit(receipt: WorkerReceiptSummary): string {
 	if (receipt.outcome === "succeeded") return theme.fg("success", `${GLYPH.ok} execution ok`);
 	if (receipt.outcome === "canceled") return theme.fg("dim", `${GLYPH.cancelled} canceled`);
-	if (receipt.abandonedDetail !== undefined) return theme.fg("error", word ? `${GLYPH.error} abandoned` : GLYPH.error);
+	if (receipt.abandonedDetail !== undefined) return theme.fg("error", GLYPH.error);
 	return theme.fg("error", `${GLYPH.error} ${receipt.outcomeCode ?? receipt.outcome}`);
 }
 
@@ -146,8 +148,8 @@ function needsInputUnit(): string {
  * A block with no settled receipt yet: the live mark, spinner-free. The row's
  * progress line says what the run is doing; `/view` spells the state out.
  */
-function pendingUnit(word = false): string {
-	return theme.fg("accent", word ? `${GLYPH.running} running` : GLYPH.running);
+function pendingUnit(): string {
+	return theme.fg("accent", GLYPH.running);
 }
 
 /**
@@ -160,36 +162,10 @@ function isPending(entry: WorkerEntryState): boolean {
 	return entry.receipt === undefined || entry.receipt.stillRunning === true;
 }
 
-/**
- * Receipt facts as footer units. A unit is dropped when unknown rather than
- * rendered as zero: an ACP peer reports no tokens at all, so its footer names
- * the tool calls it mediated instead of claiming it spent nothing.
- */
-function footerUnits(entry: WorkerEntryState, receipt: WorkerReceiptSummary): string[] {
-	const units = [outcomeUnit(receipt, true)];
-	if (workerNeedsInput(entry)) units.push(needsInputUnit());
-	if (receipt.exitCode !== undefined && receipt.exitCode !== 0) {
-		units.push(theme.fg("error", `exit=${receipt.exitCode}`));
-	}
-	if (receipt.tokenCount !== undefined && receipt.tokenCount > 0) {
-		units.push(dim(`${formatFooterTokens(receipt.tokenCount)} tok`));
-	}
-	if (receipt.toolCalls !== undefined && receipt.toolCalls > 0) {
-		units.push(dim(`${receipt.toolCalls} tool call${receipt.toolCalls === 1 ? "" : "s"}`));
-	}
-	if (receipt.durationMs !== undefined) units.push(dim(formatCompactMs(receipt.durationMs)));
-	if (receipt.contract !== undefined) units.push(dim(`contract ${receipt.contract}`));
-	const presentation = presentedContractAnswer(entry);
-	if (presentation?.footer !== undefined) units.push(dim(presentation.footer));
-	if (receipt.abandonedDetail !== undefined) units.push(theme.fg("warning", receipt.abandonedDetail));
-	else if (receipt.receiptUnavailable === true) units.push(theme.fg("warning", "receipt unavailable"));
-	return units;
-}
-
 /** Wrap one annotation onto the rail, prefixed on its first row and hanging under it after. */
 function railLines(text: string, token: ClioToken, width: number): string[] {
 	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, row)}`);
+	return wrapTextWithAnsi(text, contentWidth).map((row) => `${dim(RAIL)}${theme.fg(token, releaseSpaces(row))}`);
 }
 
 function presentedContractAnswer(entry: WorkerEntryState): PresentedContractAnswer | null {
@@ -253,25 +229,6 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 	return mutationReportLines(structured)?.map(safeWorkerAnswerText) ?? safeWorkerAnswerText(entry.text).split("\n");
 }
 
-function bodyLines(entry: WorkerEntryState, width: number, unbounded: boolean): string[] {
-	// A worker that produced no prose (a pure tool run, a run that failed before
-	// its first token) gets no rail at all rather than one blank rail row.
-	if (entry.text.length === 0) return [];
-	const contentWidth = Math.max(1, width - RAIL_WIDTH);
-	const source = unbounded ? safeWorkerAnswerText(entry.text).split("\n") : bodySourceLines(entry);
-	const capped = unbounded || source.length <= BODY_LINE_LIMIT ? source : source.slice(0, BODY_LINE_LIMIT);
-	const hiddenLines = entry.droppedLines + (source.length - capped.length);
-	const out: string[] = [];
-	for (const line of capped) {
-		for (const wrapped of wrapTextWithAnsi(line, contentWidth)) out.push(`${dim(RAIL)}${wrapped}`);
-	}
-	if (hiddenLines > 0) {
-		const tail = `${GLYPH.ellipsis} ${hiddenLines} more line${hiddenLines === 1 ? "" : "s"}, /view dispatch:${entry.runId}`;
-		out.push(`${dim(RAIL)}${dim(fitUnits(theme, "", [tail], contentWidth))}`);
-	}
-	return out;
-}
-
 /** Tool names only, coalesced onto one line. Arguments never cross into the transcript. */
 function toolLine(entry: WorkerEntryState, width: number): string | null {
 	if (entry.tools.length === 0) return null;
@@ -300,13 +257,6 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
 	return first.length === 0 ? [] : railLines(`${GLYPH.error} ${first}`, "error", width);
 }
 
-/** The receipt line, whole units only; a unit that would not fit is dropped behind a dim ellipsis. */
-function footerLine(entry: WorkerEntryState, width: number): string {
-	const units =
-		isPending(entry) || entry.receipt === undefined ? [pendingUnit(true)] : footerUnits(entry, entry.receipt);
-	return fitUnits(theme, dim(FOOTER), units, width);
-}
-
 /**
  * Folded row: everything the operator needs to decide whether to open it, on
  * one line, shaped like a tool subline. Identity outranks elapsed: when the row
@@ -323,7 +273,7 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 			? pendingUnit()
 			: workerNeedsInput(entry)
 				? needsInputUnit()
-				: outcomeUnit(entry.receipt, false);
+				: outcomeUnit(entry.receipt);
 	const elapsed =
 		entry.receipt?.durationMs === undefined ? "" : dim(`${SEPARATOR}${formatCompactMs(entry.receipt.durationMs)}`);
 	const full = ` ${status}${elapsed}`;
@@ -335,14 +285,24 @@ function actionLine(entry: WorkerEntryState, width: number): string {
 	return truncateToWidth(header, width, GLYPH.ellipsis, false);
 }
 
-function workerMetrics(entry: WorkerEntryState): string[] {
+/**
+ * What a settled run spent, and a failed process's exit status. A fact the
+ * run did not report is left out rather than stated as zero. Inspection adds
+ * the answer's result-contract conformance, which the transcript states by
+ * presenting a conforming answer readably and `/view` and `/export` cannot,
+ * since they show the answer as the run returned it.
+ */
+function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	const metrics: string[] = [];
+	const exitCode = entry.receipt?.exitCode;
+	if (exitCode !== undefined && exitCode !== 0) metrics.push(`exit ${exitCode}`);
 	const tokens = entry.receipt?.tokenCount ?? entry.progress?.processedTokens;
 	const calls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls;
 	if (tokens !== undefined) metrics.push(`${formatFooterTokens(tokens)} tokens processed`);
 	const context = entry.progress?.contextTokens ?? entry.contextTokens;
 	if (context !== undefined) metrics.push(`context ${formatFooterTokens(context)}`);
-	if (calls !== undefined) metrics.push(`${calls} tool calls`);
+	if (calls !== undefined) metrics.push(`${calls} tool call${calls === 1 ? "" : "s"}`);
+	if (inspect && entry.receipt?.contract !== undefined) metrics.push(`contract ${entry.receipt.contract}`);
 	return metrics;
 }
 
@@ -381,19 +341,40 @@ const FINISHED_VERBS: Readonly<Record<string, string>> = {
 	calling: "called",
 };
 
+/** A call's object, marked when the safety layer cut it to its length cap. */
+function descriptorObject(descriptor: NonNullable<WorkerAction["descriptor"]>): string {
+	if (descriptor.object === undefined) return "";
+	return ` ${descriptor.object}${descriptor.truncated === true ? GLYPH.ellipsis : ""}`;
+}
+
 /** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
 function finishedAction(action: WorkerAction): string {
 	const descriptor = action.descriptor;
 	if (descriptor === undefined) return action.tool;
-	const verb = FINISHED_VERBS[descriptor.verb] ?? descriptor.verb;
-	return descriptor.object === undefined ? verb : `${verb} ${descriptor.object}`;
+	return `${FINISHED_VERBS[descriptor.verb] ?? descriptor.verb}${descriptorObject(descriptor)}`;
+}
+
+/**
+ * A settled card's calls, oldest first, with a run of one repeated call stated
+ * once and counted (`read docs/retry.md ×3`): a worker going round in a loop is
+ * a fact worth one row, not four identical ones.
+ */
+function trailCalls(recent: ReadonlyArray<WorkerAction>): string[] {
+	const calls: Array<{ text: string; count: number }> = [];
+	for (const action of [...recent].reverse()) {
+		const text = finishedAction(action);
+		const last = calls[calls.length - 1];
+		if (last?.text === text) last.count += 1;
+		else calls.push({ text, count: 1 });
+	}
+	return calls.map(({ text, count }) => (count > 1 ? `${text} ${GLYPH.times}${count}` : text));
 }
 
 /** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
 function describedAction(entry: WorkerEntryState): string | null {
 	const action = entry.progress?.currentAction;
 	if (action === null || action === undefined) return null;
-	return action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object ?? ""}`.trim() : action.tool;
+	return action.descriptor ? `${action.descriptor.verb}${descriptorObject(action.descriptor)}` : action.tool;
 }
 
 function elapsedMsOf(entry: WorkerEntryState, nowMs: number): number | undefined {
@@ -484,8 +465,9 @@ export function renderWorkerEntryLines(
 	options: WorkerEntryRenderOptions,
 ): string[] {
 	const safeWidth = Math.max(1, Math.floor(width));
-	const detail = options.detail ?? transcriptDetail();
-	if (entry.helper && !options.unbounded && detail.style !== "detailed" && !workerNeedsInput(entry))
+	const inspect = options.unbounded === true;
+	const detail = inspect ? transcriptDetail("detailed") : (options.detail ?? transcriptDetail());
+	if (entry.helper && detail.style !== "detailed" && !workerNeedsInput(entry))
 		return helperRow(entry, safeWidth, detail, options.terminalRows, options.nowMs);
 	// The first card of a council round carries the round's header row.
 	const council = entry.council !== undefined && options.group !== "continues" ? [councilHeader(entry, safeWidth)] : [];
@@ -501,26 +483,11 @@ export function renderWorkerEntryLines(
 	const quality = isPending(entry)
 		? []
 		: railLines(
-				`quality: ${trustStateWord("validationGrounding", entry.receipt?.trust?.validationGrounding.state ?? "unknown")}`,
+				`quality ${trustStateWord("validationGrounding", entry.receipt?.trust?.validationGrounding.state ?? "unknown")}`,
 				"muted",
 				safeWidth,
 			);
-	if (options.unbounded) {
-		const tools = toolLine(entry, safeWidth);
-		return [
-			...council,
-			entry.council !== undefined ? fitUnits(theme, "  ", identityUnits(entry), safeWidth) : headerLine(entry, safeWidth),
-			...(entry.helper && entry.task ? railLines(entry.task, "muted", safeWidth) : []),
-			...bodyLines(entry, safeWidth, true),
-			...attemptLines(entry, safeWidth),
-			...(tools ? [tools] : []),
-			...failureLines(entry, safeWidth),
-			footerLine(entry, safeWidth),
-			...provenance,
-			...quality,
-		].map(redactSecretString);
-	}
-	const budget = (limit: number) => previewBudget(limit, options.terminalRows);
+	const budget = (limit: number) => (inspect ? Number.POSITIVE_INFINITY : previewBudget(limit, options.terminalRows));
 	// A checkpoint's body is the question the operator answers next, so it keeps
 	// its rows whatever the transcript preset hides of an ordinary answer, and
 	// it renders in the warning token rather than as folded prose.
@@ -530,7 +497,7 @@ export function renderWorkerEntryLines(
 	const summary =
 		entry.text.length === 0
 			? []
-			: bodySourceLines(entry).flatMap((line) =>
+			: (inspect ? safeWorkerAnswerText(entry.text).split("\n") : bodySourceLines(entry)).flatMap((line) =>
 					railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
 				);
 	// A running card says what it is doing on its one live line in every style,
@@ -538,14 +505,12 @@ export function renderWorkerEntryLines(
 	// lists the calls it made, oldest first and in the past tense, because they
 	// are finished work, not activity.
 	const pending = isPending(entry);
-	const recent = entry.progress?.recentActions ?? [];
+	const recent = entry.progress?.recentActions ?? entry.recentActions ?? [];
 	const trail = pending
 		? recent
 				.slice(0, 1)
 				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "muted", safeWidth))
-		: [...recent]
-				.reverse()
-				.flatMap((action) => railLines(`${GLYPH.phaseTool} ${finishedAction(action)}`, "muted", safeWidth));
+		: trailCalls(recent).flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "muted", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
 		failureLines(entry, safeWidth),
@@ -557,12 +522,12 @@ export function renderWorkerEntryLines(
 	);
 	const presented = presentedContractAnswer(entry)?.footer;
 	// Compact states identity, execution and quality; the spend is a keystroke away.
-	const metrics = pending || detail.style === "compact" ? [] : workerMetrics(entry);
+	const metrics = pending || detail.style === "compact" ? [] : workerMetrics(entry, inspect);
 	return [
 		...council,
 		actionLine(entry, safeWidth),
 		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
-		...(metrics.length ? railLines(metrics.join(" · "), "dim", safeWidth) : []),
+		...(metrics.length ? railLines(joinFacts(metrics), "dim", safeWidth) : []),
 		...(entry.helper && entry.task
 			? previewRows(
 					railLines(entry.task, "muted", safeWidth),

@@ -1,5 +1,5 @@
-import type { Component, ScrollViewScrollbar, TuiMode } from "../engine/tui.js";
-import { Container, ScrollView, VStack } from "../engine/tui.js";
+import type { Component, ScrollViewScrollbar, TUI, TuiMode } from "../engine/tui.js";
+import { Container, ScrollView, TuiAltScreen, VStack } from "../engine/tui.js";
 import type { ChatPanelRegions } from "./chat-panel.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
 
@@ -183,6 +183,17 @@ class RegularRoot implements Component {
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
 	return new RegularRoot(parts);
+}
+
+/**
+ * Bring a fullscreen transcript back to its live edge and follow new output
+ * again. A submission is the operator asking for what comes next, so a view
+ * they scrolled up to read earlier output returns to where the new turn
+ * writes. The regular screen has no viewport to move, and new output alone
+ * never moves one the operator scrolled.
+ */
+export function returnToLiveEdge(tui: TUI): void {
+	if (tui instanceof TuiAltScreen) tui.scrollToBottom();
 }
 
 /** Keep the nearest surviving text at the viewport when a preset changes row counts. */

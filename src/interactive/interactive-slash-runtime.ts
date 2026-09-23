@@ -132,6 +132,12 @@ export interface InteractiveSlashRuntimeDeps {
 	 * above the run it started. Absent hosts do not persist it.
 	 */
 	recordOperatorCommand?: (text: string) => void;
+	/**
+	 * Bring a fullscreen transcript back to its live edge. A submission asks
+	 * for what comes next, so a view the operator scrolled up follows the new
+	 * turn again. A regular-screen host has no viewport to move.
+	 */
+	returnToLiveEdge?: () => void;
 	settleVisibleFrame?: (reason: string) => Promise<void>;
 	refreshFooter: () => void;
 	dismissContextBootstrapNotices: () => void;
@@ -281,6 +287,8 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	/** One expanded operator turn into the chat loop: record it, paint it, submit it. */
 	const submitExpanded = (sub: InteractiveSlashSubmitExpansion, awaitAdmission = false): Promise<void> => {
 		try {
+			// A prompt or a steer is the operator asking for what comes next.
+			deps.returnToLiveEdge?.();
 			// Enter while streaming becomes a steer inside chat.submit. The
 			// queue panel shows it until the engine injects it, and the
 			// injection emits queued_user_turn, which is when the transcript
@@ -424,6 +432,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		io: deps.io,
 		notice: appendCommandNotice,
 		echoOperatorCommand: (text) => {
+			deps.returnToLiveEdge?.();
 			appendOperatorCommand(text, {
 				appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
 				requestRender: deps.requestRender,

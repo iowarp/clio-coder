@@ -103,7 +103,9 @@ export function dispatchSegment(rows: ReadonlyArray<DispatchBoardRow> | null | u
 				parts.push(
 					[...names]
 						.slice(0, 2)
-						.map(([name, count]) => `${sanitizeCallTargetText(name).slice(0, 24)}${count > 1 ? ` ×${count}` : ""}`)
+						.map(
+							([name, count]) => `${sanitizeCallTargetText(name).slice(0, 24)}${count > 1 ? ` ${GLYPH.times}${count}` : ""}`,
+						)
 						.join(", "),
 				);
 				if (names.size > 2) parts.push(`+${names.size - 2} kinds`);

@@ -278,12 +278,12 @@ export function autonomyDeniedNotice(decision: SafetyDecision, level: string): B
 }
 
 /**
- * The transcript already shows the rejection text the model received
- * (rejection.short names the tool and action class), so this notice aims at
- * the policy dimension the transcript omits: which rule fired and from which
- * policy source. The closing sentence states that these gates are
- * level-independent, so the notice never reads as a contradiction of the
- * autonomy level shown in the dashboards (sd-01).
+ * The blocked call's transcript row states the refusal and its body the
+ * rejection the model received, the rule included, so this notice passes
+ * through the footer's notice slot with the policy dimension: which rule
+ * fired and from which policy source. The closing sentence states that these
+ * gates are level-independent, so the notice never reads as a contradiction of
+ * the autonomy level shown in the dashboards (sd-01).
  */
 export function safetyBlockedNotice(payload: unknown): BusNotice | null {
 	if (!isSafetyBlockedPayload(payload)) return null;

@@ -73,7 +73,12 @@ import {
 } from "./stream-pacer.js";
 import type { TranscriptDetailPolicy } from "./transcript-detail.js";
 import { readWorkerReceiptFactsForReplay } from "./worker-receipts.js";
-import { WORKER_SETTLED_ENTRY, workerEntriesFromRunEntries, workerSettledFromData } from "./worker-replay.js";
+import {
+	WORKER_SETTLED_ENTRY,
+	type WorkerSettledFields,
+	workerEntriesFromRunEntries,
+	workerSettledFromData,
+} from "./worker-replay.js";
 import type { WorkerReceiptReader } from "./worker-stream.js";
 
 const DEFAULT_COALESCE_MS = 16;
@@ -1378,16 +1383,16 @@ function replayEntries(
 	// attempts of the same assignment fold into that block as `↻` rail lines, so
 	// a failover replays as the one run it was rather than as two.
 	// What a settled run's live stream knew and its receipt does not.
-	const settledContext = new Map<string, number>();
+	const settledRuns = new Map<string, WorkerSettledFields>();
 	for (const entry of selected) {
 		if (entry.kind !== "custom" || entry.customType !== WORKER_SETTLED_ENTRY) continue;
 		const settled = workerSettledFromData(entry.data);
-		if (settled !== null) settledContext.set(settled.runId, settled.contextTokens);
+		if (settled !== null) settledRuns.set(settled.runId, settled);
 	}
 	const workerStates = workerEntriesFromRunEntries(
 		selected.filter((entry): entry is WorkerRunEntry => entry.kind === "workerRun"),
 		options.readWorkerReceipt ?? readWorkerReceiptFactsForReplay,
-		settledContext,
+		settledRuns,
 	);
 	const placedAssignments = new Set<string>();
 	for (const entry of selected) {
@@ -1417,10 +1422,13 @@ function replayEntries(
 						const stopReason = (message as { stopReason?: string }).stopReason;
 						const terminalFailure = stopReason === "error" || stopReason === "aborted" || stopReason === "length";
 						const continues = !terminalFailure && (stopReason === "toolUse" || hasStructuredToolCall(message));
-						// Tool-use messages continue this run. Settling before their tool rows
-						// exist can attach a Done receipt to an earlier visible failure.
-						// Keep incomplete replay pending until a terminal assistant arrives.
-						if (continues) chatPanel.applyEvent({ type: "message_start", message });
+						// Every message starts before it ends, as it did live: the start marks
+						// where this message's reasoning goes, ahead of its text rather than
+						// lost behind the reasoning an earlier message of the run left. A
+						// tool-use message continues the run, so its entry stays pending until
+						// a terminal assistant arrives; settling before its tool rows exist
+						// could attach a Done receipt to an earlier visible failure.
+						chatPanel.applyEvent({ type: "message_start", message });
 						chatPanel.applyEvent({ type: "message_end", message });
 						runAssistantMessages.push(message);
 						for (const reason of persistedColdReasons(entry)) {

@@ -625,7 +625,7 @@ describe("dispatch quality presentation", () => {
 		};
 		const plain = renderToolSubline(finished, 44).map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
 		// With no card under it, the dispatch row carries execution and quality as separate facts.
-		match(plain, /delegated · 3 ok · quality: /u);
+		match(plain, /delegated · 3 ok · quality /u);
 		match(plain, /1 grounded/u);
 		match(plain, /1 validation failed/u);
 		match(plain, /1 validation unknown/u);
@@ -715,10 +715,12 @@ describe("dispatch quality presentation", () => {
 					},
 					76,
 				);
-				match(plain(collapsed), /3 ok · quality: /u);
+				match(plain(collapsed), /3 ok · quality /u);
 				ok(plain(collapsed).includes(wording), plain(collapsed));
+				// The label is a word, not a second colon ahead of a word that may carry one.
+				doesNotMatch(plain(collapsed), /quality:/u);
 				const island = formatTaskIslandLines([{ ...row, agentAudience: "base" }]);
-				ok(plain(island).replace(/\s+/gu, " ").includes(wording), plain(island));
+				ok(plain(island).replace(/\s+/gu, " ").includes(`quality ${wording}`), plain(island));
 				match(plain(island), /done/u);
 				const card = createDispatchBoardView(
 					() => [row],
@@ -734,7 +736,7 @@ describe("dispatch quality presentation", () => {
 				ok(worker);
 				for (const style of ["compact", "standard", "detailed"] as const) {
 					const lines = renderWorkerEntryLines(worker, 76, { detail: transcriptDetail(style) });
-					ok(plain(lines).includes(wording), plain(lines));
+					ok(plain(lines).includes(`quality ${wording}`), plain(lines));
 					match(plain(lines), /execution ok/u);
 					ok(lines.every((line) => visibleWidth(line) <= 76));
 				}

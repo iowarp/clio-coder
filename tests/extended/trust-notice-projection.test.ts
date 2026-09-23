@@ -87,7 +87,22 @@ test("S3-01: live hook trust diagnostics reach the footer notice area and unsubs
 	bus.emit(BusChannels.ExtensionsLoadIssue, { message });
 	deepStrictEqual(notices, [{ level: "warning", text: message }]);
 	strictEqual(renders, 1);
+	// A safety block is the blocked call's row, live and on /resume; the policy
+	// dimension passes through the footer rather than a live-only transcript copy.
+	bus.emit(BusChannels.SafetyBlocked, {
+		tool: "bash",
+		actionClass: "system_modify",
+		ruleId: "rm-recursive-or-force",
+		policySource: "damage-control:base",
+		reasonCode: "damage-control:rm-recursive-or-force",
+	});
+	strictEqual(notices.length, 2);
+	strictEqual(notices[1]?.level, "warning");
+	strictEqual(
+		notices[1]?.text,
+		"[safety-net] blocked bash (system_modify): rule rm-recursive-or-force (damage-control:rm-recursive-or-force) via damage-control:base. This gate applies at every autonomy level.",
+	);
 	projection.dispose();
 	bus.emit(BusChannels.ExtensionsLoadIssue, { message });
-	strictEqual(notices.length, 1);
+	strictEqual(notices.length, 2);
 });

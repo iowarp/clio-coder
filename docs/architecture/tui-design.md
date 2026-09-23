@@ -20,10 +20,10 @@ The governing principle: **the user reads state from color, structure from frame
 | Questions to you | Question and answer on one row; a round nests one answer per row | Same | Same |
 | Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
 | Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
-| Workers | Identity, execution and validation outcome; a running card's live line | Adds spend and 3 summary rows | 8 summary rows; a running card's last call, a settled card's calls |
+| Workers | Identity, execution and validation outcome; a running card's live line | Adds spend and 3 summary rows | 8 summary rows and a bounded call trail; inspection lifts the card budgets |
 | Helper work | One row | One row | The full card |
 | Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
-| Turn receipt | None | Outcome and available duration | Outcome, duration, usage and model-call facts |
+| Turn receipt | None | Outcome and available duration | Outcome, duration, usage, cache and model-call facts |
 
 Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
 
@@ -123,6 +123,7 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../
 | `◆ ◇` | `active/scoped` | Active and scoped marks | Model selector, thinking selector, Settings profile workbench. |
 | `◆ ◇` | `workerAgent/workerHuman` | Who started a run | Delegate action rows and worker cards: `◆` the model, `◇` the operator (`/run`, `/delegate`). |
 | `↳` | `subProcess` | Clio's own helper work | Helper and shadow worker rows. |
+| `×` | `times` | Repeated call count | A worker trail compresses a run of identical calls as `×4`. |
 
 ---
 
@@ -215,6 +216,8 @@ The Clio screen maintains a responsive, four-zone structure: the launchpad / ses
 
 In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Ctrl+G Home` and `Ctrl+G End` jump to its bounds, `Ctrl+Up` and `Ctrl+Down` jump between semantic prompts; plain Home/End edit the composer, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `interface.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Whenever a bar can appear (`auto` or `always`), the transcript renders one column narrower and the bar owns the last column, so it never covers a table border or a word's last letter and never reflows the transcript when it comes and goes. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
+Submitting a prompt, steer, `/run`, `/delegate`, `/council` or `!` command returns a scrolled fullscreen transcript to the live edge, where its echo and answer appear.
+
 `interface.smoothStreaming` controls presentation-only pacing of derived assistant text and thinking. The default `auto` paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. `on` explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. `off` uses the 16 ms coalescer alone. Paced or not, the first delta of a stream is shown whole in the frame it arrives, and the coalescer asks for a frame on the leading edge of a quiet window, so only the deltas inside one window wait for its end. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.
 
 Interactive startup uses one terminal lease across both boot stages. Stage 0 owns the terminal, renderer, root host, exact editor instance, input decoder, raw mode, resize subscription, protocol queries, signals, and stop lifecycle, and commits a measured minimal frame while services hydrate. Hydration synchronously swaps the root and input/signal delegates without reconstructing the editor or initializing terminal protocols again. Early Enter submissions become immutable, visibly queued admissions and drain once through the ordinary command pipeline; a later draft and cursor stay in the same editor. Boot failure or an early signal closes the lease exactly once, restores the terminal, and prints recoverable queued input and draft text. `CLIO_CODER_INSTANT_SHELL=0` selects the legacy fully hydrated first frame; ACP, headless, ordinary non-TTY invocation, and subcommand execution never acquire the lease. An explicit `CLIO_CODER_INTERACTIVE=1` retains its established force-interactive behavior on a non-TTY stream.
@@ -296,6 +299,8 @@ Source: `src/interactive/footer/dashboard.ts`, `src/interactive/footer/pages.ts`
   3. `Status`: A session line (recorded tokens and tracked cost) above one compact row per connected subscription account (`renderQuotaAccounts`, `src/interactive/quota-view.ts`), then Cost & Connections (session cost, MCP servers, plugins, extensions) and Local Machine metrics (CPU, memory, disk I/O sampled on 2s cadence), plus memory bank entries and free tokens.
 
 ### 5.4 Frame Cost
+
+The footer composes its text at the width requested by the current render. A resize therefore updates the strip immediately, even before the next periodic refresh.
 
 A frame costs the rows that changed, not the length of the session.
 
@@ -425,6 +430,8 @@ A skill that narrows the tools stays armed across turns until another skill repl
 
 Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and a diff row too long for the terminal wraps its content under itself, past the sign and the line number, so the number column stays readable at 40 columns. Failures keep actionable context in every preset. Compact folds by class: a run of consecutive successful observations and searches becomes one `▸ explored 3 files, 2 searches ✓` row, knowledge lookups one `§ consulted 5 sources ✓` row, and changes one `± edited 2 files · +6 -2 ✓` row with each file's change facts; the targets nest beneath the row, and the run spans the reasoning between its calls ([6.2](#62-thinking-blocks)). A listing states its count of entries, never the bytes of its listing text (`▸ listed workspace · 7 entries`). Commands, fetches, delegations and questions never fold, and a failure, a skill load, and a call whose result was cut, offloaded or evicted keep their own rows. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
 
+Paths inside the workspace read relative to it. A path that fits beside its verb stays whole; a path that must be cut keeps its tail (`…/net/retry.js`) on the action row. The resource label (`· docs`, `· skill`) appears only when the path has not already named that resource. Short facts such as `18 lines` and `context 3.2k` stay together when a row wraps. A blocked row states its refusal once: the bounded body omits the opening line already quoted on the row, and a safety-net block uses the footer notice slot. An approval target cut by the safety layer ends in `…`.
+
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
 
@@ -442,6 +449,8 @@ Every notice the transcript keeps is one block with a mark in the gutter: `ℹ` 
 ```
 
 A middleware reminder is advice to the model. It keeps the `ℹ` mark (`⚠` for a warning or a hard stop) so the operator sees what Clio told the model, live and on `/resume`. The `[middleware:…]` annotations middleware appends to a tool result are the model's too: a bounded body states them as one dim `note to model · …` row after the output, and `/view` keeps the result as the model read it. Telemetry about a run is not a transcript notice: an expected cold prompt cache goes to the footer's notice slot (`cache may be cold: prompt recompiled`) and to the Detailed receipt ([6.6](#66-output-style-receipts)).
+
+A safety-net block places its notice in the footer; its action row and bounded body remain the durable transcript record. This keeps the live transcript and `/resume` aligned without repeating the refusal as a separate notice row.
 
 Provider failures use a bounded, sanitized diagnosis in the primary transcript,
 retaining available HTTP status and actionable route advice. A provider retry is one
@@ -461,6 +470,8 @@ Compact omits the separate turn receipt. Standard closes a settled turn with its
 ```
 
 `/resume`, `/view` and `/export` state the same receipt as the live turn: the duration from the ledger's timestamps (the prompt's to its final answer's) and the cold reasons from the first call's prompt-cache record. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
+
+The chat loop can announce a cold prompt cache before `agent_start`. The panel holds those reasons through the turn and clears them at `agent_end` or reset, so the live Detailed receipt retains the same `cold:` fact as replay.
 
 ### 6.7 Code Ink (Syntax Highlighting)
 
@@ -507,6 +518,10 @@ A card that sits under the dispatch call that spawned it is that run's row. The 
 A running card shows one live line in every style, rewritten in place without a spinner: what the run is doing now, how long it has run, and what it has spent (`⚙ running lychee dist/**/*.html · 12s · 6.2k tokens · 4 calls`). Between calls the line names the stream's phase (`◐ thinking`, `◑ writing`). A narrow row cuts the action's text and then drops the spend, never the clock. Standard adds the live answer tail beneath it and Detailed adds the call it finished last (`⚙ last: read dist/index.html`). A settled card in Detailed lists its calls oldest first in the past tense instead.
 
 An operator's `/run` or `/delegate` line sits above its `◇` card as a dim `▌` echo, live and on `/resume`: the echo persists as a display-only `operatorCommand` session entry, which never reaches the model. A settled card's spend row states the context its last model call occupied (`context 6.2k`); the receipt has no per-call usage, so a `workerSettled` session entry records it when the run settles and `/resume` reads it back.
+
+The settled trail persists in `workerSettled.calls`, so `/resume` shows it too. Repeated identical calls compress to one `×N` row, and a descriptor cut by the safety layer ends in `…`. The inspected card in `/view` and `/export` lifts the transcript's row budgets, keeps the full available raw answer, and shows contract conformance beside spend. If a card arrives after its dispatch settles, it still nests beneath the call that spawned it.
+
+`/council` also persists its command echo above the round so the question remains visible on replay. Validation reads `quality <word>` in the card, dispatch row and task island, without a second colon.
 
 A council round is one question put to several members, so it reads as one block. The round opens with a `◇ council · round 1` row, and each member follows in the content column under its roster label in its roster color (a theme token name or a `#rrggbb` value, else `accent`), with its own outcome, answer and quality nested beneath. A later round opens its own header.
 

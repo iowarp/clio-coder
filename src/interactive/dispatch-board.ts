@@ -848,7 +848,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 
 	const quality = isTerminalStatus(row.status)
 		? wrapTextWithAnsi(
-				`  quality: ${trustStateWord("validationGrounding", row.trust?.axes.validationGrounding ?? "unknown")}`,
+				`  quality ${trustStateWord("validationGrounding", row.trust?.axes.validationGrounding ?? "unknown")}`,
 				width,
 			)
 		: [];

@@ -45,6 +45,7 @@ import type { RunKind } from "../domains/dispatch/types.js";
 import type { CanonicalTrustStatus } from "../domains/evidence/trust-status.js";
 import {
 	createWorkerProgressFold,
+	type WorkerAction,
 	type WorkerProgressFold,
 	type WorkerProgressSnapshot,
 } from "../domains/observability/worker-progress.js";
@@ -148,6 +149,12 @@ export interface WorkerEntryState {
 	 * and the sealed receipt carries no per-call usage.
 	 */
 	contextTokens?: number;
+	/**
+	 * The calls the run finished last, newest first, as the session recorded them
+	 * when it settled. Replay only, like `contextTokens`: a live block reads them
+	 * from `progress`, and the receipt seals a count rather than a list.
+	 */
+	recentActions?: ReadonlyArray<WorkerAction>;
 	/** Every attempt of this assignment, oldest first. */
 	attempts: WorkerAttempt[];
 	pending: boolean;

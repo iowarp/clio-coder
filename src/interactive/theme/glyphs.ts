@@ -73,6 +73,8 @@ export const GLYPH = {
 	// that still holds the origin column.
 	workerInternal: "·",
 	ellipsis: "…",
+	// A count of the same thing repeated: a worker's repeated call, a helper kind.
+	times: "×",
 	favorite: "★",
 } as const;
 

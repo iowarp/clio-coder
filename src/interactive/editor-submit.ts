@@ -82,6 +82,8 @@ export interface EditorSubmitSessionTranscript {
 
 export interface EditorSubmitDeps {
 	onLocalBashRunning?: (running: boolean) => void;
+	/** Bring a fullscreen transcript back to its live edge before a local command's block lands. */
+	returnToLiveEdge?: () => void;
 	editor: EditorSubmitEditor;
 	ui: EditorSubmitUi;
 	io: RunIo;
@@ -159,6 +161,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 			activeEditorBash = null;
 			return true;
 		}
+		deps.returnToLiveEdge?.();
 		const startedAt = performance.now();
 		const execution: BashTranscriptExecution = {
 			command: parsed.command,

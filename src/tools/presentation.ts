@@ -155,9 +155,10 @@ export interface ToolRowSpec {
 	/**
 	 * The row's object, from the arguments: a path, a command, a pattern, a
 	 * host and path. `code` renders in backticks; `url` is shortened to its host
-	 * and path tail, never the whole URL.
+	 * and path tail, never the whole URL; a `path` that must be cut keeps its
+	 * tail, where the file name is.
 	 */
-	object?: (args: ToolRowArgs, context: ToolRowContext) => { text: string; style?: "code" | "url" } | null;
+	object?: (args: ToolRowArgs, context: ToolRowContext) => { text: string; style?: "code" | "url" | "path" } | null;
 	/** A qualifier after the object: a search's scope (`in src`). */
 	scope?: (args: ToolRowArgs, context: ToolRowContext) => string | null;
 	/** Argument fields the row states, so they are never repeated inline or as `key ›` rows. */
@@ -184,7 +185,7 @@ export interface ToolRowContext {
 	/**
 	 * The session workspace. A command already runs there, so a leading `cd`
 	 * into it is dropped from the row and a `cd` into a subdirectory becomes the
-	 * row's scope.
+	 * row's scope; a path inside it reads relative to it.
 	 */
 	cwd?: string;
 }
@@ -230,14 +231,44 @@ function joinDefined(...parts: ReadonlyArray<string | null | undefined>): string
 	return kept.length > 0 ? kept.join(" ") : null;
 }
 
+/**
+ * A path as a row states it: relative to the workspace when it lies inside it,
+ * `root` for the workspace itself, and as written anywhere else. A model that
+ * sends absolute paths would otherwise start every row with the same long
+ * prefix and cut the part that tells two files apart.
+ */
+function workspacePath(value: string | null, context: ToolRowContext, root: string | null): string | null {
+	if (value === null) return null;
+	const relative = workspaceRelative(value, context.cwd);
+	if (relative === null) return value;
+	return relative === "" ? root : relative;
+}
+
+/**
+ * A path argument as a row states it. The workspace itself reads `workspace`
+ * where the path is the object, and says nothing where it only narrows a
+ * subject (`git status`, not `git status workspace`).
+ */
+function pathArg(
+	args: ToolRowArgs,
+	key: string,
+	context: ToolRowContext,
+	root: string | null = "workspace",
+): string | null {
+	return workspacePath(text(args, key), context, root);
+}
+
 /** The workspace root is the default scope and stays implicit. */
-function searchScope(args: ToolRowArgs): string | null {
-	const path = text(args, "path");
-	return path === null || path === "." || path === "./" ? null : path;
+function searchScope(args: ToolRowArgs, context: ToolRowContext): string | null {
+	const scope = text(args, "path");
+	if (scope === null || scope === "." || scope === "./") return null;
+	const relative = workspaceRelative(scope, context.cwd);
+	return relative === "" ? null : (relative ?? scope);
 }
 
 const plain = (value: string | null) => (value === null ? null : { text: value });
 const code = (value: string | null) => (value === null ? null : { text: value, style: "code" as const });
+const pathObject = (value: string | null) => (value === null ? null : { text: value, style: "path" as const });
 
 const quoted = (value: string | null) => (value === null ? null : `\`${value}\``);
 
@@ -406,14 +437,14 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Read]: {
 		class: "observe",
 		verbs: CLASS_VERBS.observe,
-		object: (args) => plain(text(args, "path")),
+		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["path"],
 	},
 	[ToolNames.Ls]: {
 		class: "observe",
 		verbs: ["listing", "listed"],
 		nouns: ["directory", "directories"],
-		object: (args) => plain(text(args, "path") ?? "workspace"),
+		object: (args, context) => pathObject(pathArg(args, "path", context) ?? "workspace"),
 		consumes: ["path"],
 		statesSize: false,
 	},
@@ -421,7 +452,7 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		class: "observe",
 		verbs: ["inspecting", "inspected"],
 		verbsFor: (args) => DATA_VERBS[text(args, "op") ?? ""] ?? null,
-		object: (args) => plain(text(args, "path")),
+		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["op", "path"],
 	},
 	[ToolNames.CredentialPresent]: {
@@ -486,8 +517,8 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Ledger]: {
 		class: "knowledge",
 		verbs: CLASS_VERBS.knowledge,
-		object: (args) => {
-			const path = text(args, "path");
+		object: (args, context) => {
+			const path = pathArg(args, "path", context, null);
 			const line = typeof args.line === "number" ? args.line : null;
 			const subject = text(args, "target") ?? (path === null || line === null ? path : `${path}:${line}`);
 			return plain(joinDefined("ledger", text(args, "action"), text(args, "kind"), subject));
@@ -504,21 +535,21 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Edit]: {
 		class: "mutate",
 		verbs: ["editing", "edited"],
-		object: (args) => plain(text(args, "path")),
+		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["path"],
 	},
 	[ToolNames.Write]: {
 		class: "mutate",
 		verbs: ["writing", "wrote"],
-		object: (args) => plain(text(args, "path")),
+		object: (args, context) => pathObject(pathArg(args, "path", context)),
 		consumes: ["path"],
 	},
 	[ToolNames.Artifact]: {
 		class: "mutate",
 		verbs: ["writing", "wrote"],
-		object: (args) => {
+		object: (args, context) => {
 			const title = text(args, "title");
-			const path = text(args, "path");
+			const path = pathArg(args, "path", context, null);
 			return plain(
 				joinDefined(
 					text(args, "kind") ?? "artifact",
@@ -547,16 +578,16 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 		class: "execute",
 		verbs: ["checking", "checked"],
 		verbsFor: (args) => (text(args, "check") === null ? ["listing", "listed"] : null),
-		object: (args) => {
+		object: (args, context) => {
 			const check = text(args, "check");
-			return plain(check === null ? "checks" : joinDefined(check, text(args, "path")));
+			return plain(check === null ? "checks" : joinDefined(check, pathArg(args, "path", context, null)));
 		},
 		consumes: ["check", "path"],
 	},
 	[ToolNames.Git]: {
 		class: "execute",
 		verbs: CLASS_VERBS.execute,
-		object: (args) => plain(joinDefined("git", text(args, "op"), text(args, "path"))),
+		object: (args, context) => plain(joinDefined("git", text(args, "op"), pathArg(args, "path", context, null))),
 		consumes: ["op", "path"],
 	},
 	[ToolNames.Panes]: {
