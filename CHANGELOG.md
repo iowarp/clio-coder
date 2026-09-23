@@ -13,7 +13,10 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - **Compact folding**: Group consecutive file reads, searches, and listings into class folds (`▸ explored 3 files, 2 searches ✓`), with cleaner folding across reasoning model spans.
 - **Cleaned action rows**: Removed duplicate command echoes, repetitive error codes, and unnecessary workspace `cd` prefixes; state scalar arguments directly on the action row.
 - **Inspectable `/view`**: Responsive layout switching above/below 84 columns, human-readable tool titles instead of raw IDs, redacted titles and search text, and post-paint layout optimization.
+- **Direct transcript inspection**: Bare `/view` selects the first displayed transcript detail, and clearing its filter retains the selected item. The preview shows the selected row's full available content with terminal controls neutralized; worker inspection and `/export` retain raw answers and validation facts.
+- **Worker outcomes**: Detailed trails distinguish successful, failed, and blocked calls in live and resumed sessions, compress repeated calls, and name earlier calls omitted by the four-action trail. Detailed receipts show speculative worker holds adopted or left unused after the session journal records them.
 - **Terminal responsiveness**: Accurate footer rendering across terminal resizes, auto-scroll to live edge after prompts or commands, and proper diff row wrapping.
+- **Narrow-screen polish**: Keep a quantized model suffix whole in the footer, reserve Fleet orange for a running glyph, exit fullscreen without printing its docked frame, name workspace-local `/export` files relatively, and omit a repeated run id from monitor previews.
 
 ### Transcript speed
 
@@ -23,6 +26,19 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - **Pre-warmed renderers**: Warm Markdown, LaTeX, and syntax renderers post-initialization to eliminate first-answer latency spikes.
 - **Synchronized animation clocks**: Combined footer spinner and composer rail pulse on a unified 120ms animation clock; idle-render alternative output styles for instant Alt+O switching.
 - **Cached replay blocks**: Cache notices, command output, and finished `!` commands in transcript render cache.
+
+Fresh built-binary PTY measurements against `5a8289ce` used five interleaved runs per side at 120×40, Node 24.20.0 on WSL2, with compile cache disabled. The long fixture held 40,000 settled source lines across four turns under a 1,000,000-token mock context, avoiding benchmark-triggered compaction on both sides. Times are milliseconds; pairs are p50/p99 except first token and startup, which are medians. Earlier step-2 measurements used a different long fixture and are not directly comparable.
+
+| Measure | Short before | Short after | 40k lines before | 40k lines after |
+| --- | ---: | ---: | ---: | ---: |
+| Idle key to stdout | 1.09 / 3.12 | 1.11 / 3.07 | 4.70 / 12.00 | 2.63 / 3.14 |
+| Streaming key to stdout | 0.70 / 6.36 | 0.69 / 1.42 | 5.27 / 14.22 | 2.17 / 2.89 |
+| First token to stdout | 33.11 | 8.57 | 34.02 | 6.96 |
+| Stream frame | 0.52 / 2.45 | 0.53 / 1.21 | 5.23 / 14.55 | 2.04 / 9.94 |
+| Stdout bytes per token | 149.58 | 140.12 | 143.70 | 138.21 |
+| Stage 0 / Stage 1 startup | 112.6 / 745.6 | 113.3 / 743.5 | 118.6 / 778.8 | 122.6 / 767.5 |
+
+Every run committed all 400 streamed deltas with zero full redraws. In three interleaved short runs with an empty composer, stdout bytes per token fell from 141.37 to 130.94.
 
 ### Streaming Markdown
 
@@ -35,6 +51,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - **Interactive diffusion streaming**: Stream Inception Mercury answers frame-by-frame in TUI, rewriting live frames instead of concatenating delta SSE chunks.
 - **Scoped interactive rendering**: Restrict diffusion frame replacement to interactive surfaces; headless `run`, ACP, JSONL, and workers retain standard delta streaming.
 - **Tool-call stability**: Preserve single preamble frame segments during tool-call argument deltas and accurately track time-to-first-token.
+- **Progress semantics**: The footer enters Writing on the first frame. No numeric denoising gauge is shown because the API reports progress as 0 until its final frame reports 1.
 
 ### Drafts judged by a decision model
 
@@ -46,6 +63,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - **Decision sites**: Added `turnScope`, `dispatchForecast`, `capabilities`, `consult`, and `drafts` decision sites; retired legacy `routing` site.
 - **Unified `askSite` interface**: Added single resolution entry point with certainty floors, structured criteria scaling, and provider-agnostic distributions across Jev and Laya models.
 - **Speculative dispatch**: Added experimental pre-turn worker prewarming behind `fleet.speculativeDispatch`.
+- **Dispatch accounting**: Persist speculative hold, adoption, and discard counts for live Detailed receipts and `/resume`. Admit requests to check whether tests pass to verifier, and classify inspection of test files as read work for scout.
 - **Batched pre-turn briefs**: Combined pre-turn memory and skill relevance queries into a single batched request with a 1.5s timeout.
 - **Calibration tooling**: Added `scripts/decision-probe.ts` with `--cases` to score and calibrate site prompts and certainty thresholds against labeled fixtures.
 - **Local execution**: Documented running Laya locally through `typesafe-jev` on CPU and ROCm/Radeon iGPU.
@@ -63,6 +81,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Refused `targets use --model` selections targeting unconfigured roles.
 - Normalized worker error classification and grounded citations to grep matches.
 - Bound pre-turn memory and skill query latency.
+- Mark a call target only when its source description is actually truncated at 120 characters; ACP, audit, and TUI use the same mark. Charge the context estimate only for custom handoff seeds replayed to the model, rather than display-only session records. Strip inert `<tool_call>` markup from a pending worker answer tail while preserving the settled raw answer for inspection.
 
 ### Tool contract coverage
 
