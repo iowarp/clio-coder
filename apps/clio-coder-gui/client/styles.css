@@ -1204,20 +1204,6 @@ nav a[data-group="more"] .icon {
 }
 
 /* Workspace and conversation */
-.workspace-open {
-	display: flex;
-	gap: 15px;
-	margin: var(--space-8) 0 var(--space-12);
-	align-items: end;
-	flex-wrap: wrap;
-}
-.workspace-open label {
-	display: grid;
-	flex: 1;
-	gap: 9px;
-	min-width: 180px;
-	font-size: var(--text-meta);
-}
 .workspace-browser {
 	display: grid;
 	gap: var(--space-4);
@@ -1300,116 +1286,6 @@ nav a[data-group="more"] .icon {
 	margin: 0;
 	color: var(--ink-muted);
 	font-size: var(--text-meta);
-}
-.workspace-list__heading {
-	display: flex;
-	align-items: baseline;
-	flex-wrap: wrap;
-	gap: var(--space-2) var(--space-5);
-	margin-bottom: var(--space-4);
-}
-.workspace-list__heading p {
-	margin: 0;
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-}
-.workspace-list {
-	display: grid;
-	grid-template-columns: repeat(auto-fit, minmax(min(100%, 22rem), 1fr));
-	gap: var(--space-3);
-}
-.workspace-card {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr);
-	align-items: start;
-	gap: var(--space-4);
-	min-width: 0;
-	padding: var(--space-5);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-md);
-	background: var(--surface);
-	color: var(--ink);
-}
-.workspace-card__mark {
-	display: grid;
-	place-items: center;
-	width: 38px;
-	height: 38px;
-	border-radius: var(--radius-sm);
-	background: var(--accent-soft);
-	color: var(--accent-strong);
-	font-family: var(--font-editorial);
-	font-size: var(--text-h2);
-}
-.workspace-card h3 {
-	margin: 0 0 var(--space-1);
-	font-size: var(--text-h3);
-}
-.workspace-card h3 a {
-	text-decoration-color: var(--line-strong);
-	text-underline-offset: 3px;
-}
-.workspace-card h3 a:hover {
-	color: var(--accent-strong);
-}
-.workspace-card p {
-	margin: 0 0 var(--space-2);
-	color: var(--ink-muted);
-	font-family: var(--font-mono);
-	font-size: var(--text-exact);
-	overflow-wrap: anywhere;
-}
-.workspace-card small {
-	color: var(--ink-subtle);
-}
-.workspace-card__actions {
-	display: flex;
-	align-items: center;
-	flex-wrap: wrap;
-	gap: var(--space-2) var(--space-4);
-	margin-top: var(--space-4);
-}
-.workspace-card__actions button {
-	min-height: 34px;
-	padding: var(--space-2) var(--space-3);
-	border-color: var(--accent-strong);
-	background: var(--accent);
-	color: var(--on-accent);
-	font-size: var(--text-meta);
-}
-.workspace-card__actions a {
-	color: var(--accent-strong);
-	font-size: var(--text-meta);
-	text-decoration: none;
-}
-.workspace-card__actions a:hover {
-	text-decoration: underline;
-}
-.workspace-path {
-	overflow-wrap: anywhere;
-	color: var(--ink-muted);
-}
-.session-history__search {
-	display: grid;
-	gap: var(--space-2);
-	max-width: 32rem;
-	margin: var(--space-5) 0;
-	color: var(--ink-muted);
-	font-size: var(--text-meta);
-}
-.session-list .trace-run-card {
-	align-items: center;
-	flex-wrap: wrap;
-}
-.session-list .trace-run-card > div:first-child {
-	flex: 1 1 20rem;
-}
-.session-list .trace-run-card h3 {
-	margin: 0;
-	overflow-wrap: anywhere;
-}
-.session-list .trace-run-card button {
-	flex: none;
 }
 /* Only the conversation uses a viewport workspace. Other pages keep their document scroll. */
 .workspace:has(> main > .conversation) {

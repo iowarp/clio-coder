@@ -1,0 +1,244 @@
+/* The Sessions pages, where a conversation starts or resumes. They speak the conversation's quiet
+   language: one reading column, rows divided by hairlines instead of cards, one primary action per
+   page, and every control at the same height. */
+.projects {
+	--control-height: 36px;
+	max-width: var(--conversation-max);
+}
+.projects button {
+	min-height: var(--control-height);
+	padding: 0 var(--space-4);
+	font-size: var(--text-meta);
+}
+.projects input {
+	height: var(--control-height);
+	padding: 0 var(--space-3);
+}
+.projects .primary {
+	align-items: center;
+	justify-content: center;
+}
+.projects .intro {
+	margin-bottom: var(--space-8);
+}
+
+.projects__back {
+	display: inline-flex;
+	gap: var(--space-2);
+	margin-bottom: var(--space-4);
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	text-decoration: none;
+}
+.projects__back:hover {
+	color: var(--ink);
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.projects__lead {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-3) var(--space-4);
+	margin-top: var(--space-2);
+}
+.projects__path {
+	flex: 1 1 16rem;
+	min-width: 0;
+	margin: 0;
+	color: var(--ink-muted);
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	overflow-wrap: anywhere;
+}
+.projects__note {
+	margin: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+
+/* Start a conversation in a folder: the path, a way to find it, and the one primary action. */
+.project-open {
+	display: grid;
+	gap: var(--space-2);
+}
+.project-open__label {
+	font-size: var(--text-meta);
+	font-weight: 600;
+}
+.project-open__row {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.project-open__row input {
+	flex: 1 1 18rem;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+}
+.project-open__row button {
+	flex: none;
+}
+.project-open__more {
+	margin: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+}
+/* An action phrased as part of a sentence, so it reads as a link and needs no frame. */
+.projects .text-button {
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--accent);
+	font: inherit;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.projects .text-button:disabled {
+	color: var(--ink-muted);
+	opacity: 1;
+	text-decoration: none;
+}
+.projects .workspace-browser {
+	margin: var(--space-4) 0 0;
+}
+
+.projects__section {
+	margin-top: var(--space-10);
+}
+.projects__section h2 {
+	margin: 0;
+	font-family: var(--font-ui);
+	font-size: var(--text-h3);
+	font-weight: 650;
+	line-height: var(--leading-tight);
+	letter-spacing: -0.01em;
+}
+.projects__section > h2,
+.projects__section-head {
+	margin-bottom: var(--space-3);
+}
+.projects__section-head {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2) var(--space-4);
+}
+.projects__search {
+	flex: 0 1 18rem;
+	min-width: 0;
+}
+.projects__search input {
+	font-size: var(--text-meta);
+}
+
+/* One row per project or conversation: its name, the facts that tell it apart, and its actions. */
+.record-list {
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-top: 1px solid var(--line);
+}
+.record-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2) var(--space-4);
+	min-width: 0;
+	padding: var(--space-3) 0;
+	border-bottom: 1px solid var(--line);
+}
+.record-row__text {
+	display: grid;
+	gap: 2px;
+	flex: 1 1 16rem;
+	min-width: 0;
+}
+.projects .record-row__title {
+	justify-self: start;
+	max-width: 100%;
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--ink-strong);
+	font: 650 var(--text-body) / var(--leading-body) var(--font-ui);
+	text-align: left;
+	text-decoration: none;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.projects .record-row__title:hover:not(:disabled) {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.projects .record-row__title:disabled {
+	opacity: 1;
+	color: var(--ink-muted);
+}
+/* The facts are set apart by space rather than dots, so a narrow row that wraps them never starts a
+   line with a stray separator. */
+.record-row__meta {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0 var(--space-4);
+	min-width: 0;
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+}
+.record-row__path {
+	min-width: 0;
+	font-family: var(--font-mono);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.record-row__actions,
+.record-row__status {
+	display: flex;
+	flex: 0 1 auto;
+	align-items: center;
+	gap: var(--space-2);
+	min-width: 0;
+}
+
+/* Deleting a saved conversation takes two presses, and the question stays beside the row it asks about.
+   The first press names itself in a quiet row, so it stays frameless until hovered or focused. */
+.delete-session {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2);
+}
+.record-row .delete-session__start {
+	margin-inline: calc(-1 * var(--space-3)) 0;
+	padding-inline: var(--space-3);
+	border-color: transparent;
+	background: transparent;
+	color: var(--ink-muted);
+}
+.record-row .delete-session__start:hover {
+	border-color: var(--line-strong);
+	color: var(--ink);
+}
+.delete-session__ask {
+	flex: 1 1 12rem;
+	font-size: var(--text-meta);
+}
+.delete-session__choices {
+	display: flex;
+	gap: var(--space-2);
+}
+.delete-session__confirm {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
+}
+.delete-session p {
+	flex-basis: 100%;
+	margin: 0;
+}

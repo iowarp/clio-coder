@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useOutletContext, useParams } from "react-router";
 import { type AgentCapabilities, EMPTY_CAPABILITIES } from "../../contracts/capabilities.js";
 import { routes } from "../../contracts/routes.js";
@@ -29,17 +29,20 @@ import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
-import { StatusMark } from "../design/status.js";
+import { StatusMark, type StatusTone } from "../design/status.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
 import { DeleteSession, SessionControls } from "./session-controls.js";
 import { WorkspaceBrowser } from "./workspace-browser.js";
 import "../chat/chat-turn.css";
+import "./projects.css";
 export function Workspaces({ client }: { client: Client }) {
 	const navigate = useNavigate(),
 		queries = useQueryClient(),
 		[path, setPath] = useState("");
 	const [browsing, setBrowsing] = useState(false);
+	const pathId = useId();
+	const recentId = useId();
 	const pathField = useRef<HTMLInputElement>(null);
 	const browseButton = useRef<HTMLButtonElement>(null);
 	const launchInFlight = useRef(false);
@@ -82,8 +85,9 @@ export function Workspaces({ client }: { client: Client }) {
 		launchInFlight.current = true;
 		start.mutate(workspaceId);
 	};
+	const busy = open.isPending || start.isPending;
 	return (
-		<section>
+		<section className="projects">
 			<PanelHeading
 				panel={PANELS.sessions}
 				level={1}
@@ -97,41 +101,44 @@ export function Workspaces({ client }: { client: Client }) {
 				Choose a project folder on the machine running Clio Coder to start or continue a conversation.
 			</p>
 			<form
-				className="workspace-open"
+				className="project-open"
 				onSubmit={(event) => {
 					event.preventDefault();
 					beginOpen(path.trim(), true);
 				}}
 			>
-				<label>
-					Workspace path
+				<label className="project-open__label" htmlFor={pathId}>
+					Project folder
+				</label>
+				<div className="project-open__row">
 					<input
+						id={pathId}
 						ref={pathField}
 						value={path}
 						onChange={(event) => setPath(event.target.value)}
 						placeholder="/absolute/path/to/project"
 						autoComplete="off"
+						spellCheck={false}
 						required
 					/>
-				</label>
-				<button
-					ref={browseButton}
-					type="button"
-					disabled={open.isPending || start.isPending}
-					onClick={() => setBrowsing((current) => !current)}
-				>
-					{browsing ? "Hide folders" : "Browse folders"}
-				</button>
-				<button className="primary" type="submit" disabled={open.isPending || start.isPending || path.trim() === ""}>
-					{open.isPending || start.isPending ? "Starting…" : "Start conversation"}
-				</button>
-				<button
-					type="button"
-					disabled={open.isPending || start.isPending || path.trim() === ""}
-					onClick={() => beginOpen(path.trim(), false)}
-				>
-					View saved sessions
-				</button>
+					<button ref={browseButton} type="button" disabled={busy} onClick={() => setBrowsing((current) => !current)}>
+						{browsing ? "Hide folders" : "Browse folders"}
+					</button>
+					<button className="primary" type="submit" disabled={busy || path.trim() === ""}>
+						{busy ? "Starting…" : "Start conversation"}
+					</button>
+				</div>
+				<p className="project-open__more">
+					<button
+						type="button"
+						className="text-button"
+						disabled={busy || path.trim() === ""}
+						onClick={() => beginOpen(path.trim(), false)}
+					>
+						View saved sessions
+					</button>{" "}
+					for this folder instead of starting a new one.
+				</p>
 			</form>
 			{browsing && (
 				<WorkspaceBrowser
@@ -156,38 +163,44 @@ export function Workspaces({ client }: { client: Client }) {
 			{open.error || start.error || workspaces.error ? (
 				<p role="alert">{open.error?.message ?? start.error?.message ?? workspaces.error?.message}</p>
 			) : null}
-			<div className="workspace-list__heading">
-				<h2>Recent projects</h2>
-				<p>Pick up where you left off.</p>
-			</div>
-			{workspaces.isPending ? <p>Loading workspaces…</p> : null}
-			<div className="workspace-list">
-				{workspaces.data?.map((workspace) => (
-					<article className="workspace-card" key={workspace.id}>
-						<span className="workspace-card__mark" aria-hidden="true">
-							{workspace.name.slice(0, 1).toUpperCase()}
-						</span>
-						<div>
-							<h3>
-								<Link to={`/workspaces/${workspace.id}/sessions`}>{workspace.name}</Link>
-							</h3>
-							<p>{workspace.path}</p>
-							<small>Last opened {formatTime(workspace.openedAt)}</small>
-							<div className="workspace-card__actions">
-								<button type="button" disabled={open.isPending || start.isPending} onClick={() => beginStart(workspace.id)}>
-									{start.isPending && start.variables === workspace.id ? "Starting…" : "New conversation"}
-								</button>
-								<Link to={`/workspaces/${workspace.id}/sessions`}>
-									View sessions <span aria-hidden="true">→</span>
-								</Link>
-							</div>
-						</div>
-					</article>
-				))}
-			</div>
-			{workspaces.data?.length === 0 ? (
-				<PanelEmpty>No workspace has been opened here yet. Open your first one using its absolute path.</PanelEmpty>
-			) : null}
+			<section className="projects__section" aria-labelledby={recentId}>
+				<h2 id={recentId}>Recent projects</h2>
+				{workspaces.isPending ? <p className="projects__note">Loading projects…</p> : null}
+				{(workspaces.data?.length ?? 0) > 0 ? (
+					<ul className="record-list">
+						{workspaces.data?.map((workspace) => (
+							<li className="record-row" key={workspace.id}>
+								<div className="record-row__text">
+									<Link className="record-row__title" to={`/workspaces/${workspace.id}/sessions`}>
+										{workspace.name}
+									</Link>
+									<span className="record-row__meta">
+										<span className="record-row__path" title={workspace.path}>
+											{workspace.path}
+										</span>
+										<span>Opened {formatTime(workspace.openedAt)}</span>
+									</span>
+								</div>
+								<div className="record-row__actions">
+									<button
+										type="button"
+										disabled={busy}
+										onClick={() => beginStart(workspace.id)}
+										aria-label={`New conversation in ${workspace.name}`}
+									>
+										{start.isPending && start.variables === workspace.id ? "Starting…" : "New conversation"}
+									</button>
+								</div>
+							</li>
+						))}
+					</ul>
+				) : null}
+				{workspaces.data?.length === 0 ? (
+					<PanelEmpty>
+						No project has been opened here yet. Choose its folder above to start the first conversation.
+					</PanelEmpty>
+				) : null}
+			</section>
 			<Boundary panel={PANELS.sessions} />
 		</section>
 	);
@@ -197,6 +210,8 @@ export function Sessions({ client }: { client: Client }) {
 		navigate = useNavigate(),
 		queries = useQueryClient();
 	const [historySearch, setHistorySearch] = useState("");
+	const openId = useId();
+	const historyId = useId();
 	const input = { params: { id: workspaceId }, query: {}, body: {} };
 	const workspace = useQuery({
 		queryKey: ["workspace", workspaceId],
@@ -240,77 +255,99 @@ export function Sessions({ client }: { client: Client }) {
 				),
 		)
 		.sort((a, b) => (b.lastActivityAt ?? b.createdAt).localeCompare(a.lastActivityAt ?? a.createdAt));
+	const name = workspace.data?.name ?? "This project";
 	return (
-		<section>
-			<Link to="/sessions">← Workspaces</Link>
+		<section className="projects">
+			<Link className="projects__back" to="/sessions">
+				<span aria-hidden="true">←</span> All projects
+			</Link>
 			<PanelHeading panel={PANELS.sessions} level={1} title={workspace.data?.name ?? "Sessions"} />
-			<p className="workspace-path">{workspace.data?.path}</p>
-			<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
-				{open.isPending && open.variables === null ? "Starting session…" : "New session"}
-			</button>
+			<div className="projects__lead">
+				<p className="projects__path">{workspace.data?.path ?? "Reading the project path…"}</p>
+				<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
+					{open.isPending && open.variables === null ? "Starting…" : "New conversation"}
+				</button>
+			</div>
 			{open.error || history.error || workspace.error || sessions.error ? (
 				<p role="alert">
 					{open.error?.message ?? history.error?.message ?? workspace.error?.message ?? sessions.error?.message}
 				</p>
 			) : null}
-			<section className="trace-panel session-list">
-				<h2>Open in this server</h2>
-				{active.map((session) => (
-					<Link className="trace-run-card" key={session.id} to={`/sessions/${session.id}`}>
-						<div>
-							<h3>{session.label ?? session.turns[0]?.prompt ?? session.id}</h3>
-							<p>
-								{pendingPermission(session) ? (
-									<StatusMark tone="warn" label="Approval needed" />
-								) : session.turns.at(-1)?.status === "running" ? (
-									<StatusMark tone="running" label="Working" />
-								) : session.turns.at(-1)?.status === "failed" ? (
-									<StatusMark tone="fail" label="Last turn failed" />
-								) : session.turns.at(-1)?.status === "cancelled" ? (
-									<StatusMark tone="neutral" label="Last turn stopped" />
-								) : (
-									<StatusMark tone="success" label="Ready for a prompt" />
-								)}
-							</p>
-						</div>
-					</Link>
-				))}
-				{!active.length ? <PanelEmpty>No session of this workspace is open in this server.</PanelEmpty> : null}
+			<section className="projects__section" aria-labelledby={openId}>
+				<h2 id={openId}>Open now</h2>
+				{active.length > 0 ? (
+					<ul className="record-list">
+						{active.map((session) => (
+							<li className="record-row" key={session.id}>
+								<div className="record-row__text">
+									<Link className="record-row__title" to={`/sessions/${session.id}`}>
+										{conversationTitle(session)}
+									</Link>
+								</div>
+								<span className="record-row__status">
+									<StatusMark {...openSessionStatus(session)} />
+								</span>
+							</li>
+						))}
+					</ul>
+				) : (
+					<PanelEmpty>No conversation from {name} is open in this server.</PanelEmpty>
+				)}
 			</section>
-			<section className="trace-panel session-list">
-				<h2>Session history</h2>
-				{history.isPending ? <p>Reading session history…</p> : null}
-				{(history.data?.length ?? 0) > 0 ? (
-					<label className="session-history__search">
-						Find a conversation
-						<input
-							type="search"
-							value={historySearch}
-							onChange={(event) => setHistorySearch(event.target.value)}
-							placeholder="Search name, message, model, or target"
-						/>
-					</label>
+			<section className="projects__section" aria-labelledby={historyId}>
+				<div className="projects__section-head">
+					<h2 id={historyId}>Earlier conversations</h2>
+					{(history.data?.length ?? 0) > 0 ? (
+						<label className="projects__search">
+							<span className="sr-only">Find a conversation</span>
+							<input
+								type="search"
+								value={historySearch}
+								onChange={(event) => setHistorySearch(event.target.value)}
+								placeholder="Find by name, message, model or target"
+							/>
+						</label>
+					) : null}
+				</div>
+				{history.isPending ? <p className="projects__note">Reading session history…</p> : null}
+				{saved.length > 0 ? (
+					<ul className="record-list">
+						{saved.map((session) => {
+							const title = session.name ?? session.firstMessagePreview ?? session.id;
+							const loading = open.isPending && open.variables === session.id;
+							return (
+								<li className="record-row" key={session.id}>
+									<div className="record-row__text">
+										<button
+											type="button"
+											className="record-row__title"
+											disabled={open.isPending}
+											onClick={() => open.mutate(session.id)}
+											title="Load this conversation into a new Clio Coder session"
+										>
+											{title}
+										</button>
+										<span className="record-row__meta">
+											<span>{session.model ?? "Model not recorded"}</span>
+											<span>
+												{session.messageCount == null
+													? "Message count not recorded"
+													: `${session.messageCount.toLocaleString("en-US")} ${session.messageCount === 1 ? "message" : "messages"}`}
+											</span>
+											<span>{formatTime(session.lastActivityAt ?? session.createdAt)}</span>
+											<span>{loading ? "Loading…" : session.endedAt ? "Closed" : "Not closed"}</span>
+										</span>
+									</div>
+									{session.endedAt ? (
+										<div className="record-row__actions">
+											<DeleteSession client={client} id={session.id} workspaceId={workspaceId} name={title} />
+										</div>
+									) : null}
+								</li>
+							);
+						})}
+					</ul>
 				) : null}
-				{saved.map((session) => (
-					<article className="trace-run-card" key={session.id}>
-						<div>
-							<h3>{session.name ?? session.firstMessagePreview ?? session.id}</h3>
-							<p>
-								{session.model ?? "Model not recorded"} ·{" "}
-								{session.messageCount == null
-									? "message count not recorded"
-									: `${session.messageCount.toLocaleString("en-US")} ${session.messageCount === 1 ? "message" : "messages"}`}
-							</p>
-							<small>
-								{formatTime(session.lastActivityAt ?? session.createdAt)} · {session.endedAt ? "closed" : "open in Clio"}
-							</small>
-						</div>
-						<button type="button" disabled={open.isPending} onClick={() => open.mutate(session.id)}>
-							{open.isPending && open.variables === session.id ? "Loading…" : "Load session"}
-						</button>
-						{session.endedAt ? <DeleteSession client={client} id={session.id} workspaceId={workspaceId} /> : null}
-					</article>
-				))}
 				{historySearch.trim() && saved.length === 0 && !history.isPending ? (
 					<PanelEmpty>No conversations match that search.</PanelEmpty>
 				) : null}
@@ -325,6 +362,17 @@ export function Sessions({ client }: { client: Client }) {
 		</section>
 	);
 }
+
+/** An open conversation's state in the list, in the conversation's own voice. */
+function openSessionStatus(session: SessionSnapshot): { tone: StatusTone; label: string } {
+	const last = session.turns.at(-1)?.status;
+	if (pendingPermission(session)) return { tone: "warn", label: "Waiting for your approval" };
+	if (last === "running") return { tone: "running", label: "Working" };
+	if (last === "failed") return { tone: "fail", label: "Last turn failed" };
+	if (last === "cancelled") return { tone: "neutral", label: "Last turn stopped" };
+	return { tone: "success", label: "Ready" };
+}
+
 export function Session({ client }: { client: Client }) {
 	const { id = "" } = useParams();
 	return <SessionView key={id} client={client} id={id} />;

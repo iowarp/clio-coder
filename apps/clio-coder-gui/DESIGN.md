@@ -81,9 +81,10 @@ sees before the font files resolve: Segoe UI / system-ui, Georgia, and Cascadia 
 `:root` carries `font-synthesis: none` so a missing weight is never faked into mush.
 
 Banned: Inter, monospaced body copy, terminal prompts, all-caps paragraphs. Uppercase is limited to
-short instrument labels (`.eyebrow`, `.status-mark`) on inspector pages. The conversation speaks in
-sentence case throughout: its status marks, activity kinds and outcome line are a glyph and a word
-in the interface face, because the reading voice is not an instrument panel.
+short instrument labels (`.eyebrow`, `.status-mark`) on inspector pages. The conversation and the
+Sessions pages that open it speak in sentence case throughout: their status marks, activity kinds
+and outcome line are a glyph and a word in the interface face, because the reading voice is not an
+instrument panel.
 
 Scale: `--text-body` 15px and `--text-reading` 16px for reading, `--text-meta` 13px, `--text-exact`
 12px for mono keys, ids, timestamps and counts. `--text-instrument` 10px is allowed **only** for an
@@ -202,8 +203,9 @@ count, badge, panel, permission card, session control and table cell, and measur
 in light and 3.26:1 to 4.08:1 in dark. The mechanical rule: **if removing the border would make the
 control's hit area ambiguous, it is `--line-strong`.** The one relaxation is a control whose own
 words name it in a quiet row: Session tools in the conversation header, the copy and retry actions
-under a message, and the copy and source actions in a code block's head. These stay frameless until
-hovered, focused or open, and keep the focus ring.
+under a message, the copy and source actions in a code block's head, and the first Delete on an
+earlier conversation's row. These stay frameless until hovered, focused or open, and keep the focus
+ring.
 
 Under `forced-colors: active` every box-shadow is dropped, the ring becomes `2px solid Highlight`,
 and only the few marks whose shape is the information keep `forced-color-adjust: none`.
@@ -430,6 +432,15 @@ holds the project path, switching, session controls, Clio Coder commands, dispat
 Close session, and it hangs below its own button at every width. An unhealthy target, an
 unrecognised health fact or a context warning is written out in full under the bar. Below 650px the
 project link shrinks so the status and the menu share its line, and the title takes the next.
+
+The Sessions pages, where a conversation starts or resumes, speak the conversation's language rather
+than the inspector's: one column capped at `--conversation-max`, rows divided by `--line` hairlines
+instead of cards, one primary action per page (Start conversation on the project list, New
+conversation on a project), every control 36px tall, and statuses as a glyph and a word in sentence
+case. A row's title is its action: a project's name opens its history, an open conversation's title
+returns to it, and an earlier conversation's title loads it. A row's facts sit apart by space rather
+than dots, so a narrow row that wraps them never starts a line with a separator. Deleting a saved
+conversation takes two presses in place, and the second question puts focus on Keep.
 
 ## Acceptance floor
 
