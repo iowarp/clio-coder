@@ -76,6 +76,7 @@ export function sessionRoutes(
 		),
 	);
 	register(app, hub, routes.workspaces, () => workspaces.list());
+	register(app, hub, routes.workspaceFolders, ({ query }) => workspaces.browse(query.path, query.hidden));
 	register(app, hub, routes.workspace, ({ params }) => workspaces.get(params.id));
 	register(app, hub, routes.openWorkspace, ({ body }, context) =>
 		commands.run("workspace.open", idempotencyKey(context), body, () => workspaces.open(body.path)),

@@ -27,6 +27,29 @@ The UI uses the original Clio logo, cream and pastel forest themes, a compact
 header, and no footer. The ellipsis control opens app preferences for version,
 installation, and remembered-browser controls. Theme and connection icons retain
 accessible names and keyboard focus feedback.
+The overview shows conversations open in this server, including work and approval
+states. Recent projects offer a direct new-conversation action; saved sessions can
+be searched by name, first message, model, or target. The conversation header can
+switch among open sessions, show current routing, and link to the selected project's
+settings. Nonessential views load when opened, keeping the initial page bundle
+smaller.
+When live updates reconnect, the conversation keeps its last received transcript
+visible and offers a manual refresh. Session settings keep unsaved edits through
+background refreshes and submit only changed fields. Tool output can be copied
+directly from its card. Unsent message drafts survive a reload within the same
+browser tab; deleting a session or choosing **Forget this browser** removes its
+local draft.
+The composer keeps a rejected mid-turn message for editing and gives a definite
+refusal a fresh request key, while ambiguous network failures retain the key for
+a safe retry. It waits for the agent's capability answer before saying mid-turn
+direction is unavailable.
+The project settings editor keeps unsaved values while switching sections or
+searching, collects them under **Unsaved**, and applies writes in order. A failed
+refresh leaves the last received controls visible with a retry action.
+The Sessions page can browse folders on the machine running Clio Coder, including
+home, the launch folder, and parent folders. It lists directories and links to
+directories, and starts a conversation directly from the selected folder. An absolute path can still
+be entered directly, and saved sessions remain one action away.
 
 
 The application exposes Clio through a browser or installed local PWA.
@@ -49,9 +72,12 @@ Open the full loopback URL printed by the server, then choose **Toolchain** or
 **Traces**, or choose **Sessions** to open a workspace by absolute path, start a
 conversation, or load a saved session. Up to four sessions can be open at once.
 Permission cards offer one-time allow or reject. Unanswered cards escalate after
-45 seconds and cancel the turn after 10 minutes. Session controls include cancel,
-labels, safe settings, autonomy, target probes, and confirmed deletion of closed
-sessions. The conversation's **Clio Coder commands** disclosure reads the commands
+45 seconds and cancel the turn after 10 minutes. Conversation controls include labels,
+target probes, session-only autonomy, and confirmed deletion of closed sessions.
+The safe settings form writes saved user defaults; changing its target, model, or
+thinking level also updates the running Clio process between turns. Its autonomy
+default applies to future sessions rather than replacing a session-only choice.
+Stop and interrupt actions live beside the composer. The conversation's **Clio Coder commands** disclosure reads the commands
 advertised by that ACP session, collects their typed arguments, requires a review
 before invocation, and displays the bounded result. Older agents without the
 command capability show an unavailable explanation. Commands may change project
@@ -130,10 +156,11 @@ The desktop sidebar collapses to an icon rail with its button or `Ctrl` or `Cmd`
 assistive technology and shows it as a tooltip on hover and focus, and the mobile
 navigation drawer is unchanged.
 
-Choose **Settings** to inspect a workspace’s effective settings and their origin
-layers, or **Why** to inspect customization sources, trust, precedence, and reload
-behavior. These pages are read-only. Credential/environment values and executable
-argument vectors are hidden; source issues are summarized without raw contents.
+Choose **Settings** to edit the supported user settings for a workspace, inspect
+effective settings and their origin layers, or choose **Why** to inspect
+customization sources, trust, precedence, and reload behavior. Effective values
+and Why are read-only. Credential/environment values and executable argument
+vectors are hidden; source issues are summarized without raw contents.
 
 Chat Markdown is rendered as React elements: raw HTML stays text, images are not
 fetched, and only HTTP, HTTPS, and mailto links are active. Prism produces token

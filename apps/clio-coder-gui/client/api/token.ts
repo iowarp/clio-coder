@@ -30,6 +30,14 @@ export function rememberBrowser(token: string) {
 }
 export function forgetBrowser() {
 	try {
+		for (let index = sessionStorage.length - 1; index >= 0; index -= 1) {
+			const key = sessionStorage.key(index);
+			if (key?.startsWith("clio-coder-draft:") || key === "clio-coder-draft-index") sessionStorage.removeItem(key);
+		}
+	} catch {
+		/* Browser storage may be disabled. */
+	}
+	try {
 		localStorage.removeItem(rememberedTokenKey);
 	} catch {
 		/* Storage may be disabled. */

@@ -113,18 +113,20 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 					{summary.total}
 				</span>
 			</summary>
-			<ul className="activity__rows">
-				{items.map((item) => (
-					<ActivityRow
-						key={item.id}
-						item={item}
-						client={client}
-						session={session}
-						workspaceRoot={workspaceRoot}
-						nowMs={nowMs}
-					/>
-				))}
-			</ul>
+			{open ? (
+				<ul className="activity__rows">
+					{items.map((item) => (
+						<ActivityRow
+							key={item.id}
+							item={item}
+							client={client}
+							session={session}
+							workspaceRoot={workspaceRoot}
+							nowMs={nowMs}
+						/>
+					))}
+				</ul>
+			) : null}
 		</details>
 	);
 }

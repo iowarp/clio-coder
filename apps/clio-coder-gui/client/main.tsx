@@ -5,19 +5,7 @@ import { createClient } from "./api/client.js";
 import { launchToken } from "./api/token.js";
 import { App } from "./app.js";
 import { reportProblem } from "./design/notifications.js";
-import { Docs } from "./pages/docs.js";
-import { EvidenceDetail, EvidencePage } from "./pages/evidence.js";
-import { FleetDetail, FleetPage } from "./pages/fleet.js";
 import { Home } from "./pages/home.js";
-import { LibraryPage } from "./pages/library.js";
-import { UsagePage } from "./pages/reports.js";
-import { Session, Sessions, Workspaces } from "./pages/sessions.js";
-import { SettingsPage } from "./pages/settings.js";
-import { InteropPage, SystemPage } from "./pages/system.js";
-import { TargetsPage } from "./pages/targets.js";
-import { Toolchain } from "./pages/toolchain.js";
-import { TraceRunPage } from "./pages/traces/run.js";
-import { TraceRuns } from "./pages/traces/runs.js";
 import "./styles.css";
 import "@fontsource-variable/atkinson-hyperlegible-next/index.css";
 import "@fontsource-variable/newsreader/index.css";
@@ -31,32 +19,171 @@ const queries = new QueryClient({
 	queryCache: new QueryCache({ onError: reportProblem }),
 	mutationCache: new MutationCache({ onError: reportProblem }),
 });
+function RouteError() {
+	return (
+		<main className="route-error" role="alert">
+			<p className="eyebrow">Clio Coder</p>
+			<h1>This view could not open.</h1>
+			<p>Check the local connection and reload the app.</p>
+			<button type="button" className="primary" onClick={() => window.location.reload()}>
+				Reload app
+			</button>
+		</main>
+	);
+}
 const router = createBrowserRouter([
 	{
 		element: <App client={client} />,
+		errorElement: <RouteError />,
 		children: [
-			{ path: "/evidence", element: <EvidencePage client={client} /> },
-			{ path: "/evidence/:id", element: <EvidenceDetail client={client} /> },
-			{ path: "/usage", element: <UsagePage client={client} /> },
-			{ path: "/library", element: <LibraryPage client={client} /> },
-			{ path: "/system", element: <SystemPage client={client} /> },
-			{ path: "/system/interop", element: <InteropPage client={client} /> },
-			{ path: "/fleet", element: <FleetPage client={client} /> },
-			{ path: "/fleet/:id", element: <FleetDetail client={client} /> },
-			{ path: "/fleet/dispatches/:id", element: <FleetDetail client={client} dispatch /> },
-			{ path: "/settings/targets", element: <TargetsPage client={client} view="targets" /> },
-			{ path: "/settings/routing", element: <TargetsPage client={client} view="routing" /> },
-			{ path: "/settings", element: <SettingsPage client={client} view="settings" /> },
-			{ path: "/settings/effective", element: <SettingsPage client={client} view="effective" /> },
-			{ path: "/settings/why", element: <SettingsPage client={client} view="why" /> },
-			{ path: "/docs/*", element: <Docs client={client} /> },
-			{ path: "/sessions", element: <Workspaces client={client} /> },
-			{ path: "/workspaces/:workspaceId/sessions", element: <Sessions client={client} /> },
-			{ path: "/sessions/:id", element: <Session client={client} /> },
-			{ path: "/", element: <Home /> },
-			{ path: "/traces", element: <TraceRuns client={client} /> },
-			{ path: "/traces/:runId", element: <TraceRunPage client={client} /> },
-			{ path: "/toolchain", element: <Toolchain client={client} /> },
+			{
+				path: "/evidence",
+				lazy: async () => {
+					const { EvidencePage } = await import("./pages/evidence.js");
+					return { element: <EvidencePage client={client} /> };
+				},
+			},
+			{
+				path: "/evidence/:id",
+				lazy: async () => {
+					const { EvidenceDetail } = await import("./pages/evidence.js");
+					return { element: <EvidenceDetail client={client} /> };
+				},
+			},
+			{
+				path: "/usage",
+				lazy: async () => {
+					const { UsagePage } = await import("./pages/reports.js");
+					return { element: <UsagePage client={client} /> };
+				},
+			},
+			{
+				path: "/library",
+				lazy: async () => {
+					const { LibraryPage } = await import("./pages/library.js");
+					return { element: <LibraryPage client={client} /> };
+				},
+			},
+			{
+				path: "/system",
+				lazy: async () => {
+					const { SystemPage } = await import("./pages/system.js");
+					return { element: <SystemPage client={client} /> };
+				},
+			},
+			{
+				path: "/system/interop",
+				lazy: async () => {
+					const { InteropPage } = await import("./pages/system.js");
+					return { element: <InteropPage client={client} /> };
+				},
+			},
+			{
+				path: "/fleet",
+				lazy: async () => {
+					const { FleetPage } = await import("./pages/fleet.js");
+					return { element: <FleetPage client={client} /> };
+				},
+			},
+			{
+				path: "/fleet/:id",
+				lazy: async () => {
+					const { FleetDetail } = await import("./pages/fleet.js");
+					return { element: <FleetDetail client={client} /> };
+				},
+			},
+			{
+				path: "/fleet/dispatches/:id",
+				lazy: async () => {
+					const { FleetDetail } = await import("./pages/fleet.js");
+					return { element: <FleetDetail client={client} dispatch /> };
+				},
+			},
+			{
+				path: "/settings/targets",
+				lazy: async () => {
+					const { TargetsPage } = await import("./pages/targets.js");
+					return { element: <TargetsPage client={client} view="targets" /> };
+				},
+			},
+			{
+				path: "/settings/routing",
+				lazy: async () => {
+					const { TargetsPage } = await import("./pages/targets.js");
+					return { element: <TargetsPage client={client} view="routing" /> };
+				},
+			},
+			{
+				path: "/settings",
+				lazy: async () => {
+					const { SettingsPage } = await import("./pages/settings.js");
+					return { element: <SettingsPage client={client} view="settings" /> };
+				},
+			},
+			{
+				path: "/settings/effective",
+				lazy: async () => {
+					const { SettingsPage } = await import("./pages/settings.js");
+					return { element: <SettingsPage client={client} view="effective" /> };
+				},
+			},
+			{
+				path: "/settings/why",
+				lazy: async () => {
+					const { SettingsPage } = await import("./pages/settings.js");
+					return { element: <SettingsPage client={client} view="why" /> };
+				},
+			},
+			{
+				path: "/docs/*",
+				lazy: async () => {
+					const { Docs } = await import("./pages/docs.js");
+					return { element: <Docs client={client} /> };
+				},
+			},
+			{
+				path: "/sessions",
+				lazy: async () => {
+					const { Workspaces } = await import("./pages/sessions.js");
+					return { element: <Workspaces client={client} /> };
+				},
+			},
+			{
+				path: "/workspaces/:workspaceId/sessions",
+				lazy: async () => {
+					const { Sessions } = await import("./pages/sessions.js");
+					return { element: <Sessions client={client} /> };
+				},
+			},
+			{
+				path: "/sessions/:id",
+				lazy: async () => {
+					const { Session } = await import("./pages/sessions.js");
+					return { element: <Session client={client} /> };
+				},
+			},
+			{ path: "/", element: <Home client={client} /> },
+			{
+				path: "/traces",
+				lazy: async () => {
+					const { TraceRuns } = await import("./pages/traces/runs.js");
+					return { element: <TraceRuns client={client} /> };
+				},
+			},
+			{
+				path: "/traces/:runId",
+				lazy: async () => {
+					const { TraceRunPage } = await import("./pages/traces/run.js");
+					return { element: <TraceRunPage client={client} /> };
+				},
+			},
+			{
+				path: "/toolchain",
+				lazy: async () => {
+					const { Toolchain } = await import("./pages/toolchain.js");
+					return { element: <Toolchain client={client} /> };
+				},
+			},
 		],
 	},
 ]);

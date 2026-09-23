@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { authGuidance, type Draft, draftProblems, suggestId, toRequest } from "./target-onboarding-model.js";
@@ -11,16 +11,23 @@ export function AddConnection({
 	client,
 	taken,
 	busy,
+	completedId,
 	onSubmit,
 }: {
 	client: Client;
 	taken: readonly string[];
 	busy: boolean;
+	completedId: string | undefined;
 	onSubmit: (request: ReturnType<typeof toRequest>) => void;
 }) {
 	const form = useId();
 	const [open, setOpen] = useState(false),
 		[draft, setDraft] = useState<Draft>(blank);
+	useEffect(() => {
+		if (!completedId) return;
+		setOpen(false);
+		setDraft(blank);
+	}, [completedId]);
 	const runtimes = useQuery({
 		queryKey: ["target-runtimes"],
 		queryFn: () => client.call(routes.targetRuntimes, emptyInput),
@@ -45,7 +52,7 @@ export function AddConnection({
 			aria-labelledby={`${form}-title`}
 			onSubmit={(event) => {
 				event.preventDefault();
-				if (runtime && !problems.length) onSubmit(toRequest(draft, runtime));
+				if (!busy && runtime && !problems.length) onSubmit(toRequest(draft, runtime));
 			}}
 		>
 			<h2 id={`${form}-title`}>Add a connection</h2>
@@ -61,6 +68,7 @@ export function AddConnection({
 					<label htmlFor={`${form}-runtime`}>Runtime</label>
 					<select
 						id={`${form}-runtime`}
+						disabled={busy}
 						value={draft.runtime}
 						onChange={(event) => {
 							const next = runtimes.data.runtimes.find((candidate) => candidate.id === event.target.value);
@@ -95,13 +103,14 @@ export function AddConnection({
 						{guidance.text}
 					</p>
 					<label htmlFor={`${form}-id`}>Connection id</label>
-					<input id={`${form}-id`} value={draft.id} onChange={(event) => set({ id: event.target.value })} />
+					<input id={`${form}-id`} value={draft.id} disabled={busy} onChange={(event) => set({ id: event.target.value })} />
 					{runtime.supportsCustomUrl && (
 						<>
 							<label htmlFor={`${form}-url`}>Endpoint URL</label>
 							<input
 								id={`${form}-url`}
 								type="url"
+								disabled={busy}
 								value={draft.url}
 								placeholder="Leave blank for this runtime's default address"
 								onChange={(event) => set({ url: event.target.value })}
@@ -111,6 +120,7 @@ export function AddConnection({
 					<label htmlFor={`${form}-model`}>Default model{runtime.modelRequired ? "" : " (optional)"}</label>
 					<input
 						id={`${form}-model`}
+						disabled={busy}
 						value={draft.model}
 						list={`${form}-models`}
 						placeholder={runtime.modelRequired ? "Choose a model" : "Leave blank to use the first model the endpoint reports"}
@@ -126,6 +136,7 @@ export function AddConnection({
 							<label htmlFor={`${form}-env`}>Environment variable holding the key (optional)</label>
 							<input
 								id={`${form}-env`}
+								disabled={busy}
 								value={draft.apiKeyEnv}
 								placeholder="For example OPENAI_API_KEY"
 								autoComplete="off"
@@ -137,6 +148,7 @@ export function AddConnection({
 					<label className="add-connection__check">
 						<input
 							type="checkbox"
+							disabled={busy}
 							checked={draft.useForChat}
 							onChange={(event) => set({ useForChat: event.target.checked })}
 						/>
@@ -153,10 +165,11 @@ export function AddConnection({
 			)}
 			<div className="actions">
 				<button type="submit" className="primary" disabled={busy || !runtime || problems.length > 0}>
-					Save connection
+					{busy ? "Working…" : "Save connection"}
 				</button>
 				<button
 					type="button"
+					disabled={busy}
 					onClick={() => {
 						setOpen(false);
 						setDraft(blank);

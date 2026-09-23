@@ -138,7 +138,8 @@
 	overflow-wrap: anywhere;
 }
 .approval-preview__code,
-.approval-proposed__side {
+.approval-proposed__side,
+.approval-raw__code {
 	margin: 0;
 	padding: var(--space-3);
 	overflow-x: auto;
@@ -149,6 +150,24 @@
 	color: var(--code-ink);
 	background: var(--code-paper);
 	border-radius: var(--radius-xs);
+}
+
+.approval-raw {
+	min-width: 0;
+	font-size: var(--text-meta);
+}
+.approval-raw summary {
+	width: fit-content;
+	cursor: pointer;
+	color: var(--ink-muted);
+}
+.approval-raw summary:hover {
+	color: var(--ink);
+}
+.approval-raw__code {
+	max-height: 22rem;
+	margin-block: var(--space-2);
+	overflow: auto;
 }
 
 /* The proposed edit. This is not the diff surface: it is the intent read back off `rawInput`

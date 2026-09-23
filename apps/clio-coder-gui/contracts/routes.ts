@@ -29,7 +29,7 @@ import { Meta } from "./meta.js";
 import { Accepted, Operation } from "./operations.js";
 import { PermissionDecision } from "./permissions.js";
 import { UsageReport } from "./reports.js";
-import { SessionSnapshot, SessionSummary, Workspace } from "./sessions.js";
+import { SessionSnapshot, SessionSummary, Workspace, WorkspaceFolders } from "./sessions.js";
 import { ConfigGraph, SettingsReport } from "./settings.js";
 import { SettingsControls, SettingWrite, SettingWritten } from "./settings-controls.js";
 import { Autonomy, AutonomyLevel, SafeSettings, SafeSettingsPatch } from "./settings-safe.js";
@@ -511,6 +511,19 @@ export const routes = {
 		path: "/api/workspaces",
 		response: Type.Array(Workspace),
 		summary: "Recent workspaces",
+	}),
+	workspaceFolders: defineRoute({
+		...get,
+		path: "/api/workspaces/folders",
+		query: Type.Object(
+			{
+				path: Type.Optional(Type.String({ minLength: 1, maxLength: 4096 })),
+				hidden: Type.Optional(Type.Boolean()),
+			},
+			{ additionalProperties: false },
+		),
+		response: WorkspaceFolders,
+		summary: "Browse local directories to choose a workspace",
 	}),
 	openWorkspace: defineRoute({
 		...post,

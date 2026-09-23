@@ -5,7 +5,7 @@ import { API_VERSION } from "../contracts/meta.js";
 import { routes } from "../contracts/routes.js";
 import { useTokenRejected } from "./api/auth-state.js";
 import { type Client, emptyInput } from "./api/client.js";
-import { subscribe } from "./api/events.js";
+import { type ConnectionState, subscribe } from "./api/events.js";
 import { lastTokenWasRefused } from "./api/token.js";
 import {
 	MobileNavigation,
@@ -16,7 +16,7 @@ import {
 	ThemeToggle,
 	useSidebarCollapsed,
 } from "./design/navigation.js";
-import { dismissAll, LiveRegions, NoticeToasts, useNotices } from "./design/notifications.js";
+import { dismissAll, LiveRegions, NoticeToasts, reportProblem, useNotices } from "./design/notifications.js";
 import { AppPreferences } from "./design/pwa.js";
 import { Reconnect } from "./design/reconnect.js";
 import { CommandPalette } from "./interaction/CommandPalette.js";
@@ -34,7 +34,7 @@ export function App({ client }: { client: Client }) {
 	const queries = useQueryClient();
 	const navigate = useNavigate();
 	const location = useLocation();
-	const [connection, setConnection] = useState(client.token ? "Connecting…" : "Not connected");
+	const [connection, setConnection] = useState<ConnectionState>(client.token ? "Connecting…" : "Not connected");
 	const [paletteOpen, setPaletteOpen] = useState(false);
 	const [helpOpen, setHelpOpen] = useState(false);
 	const [sidebarCollapsed, toggleSidebar] = useSidebarCollapsed();
@@ -49,7 +49,7 @@ export function App({ client }: { client: Client }) {
 		enabled: !!client.token,
 	});
 	useEffect(() => {
-		if (client.token) return subscribe(client.token, queries, setConnection);
+		if (client.token) return subscribe(client, queries, setConnection);
 	}, [client, queries]);
 
 	const sessionId = sessionIdFrom(location.pathname);
@@ -84,17 +84,20 @@ export function App({ client }: { client: Client }) {
 					dismissNotices: dismissAll,
 					cancelTurn: (turnId) => {
 						if (sessionId === null) return;
-						void client.call(routes.cancelTurn, {
-							params: { id: sessionId, turnId },
-							query: {},
-							body: {},
-						});
+						void client
+							.call(routes.cancelTurn, { params: { id: sessionId, turnId }, query: {}, body: {} })
+							.then(() => queries.invalidateQueries({ queryKey: ["session", sessionId] }))
+							.catch(reportProblem);
 					},
 					closeSession: () => {
 						if (sessionId === null) return;
 						void client
 							.call(routes.closeSession, { params: { id: sessionId }, query: {}, body: {} })
-							.then(() => queries.invalidateQueries({ queryKey: ["session", sessionId] }));
+							.then(() => {
+								void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+								void queries.invalidateQueries({ queryKey: ["sessions"] });
+							})
+							.catch(reportProblem);
 					},
 				},
 			),
@@ -113,9 +116,9 @@ export function App({ client }: { client: Client }) {
 					Clio Coder
 				</NavLink>
 				<div className="header-controls">
-					<span className="connection" role="status" title={connection} data-connected={connection === "Connected"}>
+					<span className="connection" role="status" data-connected={connection === "Connected"} data-state={connection}>
 						<span className="connection-dot" aria-hidden="true" />
-						<span className="sr-only">{connection}</span>
+						<span className="connection-label">{connection}</span>
 					</span>
 					<ThemeToggle />
 					<AppPreferences enabled={meta.data?.pwa ?? false} token={client.token} version={meta.data?.clio} />
@@ -145,7 +148,7 @@ export function App({ client }: { client: Client }) {
 					) : meta.data.apiVersion !== API_VERSION ? (
 						<div role="alert">The app and server versions differ. Rebuild the client and reload.</div>
 					) : (
-						<Outlet />
+						<Outlet context={connection} />
 					)}
 				</main>
 			</div>
