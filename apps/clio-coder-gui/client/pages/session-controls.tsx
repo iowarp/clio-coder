@@ -15,7 +15,10 @@ import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SafeSettings, SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import type { Client } from "../api/client.js";
+import { formatTime } from "../api/clock.js";
 import { discardDraftStore } from "../chat/composer.js";
+import { ACP_TARGET_MODEL_LIMIT, catalogMayBeCut, modelAfterTargetChange } from "./model-options.js";
+import { ModelSelect } from "./model-select.js";
 
 type SettingsDraft = {
 	target: string;
@@ -167,26 +170,65 @@ function SettingsPanel({
 	const probe = useMutation({
 		mutationFn: (targetId: string) =>
 			client.call(routes.probeSessionTarget, { params: { id: session.id, targetId }, query: {}, body: {} }),
+		// A probe refreshes the runtime's catalog for that target, so the model list is read again.
+		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session-targets", session.id] }),
 	});
 	const busy = session.turns.at(-1)?.status === "running";
 	const current = draft ?? (settings.data ? settingsDraft(settings.data) : null);
-	const modelSuggestions = [
-		...new Set(targets.data?.targets.find((target) => target.id === current?.target)?.models ?? []),
-	].sort();
+	// The chosen target is asked for its catalog once every few minutes, so the model list is what the
+	// endpoint offers rather than what the configuration last recorded. A probe refreshes the runtime's
+	// own list, which is then read again.
+	const chosenTarget = current?.target ?? "";
+	const catalogCheck = useQuery({
+		queryKey: ["session-target-probe", session.id, chosenTarget],
+		queryFn: () =>
+			client.call(routes.probeSessionTarget, {
+				params: { id: session.id, targetId: chosenTarget },
+				query: {},
+				body: {},
+			}),
+		enabled: chosenTarget !== "" && capabilities.targets?.probe === true,
+		staleTime: 5 * 60_000,
+		retry: false,
+	});
+	useEffect(() => {
+		if (catalogCheck.dataUpdatedAt > 0) void queries.invalidateQueries({ queryKey: ["session-targets", session.id] });
+	}, [catalogCheck.dataUpdatedAt, queries, session.id]);
+	const catalogFor = (target: string) => targets.data?.targets.find((row) => row.id === target)?.models ?? null;
+	const models = chosenTarget === "" ? null : catalogFor(chosenTarget);
 	const modelNeedsTarget = current !== null && current.target === "" && current.model.trim() !== "";
 	const modelTooLong = current !== null && new TextEncoder().encode(current.model).length > 256;
 	const invalid = modelNeedsTarget || modelTooLong;
-	const edit = <K extends keyof SettingsDraft>(key: K, value: SettingsDraft[K]) => {
+	const edit = (patch: Partial<SettingsDraft>) => {
 		if (!current || !settings.data) return;
-		setDraft({ ...current, [key]: value });
+		const reported = settingsDraft(settings.data);
+		setDraft({ ...current, ...patch });
 		setTouched((previous) => {
 			const next = new Set(previous);
-			if (value === settingsDraft(settings.data)[key]) next.delete(key);
-			else next.add(key);
+			for (const key of Object.keys(patch) as (keyof SettingsDraft)[]) {
+				if (patch[key] === reported[key]) next.delete(key);
+				else next.add(key);
+			}
 			return next;
 		});
 		save.reset();
 	};
+	const catalogNote = (() => {
+		if (chosenTarget === "") return "Automatic routing chooses the target, so it chooses the model too.";
+		const cut =
+			models !== null && catalogMayBeCut(models)
+				? ` Clio Coder lists at most ${ACP_TARGET_MODEL_LIMIT} per target; choose Another model id for one not shown.`
+				: "";
+		const count = models === null ? "" : ` ${models.length} ${models.length === 1 ? "model" : "models"}.`;
+		if (catalogCheck.isFetching) return `Asking ${chosenTarget} for its models…`;
+		if (catalogCheck.data?.healthy)
+			return `${chosenTarget} answered the check at ${formatTime(new Date(catalogCheck.dataUpdatedAt).toISOString())}.${count}${cut}`;
+		if (catalogCheck.data)
+			return `${chosenTarget} did not answer the check (${catalogCheck.data.reason ?? "no reason reported"}). These are the models Clio Coder last knew for it.${cut}`;
+		if (catalogCheck.error)
+			return `The check failed: ${catalogCheck.error.message} These are the models Clio Coder last knew for it.${cut}`;
+		return `The models Clio Coder knows for ${chosenTarget}; this agent cannot check the endpoint from here.${count}${cut}`;
+	})();
 	return (
 		<div className="session-settings">
 			<p className="session-settings__scope">
@@ -211,7 +253,13 @@ function SettingsPanel({
 						<legend>Saved defaults</legend>
 						<label>
 							Target
-							<select value={current.target} onChange={(event) => edit("target", event.target.value)}>
+							<select
+								value={current.target}
+								onChange={(event) => {
+									const target = event.target.value;
+									edit({ target, model: modelAfterTargetChange(current.model, target === "" ? null : catalogFor(target)) });
+								}}
+							>
 								<option value="">Automatic routing</option>
 								{current.target && !targets.data?.targets.some((target) => target.id === current.target) ? (
 									<option value={current.target}>{current.target} · current selection</option>
@@ -224,31 +272,24 @@ function SettingsPanel({
 							</select>
 							<small>Automatic routing uses Clio Coder's configured target.</small>
 						</label>
-						<label>
-							Model
-							<input
+						<div className="session-settings__model">
+							<label htmlFor={`session-model-${session.id}`}>Model</label>
+							<ModelSelect
+								id={`session-model-${session.id}`}
 								value={current.model}
-								maxLength={256}
-								list={`session-models-${session.id}`}
-								onChange={(event) => edit("model", event.target.value)}
+								models={models}
+								disabled={chosenTarget === "" && current.model === ""}
+								note={catalogNote}
+								onChange={(model) => edit({ model })}
 							/>
-							<datalist id={`session-models-${session.id}`}>
-								{modelSuggestions.map((model) => (
-									<option key={model} value={model} />
-								))}
-							</datalist>
-							<small>
-								Leave blank for the configured default. Suggestions come from the selected target and are not a live
-								availability check.
-							</small>
 							{modelNeedsTarget ? <small role="alert">Choose a target before setting a model.</small> : null}
 							{modelTooLong ? <small role="alert">Model name exceeds the 256 byte limit.</small> : null}
-						</label>
+						</div>
 						<label>
 							Thinking
 							<select
 								value={current.thinking}
-								onChange={(event) => edit("thinking", event.target.value as SettingsDraft["thinking"])}
+								onChange={(event) => edit({ thinking: event.target.value as SettingsDraft["thinking"] })}
 							>
 								{["off", "minimal", "low", "medium", "high", "xhigh", "max"].map((value) => (
 									<option key={value}>{value}</option>
@@ -259,7 +300,7 @@ function SettingsPanel({
 							Saved autonomy default for future sessions
 							<select
 								value={current.autonomy}
-								onChange={(event) => edit("autonomy", event.target.value as SettingsDraft["autonomy"])}
+								onChange={(event) => edit({ autonomy: event.target.value as SettingsDraft["autonomy"] })}
 							>
 								{["read-only", "suggest", "auto-edit", "full-auto"].map((value) => (
 									<option key={value}>{value}</option>

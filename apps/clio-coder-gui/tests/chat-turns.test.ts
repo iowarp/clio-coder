@@ -642,6 +642,7 @@ test("routeFacts names the reported route and never guesses one it was not told"
 	assert.equal(reported.tone, "success");
 	assert.match(reported.title, /Thinking: low\./);
 	assert.match(reported.spoken, /Target alpha:/);
+	assert.doesNotMatch(reported.spoken, /\.\./, "a detail that ends its own sentence gets no second stop");
 
 	const automatic = routeFacts({ target: null, model: null, thinking: "off" }, summarizeHealth([]));
 	assert.equal(automatic.text, "automatic routing · default model");

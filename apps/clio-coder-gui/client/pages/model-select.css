@@ -1,0 +1,28 @@
+/* The model picker: a select of the target's catalog, or a text field for an exact id. */
+.model-select {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.model-select select {
+	max-width: 100%;
+}
+.model-select__typed {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+	align-items: center;
+}
+.model-select__typed input {
+	flex: 1 1 14rem;
+	font-family: var(--font-mono);
+	font-size: var(--text-meta);
+}
+.model-select__back {
+	flex: none;
+	font-size: var(--text-meta);
+}
+.model-select__note {
+	color: var(--ink-muted);
+	font-size: var(--text-exact);
+}

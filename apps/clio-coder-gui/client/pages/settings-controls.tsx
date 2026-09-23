@@ -1,8 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { SettingControl, SettingsControls, SettingWritten } from "../../contracts/settings-controls.js";
 import { ApiProblem, type Client, emptyInput } from "../api/client.js";
+import { formatTime } from "../api/clock.js";
+import { useOperation } from "../api/queries.js";
+import { MODEL_TARGET_PATHS } from "./model-options.js";
+import { ModelSelect } from "./model-select.js";
 import {
 	emptyMeaning,
 	groupControls,
@@ -16,18 +20,27 @@ import {
 } from "./settings-control-model.js";
 import "./settings-controls.css";
 
+/** A model setting's catalog: the paired target's models as Clio Coder last read them, and where from. */
+interface ModelCatalog {
+	readonly models: readonly string[] | null;
+	readonly defaultModel: string | null;
+	readonly note: ReactNode;
+}
+
 function ControlRow({
 	control,
 	save,
 	workspaceId,
 	draft,
 	onDraft,
+	catalog,
 }: {
 	control: SettingControl;
 	save: (write: { path: string; value: string; confirmed?: boolean }) => Promise<SettingWritten>;
 	workspaceId: string;
 	draft: string | null;
 	onDraft: (value: string | null) => void;
+	catalog?: ModelCatalog | undefined;
 }) {
 	const fieldId = useId(),
 		helpId = useId();
@@ -85,7 +98,18 @@ function ControlRow({
 							}
 						}}
 					>
-						{options ? (
+						{catalog ? (
+							<ModelSelect
+								id={fieldId}
+								describedBy={helpId}
+								value={value}
+								models={catalog.models}
+								defaultModel={catalog.defaultModel}
+								disabled={write.isPending}
+								note={catalog.note}
+								onChange={edit}
+							/>
+						) : options ? (
 							<select
 								id={fieldId}
 								aria-describedby={helpId}
@@ -186,6 +210,75 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 			return changed ? next : current;
 		});
 	}, [report.data]);
+	// Model settings pick from their target's catalog. The inventory is read only when one is on
+	// screen, and "Check again" asks that target's endpoint for its current list.
+	const modelsVisible = (report.data?.controls ?? []).some((control) => MODEL_TARGET_PATHS[control.path]);
+	const inventory = useQuery({
+		queryKey: ["targets", workspaceId],
+		queryFn: () => client.call(routes.targetsList, { ...emptyInput, params: { id: workspaceId } }),
+		enabled: modelsVisible,
+	});
+	const [check, setCheck] = useState<{ operationId: string; targetId: string } | null>(null);
+	const checkOperation = useOperation(client, check?.operationId ?? null);
+	const startCheck = useMutation({
+		mutationFn: (targetId: string) =>
+			client.call(routes.targetsProbe, { ...emptyInput, params: { id: workspaceId, targetId } }),
+		onSuccess: (value, targetId) => setCheck({ operationId: value.operationId, targetId }),
+	});
+	useEffect(() => {
+		const result = checkOperation.data?.status === "succeeded" ? checkOperation.data.result : null;
+		if (result && "targets" in result) queries.setQueryData(["targets", workspaceId], result.targets);
+	}, [checkOperation.data, queries, workspaceId]);
+	const catalogFor = (control: SettingControl): ModelCatalog | undefined => {
+		const targetPath = MODEL_TARGET_PATHS[control.path];
+		if (!targetPath || control.access !== "writable") return undefined;
+		const targetControl = report.data?.controls.find((candidate) => candidate.path === targetPath);
+		const targetId = drafts[targetPath] ?? targetControl?.value ?? "";
+		if (targetId === "")
+			return {
+				models: null,
+				defaultModel: null,
+				note: `${targetControl?.label ?? targetPath} is automatic, so type an exact model id or choose a target first.`,
+			};
+		if (inventory.isPending) return { models: null, defaultModel: null, note: `Reading ${targetId}'s models…` };
+		if (!inventory.data)
+			return {
+				models: null,
+				defaultModel: null,
+				note: `The target list could not be read${inventory.error ? `: ${inventory.error.message}` : "."}`,
+			};
+		const target = inventory.data.targets.find((row) => row.id === targetId);
+		if (!target) return { models: null, defaultModel: null, note: `${targetId} is not a configured target.` };
+		const checking =
+			check?.targetId === targetId &&
+			(startCheck.isPending || checkOperation.data?.status === "queued" || checkOperation.data?.status === "running");
+		const checked = check?.targetId === targetId ? checkOperation.data : undefined;
+		const source = checking
+			? `Asking ${targetId} for its models…`
+			: checked?.status === "succeeded"
+				? `${targetId} answered at ${formatTime(checked.finishedAt)}: ${target.models.length} ${target.models.length === 1 ? "model" : "models"}.`
+				: checked?.status === "failed"
+					? `The check did not finish: ${checked.problem.detail} These are the models Clio Coder last read from ${targetId}.`
+					: `The models Clio Coder last read from ${targetId}.`;
+		return {
+			models: target.models.length > 0 ? target.models : target.defaultModel ? [target.defaultModel] : null,
+			defaultModel: target.defaultModel,
+			note: (
+				<>
+					{source}
+					{target.modelsTruncated ? " The list shows the first 200; choose Another model id for one not shown." : ""}{" "}
+					<button
+						type="button"
+						className="setting-control__check"
+						disabled={checking || startCheck.isPending}
+						onClick={() => startCheck.mutate(targetId)}
+					>
+						Check {targetId} again
+					</button>
+				</>
+			),
+		};
+	};
 	const updateDraft = (path: string, value: string | null) => {
 		setDrafts((current) => {
 			const next = { ...current };
@@ -296,6 +389,7 @@ export function SettingsControlsView({ client, workspaceId }: { client: Client; 
 							workspaceId={workspaceId}
 							draft={drafts[control.path] ?? null}
 							onDraft={(value) => updateDraft(control.path, value)}
+							catalog={catalogFor(control)}
 						/>
 					))}
 				</section>
