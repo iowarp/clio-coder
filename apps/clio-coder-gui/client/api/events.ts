@@ -4,14 +4,21 @@ import type { Operation } from "../../contracts/operations.js";
 import { routes } from "../../contracts/routes.js";
 import { type SessionDelta, SessionDeltas, type SessionSnapshot } from "../../contracts/sessions.js";
 import { onTokenRejected, tokenRejected } from "./auth-state.js";
+import { type Client, emptyInput } from "./client.js";
 import { FrameEventBuffer } from "./frame-buffer.js";
 import { resetSessionBuffers, sessionBuffer } from "./sessions.js";
 
 type OperationEntry = { resource: string; revision: number; operation?: Operation };
+export type ConnectionState = "Connecting…" | "Connected" | "Reconnecting…" | "Not connected";
 
-export function subscribe(token: string, queries: QueryClient, connection: (state: string) => void) {
-	const stream = new EventSource(`${routes.events.path}?token=${encodeURIComponent(token)}`);
+export function subscribe(client: Client, queries: QueryClient, connection: (state: ConnectionState) => void) {
+	let stream: EventSource | null = null;
+	let cursor: string | undefined;
+	let retryTimer: ReturnType<typeof setTimeout> | null = null;
+	let retryMs = 1_000;
+	let disposed = false;
 	let epoch: string | undefined;
+	let disconnected = false;
 
 	// One commit per session per display frame, however many chunks landed in it.
 	const buffer = new FrameEventBuffer((events) => {
@@ -38,12 +45,33 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 					state = held.event(delta);
 				if (state) snapshots.set(state.id, state);
 				if (held.hasGap) gaps.add(delta.payload.resource);
-				if (delta.type === "session.changed" || delta.type === "session.labelled") {
+				if (
+					delta.type === "session.changed" ||
+					delta.type === "session.labelled" ||
+					delta.type === "turn.started" ||
+					delta.type === "turn.finished" ||
+					delta.type === "permission.requested" ||
+					delta.type === "permission.resolved" ||
+					delta.type === "permission.expired"
+				) {
 					invalidate.add("sessions");
+				}
+				if (delta.type === "session.changed" || delta.type === "session.labelled" || delta.type === "turn.finished") {
 					invalidate.add("session-history");
 				}
 			}
-			if (event.type === "hello") connection("Connected");
+			if (event.type === "hello") {
+				if (disconnected) {
+					if (!resynced) {
+						// A failed REST refresh can leave a conversation showing an error even
+						// after the event stream catches up. Heal the visible read on reconnect.
+						void queries.invalidateQueries({ queryKey: ["session"] });
+						void queries.invalidateQueries({ queryKey: ["sessions"] });
+					}
+					disconnected = false;
+				}
+				connection("Connected");
+			}
 			if (event.type === "operation.finished") {
 				operations.push({ ...event.payload });
 				invalidate.add("tools");
@@ -82,33 +110,61 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 		for (const key of invalidate) void queries.invalidateQueries({ queryKey: [key] });
 	});
 
-	const receive = (message: MessageEvent<string>) => buffer.push(JSON.parse(message.data) as Event);
-	for (const type of [
-		"hello",
-		"resync",
-		"operation.progress",
-		"operation.finished",
-		"toolchain.changed",
-		...Object.keys(SessionDeltas),
-	])
-		stream.addEventListener(type, receive as EventListener);
-	stream.onerror = () => {
-		// The last painted state must match the last state actually received.
-		buffer.flush();
-		// EventSource hides the status code and retries forever. Once a request has shown the token is
-		// refused, the stream can never open, so it stops instead of hammering the server.
-		// A refused stream also arrives here already closed: the browser gives up on a 401 and fires this
-		// once, often before any fetch has recorded the refusal. Closed means nothing will retry.
-		if (tokenRejected() || stream.readyState === EventSource.CLOSED) {
-			stream.close();
-			connection("Not connected");
-			return;
-		}
-		connection("Reconnecting…");
+	const connect = () => {
+		if (disposed || tokenRejected()) return;
+		const query = new URLSearchParams({ token: client.token });
+		if (cursor !== undefined) query.set("after", cursor);
+		const source = new EventSource(`${routes.events.path}?${query}`);
+		stream = source;
+		const receive = (message: MessageEvent<string>) => {
+			if (disposed || stream !== source) return;
+			const event = JSON.parse(message.data) as Event;
+			cursor = `${event.epoch}:${event.seq}`;
+			if (event.type === "hello") retryMs = 1_000;
+			buffer.push(event);
+		};
+		for (const type of [
+			"hello",
+			"resync",
+			"operation.progress",
+			"operation.finished",
+			"toolchain.changed",
+			...Object.keys(SessionDeltas),
+		])
+			source.addEventListener(type, receive as EventListener);
+		source.onerror = () => {
+			if (disposed || stream !== source) return;
+			disconnected = true;
+			// Paint every received event before reporting a connection loss.
+			buffer.flush();
+			if (tokenRejected()) {
+				source.close();
+				stream = null;
+				connection("Not connected");
+				return;
+			}
+			connection("Reconnecting…");
+			// EventSource retries while CONNECTING, but a CLOSED source never retries.
+			if (source.readyState !== EventSource.CLOSED) return;
+			source.close();
+			stream = null;
+			// The stream hides its HTTP status. A normal authenticated read distinguishes a refused
+			// launch token from a recoverable SSE failure through the client's existing 401 handling.
+			void client.call(routes.meta, emptyInput).catch(() => {});
+			retryTimer = setTimeout(() => {
+				retryTimer = null;
+				connect();
+			}, retryMs);
+			retryMs = Math.min(retryMs * 2, 30_000);
+		};
 	};
+	connect();
 	// The refusal can also be learned after the last stream error, from an ordinary request.
 	const stopWatching = onTokenRejected(() => {
-		stream.close();
+		if (retryTimer !== null) clearTimeout(retryTimer);
+		retryTimer = null;
+		stream?.close();
+		stream = null;
 		connection("Not connected");
 	});
 	const onVisibility = () => {
@@ -116,10 +172,12 @@ export function subscribe(token: string, queries: QueryClient, connection: (stat
 	};
 	document.addEventListener("visibilitychange", onVisibility);
 	return () => {
+		disposed = true;
 		document.removeEventListener("visibilitychange", onVisibility);
 		stopWatching();
+		if (retryTimer !== null) clearTimeout(retryTimer);
 		// Closing the buffer first stops a scheduled frame landing in a torn-down tree.
 		buffer.close();
-		stream.close();
+		stream?.close();
 	};
 }

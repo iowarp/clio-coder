@@ -117,6 +117,18 @@
 .tool-card__output-cap {
 	color: var(--status-warn-fg);
 }
+.tool-card__output-head .code-block__copy {
+	margin-left: auto;
+	border-color: var(--line-strong);
+	background: var(--surface);
+	color: var(--ink);
+}
+.tool-card__output-head .code-block__copy.is-copied {
+	color: var(--status-success-fg);
+}
+.tool-card__output-head .code-block__copy.is-failed {
+	color: var(--status-fail-fg);
+}
 .tool-card__pre {
 	margin: 0;
 	padding: var(--space-2);
@@ -137,6 +149,19 @@
 }
 .tool-card__output[data-source="none"] .tool-card__pre {
 	font-style: italic;
+}
+
+.tool-card__result > summary {
+	width: fit-content;
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	cursor: pointer;
+}
+.tool-card__result > summary:hover {
+	color: var(--ink);
+}
+.tool-card__result .tool-card__output {
+	margin-top: var(--space-2);
 }
 
 .tool-card__matches {

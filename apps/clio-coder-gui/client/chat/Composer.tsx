@@ -19,6 +19,7 @@ import type { Client } from "../api/client.js";
 import { StatusMark } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import {
+	capabilityRefusal,
 	composerKeyAction,
 	draftStore,
 	noticeForError,
@@ -55,15 +56,23 @@ export interface ComposerProps {
 	readonly client: Client;
 	readonly sessionId: string;
 	readonly sessionState: SessionSnapshot["state"];
+	readonly initialFocus: boolean;
 	/** The id of the turn running right now, or null when none is. */
 	readonly runningTurnId: string | null;
 }
 
-export const Composer = memo(function Composer({ client, sessionId, sessionState, runningTurnId }: ComposerProps) {
+export const Composer = memo(function Composer({
+	client,
+	sessionId,
+	sessionState,
+	initialFocus,
+	runningTurnId,
+}: ComposerProps) {
 	const queries = useQueryClient();
 	const store = draftStore(sessionId);
 	const draft = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
 	const field = useRef<HTMLTextAreaElement | null>(null);
+	const sending = useRef(false);
 	const fieldId = useId();
 	const hintId = useId();
 	const layerOwned = useLayersActive();
@@ -77,6 +86,9 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 			if (focusHandlers.get(sessionId) === focus) focusHandlers.delete(sessionId);
 		};
 	}, [sessionId]);
+	useEffect(() => {
+		if (initialFocus && sessionState === "open" && window.matchMedia("(pointer: fine)").matches) field.current?.focus();
+	}, [initialFocus, sessionState]);
 
 	// This runs only with the isolated draft, never with incoming transcript frames.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: draft.text is the resize trigger; the DOM read happens in the callback.
@@ -92,6 +104,7 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 	const capabilities = useQuery({
 		queryKey: ["session-capabilities", sessionId],
 		queryFn: () => client.call(routes.sessionCapabilities, params),
+		enabled: sessionState === "open",
 		staleTime: Number.POSITIVE_INFINITY,
 		retry: false,
 	});
@@ -108,7 +121,7 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 	const queued = projectQueue(queue.data);
 
 	const send = useMutation({
-		mutationFn: async (intent: Exclude<SubmitIntent, { kind: "blocked" }>) => {
+		mutationFn: async ({ intent }: { intent: Exclude<SubmitIntent, { kind: "blocked" }>; draft: typeof draft }) => {
 			if (intent.kind === "prompt") {
 				await client.call(routes.turn, { ...params, body: { text: intent.text } }, intent.idempotencyKey);
 				return null;
@@ -119,19 +132,32 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 				intent.idempotencyKey,
 			);
 		},
-		onSuccess: (result) => {
-			if (result !== null && !result.accepted) return;
-			store.clear();
+		onSuccess: (result, submitted) => {
+			if (result !== null && !result.accepted) store.refuse(submitted.draft);
+			else store.acknowledge(submitted.draft);
+			// The event stream normally paints the turn. A snapshot also catches up if
+			// this browser was reconnecting when the request was accepted.
+			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
 			if (result !== null) void queries.invalidateQueries({ queryKey: ["session-queue", sessionId] });
+		},
+		onError: (error, submitted) => {
+			// A 409 is a definite server refusal and is cached by its idempotency key.
+			// Network failures are ambiguous, so they keep the key for a safe retry.
+			if (capabilityRefusal(error) !== null) store.refuse(submitted.draft);
+		},
+		onSettled: () => {
+			sending.current = false;
 		},
 	});
 
 	const interrupt = useMutation({
 		mutationFn: () => client.call(routes.interruptSession, { ...params, body: {} }),
+		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
 	const stop = useMutation({
 		mutationFn: () =>
 			client.call(routes.cancelTurn, { params: { id: sessionId, turnId: runningTurnId ?? "" }, query: {}, body: {} }),
+		onSuccess: () => void queries.invalidateQueries({ queryKey: ["session", sessionId] }),
 	});
 	const drain = useMutation({
 		mutationFn: () => client.call(routes.clearSessionQueue, { ...params, body: {} }),
@@ -142,13 +168,32 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 		},
 	});
 
-	const situation = { sessionState, turnRunning: running, sending: send.isPending, steering };
+	const steeringUnavailable: "checking" | "failed" | undefined = capabilities.data
+		? undefined
+		: capabilities.isFetching || capabilities.isPending
+			? "checking"
+			: capabilities.error
+				? "failed"
+				: "checking";
+	const situation = {
+		sessionState,
+		turnRunning: running,
+		sending: send.isPending,
+		steering,
+		...(steeringUnavailable === undefined ? {} : { steeringUnavailable }),
+	} as const;
 	const intent = submitIntent(draft, situation);
 	// Recomputed from the store rather than closed over, so a keystroke that
 	// lands between render and keydown still sends the text the operator sees.
 	const submit = () => {
-		const next = submitIntent(store.snapshot(), situation);
-		if (next.kind !== "blocked") send.mutate(next);
+		if (sending.current) return;
+		const current = store.snapshot();
+		const next = submitIntent(current, situation);
+		if (next.kind !== "blocked") {
+			sending.current = true;
+			store.markSubmitted(current);
+			send.mutate({ intent: next, draft: current });
+		}
 	};
 
 	const notice =
@@ -176,7 +221,10 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 				rows={2}
 				disabled={sessionState !== "open"}
 				placeholder="Ask Clio Coder to do something in this project"
-				onChange={(event) => store.write(event.target.value)}
+				onChange={(event) => {
+					store.write(event.target.value);
+					if (!send.isPending) send.reset();
+				}}
 				onKeyDown={(event) => {
 					const action = composerKeyAction(
 						{
@@ -193,6 +241,15 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 					submit();
 				}}
 			/>
+			{store.uncertainSubmission() && (
+				<p className="composer__notice" role="status">
+					<StatusMark tone="warn" label="Review draft" />A send may have finished before this page reloaded. Check the
+					conversation above before sending this draft again.
+					<button type="button" className="composer__secondary" onClick={() => store.clear()}>
+						Discard draft
+					</button>
+				</p>
+			)}
 			{running && modes.length > 1 ? (
 				<fieldset className="composer__modes">
 					<legend>Deliver this</legend>
@@ -202,7 +259,10 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 								type="radio"
 								name={`${fieldId}-mode`}
 								checked={draft.mode === offer.mode}
-								onChange={() => store.chooseMode(offer.mode)}
+								onChange={() => {
+									store.chooseMode(offer.mode);
+									if (!send.isPending) send.reset();
+								}}
 							/>
 							{offer.label}
 						</label>
@@ -252,6 +312,16 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 			{intent.kind === "blocked" && draft.text.trim() !== "" ? (
 				<p className="composer__blocked" role="status">
 					{intent.reason}
+					{running && steeringUnavailable === "failed" ? (
+						<button
+							type="button"
+							className="composer__secondary"
+							disabled={capabilities.isFetching}
+							onClick={() => void capabilities.refetch()}
+						>
+							Retry control check
+						</button>
+					) : null}
 				</p>
 			) : null}
 			{notice ? (

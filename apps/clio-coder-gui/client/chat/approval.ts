@@ -342,7 +342,14 @@ export type GatedPreview =
 			readonly truncated: boolean;
 	  }
 	| { readonly kind: "path"; readonly label: string; readonly path: string }
-	| { readonly kind: "host"; readonly label: string; readonly host: string; readonly url: string }
+	| {
+			readonly kind: "host";
+			readonly label: string;
+			readonly host: string;
+			readonly url: string;
+			readonly requestedUrl: string;
+			readonly truncated: boolean;
+	  }
 	| { readonly kind: "summary"; readonly label: string; readonly summary: string }
 	| { readonly kind: "none"; readonly label: string; readonly note: string };
 
@@ -404,11 +411,17 @@ export function gatedPreview(call: GatedCall | undefined): GatedPreview {
 	const input = record(call.rawInput);
 	const name = call.title ?? call.toolKind ?? "tool";
 	if (COMMAND_TOOLS.has(name)) {
-		const raw =
-			text(input.command) ??
-			text(input.script) ??
-			(name === "git" ? `git ${text(input.op) ?? "command"}` : (text(input.op) ?? text(input.id)));
-		if (raw === null) return { kind: "none", label: "Command", note: "Clio Coder reported no command for this call." };
+		const raw = text(input.command) ?? text(input.script);
+		if (raw === null) {
+			const operation = text(input.op) ?? text(input.id);
+			if (operation !== null)
+				return {
+					kind: "summary",
+					label: name === "git" ? "Git operation" : "Operation",
+					summary: clampText(operation, 1, 256).text,
+				};
+			return { kind: "none", label: "Command", note: "Clio Coder reported no command for this call." };
+		}
 		const clamped = clampText(raw, PREVIEW_MAX_LINES, COMMAND_MAX_CHARS);
 		return { kind: "command", label: "Command", command: clamped.text, truncated: clamped.truncated };
 	}
@@ -442,12 +455,26 @@ export function gatedPreview(call: GatedCall | undefined): GatedPreview {
 	if (name === "web_fetch") {
 		const url = text(input.url);
 		if (url === null) return { kind: "none", label: "Address", note: "Clio Coder reported no address for this fetch." };
+		const clamped = clampText(url, 1, 512);
 		try {
 			const parsed = new URL(url);
-			return { kind: "host", label: "Host", host: parsed.host, url: `${parsed.host}${parsed.pathname}` };
+			return {
+				kind: "host",
+				label: "Requested URL",
+				host: parsed.host,
+				url: `${parsed.host}${parsed.pathname}`,
+				requestedUrl: clamped.text,
+				truncated: clamped.truncated,
+			};
 		} catch {
-			const clamped = clampText(url, 1, 256);
-			return { kind: "host", label: "Host", host: clamped.text, url: clamped.text };
+			return {
+				kind: "host",
+				label: "Requested URL",
+				host: clamped.text,
+				url: clamped.text,
+				requestedUrl: clamped.text,
+				truncated: clamped.truncated,
+			};
 		}
 	}
 	if (name === "dispatch") {

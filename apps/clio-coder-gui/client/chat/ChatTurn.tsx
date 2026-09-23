@@ -16,7 +16,7 @@
  * above it reads as the model having spoken unprompted.
  */
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { Permission } from "../../contracts/permissions.js";
 import type { SessionSnapshot, TimelineItem, Turn } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
@@ -78,14 +78,15 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 }
 
 function ReasoningDisclosure({ item }: { item: TimelineItem }) {
+	const [open, setOpen] = useState(false);
 	return (
-		<details className="reasoning">
+		<details className="reasoning" onToggle={(event) => setOpen(event.currentTarget.open)}>
 			<summary className="reasoning__summary">
 				<span className="reasoning__label">{REASONING_LABEL}</span>
 				<span className="reasoning__preview">{reasoningPreview(item.text)}</span>
 				<span className="reasoning__source">{REASONING_SOURCE}</span>
 			</summary>
-			<p className="reasoning__body">{item.text}</p>
+			{open ? <p className="reasoning__body">{item.text}</p> : null}
 		</details>
 	);
 }

@@ -1,6 +1,17 @@
 .setting-group {
 	margin-top: var(--space-8);
 }
+.settings-refresh {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-3);
+	margin-block: var(--space-4);
+	padding: var(--space-3);
+	border-left: 3px solid var(--status-warn-line);
+	background: var(--status-warn-tint);
+	color: var(--status-warn-fg);
+}
 .setting-group > h3 {
 	font-size: var(--text-meta);
 	letter-spacing: 0.08em;

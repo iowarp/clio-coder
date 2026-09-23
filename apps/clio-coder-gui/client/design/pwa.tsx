@@ -84,8 +84,8 @@ function PwaControls({ enabled, token }: { enabled: boolean; token: string }) {
 				)
 			)}
 			<p>
-				This browser stays connected on this device. Forgetting it keeps your work in Clio and requires the Clio desktop
-				launcher to reconnect.
+				This browser stays connected on this device. Forgetting it keeps saved conversations in Clio, removes unsent drafts
+				from this tab, and requires a fresh launch link to reconnect.
 			</p>
 			<button type="button" onClick={forgetBrowser}>
 				Forget this browser

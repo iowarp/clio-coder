@@ -6,8 +6,8 @@
 // not a modal: the operator may keep reading, scrolling and typing while it waits, which is the
 // only way to review the thing being approved.
 
-import { useMutation } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useIsMutating, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
+import { memo, useEffect, useState } from "react";
 import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
@@ -27,6 +27,7 @@ import {
 	approvalAnnouncement,
 	bannerEyebrow,
 	CARD_EYEBROW,
+	clampText,
 	decisionChips,
 	decisionRows,
 	decisionTone,
@@ -55,11 +56,28 @@ function useSecond(active: boolean): number {
 
 export type AnswerApproval = ReturnType<typeof useAnswerApproval>;
 
+const permissionMutationKey = (sessionId: string) => ["permission-answer", sessionId] as const;
+
+/** A successful answer stays disabled until the session snapshot removes the request. */
+function useAnswerSent(sessionId: string, permissionId: string | undefined): boolean {
+	const answeredIds = useMutationState({
+		filters: { mutationKey: permissionMutationKey(sessionId), status: "success" },
+		select: (mutation) => (mutation.state.variables as { id?: string } | undefined)?.id,
+	});
+	return permissionId !== undefined && answeredIds.includes(permissionId);
+}
+
 /** The one mutation both surfaces answer through, exported so a tool card can reuse it. */
 export function useAnswerApproval(client: Client, sessionId: string) {
+	const queries = useQueryClient();
 	return useMutation({
+		mutationKey: permissionMutationKey(sessionId),
 		mutationFn: ({ id, decision }: { id: string; decision: PermissionDecision }) =>
 			client.call(routes.permission, { params: { id: sessionId, permissionId: id }, query: {}, body: { decision } }),
+		onSuccess: () => {
+			void queries.invalidateQueries({ queryKey: ["session", sessionId] });
+			void queries.invalidateQueries({ queryKey: ["sessions"] });
+		},
 	});
 }
 
@@ -120,8 +138,11 @@ function Preview({ preview }: { preview: GatedPreview }) {
 			<div className="approval-preview">
 				<p className="approval-preview__label">{preview.label}</p>
 				<p className="approval-preview__value">
-					<code>{preview.kind === "path" ? preview.path : preview.url}</code>
+					<code>{preview.kind === "path" ? preview.path : preview.requestedUrl}</code>
 				</p>
+				{preview.kind === "host" && preview.truncated ? (
+					<p className="approval-preview__note">Shortened for display. Open request details to inspect more.</p>
+				) : null}
 			</div>
 		);
 	if (preview.kind === "summary")
@@ -139,7 +160,29 @@ function Preview({ preview }: { preview: GatedPreview }) {
 	);
 }
 
+/** Keep the exact tool arguments available without filling a compact approval with raw JSON. */
+const RawRequest = memo(function RawRequest({ input }: { input: Readonly<Record<string, unknown>> | undefined }) {
+	const [open, setOpen] = useState(false);
+	if (!input || Object.keys(input).length === 0) return null;
+	const full = open ? JSON.stringify(input, null, 2) : "";
+	const display = open ? clampText(full, 800, 32_000) : null;
+	return (
+		<details className="approval-raw" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+			<summary>Request details · tool arguments</summary>
+			{display ? (
+				<>
+					<pre className="approval-raw__code">
+						<code>{display.text}</code>
+					</pre>
+					{display.truncated ? <p className="approval-preview__note">Details shortened for display.</p> : null}
+				</>
+			) : null}
+		</details>
+	);
+});
+
 interface CardProps {
+	readonly sessionId: string;
 	readonly permission: Permission;
 	readonly call: GatedCall | undefined;
 	readonly answer: AnswerApproval;
@@ -148,7 +191,9 @@ interface CardProps {
 	readonly variant: "banner" | "anchored";
 }
 
-function ApprovalCard({ permission, call, answer, eyebrow, hint, variant }: CardProps) {
+function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, variant }: CardProps) {
+	const answering = useIsMutating({ mutationKey: permissionMutationKey(sessionId) }) > 0;
+	const answerSent = useAnswerSent(sessionId, permission.id);
 	const now = useSecond(true);
 	const timings = deriveApprovalTimings(permission, now);
 	const facts = safetyFacts(permission, call?.locations, timings);
@@ -177,6 +222,7 @@ function ApprovalCard({ permission, call, answer, eyebrow, hint, variant }: Card
 				</p>
 			)}
 			<Preview preview={gatedPreview(call)} />
+			<RawRequest input={call?.rawInput} />
 			{rows.length > 0 ? (
 				<dl className="approval-decision">
 					{rows.map((row) => (
@@ -199,7 +245,7 @@ function ApprovalCard({ permission, call, answer, eyebrow, hint, variant }: Card
 						type="button"
 						className={action.variant === "primary" ? "primary" : ""}
 						title={action.description}
-						disabled={answer.isPending}
+						disabled={answering || answerSent}
 						onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
 					>
 						{action.label}
@@ -213,7 +259,7 @@ function ApprovalCard({ permission, call, answer, eyebrow, hint, variant }: Card
 				))}
 			</div>
 			{hint === undefined ? null : <p className="approval-card__hint">{hint}</p>}
-			{answer.error ? <p role="alert">{answer.error.message}</p> : null}
+			{answer.error && answer.variables?.id === permission.id ? <p role="alert">{answer.error.message}</p> : null}
 		</article>
 	);
 }
@@ -224,7 +270,9 @@ function ApprovalCard({ permission, call, answer, eyebrow, hint, variant }: Card
  */
 export function ApprovalBanner({ client, session }: { client: Client; session: SessionSnapshot }) {
 	const answer = useAnswerApproval(client, session.id);
+	const answering = useIsMutating({ mutationKey: permissionMutationKey(session.id) }) > 0;
 	const permission = pendingPermission(session);
+	const answerSent = useAnswerSent(session.id, permission?.id);
 	const call = permission ? session.timeline.find((item) => item.toolCallId === permission.toolCallId) : undefined;
 	const now = useSecond(permission !== undefined);
 	const timings = permission ? deriveApprovalTimings(permission, now) : null;
@@ -255,7 +303,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 		return postApprovalNotification(id, title);
 	}, [id, title]);
 
-	const enabled = permission !== undefined && !answer.isPending;
+	const enabled = permission !== undefined && !answering && !answerSent;
 	useShortcut("allowOnce", () => permission && answer.mutate({ id: permission.id, decision: "allow-once" }), {
 		enabled,
 	});
@@ -267,6 +315,7 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 		// the role out as well is the redundancy the linter rejects.
 		<section className="approval-banner" aria-label="Approval needed">
 			<ApprovalCard
+				sessionId={session.id}
 				permission={permission}
 				call={call}
 				answer={answer}
@@ -294,5 +343,14 @@ export function AnchoredApproval({
 	const answer = useAnswerApproval(client, session.id);
 	const permission = permissionForCall(session, item);
 	if (!permission) return null;
-	return <ApprovalCard permission={permission} call={item} answer={answer} eyebrow={CARD_EYEBROW} variant="anchored" />;
+	return (
+		<ApprovalCard
+			sessionId={session.id}
+			permission={permission}
+			call={item}
+			answer={answer}
+			eyebrow={CARD_EYEBROW}
+			variant="anchored"
+		/>
+	);
 }

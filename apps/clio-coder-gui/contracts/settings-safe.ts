@@ -56,4 +56,5 @@ export const SafeSettings = Type.Object(
 	},
 	closed,
 );
+export type SafeSettings = Static<typeof SafeSettings>;
 export const Autonomy = Type.Object({ level: AutonomyLevel, source: Type.String({ maxLength: 64 }) }, closed);

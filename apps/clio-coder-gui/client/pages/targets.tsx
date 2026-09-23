@@ -1,5 +1,5 @@
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { TargetAdd } from "../../contracts/targets-cli.js";
 import { type Client, emptyInput } from "../api/client.js";
@@ -12,6 +12,7 @@ import { ConfigurationTabs, useWorkspaceSelection, WorkspacePicker } from "./set
 import { AddConnection } from "./target-onboarding.js";
 
 export function TargetsPage({ client, view }: { client: Client; view: "targets" | "routing" }) {
+	const queries = useQueryClient();
 	const selection = useWorkspaceSelection(client),
 		{ id } = selection;
 	const targets = useQuery({
@@ -24,25 +25,44 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 		queryFn: () => client.call(routes.routing, { ...emptyInput, params: { id } }),
 		enabled: !!id && view === "routing",
 	});
-	const [operationId, setOperationId] = useState<string | null>(null);
+	const [operationScope, setOperationScope] = useState<{ id: string; workspaceId: string } | null>(null);
+	const operationId = operationScope?.workspaceId === id ? operationScope.id : null;
 	const operation = useOperation(client, operationId);
 	const mutate = useMutation({
-		mutationFn: ({ targetId, action }: { targetId: string; action: "probe" | "use" | "remove" }) =>
+		mutationFn: ({
+			workspaceId,
+			targetId,
+			action,
+		}: {
+			workspaceId: string;
+			targetId: string;
+			action: "probe" | "use" | "remove";
+		}) =>
 			client.call(action === "probe" ? routes.targetsProbe : action === "use" ? routes.targetsUse : routes.targetsRemove, {
 				...emptyInput,
-				params: { id, targetId },
+				params: { id: workspaceId, targetId },
 			}),
-		onSuccess: (value) => setOperationId(value.operationId),
+		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
 	});
 	const add = useMutation({
-		mutationFn: (body: TargetAdd) => client.call(routes.targetsAdd, { params: { id }, query: {}, body }),
-		onSuccess: (value) => setOperationId(value.operationId),
+		mutationFn: ({ workspaceId, body }: { workspaceId: string; body: TargetAdd }) =>
+			client.call(routes.targetsAdd, { params: { id: workspaceId }, query: {}, body }),
+		onSuccess: (value, variables) => setOperationScope({ id: value.operationId, workspaceId: variables.workspaceId }),
 	});
 	const cancel = useMutation({
 		mutationFn: () => client.call(routes.cancel, { ...emptyInput, params: { id: operationId ?? "" } }),
 	});
+	const completedId = operation.data?.status === "succeeded" ? operation.data.id : undefined;
+	useEffect(() => {
+		const result = operation.data?.status === "succeeded" ? operation.data.result : null;
+		if (!result || !("targets" in result) || !operationScope) return;
+		queries.setQueryData(["targets", operationScope.workspaceId], result.targets);
+		for (const key of ["routing", "workspace-settings", "config-graph", "target-runtimes", "settings-controls"])
+			void queries.invalidateQueries({ queryKey: [key] });
+	}, [operation.data, operationScope, queries]);
 	const busy =
 		mutate.isPending ||
+		add.isPending ||
 		(!!operationId && operation.isPending) ||
 		operation.data?.status === "queued" ||
 		operation.data?.status === "running";
@@ -66,10 +86,46 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 							client={client}
 							taken={targets.data.targets.map((target) => target.id)}
 							busy={busy || add.isPending}
-							onSubmit={(body) => add.mutate(body)}
+							completedId={add.data?.operationId === completedId ? completedId : undefined}
+							onSubmit={(body) => add.mutate({ workspaceId: id, body })}
 						/>
 					)}
 					{add.error && <p role="alert">{add.error.message}</p>}
+					{(add.isPending || mutate.isPending) && <p role="status">Sending target request…</p>}
+					{operationId && operation.isPending && !add.isPending && !mutate.isPending && (
+						<p role="status">Checking target operation…</p>
+					)}
+					{operation.error && !add.isPending && !mutate.isPending && (
+						<p role="alert">Could not read the target operation: {operation.error.message}</p>
+					)}
+					{operation.data && !add.isPending && !mutate.isPending && (
+						<section className="trace-panel" aria-label="Target operation">
+							<h2 role="status">
+								{operation.data.kind.replace("targets.", "Target ")} · {operation.data.status}
+							</h2>
+							{operation.data.progress.length > 0 && (
+								<ul>
+									{operation.data.progress.map((row) => (
+										<li key={`${row.at}:${row.message}`}>{row.message}</li>
+									))}
+								</ul>
+							)}
+							{operation.data.status === "failed" && (
+								<p role="alert">
+									{operation.data.problem.detail}
+									<br />
+									{operation.data.problem.code} · Reference {operation.data.problem.instance}
+								</p>
+							)}
+							{operation.data.status === "succeeded" && <p>{operation.data.result.message}</p>}
+							{busy && operation.data.cancellable && (
+								<button type="button" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
+									{cancel.isPending ? "Cancelling…" : "Cancel probe"}
+								</button>
+							)}
+							{cancel.error && <p role="alert">{cancel.error.message}</p>}
+						</section>
+					)}
 					<div className="config-entries">
 						{targets.data?.targets.map((target) => (
 							<article className="trace-panel" key={target.id} aria-label={target.id}>
@@ -102,10 +158,18 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 									)}
 								</details>
 								<div className="actions">
-									<button type="button" disabled={busy} onClick={() => mutate.mutate({ targetId: target.id, action: "probe" })}>
+									<button
+										type="button"
+										disabled={busy}
+										onClick={() => mutate.mutate({ workspaceId: id, targetId: target.id, action: "probe" })}
+									>
 										Probe
 									</button>
-									<button type="button" disabled={busy} onClick={() => mutate.mutate({ targetId: target.id, action: "use" })}>
+									<button
+										type="button"
+										disabled={busy}
+										onClick={() => mutate.mutate({ workspaceId: id, targetId: target.id, action: "use" })}
+									>
 										Use for chat &amp; fleet
 									</button>
 									<button
@@ -113,7 +177,7 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 										disabled={busy}
 										onClick={() => {
 											if (window.confirm(`Remove target ${target.id} and its routing references from user settings?`))
-												mutate.mutate({ targetId: target.id, action: "remove" });
+												mutate.mutate({ workspaceId: id, targetId: target.id, action: "remove" });
 										}}
 									>
 										Remove target
@@ -185,30 +249,6 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 				</>
 			)}
 			{mutate.error && <p role="alert">{mutate.error.message}</p>}
-			{operation.data && (
-				<section className="trace-panel" aria-label="Target operation">
-					<h2>Target operation · {operation.data.status}</h2>
-					<p>{operation.data.kind}</p>
-					<ul>
-						{operation.data.progress.map((row) => (
-							<li key={`${row.at}:${row.message}`}>{row.message}</li>
-						))}
-					</ul>
-					{operation.data.status === "failed" && (
-						<p role="alert">
-							{operation.data.problem.detail}
-							<br />
-							{operation.data.problem.code} · Reference {operation.data.problem.instance}
-						</p>
-					)}
-					{operation.data.status === "succeeded" && <p>{operation.data.result.message}</p>}
-					{busy && operation.data.cancellable && (
-						<button type="button" onClick={() => cancel.mutate()} disabled={cancel.isPending}>
-							Cancel probe
-						</button>
-					)}
-				</section>
-			)}
 		</section>
 	);
 }

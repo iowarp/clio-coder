@@ -11,6 +11,25 @@ export const Workspace = Type.Object(
 	closed,
 );
 export type Workspace = Static<typeof Workspace>;
+/** A bounded, directory-only view of the local machine for choosing a project. */
+export const WorkspaceFolders = Type.Object(
+	{
+		path: Type.String({ maxLength: 4096 }),
+		parent: Type.Union([Type.String({ maxLength: 4096 }), Type.Null()]),
+		homePath: Type.String({ maxLength: 4096 }),
+		launchPath: Type.String({ maxLength: 4096 }),
+		directories: Type.Array(
+			Type.Object(
+				{ name: Type.String({ maxLength: 512 }), path: Type.String({ maxLength: 4096 }) },
+				{ additionalProperties: false },
+			),
+			{ maxItems: 200 },
+		),
+		truncated: Type.Boolean(),
+	},
+	{ additionalProperties: false },
+);
+export type WorkspaceFolders = Static<typeof WorkspaceFolders>;
 export const SessionSummary = Type.Object(
 	{
 		id: Id,

@@ -53,8 +53,11 @@ export function draftProblems(draft: Draft, runtime: Runtime | undefined, taken:
 	else if (taken.includes(draft.id)) problems.push(`A connection named ${draft.id} already exists.`);
 	if (draft.url && !/^(https?|wss?):\/\/\S+$/.test(draft.url))
 		problems.push("The URL starts with http://, https://, ws:// or wss://.");
+	else if (draft.url.length > 2048) problems.push("The endpoint URL must be 2,048 characters or fewer.");
 	if (runtime.modelRequired && !draft.model.trim())
 		problems.push("This provider's model list has no recommended default, so choose a model.");
+	else if (draft.model.trim() && !/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,199}$/.test(draft.model.trim()))
+		problems.push("The model ID must start with a letter or digit and use only model ID characters (up to 200).");
 	if (draft.apiKeyEnv && !/^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(draft.apiKeyEnv))
 		problems.push("An environment variable name uses letters, digits and underscore.");
 	return problems;

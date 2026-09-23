@@ -10,14 +10,16 @@
  * 2. The live output pane is ONE element whose identity never changes across
  *    the running/settled boundary. `partialOutput` and the final result render
  *    into the same `<pre>` so the card does not flash or reflow when the
- *    terminal frame lands.
+ *    terminal frame lands. Other tool kinds expose their final text in a
+ *    readable disclosure and show failures without requiring raw JSON.
  * 3. Status meaning never rides on colour. Every state is a StatusMark, which
  *    carries a glyph and a word.
  */
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
+import { CopyButton } from "../render/Markdown.js";
 import { DiffView } from "./Diff.js";
 import {
 	formatLocation,
@@ -77,18 +79,35 @@ function Locations({ locations, headline }: { locations: readonly ToolLocation[]
 function OutputBlock({ pane }: { pane: OutputPane }) {
 	return (
 		<div className="tool-card__output" data-source={pane.source} data-running={pane.running ? "yes" : "no"}>
-			<div className="tool-card__output-head">
+			<div className="tool-card__output-head" role="status">
 				<StatusMark
 					tone={pane.running ? "running" : "neutral"}
 					label={pane.source === "partial" ? "Output so far" : "Output"}
 				/>
-				{pane.truncated ? <span className="tool-card__output-cap">cut at the byte cap</span> : null}
+				{pane.truncated ? <span className="tool-card__output-cap">Output may be shortened</span> : null}
+				{pane.text ? <CopyButton text={pane.text} label="Copy output" /> : null}
 			</div>
-			<pre className="tool-card__pre" aria-live={pane.running ? "polite" : "off"}>
-				{pane.source === "none" ? (pane.placeholder ?? "") : pane.text}
-			</pre>
+			<pre className="tool-card__pre">{pane.source === "none" ? (pane.placeholder ?? "") : pane.text}</pre>
 		</div>
 	);
+}
+
+function ResultDisclosure({ pane, label }: { pane: OutputPane; label: string }) {
+	const [open, setOpen] = useState(false);
+	return (
+		<details className="tool-card__result" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+			<summary>{label}</summary>
+			{open ? <OutputBlock pane={pane} /> : null}
+		</details>
+	);
+}
+
+function resultLabel(card: ToolPresentation): string {
+	if (card.name === "read") return "View file contents";
+	if (card.name === "ls") return "View directory listing";
+	if (card.body === "fetch") return "View fetched content";
+	if (card.body === "dispatch") return "View worker result";
+	return "View result";
 }
 
 function Matches({ groups, dropped }: { groups: readonly MatchGroup[]; dropped: number }) {
@@ -119,10 +138,13 @@ function Matches({ groups, dropped }: { groups: readonly MatchGroup[]; dropped: 
 }
 
 function RawDisclosure({ item }: { item: TimelineItem }) {
+	const [open, setOpen] = useState(false);
 	return (
-		<details className="tool-card__raw">
+		<details className="tool-card__raw" onToggle={(event) => setOpen(event.currentTarget.open)}>
 			<summary>Raw input and result</summary>
-			<pre className="tool-card__pre">{JSON.stringify({ input: item.rawInput, output: item.rawOutput }, null, 2)}</pre>
+			{open ? (
+				<pre className="tool-card__pre">{JSON.stringify({ input: item.rawInput, output: item.rawOutput }, null, 2)}</pre>
+			) : null}
 		</details>
 	);
 }
@@ -130,18 +152,18 @@ function RawDisclosure({ item }: { item: TimelineItem }) {
 /**
  * A `terminal` card keeps ONE output node for the life of the call, which is
  * what stops the partialOutput-to-result handover from flashing. The other
- * bodies swap a live pane for a structured body when they settle, which is a
- * deliberate trade: a grep or a read settles in well under a frame, and a
- * structured result is worth more there than node identity.
+ * bodies swap a live pane for a structured body when they settle. A failure
+ * always keeps its output visible, so an error is never mistaken for an empty
+ * successful result.
  */
 function Body({ card }: { card: ToolPresentation }) {
 	switch (card.body) {
 		case "diff":
-			return card.diff === null ? null : <DiffView panel={card.diff} />;
+			return card.failed ? <OutputBlock pane={card.output} /> : card.diff === null ? null : <DiffView panel={card.diff} />;
 		case "terminal":
 			return <OutputBlock pane={card.output} />;
 		case "matches":
-			return card.output.running ? (
+			return card.output.running || card.failed ? (
 				<OutputBlock pane={card.output} />
 			) : (
 				<Matches groups={card.matches} dropped={card.matchesDropped} />
@@ -149,11 +171,11 @@ function Body({ card }: { card: ToolPresentation }) {
 		case "file":
 		case "fetch":
 		case "dispatch":
-			// The fact strip is the body. A read's content is what the assistant then
-			// talks about, and duplicating it doubles the transcript.
-			return card.output.running ? <OutputBlock pane={card.output} /> : null;
+			if (card.output.running || card.failed) return <OutputBlock pane={card.output} />;
+			if (card.output.source !== "final") return null;
+			return <ResultDisclosure pane={card.output} label={resultLabel(card)} />;
 		case "ask":
-			return null;
+			return card.failed ? <OutputBlock pane={card.output} /> : null;
 		default:
 			return <OutputBlock pane={card.output} />;
 	}
