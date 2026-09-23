@@ -1,21 +1,10 @@
 # Commands and Modes
 
-Clio Coder is a terminal-first coding agent. This page is the detailed command
-reference for interactive sessions, headless runs, dispatch, verification, and
-common operator workflows; the README remains an approachable product and
-onboarding guide.
-
-Source of truth: `src/cli/index.ts`, `src/interactive/slash-commands.ts`,
-`src/domains/dispatch/**`, `src/tools/registry.ts`, and the current test suite.
-For process exit codes, stdout deliverable guarantees, and machine-readable JSON streaming formats, see [exit-codes-and-output.md](exit-codes-and-output.md).
+This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: [CLI](../../src/cli/), [run arguments](../../src/cli/args.ts), [slash-command registry](../../src/interactive/slash-commands.ts), and [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md).
 
 ## Demo guidance
 
-Interactive sessions enable capability guidance by default (`interface.demo: true`). During real project work, Clio identifies useful opportunities: a helper can check callers, a skill can guide a workflow, verification can check a change, or project context can preserve findings. She briefly connects the capability to the task, uses it when already appropriate and authorized, or offers a concrete follow-up when it expands the scope. Accepting an offer leads to execution on the current project, not another explanation or a toy demonstration. Declined offers are not repeated; simple answers and failures do not need a pitch. One bounded reminder after three successful source-inspection calls helps the model surface a relevant next step during substantial work. It uses existing tool-result annotations, never forces a tool or starts another model turn, and observes the live setting. Headless runs and workers do not receive this guidance.
-
-Use `clio-coder --no-demo` for a quiet session, `clio-coder --demo` to enable guidance for one session, or **Appearance → Display & keyboard → Demo guidance** in `/settings` or configure to change the saved preference. Session flags do not rewrite settings. Footer tips change live; the persona updates on the next turn. Asking Clio to stop suggestions affects her conversational guidance; the setting controls footer tips too.
-
-The compact footer remains two lines. A small Tip appears for about ten seconds, no more than once a minute, with each topic shown once per session: welcome/help, active agent inspection, tool-result inspection, and context composition above 40% occupancy. Shortcuts use your current bindings, including changes while a tip is visible; an agent tip disappears when no agent is running. Notices, blocked tools, retries, interviews, and expanded dashboards suppress tips. No extra model calls or idle demonstrations are scheduled.
+Interactive capability guidance is enabled by default. `--demo` and `--no-demo` override it for one invocation; change the saved value under Settings → Appearance → Demo guidance. Guidance adds hints only; it does not grant tool authority. Headless runs and workers do not receive it.
 
 ## CLI Commands
 
@@ -358,352 +347,19 @@ show equal percentages are never merged.
 
 ### Notes on individual commands
 
-The notes below explain commands whose behavior needs more than a usage line.
-
-Operator tasks are durable project work in `.clio-coder/user-tasks.json`. Use
-`clio-coder tasks add "Fix the solver" --expect src/solver.ts --verify test:solver:60000`
-or `/tasks add Fix the solver --expect src/solver.ts --verify test:solver:60000`.
-Both `--expect <path>` and `--verify <checkId>[:timeoutMs]` are repeatable.
-Expected outputs use repository-relative paths, and verification ids must exist
-in the project verifier catalog or package scripts when added.
-
-An omitted timeout uses the check's declared timeout, and requested timeouts are
-bounded as in dispatch intent. If a complete value matches a declared id
-containing colons, it names that check; otherwise the final numeric suffix is the
-timeout.
-
-Acceptance travels with the task when handed and picked, and seeds the board's
-required validation evidence. Under high rigor, a turn that changes files while
-this task is active must record a passing validation receipt for every named
-check or a successful `limitation` receipt whose `paths` array includes the exact
-check id.
-
-A task's
-completion note alone does not satisfy acceptance. `clio-coder tasks list`,
-`hand <uN>`, `done <uN>`, and `drop <uN>` manage the same inbox as `/tasks`.
-
-Retired commands are rejected before model submission. Old Library browsing forms, including `/resources`, `/library <kind>` and `/agents connect`, explain the canonical route. Browse with `/library`, `/skills`, `/agents` or `/prompts`; use `/interop` for local-agent adoption and `/extensions` for harness extensions.
-
-In `/library`, `b` switches between Browse packages and Installed entries. Agents and Fleets may show `[plugin]` provider packages with category-specific catalog hints; use Installed to find loaded recipes. Status and footer counts distinguish packages, entries and members with correct singular/plural forms, and do not imply every entry is runnable. `s` chooses User or Project as the destination for package actions; it does not filter the inventory by execution scope. Install, import and removal still require their existing review. Narrow layouts open with the selected detail visible, and Tab toggles it.
-
-Library discovery notices have their own searchable `n` view and independent count. From browse focus, `n` opens notices or returns from notices to resources. While search has edit focus, `n` types into the filter. Esc clears a filter or leaves search focus before returning to the parent browser. Your resource selection, filter draft, browse focus and detail position survive the visit. Notices are evidence to inspect and have no package action. Enter opens members only for a package that supports that operation; otherwise it opens detail.
-
-`/view [filter]` searches resource identity and available provenance with case-insensitive literal terms. Every whitespace-separated term must occur; fuzzy abbreviations do not match. A category prefix such as `dispatch:<runId>` limits the search to that category, while an ordinary query searches across the supplied categories. Left/Right moves between categories with matches without clearing the query. Match/total counts describe the current filter without hiding global evidence at the provider level. The filter persists through preview, back and refresh within the open overlay, and an initial query starts with its cursor at the end. While editing the filter, Ctrl+U clears the whole query even with customized movement keys; undo restores its full text and cursor, and clearing an already empty filter does not consume an undo step.
-
-Workspace output rows show their basename before the relative path. In View preview, press `i` for scrollable provenance with the full backing path and available session/run/correlation identities; press `i` again for content. This toggle resets the pane's scroll position. `o` reports the backing path, and `v` verifies resources that support verification. Enter or Tab opens a selected preview; Esc returns to the list, then closes. Empty results keep focus in the list. View's literal search is separate from the shared ListOverlay fuzzy search described below.
-
-`/context` with no arguments opens the context-window ledger overlay, including
-the working-set section (policy, evicted items and tokens, events, recalls,
-churn). Its subcommands own the durable project-context noun:
-
-| Subcommand | Effect |
+| Workflow | Behavior |
 | --- | --- |
-| `compact` | Summarizes older turns in the session window. |
-| `recall <ref>` | Prints an evicted tool-result body back into the transcript by the ref its `[evicted ...]` marker names. It never enters model context; the model recalls with `context(scope="recall", ref=...)`. |
-| `init` | Bootstraps or updates `CLIO-CODER.md` and the codewiki. |
-| `refresh` | Re-indexes the codewiki and refreshes `.clio-coder/state.json` without touching `CLIO-CODER.md`. |
-| `reset` | Deletes accumulated context artifacts (`.clio-coder/codewiki.json`, `.clio-coder/state.json`, `.clio-coder/handoffs/`, `.clio-coder/proposals/`). Its interactive choice preserves or deletes `CLIO-CODER.md`; cancellation makes no changes. |
+| `/model` and `/thinking` | Choose a route for this session or save it as a default. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md#live-routing-vs-saved-defaults). |
+| `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Use a model-bound draft judge for a scored pick. |
+| `/council` | Runs a configured roster of two to five read-only members. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
+| `/run` and `/delegate` | Start a fleet worker or ACP peer. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
+| `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
+| `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
+| `/tasks` | Inspect session tasks and the durable project task inbox. Acceptance checks travel with handed tasks; receipts show whether they passed. |
+| Unknown slash command | Rejected before model submission. Use `\/text` to send text that begins with a slash. The command list is [above](#interactive-slash-commands). |
 
-Session reset stays `/new`; there is deliberately no `/context clear`. The
-spellings `/context-init`, `/context-clear`, and `/context-view` are gone and are
-not aliased to anything.
-There are no slash-command aliases. `/context compact`, `/quit`, `/model`,
-`/settings`, and `/skill <name>` are their only spellings. Retired or foreign
-spellings stay errors that name `/help` instead of guessing which operation the
-operator intended.
+The command spellings and arguments are the [slash-command registry](../../src/interactive/slash-commands.ts); this table calls out only session workflows that need explanation.
 
-`/model` never changes routing on its own. Both spellings, the picker and
-`/model <pattern>`, resolve the swap and then ask where it lands: `Apply this
-session`, `Apply and save globally`, or `Cancel`. Session is the default and
-touches no file, so a mid-conversation experiment dies with the session that
-made it; global is the same write the settings center performs, and it is the
-only one a later launch inherits. Cancel leaves the model where it was. A
-thinking level named in the pattern follows the same choice.
-
-`/btw <question>` runs one model round beside the session and renders the answer
-in an overlay. It sends the same compiled message history the next turn would
-send, as read-only input, under a short system instruction saying this is a side
-question, with no tools. Nothing about the round is appended: not the session
-JSONL, not the transcript panel, not the context ledger, not the task board. That
-is the point of it. A fleet run briefs its workers from the transcript, so a
-question the operator asks to orient themselves mid-run would otherwise become
-context every worker inherits. Esc closes the overlay, and cancels the round if it
-is still streaming. `/btw` during an in-flight turn is refused with a notice
-rather than queued, because a side question answered after the run it was asked
-during has already missed its moment. The round's token usage still shows in
-`/usage`, labeled as a side question, because it was a real call and cost real
-money; it is deliberately not counted as a turn.
-
-`/draft [N] <request>` runs N out-of-turn rounds for one request in parallel,
-two to four and three by default, and shows them side by side in an overlay. Each
-round reads the same history `/btw` reads, sends no tools, and runs at its own
-temperature, because the same request at the same temperature gives a model
-little reason to answer differently. It is built for a diffusion target such as
-Inception Mercury, where every candidate denoises in the overlay at once and all
-of them settle in about a second. When every candidate has settled, the decision
-model bound to `fleet.decisionProfiles.drafts` answers one `choice` over them and
-one correctness question per candidate. Each row then shows the probability mass
-the judge gave it, so the operator can see how decisive the pick was and not only
-which one won. A candidate the judge reads as wrong or incomplete is marked
-`judged unsound`, and the overlay opens on the pick. The arrows or the number keys
-move between candidates, the up and down arrows scroll, and Esc closes the overlay
-and cancels any round still running. Without a `drafts` binding the candidates are
-still shown and the overlay says why there are no bars. Like `/btw`, nothing
-reaches the session, a turn in flight refuses the command rather than queueing it,
-and each round's usage shows in `/usage` as a side question. Measured live, three
-Mercury drafts arrived in 454ms and jev-latest judged them in 264ms.
-
-`/council [--roster <name>] [--rounds <n>] [--synthesis judge|vote|none] <task>`
-asks a roster of two to five read-only members the same task and puts the group on
-the Fleet Runs board as one card. It owns no dispatch path of its own: the command
-builds dispatch-tool arguments and admits them through the tool registry, so a
-supervised autonomy level parks the call and the approval overlay names every
-member's label, target, model, node, round count, and synthesis mode before
-anything runs. Members are pinned to read-only autonomy and the council tool
-surface by admission, exactly as they are for a council the model asks for.
-
-`--roster` names a `fleet.rosters` entry. Without it the command takes
-`fleet.rosters.default` when that roster exists, and with neither it refuses
-and names the setting to declare. A roster that is the only one configured is
-still not the default: seating a council from whichever roster happens to be
-present would run models the operator never chose. `--rounds` accepts one to
-three and `--synthesis` accepts `judge`, `vote`, or `none`, which are the tool's
-own bounds, enforced where the operator typed them so a council is never refused
-after its plan has already been shown. `/council` during an in-flight turn is
-refused with a notice rather than queued, for the same reason `/fleet run` is: an
-approved plan describes the workspace as it stands. Nothing the members produce
-enters the main agent's context until an operator runs `/share`.
-
-`/handoff <goal>` carries this session's working state into a fresh session for a
-goal the operator states. The goal is required and gated: a goal shorter than 12
-characters is refused, and so is one of a small stoplist of non-goals such as
-"continue", "next", or "resume". Both refusals name the rule they enforce, because
-"keep going" is exactly the instruction a handoff exists to replace.
-
-One model round then runs on the same out-of-turn seam `/btw` uses. It reads the
-compiled message history the next turn would send, sends no tools, and answers
-with JSON validated against a fixed response schema of decisions, facts, files,
-commands, and open questions. Every list and every string is bounded; output over
-a bound is truncated with a visible marker and the document names each bound that
-fired, so nothing is cut silently and an over-eager answer is never a refusal.
-
-Every file path the model names is checked against this session's read ledger and
-never against the filesystem. Paths the session did not touch are dropped and
-listed in the document under their own heading so the operator can see what the
-model invented. Extracted decisions are merged with the session's settled decision
-board, and the board wins. The result is one Markdown document opened for review:
-Enter accepts it, `e` hands it to `$EDITOR`, and Esc cancels the whole handoff with
-nothing written anywhere.
-
-On accept, Clio mints a new session, writes the reviewed document into it as
-bounded data labelled as a handoff from the old session id, and replays the old
-session's skill activations so loaded skills carry forward. The document is never
-written as a fabricated user turn. The old session is left untouched apart from one
-terminal note recording the target session id. A handoff is a session operation
-throughout: it writes no memory promotion candidate and never calls the task-memory
-bank. `/handoff` during an in-flight turn is refused with a notice rather than
-queued, because a document summarizing a session that is still moving would be
-wrong by the time it was read.
-
-The `/resume` picker accepts Page Up and Page Down to move by its 12 visible rows. Arrow keys continue to move one session at a time, and typing continues to filter the list. Task identity occupies the primary column, with the session name or ID as a fallback; metadata yields as the terminal narrows. Filtering preserves the selected session when it still matches, and undo from an empty result restores that selection. Confirmation resumes the visibly selected session, including with customized list bindings.
-
-Only active commands run. Typing anything command-shaped that the registry does
-not own checks the loaded prompt templates across native and foreign prompt
-roots.
-
-If the token names neither a command nor a template, it reports
-`is not a command` and points at `/help`. It is never sent to the model. That
-covers spellings removed outright, such as `/status` and `/receipts`, as well as
-ordinary typos. It replaces the earlier behavior where an unrecognized spelling
-reached the model as prose and was answered conversationally, which left the
-operator believing a command had run when nothing had.
-
-Built-in command names are reserved across interactive and headless modes. A
-template with the same basename is omitted from `/prompts` with a collision
-diagnostic instead of shadowing a command on one surface and expanding on
-another. A matching template discovered in another agent's folder makes Clio
-direct the operator to import it explicitly first; imported foreign templates
-additionally require `integrations.projectResources.trustProjectImports`, and
-blocked templates send nothing to the model.
-
-A headless `clio-coder run "/typo"` refuses the same way. The verdict is reached
-before boot, so no session is opened and no turn is spent; the diagnostic names
-the token on stderr and the run exits `2`, the usage-error code.
-
-Command-shaped means one word of letters, digits, hyphens, or colons after the slash, so
-paths such as `/home/user/notes.md` still reach the model unchanged. One word
-followed by prose is treated as a command, because `/status please` and `/tmp is
-full` are indistinguishable. To send such a line as text, escape the slash:
-`\/tmp is full` reaches the model as `/tmp is full`. The escape claims a single
-backslash and only in front of a slash, so `\\server\share` is unchanged, and it
-works on a real command too, so `\/help` is a question about `/help` rather than
-the help overlay.
-
-A rejected command stays in the input line. The error names the spelling and the
-text is still there to correct, rather than having to be retyped. Retired spellings (such as `/status`, `/receipts`, `/context-init`, `/context-clear`, `/context-view`, and `/skill:<name>`) are not recognized and fail closed with `/<token> is not a command. Type /help for the list.`
-
-The accepted spelling of every command is the table under [Interactive Slash Commands](#interactive-slash-commands); there is exactly one per operation, and nothing else is parsed as a command.
-
-Configuration lives in one place: the `/settings` overlay. `/settings <section>` reaches every section directly. `/thinking <level>` and `/model <pattern>` stay as quick setters that apply without opening anything.
-
-Settings → Connections presents an operational console table (`HEALTH`, `ID`, `ROLES`, `RUNTIME`, `LATENCY`) with an in-place action/detail drawer for URL, default model, last probe error, and reachability. `Enter` opens actions for `Use` (switches active chat target and rebases model), `Connect` (runs the API-key or OAuth flow then probes), `Probe`, and `Remove` (with preflight analysis of affected routes/profiles). Probing runs live when the overlay opens or when explicitly requested. Target creation is initiated via `clio-coder targets add`.
-
-Settings → Fleet is an entity workbench organized with dim group headers (`Defaults`, `Profiles`, `Agent routes`, `Placement`). Dispatched worker defaults and profile rows render as compact summaries (`fast-local node-a/example-coder-model  high  auto`), drilling into fields (`target`, `model`, `thinkingLevel`, `node`) on `Enter`. Profile removal is a named destructive action with affected-route preflight.
-
-Running and retrying dispatches live in the `/fleet` or `Alt+W` Fleet Runs board. Its default cards show task previews, route, status, trust/evidence, telemetry and the current operation when available. `Enter` expands the selected card to show its full task and route, policy and budget, and bounded answer. Long task previews explicitly point to Enter detail. Empty boards offer `/run` or `/delegate` and no selection action.
-
-An ordinary sealed completion without validation shows `unverified; no validation observed`, and `Enter` restores the full provenance summary. Unknown or failed trust facts remain visible by default. Completion is not scientific validation.
-
-`/run` and `/delegate` put the worker's answer on screen. Both echo the typed
-line dim above the block, then stream the run into the transcript as an
-attributed block: a header (`◇ coder · node-a/example-coder-model · run 2mkas6s`
-for fleet workers, or `◇ codex (acp) · run 7hq2ab` for ACP peers), the worker's
-prose down a rail, one coalesced line of tool names, and a one-line footer
-carrying the outcome glyph, token count, duration, and contract status, such as
-`└ ✓ ok · 8.4k tok · 18s · contract unmeasured`. A failure reason prints on the
-rail above the footer.
-
-Model-launched workers use `◆` and operator-launched workers use `◇`. Both follow
-the same Output style: Standard shows a short reported summary, Detailed adds
-bounded activity labeled `now:` for current work and `last:` for completed calls,
-and Compact keeps identity and outcome. Pending checkpoint questions remain
-visible in Compact.
-
-The footer shows the active worker count alongside the main agent's phase. Use
-`/view transcript` or `/view dispatch:<runId>` for full available details. Memory
-workers do not appear as transcript blocks, and a failover keeps one block with
-an attempt annotation.
-
-That block is the only place a `/run` answer goes. The main agent is not told
-about it, which is what makes a side run a side run; asked about the answer, it
-will say it has not seen one.
-
-To hand the answer to the main agent, use `--share` on either command to pass it
-over when the run finishes, or `/share [runId]` afterwards for a run already on
-screen. Bare `/share` takes the newest finished run the operator started
-themselves and never a model-asked `◆` run; `/share <runId>` may name a
-model-asked run explicitly.
-
-<details>
-<summary>How a shared result enters the session, and why the model does not discard it</summary>
-
-What crosses is the receipt's own bounded text under a
-`[worker result] coder · run 2mkas6s · ok · shared by the operator` header,
-entering the session through the ordinary user-turn path so replay and
-compaction treat it as operator text.
-
-The header names the operator as the origin, and the system prompt tells the main
-agent that such a note is operator steering whose run id names a receipt it can
-read, so a model that never dispatched the run does not discard it as
-unattributed output. A turn that only relays a shared note does not trip the
-unbacked-worker-claim advisory.
-
-</details>
-A council run shares as a council. `/share <synthesis runId>` brings the whole
-`council-report` in as one bounded block: every final-round member's answer under
-its roster label, each with its verdict when it declared one, then the synthesis
-line naming the mode, the verdict, the tally, and the judge run when there was
-one. `/share <member runId>` brings that one member's answer in under its roster
-label, so a single voice never reaches the main agent as an unattributed one. A
-synthesis run whose sealed text does not parse as a report is shared verbatim
-rather than dropped, because the operator named that run.
-
-`/new` resets the transcript and the pool bare `/share` draws from, so a run
-from the previous session cannot be shared into the new one. Worker tool
-arguments never cross as raw input: transcript and board activity can show tool
-names and their redacted action descriptors.
-
-Blocks survive a resume. Each attempt writes a `workerRun` session entry naming
-the run, its origin, and its runtime, and `/resume` rebuilds the block from that
-entry plus the sealed receipt under `<state>/receipts/<runId>.json`. The session
-file's `workerRun` entries carry ids, origins, and runtime references only, without
-prose; the replayed answer is bounded from the receipt exactly like the live one.
-A run whose receipt is gone replays with a `receipt unavailable` footer rather
-than a header with nothing under it. The entries are bookkeeping: they cost nothing
-in the context window and never become model context, so resuming a session full
-of side runs does not spend the window on them.
-
-The `/tasks` overlay combines the live session board, terminal task history,
-successful workspace artifacts, and the project-scoped operator task inbox.
-The live board shows every task with its status, operator provenance, completion
-evidence, or block/drop reason. It persists as full `taskLedger` snapshots, so
-stable board history and `userTaskId` pickup links survive `/resume` and `/fork`
-and can be audited from `current.jsonl`. Operator tasks persist separately in
-`.clio-coder/user-tasks.json`; the overlay can add, hand, finish, or drop them.
-The model-facing `tasks` tool's session-ledger and inbox bookkeeping is the
-documented read-class exception described in [the safety model](../architecture/safety-model.md):
-calls remain audited as `read` and do not grant workspace mutation authority.
-
-The `/decisions` overlay shows completed and cancelled `ask_user` interviews
-from the active branch. It retains settled and superseded values from
-`decisionLedger` snapshots, expands the source question and answer, and lets the
-operator supersede a decision or enter a correction. A correction is submitted
-to the model as an ordinary operator turn after the durable snapshot changes.
-
-The compact footer stays at two rows: current work, target/model, thinking and context
-occupancy, then shortcut hints with throughput and the dashboard shortcut. Normal
-editor rails have no MESSAGE/FOLLOW-UP labels, model labels, or send/newline hints.
-Footer shortcuts rotate every twelve seconds through small groups of currently bound
-composer actions, including send/newline, model/thinking controls, queues and navigation.
-They respect remapped and disabled bindings and remain available with Demo guidance off.
-Notices and contextual Demo tips take priority over shortcut reminders; parked permission
-controls remain visible on the editor rail. The workspace path and Git branch return between hint cycles. Neon teal is
-reserved for the editor rails; dashboard accents, tool colors, and agent colors
-use a quieter intensity tier.
-
-`Alt+U` cycles Activity, Context, Status, then closes the dashboard. Expanded pages
-share one-quarter of the available viewport (minimum eight rows), with padding
-that keeps the composer anchored across page changes. Activity shows current
-worker progress; finished runs collapse into invocation history. Context shares
-its category palette and occupancy grid with `/context`, plus cache and compaction
-telemetry when available. Status pairs Cost & Connections with Local Machine:
-tracked cost and the configured Clio spending ceiling, provider quota availability,
-ready MCP client IDs, active plugin packages, extension counts, and worker/tool
-activity. Provider quotas are explicitly unreported until supplied by a provider;
-the Clio ceiling is not a provider account balance.
-
-The local sampler updates every two seconds without subprocesses or inference-server
-requests. CPU/RAM and Clio process RSS use OS counters. On Linux, network and disk
-rates come from kernel counters; each shows the busiest interface or whole disk,
-not a potentially double-counted total. Supported GPU drivers expose utilization
-and VRAM through sysfs. Missing counters stay unavailable; WSL measurements are
-labeled as guest measurements and do not describe the Windows host or remote GPU.
-Counter resets wait for a fresh baseline instead of showing negative rates. Memory
-bank and context-engine activity remain visible. `/usage`, `/mcp`, `/library`, `/context`, and
-Fleet Runs retain deeper inspection. Narrow or short terminals explicitly indicate
-when detail does not fit.
-
-The read-only `/memory` overlay keeps durable and session memory attributable
-in one place. It lists approved evidence-backed lessons, then the live task
-bank by private status, knowledge, and procedural class, including each
-entry's injection count and the last memory-step outcome. The welcome launchpad
-and expanded dashboard summarize whether intervention is on, its rules or LLM
-tier, and current bank size.
-After `/resume`, Clio offers `/memory seed` when the newest handoff contains a
-structured snapshot. Seeding is explicit, deduplicated, and unavailable while
-`context.memory.enabled` is false.
-
-The `/interop` overlay lists the other coding agents Clio found on this machine,
-grouped `Detected`, `Configured`, `Declined`, and `Inventory`. A detected row's detail pane
-shows the exact `integrations.externalAgents.entries` entry that connecting it would append, plus
-the two facts a new peer inherits: `projectContext: none`, so the peer receives
-the task text and never the project projection, and `toolGovernance:
-clio-coder-policy`, so its tool calls are gated by Clio safety. Press `a` to connect
-one or `d` to decline. Opening the overlay refreshes the disk inventory and runs
-bounded version probes; navigation and plan approval start no agent session. Accepting applies to the live session,
-because `delegation` hot-reloads.
-
-Boot adds at most one line about interop. `/interop` opens the inventory and connection review. The hint names installed, unconfigured, undecided agents and stays silent in headless or ACP mode. Declining an agent silences its connection proposal until its binary version or path changes.
-
-`clio-coder interop inspect [--json]` reports host resources and wiring. `clio-coder interop adopt <host> [--kind skill|agent|prompt|plugin] [--project|--user] [--yes] [--dry-run]` shows a plan and requires approval before installing safe resources through the library. `/interop` offers the same adoption plan with source and destination scope, kind selection, and explicit approval. See [Coding agent interoperability](interop.md) for layouts, limits, and trust semantics.
-
-`clio-coder doctor` reports interop and never proposes anything. It emits one
-`ok` row per detected agent naming its version, its path, and whether it is
-configured, one `warn` row for a configured peer whose command no longer resolves
-on PATH, and one aggregate row counting the skills loaded from foreign roots. A
-machine with no other agents installed emits no interop rows at all. Reachability
-for a stdio peer means the command resolves; doctor never starts a session with
-one, and plain `doctor` writes nothing.
 
 ## Keybindings
 
@@ -881,248 +537,36 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-Clio Coder operates with a single, unified tool surface. There are no separate tool-visibility modes; what varies is the `autonomy` level (`read-only` | `suggest` | `auto-edit` | `full-auto`), edited in the `/settings` Permissions & Limits section.
-
-Tool and command execution is governed by:
-- **Target Capabilities:** What the selected model target actually supports (such as tools, streaming, and vision).
-- **Safety Net:** Granular rule packs loaded from `damage-control-rules.yaml`, project policies, and protected artifact paths; always on, identical at every autonomy level.
-- **Autonomy Mapping:** Once the net passes a call, the level decides whether it runs, asks, or is denied. See [safety-model.md](../architecture/safety-model.md) for the full matrix.
-
-At `auto-edit` a recognized command runs without asking. Recognized commands include the repository test runners such as `npm test`, `pytest`, `python -m unittest`, `ctest`, and `make check`, which execute repository code. The full list is in [tool-usage.md](tool-usage.md#bash-run-a-shell-command).
-
-When an action asks for confirmation, whether from a safety-net rail or from the autonomy level, the call parks and three surfaces say so at once. The transcript row reads `⏸ awaiting approval` with `action ·`, `axis ·`, and `target ·` lines under it; the footer phase pill reads `⏸ confirm`; and a consequence-tier dialog opens with the tool, target, action, authenticated requester, one-shot authority, reversibility, and deny and stop effects. Titles distinguish workspace authority, outward consequences, safety-net confirmation, system changes, and worker escalations. The dialog sits at bottom center with five rows reserved for the composer and footer, and it re-anchors on resize. The composer rail switches to `CONFIRM` and repeats the keys while the prompt owns the keyboard.
-
-The keys are the same on both surfaces: `Enter` allows this one call, `Esc` denies it, and `s` denies it and stops the turn so nothing asks again. `Enter` allows only from an empty composer. While the composer holds a draft, the habitual send key does nothing, the rail and the dialog footer read `[Backspace] clear draft` instead of `[Enter] allow`, and only the deletion keys (`Backspace`, `Delete`, `Ctrl+U`, `Ctrl+W`, `Ctrl+K`) reach the editor until the draft is gone. Every other key is swallowed. A call that parks while another overlay holds the screen is announced with an `[approval]` notice and the dialog opens as soon as that overlay closes; the dialog lays itself out for any terminal width, so no width is too narrow for it. Approving or denying never changes the level.
-
-Notice vocabulary, one prefix per mechanism: `[safety-net]` for level-independent blocks, `[approval]` for parked calls, `[autonomy]` for read-only denials, and `[middleware]` for hook diagnostics.
+The autonomy setting controls whether a policy-approved action runs, asks, or is denied. Safety rules remain active at every level. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or `--autonomy read-only` when execution must be restricted. See the [safety model](../architecture/safety-model.md) and [Bash policy](tool-usage.md#bash-run-a-shell-command).
 
 ## Dispatch and Built-In Agents
 
-Fleet dispatch runs focused agent recipes through configured targets. The final agent fleet includes:
-
-| Agent | Category / Audience | Use it for |
-| --- | --- | --- |
-| `architect` | `plan` / `base` | Mapping boundaries, contracts, and migration slices. |
-| `coder` | `implement` / `base` | Bounded implementation, repairs, and behavior-preserving refactors. |
-| `debugger` | `quality` / `base` | Explaining a failing run, test failure, or session evidence without edits. |
-| `documenter` | `implement` / `base` | Updating developer-facing docs, examples, and operational runbooks. |
-| `git-master` | `implement` / `base` | Bounded git repository operations, history, commits, worktrees, and PR preparation. |
-| `tester` | `quality` / `base` | Focused tests for regressions and verification gaps. |
-| `verifier` | `quality` / `base` | Independent test, lint, build, and quality gate reports. |
-| `wiki-writer` | `implement` / `base` | Planning one repository wiki or researching and writing one wiki page. |
-| `scout` | `explore` / `shadow` | Read-only repository exploration, symbol mapping, and context assembly. |
-| `researcher` | `research` / `shadow` | Documentation, literature, and web-grounded investigation. |
-| `provenance` | `operations` / `shadow` | Reading evidence files, receipts, diffs, and telemetry for handoffs. |
-| `oracle` | `plan` / `shadow` | Challenging one question against the session's settled decisions through `/oracle`. |
-| `context-bootstrap` | `internal` / `internal` | Bootstrap agent behind `clio-coder context init` that inspects the repository and returns `CLIO-CODER.md`. |
-
-Examples:
-
-```bash
-clio-coder run --agent coder "Find the main build, test, and lint commands."
-clio-coder run --agent architect "Plan a minimal change to add JSON output to the CLI."
-clio-coder run --agent verifier "Run tests and confirm the build passes."
-```
-
-Dispatchable shadow helpers (`scout`, `researcher`, `provenance`) appear in
-`clio-coder agents --all`, the full agent catalog, and the compact fleet prompt,
-but user-origin `/run` and `clio-coder run --agent` requests are rejected for
-them. `oracle` also appears in `--all` and the full catalog, but it is deliberately
-excluded from the compact prompt and is reached only through `/oracle`.
-For broad repository reconnaissance, the operating contract and Scout catalog
-description steer the model to author a Scout dispatch. The chat harness does
-not mechanically route the request. A threshold nudge advises Scout delegation
-after 9 or more manual read-only exploration calls in one turn.
-
-Agent recipes are the Markdown source files. The normalized agent spec is the
-catalog/runtime view: category, capability class, latency class, tags, mode, and
-tool set. This keeps Clio's product vocabulary stable while dispatch continues
-to execute through the existing engine worker path, the sanctioned Claude Code worker runtimes (`claude-sdk` and `claude-code`), or external ACP delegation agents.
-
-## Verification Lanes
-
-| Command | Purpose |
-| --- | --- |
-| `pnpm run ci` | Local and GitHub PR gate: typecheck, lint, library package pin and skill audit checks, build, the deterministic test suite, and the web application suite. |
-| `pnpm run ci:release` | Maintainer release gate: `pnpm run ci`, then the `check-release` dist and packaging audit. |
-| `pnpm run typecheck` | Strict TypeScript pass. |
-| `pnpm run lint` | Biome checks plus `scripts/check-hygiene.ts`, which runs the boundary invariants, the library package pin and skill audit checks, and the README and docs drift rules. |
-| `pnpm test` | Focused contract and smoke files through plain `node --test`. |
-| `pnpm run build` | Production bundle through `tsup`. |
-| `pnpm run dev` | `tsup --watch`. |
-| `pnpm run clean` | Remove `dist/`. |
-
-Live provider checks cost tokens or local GPU time and are deliberately not
-part of deterministic CI. Maintainers perform them explicitly against an
-isolated Clio home and a named configured target, recording the target, wire
-model id, serving configuration, and result with the release evidence. This is
-the appropriate lane for local gateways such as llama.cpp, LM Studio, vLLM,
-and SGLang, and for cloud targets with operator-provided credentials.
+Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker and `/delegate` starts a configured ACP peer. Fleet profiles determine target, model, and limits; worker execution and receipts are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md).
 
 ## Environment Variables
 
-Clio Coder also reads environment variables for platform paths, diagnostics, lifecycle integration, tests, and process-local behavior such as `CLIO_CODER_RIGOR`. Durable guardrail policy lives only in settings. For the complete maintained inventory, see [environment-variables.md](environment-variables.md).
-
----
+Clio-specific and ambient variables are listed in the [environment variable reference](environment-variables.md).
 
 ## Project Context
 
-Clio uses the nearest checked-in `CLIO-CODER.md` as the canonical project guide. Run
-`/context init` in the TUI or `clio-coder context init` from the shell to create or
-refresh it. During adoption, Clio can fold useful content from supported agent
-instruction files into `CLIO-CODER.md` with provenance.
-
-To skip project context for one invocation:
-
-```bash
-clio-coder --no-context-files
-clio-coder -nc run --agent scout "..."
-```
+`CLIO-CODER.md` is the project guidance file. Context operations are exposed through `clio-coder context` and `/context`; the maintained architecture and lifecycle details live in [Context continuity](context-continuity.md) and the [context engine](../architecture/context-engine.md).
 
 ### Codewiki index
 
-`clio-coder context index` builds the structural codewiki without any model calls. It
-writes `.clio-coder/codewiki.json` plus
-`.clio-coder/state.json`, records `codewikiVersion`, and prints coverage plus a
-structural hash. The same builder is used by `clio-coder context init`, `clio-coder context
-refresh`, session freshness checks, tool-demand backfill, and in-session
-incremental updates.
-
-`clio-coder context map` derives an archify architecture specification from the structural index without model calls and writes it to `.clio-coder/artifacts/maps/<repo>.architecture.json` (or `--out <path>`). Map generation reconciles the existing structural index before mapping; a missing index refuses and names `clio-coder context index`.
-
-Pinned source citations require that the workspace is clean at repository root and indexed file bytes match current files and Git blobs under a GitHub origin and full `HEAD` revision. Unknown or dirty source states fall back cleanly to usable uncited seeds. `--json` reports path, counts, repository metadata, reconciled index status, and source state (`clean`, `dirty`, or `unknown`).
-
-Clio produces the deterministic seed while Archify validates and delivers it. Standard validation checks schema conformance and layout composition, source review assesses semantic claims, and visual review in a browser assesses layout presentation. Custom model-authored maps can remain layout-invalid until refined.
+`clio-coder context index` builds the structural codewiki without model calls. `context map` derives an architecture map from that index. Pinned source citations require a clean repository and matching indexed bytes; dirty or unknown source state falls back to uncited seeds.
 
 ### Working-set replay
 
-`clio-coder context replay --sessions <path>...` accepts individual session
-directories, Clio sessions roots, and ledger JSONL files. `--synthetic <ids>`
-adds one or more procedural corpora (`science-long`, `refactor`, `exploration`)
-generated in memory from a fixed seed, so the committed tables can be rebuilt
-byte for byte on any checkout without private transcripts.
-
-Both sources drive the live fold, projection, policy, and eviction planner at
-deterministic turn boundaries. Clio traces remove prior eviction/recall sidecars
-and select the active branch.
-
-| Flag | Effect |
-| --- | --- |
-| `--no-filter` | Retains every otherwise-readable trace. The default inclusion cascade for ledgers requires at least eight turns, eight tool results, and one file re-read. |
-| `--md <file>` | Writes Markdown to that file instead of stdout. |
-| `--json` | Writes a stable report including the configuration, the corpus, git revision when available, and the exact command line. |
-| `--protect-last-turns`, `--min-evictable-tokens` | Override those two working-set settings for the replay only. They never update saved settings. |
-
-<details>
-<summary>What each reported metric means, and how the replay models the summary stage</summary>
-
-**Saturated events** is pooled over applied eviction events and reports how often
-a policy exhausted its usable candidates, which distinguishes a budget that
-measures policy choice from one that simply runs out of evictable material.
-
-**Recall tokens** is the token-weighted complement of precision: what a perfect
-recall would read back for evicted items the session referenced again.
-
-**Cold prefix tokens** is the projected working set after the earliest evicted
-position of each event, which is what an exact-prefix cache re-prefills on the
-next request.
-
-The replay also models the summary stage. When the projection is still over the
-threshold after an eviction, it applies the same `findCutPoint(keepRecentTokens)`
-cut the live path uses, appends a stand-in `compactionSummary`, counts it, and
-treats what the cut removed as lost for retention. **Summaries (mean)** is
-therefore the number of lossy, token-spending compactions a policy forced per
-trace. The summary-headroom mean always carries its contributing trace count,
-because traces that never require summary compaction do not enter that nullable
-mean.
-
-</details>
-
-`clio-coder context working-set --session <id|path>` is a read-only inspection command for
-one ledger. It prints evicted refs with reason, superseding ref, and token count; aggregate
-event, recall, and churn facts; path-observation counts by operation; and paths whose earlier
-reads were followed by writes or edits. A persisted `/tree` pin is honored when the session
-metadata is available, so the report does not resurrect an abandoned branch.
-
-The current artifact is schema v5. It records files with path, language, line
-count, role, content hash, imports, and optional summary; declaration-only
-symbols with name, kind, file id, line, and optional signature; and import edges
-to internal files or external modules. The writer emits compact JSON.
-Tree-sitter extraction covers TypeScript, JavaScript, Python, Go, Rust, C, C++,
-Java, Ruby, and C#, with per-file regex fallback where a regex extractor exists.
+`clio-coder context replay --sessions <path>...` replays saved ledgers; `--synthetic <ids>` adds deterministic procedural traces. `--json` writes a stable report, and `--md <file>` writes Markdown. `clio-coder context working-set --session <id|path>` inspects eviction, recall, and path observations for one session. These are read-only; replay-specific policy overrides never write settings. See [working-set design](../architecture/context-working-set.md).
 
 ### Markdown wiki commands
 
-`clio-coder context wiki` generates the optional agent-authored wiki under
-`.clio-coder/wiki/` by dispatching the `wiki-writer` agent through the configured
-model target. It makes one planning dispatch, which revises the page plan the
-codewiki index derived, then one dispatch per page. `quickstart.md` and every
-directory `index.md` are generated deterministically from the pages' front
-matter after the run, so no dispatch writes them. `.clio-coder/wiki/meta.json` records
-the page list, model label, content hash, git head, indexed source-tree hash,
-and the plan.
-
-Ordinary planner, page, and whole-run time and tool estimates are advisory across
-generation, not automatic aborts. An explicit caller deadline (`timeout_ms`) or
-operator cancellation remains authoritative. Failed writers remain pending; admission
-rejection does not consume a writer attempt. When `generation.pagesWritten` is below
-`generation.pagesPlanned`, run `clio-coder context wiki --update` to continue pending pages
-and refresh stale pages based on changed source dependencies, or run `clio-coder context wiki --retry-pending`
-to retry each pending page once, including exhausted pages, without erasing cumulative attempts
-or replanning at the same depth.
-
-Coverage depth is controlled by `--depth auto|simple|medium|detailed` and is harness-owned;
-explicit upgrades and downgrades requeue coverage while retaining existing prose, and
-default retries retain saved depth. Both original writer output and saved pages pass nonmutating
-mechanical validation (missing/escaping paths, invalid line ranges, malformed source/test
-metadata, or empty bodies keep pages pending); mechanical checks do not establish semantic
-accuracy or that the model read the source.
-
-`clio-coder context wiki --update` requests update mode explicitly. It revalidates
-pages against bounded source-byte evidence and recorded source and test dependencies
-rather than assuming unmentioned pages remain fresh. Pages with changed inputs or
-dependencies, as well as pages whose Git evidence is missing, unreadable, or changed,
-are re-queued for generation, while verified up-to-date pages are preserved; it is not a
-promise to overcome exhausted attempts.
-`clio-coder context wiki --status` is read-only: it prints whether wiki metadata is
-present, page count, `updatedAt`, recorded `gitHead`, whether that head differs
-from current `HEAD`, and retained failure diagnostics for unwritten planned pages. It dispatches
-nothing and spends no model tokens.
-
-`clio-coder context refresh` rebuilds only the structural codewiki and state. It does
-not run a model and does not touch `CLIO-CODER.md` or `.clio-coder/wiki/`. If a wiki exists
-and its recorded git head is stale, the command prints the hint:
-
-```text
-wiki is stale; run clio-coder context refresh --wiki or clio-coder context wiki --update
-```
-
-`clio-coder context refresh --wiki` is the explicit model-spend path for refresh. It
-first rebuilds the structural codewiki, then updates an existing wiki when
-`.clio-coder/wiki/meta.json` exists. If no wiki metadata exists, the flag is accepted
-and no wiki model call is made; use `clio-coder context wiki` to create the first
-wiki.
+`clio-coder context wiki` creates the optional model-authored wiki through the wiki-writer agent. `--status` is read-only; `--update` refreshes stale pages; `--retry-pending` retries pending pages. `clio-coder context refresh` rebuilds only the structural index; `context refresh --wiki` also updates an existing wiki and does not create the first one.
 
 ### code_nav modes
 
-Agents query the codewiki through the read-only `code_nav` tool instead of
-grepping the tree. Every mode reads local artifacts, so lookups are fast and
-model-free.
+The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#code_nav-navigate-the-codewiki-index).
 
-| Mode | Arguments | Returns |
-| --- | --- | --- |
-| `symbol` | `query=<name>` | Declaration records with path, line, kind, and signature. |
-| `path` | `query=<glob \| /regex/ \| substring>` | Indexed files whose path matches the pattern. |
-| `entries` | `[limit=<n>]` | Likely entry points from file roles and `package.json` main/bin. |
-| `outline` | `query=<path>` | Declarations in one indexed file. |
-| `deps` | `query=<path>` | The file's internal and external imports. |
-| `dependents` | `query=<path>` | Indexed files that import the target file. |
-| `wiki` | none | Wiki pages plus absent/fresh/stale state and layout warnings. |
-
-`entries` defaults to 25 results and caps at 200. `path` accepts a
-`/pattern/flags` regex, a glob using `*`, `?`, or `[...]`, or a plain substring.
-`outline`, `deps`, and `dependents` resolve an exact indexed path or a unique
-substring match.
 
 ## Output styles
 
@@ -1147,58 +591,6 @@ Use **/view transcript** to select full available reasoning, tool arguments/resu
 Output style changes presentation only. **Shift+Tab** still changes the model's thinking effort. It does not reveal unavailable reasoning; Clio shows only reasoning supplied by the provider. The previous Alt+R, Alt+P, and expand-all rendering shortcuts are retired. `/output` now explains how to reach Alt+O and Settings. Existing `minimal`, `default`, and `verbose` preferences map to `compact`, `standard`, and `detailed` without rewriting other preferences.
 
 The footer owns live activity. Transcript actions have static running or outcome markers and update in place. Background workers add a count without replacing the main agent's current phase; a completed worker cannot clear a sibling's active state. Approval and user-input waits do not spin. Failed and cancelled turns retain their actual outcome, and an elapsed wait is described as silence rather than proof that a process is stuck. A worker's successful execution remains separate from its validation result.
-
-## TUI Surface Refinements
-
-The Clio TUI maximizes operational focus, ergonomics, and discoverability:
-
-- **Welcome Launchpad & Session Header:** Prior to your first prompt, Clio renders a framed launchpad dashboard (`src/interactive/welcome-dashboard.ts`) with 11 detail rows (model route status, workspace path, permissions/autonomy, guidance, target inventory, and fleet recipes) plus a wrapping `Subscriptions` field once a connected account reports quota, accompanied by ASCII wordmark art at ≥76 columns and rotating hints at ≥160 columns. A bottom action row indicates the immediate step or blocker (`describe a task · Enter to send · / for commands`, or route blockers such as `/model` or `/settings targets`). On prompt submission, the launchpad collapses to a single live header row (`>C_ Clio Coder v0.5.1 · <target/model> · <workspace> · <branch>*`) tracking mid-session route or branch changes. `/new` restores the launchpad; `/resume`, `/tree`, `/fork`, and `/handoff` collapse it after transition. See [tui-design.md](../architecture/tui-design.md#51-welcome-launchpad--session-header).
-- **Quiet, Focused Clio Composer:** Normal composition rails remain clean and uncluttered (`src/interactive/clio-editor.ts`), omitting duplicate model identity or newline hints already provided by the footer. Exceptional operational states elevate to the top rail: `CONFIRM` (`warning` token, or `CONFIRM · FULL-AUTO` in `editorDanger`) when an approval prompt owns input, `PREPARING` during turn dispatch, `COMPACTING` during context compaction, or `FULL-AUTO` (`editorDanger`). Native editor scroll indicators (`↑/↓` line counts) remain on line 0 when drafts scroll. When the draft is empty, line 1 shows context-aware dim placeholder text (`Ask Clio…  / for commands`, `A parked call is waiting for your decision`, `Clio has your prompt and is preparing the turn`, or `Clio is compacting the session context`). During parked permission prompts, the bottom rail carries fitted decision keys (`confirmRailHint` via `src/interactive/permission-hint.ts`: `Enter` allow, or `Backspace` clear draft to allow if a draft is present; `Esc` deny; `s` stop turn; `v` inspect mutation; standing approval terms toggle via `?` on the permission card itself).
-- **Two-Line Compact Footer & Expanded Dashboard:** The compact footer (`src/interactive/footer/pages.ts`) renders an ambient two-line strip: Line 1 displays live activity phase (`accent`) and active worker counts (`agent`), model/target identity, thinking level, context meter bar, and token usage; Line 1 also shows the selected model’s weekly quota remaining when its account and model group are known; Line 2 preserves workspace cwd and Git branch/dirty state on the left, with rotating shortcuts, tips, or urgent notices on the right. Pressing `Alt+U` expands the dashboard into 1/4 of the viewport (minimum 8 rows), cycling through `Activity` (live worker cards and finished history), `Context` (meter bar/grid, category swatches, headroom), `Status` (Cost & Connections, Local Machine metrics, memory bank), and closed.
-- **Grouped Slash Command Palette:** Typing `/` opens an autocomplete command palette grouped by operational category (`Run`, `Inspect`, `Configure`, `Sessions`) with compact argument hints. Every suggestion is the command's one canonical spelling.
-- **Voice-First Transcript & Receipts:** User (`› `) and assistant (`✦ `) prose are formatted with a two-cell hanging indent, ensuring wrapped continuation lines remain visually tied to their voice prefix. Tool ledgers maintain full terminal width. Completed turn receipts honor Output style: Compact omits the separate receipt, Standard shows a small completion line with available duration, and Detailed includes available call counts, token usage and reasoning provenance.
-- **Transactional Settings Center:** Open `/settings` or deep-link to one of `chat`, `fleet`, `targets`, `context`, `safety`, `interface`, or `integrations`. Value edits construct change plans offering `Apply this session`, `Apply and save globally`, or `Cancel`; narrow terminals use a drill-down layout below 72 columns.
-
-## Overlay and Presentation Conventions
-
-Clio Coder follows strict presentation guidelines across all TUI surfaces:
-
-### Hint Grammar
-All TUI overlays construct footer hints using a standard grammar. Keys are displayed in brackets and normalized to canonical casing (`Enter`, `Esc`, `Space`, `Tab`, `↑↓`, `r`, `R`, `type`), separated by a middle dot (` · `):
-- Format: `[Key] action · [Esc] close`
-
-### Browse vs. Commit Modes
-Overlays operate in one of two modes which govern the Escape key behavior:
-- **Browse Mode:** Used for read-only viewing or exploration. The Escape key is labeled `close` (`[Esc] close`).
-- **Commit Mode:** Used for forms, selections, or settings changes that alter state. The Escape key is labeled `cancel` (`[Esc] cancel`).
-
-### Notice Levels
-Diagnostic writes in the transcript use the themed notice channel instead of raw ANSI or bracket prefixes. Notices render a single themed line containing a colorized glyph and the message:
-
-| Level | Glyphs | Color Token | Purpose |
-| --- | --- | --- | --- |
-| `info` | `ℹ` | `info` | Informational notices and general system status |
-| `success` | `✓` | `success` | Operation completed successfully |
-| `warn` | `⚠` | `warning` | Non-fatal issue or precaution |
-| `error` | `✗` | `error` | Fatal issue or operation failure |
-
-### ListOverlay Behavior
-The `ListOverlay` component provides a reusable kit for filterable, grouped, and selectable lists with an optional detail pane.
-
-Navigation keys include the up and down arrow keys, as well as the 'j' and 'k' keys when the filter input is not focused. These keys wrap selection around the ends of the list.
-
-The Tab key, or the Enter key when no primary action is defined, toggles the detail pane below the list.
-
-For filtering, typing in the input row dynamically filters items using a fuzzy search that matches both the item label and the group name. Group headers that have no matching items are hidden. The Escape key clears a non-empty filter, and pressing it again closes or cancels the overlay.
-
-The detail pane displays structured descriptions, usage, or state metadata using the Markdown component with the Clio markdown theme.
-
-### Responsive Width Adaptation
-
-All TUI overlays fluidly adapt to narrow terminals down to 40 columns:
-- `/view` falls back to one pane on narrow terminals. Type to filter, use Enter to read, Escape to return to the list, and Escape again to close. Ctrl+U clears the whole query while the filter has focus; long preview text wraps and scrolls. Tab also switches panes.
-- Settings provides a drill-down navigation stack below 72 columns (sections → rows → details) with breadcrumbs and `Esc` backtracking.
-- Text content and detail descriptions wrap cleanly without line truncation.
 
 ## Troubleshooting
 
@@ -1238,8 +630,4 @@ Task-board guidance and ordinary continuation preserve proposal-only scope. Defe
 
 ## Library packages
 
-The old top-level CLI `skills` and `plugins` groups are retired; use `clio-coder library`. In the editor, `/library`, `/skills`, `/agents` and `/prompts` open the shared browser. `/resources` and `/plugins` give a replacement hint. `/skill <name>` activates a skill; `/interop` handles local-agent discovery and reviewed adoption.
-
-Context composition keeps tool-definition schemas separate from tool-result messages. Provider usage anchors the total; category splits remain estimates. Growth beyond the decomposed estimate is assigned to the conversation/framing residual, not proportionally added to fixed prompt sections. Assistant output includes the latest completed response as well as in-flight output. Older snapshots without a tool-result split remain readable; subsequent live calls refresh the decomposition.
-
-Editor rails use a bold teal line at rest and a small moving teal/orange highlight while Clio works. Pending permission decisions use an orange pulse while retaining their keys. Effective `full-auto` autonomy adds a red `FULL-AUTO` label and red rail endcaps; it does not change approval or safety behavior. Rails stop animating while the composer contains a draft, or when `CLIO_CODER_REDUCE_MOTION=1`, `CLIO_CODER_SCREEN_READER=1`, `NO_COLOR`, or `TERM=dumb` applies. The full-auto label remains visible without color.
+Use `/library`, `/skills`, `/agents`, and `/prompts` to browse resources. `/skill <name>` activates a loaded skill; `/interop` reviews external coding-agent peers; `/extensions` manages harness extensions. See [Resource library](resource-library.md), [Interop](interop.md), and [Extensions and sharing](extensions-and-sharing.md).
