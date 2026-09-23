@@ -82,6 +82,7 @@ export {
 	isKeyRelease,
 	isKeyRepeat,
 	KeybindingsManager,
+	lexMarkdownBlocks,
 	Markdown,
 	Marked,
 	matchesKey,

@@ -38,10 +38,10 @@ index 445c8184eeb734692d9cc036f2a4b195d8769e3e..26569efa2f3d00ddb86e2d3bd1f88fb6
      private layoutText;
      getText(): string;
 diff --git a/dist/components/editor.js b/dist/components/editor.js
-index ab8b7eaeaf165369805841b30b0ffc87aa9beb1e..1b1e712359444bc4e4f4985ea08088f4643a5023 100644
+index 7eae102b06d78e10e0ab016f3ab020c66de6865d..611eef452a098528e5e2e21c0380b52473e2da35 100644
 --- a/dist/components/editor.js
 +++ b/dist/components/editor.js
-@@ -541,6 +541,18 @@ export class Editor {
+@@ -543,6 +543,18 @@ export class Editor {
              this.updateAutocomplete();
          return { handled: true, focus: true };
      }
@@ -61,7 +61,7 @@ index ab8b7eaeaf165369805841b30b0ffc87aa9beb1e..1b1e712359444bc4e4f4985ea08088f4
          const kb = getKeybindings();
          // Handle character jump mode (awaiting next character to jump to)
 diff --git a/dist/components/input.d.ts b/dist/components/input.d.ts
-index 982a3d9888fa79ed008f643beaf9461b068aed9e..b0166fca1076ab108f88874f9c7767347e819743 100644
+index 982a3d9888fa79ed008f643beaf9461b068aed9e..4df94e925f63c8d9cfd2a4e40189b0a938d8557f 100644
 --- a/dist/components/input.d.ts
 +++ b/dist/components/input.d.ts
 @@ -26,6 +26,7 @@ export declare class Input implements Component, Focusable {
@@ -73,7 +73,7 @@ index 982a3d9888fa79ed008f643beaf9461b068aed9e..b0166fca1076ab108f88874f9c776734
      handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined;
      private insertCharacter;
 diff --git a/dist/components/input.js b/dist/components/input.js
-index 5e7fffa205390c2b2ff906a5386275c9197490fa..e572c2b3ec0b05710141fb752cddd8f1fcf4b134 100644
+index 5e7fffa205390c2b2ff906a5386275c9197490fa..73428b2ee1c8b555bd3a8eed2dd88e11b1e851f2 100644
 --- a/dist/components/input.js
 +++ b/dist/components/input.js
 @@ -40,6 +40,26 @@ export class Input {
@@ -103,11 +103,74 @@ index 5e7fffa205390c2b2ff906a5386275c9197490fa..e572c2b3ec0b05710141fb752cddd8f1
      handleInput(data) {
          // Handle bracketed paste mode
          // Start of paste: \x1b[200~
+diff --git a/dist/components/markdown.d.ts b/dist/components/markdown.d.ts
+index acc312382885b1c813d540fafa1df3414545690b..ac4d177c39c35f4ab77ff36d388063a8daa1fecd 100644
+--- a/dist/components/markdown.d.ts
++++ b/dist/components/markdown.d.ts
+@@ -50,6 +50,11 @@ export interface MarkdownOptions {
+     /** Render supported LaTeX math expressions as Unicode text (default: true). */
+     renderLatex?: boolean;
+ }
++/** Clio patch: the top-level block tokens `Markdown` renders for `text`, tabs expanded. */
++export declare function lexMarkdownBlocks(text: string): Array<{
++    type: string;
++    raw: string;
++}>;
+ export declare class Markdown implements Component {
+     private text;
+     private paddingX;
+diff --git a/dist/components/markdown.js b/dist/components/markdown.js
+index 5788d755400164552ed09c7d69bdd67083caa5b1..2b7b5239b0b1827795d05799948a137428591d4f 100644
+--- a/dist/components/markdown.js
++++ b/dist/components/markdown.js
+@@ -147,6 +147,16 @@ markdownParser.setOptions({
+     tokenizer: new StrictStrikethroughTokenizer(),
+ });
+ markdownParser.use({ extensions: [...LATEX_MARKDOWN_EXTENSIONS] });
++/**
++ * Clio patch: the top-level block tokens `Markdown` renders for `text`, from
++ * the same lexer, tabs expanded the same way. Each token carries its `type`
++ * and `raw` source; the raws concatenate to the tab-expanded text. A caller
++ * that renders a document block by block splits it here so its blocks are
++ * exactly the ones this renderer would see.
++ */
++export function lexMarkdownBlocks(text) {
++    return markdownParser.lexer(text.replace(/\t/g, "   ")).map((token) => ({ type: token.type, raw: token.raw }));
++}
+ export class Markdown {
+     text;
+     paddingX; // Left/right padding
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 4a0657e57cc77703b2c271616302b7e80cb4ef2c..addc0f3c5a921d08ae09eb5986f42a8b2e8cd4d3 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -7,7 +7,7 @@ export { HStack } from "./components/h-stack.ts";
+ export { Image, type ImageOptions, type ImageTheme } from "./components/image.ts";
+ export { Input } from "./components/input.ts";
+ export { Loader, type LoaderIndicatorOptions } from "./components/loader.ts";
+-export { type DefaultTextStyle, Markdown, type MarkdownOptions, type MarkdownTheme } from "./components/markdown.ts";
++export { type DefaultTextStyle, lexMarkdownBlocks, Markdown, type MarkdownOptions, type MarkdownTheme } from "./components/markdown.ts";
+ export { MouseRegion, type MouseRegionHandler } from "./components/mouse-region.ts";
+ export { ScrollView, type ScrollViewOptions, type ScrollViewScrollbar, type ScrollViewScrollToOptions, } from "./components/scroll-view.ts";
+ export { type SelectItem, SelectList, type SelectListLayoutOptions, type SelectListTheme, type SelectListTruncatePrimaryContext, } from "./components/select-list.ts";
+diff --git a/dist/index.js b/dist/index.js
+index d3c851910daada428705eb52f0b0f55080d4d7e7..434af593b0b9d46087cac28f88313ab372cb4cd2 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -10,7 +10,7 @@ export { HStack } from "./components/h-stack.js";
+ export { Image } from "./components/image.js";
+ export { Input } from "./components/input.js";
+ export { Loader } from "./components/loader.js";
+-export { Markdown } from "./components/markdown.js";
++export { lexMarkdownBlocks, Markdown } from "./components/markdown.js";
+ export { MouseRegion } from "./components/mouse-region.js";
+ export { ScrollView, } from "./components/scroll-view.js";
+ export { SelectList, } from "./components/select-list.js";
 diff --git a/dist/tui-alt-screen.d.ts b/dist/tui-alt-screen.d.ts
-index 4cc739e48496a2c0c05979b12443d383ea1b962d..89bfcae5f6d739e27dd16e491681c14fd3300d90 100644
+index 0e4d31074f4a0ee62a47fc29dd6b7475a4f29cd7..43e1ac4fa22be9ab7263b5e25afc74bc641e749f 100644
 --- a/dist/tui-alt-screen.d.ts
 +++ b/dist/tui-alt-screen.d.ts
-@@ -97,11 +97,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
+@@ -98,11 +98,13 @@ export declare class TuiAltScreen extends TuiBase implements ViewportTUI {
      scrollBy(lines: number): void;
      scrollToTop(): void;
      scrollToBottom(): void;
@@ -126,10 +189,10 @@ index 4cc739e48496a2c0c05979b12443d383ea1b962d..89bfcae5f6d739e27dd16e491681c14f
      private handleSearchMouseEvent;
      private refreshSearch;
 diff --git a/dist/tui-alt-screen.js b/dist/tui-alt-screen.js
-index 08dc17e0c44140a5ee5ca7ceac0cd58824e63435..14b5dd0eda65c031ac6c3d63d155ef65af951366 100644
+index 13459fd73841c2908bd58012dd885b086eefa35b..60fd7f7d6ad17c00b9d69eda4e15bec11e7641c0 100644
 --- a/dist/tui-alt-screen.js
 +++ b/dist/tui-alt-screen.js
-@@ -300,6 +300,13 @@ export class TuiAltScreen extends TuiBase {
+@@ -301,6 +301,13 @@ export class TuiAltScreen extends TuiBase {
              return;
          }
      }
@@ -143,6 +206,122 @@ index 08dc17e0c44140a5ee5ca7ceac0cd58824e63435..14b5dd0eda65c031ac6c3d63d155ef65
      toggleSearch() {
          if (this.activeSearch) {
              this.closeSearch();
+diff --git a/dist/tui-main-screen.js b/dist/tui-main-screen.js
+index 896bb501fc5d6e7b0bf76faa8d97dcd045e95526..c30b6bbdba3f59dfc532e44b1e7570899b4955df 100644
+--- a/dist/tui-main-screen.js
++++ b/dist/tui-main-screen.js
+@@ -3,7 +3,8 @@ import * as os from "node:os";
+ import * as path from "node:path";
+ import { deleteKittyImage, isImageLine } from "./terminal-image.js";
+ import { TuiBase } from "./tui.js";
+-import { visibleWidth } from "./utils.js";
++import { normalizeTerminalOutput, visibleWidth } from "./utils.js";
++const SEGMENT_RESET = "\x1b[0m\x1b]8;;\x07";
+ const KITTY_SEQUENCE_PREFIX = "\x1b_G";
+ const MAX_RENDER_WRITE_CHARS = 1024 * 1024;
+ /**
+@@ -107,6 +108,61 @@ export class TuiMainScreen extends TuiBase {
+     hardwareCursorRow = 0;
+     maxLinesRendered = 0;
+     previousViewportTop = 0;
++    /**
++     * Clio patch: the previous frame's raw rows, their reset output and which of
++     * them are image rows. A row whose raw string is unchanged reuses its reset
++     * output by reference, so an unchanged scrollback prefix costs one comparison
++     * per row instead of a normalization, a string build and three image scans.
++     */
++    lineResetMemo = { raw: [], out: [], image: new Uint8Array(0) };
++    /** Clio patch: image row indices of every reset output array this renderer produced. */
++    lineImageRows = new WeakMap();
++    applyLineResets(lines) {
++        const memo = this.lineResetMemo;
++        // The raw snapshot and the image flags are rewritten in place: a frame
++        // over a tall transcript allocates nothing proportional to its height.
++        const raw = memo.raw;
++        const previousOut = memo.out;
++        let image = memo.image;
++        if (image.length < lines.length) {
++            const grown = new Uint8Array(Math.max(lines.length, image.length * 2, 64));
++            grown.set(image);
++            image = grown;
++        }
++        const previousLength = raw.length;
++        const imageRows = [];
++        for (let i = 0; i < lines.length; i++) {
++            const line = lines[i];
++            if (i < previousLength && line === raw[i]) {
++                lines[i] = previousOut[i];
++                if (image[i] === 1)
++                    imageRows.push(i);
++                continue;
++            }
++            raw[i] = line;
++            if (isImageLine(line)) {
++                image[i] = 1;
++                imageRows.push(i);
++                continue;
++            }
++            image[i] = 0;
++            lines[i] = normalizeTerminalOutput(line) + SEGMENT_RESET;
++        }
++        raw.length = lines.length;
++        this.lineResetMemo = { raw, out: lines, image };
++        this.lineImageRows.set(lines, imageRows);
++        return lines;
++    }
++    /** Clio patch: the rows worth scanning for image headers; every row when the array is unknown. */
++    imageRowsOf(lines) {
++        const known = this.lineImageRows.get(lines);
++        if (known !== undefined)
++            return known;
++        const rows = [];
++        for (let i = 0; i < lines.length; i++)
++            rows.push(i);
++        return rows;
++    }
+     captureRenderState() {
+         return {
+             previousLines: [...this.previousLines],
+@@ -129,6 +185,7 @@ export class TuiMainScreen extends TuiBase {
+         this.previousViewportTop = state.previousViewportTop;
+     }
+     resetRenderState() {
++        this.lineResetMemo = { raw: [], out: [], image: new Uint8Array(0) };
+         this.previousLines = [];
+         this.previousWidth = -1;
+         this.previousHeight = -1;
+@@ -151,8 +208,8 @@ export class TuiMainScreen extends TuiBase {
+     }
+     collectKittyImageIds(lines) {
+         const ids = new Set();
+-        for (const line of lines) {
+-            for (const id of extractKittyImageIds(line)) {
++        for (const row of this.imageRowsOf(lines)) {
++            for (const id of extractKittyImageIds(lines[row])) {
+                 ids.add(id);
+             }
+         }
+@@ -183,7 +240,7 @@ export class TuiMainScreen extends TuiBase {
+         let expandedFirstChanged = firstChanged;
+         let expandedLastChanged = lastChanged;
+         const expandForLines = (lines) => {
+-            for (let i = 0; i < lines.length; i++) {
++            for (const i of this.imageRowsOf(lines)) {
+                 if (extractKittyImageIds(lines[i]).length === 0)
+                     continue;
+                 const blockEnd = i + this.getKittyImageReservedRows(lines, i) - 1;
+@@ -445,6 +502,11 @@ export class TuiMainScreen extends TuiBase {
+             if (i > firstChanged)
+                 output.append("\r\n");
+             const line = newLines[i];
++            // Clio patch: a row inside the changed range that did not change is
++            // already on screen; step over it instead of clearing and rewriting it.
++            // A streamed token otherwise rewrote every row down to the footer.
++            if (i < this.previousLines.length && line === this.previousLines[i] && !isImageLine(line))
++                continue;
+             const isImage = isImageLine(line);
+             const imageReservedRows = isImage ? this.getKittyImageReservedRows(newLines, i, renderEnd) : 1;
+             if (imageReservedRows > 1) {
 diff --git a/dist/tui.d.ts b/dist/tui.d.ts
 index 8c770ec6e4125baa138a46999bc576cd60e9bf1e..329ca2951967f20e07ec60abe96916bf48186bb3 100644
 --- a/dist/tui.d.ts
@@ -205,3 +384,32 @@ index 887f5e8bd3c3ba9b467f9f6c6b5eb4af8a63f7f3..17ece264d1c7970f2b37877e7680df30
          if (this.inputListeners.size > 0) {
              let current = data;
              for (const listener of this.inputListeners) {
+diff --git a/dist/utils.js b/dist/utils.js
+index 31bb2e1105476b28d087c0def4f94862d723edff..1f0ef0c408a1148b1e1745bf14297d0abcc241ed 100644
+--- a/dist/utils.js
++++ b/dist/utils.js
+@@ -803,7 +803,9 @@ function wrapSingleLine(line, width) {
+     let currentVisibleLength = 0;
+     for (const token of tokens) {
+         const tokenVisibleLength = visibleWidth(token);
+-        const isWhitespace = token.trim() === "";
++        // Clio patch: a whitespace token can carry the closing codes of the styled
++        // word before it, so it is whitespace when its visible text is.
++        const isWhitespace = stripTerminalSequences(token).trim() === "";
+         // Token itself is too long - break it character by character
+         if (tokenVisibleLength > width && !isWhitespace) {
+             if (currentLine) {
+@@ -836,9 +838,12 @@ function wrapSingleLine(line, width) {
+             }
+             wrapped.push(lineToWrap);
+             if (isWhitespace) {
+-                // Don't start new line with whitespace
++                // Don't start new line with whitespace. Apply the codes it carries
++                // first, so a style the previous word closed stays closed.
++                updateTrackerFromText(token, tracker);
+                 currentLine = tracker.getActiveCodes();
+                 currentVisibleLength = 0;
++                continue;
+             }
+             else {
+                 currentLine = tracker.getActiveCodes() + token;
