@@ -100,7 +100,8 @@ export function TargetsPage({ client, view }: { client: Client; view: "targets" 
 					)}
 					{operation.data && !add.isPending && !mutate.isPending && (
 						<section className="trace-panel" aria-label="Target operation">
-							<h2 role="status">
+							{/* aria-live, not role="status": a role on the h2 would replace its heading role. */}
+							<h2 aria-live="polite">
 								{operation.data.kind.replace("targets.", "Target ")} · {operation.data.status}
 							</h2>
 							{operation.data.progress.length > 0 && (
