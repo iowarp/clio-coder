@@ -64,8 +64,8 @@ export type FleetAgentProfiles = Record<string, string>;
 
 /**
  * Harness decisions a System One model may answer instead of a chat model.
- * Each names a moment in the turn, not an agent: `routing` is accepted and
- * not consulted, because dispatch never awaits a decision model, `skills` and
+ * Each names a moment in the turn, not an agent: `routing` is retired, still
+ * accepted and never asked, because dispatch never awaits a decision model; `skills` and
  * `memory` narrow what the prompt carries,
  * `toolRisk` rates a command's blast radius for the approval prompt,
  * `drafts` picks the strongest of the candidates `/draft` generated,

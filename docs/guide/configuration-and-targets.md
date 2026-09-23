@@ -974,8 +974,8 @@ fleet:
 Eight sites are accepted, and each names a moment in the session rather than a
 component:
 
-- `routing` is accepted and not consulted. Dispatch routes with its rules and
-  never waits on a decision model; see [what `routing` changes](#what-routing-changes).
+- `routing` is retired. A binding still validates, is never asked, and is named
+  in one startup notice; see [what `routing` changes](#what-routing-changes).
 - `skills` answers which installed skills the listing carries, before the prompt
   is composed.
 - `memory` answers which durable records the prompt carries, at the same point.
@@ -1026,7 +1026,10 @@ is bound. Until 0.5.4 a bound site was asked about each dispatch's task during
 admission, for up to 3s, and its answer fed only the shadow route observation.
 A dispatch is the main agent's call, and a decision model that could delay it or
 change its route would be deciding on the agent's behalf, so the call was
-removed. A bound `routing` entry still validates and is otherwise ignored.
+removed and the site retired. A bound `routing` entry still validates, so a
+settings file written for an earlier release still loads, and a session that
+starts with one prints `fleet.decisionProfiles.routing is retired and ignored`
+once. Remove the entry to silence it.
 
 Task features are host-resolved and never accepted from model arguments.
 `routeValidationProjection` strips `routingFeatures` from a dispatch request on

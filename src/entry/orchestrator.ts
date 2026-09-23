@@ -114,6 +114,7 @@ import { PluginsDomainModule, pluginSnapshotFor } from "../domains/plugins/index
 import type { PromptsContract } from "../domains/prompts/contract.js";
 import { createPromptsDomainModule } from "../domains/prompts/index.js";
 import { credentialsPresent } from "../domains/providers/credentials.js";
+import { retiredDecisionSiteNotices } from "../domains/providers/decision-sites.js";
 import type { ProvidersContract, TargetDescriptor, ThinkingLevel } from "../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
@@ -2070,6 +2071,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				`task memory: ${offer.count} handoff entr${offer.count === 1 ? "y" : "ies"} available from ${offer.source}; run /memory seed to import`,
 			);
 		}
+	}
+	for (const notice of retiredDecisionSiteNotices(getCurrentSettings())) {
+		if (interactive) initialNotices.push(notice);
+		else process.stderr.write(`${notice}\n`);
 	}
 	for (const warning of agentRoleToolWarnings(providers, getCurrentSettings())) {
 		if (interactive) initialNotices.push(warning);

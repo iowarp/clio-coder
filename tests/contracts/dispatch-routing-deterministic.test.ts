@@ -7,13 +7,14 @@
  * dispatch and the worker starts as it would unbound.
  */
 
-import { ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
+import { retiredDecisionSiteNotices } from "../../src/domains/providers/decision-sites.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import typesafeJevRuntime from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -111,4 +112,13 @@ it("admits a dispatch without asking a bound routing site", { timeout: 20_000 },
 	} finally {
 		await closeServer(jev.server);
 	}
+});
+
+it("tells the operator once that a bound routing site is retired", () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	deepStrictEqual(retiredDecisionSiteNotices(settings), []);
+	settings.fleet.decisionProfiles = { routing: "system-one", memory: "system-one" };
+	const notices = retiredDecisionSiteNotices(settings);
+	strictEqual(notices.length, 1);
+	match(notices[0] ?? "", /^fleet\.decisionProfiles\.routing is retired and ignored: .* Remove the entry\.$/u);
 });

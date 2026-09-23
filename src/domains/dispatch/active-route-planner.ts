@@ -32,9 +32,9 @@ export function routeValidationProjection(
 		agentSelection,
 		routeApproval,
 		routeAttemptDecision,
-		// Host-resolved from the `routing` decision site while admission was
-		// still async. Stripped on the same terms as the reservation: a model
-		// must not be able to author the task features its own routing reads.
+		// No longer read: routing always classifies with the rules. Stripped on
+		// the same terms as the reservation, so a model can never author the
+		// task features routing reads.
 		routingFeatures,
 		assignmentDeadlineAt,
 		// Orchestrator-minted, never model-authored: the ledger reference is
