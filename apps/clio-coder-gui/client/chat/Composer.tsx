@@ -5,8 +5,9 @@
  * Two properties are load-bearing and easy to lose in a refactor:
  *
  * 1. It reads the draft from a store outside React, and its props are scalars
- *    behind `memo`, so a streamed timeline delta does not re-render the
- *    textarea. Passing the whole `SessionSnapshot` in would undo that.
+ *    or memoized facts behind `memo`, so a streamed timeline delta does not
+ *    re-render the textarea. Passing the whole `SessionSnapshot` in would undo
+ *    that, and so would a `route` object rebuilt on every render.
  * 2. The textarea is never disabled while a turn runs. Only the submit changes
  *    meaning, and a draft typed mid-turn survives the turn.
  */
@@ -16,7 +17,7 @@ import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExter
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { StatusMark } from "../design/status.js";
+import { StatusMark, TONE_GLYPHS } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import {
 	capabilityRefusal,
@@ -33,6 +34,7 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer.js";
+import type { RouteFacts } from "./route.js";
 import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
@@ -70,6 +72,21 @@ export interface ComposerProps {
 	readonly initialFocus: boolean;
 	/** The id of the turn running right now, or null when none is. */
 	readonly runningTurnId: string | null;
+	/** Where the next request goes. Memoize it: a new object on every render re-renders the field. */
+	readonly route: RouteFacts;
+}
+
+/** The target and model beside Send, with the target's reported health as its glyph. */
+function RouteChip({ route }: { route: RouteFacts }) {
+	return (
+		<span className="route-chip" data-tone={route.tone} title={route.title}>
+			<span className="route-chip__glyph" aria-hidden="true">
+				{TONE_GLYPHS[route.tone]}
+			</span>
+			<span className="route-chip__text">{route.text}</span>
+			<span className="sr-only">{route.spoken}</span>
+		</span>
+	);
 }
 
 export const Composer = memo(function Composer({
@@ -78,6 +95,7 @@ export const Composer = memo(function Composer({
 	sessionState,
 	initialFocus,
 	runningTurnId,
+	route,
 }: ComposerProps) {
 	const queries = useQueryClient();
 	const store = draftStore(sessionId);
@@ -308,6 +326,7 @@ export const Composer = memo(function Composer({
 				<p className="composer__hint" id={hintId}>
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
 				</p>
+				<RouteChip route={route} />
 				{running ? (
 					<>
 						{steering.interrupt ? (

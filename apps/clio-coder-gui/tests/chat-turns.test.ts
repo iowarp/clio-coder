@@ -13,6 +13,7 @@ import {
 } from "../client/chat/activity.js";
 import { type HealthItemLike, summarizeHealth } from "../client/chat/health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveState, liveStatus } from "../client/chat/live-status.js";
+import { routeFacts } from "../client/chat/route.js";
 import { activeTurn, type ChatTurn, groupTurns, sameTurnView, turnStatuses } from "../client/chat/turns.js";
 import type { HealthItem } from "../contracts/fleet-events.js";
 import type { Permission } from "../contracts/permissions.js";
@@ -630,4 +631,27 @@ test("a group says what it did in words, counting files once and leaving reasoni
 	assert.equal(summary.label, "6 tools completed", "reasoning is not a step and never reads as running");
 	assert.equal(summary.running, 0);
 	assert.equal(runningItem(items), null);
+});
+
+test("routeFacts names the reported route and never guesses one it was not told", () => {
+	const healthy = summarizeHealth([
+		health("health.provider", { targetId: "alpha", status: "healthy", available: true, latencyMs: 120 }),
+	]);
+	const reported = routeFacts({ target: "alpha", model: "m-1", thinking: "low" }, healthy);
+	assert.equal(reported.text, "alpha · m-1");
+	assert.equal(reported.tone, "success");
+	assert.match(reported.title, /Thinking: low\./);
+	assert.match(reported.spoken, /Target alpha:/);
+
+	const automatic = routeFacts({ target: null, model: null, thinking: "off" }, summarizeHealth([]));
+	assert.equal(automatic.text, "automatic routing · default model");
+	assert.equal(automatic.tone, "unverified", "no probe has run, so the glyph is not a healthy one");
+	assert.match(automatic.spoken, /No target health reported/);
+
+	const unreported = routeFacts(undefined, summarizeHealth([]));
+	assert.equal(unreported.text, "Model not reported");
+	assert.equal(unreported.tone, "unverified");
+	const onlyHealth = routeFacts(undefined, healthy);
+	assert.equal(onlyHealth.text, "alpha", "a health row names its target even without settings");
+	assert.match(onlyHealth.spoken, /^Model not reported\./);
 });

@@ -1460,8 +1460,8 @@ main:has(> .conversation) {
 	padding-inline: var(--space-6);
 	border-bottom: 1px solid var(--line);
 }
-/* One line: where you are, what this conversation is, whether Clio Coder is working, which model
-   answers, and one control for everything else. */
+/* One line: where you are, what this conversation is, whether Clio Coder is working, and one
+   control for everything else. The model sits in the composer, where the next request leaves. */
 .conversation__bar {
 	display: flex;
 	align-items: center;
@@ -1518,34 +1518,6 @@ main:has(> .conversation) {
 	letter-spacing: 0;
 	text-transform: none;
 	white-space: nowrap;
-}
-.route-chip {
-	display: inline-flex;
-	align-items: baseline;
-	gap: var(--space-2);
-	flex: 0 1 auto;
-	max-width: 18rem;
-	min-width: 0;
-	color: var(--ink-muted);
-	font-size: var(--text-exact);
-	white-space: nowrap;
-}
-.route-chip__glyph {
-	flex: none;
-	font-family: var(--font-mono);
-}
-.route-chip[data-tone="success"] .route-chip__glyph {
-	color: var(--status-success-fg);
-}
-.route-chip[data-tone="warn"] .route-chip__glyph {
-	color: var(--status-warn-fg);
-}
-.route-chip[data-tone="fail"] .route-chip__glyph {
-	color: var(--status-fail-fg);
-}
-.route-chip__text {
-	overflow: hidden;
-	text-overflow: ellipsis;
 }
 .conversation__health {
 	display: grid;
@@ -1738,9 +1710,6 @@ main:has(> .conversation) {
 	}
 	.conversation__bar .session-status {
 		margin-left: auto;
-	}
-	.route-chip {
-		display: none;
 	}
 	.conversation__tools-label {
 		position: absolute;

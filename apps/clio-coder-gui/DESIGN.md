@@ -284,7 +284,8 @@ with `el.scrollTop = el.scrollHeight` inside the same rAF callback that delivers
 2. Tool, approval, terminal, control and error events remain immediate and flush any preceding
    narrative first, in the same ordered delivery.
 3. Keep the composer's draft and scroll position inside an isolated component so incoming agent
-   frames never reconcile the operator's keystrokes.
+   frames never reconcile the operator's keystrokes. Its props are scalars or objects memoized on
+   facts that streaming does not touch, such as the route.
 4. Prefer native scrolling with `scrollbar-gutter: stable` and local `contain: layout style` on long
    text surfaces. Do not force smooth scrolling, do not continuously measure geometry, and never put
    `backdrop-filter` or another expensive effect over moving text.
@@ -419,8 +420,12 @@ Escape and return-to-trigger. A skip link reaches the main landmark. Route chang
 landmark and update the document title.
 
 The conversation header is one bar across the pane: the project link, the title (the session label,
-else the first request), the live status as a glyph and a sentence, the route (target and model,
-with the target's reported health folded into its glyph), and one **Session tools** menu. The menu
+else the first request), the live status as a glyph and a sentence, and one **Session tools** menu.
+The route (target and model, with the target's reported health folded into its glyph) sits in the
+composer's actions row beside Send, because that is where the next request leaves from. Without
+reported settings it reads "Model not reported", or the target a health fact names, and never a
+guessed default. The composer takes the route as one object memoized on the reported settings and
+health, so a streamed delta still leaves the composer unrendered. The menu
 holds the project path, switching, session controls, Clio Coder commands, dispatched workers and
 Close session, and it hangs below its own button at every width. An unhealthy target, an
 unrecognised health fact or a context warning is written out in full under the bar. Below 650px the

@@ -24,11 +24,12 @@ import {
 import { FleetStrip } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
+import { routeFacts } from "../chat/route.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
 import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
-import { StatusMark, TONE_GLYPHS } from "../design/status.js";
+import { StatusMark } from "../design/status.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
 import { DeleteSession, SessionControls } from "./session-controls.js";
@@ -478,41 +479,6 @@ function SessionTools({
 }
 
 /**
- * The model this conversation routes to, with the reported health of its target folded into one glyph.
- * The words stay in the accessible name and the tooltip; a target in any state other than healthy is
- * also spelled out below the header by `SessionHealth`.
- */
-function RouteChip({ settings, health }: { settings: SessionSettingsView | undefined; health: HealthSummary }) {
-	const target = settings?.target ?? null;
-	const provider = health.providers.find((row) => row.key === target) ?? health.providers[0];
-	const tone = provider?.tone ?? "unverified";
-	const healthText = provider
-		? `Target ${provider.key}: ${provider.detail ?? provider.label}`
-		: "No target health reported by Clio Coder.";
-	const route = settings
-		? `${settings.target ?? "automatic routing"} · ${settings.model ?? "default model"}`
-		: (provider?.key ?? "Target");
-	const title = settings
-		? `Target: ${settings.target ?? "automatic"}. Model: ${settings.model ?? "configured default"}. Thinking: ${settings.thinking}. ${healthText}`
-		: healthText;
-	return (
-		<span className="route-chip" data-tone={tone} title={title}>
-			<span className="route-chip__glyph" aria-hidden="true">
-				{TONE_GLYPHS[tone]}
-			</span>
-			<span className="route-chip__text">{route}</span>
-			<span className="sr-only">{`Thinking ${settings?.thinking ?? "not reported"}. ${healthText}`}</span>
-		</span>
-	);
-}
-
-interface SessionSettingsView {
-	readonly target: string | null;
-	readonly model: string | null;
-	readonly thinking: string;
-}
-
-/**
  * Session health that needs a reader. A healthy target is one glyph in the route chip; anything else,
  * and every fact kind this build does not recognise, is written out here in full.
  */
@@ -610,6 +576,18 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	// A deep link starts without a cached snapshot. Attach the observer only once
 	// the transcript element exists; a ref becoming non-null does not rerun an effect.
 	const follow = useFollowLatest(scroll, snapshot !== undefined, snapshot?.timeline);
+	// One object per change of reported settings or health, so a streamed delta leaves the composer alone.
+	const settings = snapshot?.state === "open" ? sessionSettings.data?.settings.chat : undefined;
+	const route = useMemo(
+		() =>
+			routeFacts(
+				settings
+					? { target: settings.target ?? null, model: settings.model ?? null, thinking: settings.thinkingLevel }
+					: undefined,
+				health,
+			),
+		[settings, health],
+	);
 	if (session.error && !snapshot)
 		return (
 			<div role="alert">
@@ -626,14 +604,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;
 	const title = conversationTitle(snapshot);
-	const route =
-		snapshot.state === "open" && sessionSettings.data
-			? {
-					target: sessionSettings.data.settings.chat.target ?? null,
-					model: sessionSettings.data.settings.chat.model ?? null,
-					thinking: sessionSettings.data.settings.chat.thinkingLevel,
-				}
-			: undefined;
 	const activity = pending
 		? { tone: "warn" as const, label: "Waiting for your approval" }
 		: running
@@ -665,7 +635,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						<StatusMark tone={activity.tone} label={activity.label} />
 						{snapshot.recoveredOrphan ? <span>Recovered after server interruption</span> : null}
 					</p>
-					<RouteChip settings={route} health={health} />
 					<SessionTools
 						client={client}
 						session={snapshot}
@@ -753,6 +722,7 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 					sessionState={snapshot.state}
 					initialFocus={snapshot.timeline.length === 0}
 					runningTurnId={turn?.status === "running" ? turn.id : null}
+					route={route}
 				/>
 			</div>
 		</section>
