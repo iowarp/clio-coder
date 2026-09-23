@@ -56,14 +56,15 @@ import {
 	applyTarget,
 	buildDescriptor,
 	contextWindowUndiscovered,
-	defaultUrlFor,
 	deriveTargetId,
 	describeAuthStatus,
+	gatewayUrlGuidance,
 	inventoryGap,
 	inventoryNote,
 	modelChoiceRefusal,
 	modelSupportsThinking,
 	normalizeUrl,
+	offeredUrlFor,
 	PROTOCOL_COMPAT_RUNTIME_IDS,
 	preferredModelFor,
 	probeReadings,
@@ -336,14 +337,22 @@ const URL_STEP: Step = {
 		const runtime = answers.runtime;
 		if (!runtime) return "back";
 		const local = supportFor(runtime).group === "local-http";
+		const gateway = runtime.gatewayUrl;
 		const result = await promptText({
-			heading: ["", chalk.bold(local ? "Where is the server?" : "Base URL")],
-			initial: answers.url ?? defaultUrlFor(runtime.id),
-			hint: "host:port is enough; Clio fills in the scheme and the port it knows",
+			heading: [
+				"",
+				chalk.bold(gateway?.label ?? (local ? "Where is the server?" : "Base URL")),
+				...gatewayUrlGuidance(runtime).map((line) => chalk.dim(line)),
+			],
+			initial: answers.url ?? offeredUrlFor(runtime) ?? "",
+			hint: gateway
+				? "paste the whole URL, scheme and path included"
+				: "host:port is enough; Clio fills in the scheme and the port it knows",
 			railPrefix: wizard.rail,
 			backLabel: "back",
 			clearOnExit: true,
-			validate: (value) => (value.length === 0 ? "a URL is required for this runtime" : null),
+			validate: (value) =>
+				value.length === 0 ? (gateway ? `the ${gateway.label} is required` : "a URL is required for this runtime") : null,
 			input: wizard.input,
 			output: wizard.output,
 		});

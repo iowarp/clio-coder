@@ -305,6 +305,7 @@ const DOWN = `${ESC}[B`;
 const ENTER = "\r";
 const ESCAPE = ESC;
 const CLEAR_LINE = String.fromCharCode(21);
+const CTRL_C = String.fromCharCode(3);
 
 function fakeTty(
 	columns = 100,
@@ -350,6 +351,7 @@ interface ScriptStep {
 async function runWizard(
 	env: Record<string, string>,
 	script: ReadonlyArray<ScriptStep>,
+	options?: Parameters<typeof runOnboardingWizard>[1],
 ): Promise<{ code: number; transcript: () => string; stderr: string }> {
 	const saved = new Map(Object.keys(env).map((key) => [key, process.env[key]]));
 	const origStderrWrite = process.stderr.write;
@@ -366,7 +368,7 @@ async function runWizard(
 
 	const tty = fakeTty();
 	registerBuiltinRuntimes(getRuntimeRegistry());
-	const pending = runOnboardingWizard({ in: tty.input, out: tty.output });
+	const pending = runOnboardingWizard({ in: tty.input, out: tty.output }, options);
 	let settled = false;
 	void pending.then(() => {
 		settled = true;
@@ -636,6 +638,86 @@ describe("contracts/configure-onboarding", () => {
 			strictEqual(existsSync(testEnv.settingsFile), false);
 		} finally {
 			testEnv.cleanup();
+		}
+	});
+
+	// #388: a localhost default looked usable for an ALCF target, let setup finish, and left it down.
+	it("asks an ALCF target for its gateway URL by name, and keeps every local default", async () => {
+		if (getRuntimeRegistry().list().length === 0) registerBuiltinRuntimes(getRuntimeRegistry());
+		const testEnv = unconfiguredEnv();
+		try {
+			const alcf = getRuntimeRegistry().get("alcf");
+			ok(alcf);
+			const result = await runWizard(
+				testEnv.env,
+				[
+					{ waitFor: "Target id", keys: [ENTER] },
+					{ waitFor: "Sign in to", keys: [DOWN, ENTER] },
+					{ waitFor: "ALCF gateway URL", keys: [ENTER] },
+					{ waitFor: "the ALCF gateway URL is required", keys: [CTRL_C] },
+				],
+				{ mode: "first", runtime: alcf },
+			);
+			const screen = plainText(result.transcript());
+			for (const expected of [
+				"Required. For example https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1",
+				"The right URL and model depend on the ALCF cluster or resource, such as Sophia or Metis.",
+				"paste the whole URL, scheme and path included",
+			]) {
+				ok(screen.includes(expected), `${JSON.stringify(expected)} missing from:\n${screen}`);
+			}
+			ok(!screen.includes("127.0.0.1"), `the ALCF prompt must offer no localhost default:\n${screen}`);
+			strictEqual(existsSync(testEnv.settingsFile), false);
+
+			// The numbered prompts a pipe falls back to ask the same way. Their guidance
+			// goes to process.stdout and the prompts to the prompt stream, so read both.
+			let printed = "";
+			const origStdoutWrite = process.stdout.write;
+			process.stdout.write = ((chunk: unknown) => {
+				printed += String(chunk);
+				return true;
+			}) as typeof process.stdout.write;
+			let numbered: Awaited<ReturnType<typeof captureConfigure>>;
+			try {
+				numbered = await captureConfigure([], testEnv.env, ["all\n", "alcf\n", "\n", "\n", "q\n"]);
+			} finally {
+				process.stdout.write = origStdoutWrite;
+			}
+			strictEqual(numbered.code, 130, `${numbered.stderr}\n${numbered.stdout}`);
+			ok(numbered.stdout.includes("ALCF gateway URL: ALCF gateway URL:"), numbered.stdout);
+			ok(printed.includes("ALCF gateway URL:\n  Required. For example https://"), printed);
+			ok(printed.includes("the ALCF gateway URL is required."), printed);
+			ok(!`${printed}${numbered.stdout}`.includes("127.0.0.1"), "the numbered prompt must offer no localhost default");
+
+			const refused = await captureConfigure(["--id", "alcf", "--runtime", "alcf"], testEnv.env);
+			strictEqual(refused.code, 2);
+			match(refused.stderr, /--url is required for alcf: give the ALCF gateway URL/u);
+			match(refused.stderr, /sophia\/vllm\/v1/u);
+			const saved = existsSync(testEnv.settingsFile) ? readFileSync(testEnv.settingsFile, "utf8") : "";
+			ok(!saved.includes("runtime: alcf"), `no ALCF target is saved without its gateway URL:\n${saved}`);
+		} finally {
+			testEnv.cleanup();
+		}
+
+		const localEnv = unconfiguredEnv();
+		try {
+			const llamacpp = getRuntimeRegistry().get("llamacpp");
+			ok(llamacpp);
+			const result = await runWizard(
+				localEnv.env,
+				[
+					{ waitFor: "Target id", keys: [ENTER] },
+					{ waitFor: "How should Clio get the API key?", keys: [ENTER] },
+					{ waitFor: "Where is the server?", keys: [CTRL_C] },
+				],
+				{ mode: "first", runtime: llamacpp },
+			);
+			const screen = plainText(result.transcript());
+			ok(screen.includes("❯ http://127.0.0.1:8080"), `the local default must stay:\n${screen}`);
+			ok(screen.includes("host:port is enough; Clio fills in the scheme and the port it knows"), screen);
+			ok(!screen.includes("gateway URL"), screen);
+		} finally {
+			localEnv.cleanup();
 		}
 	});
 
