@@ -19,6 +19,7 @@ import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { StatusMark, TONE_GLYPHS } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
+import { countRender } from "../render/render-probe.js";
 import {
 	capabilityRefusal,
 	composerKeyAction,
@@ -97,6 +98,7 @@ export const Composer = memo(function Composer({
 	runningTurnId,
 	route,
 }: ComposerProps) {
+	countRender("composer");
 	const queries = useQueryClient();
 	const store = draftStore(sessionId);
 	const draft = useSyncExternalStore(store.subscribe, store.snapshot, store.snapshot);
