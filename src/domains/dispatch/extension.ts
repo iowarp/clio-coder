@@ -6334,7 +6334,7 @@ export function createDispatchBundle(
 				}
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode, providerErrorMessage);
-				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode);
+				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode, providerErrorMessage);
 				const receiptDraft = buildReceiptDraft(
 					result,
 					endedAt,
