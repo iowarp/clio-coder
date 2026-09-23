@@ -113,7 +113,9 @@ export function countdownSentence(timings: ApprovalTimings, expiresAt: string): 
 		: "If unanswered, this turn stops when Clio Coder's approval budget runs out.";
 }
 
-export const waitedSentence = (timings: ApprovalTimings): string => `Waiting ${formatDuration(timings.waitedMs)}.`;
+/** Under a second the wait is not a measurement worth printing, so it says the request just arrived. */
+export const waitedSentence = (timings: ApprovalTimings): string =>
+	timings.waitedMs < 1000 ? "Asked just now." : `Waiting ${formatDuration(timings.waitedMs)}.`;
 
 export interface CallLocation {
 	readonly path: string;

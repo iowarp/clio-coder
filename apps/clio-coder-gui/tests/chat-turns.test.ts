@@ -656,3 +656,44 @@ test("routeFacts names the reported route and never guesses one it was not told"
 	assert.equal(onlyHealth.text, "alpha", "a health row names its target even without settings");
 	assert.match(onlyHealth.spoken, /^Model not reported\./);
 });
+
+test("a refused call and a stopped run end without breaking, so groups count them apart from failures", () => {
+	const refused = item({
+		id: "r",
+		turnId: "t",
+		kind: "tool",
+		status: "failed",
+		title: "write",
+		rawOutput: {
+			result: {
+				content: [
+					{ type: "text", text: "write blocked: write was not approved\nThis call was denied; no approval is pending." },
+				],
+			},
+			isError: true,
+		},
+	});
+	const stopped = item({
+		id: "s",
+		turnId: "t",
+		kind: "tool",
+		status: "failed",
+		title: "dispatch",
+		rawOutput: {
+			result: {
+				content: [{ type: "text", text: "dispatch failed: run r1 was cancelled (operator_cancel)" }],
+				details: { runId: "r1", outcome: "canceled", outcomeDetail: "operator_cancel" },
+			},
+			isError: true,
+		},
+	});
+	const alone = summarizeActivity([refused]);
+	assert.deepEqual([alone.label, alone.tone, alone.failed, alone.declined], ["1 tool not approved", "neutral", 0, 1]);
+	assert.equal(activityGlyph(alone), "–");
+	const both = summarizeActivity([refused, stopped]);
+	assert.deepEqual([both.label, both.tone, both.attention], ["1 tool not approved · 1 stopped", "neutral", false]);
+	const mixed = summarizeActivity([tool("a", "completed"), tool("b", "completed"), stopped]);
+	assert.deepEqual([mixed.label, mixed.tone], ["2 tools completed · 1 stopped", "success"]);
+	// A real failure still outranks them.
+	assert.equal(summarizeActivity([refused, tool("c", "failed")]).label, "1 tool failed");
+});

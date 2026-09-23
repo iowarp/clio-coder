@@ -4,7 +4,7 @@
 // happening. No server field is added for any of it.
 
 import type { TimelineItem } from "../../contracts/sessions.js";
-import { notApproved, readWire } from "./tool-presentation.js";
+import { notApproved, readWire, stoppedRun } from "./tool-presentation.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning" | "error";
 
@@ -17,6 +17,8 @@ export interface ActivitySummary {
 	readonly completed: number;
 	readonly failed: number;
 	readonly canceled: number;
+	/** Calls settled at their approval gate; they did not break, so they are not failures. */
+	readonly declined: number;
 	/** True when something in the group needs the operator's eyes right now. */
 	readonly attention: boolean;
 }
@@ -34,6 +36,7 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 		completed = 0,
 		failed = 0,
 		canceled = 0,
+		declined = 0,
 		onlyTools = true;
 	for (const item of items) {
 		// Reasoning inside a group is context for the calls, not a step with an outcome of its own.
@@ -47,9 +50,14 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 			case "escalated":
 				waiting += 1;
 				break;
-			case "failed":
-				failed += 1;
+			case "failed": {
+				// A refusal and a stopped run settle as failed calls, but neither broke.
+				const wire = readWire(item);
+				if (item.kind === "tool" && notApproved(item, wire)) declined += 1;
+				else if (item.kind === "tool" && stoppedRun(item, wire)) canceled += 1;
+				else failed += 1;
 				break;
+			}
 			case "cancelled":
 			case "rejected":
 			case "expired":
@@ -71,22 +79,32 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	} else if (failed > 0) {
 		label = `${plural(failed, noun)} failed${completed > 0 ? ` · ${completed} completed` : ""}`;
 		tone = "error";
-	} else if (canceled > 0 && completed === 0) {
-		label = `${plural(canceled, noun)} stopped`;
-		tone = "neutral";
 	} else {
-		label = `${plural(completed, noun)} completed${canceled > 0 ? ` · ${canceled} stopped` : ""}`;
-		tone = "success";
+		const endings = (
+			[
+				[declined, "not approved"],
+				[canceled, "stopped"],
+			] as const
+		).filter(([count]) => count > 0);
+		if (completed === 0 && endings.length > 0) {
+			// The first count carries the noun: "1 tool not approved · 1 stopped".
+			label = endings.map(([count, word], index) => `${index === 0 ? plural(count, noun) : count} ${word}`).join(" · ");
+			tone = "neutral";
+		} else {
+			label = [`${plural(completed, noun)} completed`, ...endings.map(([count, word]) => `${count} ${word}`)].join(" · ");
+			tone = "success";
+		}
 	}
 	return {
 		label,
 		tone,
-		total: running + waiting + completed + failed + canceled,
+		total: running + waiting + completed + failed + canceled + declined,
 		running,
 		waiting,
 		completed,
 		failed,
 		canceled,
+		declined,
 		attention: waiting > 0 || running > 0 || failed > 0,
 	};
 }
@@ -124,18 +142,20 @@ export function activityGlyph(summary: ActivitySummary): string {
 	if (summary.waiting > 0) return "!";
 	if (summary.running > 0) return "◐";
 	if (summary.failed > 0) return "✕";
+	if (summary.completed === 0 && summary.canceled + summary.declined > 0) return "–";
 	return "✓";
 }
 
 /**
  * The disclosure policy. The group the turn is still working in stays open, one line per call, so the
  * operator can follow it without it opening and closing between calls; once prose follows, it folds
- * to its summary. Failures and waiting approvals stay open. Once the operator has toggled a group,
- * their choice wins forever, so `userOpen` is never reset.
+ * to its summary. Failures, waiting approvals and changes that were not approved stay open. Once the
+ * operator has toggled a group, their choice wins forever, so `userOpen` is never reset.
  */
 export function activityOpen(userOpen: boolean | null, settled: boolean, summary: ActivitySummary): boolean {
 	if (userOpen !== null) return userOpen;
-	return !settled || summary.failed > 0 || summary.waiting > 0;
+	// A change that was not approved keeps its proposal on screen, so its group stays open too.
+	return !settled || summary.failed > 0 || summary.waiting > 0 || summary.declined > 0;
 }
 
 type Phrase = (count: number) => string;
