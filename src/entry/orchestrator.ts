@@ -1901,7 +1901,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		resolve: () => ({
 			settings: getCurrentSettings(),
 			providers,
-			ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS },
+			ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS }),
 		}),
 		listMemory: () =>
 			loadMemoryRecordsSync(clioDataDir()).map((record) => ({
@@ -1929,7 +1929,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				{
 					settings: getCurrentSettings(),
 					providers,
-					ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS },
+					ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: RELEVANCE_DECISION_TIMEOUT_MS }),
 				},
 				{ query: request.query, task: turnRelevance.task() },
 				request.entries,
