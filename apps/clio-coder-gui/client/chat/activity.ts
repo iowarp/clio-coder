@@ -35,6 +35,8 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 		canceled = 0,
 		onlyTools = true;
 	for (const item of items) {
+		// Reasoning inside a group is context for the calls, not a step with an outcome of its own.
+		if (item.kind === "thought") continue;
 		if (item.kind !== "tool") onlyTools = false;
 		switch (item.status) {
 			case "in_progress":
@@ -78,7 +80,7 @@ export function summarizeActivity(items: readonly TimelineItem[]): ActivitySumma
 	return {
 		label,
 		tone,
-		total: items.length,
+		total: running + waiting + completed + failed + canceled,
 		running,
 		waiting,
 		completed,
@@ -125,17 +127,78 @@ export function activityGlyph(summary: ActivitySummary): string {
 }
 
 /**
- * The disclosure policy. The group opens itself only while something still needs attention; once
- * the operator has toggled it, their choice wins forever, so `userOpen` is never reset.
+ * The disclosure policy. The group the turn is still working in stays open, one line per call, so the
+ * operator can follow it without it opening and closing between calls; once prose follows, it folds
+ * to its summary. Failures and waiting approvals stay open. Once the operator has toggled a group,
+ * their choice wins forever, so `userOpen` is never reset.
  */
 export function activityOpen(userOpen: boolean | null, settled: boolean, summary: ActivitySummary): boolean {
 	if (userOpen !== null) return userOpen;
-	return (!settled && summary.attention) || summary.failed > 0 || summary.waiting > 0;
+	return !settled || summary.failed > 0 || summary.waiting > 0;
+}
+
+type Phrase = (count: number) => string;
+const counted =
+	(verb: string, singular: string, pluralNoun = `${singular}s`): Phrase =>
+	(count) =>
+		`${verb} ${count} ${count === 1 ? singular : pluralNoun}`;
+const DIGEST_PHRASES: Readonly<Record<string, Phrase>> = {
+	read: counted("read", "file"),
+	ls: counted("listed", "folder"),
+	edit: counted("changed", "file"),
+	write: counted("changed", "file"),
+	artifact: counted("changed", "file"),
+	bash: counted("ran", "command"),
+	run_script: counted("ran", "command"),
+	safe_exec: counted("ran", "command"),
+	git: counted("ran", "git command"),
+	verify: counted("ran", "check"),
+	grep: counted("ran", "search", "searches"),
+	find: counted("ran", "search", "searches"),
+	code_nav: counted("ran", "search", "searches"),
+	web_fetch: counted("fetched", "page"),
+	dispatch: counted("delegated", "task"),
+};
+/** Kinds whose phrase counts distinct paths rather than calls, so rereading one file reads as one file. */
+const BY_PATH = new Set(["read", "edit", "write", "artifact"]);
+
+/**
+ * What a group did, in words: "read 2 files, ran 1 command". Phrases follow first appearance, reads and
+ * changes count distinct paths, and anything unnamed is counted as a tool rather than dropped.
+ */
+export function activityDigest(items: readonly TimelineItem[]): string {
+	const order: string[] = [];
+	const tallies = new Map<string, { calls: number; paths: Set<string> }>();
+	for (const item of items) {
+		if (item.kind === "thought") continue;
+		const key =
+			item.kind === "notice" ? "notice" : DIGEST_PHRASES[item.title ?? ""] === undefined ? "other" : (item.title ?? "");
+		let tally = tallies.get(key);
+		if (tally === undefined) {
+			tally = { calls: 0, paths: new Set() };
+			tallies.set(key, tally);
+			order.push(key);
+		}
+		tally.calls += 1;
+		const path = item.rawInput?.path;
+		if (typeof path === "string" && path.length > 0) tally.paths.add(path);
+	}
+	return order
+		.map((key) => {
+			const tally = tallies.get(key);
+			if (tally === undefined) return "";
+			if (key === "notice") return `${tally.calls} ${tally.calls === 1 ? "approval step" : "approval steps"}`;
+			if (key === "other") return `used ${tally.calls} ${tally.calls === 1 ? "other tool" : "other tools"}`;
+			const count = BY_PATH.has(key) && tally.paths.size > 0 ? tally.paths.size : tally.calls;
+			return DIGEST_PHRASES[key]?.(count) ?? "";
+		})
+		.filter((phrase) => phrase.length > 0)
+		.join(", ");
 }
 
 /** The one fact that makes a collapsed group still informative. */
 export function runningItem(items: readonly TimelineItem[]): TimelineItem | null {
-	return items.find((item) => item.status === "in_progress") ?? null;
+	return items.find((item) => item.kind !== "thought" && item.status === "in_progress") ?? null;
 }
 
 /** The left-hand kind column of a row. A notice says which kind of notice it is. */

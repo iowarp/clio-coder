@@ -14,6 +14,9 @@ import {
 import {
 	applyPartialFrame,
 	basename,
+	describeTool,
+	FAILURE_EXCERPT_MAX,
+	failureExcerpt,
 	formatBytes,
 	formatLocation,
 	outputPane,
@@ -21,6 +24,8 @@ import {
 	presentable,
 	presentTool,
 	readWire,
+	stripResultEnvelope,
+	toolOpensAtMount,
 } from "../client/chat/tool-presentation.js";
 import type { TimelineItem } from "../contracts/sessions.js";
 
@@ -570,4 +575,87 @@ test("byte and path helpers behave at their edges", () => {
 	assert.equal(basename("/a/b/c.ts"), "c.ts");
 	assert.equal(basename("/a/b/"), "b");
 	assert.equal(basename("c.ts"), "c.ts");
+});
+
+test("a shell result shows Clio Coder's operator copy, never the model-facing envelope", () => {
+	const envelope =
+		'[tool-result bounded]\nkind=ok capturedBytes=25 displayedBytes=25 truncated=false\nretrieve="narrow it"\nfollowUp="narrow it"\nfacts={"exitCode":0}\n2026-06-02 center -22.89\n';
+	const card = presentTool(
+		toolItem({
+			title: "bash",
+			toolKind: "execute",
+			status: "completed",
+			rawInput: { command: "python3 analyze.py" },
+			rawOutput: {
+				result: {
+					content: [{ type: "text", text: envelope }],
+					details: {
+						exitCode: 0,
+						resultDisposition: { presentation: { content: "2026-06-02 center -22.89\n" }, presentationTruncated: false },
+					},
+				},
+				isError: false,
+			},
+		}),
+	);
+	assert.equal(card.output.text, "2026-06-02 center -22.89\n");
+	assert.equal(card.output.truncated, false);
+	assert.equal(stripResultEnvelope(envelope), "2026-06-02 center -22.89\n");
+	assert.equal(
+		stripResultEnvelope('all 12 passed\n[tool-result metadata]\nfacts={"exitCode":0}\nfollowUp="none"'),
+		"all 12 passed\n",
+	);
+	assert.equal(stripResultEnvelope("[tool-result bounded]\nordinary text"), "[tool-result bounded]\nordinary text");
+	assert.equal(stripResultEnvelope("[1, 2, 3]"), "[1, 2, 3]");
+});
+
+test("a folded row names the call in plain words and carries its one telling fact", () => {
+	const run = presentTool(
+		toolItem({
+			status: "completed",
+			rawInput: { command: "python3 analyze.py" },
+			rawOutput: { result: { content: [{ type: "text", text: "ok\n" }], details: { exitCode: 2 } }, isError: false },
+		}),
+	);
+	assert.equal(run.verb, "Run");
+	assert.equal(run.digest, "exit 2");
+	assert.equal(run.digestTone, "fail");
+	const read = presentTool(
+		toolItem({
+			title: "read",
+			toolKind: "read",
+			status: "completed",
+			rawInput: { path: "/repo/a.py" },
+			rawOutput: {
+				result: {
+					content: [{ type: "text", text: "x" }],
+					details: { file: { bytes: 5 }, observation: { unit: "lines", shownCount: 1 } },
+				},
+				isError: false,
+			},
+		}),
+	);
+	assert.equal(read.verb, "Read");
+	assert.equal(read.digest, "1 line");
+	assert.equal(describeTool(toolItem({ rawInput: { command: "make test" } })), "Run make test");
+});
+
+test("rows fold like Clio Coder's terminal: diffs stay visible, failures carry their last line", () => {
+	assert.equal(toolOpensAtMount({ body: "diff", settled: true }), true);
+	assert.equal(toolOpensAtMount({ body: "file", settled: true }), false);
+	assert.equal(toolOpensAtMount({ body: "terminal", settled: false }), true, "a live command shows its output");
+	assert.equal(toolOpensAtMount({ body: "terminal", settled: true }), false);
+	const failed = presentTool(
+		toolItem({
+			title: "read",
+			toolKind: "read",
+			status: "failed",
+			rawInput: { path: "missing.txt" },
+			rawOutput: { result: { kind: "error", message: "read failed\nENOENT: no such file\n\n" }, isError: true },
+		}),
+	);
+	assert.equal(failed.digest, "ENOENT: no such file");
+	assert.equal(failed.digestTone, "fail");
+	assert.equal(failureExcerpt("   \n"), null);
+	assert.equal(failureExcerpt("x".repeat(200))?.length, FAILURE_EXCERPT_MAX);
 });

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+	activityDigest,
 	activityGlyph,
 	activityKindLabel,
 	activityOpen,
@@ -73,13 +74,34 @@ test("groupTurns interleaves prose, reasoning and runs of activity", () => {
 	assert.equal(turn.settled, true);
 	assert.deepEqual(
 		turn.segments.map((segment) => (segment.kind === "activity" ? ["activity", segment.items.length] : segment.kind)),
-		["response", ["activity", 2], "response", "reasoning", ["activity", 2]],
+		["response", ["activity", 2], "response", ["activity", 3]],
+	);
+	const work = turn.segments[3];
+	assert.ok(work?.kind === "activity");
+	assert.deepEqual(
+		work.items.map((entry) => entry.id),
+		["f", "g", "h"],
+		"reasoning between calls stays with the calls, in wire order",
 	);
 	const activity = turn.segments[1];
 	assert.ok(activity?.kind === "activity");
 	assert.deepEqual(
 		activity.items.map((entry) => entry.id),
 		["c", "d"],
+	);
+});
+
+test("reasoning with no call beside it keeps its own disclosure", () => {
+	const timeline = [
+		item({ id: "a", turnId: "t1", kind: "user", text: "explain" }),
+		item({ id: "b", turnId: "t1", kind: "thought", text: "Consider the question." }),
+		item({ id: "c", turnId: "t1", kind: "text", text: "Here is why." }),
+		item({ id: "d", turnId: "t1", kind: "thought", text: "Anything else?" }),
+	];
+	const turn = only(groupTurns(timeline, statuses({ t1: "running" })));
+	assert.deepEqual(
+		turn.segments.map((segment) => segment.kind),
+		["reasoning", "response", "reasoning"],
 	);
 });
 
@@ -243,12 +265,12 @@ test("the disclosure policy opens the right groups and then defers to the operat
 	const failed = summarizeActivity([tool("a", "failed")]);
 	const waiting = summarizeActivity([tool("a", "escalated")]);
 	const clean = summarizeActivity([tool("a", "completed")]);
-	assert.equal(activityOpen(null, false, running), true, "a live run that still needs attention opens");
+	assert.equal(activityOpen(null, false, running), true, "a live run opens");
 	assert.equal(activityOpen(null, true, running), false, "a settled run is never opened by liveness alone");
 	assert.equal(activityOpen(null, true, failed), true, "a failure opens even after the turn settles");
 	assert.equal(activityOpen(null, true, waiting), true);
 	assert.equal(activityOpen(null, true, clean), false);
-	assert.equal(activityOpen(null, false, clean), false);
+	assert.equal(activityOpen(null, false, clean), true, "the group the turn is working in stays open between calls");
 	assert.equal(activityOpen(false, false, failed), false, "the operator's collapse wins over every default");
 	assert.equal(activityOpen(true, true, clean), true, "the operator's expansion wins over every default");
 });
@@ -567,4 +589,23 @@ test("a malformed payload never throws and never invents a value", () => {
 	assert.equal(summary.providers[0]?.key, "unnamed target");
 	assert.equal(summary.providers[0]?.tone, "unverified");
 	assert.equal(summary.contextWarning, null, "a non-string warning is not a warning");
+});
+
+test("a group says what it did in words, counting files once and leaving reasoning out", () => {
+	const call = (id: string, title: string, path?: string) =>
+		item({ id, turnId: "t", kind: "tool", title, status: "completed", ...(path ? { rawInput: { path } } : {}) });
+	const items = [
+		item({ id: "r", turnId: "t", kind: "thought", status: "in_progress", text: "Look first." }),
+		call("a", "read", "a.py"),
+		call("b", "read", "a.py"),
+		call("c", "read", "data.csv"),
+		call("d", "bash"),
+		call("e", "edit", "a.py"),
+		call("f", "mcp_custom"),
+	];
+	assert.equal(activityDigest(items), "read 2 files, ran 1 command, changed 1 file, used 1 other tool");
+	const summary = summarizeActivity(items);
+	assert.equal(summary.label, "6 tools completed", "reasoning is not a step and never reads as running");
+	assert.equal(summary.running, 0);
+	assert.equal(runningItem(items), null);
 });

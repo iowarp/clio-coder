@@ -1,7 +1,8 @@
 // The conversation projection. `SessionSnapshot.timeline` is a flat, ordered list of items that
 // carry a `turnId`; a reader needs it as turns, and inside a turn as an interleaving of prose,
 // reasoning and *runs* of tool activity, so a turn that ran fourteen tools between two paragraphs
-// reads as paragraph, one collapsed activity group, paragraph.
+// reads as paragraph, one collapsed activity group, paragraph. Reasoning reported between those calls
+// belongs to the same work and sits inside the group.
 //
 // The referential-identity contract is the point of this module. A turn whose items are
 // element-wise identical to the previous grouping keeps its object identity, and the whole array
@@ -51,10 +52,13 @@ function isSettled(items: readonly TimelineItem[], status: Turn["status"] | unde
 function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn["status"] | undefined): ChatTurn {
 	let request: TimelineItem | null = null;
 	const segments: ChatSegment[] = [];
-	let activity: TimelineItem[] | null = null;
+	// Reasoning and calls between two stretches of prose. Reasoning that sits among calls is part of that
+	// work and joins its group; reasoning with no call beside it stays its own disclosure above the prose.
+	let pending: TimelineItem[] = [];
 	const flush = () => {
-		if (activity !== null && activity.length > 0) segments.push({ kind: "activity", items: activity });
-		activity = null;
+		if (pending.some((item) => item.kind !== "thought")) segments.push({ kind: "activity", items: pending });
+		else for (const item of pending) segments.push({ kind: "reasoning", item });
+		pending = [];
 	};
 	for (const item of items) {
 		switch (item.kind) {
@@ -66,13 +70,9 @@ function buildTurn(turnId: string, items: readonly TimelineItem[], status: Turn[
 				segments.push({ kind: "response", item });
 				break;
 			case "thought":
-				flush();
-				segments.push({ kind: "reasoning", item });
-				break;
 			case "tool":
 			case "notice":
-				if (activity === null) activity = [];
-				activity.push(item);
+				pending.push(item);
 				break;
 		}
 	}

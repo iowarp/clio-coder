@@ -16,9 +16,9 @@
  * above it reads as the model having spoken unprompted.
  */
 
-import { memo, useState } from "react";
+import { memo } from "react";
 import type { Permission } from "../../contracts/permissions.js";
-import type { SessionSnapshot, TimelineItem, Turn } from "../../contracts/sessions.js";
+import type { SessionSnapshot, Turn } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
@@ -26,10 +26,7 @@ import { MarkdownContent } from "../render/Markdown.js";
 import { ActivityGroup } from "./ActivityGroup.js";
 import { isAwaitingAnswer } from "./approval.js";
 import {
-	REASONING_LABEL,
-	REASONING_SOURCE,
 	REPLAY_CHIP,
-	reasoningPreview,
 	requestView,
 	responseAuthor,
 	responseText,
@@ -42,6 +39,8 @@ import { turnOutcome } from "./composer.js";
 import type { HealthRow } from "./health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveStatus, livePlaceholder, liveStatus } from "./live-status.js";
 import { MessageActions, TurnOutcome } from "./message-actions.js";
+import { ReasoningDisclosure } from "./Reasoning.js";
+import { describeTool } from "./tool-presentation.js";
 import { type ChatTurn, sameTurnView } from "./turns.js";
 import "./chat-turn.css";
 
@@ -91,20 +90,6 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	return sameTurnView(previous, next);
 }
 
-function ReasoningDisclosure({ item }: { item: TimelineItem }) {
-	const [open, setOpen] = useState(false);
-	return (
-		<details className="reasoning" onToggle={(event) => setOpen(event.currentTarget.open)}>
-			<summary className="reasoning__summary">
-				<span className="reasoning__label">{REASONING_LABEL}</span>
-				<span className="reasoning__preview">{reasoningPreview(item.text)}</span>
-				<span className="reasoning__source">{REASONING_SOURCE}</span>
-			</summary>
-			{open ? <p className="reasoning__body">{item.text}</p> : null}
-		</details>
-	);
-}
-
 function LiveChip({ status }: { status: LiveStatus }) {
 	return (
 		<span className="live-chip" data-state={status.state}>
@@ -142,7 +127,13 @@ export const ChatTurnView = memo(function ChatTurnView({
 	workspaceRoot,
 	liveWorkers,
 }: ChatTurnProps) {
-	const status = liveStatus(turn, row, pending, stopping, liveWorkers);
+	const reported = liveStatus(turn, row, pending, stopping, liveWorkers);
+	const last = turn.items.at(-1);
+	// The chip names the running call the way its row does ("Run python3 analyze.py"), not by tool id.
+	const status =
+		reported.state === "acting" && reported.detail !== null && last?.kind === "tool" && last.status === "in_progress"
+			? { ...reported, detail: describeTool(last, workspaceRoot) }
+			: reported;
 	const live = isLive(status) && !turn.settled;
 	const request = requestView(turn);
 	const author = responseAuthor(turn);
@@ -177,7 +168,8 @@ export const ChatTurnView = memo(function ChatTurnView({
 			<div className="chat-response">
 				<div className="chat-response__meta">
 					<span className="chat-response__who">{author.name}</span>
-					<LiveChip status={status} />
+					{/* A settled turn states its outcome once, in the footer. */}
+					{live || row === undefined ? <LiveChip status={status} /> : null}
 				</div>
 				<div className="chat-response__body">
 					{turn.segments.length === 0 && live ? (

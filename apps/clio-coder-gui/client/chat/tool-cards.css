@@ -3,51 +3,128 @@
    tone is introduced, so scripts/check-contrast.mjs has nothing further to
    measure. */
 
+/* One call is one line. The row is a native disclosure, so the summary is keyboard reachable and the
+   browser owns the open state's semantics; the body holds the evidence. */
 .tool-card {
-	border: 1px solid var(--line);
-	border-left: 3px solid var(--status-neutral-line);
-	border-radius: var(--radius-sm);
-	background: var(--surface);
-	padding: var(--space-3);
-	display: grid;
-	gap: var(--space-2);
+	min-width: 0;
 }
-.tool-card[data-tone="running"] {
-	border-left-color: var(--status-running-line);
-}
-.tool-card[data-tone="success"] {
-	border-left-color: var(--status-success-line);
-}
-.tool-card[data-tone="warn"] {
-	border-left-color: var(--status-warn-line);
-}
-.tool-card[data-tone="fail"] {
-	border-left-color: var(--status-fail-line);
-}
-
 .tool-card__head {
 	display: flex;
-	flex-wrap: wrap;
 	align-items: baseline;
 	gap: var(--space-2);
+	min-width: 0;
+	padding: 5px var(--space-2);
+	margin-inline: calc(-1 * var(--space-2));
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	line-height: var(--leading-tight);
+	cursor: pointer;
+	list-style: none;
 }
-.tool-card__chip {
-	font-size: var(--text-instrument);
-	letter-spacing: var(--tracking-instrument);
-	text-transform: uppercase;
+.tool-card__head::-webkit-details-marker {
+	display: none;
+}
+.tool-card__head:hover {
+	background: var(--surface-sunken);
+}
+.tool-card__head::after {
+	content: "›";
+	flex: none;
+	width: 1ch;
 	color: var(--ink-muted);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-pill);
-	padding: 0 var(--space-2);
-	white-space: nowrap;
+	font-family: var(--font-mono);
+	text-align: center;
+	transition: transform var(--motion-fast) var(--ease-standard);
+}
+.tool-card[open] > .tool-card__head::after {
+	transform: rotate(90deg);
+}
+.tool-card__glyph {
+	flex: none;
+	width: 1.25em;
+	text-align: center;
+	font-family: var(--font-mono);
+	color: var(--ink-muted);
+}
+.tool-card[data-tone="success"] .tool-card__glyph {
+	color: var(--status-success-fg);
+}
+.tool-card[data-tone="running"] .tool-card__glyph {
+	color: var(--status-running-fg);
+}
+.tool-card[data-tone="warn"] .tool-card__glyph {
+	color: var(--status-warn-fg);
+}
+.tool-card[data-tone="fail"] .tool-card__glyph {
+	color: var(--status-fail-fg);
+}
+.tool-card__verb {
+	flex: none;
+	font-weight: 600;
+	color: var(--ink);
 }
 .tool-card__headline {
-	font-family: var(--font-mono);
-	font-size: var(--text-meta);
-	color: var(--ink-strong);
+	flex: 1 1 auto;
 	min-width: 0;
-	overflow-wrap: anywhere;
-	flex: 1 1 12rem;
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.tool-card__trail {
+	flex: 0 1 auto;
+	min-width: 0;
+	max-width: 60%;
+	display: inline-flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink-muted);
+	white-space: nowrap;
+}
+.tool-card__trail > * {
+	flex: none;
+}
+.tool-card__trail > .tool-card__digest {
+	flex: 0 1 auto;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.tool-card__digest[data-tone="fail"] {
+	color: var(--status-fail-fg);
+}
+.tool-card__state {
+	font-family: var(--font-ui);
+	font-weight: 600;
+}
+.tool-card[data-tone="running"] .tool-card__state {
+	color: var(--status-running-fg);
+}
+.tool-card[data-tone="warn"] .tool-card__state {
+	color: var(--status-warn-fg);
+}
+.tool-card[data-tone="fail"] .tool-card__state {
+	color: var(--status-fail-fg);
+}
+.tool-card__agent {
+	border: 1px dashed var(--line-strong);
+	border-radius: var(--radius-pill);
+	padding: 0 var(--space-2);
+	font-family: var(--font-ui);
+}
+.tool-card__body {
+	display: grid;
+	gap: var(--space-2);
+	min-width: 0;
+	padding: var(--space-1) 0 var(--space-3) calc(1.25em + var(--space-2));
+}
+.tool-card__body > * {
+	min-width: 0;
 }
 
 .tool-card__facts {
@@ -94,6 +171,8 @@
 	font-size: var(--text-exact);
 }
 .tool-card__location {
+	display: inline;
+	padding: 0;
 	font-family: var(--font-mono);
 	color: var(--ink-muted);
 }
@@ -113,6 +192,12 @@
 	gap: var(--space-2);
 	align-items: baseline;
 	font-size: var(--text-exact);
+}
+.tool-card__output-label {
+	color: var(--ink-muted);
+}
+.tool-card__output[data-running="yes"] .tool-card__output-label {
+	color: var(--status-running-fg);
 }
 .tool-card__output-cap {
 	color: var(--status-warn-fg);
@@ -168,6 +253,10 @@
 	display: grid;
 	gap: var(--space-1);
 }
+.tool-card__match-file > summary code {
+	display: inline;
+	padding: 0;
+}
 .tool-card__match-file > summary {
 	display: flex;
 	gap: var(--space-2);
@@ -192,6 +281,7 @@
 }
 .tool-card__match-text {
 	white-space: pre;
+	padding: 0;
 }
 
 .tool-card__raw > summary {
@@ -276,9 +366,11 @@
 	user-select: none;
 }
 .diff__text {
+	display: block;
 	color: var(--ink);
 	white-space: pre;
-	padding-right: var(--space-3);
+	/* The page-wide block code rule pads every <code>; a diff row is one line. */
+	padding: 0 var(--space-3) 0 0;
 }
 .diff__text::before {
 	content: "  ";
@@ -309,33 +401,17 @@
 	color: var(--ink-muted);
 }
 
-/* In the conversation, the tool is already inside an activity disclosure. A second
-   framed surface and a third internal vertical scroller make the record hard to read. */
-.conversation .tool-card {
-	border: 0;
-	border-radius: 0;
-	background: transparent;
-	padding: 0;
+/* Inside the conversation a long output or diff scrolls within a bounded well, so one command's
+   output cannot push the answer below several screens of text. */
+.conversation .tool-card__pre {
+	max-height: min(24rem, 45dvh);
 }
-.conversation .tool-card__chip {
-	border: 0;
-	border-radius: 0;
-	padding: 0;
-}
-.conversation .tool-card__pre,
 .conversation .diff__grid {
-	max-height: none;
-	overflow-y: visible;
+	max-height: min(28rem, 50dvh);
 }
 .conversation .diff {
 	border: 0;
 	border-radius: 0;
 	background: transparent;
 	padding: 0;
-}
-
-@media (prefers-reduced-motion: no-preference) {
-	.tool-card {
-		transition: border-left-color var(--motion-fast) var(--ease-standard);
-	}
 }
