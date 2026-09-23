@@ -30,7 +30,6 @@ science. CLIO stands for Context Layer for Input/Output, named for the Greek mus
 
 Usage:
   clio-coder                      start interactive repository chat
-  clio-coder gui [--open]         start the graphical application
   clio-coder acp                  serve Clio as an ACP v1 agent over stdio
   clio-coder --acp                alias for clio-coder acp
   clio-coder run [flags] <task>   run one headless main-agent turn
@@ -78,8 +77,8 @@ Usage:
   clio-coder tools list|status|install|remove <id>  pinned external programs Clio can drive
   clio-coder interop inspect --json  detected external coding agents and how far each one is wired
   clio-coder panes install|theme  install the pane multiplexer (alias for 'tools install herdr'), or print Clio's theme as a herdr block
-  clio-coder docs [topic]         open documentation in the graphical app (--no-open to print the launch link)
-  clio-coder dev <command>        harness instruments; run 'clio-coder dev' for the list
+  clio-coder docs [topic]         open the documentation in your browser (--no-open to print the launch link)
+  clio-coder dev <command>        harness instruments and power-user surfaces; run 'clio-coder dev' for the list
   clio-coder --demo|--no-demo      enable or disable interactive guidance for this session
   clio-coder --help, -h           this message
   clio-coder --help --all         this message plus every command under 'clio-coder dev'
@@ -87,7 +86,8 @@ Usage:
 
 /**
  * Commands that answer a question about the harness rather than about the
- * user's own work.
+ * user's own work, and the opt-in alpha graphical application, which is for
+ * power users and not a default surface.
  *
  * Nothing here is removed or deprecated. An agent driving Clio over bash can
  * reach a wider surface than a person reading a help screen can hold, so the
@@ -98,9 +98,10 @@ const DEV_COMMANDS: ReadonlyArray<{ name: string; summary: string }> = [
 	{ name: "components", summary: "list, snapshot, or diff harness components" },
 	{ name: "evolve", summary: "create, validate, or summarize change manifests" },
 	{ name: "share", summary: "export or import Clio project/resource archives" },
+	{ name: "gui", summary: "start the opt-in alpha graphical application" },
 ];
 
-const DEV_HELP = `Clio Coder harness instruments
+const DEV_HELP = `Clio Coder harness instruments and power-user surfaces
 
 Usage:
 ${DEV_COMMANDS.map((entry) => `  clio-coder dev ${entry.name.padEnd(20)}${entry.summary}`).join("\n")}

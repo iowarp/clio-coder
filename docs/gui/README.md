@@ -3,7 +3,9 @@
 Clio Coder includes a graphical application as an opt-in alpha for power users. The
 terminal is the primary interface, and nothing here is needed to use it. The
 application runs only when you start it with one of the commands below; the CLI,
-the TUI and `clio-coder acp` work the same whether or not it is used.
+the TUI and `clio-coder acp` work the same whether or not it is used. `clio-coder gui`
+is listed under `clio-coder --help --all` rather than in the default help, and the
+installer does not mention it.
 
 ## Commands
 
