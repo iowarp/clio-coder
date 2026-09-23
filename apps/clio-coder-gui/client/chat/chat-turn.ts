@@ -37,9 +37,11 @@ export const STARTER_PROMPTS = [
  * The whole reasoning affordance is its first line. Thinking is provenance, not prose, and inlining
  * it puts the model's private deliberation at the same weight as its answer.
  */
-export function reasoningPreview(text: string): string {
-	const first = text.trim().split("\n", 1)[0] ?? "";
-	return first.length > REASONING_PREVIEW_MAX ? `${first.slice(0, REASONING_PREVIEW_MAX)}…` : first;
+export function reasoningPreview(text: string, latest = false): string {
+	const lines = text.trim().split("\n");
+	// While the thought is still streaming, its newest line is what shows the work moving.
+	const line = (latest ? lines.filter((entry) => entry.trim() !== "").at(-1) : lines[0]) ?? "";
+	return line.length > REASONING_PREVIEW_MAX ? `${line.slice(0, REASONING_PREVIEW_MAX)}…` : line;
 }
 
 export interface RequestView {

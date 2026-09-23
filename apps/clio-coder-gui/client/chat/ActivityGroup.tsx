@@ -2,33 +2,35 @@
  * A run of tool calls and notices, collapsed to one line.
  *
  * This is the mechanism that keeps a forty-tool turn readable. Every decision behind it is in
- * `activity.ts`: the summary label and tone, the glyph, the disclosure policy and the agent tag.
- * Nothing here branches on anything it did not receive as a decision.
+ * `activity.ts`: the summary label and tone, the glyph, the disclosure policy, the digest and the
+ * agent tag. Nothing here branches on anything it did not receive as a decision.
  *
- * The collapsed line names the running tool, which is what makes a silent five-minute run still
- * informative. Opening the group swaps that line for the per-tool cards, because the question an
- * operator opens a group to answer is "what did it actually do", and that answer is per tool kind.
+ * The collapsed line names the running call in plain words ("Run python3 analyze.py"), which is what
+ * makes a silent five-minute run still informative, and a settled group says what it did ("read 2
+ * files, ran 1 command"). Opening the group lists one line per call; each line opens to its evidence.
  */
 
 import { useState } from "react";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
 import { formatDuration } from "../api/clock.js";
-import { StatusMark, toneForOutcome } from "../design/status.js";
 import { AnchoredApproval } from "./Approval.js";
 import {
+	activityDigest,
 	activityGlyph,
 	activityKindLabel,
 	activityOpen,
 	runningItem,
 	showElapsed,
+	statusGlyph,
 	summarizeActivity,
 	toolStatusLabel,
-	WORKER_LABEL_TITLE,
 	workerLabel,
 } from "./activity.js";
-import { ELAPSED_TITLE, observeStart } from "./chat-turn.js";
+import { observeStart } from "./chat-turn.js";
+import { ReasoningDisclosure } from "./Reasoning.js";
 import { ToolCard } from "./tool-cards.js";
+import { describeTool } from "./tool-presentation.js";
 import "./chat-turn.css";
 
 export interface ActivityGroupProps {
@@ -43,26 +45,13 @@ export interface ActivityGroupProps {
 }
 
 function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRowProps) {
-	const agent = workerLabel(item.provenance);
 	const startedAtMs = observeStart(item.id, nowMs);
 	const elapsedMs = nowMs === 0 ? 0 : Math.max(0, nowMs - startedAtMs);
 	return (
 		<li className="activity__row" data-kind={item.kind}>
-			<div className="activity__rowhead">
-				<span className="activity__kind">{activityKindLabel(item)}</span>
-				{agent === null ? null : (
-					<span className="activity__agent" title={WORKER_LABEL_TITLE}>
-						agent {agent}
-					</span>
-				)}
-				<StatusMark tone={toneForOutcome(item.status)} label={toolStatusLabel(item.status)} />
-				{showElapsed(item, elapsedMs) ? (
-					<span className="activity__elapsed" title={ELAPSED_TITLE}>
-						{formatDuration(elapsedMs)}
-					</span>
-				) : null}
-			</div>
-			{item.kind === "tool" ? (
+			{item.kind === "thought" ? (
+				<ReasoningDisclosure item={item} compact />
+			) : item.kind === "tool" ? (
 				<ToolCard
 					item={item}
 					options={{
@@ -70,9 +59,18 @@ function ActivityRow({ item, client, session, workspaceRoot, nowMs }: ActivityRo
 						nowMs,
 						startedAtMs,
 					}}
+					agent={workerLabel(item.provenance)}
+					elapsed={showElapsed(item, elapsedMs) ? formatDuration(elapsedMs) : null}
 				/>
 			) : (
-				<p className="activity__notice">{item.text}</p>
+				<p className="activity__notice">
+					<span className="activity__notice-glyph" aria-hidden="true">
+						{statusGlyph(item.status)}
+					</span>
+					<span className="activity__kind">{activityKindLabel(item)}</span>
+					<span className="activity__notice-text">{item.text}</span>
+					<span className="sr-only">{toolStatusLabel(item.status)}</span>
+				</p>
 			)}
 			<AnchoredApproval client={client} session={session} item={item} />
 		</li>
@@ -93,6 +91,8 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 	const summary = summarizeActivity(items);
 	const open = activityOpen(userOpen, settled, summary);
 	const running = runningItem(items);
+	const detail =
+		summary.waiting > 0 ? null : running !== null ? describeTool(running, workspaceRoot) : activityDigest(items);
 	return (
 		<details
 			className={`activity activity--${summary.tone}`}
@@ -106,12 +106,7 @@ export function ActivityGroup({ items, settled, client, session, workspaceRoot, 
 					{activityGlyph(summary)}
 				</span>
 				<span className="activity__label">{summary.label}</span>
-				{running !== null && summary.waiting === 0 ? (
-					<span className="activity__current">{running.title ?? running.text}</span>
-				) : null}
-				<span className="activity__count" aria-hidden="true">
-					{summary.total}
-				</span>
+				{detail ? <span className="activity__current">{detail}</span> : null}
 			</summary>
 			{open ? (
 				<ul className="activity__rows">

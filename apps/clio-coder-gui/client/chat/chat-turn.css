@@ -61,6 +61,11 @@
 	overflow-wrap: anywhere;
 	min-width: 0;
 }
+/* The page-wide disclosure margin spaces settings forms; in the record every disclosure is a line and
+   its rhythm comes from the transcript grid. */
+.chat-transcript details {
+	margin: 0;
+}
 /* A disclosure summary is not a scroll container and has to wrap instead. */
 .activity__row summary,
 .chat-response__body summary {
@@ -147,37 +152,69 @@
 	font-weight: 600;
 }
 
-/* Reported reasoning is provenance, not prose, and stays behind a disclosure. */
+/* Reported reasoning is provenance, not prose, and stays behind a disclosure: one quiet violet line
+   with its first sentence, the full text on the reasoning tint once opened. */
 .reasoning {
+	min-width: 0;
 	color: var(--reason-fg);
-	background: var(--reason-tint);
-	border-left: 2px solid var(--reason-line);
-	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
 	font-size: var(--text-meta);
-	padding: var(--space-2) var(--space-4);
 }
 .reasoning__summary {
 	cursor: pointer;
 	display: flex;
-	flex-wrap: wrap;
 	align-items: baseline;
 	gap: var(--space-2);
+	min-width: 0;
+	padding: 3px var(--space-2);
+	margin-left: calc(-1 * var(--space-2));
+	border-radius: var(--radius-sm);
+	list-style: none;
+}
+.reasoning__summary::-webkit-details-marker {
+	display: none;
+}
+.reasoning__summary:hover {
+	background: var(--reason-tint);
+}
+.reasoning__glyph {
+	flex: none;
+	width: 1.25em;
+	text-align: center;
 }
 .reasoning__label {
+	flex: none;
 	font-weight: 600;
-	color: var(--ink);
 }
 .reasoning__preview {
-	color: var(--reason-fg);
-	overflow-wrap: anywhere;
+	flex: 1 1 auto;
+	min-width: 0;
+	font-style: italic;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.reasoning[open] .reasoning__preview {
+	visibility: hidden;
+}
+.reasoning__body {
+	margin-top: var(--space-1);
+	padding: var(--space-3) var(--space-4);
+	border-left: 2px solid var(--reason-line);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	background: var(--reason-tint);
 }
 .reasoning__source {
-	margin-left: auto;
-	font-size: var(--text-instrument);
-	text-transform: uppercase;
-	letter-spacing: var(--tracking-instrument);
+	margin: 0 0 var(--space-2);
+	font-size: var(--text-exact);
 	/* --ink-subtle clears 4.5:1 on the page ground but not on the reasoning tint. */
 	color: var(--ink-muted);
+}
+.reasoning__text {
+	margin: 0;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: var(--leading-body);
+	color: var(--ink);
 }
 
 /* `CopyButton` is shared with the code block, where it sits on a fixed dark paper and carries fixed
@@ -205,44 +242,73 @@
 	color: var(--status-fail-fg);
 }
 
-.reasoning__body {
-	white-space: pre-wrap;
-	overflow-wrap: anywhere;
-	line-height: var(--leading-body);
-	margin-top: var(--space-3);
-	color: var(--ink);
-}
-
-/* Activity is a ruled entry in the record, not a card inside the response. */
+/* Activity is a quiet line in the record, not a card inside the response. Opened, it lists one line
+   per call; each line opens to its own evidence. */
 .activity {
-	border-top: 1px solid var(--line);
-	padding: var(--space-2) 0;
-}
-.activity--warning {
-	border-top-color: var(--status-warn-line);
-}
-.activity--error {
-	border-top-color: var(--status-fail-line);
-}
-.activity--action {
-	border-top-color: var(--action-line);
-}
-.activity[open] {
-	border-bottom: 1px solid var(--line);
+	min-width: 0;
 }
 .activity__summary {
 	cursor: pointer;
 	display: flex;
 	align-items: baseline;
 	gap: var(--space-2);
-	font-size: var(--text-meta);
 	min-width: 0;
+	width: fit-content;
+	max-width: 100%;
+	padding: 5px var(--space-3) 5px var(--space-2);
+	margin-left: calc(-1 * var(--space-2));
+	border: 1px solid var(--line);
+	border-radius: var(--radius-sm);
+	background: var(--surface);
+	font-size: var(--text-meta);
+	line-height: var(--leading-tight);
+	list-style: none;
+}
+.activity__summary::-webkit-details-marker {
+	display: none;
+}
+.activity__summary::after {
+	content: "›";
+	flex: none;
+	color: var(--ink-muted);
+	font-family: var(--font-mono);
+	transition: transform var(--motion-fast) var(--ease-standard);
+}
+.activity[open] > .activity__summary::after {
+	transform: rotate(90deg);
+}
+.activity__summary:hover {
+	border-color: var(--line-strong);
+}
+.activity--action > .activity__summary {
+	border-color: var(--status-running-line);
+}
+.activity--warning > .activity__summary {
+	border-color: var(--status-warn-line);
+	background: var(--status-warn-tint);
+}
+.activity--error > .activity__summary {
+	border-color: var(--status-fail-line);
 }
 .activity__glyph {
+	flex: none;
 	font-family: var(--font-mono);
 	color: var(--ink-muted);
 }
+.activity--success .activity__glyph {
+	color: var(--status-success-fg);
+}
+.activity--action .activity__glyph {
+	color: var(--status-running-fg);
+}
+.activity--warning .activity__glyph {
+	color: var(--status-warn-fg);
+}
+.activity--error .activity__glyph {
+	color: var(--status-fail-fg);
+}
 .activity__label {
+	flex: none;
 	font-weight: 600;
 	color: var(--ink);
 	white-space: nowrap;
@@ -254,33 +320,21 @@
 	white-space: nowrap;
 	min-width: 0;
 }
-.activity__count {
-	margin-left: auto;
-	font-variant-numeric: tabular-nums;
-	font-size: var(--text-exact);
-	color: var(--ink-muted);
-	padding-left: var(--space-2);
+.activity__current::before {
+	content: "· ";
 }
 .activity__rows {
 	list-style: none;
 	margin: var(--space-2) 0 0;
-	padding: 0;
+	padding: 0 0 0 var(--space-3);
+	border-left: 1px solid var(--line);
 	display: grid;
+	gap: 1px;
 }
 .activity__row {
 	display: grid;
 	gap: var(--space-2);
 	min-width: 0;
-	padding: var(--space-3) 0;
-	border-top: 1px solid var(--line);
-}
-.activity__rowhead {
-	display: flex;
-	flex-wrap: wrap;
-	align-items: baseline;
-	gap: var(--space-2);
-	font-size: var(--text-exact);
-	color: var(--ink-muted);
 }
 .activity__kind {
 	font-family: var(--font-mono);
@@ -289,19 +343,22 @@
 	font-size: var(--text-instrument);
 	color: var(--ink-muted);
 }
-.activity__agent {
-	border: 1px dashed var(--line-strong);
-	border-radius: var(--radius-pill);
-	padding: 0 var(--space-2);
-}
-.activity__elapsed {
-	font-variant-numeric: tabular-nums;
-	margin-left: auto;
-}
 .activity__notice {
+	display: flex;
+	align-items: baseline;
+	gap: var(--space-2);
+	margin: 0;
+	padding: 5px 0;
 	font-size: var(--text-meta);
 	color: var(--ink);
 	overflow-wrap: anywhere;
+}
+.activity__notice-glyph {
+	flex: none;
+	width: 1.25em;
+	text-align: center;
+	font-family: var(--font-mono);
+	color: var(--ink-muted);
 }
 
 /* Health facts rendered at the point in the conversation they happened. */

@@ -1,25 +1,33 @@
 /**
- * Tool cards. Every decision lives in `tool-presentation.ts` and `diff.ts`;
+ * Tool rows. Every decision lives in `tool-presentation.ts` and `diff.ts`;
  * this file is the markup and nothing else.
  *
- * Three properties are load-bearing and easy to lose in a refactor:
+ * A call is one line by default: status glyph, a plain verb, what it touched,
+ * and the one fact worth reading. Opening the row shows the evidence. Four
+ * properties are load-bearing and easy to lose in a refactor:
  *
- * 1. The card is the default and the JSON is the escape hatch, not the other
- *    way round. Every card keeps a closed `raw input and result` disclosure,
+ * 1. The row is the default and the JSON is the escape hatch, not the other
+ *    way round. Every row keeps a closed `raw input and result` disclosure,
  *    because an operator debugging a tool needs the bytes.
  * 2. The live output pane is ONE element whose identity never changes across
  *    the running/settled boundary. `partialOutput` and the final result render
- *    into the same `<pre>` so the card does not flash or reflow when the
- *    terminal frame lands. Other tool kinds expose their final text in a
- *    readable disclosure and show failures without requiring raw JSON.
- * 3. Status meaning never rides on colour. Every state is a StatusMark, which
- *    carries a glyph and a word.
+ *    into the same `<pre>` so the row does not flash or reflow when the
+ *    terminal frame lands. A row that opened for live output stays open when
+ *    the call settles; the operator was reading it.
+ * 3. A failure is never hidden behind a closed line: the folded row carries the
+ *    last line the call printed, as the terminal does, and the group around it
+ *    opens.
+ * 4. Status meaning never rides on colour. The glyph's shape differs per state
+ *    and every state other than done is also written out; done is written for
+ *    assistive technology.
  */
 
 import { memo, useState } from "react";
 import type { TimelineItem } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
+import { statusGlyph } from "./activity.js";
+import { ELAPSED_TITLE } from "./chat-turn.js";
 import { DiffView } from "./Diff.js";
 import {
 	formatLocation,
@@ -30,6 +38,7 @@ import {
 	type ToolFact,
 	type ToolLocation,
 	type ToolPresentation,
+	toolOpensAtMount,
 } from "./tool-presentation.js";
 import "./tool-cards.css";
 
@@ -72,22 +81,24 @@ function Locations({ locations, headline }: { locations: readonly ToolLocation[]
 }
 
 /**
- * The output pane. It renders unconditionally for a terminal-shaped card so the
+ * The output pane. It renders unconditionally for a terminal-shaped row so the
  * DOM node exists from the first frame, which is what keeps the
- * partialOutput-to-result handover from reflowing the card.
+ * partialOutput-to-result handover from reflowing the row.
  */
 function OutputBlock({ pane }: { pane: OutputPane }) {
 	return (
 		<div className="tool-card__output" data-source={pane.source} data-running={pane.running ? "yes" : "no"}>
-			<div className="tool-card__output-head" role="status">
-				<StatusMark
-					tone={pane.running ? "running" : "neutral"}
-					label={pane.source === "partial" ? "Output so far" : "Output"}
-				/>
+			<div className="tool-card__output-head">
+				<span className="tool-card__output-label" role="status">
+					{pane.source === "partial" ? "Output so far" : pane.running ? "Waiting for output" : "Output"}
+				</span>
 				{pane.truncated ? <span className="tool-card__output-cap">Output may be shortened</span> : null}
 				{pane.text ? <CopyButton text={pane.text} label="Copy output" /> : null}
 			</div>
-			<pre className="tool-card__pre">{pane.source === "none" ? (pane.placeholder ?? "") : pane.text}</pre>
+			{/* biome-ignore lint/a11y/noNoninteractiveTabindex: A long output scrolls inside its own bounded well, so the keyboard must be able to focus it to scroll. */}
+			<pre className="tool-card__pre" tabIndex={0}>
+				{pane.source === "none" ? (pane.placeholder ?? "") : pane.text}
+			</pre>
 		</div>
 	);
 }
@@ -150,7 +161,7 @@ function RawDisclosure({ item }: { item: TimelineItem }) {
 }
 
 /**
- * A `terminal` card keeps ONE output node for the life of the call, which is
+ * A `terminal` row keeps ONE output node for the life of the call, which is
  * what stops the partialOutput-to-result handover from flashing. The other
  * bodies swap a live pane for a structured body when they settle. A failure
  * always keeps its output visible, so an error is never mistaken for an empty
@@ -184,24 +195,57 @@ function Body({ card }: { card: ToolPresentation }) {
 export interface ToolCardProps {
 	readonly item: TimelineItem;
 	readonly options?: PresentOptions;
+	/** Delegated worker named by Clio Coder's provenance, or null for the orchestrator. */
+	readonly agent?: string | null;
+	/** Browser-measured running time, already formatted, or null when not worth showing. */
+	readonly elapsed?: string | null;
 }
 
-export const ToolCard = memo(function ToolCard({ item, options }: ToolCardProps) {
+export const ToolCard = memo(function ToolCard({ item, options, agent = null, elapsed = null }: ToolCardProps) {
 	const card = presentTool(item, options ?? {});
+	const [open, setOpen] = useState(() => toolOpensAtMount(card));
 	return (
-		<article className={`tool-card is-${card.body}`} data-tone={card.tone} data-settled={card.settled ? "yes" : "no"}>
-			<header className="tool-card__head">
-				<span className="tool-card__chip">{card.chip}</span>
+		<details
+			className={`tool-card is-${card.body}`}
+			data-tone={card.tone}
+			data-settled={card.settled ? "yes" : "no"}
+			open={open}
+			onToggle={(event) => setOpen(event.currentTarget.open)}
+		>
+			<summary className="tool-card__head">
+				<span className="tool-card__glyph" aria-hidden="true">
+					{card.failed ? "✕" : statusGlyph(item.status)}
+				</span>
+				<span className="tool-card__verb" title={`Clio Coder tool: ${card.name}`}>
+					{card.verb}
+				</span>
 				<span className="tool-card__headline" title={card.headline}>
 					{card.headline}
 				</span>
-				<StatusMark tone={card.tone} label={card.statusLabel} />
-			</header>
-			<FactStrip facts={card.facts} />
-			{card.note === null ? null : <p className="tool-card__note">{card.note}</p>}
-			<Locations locations={card.locations} headline={card.headline} />
-			<Body card={card} />
-			<RawDisclosure item={item} />
-		</article>
+				<span className="tool-card__trail">
+					{agent === null ? null : <span className="tool-card__agent">agent {agent}</span>}
+					{card.digest === null ? null : (
+						<span className="tool-card__digest" data-tone={card.digestTone ?? undefined}>
+							{card.digest}
+						</span>
+					)}
+					{elapsed === null ? null : (
+						<span className="tool-card__elapsed" title={ELAPSED_TITLE}>
+							{elapsed}
+						</span>
+					)}
+					<span className={card.tone === "success" ? "sr-only" : "tool-card__state"}>{card.statusLabel}</span>
+				</span>
+			</summary>
+			{open ? (
+				<div className="tool-card__body">
+					<FactStrip facts={card.facts} />
+					{card.note === null ? null : <p className="tool-card__note">{card.note}</p>}
+					<Locations locations={card.locations} headline={card.headline} />
+					<Body card={card} />
+					<RawDisclosure item={item} />
+				</div>
+			) : null}
+		</details>
 	);
 });

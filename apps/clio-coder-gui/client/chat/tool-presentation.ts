@@ -78,6 +78,12 @@ export interface OutputPane {
 export interface ToolPresentation {
 	/** Short lowercase kind chip. */
 	readonly chip: string;
+	/** Plain-language verb for the collapsed row. The exact tool name stays in `name`. */
+	readonly verb: string;
+	/** The one fact worth reading on the collapsed row: an exit code, a line count, a change count. */
+	readonly digest: string | null;
+	/** Tone of the digest when it carries a judgement, such as a nonzero exit code. */
+	readonly digestTone: StatusTone | null;
 	/** Canonical tool name, or the kind hint when the name is missing. */
 	readonly name: string;
 	/** One line, always visible, never JSON. */
@@ -200,6 +206,41 @@ function contentText(value: unknown): string | null {
 }
 
 /**
+ * The operator copy of a result. Clio Coder shapes what the model reads into a bounded context text with
+ * a `[tool-result …]` header, and keeps the plain output for people in
+ * `details.resultDisposition.presentation.content` (src/tools/result-disposition.ts,
+ * `toolResultPresentationText`). The terminal reads that copy, so the GUI does too.
+ */
+function operatorText(details: Record<string, unknown> | undefined): string | null {
+	const presentation = record(record(details?.resultDisposition)?.presentation);
+	return typeof presentation?.content === "string" ? presentation.content : null;
+}
+
+const ENVELOPE_FIELD = /^(kind|retrieve|followUp|summary|fallback|facts)=/;
+
+/**
+ * Removes the model-facing `[tool-result <mode>]` header and `[tool-result metadata]` trailer when a result
+ * carries no operator copy. Only a block made entirely of the known `key=` lines is removed, so ordinary
+ * output that happens to start with a bracket stays intact.
+ */
+export function stripResultEnvelope(text: string): string {
+	let body = text;
+	if (/^\[tool-result [a-z-]+\]\n/.test(body)) {
+		const lines = body.split("\n");
+		let index = 1;
+		while (index < lines.length && ENVELOPE_FIELD.test(lines[index] ?? "")) index += 1;
+		if (index > 1) body = lines.slice(index).join("\n");
+	}
+	const trailer = body.lastIndexOf("[tool-result metadata]\n");
+	if (trailer >= 0 && (trailer === 0 || body[trailer - 1] === "\n")) {
+		const rest = body.slice(trailer + "[tool-result metadata]\n".length).split("\n");
+		if (rest.every((line) => line === "" || ENVELOPE_FIELD.test(line)))
+			body = body.slice(0, trailer).replace(/\n+$/, "\n");
+	}
+	return body;
+}
+
+/**
  * Unwrap `rawInput`/`rawOutput` into the shapes the taxonomy reads.
  *
  * Three real shapes have to survive here:
@@ -236,8 +277,10 @@ export function readWire(item: Pick<TimelineItem, "rawInput" | "rawOutput">): To
 		};
 	const result = record(output.result);
 	const details = record(result?.details);
-	const resultText =
+	const operator = operatorText(details);
+	const modelText =
 		str(result?.output) ?? str(result?.message) ?? contentText(output.content) ?? contentText(result?.content) ?? null;
+	const resultText = operator ?? (modelText === null ? null : stripResultEnvelope(modelText));
 	return {
 		input,
 		result,
@@ -295,7 +338,9 @@ export function outputPane(item: Pick<TimelineItem, "status" | "partialOutput">,
 		source: "final",
 		text,
 		running: false,
-		truncated: wire.details?.observation !== undefined && record(wire.details.observation)?.truncated === true,
+		truncated:
+			record(wire.details?.observation)?.truncated === true ||
+			record(wire.details?.resultDisposition)?.presentationTruncated === true,
 		placeholder: null,
 	};
 }
@@ -448,6 +493,100 @@ const KINDS: Readonly<Record<string, Kind>> = {
 	ledger: { chip: "ledger", body: "json" },
 	task: { chip: "task", body: "json" },
 };
+
+/** What a collapsed row says the call did. Someone who has never used a shell reads these first. */
+const VERBS: Readonly<Record<string, string>> = {
+	read: "Read",
+	list: "List",
+	edit: "Edit",
+	write: "Write",
+	bash: "Run",
+	run: "Run",
+	git: "Git",
+	grep: "Search",
+	find: "Find",
+	nav: "Look up",
+	fetch: "Fetch",
+	dispatch: "Delegate",
+	control: "Control",
+	context: "Context",
+	ask: "Ask",
+	evidence: "Evidence",
+	ledger: "Ledger",
+	task: "Task",
+	search: "Search",
+	think: "Think",
+	delete: "Delete",
+	move: "Move",
+	tool: "Tool",
+};
+
+/** Longest failure excerpt a folded row carries; the full text is one click away. */
+export const FAILURE_EXCERPT_MAX = 96;
+
+/** The last non-empty line a failed call printed, as Clio Coder's terminal shows it on the folded row. */
+export function failureExcerpt(text: string): string | null {
+	const line = text
+		.split("\n")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0)
+		.at(-1);
+	if (line === undefined) return null;
+	return line.length > FAILURE_EXCERPT_MAX ? `${line.slice(0, FAILURE_EXCERPT_MAX - 1)}…` : line;
+}
+
+/** "1 entries" reads as a bug. Observation units are plain English plurals, so this covers them. */
+function singular(unit: string): string {
+	if (unit.endsWith("ies")) return `${unit.slice(0, -3)}y`;
+	if (unit.endsWith("ches") || unit.endsWith("shes")) return unit.slice(0, -2);
+	return unit.endsWith("s") ? unit.slice(0, -1) : unit;
+}
+
+function digestFor(
+	body: ToolBody,
+	facts: readonly ToolFact[],
+	diff: DiffPanel | null,
+	matches: readonly MatchGroup[],
+	settled: boolean,
+): { text: string | null; tone: StatusTone | null } {
+	const fact = (label: string) => facts.find((entry) => entry.label === label);
+	switch (body) {
+		case "terminal": {
+			const exit = fact("exit");
+			if (exit !== undefined) return { text: `exit ${exit.value}`, tone: exit.tone ?? null };
+			const signal = fact("signal");
+			return signal === undefined ? { text: null, tone: null } : { text: signal.value, tone: "fail" };
+		}
+		case "file": {
+			const counted = facts.find((entry) => entry.label !== "size" && entry.tone === undefined);
+			if (counted !== undefined)
+				return { text: `${counted.value} ${counted.value === "1" ? singular(counted.label) : counted.label}`, tone: null };
+			const size = fact("size");
+			return { text: size?.value ?? null, tone: null };
+		}
+		case "diff":
+			return diff?.diff ? { text: `+${diff.diff.adds} −${diff.diff.dels}`, tone: null } : { text: null, tone: null };
+		case "matches": {
+			if (!settled) return { text: null, tone: null };
+			const rows = matches.reduce((total, group) => total + group.total, 0);
+			return {
+				text:
+					rows === 0
+						? "no matches"
+						: `${rows.toLocaleString("en-US")} ${rows === 1 ? "match" : "matches"}${matches.length > 1 ? ` in ${matches.length} files` : ""}`,
+				tone: null,
+			};
+		}
+		case "fetch": {
+			const status = fact("status");
+			return status === undefined ? { text: null, tone: null } : { text: status.value, tone: status.tone ?? null };
+		}
+		case "dispatch":
+			return { text: fact("agent")?.value ?? null, tone: null };
+		default:
+			return { text: null, tone: null };
+	}
+}
 
 /** The five-value ACP hint, used only when the canonical name is unknown. */
 const KIND_HINT: Readonly<Record<string, Kind>> = {
@@ -629,13 +768,21 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 	if (!settled && elapsedSeconds !== null && elapsedSeconds >= LONG_RUNNING_TOOL_SECONDS)
 		facts.push({ label: "still running", value: formatDuration(elapsedSeconds), tone: "warn" });
 
+	const output = outputPane(item, wire);
+	const excerpt = failed ? failureExcerpt(output.text) : null;
+	const digest =
+		excerpt === null ? digestFor(kind.body, facts, diff, matches, settled) : { text: excerpt, tone: "fail" as const };
 	return {
 		chip: kind.chip,
+		verb: VERBS[kind.chip] ?? "Tool",
+		digest: digest.text,
+		digestTone: digest.tone,
 		name,
 		headline,
 		body: kind.body,
 		tone: toneFor(item.status, wire.isError),
-		statusLabel: STATUS_LABEL[item.status] ?? item.status,
+		// A result that reports an error is a failure even when its frame said completed.
+		statusLabel: wire.isError && item.status === "completed" ? "Failed" : (STATUS_LABEL[item.status] ?? item.status),
 		settled,
 		failed,
 		facts,
@@ -644,12 +791,33 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 			path: presentable(location.path, options.workspaceRoot),
 			line: typeof location.line === "number" ? location.line : null,
 		})),
-		output: outputPane(item, wire),
+		output,
 		diff,
 		matches,
 		matchesDropped,
 		rawTruncated: wire.rawTruncated,
 	};
+}
+
+/**
+ * Which rows start open, mirroring Clio Coder's own presentation policy (src/tools/presentation.ts):
+ * every call folds to its one line, a change keeps its diff visible under that line, and a failure
+ * carries its last output line on the folded row instead of opening. Two additions follow a live run:
+ * a command observed while it runs shows its output as it arrives, and a question shows itself.
+ */
+export function toolOpensAtMount(card: Pick<ToolPresentation, "body" | "settled">): boolean {
+	if (card.body === "diff") return true;
+	if (card.settled) return false;
+	return card.body === "terminal" || card.body === "ask";
+}
+
+/**
+ * One line naming what a call is doing, for a live status or a collapsed group: "Run python3 analyze.py"
+ * instead of the bare tool name. Never throws, like `presentTool`.
+ */
+export function describeTool(item: TimelineItem, workspaceRoot?: string): string {
+	const card = presentTool(item, workspaceRoot === undefined ? {} : { workspaceRoot });
+	return `${card.verb} ${card.headline}`;
 }
 
 /** `path:12`, with the ACP zero-based line turned into an editor line. */
