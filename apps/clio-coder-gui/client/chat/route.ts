@@ -31,7 +31,7 @@ export function routeFacts(settings: RouteSettings | undefined, health: HealthSu
 	const provider = health.providers.find((row) => row.key === target) ?? health.providers[0];
 	const tone = provider?.tone ?? "unverified";
 	const healthText = provider
-		? `Target ${provider.key}: ${provider.detail ?? provider.label}.`
+		? `Target ${provider.key}: ${sentenceEnd(provider.detail ?? provider.label)}`
 		: "No target health reported by Clio Coder.";
 	if (settings === undefined) {
 		return {
@@ -48,3 +48,6 @@ export function routeFacts(settings: RouteSettings | undefined, health: HealthSu
 		spoken: `Thinking ${settings.thinking}. ${healthText}`,
 	};
 }
+
+/** A reported detail may already end its sentence; the chip's text must not print a second stop. */
+const sentenceEnd = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);

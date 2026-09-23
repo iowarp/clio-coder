@@ -1667,9 +1667,11 @@ main:has(> .conversation) {
 	border-radius: var(--radius-sm);
 }
 .session-settings label,
+.session-settings__model,
 .session-controls label {
 	display: grid;
 	gap: 6px;
+	align-content: start;
 	min-width: 0;
 }
 .session-settings select,

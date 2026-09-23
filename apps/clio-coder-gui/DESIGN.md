@@ -449,6 +449,17 @@ returns to it, and an earlier conversation's title loads it. A row's facts sit a
 than dots, so a narrow row that wraps them never starts a line with a separator. Deleting a saved
 conversation takes two presses in place, and the second question puts focus on Keep.
 
+A model is always picked from its target's catalog, never typed from memory. Session tools and the
+Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
+`context.compaction.model`, which runs on the chat target) share one `ModelSelect`: the target's
+default, the saved id when the target no longer lists it (so opening a form never rewrites it), the
+catalog sorted for scanning, and "Another model id…" for an exact id the catalog cannot show. Choosing
+a target in Session tools asks that endpoint for its catalog through the runtime's probe, at most
+every five minutes, and drops a model the new target does not list back to its default. Beneath the
+field a sentence says where the list came from: when the target answered, that it did not answer and
+why, or that this is the list Clio Coder last read, with a way to check again. A catalog as long as
+the wire allows (64 models over ACP, 200 from the CLI inventory) says it may be cut.
+
 ## Acceptance floor
 
 Every UI change must preserve:

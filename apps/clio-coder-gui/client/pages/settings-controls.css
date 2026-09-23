@@ -124,3 +124,18 @@
 	font-size: var(--text-meta);
 	overflow-wrap: anywhere;
 }
+/* "Check <target> again" sits inside the catalog's sentence, so it is a quiet inline action. */
+.setting-control__check {
+	min-height: 0;
+	padding: 0;
+	border: 0;
+	background: none;
+	color: var(--accent);
+	font: inherit;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+.setting-control__check:disabled {
+	color: var(--ink-muted);
+	text-decoration: none;
+}
