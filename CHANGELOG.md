@@ -22,6 +22,13 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Drop the space pi-tui's ANSI wrap strands at the start of a wrapped Markdown row when a styled word exactly fills the row before it (`Math.random()⏎ jitter`).
 - Singularize observation counts (`1 result`, not `1 results`).
 
+### Transcript speed
+
+- Stop re-scanning the whole transcript on every regular-screen frame. pi-tui normalized, rebuilt and scanned every row three times for Kitty image headers on every frame, so a keystroke that changed only the composer cost time proportional to the session's length. The tracked pi-tui patch now reuses each unchanged row's reset output by reference and scans only rows that hold images, and the regular-mode root and lease host no longer copy every row two extra times per frame. Measured in-process at 120x40 over 2,000 entries (22,800 rows), interleaved against the previous tree on the same loaded host: a keystroke frame went from 16.5 ms to 2.4 ms at the median (32.7 to 4.8 ms p99) and a streamed-token frame from 17.7 ms to 2.6 ms. Through the built binary in a PTY over a 40,000-row transcript, keystroke to stdout commit had measured 10.4 ms median and 23.7 ms p99 before the change.
+- Fix a crash waiting in long regular-mode sessions. The lease host was a flex stack that appended the whole transcript with a spread call, which throws `Maximum call stack size exceeded` once a transcript passes roughly 150,000 rows. Regular mode now uses a host that only delegates.
+- Step over rows that did not change inside a rewritten range. A streamed token that also moved the footer rewrote every row between the answer's last line and the footer.
+- Fix pi-tui's ANSI wrap stranding a space at the start of a row after a styled word that exactly filled the previous row, in the tracked patch rather than by trimming Clio's Markdown output.
+
 ### Diffusion frames
 
 - Stream Inception Mercury's answers as diffusion frames in the TUI. With `diffusing: true` each SSE chunk carries the whole response so far, with unresolved positions still noise, and pi-ai appends every `delta.content`, so frames concatenated into garbage without intervention. The adapter recognizes each frame on the wire in the same byte path the SDK reads, marks the matching `text_delta`, and rewrites the shared text block to the frame, so the agent's context and the final message always hold exactly one frame. The transcript replaces the live answer per frame, renders the unsettled remainder dim, and hands the settled message to Markdown. Measured live, a long code answer arrived as five to eleven frames over one to three seconds.

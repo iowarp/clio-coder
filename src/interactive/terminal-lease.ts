@@ -104,7 +104,12 @@ export function instantShellEnabled(env: Readonly<Record<string, string | undefi
 	return env[INSTANT_SHELL_ENV] !== "0";
 }
 
-class RootHost extends VStack {
+interface RootHost extends Component {
+	replace(next: Component): void;
+}
+
+/** Fullscreen lays the root out against the viewport height, so its host is a flex stack. */
+class FlexRootHost extends VStack implements RootHost {
 	constructor(current: Component) {
 		super();
 		this.replace(current);
@@ -113,6 +118,28 @@ class RootHost extends VStack {
 	replace(next: Component): void {
 		this.clear();
 		this.addChild(next, { grow: 1, shrink: 1, minSize: 1 });
+	}
+}
+
+/**
+ * Regular mode renders into scrollback with no height to allocate, so its host
+ * only delegates. A stack here copied every transcript row twice per frame, the
+ * second time through a spread push that throws once a transcript passes
+ * roughly 150k rows.
+ */
+class DirectRootHost implements RootHost {
+	constructor(private current: Component) {}
+
+	replace(next: Component): void {
+		this.current = next;
+	}
+
+	render(width: number): string[] {
+		return this.current.render(width);
+	}
+
+	invalidate(): void {
+		this.current.invalidate();
 	}
 }
 
@@ -226,7 +253,8 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		() => shutdownArmed,
 		keybindings,
 	);
-	const host = new RootHost(stage0);
+	const host: RootHost =
+		settings.interface.mode === "fullscreen" ? new FlexRootHost(stage0) : new DirectRootHost(stage0);
 
 	let state: TerminalLeaseState = "created";
 	let epoch = 0;

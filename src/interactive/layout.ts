@@ -23,7 +23,9 @@ export interface FullscreenLayout {
 
 /**
  * One blank row around a transcript that has anything in it: above, against
- * the header, and below, against the queue and composer rail. The collapsed
+ * the header, and below, against the queue and composer rail. Fullscreen's
+ * scroll view wraps the transcript in this; regular mode builds the same rows
+ * inline in its root. The collapsed
  * session header is exactly one row by contract, and the first prompt bar used
  * to sit flush against it, as the newest receipt did against the composer. The
  * wrapped array is reused while the transcript returns the same cached array,
@@ -75,15 +77,54 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
 	return { root, transcript };
 }
 
+/**
+ * Regular-mode root. The terminal renderer copies whatever the root returns
+ * before it normalizes rows in place, so the root is the one place the
+ * transcript is copied: the stack is built in a single pass with the
+ * transcript's blank rows inline, instead of a separating wrapper and a
+ * container each copying every row again.
+ */
+class RegularRoot implements Component {
+	/**
+	 * Rebuilt in place every frame. The renderer copies the root's rows before
+	 * normalizing them, so nothing holds this array across frames, and reusing
+	 * it spares the collector one transcript-sized array per streamed token.
+	 */
+	private readonly out: string[] = [];
+
+	constructor(private readonly parts: LayoutParts) {}
+
+	render(width: number): string[] {
+		const out = this.out;
+		out.length = 0;
+		const append = (lines: readonly string[]): void => {
+			for (const line of lines) out.push(line);
+		};
+		append(this.parts.banner.render(width));
+		const chat = this.parts.chat.render(width);
+		if (chat.length > 0) {
+			out.push("");
+			append(chat);
+			out.push("");
+		}
+		if (this.parts.pending) append(this.parts.pending.render(width));
+		append(this.parts.editor.render(width));
+		append(this.parts.footer.render(width));
+		return out;
+	}
+
+	invalidate(): void {
+		this.parts.banner.invalidate();
+		this.parts.chat.invalidate();
+		this.parts.pending?.invalidate();
+		this.parts.editor.invalidate();
+		this.parts.footer.invalidate();
+	}
+}
+
 export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Component {
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
-	const root = new Container();
-	root.addChild(parts.banner);
-	root.addChild(separatedTranscript(parts.chat));
-	if (parts.pending) root.addChild(parts.pending);
-	root.addChild(parts.editor);
-	root.addChild(parts.footer);
-	return root;
+	return new RegularRoot(parts);
 }
 
 /** Keep the nearest surviving text at the viewport when a preset changes row counts. */
