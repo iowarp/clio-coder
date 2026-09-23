@@ -182,9 +182,9 @@ The worker compiler runs after target capability and tool-profile admission. Can
 
 Project context, memory, bounded dispatch briefing, pipeline input, the assigned task, and the per-run safety-posture reminder remain dynamic user messages. A briefing is a separately delimited message labeled as untrusted task context/data; it is never concatenated into the task or stable system prompt. Dynamic ordering is project, safety, memory, briefing, then pipeline input, with pipeline input last. These messages do not affect the stable composition hash. Persona, effective autonomy, target tool capability, or final toolkit changes do affect it.
 
-## Eight planes, thirty builtin tools
+## Eight planes, thirty-one builtin tools
 
-The canonical builtin catalog contains 30 tools organized in eight planes. A
+The canonical builtin catalog contains 31 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 `src/tools/policy.ts` asserts these invariants at bootstrap, so drift between
@@ -214,6 +214,7 @@ it on a registry the test builds.
 | ORCHESTRATE | `panes` | read | sequential |
 | ORCHESTRATE | `limitation` | read | parallel |
 | ORCHESTRATE | `decide` | read | sequential |
+| ORCHESTRATE | `self_compact` | read | sequential |
 | RETRIEVE | `web_read`, `web_fetch` | read | parallel |
 | INTERACT | `ask_user` | read | sequential |
 | ARTIFACT | `artifact` | write | sequential |
@@ -231,6 +232,7 @@ Several tools sit in a plane for containment rather than class:
 | `evidence` | OBSERVE plane, sequential | It only reads canonical evidence, trust status, gate decisions, and findings, but `run` mode may materialize a bundle under Clio's data directory. |
 | `limitation` | ORCHESTRATE plane, read class, parallel | It appends one typed receipt to the session ledger and touches nothing else. The call is pure. |
 | `decide` | ORCHESTRATE plane, read class, sequential | It appends one decision-board entry and touches nothing else. Sequential so two decisions in one batch cannot race the supersede lookup. |
+| `self_compact` | ORCHESTRATE plane, read class, sequential | It saves the agent's handoff note and asks the host to compact the agent's own context, touching no workspace. Only the native interactive host supplies the continuity port it needs, so bootstrap never requires it and an external agent loop never receives it. |
 
 For `tasks`, board mutations append session task-ledger snapshots, and calls can
 reconcile the project-local `.clio-coder/user-tasks.json` inbox while `pick` and
