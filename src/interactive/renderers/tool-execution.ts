@@ -150,8 +150,8 @@ function resultCharLimit(opts: ToolBodyRenderOptions): number {
 // Counts UTF-16 code units; can split a surrogate pair on non-BMP input. Acceptable for ASCII paths/commands.
 function truncate(value: string, limit: number): string {
 	if (value.length <= limit) return value;
-	const cut = Math.max(0, limit - 3);
-	return `${value.slice(0, cut)}...`;
+	const cut = Math.max(0, limit - 1);
+	return `${value.slice(0, cut)}${GLYPH.ellipsis}`;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -643,7 +643,11 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
 		const details = detailsOf(finished.result);
 		const status = row.spec.class === "execute" && finished.isError ? commandStatusLine(finished.result) : null;
-		if (details?.timedOut === true || status?.timedOut === true) parts.push("timed out");
+		if (details?.timedOut === true || status?.timedOut === true) {
+			// The row does not state a timeout the command stayed under; one it hit is the fact.
+			const limit = typeof row.args.timeout_ms === "number" ? optionalCompactMs(row.args.timeout_ms) : null;
+			parts.push(limit === null ? "timed out" : `timed out after ${limit}`);
+		}
 		if (status?.aborted === true) parts.push("aborted");
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
@@ -655,6 +659,9 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${dim(" · ")}${yellow("drifted")}` : "";
+	// An offloaded result says where the rest is, not what its path is: the
+	// path is a 64-hex name that wrapped a row across three, and /view and the
+	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
 		facts: `${statText}${parts.length > 0 ? dim(` · ${parts.map((part) => sanitizeCallTargetText(part)).join(" · ")}`) : ""}${driftText}`,
@@ -662,8 +669,8 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 			offloadPath === null
 				? ""
 				: offloadFileMissing(finished)
-					? dim(" · full: gone after the 14-day retention sweep")
-					: dim(` · full: ${offloadPath}`),
+					? dim(" · full output gone after the 14-day retention sweep")
+					: dim(" · full output · /view"),
 	};
 }
 
@@ -772,6 +779,7 @@ function resolveRow(call: ToolExecutionStart | ToolExecutionFinished): ResolvedT
 	const finished = "result" in call ? call : null;
 	return resolveToolRow(call.toolName, redactToolArgs(call.args), detailsOf(finished?.result), call.actionClass, {
 		cardAttached: call.cardAttached === true,
+		cwd: process.cwd(),
 	});
 }
 
@@ -799,7 +807,7 @@ function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null,
 	const display = objectDisplay(row, width);
 	if (display === null) return "";
 	if (display.style === "url") return display.shown;
-	const clean = display.shown.length < display.full.length ? `${display.shown}...` : display.shown;
+	const clean = display.shown.length < display.full.length ? `${display.shown}${GLYPH.ellipsis}` : display.shown;
 	return display.style === "code" ? `\`${clean}\`` : clean;
 }
 
@@ -817,7 +825,7 @@ function objectDisplay(
 	if (object.style === "url") return { full: object.text, shown: urlLabel(object.text, urlBudget(width)), style: "url" };
 	const full = displayText(object.text, object.style);
 	const limit = objectLimit(row.spec.class, width);
-	const shown = full.length <= limit ? full : full.slice(0, Math.max(0, limit - 3));
+	const shown = full.length <= limit ? full : full.slice(0, Math.max(0, limit - 1));
 	return object.style === undefined ? { full, shown } : { full, shown, style: object.style };
 }
 
@@ -848,6 +856,9 @@ const MUTATION_PAYLOAD_FIELDS = ["edits", "oldText", "newText", "content"] as co
 
 /** Scalar arguments the row states inline, as `key value`, in argument order. */
 function inlineArgs(row: ResolvedToolRow, finished: ToolExecutionFinished | null): string[] {
+	// A call whose worker card sits under it leaves the run's facts, its route
+	// included, to the card: the row reads `◆ delegated to scout ✓ · 38s`.
+	if (row.context.cardAttached === true) return [];
 	const skip = new Set<string>([...row.spec.consumes, ...factConsumedFields(row, finished)]);
 	if (row.spec.class === "mutate") for (const key of MUTATION_PAYLOAD_FIELDS) skip.add(key);
 	const out: string[] = [];
@@ -936,7 +947,7 @@ function sublineParts(
 	const settled = status === "ok" || status === "error";
 	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : settled ? row.spec.verbs[1] : row.spec.verbs[0];
 	const object = rowObject(row, finished, width);
-	const scopeText = row.spec.scope?.(row.args) ?? null;
+	const scopeText = row.spec.scope?.(row.args, row.context) ?? null;
 	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
 	const inline = inlinePair(row, resolvedPairs(row, finished));
 	const answer =
@@ -1164,14 +1175,15 @@ function resultText(result: unknown, limit = FULL_RESULT_PREVIEW_LIMIT): string 
 
 function truncateRowsMiddle(rows: ReadonlyArray<string>, rowLimit: number, isError: boolean): string[] {
 	if (rows.length <= rowLimit) return [...rows];
-	if (rowLimit <= 1) return [`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`... ${rows.length} lines hidden`)}`];
+	if (rowLimit <= 1)
+		return [`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`${GLYPH.ellipsis} ${rows.length} lines hidden`)}`];
 	const available = rowLimit - 1;
 	const head = Math.floor(available / 2);
 	const tail = available - head;
 	const hidden = Math.max(0, rows.length - head - tail);
 	return [
 		...rows.slice(0, head),
-		`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`... ${hidden} lines hidden`)}`,
+		`${isError ? RAIL_ERROR : RAIL_DIM}${dim(`${GLYPH.ellipsis} ${hidden} lines hidden`)}`,
 		...rows.slice(-tail),
 	];
 }
@@ -1820,7 +1832,7 @@ export function renderFoldedGroup(
 	let complete = true;
 	for (const call of calls) {
 		const row = resolveRow(call);
-		const scope = row.spec.scope?.(row.args) ?? null;
+		const scope = row.spec.scope?.(row.args, row.context) ?? null;
 		const target = `${rowObject(row, call, width)}${scope === null ? "" : ` in ${truncate(sanitizeCallTargetText(scope), ARG_PREVIEW_LIMIT)}`}`;
 		if (family !== "mutate") {
 			targets.push(target);

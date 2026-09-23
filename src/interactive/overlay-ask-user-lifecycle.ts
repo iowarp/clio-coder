@@ -24,7 +24,11 @@ export interface OverlayAskUserLifecycleDeps {
 	 * overlay session opens, not per question, so one interview notifies once.
 	 */
 	onOperatorParked?(): void;
-	/** A round the operator answered, for the transcript record. Not fired on cancel. */
+	/**
+	 * A round the operator answered that no tool row states, for the transcript
+	 * record. A round a tool call asked is stated by that call's own `? asked …
+	 * → answer` row, so it is not fired for one; nor on cancel.
+	 */
 	onRoundAnswered?(questions: ReadonlyArray<AskUserQuestion>, answers: ReadonlyArray<AskUserAnswer>): void;
 }
 
@@ -91,7 +95,8 @@ export function createOverlayAskUserLifecycle(deps: OverlayAskUserLifecycleDeps)
 		if (!activeSession) return cancelledAskUserResult();
 		pendingCancel = cancel;
 		const result = await activeSession.ask(questions, invokeOptions?.decisionPresentation);
-		if (result.cancelled !== true && result.answers.length > 0) deps.onRoundAnswered?.(questions, result.answers);
+		if (!toolBacked && result.cancelled !== true && result.answers.length > 0)
+			deps.onRoundAnswered?.(questions, result.answers);
 		if (result.cancelled === true || !toolBacked) {
 			if (result.cancelled === true) cancelledForTurn = true;
 			close();
