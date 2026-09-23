@@ -19,6 +19,7 @@ import {
 	Text,
 	type TUI,
 	TuiAltScreen,
+	TuiMainScreen,
 	VStack,
 	visibleWidth,
 } from "../../src/engine/tui.js";
@@ -409,6 +410,81 @@ class RenderingTerminal implements Terminal {
 	setTitle(): void {}
 	setProgress(): void {}
 }
+
+const STREAMED_ANSWER = [
+	"## Retry design",
+	"",
+	"The loop owns **how many** attempts and **how long** to wait.",
+	"",
+	...Array.from({ length: 12 }, (_, i) => `- step ${i} uses \`backoff(${i})\``),
+	"",
+	"```ts",
+	...Array.from({ length: 12 }, (_, i) => `const delay${i} = backoff(${i});`),
+	"```",
+	"",
+	"Tests drive the clock directly.",
+].join("\n");
+
+function streamAnswer(panel: ChatPanel, text: string): void {
+	panel.applyEvent({ type: "agent_start" } as never);
+	panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
+	for (let at = 0; at < text.length; at += 4) {
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: text.slice(at, at + 4) } as never);
+	}
+}
+
+function settleAnswer(panel: ChatPanel, text: string): void {
+	const message = {
+		role: "assistant",
+		content: [{ type: "text", text }],
+		stopReason: "stop",
+		usage: { input: 900, output: 120, cacheRead: 0, cacheWrite: 0 },
+	};
+	panel.applyEvent({ type: "message_end", message } as never);
+	panel.applyEvent({ type: "agent_end", messages: [message] } as never);
+}
+
+describe("streamed answers settle in place", () => {
+	it("keeps every streamed row byte-stable when the answer finalizes", () => {
+		const panel = createChatPanel({ now: () => 0 });
+		panel.appendUser("Explain the retry design.");
+		streamAnswer(panel, STREAMED_ANSWER);
+		const streamed = panel.render(80);
+		settleAnswer(panel, STREAMED_ANSWER);
+		const settled = panel.render(80);
+		// Only the receipt is added below; rows the operator already saw never change.
+		ok(settled.length > streamed.length, "the settled turn gains its receipt");
+		deepStrictEqual(settled.slice(0, streamed.length), streamed);
+	});
+
+	it("never full-redraws the regular screen when an answer taller than it finalizes", () => {
+		const terminal = new RenderingTerminal();
+		terminal.rows = 12;
+		const panel = createChatPanel({ now: () => 0, getTerminalRows: () => terminal.rows });
+		const tui = new TuiMainScreen(terminal);
+		tui.addChild(
+			buildLayout({
+				banner: new Text("banner", 0, 0),
+				chat: panel,
+				editor: new Text("editor", 0, 0),
+				footer: new Text("footer", 0, 0),
+			}),
+		);
+		tui.start();
+		try {
+			panel.appendUser("Explain the retry design.");
+			tui.renderNow();
+			streamAnswer(panel, STREAMED_ANSWER);
+			tui.renderNow();
+			const redraws = tui.fullRedraws;
+			settleAnswer(panel, STREAMED_ANSWER);
+			tui.renderNow();
+			strictEqual(tui.fullRedraws, redraws, "finalize rewrote rows already in scrollback");
+		} finally {
+			tui.stop();
+		}
+	});
+});
 
 describe("Pi TUI compatibility", () => {
 	it("keeps context legend percentages on their row through frame resizing and refresh", () => {
