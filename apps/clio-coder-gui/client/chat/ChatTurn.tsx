@@ -6,8 +6,8 @@
  * savings: a settled turn does not re-render while a later turn streams, does not re-render on the
  * one-second clock, and does not re-render when a permission lands somewhere else in the
  * conversation. Anything added to these props that changes identity on every delta throws that away,
- * which is why `row` and `notices` are compared explicitly and `session` is compared only through
- * its permissions array.
+ * which is why `row` and `notices` are compared explicitly and permission changes are checked
+ * only for tool calls in this turn.
  *
  * Two truthfulness rules are enforced here rather than in CSS. A replayed turn has no `startedAt`
  * because the host refuses to stamp history with the current wall clock, so the meta line says the
@@ -24,6 +24,7 @@ import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { ActivityGroup } from "./ActivityGroup.js";
+import { isAwaitingAnswer } from "./approval.js";
 import {
 	REASONING_LABEL,
 	REASONING_SOURCE,
@@ -71,9 +72,22 @@ function sameChatTurn(previous: ChatTurnProps, next: ChatTurnProps): boolean {
 	if (previous.liveWorkers !== next.liveWorkers) return false;
 	if (previous.notices !== next.notices) return false;
 	if (previous.stopping !== next.stopping) return false;
-	// The only part of the session a turn reads that it does not already hold. `applySessionDelta`
-	// replaces this array only on a permission delta, so a streamed token does not reach a settled turn.
-	if (previous.session.permissions !== next.session.permissions) return false;
+	// The live chip reads the current request, including its status and escalation facts.
+	if (!previous.turn.settled && previous.pending !== next.pending) return false;
+	// An anchored approval only reads the pending request for its own tool call. A request in
+	// another turn must not repaint every settled response in a long conversation.
+	if (previous.session.permissions !== next.session.permissions) {
+		for (const item of previous.turn.items) {
+			if (item.toolCallId === undefined) continue;
+			const before = previous.session.permissions.find(
+				(permission) => isAwaitingAnswer(permission) && permission.toolCallId === item.toolCallId,
+			);
+			const after = next.session.permissions.find(
+				(permission) => isAwaitingAnswer(permission) && permission.toolCallId === item.toolCallId,
+			);
+			if (before !== after) return false;
+		}
+	}
 	return sameTurnView(previous, next);
 }
 
