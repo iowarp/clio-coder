@@ -121,6 +121,29 @@ const STEERING =
 				},
 			}
 		: null;
+const COMMANDS =
+	scenario === "markdown"
+		? {
+				version: 1,
+				commands: [
+					{
+						name: "doctor",
+						summary: "Check this installation",
+						usage: "/doctor [deep]",
+						group: "Inspect",
+						args: { positionals: [{ name: "depth", required: false, values: ["deep"] }] },
+					},
+					{
+						name: "context",
+						summary: "Work with project context",
+						usage: "/context <compact>",
+						group: "Session",
+						requiresSubcommand: true,
+						args: { subcommands: { compact: { positionals: [{ name: "instructions", required: false, rest: true }] } } },
+					},
+				],
+			}
+		: null;
 const queues = { steer: [], followUp: [] };
 /** runId -> resolve. A held worker settles when it is stopped or the turn is cancelled. */
 const liveRuns = new Map();
@@ -233,7 +256,23 @@ async function handle(frame) {
 					agentInfo: { name: "fixture", version: "1" },
 					agentCapabilities: {
 						loadSession: true,
-						...(STEERING ? { _meta: { "clio-coder/steering": STEERING } } : {}),
+						...(STEERING
+							? {
+									_meta: {
+										"clio-coder/steering": STEERING,
+										...(COMMANDS
+											? {
+													"clio-coder/commands": {
+														version: 1,
+														list: "clio-coder/commands/list",
+														invoke: "clio-coder/commands/invoke",
+														count: COMMANDS.commands.length,
+													},
+												}
+											: {}),
+									},
+								}
+							: {}),
 					},
 				};
 				break;
@@ -323,6 +362,19 @@ async function handle(frame) {
 					}
 				}
 				result = { stopReason: cancelled ? "cancelled" : "end_turn", _meta: { "clio-coder/usage": usage } };
+				break;
+			}
+			case "clio-coder/commands/list":
+				if (!COMMANDS) throw Error("method_not_found");
+				result = COMMANDS;
+				break;
+			case "clio-coder/commands/invoke": {
+				if (!COMMANDS?.commands.some((row) => row.name === frame.params.command)) throw Error("command_not_exposed");
+				const { command, argv = [] } = frame.params;
+				result =
+					command === "doctor"
+						? { level: "success", lines: [argv.includes("deep") ? "Deep checks completed." : "Checks completed."] }
+						: { level: "info", lines: [`Context action: ${argv.join(" ")}`] };
 				break;
 			}
 			case "clio-coder/session/steer": {

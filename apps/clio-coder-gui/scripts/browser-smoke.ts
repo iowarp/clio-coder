@@ -614,6 +614,34 @@ try {
 			await page.locator(".conversation__tools > summary").evaluate((element) => document.activeElement === element),
 			true,
 		);
+		await page.getByText("Session tools", { exact: true }).click();
+		await page.getByText("Clio Coder commands", { exact: true }).click();
+		await page.locator(".command-panel__form select").first().selectOption("doctor");
+		await page.locator('.command-panel select[name="pos:0"]').selectOption("deep");
+		await page.getByRole("button", { name: "Review request" }).click();
+		await page.getByText("/doctor deep", { exact: true }).waitFor();
+		assert.equal(await page.getByText("Deep checks completed.", { exact: true }).count(), 0);
+		await page.locator('.command-panel select[name="pos:0"]').selectOption("");
+		assert.equal(
+			await page.getByRole("button", { name: "Send command" }).count(),
+			0,
+			"changing an argument discards the reviewed request",
+		);
+		await page.locator('.command-panel select[name="pos:0"]').selectOption("deep");
+		await page.getByRole("button", { name: "Review request" }).click();
+		await page.getByRole("button", { name: "Send command" }).click();
+		await page.getByText("Deep checks completed.", { exact: true }).waitFor();
+		await page.locator(".command-panel__form select").first().selectOption("context");
+		await page.locator('.command-panel select[name="subcommand"]').selectOption("compact");
+		await page.locator('.command-panel textarea[name="pos:0"]').fill("Summarize the project");
+		await page.getByRole("button", { name: "Review request" }).click();
+		await page.getByText("/context compact Summarize the project", { exact: true }).waitFor();
+		await page.getByRole("button", { name: "Send command" }).click();
+		await page.getByText("Context action: compact Summarize the project", { exact: true }).waitFor();
+		await check("session-commands");
+		if (width === 1600) await page.screenshot({ path: join(output, "session-commands.png"), fullPage: true });
+		await page.getByText("Clio Coder commands", { exact: true }).click();
+		await page.getByText("Session tools", { exact: true }).click();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
