@@ -6,6 +6,10 @@ export const GLYPH = {
 	// the reply prefix; it survives only in the two headers above.
 	agent: "✦",
 	user: "›",
+	// Operator input in the transcript. Every row of a prompt carries the bar in
+	// the gutter, so a multi-line prompt reads as one block that is plainly the
+	// operator's and never as the agent's first sentence.
+	userBar: "▌",
 	// Selection focus marker for list overlays. It is deliberately distinct from
 	// the tool ledger's toolHeader so a focused row never reads as a tool line.
 	cursor: "❯",

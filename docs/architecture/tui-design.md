@@ -18,9 +18,9 @@ The governing principle: **the user reads state from color, structure from frame
 | File changes | Paths and change facts | 8 diff rows | 20 diff rows |
 | Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
 | Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
-| Workers | Identity, execution and validation outcome | 3 summary rows | 8 summary rows and bounded tool activity |
+| Workers | Identity, execution and validation outcome | 3 summary rows and the current action while running | 8 summary rows and bounded tool activity |
 | Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
-| Turn receipt | None | Completion and available duration | Usage and model-call facts |
+| Turn receipt | None | Outcome and available duration | Outcome, duration, usage and model-call facts |
 
 Preview budgets count terminal rows **after wrapping**, including the `/view` overflow hint, and shrink on short terminals. Reasoning previews retain the newest text when streaming stops. Detailed remains bounded: a successful `cat` or file read cannot fill the transcript with the entire file.
 
@@ -40,21 +40,28 @@ All color styling is defined in [src/interactive/theme/tokens.ts](../../src/inte
 
 ### 1.1 Color Tokens
 
-| Token | Value (truecolor) | Role |
+| Token | Value | Role |
 |---|---|---|
-| `accent` | `rgb(70, 229, 208)` (Teal) | Brand and interactivity: frame titles, selection highlight, keybinding/slash-command affordances, agent voice glyphs, tool verbs, and active/writing phases. |
-| `accentDeep` | `rgb(31, 183, 166)` | Structural emphasis only: bold CAPS section tags. |
-| `action` | `rgb(255, 126, 41)` (Orange) | Active autonomous operations: dispatching phase pills, active fleet badges, running fleet indicators, running connect/probe indicators, and user-steering queues. |
-| `success` | `rgb(87, 227, 137)` (Green) | Positive outcomes: success indicators (`✓`), ok health status, clean git trees, and output-token count updates. |
-| `warning` | `rgb(255, 180, 84)` (Amber) | Real warnings only: stale data, dirty trees, retry status, blocked tools, and truncation. |
-| `error` | `rgb(255, 92, 102)` (Red) | Failures: error indicators (`✗`), error rails, failed outcomes, and error message text. |
-| `info` | `rgb(91, 168, 255)` (Blue) | Informational messages, notices, and system-prompt meters. |
-| `reason` | `rgb(157, 140, 255)` (Purple) | Reasoning-related status: thinking phases, thinking rails, reasoning-token metrics, and context compacting. |
-| `dim` | `rgb(106, 122, 133)` | Scaffolding elements: separators, key names, keyboard shortcut hints, durations, and timestamps. |
-| `muted` | `rgb(138, 153, 164)` | Secondary content: paths, previews, counts, and non-status values. |
-| `title` | alias of `accent` | Semantic title token mapping. |
-| `frame` | `rgb(47, 93, 90)` | Borders, rules, inner dividers, and unused context space. |
-| `frameStrong` | `rgb(42, 171, 158)` | The active editor input rail background. |
+| `editor` | `#40ffbf` (Neon teal) | The composer rails alone own the neon intensity tier. |
+| `editorDanger` | `#ff5058` | Composer rail endcaps and label under full-auto autonomy. |
+| `editorAction` | `#ffab45` | Composer rail during exceptional preparation and compacting phases. |
+| `accent` | `#53b196` (Teal) | Brand and interactivity: frame titles, selection highlight, keybinding/slash-command affordances, the operator prompt bar, the agent voice glyph, and active/writing phases. |
+| `accentDeep` | `#3e9389` | Structural emphasis only: bold CAPS section tags. |
+| `tool` | `#6fada5` | Action-row verbs in the tool ledger. |
+| `agent` | `#cf905b` | Dispatch verbs and active worker counts. |
+| `action` | `#d99b62` (Orange) | Active autonomous operations: dispatching phase pills, active fleet badges, running fleet indicators, running connect/probe indicators, and user-steering queues. |
+| `success` | `#77b891` (Green) | Positive outcomes: success indicators (`✓`), ok health status, clean git trees, added-line counts, and output-token count updates. |
+| `warning` | `#d3b06b` (Amber) | Real warnings only: stale data, dirty trees, retry status, blocked tools, and truncation. |
+| `error` | `#db8289` (Red) | Failures: error indicators (`✗`), error rails, failed outcomes, removed-line counts, and error message text. |
+| `info` | `#80a7ce` (Blue) | Informational messages, notices, and system-prompt meters. |
+| `reason` | `#af9bc9` (Purple) | Reasoning-related status: thinking phases, the reasoning rail, reasoning-token metrics, and context compacting. |
+| `dim` | `#6a7a85` | Scaffolding elements: separators, key names, keyboard shortcut hints, durations, and timestamps. |
+| `muted` | `#8a99a4` | Secondary content: paths, previews, counts, and non-status values. |
+| `title` | `#72b8ad` | Overlay and frame titles. |
+| `frame` | `#2f5d5a` | Borders, rules, inner dividers, and unused context space. |
+| `frameStrong` | `#2aab9e` | The active editor input rail background. |
+
+The canonical hex values live in [src/core/theme-token-hex.ts](../../src/core/theme-token-hex.ts); terminals without truecolor get each token's nearest xterm-256 color from `tokens.ts`.
 
 ### 1.2 Placement Rules
 
@@ -73,8 +80,9 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../
 | Glyph | Name | Meaning | Used by |
 |---|---|---|---|
 | `>C_` | `brand` | Clio wordmark | Welcome launchpad header, session header, and dashboard header only. |
-| `✦` | `agent` | Agent voice | Chat reply prefix (accent; error red on failed turns). |
-| `›` | `user` | User voice | Chat user prefix (accent); steering queue marker (action). |
+| `✦` | `agent` | Agent voice | First row of every agent prose block (accent); the terminal error block (error). |
+| `▌` | `userBar` | Operator input | Every row of a transcript prompt (accent); command echoes (dim). |
+| `›` | `user` | Quoted operator text | Steering queue marker (action); request echoes in overlays. |
 | `❯` | `cursor` | Selection focus | Settings, list overlays, selectors. |
 | `▸` | `toolHeader` | Tool ledger line | Tool sublines and expanded tool headers. |
 | `✓` | `ok` | Success | Everywhere. |
@@ -97,7 +105,7 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../
 | `▰ ▱` | `contextFull/contextFree` | Context meter cells | Meters. |
 | `▒` | `contextReserve` | Autocompact reserve cells | Context meters. |
 | `█ ░` | `barFull/barEmpty` | Wide-glyph fallback | Meters. |
-| `│` | `rail` | Body rail and section bar | Tool bodies, thinking rail, column separators. |
+| `│` | `rail` | Rail | Reasoning in the transcript gutter (reason); tool and worker bodies nested in the content column; column separators. |
 | `─` | (rules) | Horizontal rule and borders | Frames and rules. |
 | `╌` | `innerDivider` | Divider inside a frame | Task island, any framed list. |
 | `·` | (dotSep) | Chip separator (dim) | Everywhere. |
@@ -296,24 +304,61 @@ State is signaled through the status pill in the footer and matches the followin
 
 ## 6. Agent and Transcript Formatting
 
-### 6.1 Voices & Hanging Indent
-- **User**: `› text` with the user glyph in `accent`.
-- **Agent**: `✦ text` with the agent glyph in `accent` (turning `error` red on failed turns, along with the text message). Skill suggestions do not claim the `✦` reply glyph.
-- **Two-Cell Hanging Indent**: User and assistant prose are rendered with a fixed two-cell gutter. The first line begins with the turn prefix (`› ` or `✦ `), while all wrapped continuation lines indent by two spaces (`PROSE_GUTTER = "  "`), keeping multiline text visibly attached to its voice glyph.
+### 6.1 Gutter Grammar
+
+Every transcript row belongs to a two-cell gutter and a content column. The gutter holds exactly one mark per block, and every wrapped row of a block hangs in the content column, so the left edge alone tells whose words a block is and where it starts.
+
+| Gutter | Block | Content |
+| --- | --- | --- |
+| `▌` (accent, every row) | Operator prompt | Bold text. A prompt Clio has not committed yet shows a dim bar, plain text and `· preparing`; a refused one `· not sent`. |
+| `✦` (accent) | Agent prose | Each prose block, not only the first of a turn, so narration that resumes after actions reads as the agent speaking again. Skill suggestion lines do not claim it. |
+| `│` (reason) | Supplied reasoning | Dim italic excerpt, or the folded `Thinking · /view` marker. No other block uses a gutter rail. |
+| `▸` | Action | One row per call; its body nests beneath it (`  │ `). |
+| `◆` / `◇` / `↳` | Worker | The card body nests beneath the header (`  │ `), closing on `  └ `. |
+| `✦` (error) | Terminal error | Clio's account of why the turn ended, in the error token. |
+| `✓` / `✗` / `⊘` / `⚠` | Receipt | Closes a settled turn with its outcome. |
+
+Blocks of different kinds are separated by one blank row inside a turn, as turns and workers are separated from each other. Consecutive actions without a body stack as one run, even when a narrow terminal wraps one of their rows; an action with a body (arguments, output, a diff, approval facts) gets a blank row on both sides. The same rule applies in every output style: Compact saves rows by folding bodies and grouping observations, not by removing the separation between what the agent said and what it did.
+
+```text
+▌ The retry test is flaky on CI. Find out why and fix it.
+
+│ Flaky timing tests usually come from real timers or randomness.
+
+✦ I'll read the retry module and its test first.
+
+▸ reading src/net/retry.ts · lines 1-10 of 10 ✓ · 42ms
+▸ searching for `Math.random` in src · 1 match ✓ · 42ms
+
+✦ Found it. The test races the jitter; I'll make it injectable.
+
+▸ editing src/net/retry.ts · +5 -2 ✓ · 18ms
+  │ - 1 export async function retry<T>(fn, attempts = 3) {
+  │ + 1 export async function retry<T>(
+  │ … 8 rows · /view
+
+✦ The first backoff includes up to 50ms of jitter...
+
+✓ Done · 58s
+```
 
 ### 6.2 Thinking Blocks
 
-Supplied reasoning stays in stream order on the `reason` color rail. Compact shows a historical marker; Standard and Detailed show the bounded tail defined in [Output styles](#output-styles). The footer alone reports current activity.
+Supplied reasoning stays in stream order on the `reason` gutter rail, dim and italic. Compact shows the folded marker on the same rail; Standard and Detailed show the bounded tail defined in [Output styles](#output-styles), with the overflow hint on the rail. The footer alone reports current activity.
 
 ### 6.3 Tool Ledger
 
 Each call owns one stable action row. Argument fragments stay hidden until the call is formed. A formed call becomes ready, then running, then settles with its actual outcome. Cumulative output replaces the live preview; late partials cannot overwrite a settled result. The same policy applies during replay.
 
 ```text
-▸ bash(cat README.md) · exit 0 ✓ · 230ms
+▸ ran `cat README.md` · exit 0 ✓ · 230ms
 ```
 
-Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
+The action row states the facts the call's arguments carry: a command, a path, a search pattern and its scope (``searching for `needle` in src``), a single dispatch's agent and task. Argument rows under it list only what the row could not show whole, so a short command or path is never repeated as `command ›` or `path ›`. A settled read drops its requested `offset`/`limit` because the row states the range it returned. A successful edit or write carries its change facts (`+5 -2`) on the row in every style and never previews its replacement payload; a failed one keeps the payload, bounded, because the text that did not match is the diagnosis. A row too long for the terminal wraps with a hanging indent into the content column.
+
+A skill load is its own action identity. A settled `context(scope="skills")` load reads `▸ loaded skill <name>` with the name in `accent`, states who asked for it (`by operator` for `/skill`, the selector or a marketplace install; `by recipe` for a bound worker; `by model` under model activation), `narrows tools` when the skill declares a tool surface, and `drifted` in `warning` when its content no longer matches its recorded hash. Standard and Detailed add the skill's description as one nested row. A load refused for trust, installation or activation reasons settles as a failed row carrying the refusal. An operator prompt that starts with `/skill <name>` leads with that command in `accent`.
+
+Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. In Compact, a run of consecutive successful reads, searches, globs or listings folds into one row (`▸ read 3 files ✓`) with the targets on one nested row. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
@@ -330,7 +375,7 @@ upstream SDK truncation cannot be undone by the presentation layer.
 
 ### 6.6 Output Style Receipts
 
-Compact omits the separate turn receipt. Standard shows a small completion line with available duration. Replay treats tool-use messages as intermediate; they cannot create a successful receipt on an earlier failed or cancelled turn. Detailed includes model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
+Compact omits the separate turn receipt. Standard closes a settled turn with its outcome glyph in the gutter and a dim line naming the outcome and available duration (`✓ Done · 58s`, `✗ Failed`, `⊘ Cancelled`, `⚠ Output limit`). A run that a worker block or a notice split across several transcript entries keeps one receipt, after its last output. Replay treats tool-use messages as intermediate; they cannot create a successful receipt on an earlier failed or cancelled turn. Detailed adds model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance to the same line. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
 
 ### 6.7 Code Ink (Syntax Highlighting)
 

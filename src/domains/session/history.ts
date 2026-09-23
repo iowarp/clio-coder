@@ -121,7 +121,12 @@ const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder
 const LEADING_SKILL_REQUEST =
 	/^\s*\[Skill request\][\s\S]*?Only these pending skill names are allowed this turn\.[^\n]*\s*/u;
 
-function stripInjectedPreamble(text: string): string {
+/**
+ * Drop the composed scaffolding (leading `<system-reminder>` blocks and a
+ * `[Skill request]` preamble) from a persisted user message, keeping the
+ * operator's words and their line structure.
+ */
+export function stripInjectedPreamble(text: string): string {
 	let current = text;
 	for (;;) {
 		const next = current.replace(LEADING_SYSTEM_REMINDER, "").replace(LEADING_SKILL_REQUEST, "");

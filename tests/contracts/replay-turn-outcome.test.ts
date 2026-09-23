@@ -60,7 +60,7 @@ for (const stopReason of ["error", "aborted"] as const) {
 			toolCall,
 			success,
 		]);
-		const [first, second] = output.split("› Second request");
+		const [first, second] = output.split("▌ Second request");
 		assert.ok(first !== undefined && second !== undefined);
 		assert.match(first, /503/);
 		assert.doesNotMatch(first, /\bDone\b/);
@@ -101,4 +101,17 @@ test("actual final failure after tool use retains a failed outcome while success
 test("a replay ending at an intermediate tool-use message does not invent completion", () => {
 	const output = replay([{ role: "user", payload: { text: "Incomplete request" } }, toolCall]);
 	assert.doesNotMatch(output, /\bDone\b/);
+});
+
+test("a legacy replayed prompt drops the skill-request preamble the model received", () => {
+	const composed = [
+		"[Skill request]",
+		"- test-hygiene (installed, source=slash-command) — task: pin the timers",
+		'First call context with scope="skills" and name for: test-hygiene. Only these pending skill names are allowed this turn. After the skill loads, follow the loaded workflow.',
+		"",
+		"/skill test-hygiene pin the timers",
+	].join("\n");
+	const output = replay([{ role: "user", payload: { text: composed } }]);
+	assert.doesNotMatch(output, /\[Skill request\]|Only these pending skill names/u);
+	assert.match(output, /▌ \/skill test-hygiene pin the timers/u);
 });

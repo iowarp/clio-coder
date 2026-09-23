@@ -40,6 +40,7 @@ import {
 	isHandoffNoteData,
 	isHandoffSeedData,
 } from "../domains/session/handoff.js";
+import { stripInjectedPreamble } from "../domains/session/history.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import {
 	type BashExecutionMessage,
@@ -674,27 +675,20 @@ function chatMessageText(entry: MessageEntry): string {
 	return extractTurnText(entry.payload);
 }
 
-const LEADING_SYSTEM_REMINDER = /^\s*<system-reminder>[\s\S]*?<\/system-reminder>\s*/u;
-
 /**
  * What the operator typed for a replayed user turn. The persisted text is the
  * composed prompt (a system-reminder block and any skill preamble ride ahead of
  * the operator's words, as visible text the model receives), and the live
  * transcript only ever showed the typed part. Entries written since the
  * operator text was persisted carry it directly; older entries drop the
- * leading reminder scaffolding so a /fork or /resume redraw does not attribute
- * it to the operator (#81).
+ * leading reminder and skill-request scaffolding so a /fork or /resume redraw
+ * does not attribute it to the operator (#81).
  */
 function replayedUserText(entry: MessageEntry): string {
 	const obj = payloadObject(entry.payload);
 	if (typeof obj?.displayText === "string" && obj.displayText.length > 0) return obj.displayText;
 	if (typeof obj?.operatorText === "string") return obj.operatorText;
-	let text = extractTurnText(entry.payload);
-	for (;;) {
-		const stripped = text.replace(LEADING_SYSTEM_REMINDER, "");
-		if (stripped === text) return text;
-		text = stripped;
-	}
+	return stripInjectedPreamble(extractTurnText(entry.payload));
 }
 
 function messageFailure(entry: MessageEntry): { stopReason: "error" | "aborted"; errorMessage: string } | null {

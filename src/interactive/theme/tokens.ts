@@ -37,6 +37,10 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 
 export const SGR_RESET = "\u001b[0m";
 export const SGR_DIM = "\u001b[2m";
+export const SGR_BOLD = "\u001b[1m";
+/** Normal intensity: ends bold and dim together. */
+export const SGR_BOLD_OFF = "\u001b[22m";
+export const SGR_ITALIC = "\u001b[3m";
 
 export interface PaintMods {
 	fg?: ClioToken;

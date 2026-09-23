@@ -619,6 +619,10 @@ function runSkillsScope(
 		details: {
 			name: skill.name,
 			description: skill.description,
+			// Who asked for this load: a pending operator request (`/skill`, the
+			// selector, a marketplace install), the recipe a worker is bound to, or
+			// the model under model activation. The transcript row states it.
+			activation: pendingRequest === null ? "model" : pendingRequest.source === "recipe" ? "recipe" : "operator",
 			...(pendingTask.length > 0 ? { pendingTask } : {}),
 			path: skill.filePath,
 			baseDir: skill.baseDir,
