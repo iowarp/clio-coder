@@ -88,8 +88,6 @@ Example:
 CLIO_CODER_RENDER_TRACE=/tmp/clio-coder-render.jsonl clio-coder
 ```
 
-`CLIO_CODER_CHROME` also takes a path: the Chrome or Chromium binary the contributor gallery (`pnpm tui:gallery --out <dir> --png`) screenshots transcript frames with. Unset, the gallery looks for `google-chrome`, `chromium` or `chromium-browser` on `PATH` (`scripts/tui-dev.ts`).
-
 ## Internal plumbing
 
 Set by Clio for its own processes; not operator knobs.
