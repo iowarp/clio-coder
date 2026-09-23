@@ -56,6 +56,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Add contract tests for the tools whose `run()` no CI test invoked: `steer`, `monitor`, `ledger`, `panes`, `ask_user`, `code_nav` and `data`. `data` was registered in a contract test with its `run()` replaced by a stub, and no test anywhere had called `ask_user`. Add focused tests where CI reached a tool at one edge only: `credential_present` and `clio_library` ran only on their absent and refused paths, and `ls`, `git` and `artifact` left their refusals, continuation hints, diff and log options, and pathless artifact placement unpinned.
 - Move seven fast, deterministic tests from `tests/extended` into `tests/contracts`, so CI exercises `evidence`, `decide`, `limitation`, `tasks`, `verify`, `web_read` and `web_fetch`. `web_fetch` had only ever been refused at admission in CI, and the egress tests for redirects, mixed DNS answers and address pinning now gate every merge.
 - Restore the admission filesystem-call pin that the eval removal gave up. One admitted 1 KB edit makes 40 counted fs calls and one 1 KB write makes 48, the numbers the tool bench pinned; the counter is now a small harness in `tests/harness/fs-counter.ts` and needs no bench driver.
+- Correct the architecture guide's builtin tool count to 31 and add `self_compact` to its plane table, which listed 30. A contract test now compares both with the tool name registry.
 
 ### Removed
 
