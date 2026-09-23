@@ -405,12 +405,14 @@ export interface ComposerKeyContext {
 	readonly layerOwned: boolean;
 	/** True mid-IME-composition, where Enter commits a candidate and must never send. */
 	readonly composing: boolean;
+	/** False when plain Enter should add a line, as on touch keyboards or by operator choice. */
+	readonly plainEnterSends?: boolean;
 }
 
 /**
- * Enter sends, Shift+Enter inserts a newline, and the declared `send` chord
- * (Ctrl or Cmd + Enter) sends as well so the registry's own binding keeps
- * working from the composer.
+ * Enter follows the operator's composer choice, Shift+Enter inserts a newline,
+ * and the declared `send` chord (Ctrl or Cmd + Enter) always sends so the
+ * registry's own binding keeps working from the composer.
  *
  * Plain Enter is deliberately NOT a registry entry. `tests/interaction.test.ts`
  * asserts the table never binds a bare printable key, and rightly so: a bare
@@ -423,7 +425,7 @@ export function composerKeyAction(event: KeyEventLike, context: ComposerKeyConte
 	if (context.layerOwned) return "newline";
 	if (matchesKeybinding(KEYBINDINGS.send, event)) return "send";
 	if (event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return "newline";
-	return "send";
+	return context.plainEnterSends === false ? "newline" : "send";
 }
 
 // ---------------------------------------------------------------------------

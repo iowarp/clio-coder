@@ -91,6 +91,21 @@
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
+.composer__enter-mode {
+	border: 0;
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-sm);
+	background: transparent;
+	color: var(--ink-muted);
+	font: inherit;
+	font-size: var(--text-exact);
+	cursor: pointer;
+}
+.composer__enter-mode:hover,
+.composer__enter-mode:focus-visible {
+	background: var(--surface-sunken);
+	color: var(--ink);
+}
 .composer__submit,
 .composer__secondary {
 	border-radius: var(--radius-sm);

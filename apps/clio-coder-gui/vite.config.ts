@@ -23,7 +23,9 @@ export default defineConfig({
 		port: 4318,
 		strictPort: true,
 		proxy: {
-			"/api": {
+			// Vite serves client/api/*.ts as source modules. Proxy only backend API paths;
+			// otherwise those imports get a 401 and the development page stays blank.
+			"^/api(?:/|$)(?!.*\\.tsx?(?:\\?|$))": {
 				target: "http://127.0.0.1:4317",
 				changeOrigin: true,
 				configure(proxy) {
