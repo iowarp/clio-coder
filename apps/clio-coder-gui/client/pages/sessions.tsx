@@ -17,18 +17,18 @@ import {
 	EMPTY_EYEBROW,
 	EMPTY_GLYPH,
 	EMPTY_HEADING,
-	PROVIDER_UNREPORTED,
 	placeHealthRows,
 	STARTER_PROMPTS,
 	TRUNCATION_NOTE,
 } from "../chat/chat-turn.js";
 import { FleetStrip } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
-import { type HealthRow, summarizeHealth } from "../chat/health.js";
+import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { type ChatTurn, groupTurns, turnStatuses } from "../chat/turns.js";
+import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
-import { StatusMark } from "../design/status.js";
+import { StatusMark, TONE_GLYPHS } from "../design/status.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
 import { DeleteSession, SessionControls } from "./session-controls.js";
@@ -366,19 +366,42 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 	);
 }
 
+/** What the header calls the conversation: its reported label, else the first request, else nothing yet. */
+function conversationTitle(snapshot: SessionSnapshot): string {
+	if (snapshot.label) return snapshot.label;
+	const prompt =
+		snapshot.turns.find((turn) => turn.prompt.trim() !== "")?.prompt ??
+		snapshot.timeline.find((item) => item.kind === "user" && item.text.trim() !== "")?.text;
+	return prompt?.replace(/\s+/g, " ").trim() ?? "New conversation";
+}
+
+/**
+ * Everything about the session that is not the conversation itself, behind one control: where it runs,
+ * how it is configured, Clio Coder commands, dispatched workers, switching and closing. It opens on
+ * demand so the header stays one line, and it closes on Escape or an outside press.
+ */
 function SessionTools({
 	client,
 	session,
+	workspaceRoot,
 	liveWorkers,
 	capabilities,
 	capabilitiesError,
+	openSessions,
+	closing,
+	onClose,
 }: {
 	client: Client;
 	session: SessionSnapshot;
+	workspaceRoot: string | undefined;
 	liveWorkers: number;
 	capabilities: AgentCapabilities | undefined;
 	capabilitiesError: Error | null;
+	openSessions: readonly SessionSnapshot[];
+	closing: boolean;
+	onClose: () => void;
 }) {
+	const navigate = useNavigate();
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
 	useEffect(() => {
@@ -400,14 +423,37 @@ function SessionTools({
 			document.removeEventListener("keydown", closeOnEscape);
 		};
 	}, [open]);
+	const others = openSessions.filter((entry) => entry.state === "open");
 	return (
 		<details className="conversation__tools" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>
 			<summary>
-				Controls &amp; settings
-				{liveWorkers > 0 ? ` · ${liveWorkers} ${liveWorkers === 1 ? "worker" : "workers"} running` : ""}
+				<Icon name="settings" />
+				<span className="conversation__tools-label">
+					Session tools
+					{liveWorkers > 0 ? ` · ${liveWorkers} ${liveWorkers === 1 ? "worker" : "workers"} running` : ""}
+				</span>
 			</summary>
 			{open ? (
 				<div className="conversation__tools-body">
+					<section className="conversation__place" aria-label="Where this conversation runs">
+						<p className="eyebrow">Project folder</p>
+						<code title={workspaceRoot}>{workspaceRoot ?? "Reading the project path…"}</code>
+						<Link className="conversation__settings-link" to={`/settings?workspace=${session.workspaceId}`}>
+							Project settings <span aria-hidden="true">→</span>
+						</Link>
+					</section>
+					{session.state === "open" && others.length > 1 ? (
+						<label className="conversation__switch">
+							Switch to another open conversation
+							<select value={session.id} onChange={(event) => void navigate(`/sessions/${event.target.value}`)}>
+								{others.map((entry) => (
+									<option value={entry.id} key={entry.id}>
+										{conversationTitle(entry)}
+									</option>
+								))}
+							</select>
+						</label>
+					) : null}
 					{capabilities || session.state !== "open" ? (
 						<SessionControls client={client} session={session} capabilities={capabilities ?? EMPTY_CAPABILITIES} />
 					) : capabilitiesError ? (
@@ -415,53 +461,93 @@ function SessionTools({
 					) : (
 						<p>Checking session controls…</p>
 					)}
-					<Link className="conversation__settings-link" to={`/settings?workspace=${session.workspaceId}`}>
-						Project settings <span aria-hidden="true">→</span>
-					</Link>
 					<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
 					<FleetStrip client={client} session={session} />
+					<div className="conversation__close">
+						<p>
+							Closing ends this Clio Coder session. The conversation stays in the project history and can be loaded again.
+						</p>
+						<button type="button" onClick={onClose} disabled={closing || session.state !== "open"}>
+							{closing ? "Closing…" : "Close session"}
+						</button>
+					</div>
 				</div>
 			) : null}
 		</details>
 	);
 }
 
-function SessionHealth({ session }: { session: SessionSnapshot }) {
-	const summary = useMemo(() => summarizeHealth(session.health), [session.health]);
-	const providers = summary.providers;
-	const unknown = summary.unknown;
+/**
+ * The model this conversation routes to, with the reported health of its target folded into one glyph.
+ * The words stay in the accessible name and the tooltip; a target in any state other than healthy is
+ * also spelled out below the header by `SessionHealth`.
+ */
+function RouteChip({ settings, health }: { settings: SessionSettingsView | undefined; health: HealthSummary }) {
+	const target = settings?.target ?? null;
+	const provider = health.providers.find((row) => row.key === target) ?? health.providers[0];
+	const tone = provider?.tone ?? "unverified";
+	const healthText = provider
+		? `Target ${provider.key}: ${provider.detail ?? provider.label}`
+		: "No target health reported by Clio Coder.";
+	const route = settings
+		? `${settings.target ?? "automatic routing"} · ${settings.model ?? "default model"}`
+		: (provider?.key ?? "Target");
+	const title = settings
+		? `Target: ${settings.target ?? "automatic"}. Model: ${settings.model ?? "configured default"}. Thinking: ${settings.thinking}. ${healthText}`
+		: healthText;
 	return (
-		<>
+		<span className="route-chip" data-tone={tone} title={title}>
+			<span className="route-chip__glyph" aria-hidden="true">
+				{TONE_GLYPHS[tone]}
+			</span>
+			<span className="route-chip__text">{route}</span>
+			<span className="sr-only">{`Thinking ${settings?.thinking ?? "not reported"}. ${healthText}`}</span>
+		</span>
+	);
+}
+
+interface SessionSettingsView {
+	readonly target: string | null;
+	readonly model: string | null;
+	readonly thinking: string;
+}
+
+/**
+ * Session health that needs a reader. A healthy target is one glyph in the route chip; anything else,
+ * and every fact kind this build does not recognise, is written out here in full.
+ */
+function SessionHealth({ summary }: { summary: HealthSummary }) {
+	const concerns = summary.providers.filter((row) => row.tone !== "success");
+	if (!summary.contextWarning && concerns.length === 0 && summary.unknown.length === 0) return null;
+	return (
+		<div className="conversation__health">
 			{summary.contextWarning ? (
 				<p className="context-banner" role="status">
 					<strong>{CONTEXT_WARNING_LABEL}</strong> {summary.contextWarning.detail ?? summary.contextWarning.label}
 				</p>
 			) : null}
-			<div className="session-health">
-				{providers.length === 0 ? (
-					<StatusMark tone="unverified" label={PROVIDER_UNREPORTED} />
-				) : (
-					providers.map((row) => (
+			{concerns.length > 0 || summary.unknown.length > 0 ? (
+				<div className="session-health">
+					{concerns.map((row) => (
 						<StatusMark
 							key={row.id}
 							tone={row.tone}
 							label={row.label}
 							{...(row.detail === null ? {} : { detail: row.detail })}
 						/>
-					))
-				)}
-				{unknown.map((row) => (
-					<StatusMark key={row.id} tone={row.tone} label={row.label} />
-				))}
-			</div>
-		</>
+					))}
+					{summary.unknown.map((row) => (
+						<StatusMark key={row.id} tone={row.tone} label={row.label} />
+					))}
+				</div>
+			) : null}
+		</div>
 	);
 }
 
 function SessionView({ client, id }: { client: Client; id: string }) {
 	const connection = useOutletContext<ConnectionState>();
 	const queries = useQueryClient();
-	const navigate = useNavigate();
 	const input = { params: { id }, query: {}, body: {} };
 	const session = useQuery({
 		queryKey: ["session", id],
@@ -514,11 +600,11 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	}, [snapshot?.timeline, statuses]);
 	const fleet = snapshot?.fleet;
 	const liveWorkers = useMemo(() => (fleet === undefined ? 0 : foldFleetRuns(fleet).filter(isLiveRun).length), [fleet]);
+	const health = useMemo(() => summarizeHealth(snapshot?.health ?? []), [snapshot?.health]);
 	const notices = useMemo(() => {
-		const health = summarizeHealth(snapshot?.health ?? []);
 		const rows = [health.compaction, health.toolBudget].filter((row): row is HealthRow => row !== null);
 		return placeHealthRows(rows, snapshot?.turns ?? []);
-	}, [snapshot?.health, snapshot?.turns]);
+	}, [health, snapshot?.turns]);
 	const running = snapshot?.turns.at(-1)?.status === "running";
 	const now = useSecond(running || (snapshot?.permissions.some((item) => item.status === "pending") ?? false));
 	// A deep link starts without a cached snapshot. Attach the observer only once
@@ -539,6 +625,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const turn = snapshot.turns.at(-1);
 	const pending = pendingPermission(snapshot) ?? null;
 	const workspaceRoot = workspace.data?.path;
+	const title = conversationTitle(snapshot);
+	const route =
+		snapshot.state === "open" && sessionSettings.data
+			? {
+					target: sessionSettings.data.settings.chat.target ?? null,
+					model: sessionSettings.data.settings.chat.model ?? null,
+					thinking: sessionSettings.data.settings.chat.thinkingLevel,
+				}
+			: undefined;
 	const activity = pending
 		? { tone: "warn" as const, label: "Waiting for your approval" }
 		: running
@@ -553,62 +648,37 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	return (
 		<section className="conversation">
 			<header className="conversation__header">
-				<Link className="conversation__back" to={`/workspaces/${snapshot.workspaceId}/sessions`}>
-					← Workspace sessions
-				</Link>
-				<div className="conversation__titlebar">
-					<div>
-						<p className="eyebrow">{workspace.data?.name ?? "Conversation"} / Clio Coder</p>
-						<h1>{snapshot.label ?? "Clio Coder"}</h1>
-						{workspaceRoot ? (
-							<p className="conversation__path" title={workspaceRoot}>
-								{workspaceRoot}
-							</p>
-						) : null}
-					</div>
-					<button type="button" onClick={() => close.mutate()} disabled={close.isPending || snapshot.state !== "open"}>
-						Close session
-					</button>
-				</div>
-				<div className="conversation__meta">
+				<div className="conversation__bar">
+					<Link
+						className="conversation__project"
+						to={`/workspaces/${snapshot.workspaceId}/sessions`}
+						title={workspaceRoot ? `Conversations in ${workspaceRoot}` : "Conversations in this project"}
+					>
+						<span aria-hidden="true">←</span>
+						<span className="conversation__project-name">{workspace.data?.name ?? "Project"}</span>
+						<span className="sr-only">: all conversations</span>
+					</Link>
+					<h1 className="conversation__title" title={title}>
+						{title}
+					</h1>
 					<p className="session-status" role="status">
 						<StatusMark tone={activity.tone} label={activity.label} />
 						{snapshot.recoveredOrphan ? <span>Recovered after server interruption</span> : null}
 					</p>
-					{snapshot.state === "open" && sessionSettings.data ? (
-						<section className="conversation__routing" aria-label="Current session settings">
-							<span title={sessionSettings.data.settings.chat.target ?? "Automatic routing"}>
-								Target: {sessionSettings.data.settings.chat.target ?? "automatic"}
-							</span>
-							<span title={sessionSettings.data.settings.chat.model ?? "Configured default model"}>
-								Model: {sessionSettings.data.settings.chat.model ?? "default"}
-							</span>
-							<span>Thinking: {sessionSettings.data.settings.chat.thinkingLevel}</span>
-						</section>
-					) : null}
-					<SessionHealth session={snapshot} />
-					{snapshot.state === "open" && (openSessions.data?.filter((entry) => entry.state === "open").length ?? 0) > 1 ? (
-						<label className="conversation__switch">
-							Switch conversation
-							<select value={id} onChange={(event) => void navigate(`/sessions/${event.target.value}`)}>
-								{openSessions.data
-									?.filter((entry) => entry.state === "open")
-									.map((entry) => (
-										<option value={entry.id} key={entry.id}>
-											{entry.label ?? entry.turns[0]?.prompt ?? "New conversation"}
-										</option>
-									))}
-							</select>
-						</label>
-					) : null}
+					<RouteChip settings={route} health={health} />
 					<SessionTools
 						client={client}
 						session={snapshot}
+						workspaceRoot={workspaceRoot}
 						liveWorkers={liveWorkers}
 						capabilities={capabilities.data}
 						capabilitiesError={capabilities.error}
+						openSessions={openSessions.data ?? []}
+						closing={close.isPending}
+						onClose={() => close.mutate()}
 					/>
 				</div>
+				<SessionHealth summary={health} />
 			</header>
 			<div className="conversation__approval">
 				{connection === "Reconnecting…" || connection === "Not connected" || session.error ? (
