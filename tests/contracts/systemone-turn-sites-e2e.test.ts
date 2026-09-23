@@ -39,11 +39,25 @@ interface JevFixture {
 }
 
 /** Answers every question id it is sent, in the shape the mode asks for. */
-function answerFor(id: string, mode: JevMode): unknown {
+function answerFor(id: string, mode: JevMode, question: unknown): unknown {
 	if (id.endsWith(".shape")) {
+		const criteria = (question as { criteria: Record<string, string> }).criteria;
+		const options = Object.keys(criteria);
 		return mode === "abstain"
-			? { type: "choice", choice: "single", confidence: 0.05, probabilities: { single: 0.3, parallel: 0.25 } }
-			: { type: "choice", choice: "single", confidence: 1, probabilities: { single: 1 } };
+			? {
+					type: "choice",
+					choice: "single",
+					confidence: 0.05,
+					probabilities: Object.fromEntries(
+						options.map((option) => [option, option === "single" ? 0.3 : 0.7 / (options.length - 1)]),
+					),
+				}
+			: {
+					type: "choice",
+					choice: "single",
+					confidence: 1,
+					probabilities: Object.fromEntries(options.map((option) => [option, option === "single" ? 1 : 0])),
+				};
 	}
 	if (mode === "abstain") return { type: "noul", noul: 0.5 };
 	if (id === "turnScope.direct") return { type: "noul", noul: 0.95 };
@@ -70,7 +84,9 @@ async function startJevFixture(): Promise<JevFixture> {
 		const answers =
 			fixture.mode === "malformed"
 				? {}
-				: Object.fromEntries(Object.keys(body.questions).map((id) => [id, answerFor(id, fixture.mode)]));
+				: Object.fromEntries(
+						Object.entries(body.questions).map(([id, question]) => [id, answerFor(id, fixture.mode, question)]),
+					);
 		res.writeHead(200, { "content-type": "application/json" });
 		res.end(JSON.stringify({ model: "jev-fixture", answers }));
 	});
