@@ -50,7 +50,7 @@ the theme.
 | Violet | `--reason-*` | Clio Coder-reported reasoning or narrative provenance |
 | Slate grey, dashed | `--status-unverified-*` | No probe has run; unavailable; not measured |
 | Rules | `--line` decorative, `--line-strong` control boundary | Structure |
-| Contained code | `--code-paper`, `--code-surface`, `--code-ink`, `--code-line`, `--code-gutter` | Code and diagrams, dark in both themes |
+| Contained code | `--code-paper`, `--code-surface`, `--code-ink`, `--code-ink-muted`, `--code-line`, `--code-gutter` | Code and diagrams, dark in both themes |
 
 **Colour is always supplementary.** Text, label, shape or pattern must carry the same distinction.
 That is why `StatusMark` always renders a glyph and a word, why `unverified` is dashed, and why a run
@@ -127,8 +127,9 @@ session-tools disclosure may scroll locally when their content exceeds the avail
 tools open on demand, not as a stack of permanent cards above the transcript. The minimum side gutter
 at any width is `--space-4`.
 
-**Radius decision rule.** `--radius-xs` for inline chips in dense rows and for code/JSON wells;
-`--radius-sm` for controls (button, input, select, badge); `--radius-md` for panels and cards;
+**Radius decision rule.** `--radius-xs` for inline chips in dense rows and for JSON wells;
+`--radius-sm` for controls (button, input, select, badge); `--radius-md` for panels, cards, and the
+code blocks and diagrams in reading text;
 `--radius-lg` for dialogs, drawers, the composer and the operator's request; `--radius-pill` only for
 status marks on inspector pages and the jump pill. Nothing gets a radius the tokens do not name.
 
@@ -185,7 +186,7 @@ It does not run a full-shell animated reflow while text is streaming.
 ## Focus and non-text contrast
 
 **The floor is 4.5:1 for text and 3:1 for non-text boundaries and focus indicators** (WCAG 2.2
-SC 1.4.3 and SC 1.4.11). `scripts/check-contrast.mjs` parses the token values and asserts 84 pairs
+SC 1.4.3 and SC 1.4.11). `scripts/check-contrast.mjs` parses the token values and asserts 92 pairs
 across both themes; it fails the build rather than warning.
 
 The focus ring is two-tone, in `client/design/a11y.css`: a 2px `outline` in `--focus` at a 2px
@@ -200,9 +201,9 @@ around 1.3:1 by design. `--line-strong` is the boundary of every button, input, 
 count, badge, panel, permission card, session control and table cell, and measures 3.13:1 to 3.69:1
 in light and 3.26:1 to 4.08:1 in dark. The mechanical rule: **if removing the border would make the
 control's hit area ambiguous, it is `--line-strong`.** The one relaxation is a control whose own
-words name it in a quiet row: Session tools in the conversation header, and the copy and retry
-actions under a message. These stay frameless until hovered, focused or open, and keep the focus
-ring.
+words name it in a quiet row: Session tools in the conversation header, the copy and retry actions
+under a message, and the copy and source actions in a code block's head. These stay frameless until
+hovered, focused or open, and keep the focus ring.
 
 Under `forced-colors: active` every box-shadow is dropped, the ring becomes `2px solid Highlight`,
 and only the few marks whose shape is the information keep `forced-color-adjust: none`.
@@ -315,6 +316,15 @@ settled blocks stay mounted.
 Prism loads its core and known grammars on demand, only for settled blocks near the viewport and at
 most 60,000 characters. Its output is a token tree, never HTML. Unknown languages render plain with
 their label shown. Copy is explicit, and an overflowing `<pre>` accepts focus for keyboard scrolling.
+
+A code block or diagram is one dark well with `--radius-md` and a `--code-line` hairline. Its chrome
+is a single quiet head inside the well, with no ground or rule of its own: the language in
+`--text-exact` mono and `--code-ink-muted`, then the actions (Copy; Show source and Copy source on a
+diagram) as frameless words that take `--code-surface` on hover. A block names its line count only
+once it is longer than the 24 lines its `<pre>` shows before scrolling, because a block that fits
+already shows its length. The conversation and Docs share this one treatment. Mermaid's theme
+variables restate the `--code-*` tokens in hex, because Mermaid computes shades from them: node fills
+on `--code-surface`, sage rules that clear 3:1 on `--code-paper`, and `--code-ink` labels.
 
 Mermaid loads after the response settles. Bounds are three numbers, not two: **16 KiB and 400 lines**
 of source, and **400 edges** at the renderer. Layout is one synchronous main-thread task, which is

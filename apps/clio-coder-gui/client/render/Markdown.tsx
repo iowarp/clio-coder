@@ -158,6 +158,12 @@ function HighlightedCode({ tokens }: { tokens: readonly HighlightToken[] }) {
 	);
 }
 
+/**
+ * Lines a code block shows before it scrolls, from the `pre`'s 520px cap at 12px/1.7 mono. A block
+ * that fits says nothing about its length; a longer one names it, because its end is out of sight.
+ */
+const CODE_VISIBLE_LINES = 24;
+
 interface CodeBlockProps {
 	readonly code: string;
 	readonly info: string | undefined;
@@ -189,11 +195,9 @@ export const CodeBlock = memo(function CodeBlock({ code, info, settled }: CodeBl
 			ref={container}
 			data-language={grammar ?? undefined}
 		>
-			<div className="code-block__bar">
+			<div className="code-block__head">
 				<span className="code-block__lang">{language.label ?? "text"}</span>
-				<span className="code-block__lines">
-					{lineCount} {lineCount === 1 ? "line" : "lines"}
-				</span>
+				{lineCount > CODE_VISIBLE_LINES ? <span className="code-block__lines">{lineCount} lines</span> : null}
 				<CopyButton text={code} />
 			</div>
 			<CodeViewport>
@@ -268,7 +272,7 @@ export const MermaidBlock = memo(function MermaidBlock({ source, settled }: Merm
 	const sourceVisible = state !== "rendered" || showSource;
 	return (
 		<figure className={`diagram is-${state}`} ref={container} aria-label="Mermaid diagram">
-			<div className="code-block__bar">
+			<div className="code-block__head">
 				<span className="code-block__lang">mermaid</span>
 				{state === "rendered" && (
 					<button

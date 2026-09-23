@@ -58,6 +58,8 @@ const CHECKS = [
 	["--action-line", "--paper", NON_TEXT],
 	["--code-ink", "--code-paper", TEXT],
 	["--code-ink", "--code-surface", TEXT],
+	["--code-ink-muted", "--code-paper", TEXT],
+	["--code-ink-muted", "--code-surface", TEXT],
 	["--code-gutter", "--code-paper", NON_TEXT],
 ];
 
