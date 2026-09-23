@@ -127,6 +127,7 @@ export function createDecider(
 	target: TargetDescriptor,
 	ctx: ProbeContext,
 	resolveAuthToken?: (signal?: AbortSignal) => Promise<string | undefined>,
+	boundModel?: string,
 ): Decider {
 	const decide = runtime.decide;
 	if (!decide) {
@@ -137,13 +138,16 @@ export function createDecider(
 		// rotation, and an operator who stores a key mid-session is answered on
 		// the next question rather than at the next restart.
 		const authToken = ctx.authToken ?? (await resolveAuthToken?.(options.signal));
+		// A per-call model wins, then the one the binding names; without either the
+		// runtime falls back to the target's default.
+		const model = options.model ?? boundModel;
 		return decide.call(
 			runtime,
 			target,
 			{
 				state,
 				questions,
-				...(options.model !== undefined ? { model: options.model } : {}),
+				...(model !== undefined ? { model } : {}),
 				...(options.signal !== undefined ? { signal: options.signal } : {}),
 			},
 			authToken ? { ...ctx, authToken } : ctx,
