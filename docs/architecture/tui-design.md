@@ -1,8 +1,8 @@
 # Clio TUI Design System
 
-Reference specification for the Clio Coder TUI visual layout, styling, and behavior across [src/interactive/](../../src/interactive/).
+This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior across [src/interactive/](../../src/interactive/).
 
-**Core Invariant**: *State from color, structure from frames, identity from brand marks. Everything else remains visually quiet.*
+The governing architectural principle: **the user reads state from color, structure from frames, and identity from brand marks.** Everything that is not state or structure remains visually quiet.
 
 ---
 
@@ -28,12 +28,13 @@ Toggle styles with **Alt+O** (`Compact` → `Standard` → `Detailed` → `Compa
 
 - **Preview Budgets**: Counted *after terminal wrapping*. Narrow terminals scale budgets downward.
 - **Worker Inspection**: Full unbounded output is inspectable via `/view transcript`.
+- **Idle Pre-rendering**: Settled entries are pre-rendered into the two alternative styles during idle time, eliminating delay on Alt+O switching.
 
 ---
 
 ## 1. Color System
 
-Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts); hex values in [src/core/theme-token-hex.ts](../../src/core/theme-token-hex.ts). Raw ANSI SGR escapes are forbidden.
+Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/theme/tokens.ts); canonical hex values in [src/core/theme-token-hex.ts](../../src/core/theme-token-hex.ts). Raw ANSI SGR escapes are forbidden outside the theme module.
 
 ### 1.1 Color Tokens
 
@@ -117,9 +118,32 @@ Compact inline lifecycle indicators:
 
 ---
 
-## 4. State Choreography
+## 4. Screen Surfaces & State Choreography
 
-| State | Composer Rails | Gutter Mark | Footer Indicator |
+The visual hierarchy coordinates four primary screen surfaces: Header, Transcript, Composer, and Footer.
+
+### 5.1 Welcome Launchpad & Session Header
+
+The header operates in two distinct modes:
+- **Launchpad (before the first prompt)**: A framed panel dashboard enclosed by `╭─ Clio Coder v<version> ─╮`. Displays model route status, workspace path, autonomy level, target inventory, fleet recipes, and cached subscription quotas.
+- **Session Header (after prompt admission)**: Collapses into a single compact line showing the active route and directory, preserving vertical space for the transcript.
+
+### 5.2 Composer (ClioEditor)
+
+The input surface (`ClioEditor`) frames the operator's prompt:
+- **Rails**: Framed with double vertical rails. Normal input glows neon teal (`editor`); full-auto turns glow red (`editorDanger`); preparation and compaction glow orange (`editorAction`).
+- **Steering Affordance**: Queued steering instructions display a `›` marker in `action` orange above the prompt.
+
+### 5.3 Progressively Disclosed Footer
+
+The footer anchors live system telemetry across two lines:
+- **Line 1 (Activity & Model)**: Active tool or worker status, model identity, weekly quota headroom, reasoning metrics, and context occupancy meter.
+- **Line 2 (Environment & Hints)**: Working directory, Git branch / dirty status, and rotating context hints.
+- **Narrow Terminals**: At narrow widths (<60 columns), secondary tips yield space to essential meters without wrapping.
+
+### 5.4 State Choreography Table
+
+| Lifecycle State | Composer Rails | Gutter Mark | Footer Indicator |
 | :--- | :--- | :--- | :--- |
 | **Idle** | `editor` (Neon teal) | ` ` | `ready` |
 | **Typing / Input** | `editor` (Neon teal) | `▌` (`accent`) | `editing` |
@@ -153,3 +177,16 @@ Every transcript row follows a rigid 2-column gutter format:
 - **`/usage`**: 4 tabs (Accounts, Session, Models, Workers) with consumption vs budget percentages.
 - **`/tasks`**: Interactive task board tracking parent/child subagent execution status.
 - **`/doctor`**: In-session diagnostic reports with severity-ordered findings.
+
+---
+
+## 7. Source Implementation Map
+
+| Subsystem | Source Location | Key Exports |
+| :--- | :--- | :--- |
+| Theme & Tokens | [tokens.ts](../../src/interactive/theme/tokens.ts) | `tokens`, `ColorToken`, `themeTokenHex` |
+| Glyph Constants | [glyphs.ts](../../src/interactive/theme/glyphs.ts) | `glyphs`, `GlyphName` |
+| Welcome Dashboard | [welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts) | `buildWelcomeDashboardLines` |
+| Composer Rail | [composer.ts](../../src/interactive/composer.ts) | `ClioEditor`, `EditorRail` |
+| Transcript Presenter | [transcript.ts](../../src/interactive/transcript.ts) | `renderTranscript`, `GutterMark` |
+| Overlays & Boards | [overlays/](../../src/interactive/overlays/) | `SettingsOverlay`, `ViewOverlay`, `TasksOverlay` |
