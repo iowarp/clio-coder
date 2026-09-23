@@ -854,7 +854,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 		synthesisToolLock = true;
 		if (resultContractRepairsQueued >= RESULT_CONTRACT_REPAIR_LIMIT) {
 			workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${reason}`;
-			emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
+			emit({
+				type: "clio_coder_run_outcome",
+				payload: { outcomeCode: "result_contract_exhausted", detail: workerBoundFailure },
+			});
 			return;
 		}
 		resultContractRepairsQueued += 1;
@@ -1034,8 +1037,10 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 					for (const message of repair) agent.followUp(message as unknown as AgentMessage);
 				} else if (workerBoundFailure === null) {
 					workerBoundFailure = `result contract failed after ${RESULT_CONTRACT_REPAIR_LIMIT} bounded repair rounds: ${violation}`;
-					emit({ type: "clio_coder_run_outcome", payload: { outcomeCode: "result_contract_exhausted" } });
-					process.stderr.write(`[worker] ${workerBoundFailure}\n`);
+					emit({
+						type: "clio_coder_run_outcome",
+						payload: { outcomeCode: "result_contract_exhausted", detail: workerBoundFailure },
+					});
 				}
 			}
 		}

@@ -43,6 +43,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - List `inception` and `typesafe-jev` in the runtime boot manifest. The TUI refused a Mercury chat target at startup because the manifest is read before the providers domain loads and neither row had been added; headless `run` hydrates the full registry and never hit the check. A contract test now diffs the manifest against the built-in runtimes in both directions. The v0.5.3 tag shipped with this defect.
 - Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff outranked the configuration guide on an ordinary question about choosing a worker model.
 - Stop the skills listing from claiming a relevance order when the decision model abstained on every row it shows. The catalog order was untouched, so the sentence credited an order nothing made.
+- Record why a worker's result contract ran out of repairs. The receipt said `result_contract_exhausted` with the detail `exit code 1`, because the validator's reason reached only worker stderr on one path and nowhere at all on the structured handoff path that scouts use. The worker now sends the reason with its outcome code, and the receipt's detail carries it, bounded to 1 KB and redacted.
 
 ### Tool contract coverage
 
