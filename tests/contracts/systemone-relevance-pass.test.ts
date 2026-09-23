@@ -224,6 +224,24 @@ describe("pre-turn relevance pass", () => {
 		strictEqual(capture.calls[0]?.questionIds.length, 24);
 	});
 
+	it("scores installed skills beyond the first 24 catalog names", async () => {
+		const capture: Capture = { calls: [] };
+		const skills = [
+			...Array.from({ length: 37 }, (_, index) => ({ id: `skill-${index}`, summary: "A skill." })),
+			{ id: "zz-relevant", summary: "The relevant skill, listed last." },
+		];
+		const result = await scoreTurnRelevance(
+			{
+				settings: settingsFor({ skills: "system-one" }),
+				providers: providersWith(capture, (ids) => Object.fromEntries(ids.map((id) => [id, noul(0.9)]))),
+				ctx,
+			},
+			{ task: "use the skill listed last", memory: [], skills },
+		);
+		strictEqual(capture.calls[0]?.questionIds.length, skills.length);
+		strictEqual(result.skills?.scores["zz-relevant"], 0.9);
+	});
+
 	it("reports the target and model that answered", async () => {
 		const capture: Capture = { calls: [] };
 		const result = await scoreTurnRelevance(
