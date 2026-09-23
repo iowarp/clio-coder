@@ -1,4 +1,5 @@
 import { writeDiagnostic } from "../../core/diagnostics.js";
+import { boundedExternalDiagnostic } from "../../core/external-diagnostic.js";
 import { readPiMonoVersion } from "../../engine/pi-mono-names.js";
 import { parseWorkerContextSeed } from "../../worker/context-seed.js";
 import { WORKER_STDIN_FRAME_MAX_BYTES } from "../../worker/protocol.js";
@@ -826,6 +827,7 @@ function resolveTrustedOutcomeCodes(codes: ReadonlySet<RunOutcomeCode>): {
 }
 
 const MAX_WORKER_DIAGNOSTIC_DETAIL_CHARS = 2048;
+const MAX_WORKER_OUTCOME_DETAIL_BYTES = 1024;
 const MAX_WORKER_DIAGNOSTIC_FAILURE_CHARS = 4096;
 
 function compactDiagnosticText(value: string): string {
@@ -5406,6 +5408,7 @@ export function createDispatchBundle(
 		let failureMessage: string | undefined;
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
+		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
 		let reportedUntrustedOutcome = false;
 		const acceptsOutcomeCodeEvents =
 			lifecycle.runtimeKind === "http" ||
@@ -5468,6 +5471,7 @@ export function createDispatchBundle(
 					tool?: string;
 					sequence?: number;
 					outcomeCode?: unknown;
+					detail?: unknown;
 					posture?: string;
 					durationMs?: number;
 					outcome?: "ok" | "error" | "blocked";
@@ -5504,6 +5508,16 @@ export function createDispatchBundle(
 			) {
 				if (acceptsOutcomeCodeEvents) {
 					trustedOutcomeCodes.add(event.payload.outcomeCode);
+					const detail = event.payload.detail;
+					if (
+						typeof detail === "string" &&
+						detail.trim().length > 0 &&
+						!trustedOutcomeDetails.has(event.payload.outcomeCode)
+					)
+						trustedOutcomeDetails.set(
+							event.payload.outcomeCode,
+							compactDiagnosticText(boundedExternalDiagnostic(detail, MAX_WORKER_OUTCOME_DETAIL_BYTES)),
+						);
 				} else if (!reportedUntrustedOutcome) {
 					reportedUntrustedOutcome = true;
 					reportDispatchDiagnostic(
@@ -6197,6 +6211,14 @@ export function createDispatchBundle(
 				if (resolvedOutcomeCode.conflict !== null) {
 					reportDispatchDiagnostic(`run ${envelope.id}`, new Error(resolvedOutcomeCode.conflict));
 					finalDetail = [finalDetail, resolvedOutcomeCode.conflict].filter(Boolean).join("; ");
+				}
+				// The exit code alone says a contract ran out of repairs, not why.
+				// The worker's own reason is what separates a model that cannot
+				// meet a grounding rule from a prompt that asks for the impossible.
+				const outcomeCodeDetail = outcomeCode === null ? undefined : trustedOutcomeDetails.get(outcomeCode);
+				if (outcomeCodeDetail !== undefined && finalOutcome === "failed") {
+					finalDetail = [finalDetail, outcomeCodeDetail].filter(Boolean).join("; ");
+					failureMessage = finalDetail;
 				}
 				if (outcomeCode !== null && finalOutcome === "succeeded") {
 					finalOutcome = "failed";

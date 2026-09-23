@@ -90,7 +90,11 @@ export interface ClioSteerReceivedEvent {
 /** Machine-readable terminal classification, emitted where the condition is known. */
 export interface ClioRunOutcomeEvent {
 	type: "clio_coder_run_outcome";
-	payload: { outcomeCode: RunOutcomeCode };
+	/**
+	 * `detail` says why, where the worker knows more than its exit code. The
+	 * parent bounds and redacts it before it reaches the receipt.
+	 */
+	payload: { outcomeCode: RunOutcomeCode; detail?: string };
 }
 
 /** Emitted only after the host validates an internal helper's terminal object. */

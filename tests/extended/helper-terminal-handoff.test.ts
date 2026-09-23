@@ -139,13 +139,15 @@ for (const scenario of scenarios) {
 				strictEqual(request.tool_choice, "required");
 				strictEqual(request.parallel_tool_calls, false);
 			}
-			if (scenario.code === 1 && scenario.rounds.length === 3)
-				strictEqual(
-					events.filter(
-						(event) => event.type === "clio_coder_run_outcome" && event.payload.outcomeCode === "result_contract_exhausted",
-					).length,
-					1,
+			if (scenario.code === 1 && scenario.rounds.length === 3) {
+				const exhausted = events.filter(
+					(event) => event.type === "clio_coder_run_outcome" && event.payload.outcomeCode === "result_contract_exhausted",
 				);
+				strictEqual(exhausted.length, 1);
+				// The receipt can only say why if the event carries the reason.
+				ok(exhausted[0]?.type === "clio_coder_run_outcome");
+				ok(/^result contract failed after 2 bounded repair rounds: \S/u.test(exhausted[0].payload.detail ?? ""));
+			}
 		} finally {
 			worker?.abort();
 			await worker?.promise;
