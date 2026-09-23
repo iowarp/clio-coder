@@ -218,6 +218,50 @@ describe("decision site credentials", () => {
 		}
 		deepStrictEqual(urls, ["https://api.typesafe.ai/v1/systemone"]);
 	});
+
+	it("treats incomplete or inconsistent choice and score distributions as no opinion", async () => {
+		const { settings } = settingsWith({ toolRisk: "system-one" });
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => typesafeJev,
+		} as unknown as ProvidersContract;
+		const cases = [
+			{
+				label: "missing choice distribution",
+				question: { type: "choice" as const, instructions: "Pick one", criteria: { a: "First", b: "Second" } },
+				answer: { type: "choice", choice: "a", confidence: 0.9 },
+			},
+			{
+				label: "choice contradicts distribution",
+				question: { type: "choice" as const, instructions: "Pick one", criteria: { a: "First", b: "Second" } },
+				answer: { type: "choice", choice: "a", confidence: 0.9, probabilities: { a: 0.1, b: 0.9 } },
+			},
+			{
+				label: "score contradicts distribution",
+				question: { type: "score" as const, instructions: "Rate it", criteria: ["Low", "High"] },
+				answer: {
+					type: "score",
+					score: 0.9,
+					confidence: 0.9,
+					legend: { "0": "Low", "1": "High" },
+					probabilities: { "0": 0.9, "1": 0.1 },
+				},
+			},
+		];
+		const realFetch = globalThis.fetch;
+		try {
+			for (const { label, question, answer } of cases) {
+				globalThis.fetch = (async () =>
+					new Response(JSON.stringify({ answers: { q: answer } }), {
+						status: 200,
+						headers: { "content-type": "application/json" },
+					})) as typeof fetch;
+				strictEqual(await askSite("toolRisk", { settings, providers, ctx }, {}, { q: question }), null, label);
+			}
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
 });
 
 describe("decision site resolution", () => {

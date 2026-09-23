@@ -84,13 +84,21 @@ function stringMap(value: unknown): Record<string, string> | undefined {
 	return Object.keys(out).length > 0 ? out : undefined;
 }
 
-function numberMap(value: unknown): Record<string, number> | undefined {
-	if (typeof value !== "object" || value === null) return undefined;
+function distribution(value: unknown, keys: ReadonlyArray<string>): Record<string, number> | null {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+	const raw = value as Record<string, unknown>;
+	if (Object.keys(raw).length !== keys.length) return null;
 	const out: Record<string, number> = {};
-	for (const [key, entry] of Object.entries(value)) {
-		if (typeof entry === "number" && Number.isFinite(entry)) out[key] = entry;
+	let total = 0;
+	for (const key of keys) {
+		const entry = raw[key];
+		if (typeof entry !== "number" || !Number.isFinite(entry) || entry < 0 || entry > 1) return null;
+		out[key] = entry;
+		total += entry;
 	}
-	return Object.keys(out).length > 0 ? out : undefined;
+	// Wire values are rounded for display. Allow that rounding, but not a map
+	// that is no longer a probability distribution.
+	return Math.abs(total - 1) <= Math.max(0.02, keys.length * 0.005) ? out : null;
 }
 
 /**
@@ -110,11 +118,28 @@ function parseAnswer(raw: unknown, question: DecisionQuestion): DecisionAnswer |
 	if (type === "choice" && (typeof row.choice !== "string" || !Object.hasOwn(question.criteria, row.choice)))
 		return null;
 	if (typeof row.choice === "string") answer.choice = row.choice;
-	const probabilities = numberMap(row.probabilities);
-	if (probabilities) answer.probabilities = probabilities;
+	const probabilities =
+		question.type === "choice"
+			? distribution(row.probabilities, Object.keys(question.criteria))
+			: question.type === "score"
+				? distribution(
+						row.probabilities,
+						question.criteria.map((_level, index) => String(index)),
+					)
+				: null;
+	if (type !== "noul" && probabilities === null) return null;
+	if (probabilities !== null) answer.probabilities = probabilities;
+	if (type === "choice" && probabilities !== null) {
+		const chosen = probabilities[row.choice as string] as number;
+		if (chosen + 0.01 < Math.max(...Object.values(probabilities))) return null;
+	}
 	const score = numberOrUndefined(row.score);
 	if (question.type === "score" && (score === undefined || score < 0 || score > question.criteria.length - 1))
 		return null;
+	if (question.type === "score" && score !== undefined && probabilities !== null) {
+		const weighted = Object.entries(probabilities).reduce((sum, [index, mass]) => sum + Number(index) * mass, 0);
+		if (Math.abs(score - weighted) > Math.max(0.03, 0.02 * (question.criteria.length - 1))) return null;
+	}
 	if (score !== undefined) answer.score = score;
 	const legend = stringMap(row.legend);
 	if (legend) answer.legend = legend;
@@ -123,6 +148,7 @@ function parseAnswer(raw: unknown, question: DecisionQuestion): DecisionAnswer |
 	// max(p, 1 - p), a scale that never falls below 0.5 and so would clear every
 	// abstention floor with a coin-flip.
 	const confidence = type === "noul" ? undefined : numberOrUndefined(row.confidence);
+	if (type !== "noul" && (confidence === undefined || confidence < 0 || confidence > 1)) return null;
 	if (confidence !== undefined) answer.confidence = confidence;
 	return answer;
 }
