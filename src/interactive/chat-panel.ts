@@ -4,7 +4,14 @@ import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
-import { type Component, Markdown, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui.js";
+import {
+	type Component,
+	Markdown,
+	stripTerminalSequences,
+	truncateToWidth,
+	visibleWidth,
+	wrapTextWithAnsi,
+} from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
@@ -17,7 +24,9 @@ import { presentProviderError, providerErrorEvidence } from "./renderers/provide
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import {
 	canGroupObservation,
-	renderToolArguments,
+	hasToolBody,
+	observationTarget,
+	renderObservationGroup,
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
@@ -34,7 +43,18 @@ import {
 	reasoningFromTally,
 	UNMEASURED_REASONING,
 } from "./status/index.js";
-import { clioTheme, fgSequence, GLYPH, markdownTheme, SGR_DIM, SGR_RESET } from "./theme/index.js";
+import {
+	clioTheme,
+	fgSequence,
+	formatCompactMs,
+	GLYPH,
+	markdownTheme,
+	SGR_BOLD,
+	SGR_BOLD_OFF,
+	SGR_DIM,
+	SGR_ITALIC,
+	SGR_RESET,
+} from "./theme/index.js";
 import { type TranscriptDetailPolicy, transcriptDetail } from "./transcript-detail.js";
 import type { ViewArtifact } from "./view/artifacts.js";
 import type { WorkerEntryState } from "./worker-stream.js";
@@ -62,8 +82,10 @@ const DIM = SGR_DIM;
 const TEAL = fgSequence("accent");
 const BLUE_REASON = fgSequence("reason");
 const RED_CRIT = fgSequence("error");
+const GREEN_OK = fgSequence("success");
+const AMBER_WARN = fgSequence("warning");
 const AGENT_GLYPH = GLYPH.agent;
-const USER_GLYPH = GLYPH.user;
+const USER_BAR = GLYPH.userBar;
 
 /**
  * An assistant turn is a sequence of text and tool segments interleaved in
@@ -636,8 +658,18 @@ function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	// plain text to padded Markdown changes historical rows and forces a full
 	// redraw on terminals that cannot clear scrollback. Trim only that render
 	// padding so finalized prose remains byte-stable with the streamed shape.
-	return seg.md.render(width).map((line) => line.replace(/ +$/, ""));
+	return seg.md.render(width).map((line) => line.replace(/ +$/, "").replace(WRAPPED_STYLED_SPACE, "$1"));
 }
+
+/**
+ * pi-tui's ANSI wrap breaks a styled word that exactly fills the row before
+ * the word's closing SGR, so the continuation row opens with that reset and
+ * then the space that followed the word (`Math.random()⏎ jitter`). A wrapped
+ * paragraph row never begins with meaningful whitespace behind a style reset;
+ * indented Markdown (code, lists) puts its indent before any style. Only that
+ * one stranded space is dropped.
+ */
+const WRAPPED_STYLED_SPACE = new RegExp(`^((?:${String.fromCharCode(27)}\\[[0-9;]*m)+) (?=\\S)`, "u");
 
 /**
  * Render a terminal-error segment in the error token. Terminal markers such as
@@ -657,14 +689,18 @@ function renderErrorSegmentLines(seg: ErrorSegment, width: number, unbounded: bo
 
 const CLIO_PREFIX = `${TEAL}${AGENT_GLYPH}${RESET} `;
 const CLIO_PREFIX_ERROR = `${RED_CRIT}${AGENT_GLYPH}${RESET} `;
-const USER_PREFIX = `${TEAL}${USER_GLYPH}${RESET} `;
 /**
- * A prompt Clio has taken but not yet committed. The glyph is dim rather than
- * teal and the row says so, because the transcript used to paint an
- * uncommitted prompt exactly like a durable user turn while the ledger still
- * had no entry for it (issue #251).
+ * Operator prompts wear the accent bar on every row and bold text, so the
+ * operator's words are never the same weight as the agent prose beneath them.
  */
-const USER_PREFIX_PENDING = `${DIM}${USER_GLYPH}${RESET} `;
+const USER_PREFIX = `${TEAL}${USER_BAR}${RESET} `;
+/**
+ * A prompt Clio has taken but not yet committed. The bar is dim rather than
+ * teal, the text is not bold, and the row says so, because the transcript used
+ * to paint an uncommitted prompt exactly like a durable user turn while the
+ * ledger still had no entry for it (issue #251).
+ */
+const USER_PREFIX_PENDING = `${DIM}${USER_BAR}${RESET} `;
 /**
  * The uncommitted-row tails, stored as plain text so their width can be spent
  * against the row's budget before the dim codes go on. Both begin with the
@@ -706,7 +742,36 @@ function appendUserRowTail(rendered: string[], tail: string, width: number): voi
 		rendered[last] = `${lastLine}${DIM}${tail}${RESET}`;
 		return;
 	}
-	rendered.push(`${PROSE_GUTTER}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
+	rendered.push(`${USER_PREFIX_PENDING}${dimLine(tail.trimStart(), Math.max(1, width - PROSE_GUTTER_WIDTH))}`);
+}
+
+/**
+ * An operator prompt: the bar on every row, the text bold once committed. The
+ * bar is what separates the operator's words from the agent's, so it does not
+ * stop at the first row the way a voice glyph does.
+ */
+const SKILL_INVOCATION = /^\/skill\s+\S+/u;
+
+function renderUserLines(text: string, width: number, status: UserTurnStatus): string[] {
+	const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
+	const committed = status === "committed";
+	const prefix = committed ? USER_PREFIX : USER_PREFIX_PENDING;
+	const rendered: string[] = [];
+	const sourceLines = text.split("\n");
+	// A `/skill <name>` prompt leads with the command in the slash-command
+	// accent, so an explicit skill invocation reads as one rather than as prose.
+	const invocation = SKILL_INVOCATION.exec(sourceLines[0] ?? "");
+	if (invocation?.[0] !== undefined) {
+		sourceLines[0] = `${clioTheme().style("accent", invocation[0], { bold: committed })}${committed ? SGR_BOLD : ""}${(sourceLines[0] ?? "").slice(invocation[0].length)}`;
+	}
+	for (const sourceLine of sourceLines) {
+		for (const row of wrapTextWithAnsi(sourceLine, contentWidth)) {
+			rendered.push(`${prefix}${committed && row.length > 0 ? `${SGR_BOLD}${row}${SGR_BOLD_OFF}` : row}`);
+		}
+	}
+	if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
+	if (!committed) appendUserRowTail(rendered, status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL, width);
+	return rendered;
 }
 
 /**
@@ -719,6 +784,14 @@ function dimLine(text: string, width: number): string {
 }
 
 /**
+ * Supplied reasoning owns the purple rail in the gutter, in every style: a
+ * folded marker and an excerpt wear the same mark, and no other block uses a
+ * gutter rail, so reasoning never reads as tool output. The excerpt is italic
+ * as well as dim because it is the model thinking aloud, not its answer.
+ */
+const REASON_RAIL = `${BLUE_REASON}│${RESET} `;
+
+/**
  * A closed thinking stretch's folded marker, in place in the segment order. The
  * turn's count chip rides on the last marker of a settled turn (`view` is
  * unmeasured everywhere else), and comes from the settled usage, never from
@@ -726,18 +799,23 @@ function dimLine(text: string, width: number): string {
  */
 function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): string {
 	const chip = formatReasoningChip(view, compactReasoningTokens);
-	return dimLine(
+	return `${REASON_RAIL}${dimLine(
 		chip === null ? THINKING_HIDDEN_LABEL : `${THINKING_HIDDEN_LABEL} · ${chip} ${formatReasoningLabel(view)}`,
-		width,
-	);
+		Math.max(1, width - PROSE_GUTTER_WIDTH),
+	)}`;
 }
 
 /** Wrap first, then keep the same tail both while streaming and after settlement. */
 function renderThinkingRail(thinking: string, width: number, limit: number, unbounded = false): string[] {
-	const rows = wrapTextWithAnsi(redactSecretString(thinking), Math.max(1, width - 2)).map(
-		(row) => `${BLUE_REASON}│ ${RESET}${DIM}${row}${RESET}`,
+	// Reasoning often ends on a newline; wrapped, that became an empty rail row.
+	const text = redactSecretString(thinking).replace(/^\s*\n|\s+$/gu, "");
+	if (text.length === 0) return [];
+	// A bounded excerpt spends no rows on paragraph breaks; /view keeps them.
+	const wrapped = wrapTextWithAnsi(text, Math.max(1, width - PROSE_GUTTER_WIDTH));
+	const rows = (unbounded ? wrapped : wrapped.filter((row) => row.trim().length > 0)).map(
+		(row) => `${REASON_RAIL}${DIM}${SGR_ITALIC}${row}${RESET}`,
 	);
-	return unbounded ? rows : previewRows(rows, limit, width, true);
+	return unbounded ? rows : previewRows(rows, limit, width, true, REASON_RAIL, PROSE_GUTTER_WIDTH);
 }
 
 /**
@@ -754,14 +832,11 @@ function renderTurnUsageLine(
 	receipt: TranscriptDetailPolicy["receipt"],
 ): string[] {
 	if (receipt === "none") return [];
+	const outcome = usage.outcome ?? "Done";
+	const settled = `${outcome}${usage.elapsedMs === undefined ? "" : ` · ${formatCompactMs(usage.elapsedMs)}`}`;
+	const glyph = receiptGlyph(outcome);
 	if (receipt === "compact") {
-		const receipt = truncateToWidth(
-			`  ${usage.outcome ?? "Done"}${usage.elapsedMs === undefined ? "" : ` · ${Math.round(usage.elapsedMs / 1000)}s`}`,
-			width,
-			GLYPH.ellipsis,
-			false,
-		);
-		return [`${DIM}${receipt}${RESET}`];
+		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
 	}
 	const calls = usage.modelCalls !== undefined && usage.modelCalls > 1 ? ` over ${usage.modelCalls} calls` : "";
 	// The label stays separated from the count in both provenances. Deriving the
@@ -777,20 +852,35 @@ function renderTurnUsageLine(
 	const view = reasoningFromTurnUsage(usage);
 	const reason =
 		view.tokens > 0 && view.provenance !== "unmeasured"
-			? ` reasoning ${view.provenance === "provider" ? "" : "≈"}${view.tokens} ${formatReasoningLabel(view)}`
+			? ` · reasoning ${view.provenance === "provider" ? "" : "≈"}${view.tokens} ${formatReasoningLabel(view)}`
 			: "";
 	const cache =
 		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
-			? ` cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
+			? ` · cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
 			: "";
 	// The caveat is about reasoning text the panel displayed. A turn that spent
 	// no reasoning tokens displayed none, so appending it there warned about
 	// something absent and cost a wrapped line per turn at narrow widths.
 	const caveat = view.tokens > 0 ? " · reasoning text is a UI excerpt, not a verification" : "";
-	return wrapTextWithAnsi(
-		`${DIM}  turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason}${caveat}${RESET}`,
-		width,
+	return hangProseLines(
+		wrapTextWithAnsi(
+			`${DIM}${settled} · turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason}${caveat}${RESET}`,
+			Math.max(1, width - PROSE_GUTTER_WIDTH),
+		),
+		glyph,
 	);
+}
+
+/**
+ * The receipt closes a turn with its outcome glyph in the gutter, like every
+ * other block's mark, so where each turn ended and how is scannable down the
+ * left edge. Only the glyph carries color; the facts stay dim.
+ */
+function receiptGlyph(outcome: string): string {
+	if (outcome === "Done") return `${GREEN_OK}${GLYPH.ok}${RESET} `;
+	if (outcome === "Failed") return `${RED_CRIT}${GLYPH.error}${RESET} `;
+	if (outcome === "Cancelled") return `${DIM}${GLYPH.cancelled}${RESET} `;
+	return `${AMBER_WARN}${GLYPH.warn}${RESET} `;
 }
 
 function renderToolSegmentLines(
@@ -845,6 +935,57 @@ function observation(seg: AssistantSegment | undefined): string | null {
 		: null;
 }
 
+/**
+ * One visual unit of an assistant turn: a stretch of reasoning, a prose
+ * paragraph run, one action (or a Compact group of observations), or the
+ * terminal error. Segments render into blocks first so spacing is decided in
+ * one place, by what sits on either side, instead of by each renderer.
+ */
+interface TurnBlock {
+	kind: "thinking" | "prose" | "tool" | "error" | "receipt";
+	lines: string[];
+	/** An action with nested rows under its action row. */
+	body?: boolean;
+}
+
+/**
+ * Blocks of different kinds are separated by one blank row, so the agent's
+ * words, its reasoning, and the actions between them never run together.
+ * Consecutive body-less actions stack as a single run, the way a list of reads
+ * reads as one step, even when a narrow terminal wraps one of their rows; an
+ * action with a body (arguments, output, a diff) opens a gap on both sides so
+ * its body cannot be mistaken for its neighbor's.
+ */
+function joinTurnBlocks(blocks: readonly TurnBlock[]): string[] {
+	const out: string[] = [];
+	let previous: TurnBlock | undefined;
+	for (const raw of blocks) {
+		// Markdown can open or close a block on an empty row; the gap between
+		// blocks is decided here, so a block's own blank edges would double it.
+		const block = { ...raw, lines: trimBlankEdges(raw.lines) };
+		if (block.lines.length === 0) continue;
+		if (previous !== undefined) {
+			const stacked = previous.kind === "tool" && block.kind === "tool" && !previous.body && !block.body;
+			if (!stacked) out.push("");
+		}
+		for (const line of block.lines) out.push(line);
+		previous = block;
+	}
+	return out;
+}
+
+function isBlankRow(line: string): boolean {
+	return stripTerminalSequences(line).trim().length === 0;
+}
+
+function trimBlankEdges(lines: string[]): string[] {
+	let start = 0;
+	let end = lines.length;
+	while (start < end && isBlankRow(lines[start] ?? "")) start += 1;
+	while (end > start && isBlankRow(lines[end - 1] ?? "")) end -= 1;
+	return start === 0 && end === lines.length ? lines : lines.slice(start, end);
+}
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -857,15 +998,7 @@ function renderEntryLines(
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "user") {
-		const contentWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
-		const lines: string[] = [];
-		for (const sourceLine of entry.text.split("\n")) lines.push(...wrapTextWithAnsi(sourceLine, contentWidth));
-		const status = entry.status?.() ?? "committed";
-		const rendered = hangProseLines(lines, status === "committed" ? USER_PREFIX : USER_PREFIX_PENDING);
-		if (rendered[0] !== undefined) rendered[0] = `${OSC133_PROMPT_START}${rendered[0]}`;
-		if (status !== "committed")
-			appendUserRowTail(rendered, status === "pending" ? USER_PENDING_TAIL : USER_REFUSED_TAIL, width);
-		return rendered;
+		return renderUserLines(entry.text, width, entry.status?.() ?? "committed");
 	}
 	if (entry.role === "retryStatus") {
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
@@ -880,24 +1013,23 @@ function renderEntryLines(
 	if (!entry.pending && entry.turnUsage === undefined && !hasVisibleOutput(entry) && entry.segments.length === 0) {
 		return [];
 	}
-	const lines: string[] = [];
+	const blocks: TurnBlock[] = [];
 	// Reasoning stays between the prose and actions that surround it.
 	const chipIndex = entry.pending ? -1 : lastThinkingIndex(entry);
-	const clioPrefix = entry.isError ? CLIO_PREFIX_ERROR : CLIO_PREFIX;
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
-	let labeled = false;
 	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
 			if (seg.text.length === 0) continue;
 			if (detail.reasoningRows > 0 || unboundedToolBodies) {
-				lines.push(
-					...renderThinkingRail(seg.text, width, previewBudget(detail.reasoningRows, terminalRows), unboundedToolBodies),
-				);
+				blocks.push({
+					kind: "thinking",
+					lines: renderThinkingRail(seg.text, width, previewBudget(detail.reasoningRows, terminalRows), unboundedToolBodies),
+				});
 			} else {
 				const view = segIndex === chipIndex ? reasoningFromTurnUsage(entry.turnUsage) : UNMEASURED_REASONING;
-				lines.push(renderSettledThinkingMarker(view, width));
+				blocks.push({ kind: "thinking", lines: [renderSettledThinkingMarker(view, width)] });
 			}
 			continue;
 		}
@@ -907,33 +1039,35 @@ function renderEntryLines(
 			if (kind) {
 				while (entry.segments[segIndex + count] && observation(entry.segments[segIndex + count]) === kind) count++;
 			}
-			if (count > 1) {
-				lines.push(dimLine(`✓ ${kind === "read" ? `Read ${count} files` : `${count} ${kind} actions`} · /view`, width));
+			if (kind && count > 1) {
+				const targets: string[] = [];
 				for (let offset = 0; offset < count; offset++) {
 					const grouped = entry.segments[segIndex + offset];
-					if (grouped?.kind === "tool")
-						lines.push(
-							...renderToolArguments(grouped.args, width, false, previewBudget(detail.invocationRows, terminalRows)),
-						);
+					if (grouped?.kind === "tool") targets.push(observationTarget(grouped.name, grouped.args));
 				}
+				const lines = renderObservationGroup(kind, targets, width, previewBudget(detail.invocationRows, terminalRows));
+				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
 				segIndex += count - 1;
-			} else lines.push(...renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows));
+			} else {
+				const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
+				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
+			}
 			continue;
 		}
-		// Text and error segments share the reply-prefix bookkeeping: the first
-		// substantive one carries the agent glyph and every later one hangs plain.
-		// A leading skill-suggestion protocol line is advisory rather than the
-		// answer, so it renders in place without claiming the turn's voice glyph.
+		// Every prose block carries the agent glyph on its first row, so narration
+		// that resumes after a run of actions reads as the agent speaking again
+		// rather than as a caption of the action above it. A skill-suggestion
+		// protocol line is advisory rather than the answer: it renders in place
+		// without claiming the glyph.
 		if (seg.kind === "text" && seg.text.length === 0) continue;
 		const split = seg.kind === "text" ? skillSuggestionSplit(seg) : null;
 		if (split) {
-			// The suggestion line hangs plain and the answer beneath it is ordinary
-			// prose, so it claims the glyph when nothing else has.
-			lines.push(...hangProseLines(wrapTextWithAnsi(split.suggestion, proseWidth)));
+			const suggestion = hangProseLines(wrapTextWithAnsi(split.suggestion, proseWidth));
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth);
-			if (answerLines.length === 0) continue;
-			lines.push(...(labeled ? hangProseLines(answerLines) : hangProseLines(answerLines, clioPrefix)));
-			labeled = true;
+			blocks.push({
+				kind: "prose",
+				lines: answerLines.length === 0 ? suggestion : [...suggestion, ...hangProseLines(answerLines, CLIO_PREFIX)],
+			});
 			continue;
 		}
 		let rendered =
@@ -944,16 +1078,17 @@ function renderEntryLines(
 			rendered = previewRows(rendered, previewBudget(detail.errorRows, terminalRows), proseWidth);
 		}
 		if (rendered.length === 0) continue;
-		const isSkillSuggestion = seg.kind === "text" && findSkillSuggestionLine(seg) !== null;
-		if (!labeled && !isSkillSuggestion) {
-			lines.push(...hangProseLines(rendered, clioPrefix));
-			labeled = true;
-		} else {
-			lines.push(...hangProseLines(rendered));
+		if (seg.kind === "error") {
+			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR) });
+			continue;
 		}
+		const isSkillSuggestion = findSkillSuggestionLine(seg) !== null;
+		blocks.push({ kind: "prose", lines: hangProseLines(rendered, isSkillSuggestion ? undefined : CLIO_PREFIX) });
 	}
-	if (entry.turnUsage && !entry.pending) lines.push(...renderTurnUsageLine(entry.turnUsage, width, detail.receipt));
-	return lines;
+	if (entry.turnUsage && !entry.pending) {
+		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt) });
+	}
+	return joinTurnBlocks(blocks);
 }
 
 export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
@@ -962,6 +1097,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
 	let dirty = true;
 	let runStartedAt: number | undefined;
+	/**
+	 * Transcript index where the current run's entries begin. A worker block or
+	 * a mid-turn notice splits one run across several assistant entries, and
+	 * each entry keeps the per-message receipt its last `message_end` gave it;
+	 * `agent_end` clears every one of them except the entry that carries the run
+	 * total, so a receipt never lands in the middle of a turn.
+	 */
+	let runStartIndex: number | undefined;
 	let cachedWidth: number | undefined;
 	let cachedLines: string[] = [];
 	let cachedDetail: TranscriptDetailPolicy | undefined;
@@ -1058,6 +1201,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * result may upgrade the synthetic settle, but a segment that finished
 	 * with its own result is never rewritten after the fact.
 	 */
+	/**
+	 * First entry of the run that owns `target` when no `agent_start` marked it
+	 * (a replayed turn): the entry after the operator prompt that opened it.
+	 */
+	const runStartFallback = (target: number | null): number => {
+		if (target === null) return 0;
+		for (let index = target - 1; index >= 0; index -= 1) {
+			if (transcript[index]?.role === "user") return index + 1;
+		}
+		return 0;
+	};
+
 	const findToolSegmentOwner = (toolCallId: string): { segment: ToolSegment; entry: TranscriptEntry } | undefined => {
 		let settledMatch: { segment: ToolSegment; entry: TranscriptEntry } | undefined;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
@@ -1409,6 +1564,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				transcript.push(entry);
 			} else {
 				transcript.splice(at, 0, entry);
+				if (runStartIndex !== undefined && at <= runStartIndex) runStartIndex += 1;
 				// A frozen prefix is a run of indices. Inserting inside it renumbers
 				// every entry behind the cut, so the freeze has to go.
 				if (frozen !== null && at < frozen.through) frozen = null;
@@ -1472,6 +1628,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		reset(): void {
 			transcript.length = 0;
 			runStartedAt = undefined;
+			runStartIndex = undefined;
 			workerEntries.clear();
 			clearRenderCaches();
 			markDirty();
@@ -1486,6 +1643,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		applyEvent(event: ChatLoopEvent): void {
 			if (event.type === "agent_start") {
 				runStartedAt = now();
+				runStartIndex = transcript.length;
 				return;
 			}
 			if (event.type === "agent_status") {
@@ -1821,13 +1979,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 											: "Done",
 						};
 					}
-					for (let after = (index ?? -1) + 1; after < transcript.length; after += 1) {
-						const later = transcript[after];
-						if (later?.role !== "assistant") continue;
-						if (later.turnUsage !== undefined) invalidateEntryCache(later);
-						delete later.turnUsage;
+					const firstRunEntry = runStartIndex ?? runStartFallback(index);
+					for (let other = firstRunEntry; other < transcript.length; other += 1) {
+						if (other === index) continue;
+						const sibling = transcript[other];
+						if (sibling?.role !== "assistant") continue;
+						if (sibling.turnUsage !== undefined) invalidateEntryCache(sibling);
+						delete sibling.turnUsage;
 					}
 				}
+				runStartIndex = undefined;
 				// The run is over: no tool can still be executing anywhere in the
 				// transcript, not just in the tail entry (a mid-turn notice splits
 				// entries). Settle any tool segment whose `tool_execution_end` never

@@ -22,9 +22,11 @@ import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } 
 const theme = clioTheme();
 const dim = (text: string): string => theme.fg("dim", text);
 
-const RAIL = "│ ";
-const RAIL_WIDTH = 2;
-const FOOTER = "└ ";
+// The worker card follows the transcript's gutter grammar: the origin glyph
+// sits in the gutter and the card's body nests under it in the content column.
+const RAIL = "  │ ";
+const RAIL_WIDTH = 4;
+const FOOTER = "  └ ";
 const ATTEMPT = "↻ ";
 const SEPARATOR = " · ";
 
@@ -348,12 +350,26 @@ function helperCard(
 	const metrics = workerMetrics(entry);
 	return [
 		...wrapTextWithAnsi(header, width),
-		...previewRows(body, previewBudget(detail.invocationRows, terminalRows), width),
+		...previewRows(body, previewBudget(detail.invocationRows, terminalRows), width, false, dim(RAIL), RAIL_WIDTH),
 		...railLines(clean(activity), pending ? "accent" : "muted", width),
 		...(metrics.length ? railLines(metrics.join(" · "), "dim", width) : []),
 		...wrapTextWithAnsi(`${dim(FOOTER)}${dim(`/view dispatch:${entry.runId}`)}`, width),
-		...previewRows(failureLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
-		...previewRows(attemptLines(entry, width), previewBudget(detail.errorRows, terminalRows), width),
+		...previewRows(
+			failureLines(entry, width),
+			previewBudget(detail.errorRows, terminalRows),
+			width,
+			false,
+			dim(RAIL),
+			RAIL_WIDTH,
+		),
+		...previewRows(
+			attemptLines(entry, width),
+			previewBudget(detail.errorRows, terminalRows),
+			width,
+			false,
+			dim(RAIL),
+			RAIL_WIDTH,
+		),
 		...(entry.receipt?.receiptUnavailable ? railLines("receipt unavailable", "warning", width) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", width) : []),
 	].map(redactSecretString);
@@ -420,19 +436,45 @@ export function renderWorkerEntryLines(
 			safeWidth,
 		),
 	);
+	// Standard keeps no activity history, but a running worker still says what
+	// it is doing right now; without it the card reads as idle until it settles.
+	const now =
+		!detail.workerActivity && detail.workerRows > 0 && current
+			? railLines(
+					`${GLYPH.phaseTool} now: ${current.descriptor ? `${current.descriptor.verb} ${current.descriptor.object}` : current.tool}`,
+					"muted",
+					safeWidth,
+				)
+			: [];
 	const tools = detail.workerActivity && trail.length === 0 ? toolLine(entry, safeWidth) : null;
-	const failure = previewRows(failureLines(entry, safeWidth), budget(detail.errorRows), safeWidth);
+	const failure = previewRows(
+		failureLines(entry, safeWidth),
+		budget(detail.errorRows),
+		safeWidth,
+		false,
+		dim(RAIL),
+		RAIL_WIDTH,
+	);
 	const presented = presentedContractAnswer(entry)?.footer;
 	return [
 		actionLine(entry, safeWidth),
 		...(workerMetrics(entry).length ? railLines(workerMetrics(entry).join(" · "), "dim", safeWidth) : []),
 		...(entry.helper && entry.task
-			? previewRows(railLines(entry.task, "muted", safeWidth), budget(detail.invocationRows), safeWidth)
+			? previewRows(
+					railLines(entry.task, "muted", safeWidth),
+					budget(detail.invocationRows),
+					safeWidth,
+					false,
+					dim(RAIL),
+					RAIL_WIDTH,
+				)
 			: []),
-		...(detail.workerRows > 0 || needsInput ? previewRows(summary, summaryRows, safeWidth, entry.pending) : []),
-		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true),
+		...(detail.workerRows > 0 || needsInput
+			? previewRows(summary, summaryRows, safeWidth, entry.pending, dim(RAIL), RAIL_WIDTH)
+			: []),
+		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, dim(RAIL), RAIL_WIDTH),
 		...(tools ? [tools] : []),
-		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth) : []),
+		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, false, dim(RAIL), RAIL_WIDTH) : now),
 		...failure,
 		...(presented ? railLines(presented, "muted", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),

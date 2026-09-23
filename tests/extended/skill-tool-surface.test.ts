@@ -218,6 +218,23 @@ describe("skill tool surface lifetime", () => {
 		}
 	});
 
+	it("records who asked for a skill load so the transcript row can state it", async () => {
+		const root = scratchRoot();
+		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+		const context = contextToolFor(root);
+		const byOperator = await context.run(
+			{ scope: "skills", name: "interview" },
+			invokeOptions(turnPolicy("/skill interview start", root, undefined)),
+		);
+		const byModel = await context.run(
+			{ scope: "skills", name: "interview" },
+			invokeOptions(turnPolicy("look at the failing test", root, undefined, "full-auto")),
+		);
+		ok(byOperator.kind === "ok" && byModel.kind === "ok");
+		strictEqual((byOperator.details as { activation?: unknown }).activation, "operator");
+		strictEqual((byModel.details as { activation?: unknown }).activation, "model");
+	});
+
 	it("keeps a loaded skill's narrowing armed on the operator's next turn", async () => {
 		const root = scratchRoot();
 		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];

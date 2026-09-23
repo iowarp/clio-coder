@@ -19,7 +19,7 @@ import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
-import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
 import { toolResultPresentationPolicy, toolResultPresentationText } from "../../tools/result-disposition.js";
 import { effectiveToolCall } from "../../tools/surface.js";
@@ -42,11 +42,16 @@ const yellow = (text: string): string => theme.fg("warning", text);
 const cyan = (text: string): string => theme.fg("accent", text);
 const cyanBold = (text: string): string => theme.style("accent", text, { bold: true });
 
-// Visible width of the rail prefix is 2 columns (`│ `). Width budgets and
-// diff renderers compute against the visible length, not the styled length,
-// so the constant is kept as the plain-text representation.
-const BODY_INDENT_PLAIN = "│ ";
-const BODY_INDENT_VISIBLE_WIDTH = 2;
+// The transcript is a two-cell gutter plus a content column. The action row
+// puts `▸` in the gutter; its body nests under it with the rail in the content
+// column (`  │ `), so arguments, output, and diffs read as belonging to the row
+// above them instead of as more gutter-level blocks. Width budgets and diff
+// renderers compute against the visible length, not the styled length, so the
+// constant is kept as the plain-text representation.
+const BODY_INDENT_VISIBLE_WIDTH = 4;
+/** Hanging indent for a wrapped action row: continuation rows start in the content column. */
+const CONTENT_INDENT = "  ";
+const CONTENT_INDENT_WIDTH = 2;
 const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
 const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
@@ -58,8 +63,8 @@ const STATUS_ERROR_GLYPH = GLYPH.error;
 // Hoisted rail prefixes. `indentAndWrap` would otherwise allocate two fresh
 // styled strings per rendered line; by precomputing the dim and error variants
 // once at module scope, repeated rendering of long result blocks stays cheap.
-const RAIL_DIM = dim(BODY_INDENT_PLAIN);
-const RAIL_ERROR = red(BODY_INDENT_PLAIN);
+const RAIL_DIM = `${CONTENT_INDENT}${dim("│ ")}`;
+const RAIL_ERROR = `${CONTENT_INDENT}${red("│ ")}`;
 
 export interface ToolExecutionStart {
 	toolCallId: string;
@@ -309,14 +314,22 @@ function stringField(record: Record<string, unknown> | null, key: string): strin
 	return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+/** Observation units are plural nouns (`entries`, `lines`); one of them is singular. */
+function unitFor(count: number, unit: string): string {
+	if (count !== 1) return unit;
+	if (unit.endsWith("ies")) return `${unit.slice(0, -3)}y`;
+	if (/(?:ch|sh|x|ss)es$/u.test(unit)) return unit.slice(0, -2);
+	return unit.endsWith("s") ? unit.slice(0, -1) : unit;
+}
+
 function countSummary(observation: Record<string, unknown>): string | null {
 	const unit = stringField(observation, "unit") ?? "results";
 	const shown = numberField(observation, "shownCount");
 	if (shown === null) return null;
 	const total = numberField(observation, "totalCount");
 	if (total === null) return `${shown}+ ${unit}`;
-	if (total === shown) return `${shown} ${unit}`;
-	return `${shown}/${total} ${unit}`;
+	if (total === shown) return `${shown} ${unitFor(shown, unit)}`;
+	return `${shown}/${total} ${unitFor(total, unit)}`;
 }
 
 /**
@@ -324,7 +337,52 @@ function countSummary(observation: Record<string, unknown>): string | null {
  * envelope (OBSERVE plane), the exec record (git/verify), or the dispatch
  * receipt counts. Returns null when the result carries no recognizable facts.
  */
+/**
+ * A settled skill load, read from the details `context(scope=skills)` returns.
+ * Null for every other context call and for a load that failed.
+ */
+interface SkillLoadFacts {
+	name: string;
+	description: string | null;
+	activation: string | null;
+	narrows: boolean;
+	drifted: boolean;
+}
+
+function skillLoadFacts(finished: ToolExecutionFinished): SkillLoadFacts | null {
+	if (finished.toolName !== "context" || finished.isError || finished.outcome !== undefined) return null;
+	if (!isPlainObject(finished.args) || finished.args.scope !== "skills") return null;
+	const details = detailsOf(finished.result);
+	const name = stringField(details, "name");
+	if (name === null) return null;
+	const declared = (key: string) => Array.isArray(details?.[key]) && (details[key] as unknown[]).length > 0;
+	return {
+		name,
+		description: stringField(details, "description"),
+		activation: stringField(details, "activation"),
+		narrows: declared("allowedTools") || declared("disallowedTools"),
+		drifted: details?.drift === "mismatch",
+	};
+}
+
+/** Who a skill load answered: the operator's request, a bound recipe, or the model's own choice. */
+const SKILL_ACTIVATION_WORDS: Readonly<Record<string, string>> = {
+	operator: "by operator",
+	recipe: "by recipe",
+	model: "by model",
+};
+
 function outcomeSummary(finished: ToolExecutionFinished): string | null {
+	const skill = skillLoadFacts(finished);
+	if (skill !== null) {
+		const facts = [
+			...(skill.activation !== null && SKILL_ACTIVATION_WORDS[skill.activation] !== undefined
+				? [SKILL_ACTIVATION_WORDS[skill.activation] as string]
+				: []),
+			...(skill.narrows ? ["narrows tools"] : []),
+		];
+		return facts.length > 0 ? facts.join(" · ") : null;
+	}
 	const observation = observationOf(finished);
 	if (observation !== null) {
 		if (finished.toolName === "read") {
@@ -451,6 +509,7 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	const outcome = outcomeSummary(finished);
 	if (outcome !== null) parts.push(outcome);
 	const executed = !isNonExecutedOutcome(finished.outcome);
+	const stat = executed && !finished.isError ? changeStat(finished.result) : null;
 	// A folded bash row is the only view of the call the operator gets by
 	// default, so its settlement facts have to be here rather than only in the
 	// expanded body. A failed row already carries `(exit N)` on the status glyph.
@@ -473,8 +532,12 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	const offloadPath = executed ? offloadPathOf(finished) : null;
+	const statText = stat === null ? "" : `${dim(" · ")}${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`;
+	// A skill whose content no longer matches its recorded hash is the one
+	// skill fact that is a warning rather than provenance.
+	const driftText = skillLoadFacts(finished)?.drifted === true ? `${dim(" · ")}${yellow("drifted")}` : "";
 	return {
-		facts: parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : "",
+		facts: `${statText}${parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : ""}${driftText}`,
 		offload:
 			offloadPath === null
 				? ""
@@ -666,14 +729,34 @@ function dispatchSublineBody(args: unknown): string | null {
 	return `dispatching ${agent}: ${taskPreview}${more}`;
 }
 
+/**
+ * A search's scope, when it names one. The workspace root is the default and
+ * stays implicit, so `path: "."` does not cost the row a word.
+ */
+function searchScope(args: unknown): string | null {
+	const path = readStringField(args, "path");
+	if (path === null) return null;
+	const scope = sanitizeCallTargetText(path).trim();
+	if (scope.length === 0 || scope === "." || scope === "./") return null;
+	return truncate(scope, ARG_PREVIEW_LIMIT);
+}
+
+/** `searching for \`pattern\` in scope`: the scope rides the row instead of a `path ›` argument row. */
+function searchSublineBody(args: unknown, lead: string): string | null {
+	const body = buildFieldSublineBody(args, "pattern", lead, { wrapInBackticks: true });
+	if (body === null) return null;
+	const scope = searchScope(args);
+	return scope === null ? body : `${body} in ${scope}`;
+}
+
 const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string | null>> = {
 	read: (args) => buildFieldSublineBody(args, "path", "reading "),
 	edit: (args) => buildFieldSublineBody(args, "path", "editing "),
 	write: (args) => buildFieldSublineBody(args, "path", "writing "),
 	ls: (args) => buildFieldSublineBody(args, "path", "listing ") ?? "listing workspace",
 	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
-	grep: (args) => buildFieldSublineBody(args, "pattern", "searching for ", { wrapInBackticks: true }),
-	find: (args) => buildFieldSublineBody(args, "pattern", "finding ", { wrapInBackticks: true }),
+	grep: (args) => searchSublineBody(args, "searching for "),
+	find: (args) => searchSublineBody(args, "finding "),
 	web_read: (args) => buildFieldSublineBody(args, "url", "reading "),
 	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
 	git: (args) => buildFieldSublineBody(args, "op", "git "),
@@ -782,6 +865,12 @@ function buildSublineBody(
 		const body = SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
 		return `${body}${meta ? dim(` · ${meta}`) : ""}`;
 	}
+	if (toolName === "context" && status === "ok" && isPlainObject(args) && args.scope === "skills") {
+		const name = readStringField(args, "name");
+		if (name !== null && name.trim().length > 0) {
+			return `loaded skill ${cyan(truncate(sanitizeCallTargetText(name), ARG_PREVIEW_LIMIT))}`;
+		}
+	}
 	if (toolName === "bash") {
 		const lead = status === "ok" || status === "error" ? "ran " : "running ";
 		return (
@@ -838,21 +927,41 @@ function sublineParts(
  * duration are never separated by a wrap.
  */
 function wrapSublineWithTail(lead: string, tail: string, width: number): string[] {
-	if (tail.length === 0) return wrap(lead, width);
+	if (tail.length === 0) return wrapHanging(lead, width);
 	if (visibleWidth(`${lead}${tail}`) <= width) return [`${lead}${tail}`];
-	const leadLines = wrap(lead, width);
+	const leadLines = wrapHanging(lead, width);
 	const last = leadLines[leadLines.length - 1];
 	if (last !== undefined && visibleWidth(`${last}${tail}`) <= width) {
 		leadLines[leadLines.length - 1] = `${last}${tail}`;
 		return leadLines;
 	}
-	// The tail cannot sit beside the lead: give it its own row, dropping the
-	// joining leading space so it starts flush at the left.
-	return [...leadLines, ...wrap(tail.replace(/^ +/u, ""), width)];
+	// The tail cannot sit beside the lead: give it its own row in the content
+	// column, dropping the joining leading space.
+	return [...leadLines, ...indentRows(wrap(tail.replace(/^ +/u, ""), contentWidth(width)))];
 }
 
 function wrap(line: string, width: number): string[] {
 	return wrapTextWithAnsi(line, width);
+}
+
+function contentWidth(width: number): number {
+	return Math.max(1, width - CONTENT_INDENT_WIDTH);
+}
+
+function indentRows(rows: string[]): string[] {
+	return rows.map((row) => `${CONTENT_INDENT}${row}`);
+}
+
+/**
+ * Wrap an action row with a hanging indent. The first row keeps the `▸` in the
+ * gutter; every continuation starts in the content column, so a long dispatch
+ * or command row never wraps back to column 0 where it would read as the next
+ * action.
+ */
+function wrapHanging(line: string, width: number): string[] {
+	if (visibleWidth(line) <= width) return [line];
+	const rows = wrap(line, contentWidth(width));
+	return rows.map((row, index) => (index === 0 ? row : `${CONTENT_INDENT}${row}`));
 }
 
 /**
@@ -1023,6 +1132,28 @@ function highlightBashCommand(command: string): string {
 function resultDiff(result: unknown): string | null {
 	const value = detailsOf(result)?.diff;
 	return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+/** Numbered rows from the edit-diff producer: `+12 text`, `- 5 text`. */
+const DIFF_ADDED_ROW = /^\+\s*\d+ /u;
+const DIFF_REMOVED_ROW = /^-\s*\d+ /u;
+
+/**
+ * Added and removed line counts of a mutation, read from the diff the tool
+ * returned. These are the change facts a folded row carries in every style,
+ * which is what lets Compact describe a change without its payload. A diff the
+ * producer capped is partial, so it states nothing rather than a low count.
+ */
+function changeStat(result: unknown): { added: number; removed: number } | null {
+	const diff = resultDiff(result);
+	if (diff === null || diff.includes("diff truncated")) return null;
+	let added = 0;
+	let removed = 0;
+	for (const row of diff.split("\n")) {
+		if (DIFF_ADDED_ROW.test(row)) added += 1;
+		else if (DIFF_REMOVED_ROW.test(row)) removed += 1;
+	}
+	return added + removed > 0 ? { added, removed } : null;
 }
 
 function renderMutationDiffBlock(diff: string, width: number, color: boolean): string[] {
@@ -1210,7 +1341,7 @@ export function renderToolExecution(
 		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, finished.args, status, statusMeta), width));
+	out.push(...wrapHanging(headerLine(finished.toolName, finished.args, status, statusMeta), width));
 
 	// Edit and write tools produce one bounded numbered diff on result.details.
 	// It is the authority because canonical edit args can contain multiple
@@ -1283,7 +1414,7 @@ export function renderToolResultOnly(
 		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
-	out.push(...wrap(headerLine(finished.toolName, undefined, status, statusMeta), width));
+	out.push(...wrapHanging(headerLine(finished.toolName, undefined, status, statusMeta), width));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -1365,29 +1496,73 @@ export function renderBashTranscriptExecution(
 		: renderToolPreview(finished, width, bodyOptions.detail ?? transcriptDetail(), { ...bodyOptions, operator: true });
 }
 
+/**
+ * The argument fields a tool's action row prints. Each builder above names
+ * exactly these, so a preview can drop the ones the row already shows whole
+ * instead of repeating them as `key › value` rows beneath it.
+ */
+function headerFields(toolName: string, args: Record<string, unknown>): readonly string[] {
+	switch (toolName) {
+		case "grep":
+		case "find":
+			return ["pattern", "path"];
+		case "data":
+			return ["op", "path"];
+		case "code_nav":
+			return ["mode", "query"];
+		case "context":
+			return args.scope === "docs" ? ["scope", "query"] : args.scope === "skills" ? ["scope", "name"] : ["scope"];
+		case "tasks":
+			return args.action === "plan" ? ["action", "title"] : ["action", "id"];
+		case "dispatch": {
+			// One inline task names its agent and task on the row; a task list keeps its rows.
+			if (typeof args.task !== "string" || args.tasks !== undefined) return [];
+			return typeof args.agent === "string" && args.agent.trim().length > 0 ? ["agent", "task"] : ["agent_id", "task"];
+		}
+		default: {
+			const primary = PRIMARY_ARG_FIELD[toolName];
+			return primary === undefined ? [] : [primary];
+		}
+	}
+}
+
+/** A field value the row can print without truncating or folding it. */
+function shownWhole(toolName: string, key: string, value: unknown): boolean {
+	if (typeof value !== "string") return false;
+	const display = toolName === "bash" && key === "command" ? stripShellWrapperForDisplay(value) : value;
+	return display.length <= ARG_PREVIEW_LIMIT && !/[\r\n\t]/u.test(display);
+}
+
+/**
+ * Mutation payloads. A settled change is described by its diff (Standard and
+ * Detailed) or its `+N -M` change facts (Compact); the raw replacement text is
+ * inspection material. A failed mutation keeps its payload visible, bounded,
+ * because the text that did not match is the diagnosis.
+ */
+const MUTATION_PAYLOAD_FIELDS = ["edits", "oldText", "newText", "content"] as const;
+
 function previewArguments(call: ToolExecutionStart | ToolExecutionFinished): unknown {
 	if (!isPlainObject(call.args)) return call.args;
 	const safe = redactToolArgs(call.args);
 	if (!isPlainObject(safe)) return safe;
-	if (call.toolName === "context" && safe.scope === "skills") {
-		const { scope: _scope, ...rest } = safe;
-		if (
-			typeof rest.name === "string" &&
-			rest.name.length > 0 &&
-			rest.name.length <= ARG_PREVIEW_LIMIT &&
-			!/[\r\n\t]/.test(rest.name)
-		)
-			delete rest.name;
-		return rest;
+	const rest: Record<string, unknown> = { ...safe };
+	for (const key of headerFields(call.toolName, safe)) {
+		const value = safe[key];
+		if (value === undefined) continue;
+		// `path: "."` is the implicit workspace scope a search row leaves unsaid.
+		const implicitScope = key === "path" && (call.toolName === "grep" || call.toolName === "find");
+		if (shownWhole(call.toolName, key, value) || (implicitScope && searchScope(safe) === null)) delete rest[key];
 	}
-	const primary = PRIMARY_ARG_FIELD[call.toolName];
-	if (!primary || typeof safe[primary] !== "string") return safe;
-	const value = safe[primary] as string;
-	// Commands retain their separate, readable command block even when short.
-	if (call.toolName === "bash" || /[\r\n\t]/.test(value) || value.length > ARG_PREVIEW_LIMIT) return safe;
-	const heading = buildSublineBody(call.toolName, safe, undefined, undefined, undefined);
-	if (!value || !heading.includes(value)) return safe;
-	const { [primary]: _shown, ...rest } = safe;
+	const finished = "result" in call ? call : null;
+	const failed = finished !== null && (finished.isError || finished.outcome !== undefined);
+	if ((call.toolName === "edit" || call.toolName === "write") && !failed) {
+		for (const key of MUTATION_PAYLOAD_FIELDS) delete rest[key];
+	}
+	// A settled read states the range it actually returned (`lines 120-159 of
+	// 400`), which is the truer fact than the window it asked for.
+	if (call.toolName === "read" && finished !== null && !failed && outcomeSummary(finished) !== null) {
+		for (const key of ["offset", "limit"]) delete rest[key];
+	}
 	return rest;
 }
 
@@ -1419,6 +1594,14 @@ export function renderToolPreview(
 			previewBudget(detail.invocationRows, options.terminalRows),
 		),
 	);
+	const skill = finished ? skillLoadFacts(finished) : null;
+	// The one line that says what a loaded skill is for; Compact keeps the row alone.
+	if (skill?.description && detail.style !== "compact") {
+		const line = sanitizeCallTargetText(skill.description);
+		rows.push(
+			`${RAIL_DIM}${theme.fg("muted", truncateToWidth(line, Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
+		);
+	}
 	const result = finished?.result ?? options.partialResult;
 	const diff = finished && !failure ? resultDiff(result) : null;
 	if (diff !== null && detail.diffRows > 0) {
@@ -1427,14 +1610,73 @@ export function renderToolPreview(
 				renderMutationDiffBlock(redactSecretString(diff), width, options.diffStyle !== "plain"),
 				previewBudget(detail.diffRows, options.terminalRows),
 				width,
+				false,
+				RAIL_DIM,
+				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
 	} else if (limit > 0 && result !== undefined) {
 		const text = resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
 		const body = indentAndWrap(redactSecretString(text), width, failure);
-		rows.push(...previewRows(body, limit, width, call.toolName === "bash" || !finished));
+		rows.push(
+			...previewRows(
+				body,
+				limit,
+				width,
+				call.toolName === "bash" || !finished,
+				failure ? RAIL_ERROR : RAIL_DIM,
+				BODY_INDENT_VISIBLE_WIDTH,
+			),
+		);
 	}
 	return rows;
+}
+
+/**
+ * Whether rendered action rows include a nested body (arguments, output, a
+ * diff, approval facts, or a preview hint) rather than only the action row and
+ * its wrapped continuation. The transcript stacks body-less actions and puts a
+ * gap around the rest.
+ */
+export function hasToolBody(lines: readonly string[]): boolean {
+	return lines.some((line) => line.startsWith(RAIL_DIM) || line.startsWith(RAIL_ERROR));
+}
+
+/** What one grouped observation looked at: a read's path, a search's pattern and scope. */
+export function observationTarget(toolName: string, args: unknown): string {
+	if (toolName === "grep" || toolName === "find") {
+		const pattern = readStringField(args, "pattern");
+		const scope = searchScope(args);
+		const shown = pattern === null ? toolName : `\`${truncate(sanitizeCallTargetText(pattern), ARG_PREVIEW_LIMIT)}\``;
+		return scope === null ? shown : `${shown} in ${scope}`;
+	}
+	const path = readStringField(args, "path");
+	if (path === null) return toolName === "ls" ? "workspace" : sanitizeCallTargetText(toolName);
+	return truncate(sanitizeCallTargetText(path), ARG_PREVIEW_LIMIT);
+}
+
+const OBSERVATION_GROUP_LABELS: Readonly<Record<string, (count: number) => string>> = {
+	read: (count) => `read ${count} files`,
+	grep: (count) => `searched ${count} patterns`,
+	find: (count) => `matched ${count} file patterns`,
+	ls: (count) => `listed ${count} directories`,
+};
+
+/**
+ * A run of consecutive successful observations in Compact: one settled action
+ * row naming the count, and the targets on one nested row list. Per-call facts
+ * (line ranges, byte counts, durations) stay in `/view`.
+ */
+export function renderObservationGroup(
+	toolName: string,
+	targets: readonly string[],
+	width: number,
+	maxRows: number,
+): string[] {
+	const label = OBSERVATION_GROUP_LABELS[toolName]?.(targets.length) ?? `${targets.length} ${toolName} actions`;
+	const head = `${dim(HEADER_PREFIX_PLAIN)}${styleSublineBody(label)} ${green(STATUS_OK_GLYPH)}`;
+	const body = indentAndWrap(targets.join(dim(" · ")), width, false);
+	return [...wrapHanging(head, width), ...previewRows(body, maxRows, width, false, RAIL_DIM, BODY_INDENT_VISIBLE_WIDTH)];
 }
 
 /** Only ordinary successful observations can lose their individual metadata rows. */

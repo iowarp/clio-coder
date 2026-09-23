@@ -710,3 +710,223 @@ it("keeps helper context occupancy separate from cumulative tokens and counts ob
 	strictEqual(fold.snapshot().processedTokens, undefined);
 	strictEqual(fold.snapshot().toolCalls, undefined);
 });
+
+describe("transcript block grammar", () => {
+	const assistantMessage = (text: string) => ({
+		role: "assistant",
+		content: [{ type: "text", text }],
+		usage: { input: 10, output: 5, cacheRead: 0, cacheWrite: 0, totalTokens: 15, cost: { total: 0 } },
+		stopReason: "stop",
+	});
+	const say = (panel: ChatPanel, text: string) => {
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as never);
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: text } as never);
+		panel.applyEvent({ type: "message_end", message: assistantMessage(text) } as never);
+	};
+	const act = (panel: ChatPanel, id: string, toolName: string, args: unknown, result: unknown, isError = false) => {
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName, args } as never);
+		panel.applyEvent({ type: "tool_execution_end", toolCallId: id, toolName, result, isError, durationMs: 5 } as never);
+	};
+	const observed = (text: string) => ({
+		content: [{ type: "text", text }],
+		details: { observation: { shownCount: 3, totalCount: 3, unit: "lines" } },
+	});
+
+	it("marks every operator prompt row with the bar and keeps its words bold only once committed", () => {
+		let status: "pending" | "committed" = "pending";
+		const panel = createChatPanel();
+		panel.appendUser("first line of the prompt\nsecond line", () => status);
+		const pending = panel.render(60);
+		ok(pending.every((row) => stripTerminalSequences(row).startsWith(`${GLYPH.userBar} `)));
+		ok(!pending.join("\n").includes("\u001b[1m"));
+		match(stripTerminalSequences(pending.join("\n")), /· preparing/u);
+		status = "committed";
+		panel.invalidate();
+		const committed = panel.render(60);
+		deepStrictEqual(committed.map(stripTerminalSequences), [
+			`${GLYPH.userBar} first line of the prompt`,
+			`${GLYPH.userBar} second line`,
+		]);
+		ok(committed[0]?.startsWith("\u001b]133;A\u0007"));
+		ok(committed.every((row) => row.includes("\u001b[1m")));
+	});
+
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		it(`separates prose, reasoning, and actions and stacks one-row actions in ${style}`, () => {
+			const panel = createChatPanel({ getOutputStyle: () => style, getTerminalRows: () => 60 });
+			panel.appendUser("Fix it");
+			panel.applyEvent({ type: "agent_start" } as never);
+			panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as never);
+			panel.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: "Plan the reads." } as never);
+			panel.applyEvent({ type: "text_delta", contentIndex: 1, delta: "Reading first." } as never);
+			panel.applyEvent({ type: "message_end", message: assistantMessage("Reading first.") } as never);
+			act(panel, "r1", "grep", { pattern: "needle", path: "src" }, observed("a\nb\nc"));
+			act(panel, "r2", "git", { op: "status" }, { details: { exitCode: 0 } });
+			say(panel, "Found it.");
+			panel.applyEvent({ type: "agent_end", messages: [assistantMessage("Found it.")] } as never);
+			const rows = panel.render(100).map(stripTerminalSequences);
+			const at = (pattern: RegExp) => rows.findIndex((row) => pattern.test(row));
+			const reading = at(/Reading first\./u);
+			const grep = at(/searching for `needle` in src/u);
+			const git = at(/git status/u);
+			const found = at(/Found it\./u);
+			ok(reading > 0 && grep > reading && found > git, rows.join("\n"));
+			strictEqual(rows[reading - 1], "", "reasoning and prose are separated");
+			strictEqual(rows[grep - 1], "", "prose and the first action are separated");
+			strictEqual(git, grep + (style === "detailed" ? 5 : 1), rows.join("\n"));
+			strictEqual(rows[found - 1], "", "resumed prose is separated from the actions");
+			ok(rows[reading]?.startsWith(`${GLYPH.agent} `));
+			ok(rows[found]?.startsWith(`${GLYPH.agent} `), "every prose block carries the agent glyph");
+			doesNotMatch(rows.join("\n"), /path ›|pattern ›/u);
+		});
+	}
+
+	it("closes a run split by a worker with exactly one receipt, after the last output", () => {
+		for (const style of ["standard", "detailed"] as const) {
+			const panel = createChatPanel({ getOutputStyle: () => style });
+			panel.appendUser("Delegate the review");
+			panel.applyEvent({ type: "agent_start" } as never);
+			say(panel, "Dispatching a reviewer.");
+			act(panel, "d1", "dispatch", { agent: "reviewer", task: "review" }, "1 task dispatched");
+			panel.applyWorkerState({
+				assignmentId: "a1",
+				runId: "run-1",
+				origin: "agent",
+				agentId: "reviewer",
+				runtime: { kind: "clio", targetId: "mini", wireModelId: "coder" },
+				text: "looks fine",
+				droppedLines: 0,
+				tools: [],
+				attempts: [{ runId: "run-1", targetLabel: "mini" }],
+				pending: false,
+				parentToolCallId: "d1",
+				receipt: { outcome: "succeeded" },
+			} as WorkerEntryState);
+			say(panel, "The reviewer found nothing.");
+			panel.applyEvent({ type: "agent_end", messages: [assistantMessage("The reviewer found nothing.")] } as never);
+			const plain = plainRender(panel, 100);
+			const receipt = style === "standard" ? /Done/gu : /turn · in/gu;
+			strictEqual((plain.match(receipt) ?? []).length, 1, plain);
+			ok(plain.lastIndexOf("found nothing") < plain.search(receipt), plain);
+		}
+	});
+
+	it("keeps header facts off argument rows, hides settled mutation payloads, and states change facts", () => {
+		const policy = transcriptDetail("standard");
+		const bash = renderToolPreview(
+			{ toolCallId: "b", toolName: "bash", args: { command: "pnpm test" }, result: "ok", isError: false },
+			80,
+			policy,
+		).map(stripTerminalSequences);
+		deepStrictEqual(bash.length, 1, bash.join("\n"));
+		const edit = {
+			toolCallId: "e",
+			toolName: "edit",
+			args: { path: "src/a.ts", edits: [{ oldText: "OLD_PAYLOAD", newText: "NEW_PAYLOAD" }] },
+			result: { content: [{ type: "text", text: "ok" }], details: { diff: "-1 old\n+1 new\n+2 more\n 3 same" } },
+			isError: false,
+		};
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const plain = stripTerminalSequences(renderToolPreview(edit, 80, transcriptDetail(style)).join("\n"));
+			match(plain, /editing src\/a\.ts · \+2 -1/u);
+			doesNotMatch(plain, /OLD_PAYLOAD|NEW_PAYLOAD/u);
+		}
+		const failed = stripTerminalSequences(
+			renderToolPreview({ ...edit, result: "oldText not found", isError: true }, 80, policy).join("\n"),
+		);
+		match(failed, /OLD_PAYLOAD/u, "a failed mutation keeps the text that did not match");
+	});
+
+	it("hangs a wrapped action row and nests its body in the content column", () => {
+		const rows = renderToolPreview(
+			{
+				toolCallId: "w",
+				toolName: "bash",
+				args: { command: `echo ${"x".repeat(50)}` },
+				result: "line one\nline two",
+				isError: true,
+			},
+			48,
+			transcriptDetail("standard"),
+		).map(stripTerminalSequences);
+		ok(rows[0]?.startsWith(`${GLYPH.toolHeader} `), rows.join("\n"));
+		ok(rows.length > 2, rows.join("\n"));
+		for (const row of rows.slice(1)) ok(row.startsWith("  "), `continuation or body left the gutter: ${row}`);
+		ok(
+			rows.some((row) => row.startsWith("  │ line one")),
+			rows.join("\n"),
+		);
+	});
+
+	it("states a skill load's identity, who asked for it, and what it is for", () => {
+		const load = {
+			toolCallId: "s",
+			toolName: "context",
+			args: { scope: "skills", name: "test-hygiene" },
+			result: {
+				content: [{ type: "text", text: "# test-hygiene" }],
+				details: {
+					name: "test-hygiene",
+					description: "Keep tests deterministic.",
+					activation: "model",
+					allowedTools: ["read"],
+					drift: "mismatch",
+					observation: { shownCount: 1, totalCount: 1, unit: "sections" },
+				},
+			},
+			isError: false,
+		};
+		const render = (style: OutputStyle) =>
+			stripTerminalSequences(renderToolPreview(load, 90, transcriptDetail(style)).join("\n"));
+		match(render("compact"), /loaded skill test-hygiene · by model · narrows tools · drifted ✓/u);
+		doesNotMatch(render("compact"), /Keep tests deterministic|1 section/u);
+		match(render("standard"), /\n {2}│ Keep tests deterministic\./u);
+		// Until it settles, the row says the load is in progress.
+		match(
+			stripTerminalSequences(renderToolSubline({ toolCallId: "s", toolName: "context", args: load.args }, 90).join("")),
+			/loading skill test-hygiene/u,
+		);
+	});
+
+	it("leads an explicit /skill prompt with the command in the accent token", () => {
+		const panel = createChatPanel();
+		panel.appendUser("/skill test-hygiene make the test deterministic");
+		const [row] = panel.render(80);
+		ok(row?.includes(clioTheme().style("accent", "/skill test-hygiene", { bold: true })), row);
+		strictEqual(stripTerminalSequences(row ?? ""), `${GLYPH.userBar} /skill test-hygiene make the test deterministic`);
+	});
+
+	it("shows what a running worker is doing in Standard and its history only in Detailed", () => {
+		const entry = {
+			assignmentId: "a",
+			runId: "run-2",
+			origin: "user",
+			agentId: "scout",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: "",
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: "run-2", targetLabel: "blade" }],
+			pending: true,
+			progress: {
+				revision: 1,
+				phase: "tool",
+				tailText: "",
+				droppedLines: 0,
+				droppedBytes: 0,
+				currentAction: { tool: "grep", descriptor: { verb: "searching", object: "retry(" } },
+				recentActions: [{ tool: "read", descriptor: { verb: "read", object: "a.ts" } }],
+				toolNames: ["grep", "read"],
+				settled: false,
+			},
+		} as unknown as WorkerEntryState;
+		const render = (style: OutputStyle) =>
+			renderWorkerEntryLines(entry, 80, { detail: transcriptDetail(style) })
+				.map(stripTerminalSequences)
+				.join("\n");
+		match(render("standard"), /now: searching retry\(/u);
+		doesNotMatch(render("standard"), /last: read/u);
+		match(render("detailed"), /last: read a\.ts/u);
+		doesNotMatch(render("compact"), /now:/u);
+	});
+});

@@ -628,9 +628,11 @@ describe("dispatch quality presentation", () => {
 		match(plain, /1 grounded/u);
 		match(plain, /1 validation failed/u);
 		match(plain, /1 validation unknown/u);
+		// Wrapped action rows hang in the content column, so rows join on any run of whitespace.
 		const historical = renderToolSubline({ ...finished, result: { details: { receiptCount: 3, failedCount: 1 } } }, 76)
 			.map(stripTerminalSequences)
-			.join(" ");
+			.join(" ")
+			.replace(/\s+/gu, " ");
 		match(historical, /2 execution ok, 1 execution failed/u);
 		match(historical, /3 validation unknown/u);
 		doesNotMatch(historical, /validation failed/u);

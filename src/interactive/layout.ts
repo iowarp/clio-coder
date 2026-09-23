@@ -21,10 +21,40 @@ export interface FullscreenLayout {
 	transcript: ScrollView;
 }
 
+/**
+ * One blank row around a transcript that has anything in it: above, against
+ * the header, and below, against the queue and composer rail. The collapsed
+ * session header is exactly one row by contract, and the first prompt bar used
+ * to sit flush against it, as the newest receipt did against the composer. The
+ * wrapped array is reused while the transcript returns the same cached array,
+ * so a cache-hit frame stays O(1).
+ */
+function separatedTranscript(chat: Component): Component {
+	let source: string[] | undefined;
+	let separated: string[] = [];
+	return {
+		render(width: number): string[] {
+			const lines = chat.render(width);
+			if (lines.length === 0) return lines;
+			if (lines !== source) {
+				source = lines;
+				separated = [""];
+				for (const line of lines) separated.push(line);
+				separated.push("");
+			}
+			return separated;
+		},
+		invalidate(): void {
+			source = undefined;
+			chat.invalidate();
+		},
+	};
+}
+
 function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
 	const document = new Container();
 	document.addChild(parts.banner);
-	document.addChild(parts.chat);
+	document.addChild(separatedTranscript(parts.chat));
 	const theme = clioTheme();
 	const transcript = new ScrollView(document, {
 		follow: "end",
@@ -49,7 +79,7 @@ export function buildLayout(parts: LayoutParts, options: LayoutOptions = {}): Co
 	if (options.mode === "fullscreen") return buildFullscreenLayout(parts, options).root;
 	const root = new Container();
 	root.addChild(parts.banner);
-	root.addChild(parts.chat);
+	root.addChild(separatedTranscript(parts.chat));
 	if (parts.pending) root.addChild(parts.pending);
 	root.addChild(parts.editor);
 	root.addChild(parts.footer);

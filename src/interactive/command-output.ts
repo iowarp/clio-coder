@@ -50,7 +50,10 @@ export function appendOperatorCommand(text: string, sink: CommandOutputSink): vo
 	if (normalized.length === 0) return;
 	sink.appendReplayBlock((width) => {
 		const theme = clioTheme();
-		return wrapTextWithAnsi(theme.fg("dim", `${GLYPH.user} ${normalized}`), width);
+		// The operator's own input wears the prompt bar, dimmed: it is theirs, but
+		// it was a command, not a turn the model saw.
+		const bar = `${theme.fg("dim", GLYPH.userBar)} `;
+		return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((row) => `${bar}${row}`);
 	});
 	sink.requestRender();
 }
