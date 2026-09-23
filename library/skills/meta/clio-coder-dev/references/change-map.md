@@ -9,7 +9,7 @@ owners; inspect callers and current schemas before assuming behavior.
 | Context and compaction | `src/interactive/turn-context.ts`, `src/domains/session/compaction/`, context accounting | `src/entry/orchestrator.ts`, model-session replay, session entries and tree, context UI |
 | Memory | `src/domains/memory/`, `src/domains/middleware/memory-intervention.ts` | Lifecycle binding, prompt selection, provenance/promotion, usage and memory UI |
 | Prompt and skill loading | `src/domains/prompts/`, `src/domains/resources/skills/`, `src/tools/context/` | Turn constraints, autonomy, package readiness, skill checkpoints, headless/worker binding |
-| Tool behavior | `src/tools/`, `src/core/tool-names.ts` | Registry/admission, observation budget, declared action/scope, result disposition and replay |
+| Tool behavior | `src/tools/`, `src/core/tool-names.ts` | Registry/admission, observation budget, declared action/scope, result disposition and replay. Name the tool's contract tests in `TOOL_CONTRACT_TESTS` in `scripts/check-hygiene.ts`; typecheck and the `tool-contract-coverage` lint check fail without them |
 | Session persistence | `src/domains/session/`, `src/engine/session.ts` | Append/flush/checkpoint, active path, fork/archive/export, cancellation and resume |
 | Providers and workers | `src/domains/providers/`, `src/domains/dispatch/`, `src/worker/` | Engine adapters, route identity, endpoint capacity, usage, result evidence and receipt |
 | TUI and GUI | `src/interactive/`, `apps/clio-coder-gui/` | Typed events, ACP boundary, narrow layouts, cancellation, capability limits |

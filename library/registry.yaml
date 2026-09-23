@@ -161,7 +161,7 @@ entries:
       - edit Clio skills tools or prompts
     version: 0.5.0
     sourceUrl: skills/meta/clio-coder-dev
-    sha256: 0a8a620d3f5e3b94352506bedd37eae3fe680f4eb8624bba2d32a7989e6a92ca
+    sha256: e970458698b02a6e423f7034e756c9338e5758f4bf14d068408728c87d4f2733
     provides:
       - kind: skill
         name: clio-coder-dev
