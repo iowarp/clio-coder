@@ -14,7 +14,7 @@ import {
 } from "../tools/verify/catalog.js";
 import { verifyTool } from "../tools/verify/index.js";
 import { normalizeNumericTolerance } from "../tools/verify/numeric.js";
-import { recordPerfBaseline } from "../tools/verify/scripts.js";
+import { discoverDeclaredChecksAtRoot, recordPerfBaseline } from "../tools/verify/scripts.js";
 import { printError, printOk } from "./argv.js";
 import { runVerifiersInspect } from "./verifiers-inspect.js";
 
@@ -425,6 +425,16 @@ function validateCommand(): number {
 	if (loaded.source === null) {
 		process.stdout.write(`No ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} exists. Run \`clio-coder verifiers author\`.\n`);
 		return 0;
+	}
+	// A catalog the parser accepts can still leave dispatch with no checks: production
+	// discovery merges it with package.json scripts and refuses the whole plane on a
+	// duplicate id. Report what dispatch will actually see, not only what parsed.
+	const discovery = discoverDeclaredChecksAtRoot(process.cwd(), undefined);
+	if (!discovery.ok) {
+		printError(
+			`production catalog parser accepted ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}, but check discovery is blocked: ${discovery.reason}`,
+		);
+		return 1;
 	}
 	printOk(
 		`production catalog parser accepted ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} (${loaded.source.checks.length} check${loaded.source.checks.length === 1 ? "" : "s"})`,
