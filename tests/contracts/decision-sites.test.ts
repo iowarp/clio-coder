@@ -316,4 +316,38 @@ describe("answer certainty", () => {
 		strictEqual(rating({ type: "score", score: 0.81, confidence: 0.28 }, { minConfidence: 0.5 }), null);
 		strictEqual(rating({ type: "score", score: 0.81, confidence: 0.28 }, { minConfidence: 0.2 }), 0.81);
 	});
+
+	// laya-serve speaks this wire and puts `confidence: max(p, 1 - p)` on every
+	// noul, a scale that never drops below 0.5. Read as certainty, a 0.52 cleared
+	// every abstention floor, and live every skill scored as an opinion.
+	it("reads a wire noul's certainty from its probability, ignoring a reported confidence", async () => {
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(
+				JSON.stringify({
+					model: "laya-rl-agent",
+					answers: {
+						near: { type: "noul", noul: 0.52, confidence: 0.52 },
+						sure: { type: "noul", noul: 0.91, confidence: 0.91 },
+					},
+				}),
+				{ status: 200, headers: { "content-type": "application/json" } },
+			)) as typeof fetch;
+		let answers: Awaited<ReturnType<NonNullable<typeof typesafeJev.decide>>>["answers"];
+		try {
+			const question = { type: "noul" as const, instructions: "?", criteria: { true: "y", false: "n" } };
+			const result = await typesafeJev.decide?.(
+				{ id: "laya", runtime: "typesafe-jev", url: "http://127.0.0.1:8000/v1" } as never,
+				{ state: {}, questions: { near: question, sure: question } },
+				ctx,
+			);
+			ok(result);
+			answers = result.answers;
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		strictEqual(answers.near?.confidence, undefined);
+		strictEqual(isTrue(answers.near, { minConfidence: 0.2 }), null);
+		strictEqual(isTrue(answers.sure, { minConfidence: 0.2 }), true);
+	});
 });
