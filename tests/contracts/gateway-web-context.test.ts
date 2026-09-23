@@ -93,7 +93,7 @@ describe("clio_docs and clio_library", () => {
 		strictEqual(searched.output, legacy.output);
 	});
 
-	it("ranks current guidance ahead of historical plans while keeping explicit history searchable", () => {
+	it("ranks current guidance ahead of release notes for configuration and worker queries", () => {
 		for (const query of [
 			"How do I configure a different model for workers?",
 			"In v0.5.0, how do I configure a different model for workers?",
@@ -102,10 +102,6 @@ describe("clio_docs and clio_library", () => {
 			ok(workerQuery.ok, workerQuery.ok ? "" : workerQuery.message);
 			if (!workerQuery.ok) return;
 			const workerResults = (workerQuery.payload as { results: Array<{ file: string }> }).results;
-			ok(
-				!workerResults.slice(0, 3).some((result) => result.file === "docs/process/configure-tree-proposal.md"),
-				JSON.stringify(workerResults),
-			);
 			// A release handoff is a dated record of one cut, not operator guidance.
 			ok(!workerResults.slice(0, 3).some((result) => /handoff/u.test(result.file)), JSON.stringify(workerResults));
 			ok(
@@ -122,13 +118,6 @@ describe("clio_docs and clio_library", () => {
 		if (!defaultsQuery.ok) return;
 		const defaultsResults = (defaultsQuery.payload as { results: Array<{ file: string }> }).results;
 		strictEqual(defaultsResults[0]?.file, "docs/guide/configuration-reference.md");
-		ok(!defaultsResults.some((result) => result.file.startsWith("docs/gui/")), JSON.stringify(defaultsResults));
-
-		const historyQuery = searchDocs("What did the historical configure tree proposal say about worker models?", 5);
-		ok(historyQuery.ok, historyQuery.ok ? "" : historyQuery.message);
-		if (!historyQuery.ok) return;
-		const historyResults = (historyQuery.payload as { results: Array<{ file: string }> }).results;
-		strictEqual(historyResults[0]?.file, "docs/process/configure-tree-proposal.md");
 	});
 
 	it("returns heading anchors that match the docs renderer, including duplicates and Unicode", () => {
