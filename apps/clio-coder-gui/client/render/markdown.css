@@ -122,55 +122,60 @@
 	overflow-wrap: normal;
 	word-break: normal;
 }
+/* Code and diagrams are contained dark wells in both themes. Their chrome is one quiet line inside
+   the well, the language and the actions, so the code itself is the heaviest thing in the block. */
 .code-block,
 .diagram {
 	min-width: 0;
 	margin: 16px 0;
-	border: 1px solid #3b5146;
-	border-radius: 5px;
+	border: 1px solid var(--code-line);
+	border-radius: var(--radius-md);
 	overflow: hidden;
-	background: #15201c;
-	color: #e2eee5;
+	background: var(--code-paper);
+	color: var(--code-ink);
 }
-.code-block__bar {
+.code-block__head {
 	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
-	gap: 12px;
-	padding: 7px 12px;
-	border-bottom: 1px solid #3b5146;
-	background: #1d2b24;
-	color: #b9cabd;
-	font: 11px var(--font-mono);
+	gap: var(--space-1);
+	padding: var(--space-1) var(--space-1) 0 var(--space-4);
+	color: var(--code-ink-muted);
+	font: var(--text-exact) / 1.4 var(--font-mono);
 }
 .code-block__lang {
-	color: #b7dbbe;
-	font-weight: 700;
-}
-.code-block__lines {
 	margin-right: auto;
 }
-.code-block__copy {
-	min-height: 32px;
-	padding: 5px 9px;
-	border-color: #53745f;
+.code-block__lines {
+	margin-right: var(--space-2);
+	font-variant-numeric: tabular-nums;
+}
+/* The copy and source actions name themselves, so they stay frameless until hovered or focused. */
+.code-block__head button {
+	min-height: 28px;
+	padding: 2px var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
 	background: transparent;
-	color: #e2eee5;
-	font: 11px var(--font-mono);
+	color: var(--code-ink-muted);
+	font: var(--text-meta) / 1.4 var(--font-ui);
 }
-.code-block__copy.is-copied {
-	color: #c4edbe;
+.code-block__head button:hover:not(:disabled),
+.code-block__head button[aria-pressed="true"] {
+	border-color: transparent;
+	background: var(--code-surface);
+	color: var(--code-ink);
 }
-.code-block__copy.is-failed {
-	color: #ffc0a8;
+/* "Copied" and "Copy failed" are words; the ink only confirms that something changed. */
+.code-block__head .code-block__copy:is(.is-copied, .is-failed) {
+	color: var(--code-ink);
 }
 .code-block pre,
 .diagram pre {
 	max-height: 520px;
 	margin: 0;
-	padding: 16px;
+	padding: var(--space-2) var(--space-4) var(--space-4);
 	overflow: auto;
-	color: #e2eee5;
+	color: var(--code-ink);
 	white-space: pre;
 	font: 12px / 1.7 var(--font-mono);
 	tab-size: 4;
@@ -179,7 +184,7 @@
 	display: inline-block;
 	width: 6px;
 	height: 13px;
-	background: #c3dcbf;
+	background: var(--code-ink-muted);
 	margin-left: 3px;
 }
 .token.comment,
@@ -239,7 +244,7 @@
 }
 .diagram__canvas {
 	overflow: auto;
-	padding: 18px;
+	padding: var(--space-2) var(--space-4) var(--space-4);
 }
 .diagram__canvas svg {
 	display: block;
@@ -248,9 +253,9 @@
 	margin-inline: auto;
 }
 .diagram__status {
-	padding: 12px;
+	padding: 0 var(--space-4) var(--space-3);
 	font: 12px / 1.6 var(--font-mono);
-	color: #c6d6cd;
+	color: var(--code-ink-muted);
 	white-space: pre-wrap;
 }
 .code-block pre:focus-visible,

@@ -185,12 +185,14 @@ test("hostile Markdown never becomes markup, a live unsafe link, or a fetched im
 	match(html, /href="https:\/\/example\.org\/bare"/u);
 });
 
-test("fenced code renders a label, a copy control, a line count, and plain text for unknown languages", () => {
+test("fenced code renders a label, a copy control, a line count once it scrolls, and plain text for unknown languages", () => {
 	const known = renderToStaticMarkup(<CodeBlock code={TWO_LINES} info="ts" settled />);
 	match(known, /class="code-block is-settled"/u);
 	match(known, /data-language="typescript"/u);
 	match(known, /<span class="code-block__lang">ts<\/span>/u);
-	match(known, /2 lines/u);
+	ok(!known.includes("code-block__lines"), "a block that fits says nothing about its length");
+	const long = renderToStaticMarkup(<CodeBlock code={"x\n".repeat(40).trimEnd()} info="ts" settled />);
+	match(long, /<span class="code-block__lines">40 lines<\/span>/u);
 	match(known, /<button type="button" class="code-block__copy is-idle"[^>]*>Copy<\/button>/u);
 	match(known, /<pre tabindex="0"><code class="language-typescript">const a = 1;\nconst b = 2;<\/code><\/pre>/u);
 
@@ -201,7 +203,6 @@ test("fenced code renders a label, a copy control, a line count, and plain text 
 
 	const bare = renderToStaticMarkup(<CodeBlock code="" info={undefined} settled />);
 	match(bare, /<span class="code-block__lang">text<\/span>/u);
-	match(bare, /0 lines/u);
 });
 
 test("code with markup-like content stays escaped inside the block", () => {
