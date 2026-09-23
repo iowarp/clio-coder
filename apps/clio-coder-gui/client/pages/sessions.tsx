@@ -30,67 +30,23 @@ import { Icon } from "../design/icons.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
+import { useDetailsDismiss } from "../interaction/use-details-dismiss.js";
 import { JumpToLatest } from "../render/FollowLatest.js";
 import { useFollowLatest } from "../render/follow-latest.js";
+import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
 import { DeleteSession, SessionControls } from "./session-controls.js";
-import { WorkspaceBrowser } from "./workspace-browser.js";
 import "../chat/chat-turn.css";
 import "./projects.css";
 export function Workspaces({ client }: { client: Client }) {
-	const navigate = useNavigate(),
-		queries = useQueryClient(),
-		[path, setPath] = useState("");
-	const [browsing, setBrowsing] = useState(false);
-	const pathId = useId();
 	const recentId = useId();
-	const pathField = useRef<HTMLInputElement>(null);
-	const browseButton = useRef<HTMLButtonElement>(null);
-	const launchInFlight = useRef(false);
+	const launch = useProjectLaunch(client);
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	const open = useMutation({
-		mutationFn: ({ projectPath }: { projectPath: string; startConversation: boolean }) =>
-			client.call(routes.openWorkspace, { ...emptyInput, body: { path: projectPath } }),
-		onSuccess: (workspace, request) => {
-			void queries.invalidateQueries({ queryKey: ["workspaces"] });
-			if (request.startConversation) start.mutate(workspace.id);
-			else {
-				launchInFlight.current = false;
-				void navigate(`/workspaces/${workspace.id}/sessions`);
-			}
-		},
-		onError: () => {
-			launchInFlight.current = false;
-		},
-	});
-	const start = useMutation({
-		mutationFn: (workspaceId: string) =>
-			client.call(routes.newSession, { params: { id: workspaceId }, query: {}, body: {} }),
-		onSuccess: (session) => {
-			sessionBuffer(session.id).snapshot(session);
-			queries.setQueryData(["session", session.id], session);
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void navigate(`/sessions/${session.id}`);
-		},
-		onSettled: () => {
-			launchInFlight.current = false;
-		},
-	});
-	const beginOpen = (projectPath: string, startConversation: boolean) => {
-		if (launchInFlight.current) return;
-		launchInFlight.current = true;
-		open.mutate({ projectPath, startConversation });
-	};
-	const beginStart = (workspaceId: string) => {
-		if (launchInFlight.current) return;
-		launchInFlight.current = true;
-		start.mutate(workspaceId);
-	};
-	const busy = open.isPending || start.isPending;
 	return (
 		<section className="projects">
 			<PanelHeading
 				panel={PANELS.sessions}
 				level={1}
+				eyebrow={false}
 				title={
 					<>
 						Sessions<span className="period">.</span>
@@ -100,69 +56,8 @@ export function Workspaces({ client }: { client: Client }) {
 			<p className="intro">
 				Choose a project folder on the machine running Clio Coder to start or continue a conversation.
 			</p>
-			<form
-				className="project-open"
-				onSubmit={(event) => {
-					event.preventDefault();
-					beginOpen(path.trim(), true);
-				}}
-			>
-				<label className="project-open__label" htmlFor={pathId}>
-					Project folder
-				</label>
-				<div className="project-open__row">
-					<input
-						id={pathId}
-						ref={pathField}
-						value={path}
-						onChange={(event) => setPath(event.target.value)}
-						placeholder="/absolute/path/to/project"
-						autoComplete="off"
-						spellCheck={false}
-						required
-					/>
-					<button ref={browseButton} type="button" disabled={busy} onClick={() => setBrowsing((current) => !current)}>
-						{browsing ? "Hide folders" : "Browse folders"}
-					</button>
-					<button className="primary" type="submit" disabled={busy || path.trim() === ""}>
-						{busy ? "Starting…" : "Start conversation"}
-					</button>
-				</div>
-				<p className="project-open__more">
-					<button
-						type="button"
-						className="text-button"
-						disabled={busy || path.trim() === ""}
-						onClick={() => beginOpen(path.trim(), false)}
-					>
-						View saved sessions
-					</button>{" "}
-					for this folder instead of starting a new one.
-				</p>
-			</form>
-			{browsing && (
-				<WorkspaceBrowser
-					client={client}
-					initialPath={path}
-					onStart={(selected) => {
-						setPath(selected);
-						setBrowsing(false);
-						beginOpen(selected, true);
-					}}
-					onClose={() => {
-						setBrowsing(false);
-						browseButton.current?.focus();
-					}}
-					onChoose={(selected) => {
-						setPath(selected);
-						setBrowsing(false);
-						pathField.current?.focus();
-					}}
-				/>
-			)}
-			{open.error || start.error || workspaces.error ? (
-				<p role="alert">{open.error?.message ?? start.error?.message ?? workspaces.error?.message}</p>
-			) : null}
+			<ProjectOpenForm client={client} launch={launch} />
+			{launch.error || workspaces.error ? <p role="alert">{launch.error?.message ?? workspaces.error?.message}</p> : null}
 			<section className="projects__section" aria-labelledby={recentId}>
 				<h2 id={recentId}>Recent projects</h2>
 				{workspaces.isPending ? <p className="projects__note">Loading projects…</p> : null}
@@ -184,11 +79,11 @@ export function Workspaces({ client }: { client: Client }) {
 								<div className="record-row__actions">
 									<button
 										type="button"
-										disabled={busy}
-										onClick={() => beginStart(workspace.id)}
+										disabled={launch.busy}
+										onClick={() => launch.start(workspace.id)}
 										aria-label={`New conversation in ${workspace.name}`}
 									>
-										{start.isPending && start.variables === workspace.id ? "Starting…" : "New conversation"}
+										{launch.starting === workspace.id ? "Starting…" : "New conversation"}
 									</button>
 								</div>
 							</li>
@@ -261,7 +156,7 @@ export function Sessions({ client }: { client: Client }) {
 			<Link className="projects__back" to="/sessions">
 				<span aria-hidden="true">←</span> All projects
 			</Link>
-			<PanelHeading panel={PANELS.sessions} level={1} title={workspace.data?.name ?? "Sessions"} />
+			<PanelHeading panel={PANELS.sessions} level={1} eyebrow={false} title={workspace.data?.name ?? "Sessions"} />
 			<div className="projects__lead">
 				<p className="projects__path">{workspace.data?.path ?? "Reading the project path…"}</p>
 				<button className="primary" type="button" disabled={open.isPending} onClick={() => open.mutate(null)}>
@@ -451,25 +346,7 @@ function SessionTools({
 	const navigate = useNavigate();
 	const panel = useRef<HTMLDetailsElement>(null);
 	const [open, setOpen] = useState(false);
-	useEffect(() => {
-		if (!open) return;
-		const closeOutside = (event: PointerEvent) => {
-			if (event.target instanceof Node && !panel.current?.contains(event.target) && panel.current)
-				panel.current.open = false;
-		};
-		const closeOnEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || !(event.target instanceof Node) || !panel.current?.contains(event.target)) return;
-			event.preventDefault();
-			panel.current.open = false;
-			panel.current.querySelector("summary")?.focus();
-		};
-		document.addEventListener("pointerdown", closeOutside);
-		document.addEventListener("keydown", closeOnEscape);
-		return () => {
-			document.removeEventListener("pointerdown", closeOutside);
-			document.removeEventListener("keydown", closeOnEscape);
-		};
-	}, [open]);
+	useDetailsDismiss(panel, open);
 	const others = openSessions.filter((entry) => entry.state === "open");
 	return (
 		<details className="conversation__tools" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>

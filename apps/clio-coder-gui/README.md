@@ -1,7 +1,9 @@
 # Clio Coder graphical application
 
-Clio Coder 0.5.1 ships this application as an early preview. The default build
-bundles it, and it runs through the installed CLI:
+Clio Coder ships this application as an alpha; it was an early preview from 0.5.1.
+Expect the conversation, approvals, workers and the model picker to work, and some
+inspector pages to change. The default build bundles it, and it runs through the
+installed CLI:
 
 ```sh
 clio-coder docs [topic]      # documentation in your browser, served in the background
@@ -72,16 +74,16 @@ pnpm --filter @iowarp/clio-coder-gui build
 pnpm --filter @iowarp/clio-coder-gui start
 ```
 
-Open the full loopback URL printed by the server, then choose **Toolchain** or
-**Traces**, or choose **Sessions** to open a workspace by absolute path, start a
-conversation, or load a saved session. Up to four sessions can be open at once.
+Open the full loopback URL printed by the server. Overview asks for a project folder
+and starts a conversation there; **Sessions** lists every project and loads a saved
+session. Up to four sessions can be open at once.
 Permission cards offer one-time allow or reject. Unanswered cards escalate after
-45 seconds and cancel the turn after 10 minutes. Conversation controls include labels,
-target probes, session-only autonomy, and confirmed deletion of closed sessions.
-The safe settings form writes saved user defaults; changing its target, model, or
-thinking level also updates the running Clio process between turns. Its autonomy
-default applies to future sessions rather than replacing a session-only choice.
-Stop and interrupt actions live beside the composer. The conversation's **Clio Coder commands** disclosure reads the commands
+45 seconds and cancel the turn after 10 minutes. The route beside Send opens the
+target, model and thinking level. Saving them writes your user settings, so the
+choice reaches this conversation's next request and every new conversation, the CLI
+and the TUI; the picker says so before its button. Session tools hold labels,
+working freedom for this session and the saved default for new ones, and confirmed
+deletion of closed sessions. Stop and interrupt actions live beside the composer. The conversation's **Clio Coder commands** disclosure reads the commands
 advertised by that ACP session, collects their typed arguments, requires a review
 before invocation, and displays the bounded result. Older agents without the
 command capability show an unavailable explanation. Commands may change project

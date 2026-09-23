@@ -12,17 +12,20 @@ export function PanelHeading({
 	title,
 	level = 2,
 	action,
+	eyebrow = true,
 }: {
 	panel: PanelCopy;
 	title?: ReactNode;
 	level?: 1 | 2 | 3;
 	action?: ReactNode;
+	/** The conversation's own pages speak without the inspector's scope line. */
+	eyebrow?: boolean;
 }) {
 	const Title = `h${level}` as "h1" | "h2" | "h3";
 	return (
 		<div className="panel-heading">
 			<div>
-				<p className="eyebrow">{panel.eyebrow}</p>
+				{eyebrow ? <p className="eyebrow">{panel.eyebrow}</p> : null}
 				<Title>{title ?? panel.title}</Title>
 			</div>
 			{action ? <div className="panel-heading__action">{action}</div> : null}

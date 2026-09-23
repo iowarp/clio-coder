@@ -143,8 +143,7 @@ h2 {
 	letter-spacing: -0.5px;
 	margin: 0;
 }
-h1,
-.home-instruments h2 {
+h1 {
 	font-family: var(--font-editorial);
 }
 h1 {
@@ -454,6 +453,7 @@ nav a[data-group="more"] .icon {
 	font-size: var(--text-meta);
 	text-decoration: none;
 	display: inline-flex;
+	align-items: center;
 	gap: 25px;
 	justify-content: space-between;
 }
@@ -488,7 +488,8 @@ nav a[data-group="more"] .icon {
 }
 
 /* Status ramp. Colour is supplementary: the glyph and the word carry the
-   state, and `unverified` is dashed so it survives a greyscale screenshot. */
+   state, and `unverified` is dashed so it survives a greyscale screenshot.
+   Every page speaks in sentence case; inspector pages keep the pill. */
 .status-mark {
 	display: inline-flex;
 	align-items: center;
@@ -496,14 +497,15 @@ nav a[data-group="more"] .icon {
 	padding: 2px var(--space-2);
 	border: 1px solid var(--status-neutral-line);
 	border-radius: var(--radius-pill);
-	font-family: var(--font-mono);
+	font-family: var(--font-ui);
 	font-size: var(--text-exact);
 	font-weight: 600;
-	letter-spacing: 0.04em;
-	text-transform: uppercase;
 	white-space: nowrap;
 	color: var(--status-neutral-fg);
 	background: var(--status-neutral-tint);
+}
+.status-mark__glyph {
+	font-family: var(--font-mono);
 }
 .status-mark[data-tone="running"] {
 	color: var(--status-running-fg);
@@ -533,8 +535,6 @@ nav a[data-group="more"] .icon {
 }
 .status-mark__detail {
 	font-weight: 400;
-	text-transform: none;
-	letter-spacing: 0;
 	color: var(--ink-muted);
 }
 
@@ -853,41 +853,6 @@ nav a[data-group="more"] .icon {
 	border: 1px dashed var(--line-strong);
 	border-radius: var(--radius-sm);
 	color: var(--ink-muted);
-}
-.home-instruments {
-	display: grid;
-	grid-template-columns: repeat(3, minmax(0, 1fr));
-	gap: 28px;
-	margin-top: var(--space-12);
-}
-.home-instruments > a {
-	border-top: 1px solid var(--accent);
-	padding-top: 22px;
-	text-decoration: none;
-}
-.home-instruments h2 {
-	font-weight: 450;
-	font-size: 28px;
-	margin-top: 22px;
-}
-.home-instruments p {
-	line-height: 1.65;
-	color: var(--ink-muted);
-}
-.home-instruments > a > span:last-child {
-	display: block;
-	margin-top: var(--space-5);
-	font-size: 22px;
-}
-.home-instruments a:hover h2 {
-	text-decoration: underline;
-	text-underline-offset: 4px;
-}
-.home-link {
-	margin-top: 10px;
-	padding: var(--space-4) var(--space-5);
-	min-width: 240px;
-	font-size: var(--text-meta);
 }
 .home-note {
 	border-top: 1px solid var(--line);
@@ -1626,7 +1591,8 @@ main:has(> .conversation) {
 .session-controls {
 	background: var(--surface-sunken);
 }
-.session-controls > h2 {
+.session-controls > h2,
+.session-settings > h2 {
 	margin: 0;
 	font-size: var(--text-h3);
 }
@@ -1651,20 +1617,22 @@ main:has(> .conversation) {
 	font-size: 14px;
 	color: var(--ink);
 }
+.session-settings__route,
 .session-settings__scope {
 	margin: 0;
-	padding: var(--space-3) var(--space-4);
-	border-left: 3px solid var(--accent);
-	background: var(--surface-sunken);
 	line-height: var(--leading-body);
+	color: var(--ink-muted);
 }
-.session-settings fieldset {
+.session-settings__scope strong {
+	color: var(--ink);
+}
+.session-settings__default {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
-	gap: var(--space-4);
-	padding: var(--space-4);
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-sm);
+	gap: var(--space-2);
+	justify-items: start;
+}
+.session-settings__default label {
+	justify-self: stretch;
 }
 .session-settings label,
 .session-settings__model,
@@ -1706,14 +1674,6 @@ main:has(> .conversation) {
 	}
 	main {
 		padding: var(--space-8) var(--space-6);
-	}
-	.home-instruments {
-		grid-template-columns: 1fr;
-		gap: var(--space-6);
-		margin-top: 44px;
-	}
-	.home-instruments h2 {
-		margin-top: var(--space-3);
 	}
 	.tool {
 		gap: var(--space-5);
@@ -1817,9 +1777,6 @@ main:has(> .conversation) {
 	}
 	.home-note {
 		margin-top: 60px;
-	}
-	.session-settings fieldset {
-		grid-template-columns: minmax(0, 1fr);
 	}
 	.target-card {
 		flex-direction: column;

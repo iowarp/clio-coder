@@ -73,7 +73,7 @@
 	gap: var(--space-2);
 }
 .project-open__row input {
-	flex: 1 1 18rem;
+	flex: 1 1 12rem;
 	font-family: var(--font-mono);
 	font-size: var(--text-meta);
 }
@@ -86,7 +86,7 @@
 	font-size: var(--text-meta);
 }
 /* An action phrased as part of a sentence, so it reads as a link and needs no frame. */
-.projects .text-button {
+.project-open .text-button {
 	min-height: 0;
 	padding: 0;
 	border: 0;
@@ -96,12 +96,12 @@
 	text-decoration: underline;
 	text-underline-offset: 3px;
 }
-.projects .text-button:disabled {
+.project-open .text-button:disabled {
 	color: var(--ink-muted);
 	opacity: 1;
 	text-decoration: none;
 }
-.projects .workspace-browser {
+:is(.projects, .home) .workspace-browser {
 	margin: var(--space-4) 0 0;
 }
 
