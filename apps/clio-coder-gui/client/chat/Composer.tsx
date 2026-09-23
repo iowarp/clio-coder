@@ -12,7 +12,7 @@
  */
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useId, useRef, useSyncExternalStore } from "react";
+import { memo, useEffect, useId, useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
@@ -36,6 +36,14 @@ import "./composer.css";
 
 /** Focus handlers keyed by session, so a retry elsewhere in the turn can fill and focus this field. */
 const focusHandlers = new Map<string, () => void>();
+
+/** Grow with the draft until CSS applies its cap; after that, keep scrolling inside the field. */
+function fitComposerField(field: HTMLTextAreaElement | null): void {
+	if (field === null) return;
+	field.style.height = "auto";
+	field.style.height = `${field.scrollHeight}px`;
+	field.style.overflowY = field.scrollHeight > field.clientHeight ? "auto" : "hidden";
+}
 
 /** Fill the composer for this session and put the caret in it. Used by Try again and the starters. */
 export function fillComposer(sessionId: string, text: string): void {
@@ -69,6 +77,15 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 			if (focusHandlers.get(sessionId) === focus) focusHandlers.delete(sessionId);
 		};
 	}, [sessionId]);
+
+	// This runs only with the isolated draft, never with incoming transcript frames.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: draft.text is the resize trigger; the DOM read happens in the callback.
+	useLayoutEffect(() => fitComposerField(field.current), [draft.text]);
+	useEffect(() => {
+		const fit = () => fitComposerField(field.current);
+		window.addEventListener("resize", fit);
+		return () => window.removeEventListener("resize", fit);
+	}, []);
 
 	// Read once per session and keep. Every steering route answers 409 when the
 	// agent announced nothing, so this decides what is rendered at all.
@@ -156,7 +173,7 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 				className="composer__field"
 				aria-describedby={hintId}
 				value={draft.text}
-				rows={4}
+				rows={2}
 				disabled={sessionState !== "open"}
 				placeholder="Ask Clio Coder to do something in this project"
 				onChange={(event) => store.write(event.target.value)}
@@ -197,7 +214,7 @@ export const Composer = memo(function Composer({ client, sessionId, sessionState
 			) : null}
 			<div className="composer__actions">
 				<p className="composer__hint" id={hintId}>
-					Enter sends. Shift and Enter start a new line. Prompts go only to the Clio Coder target you configured.
+					Enter sends · Shift+Enter adds a line
 				</p>
 				{running ? (
 					<>

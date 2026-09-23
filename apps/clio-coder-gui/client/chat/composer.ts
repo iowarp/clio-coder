@@ -468,6 +468,8 @@ export interface TurnOutcomeView {
 	readonly detail: string | null;
 	readonly stopReason: string | null;
 	readonly facts: readonly string[];
+	/** Reported accounting, retained for the keyboard-reachable breakdown beside the outcome. */
+	readonly usage: Usage | null;
 	readonly usageTitle: string | null;
 	readonly finishedAt: string | null;
 }
@@ -511,6 +513,7 @@ export function turnOutcome(turn: Turn, toolCount: number): TurnOutcomeView {
 		detail: turn.status === "succeeded" ? null : (turn.problem?.detail ?? null),
 		stopReason: turn.status === "failed" ? turn.stopReason : null,
 		facts,
+		usage: turn.usage,
 		usageTitle: turn.usage === null ? null : usageTitle(turn.usage),
 		finishedAt: turn.finishedAt,
 	};

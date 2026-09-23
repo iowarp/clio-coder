@@ -372,10 +372,13 @@ test("a completed turn footer carries its reported tool count and spend, and not
 	assert.equal(view.tone, "success");
 	assert.equal(view.label, "Turn complete");
 	assert.deepEqual(view.facts, ["3 tool calls", "tokens 12,345 in · 678 out"]);
+	assert.equal(view.usage, usage, "the full reported accounting stays reachable from the compact outcome");
 	assert.equal(view.detail, null);
 	assert.equal(view.stopReason, null, "a stop reason on a successful turn is noise");
 	assert.deepEqual(turnOutcome(turn(), 1).facts[0], "1 tool call");
-	assert.deepEqual(turnOutcome(turn({ usage: null }), 0).facts, []);
+	const withoutUsage = turnOutcome(turn({ usage: null }), 0);
+	assert.deepEqual(withoutUsage.facts, []);
+	assert.equal(withoutUsage.usage, null);
 });
 
 test("a failed turn shows its problem detail and its stop reason; a stopped one is not a failure", () => {

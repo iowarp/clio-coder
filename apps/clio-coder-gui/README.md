@@ -51,7 +51,10 @@ conversation, or load a saved session. Up to four sessions can be open at once.
 Permission cards offer one-time allow or reject. Unanswered cards escalate after
 45 seconds and cancel the turn after 10 minutes. Session controls include cancel,
 labels, safe settings, autonomy, target probes, and confirmed deletion of closed
-sessions; fleet activity and evidence-ready facts stream alongside the conversation. Trace history includes server-side filters and pagination, run details,
+sessions. Fleet activity and evidence-ready facts stream alongside the conversation. The conversation
+uses one primary transcript scroller with a docked composer; session tools and live worker
+controls open from the top bar rather than stacking permanent cards over the reading area.
+Trace history includes server-side filters and pagination, run details,
 phase timelines, event payloads, gates, processes, receipts, and live tails. Trace
 reads use your configured Clio state directory; a missing database shows an empty
 state. Receipt summaries omit large payload fields until you request the full receipt.

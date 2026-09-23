@@ -1041,8 +1041,130 @@ nav a.active .icon {
 	overflow-wrap: anywhere;
 	color: var(--ink-muted);
 }
+/* Only the conversation uses a viewport workspace. Other pages keep their document scroll. */
+.workspace:has(> main > .conversation) {
+	height: calc(100dvh - var(--masthead-height));
+	min-height: 0;
+	flex: 1 1 0;
+}
+main:has(> .conversation) {
+	height: 100%;
+	min-height: 0;
+	/* clip does not create a second, programmatically scrollable main viewport. */
+	overflow: clip;
+	padding: var(--space-4) var(--space-8);
+}
 .conversation {
 	max-width: var(--conversation-max);
+	margin-inline: auto;
+	height: 100%;
+	min-height: 0;
+	display: grid;
+	grid-template-rows: auto auto minmax(0, 1fr) 0 auto;
+}
+.conversation__header {
+	min-width: 0;
+	padding-bottom: var(--space-2);
+}
+.conversation__back {
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	text-decoration: none;
+}
+.conversation__back:hover {
+	color: var(--ink);
+	text-decoration: underline;
+}
+.conversation__titlebar,
+.conversation__meta {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: var(--space-2) var(--space-4);
+	min-width: 0;
+}
+.conversation__titlebar h1 {
+	font-size: clamp(28px, 3vw, 38px);
+	line-height: 1.1;
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+.conversation__titlebar .eyebrow {
+	margin: 0 0 var(--space-1);
+}
+.conversation__titlebar button {
+	flex: none;
+}
+.conversation__meta {
+	position: relative;
+	flex-wrap: wrap;
+	border-bottom: 1px solid var(--line);
+	padding-block: var(--space-2);
+}
+.conversation__tools {
+	margin: 0 0 0 auto;
+	flex: none;
+}
+.conversation__tools > summary {
+	padding: var(--space-1) var(--space-2);
+	border-radius: var(--radius-sm);
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.conversation__tools > summary:hover,
+.conversation__tools[open] > summary {
+	background: var(--surface-sunken);
+}
+.conversation__tools-body {
+	position: absolute;
+	z-index: 4;
+	right: 0;
+	top: 100%;
+	width: min(42rem, calc(100vw - 2 * var(--space-5)));
+	max-height: min(70dvh, 42rem);
+	overflow: auto;
+	padding: var(--space-2) var(--space-4);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--surface);
+	box-shadow: var(--shadow-panel);
+}
+.conversation__tools-body :is(.session-controls, .command-panel, .fleet-strip) {
+	background: transparent;
+	border: 0;
+	border-top: 1px solid var(--line);
+	border-radius: 0;
+	margin: 0;
+	padding: var(--space-3) 0;
+}
+.conversation__dock {
+	min-width: 0;
+	padding-top: var(--space-2);
+}
+
+.conversation__approval {
+	min-height: 0;
+}
+.conversation .approval-banner {
+	margin-block: var(--space-2);
+	max-height: min(38dvh, 22rem);
+	overflow-y: auto;
+}
+@media (max-width: 650px) {
+	main:has(> .conversation) {
+		padding: var(--space-2) var(--space-4);
+	}
+	.conversation__titlebar h1 {
+		font-size: 28px;
+	}
+	.conversation__titlebar button {
+		padding: var(--space-2);
+		font-size: var(--text-meta);
+	}
+	.conversation__meta .session-health {
+		order: 3;
+		width: 100%;
+	}
 }
 .conversation .page-heading {
 	gap: 15px;
@@ -1054,8 +1176,7 @@ nav a.active .icon {
 .session-status {
 	font-size: var(--text-meta);
 	color: var(--ink-muted);
-	border-bottom: 1px solid var(--line);
-	padding-bottom: var(--space-5);
+	margin: 0;
 }
 .chat-timeline {
 	display: grid;
