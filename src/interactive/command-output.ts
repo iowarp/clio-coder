@@ -40,24 +40,35 @@ export function appendNotice(level: NoticeLevel, text: string, sink: CommandOutp
 }
 
 /**
+ * The session entry that records an operator command's echo, so `/resume`
+ * states the `/run` above the card it started. Display only: the model's
+ * context is built from message entries, and this is never one.
+ */
+export const OPERATOR_COMMAND_ENTRY = "operatorCommand";
+
+/** An operator command line as the transcript echoes it, live and on replay. */
+export function renderOperatorCommandRows(text: string, width: number): string[] {
+	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trim();
+	if (normalized.length === 0) return [];
+	const theme = clioTheme();
+	// The operator's own input wears the prompt bar, dimmed: it is theirs, but
+	// it was a command, not a turn the model saw.
+	const bar = `${theme.fg("dim", GLYPH.userBar)} `;
+	return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((row) => `${bar}${row}`);
+}
+
+/**
  * Echo the command line an operator typed, dimmed, above the output it starts.
  *
  * A dispatched run draws its own attributed block, and without this the block
  * appears with nothing above it saying who asked for it or what was asked. The
- * echo is transcript-only: it is a replay block, so it is never persisted as a
- * session entry and never reaches the model, which is the whole point of a
- * `/run` the main agent is not told about.
+ * echo never reaches the model, which is the whole point of a `/run` the main
+ * agent is not told about; the host records it as an `operatorCommand` session
+ * entry so a resumed transcript states it too.
  */
 export function appendOperatorCommand(text: string, sink: CommandOutputSink): void {
-	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trim();
-	if (normalized.length === 0) return;
-	sink.appendReplayBlock((width) => {
-		const theme = clioTheme();
-		// The operator's own input wears the prompt bar, dimmed: it is theirs, but
-		// it was a command, not a turn the model saw.
-		const bar = `${theme.fg("dim", GLYPH.userBar)} `;
-		return wrapTextWithAnsi(theme.fg("dim", normalized), Math.max(1, width - 2)).map((row) => `${bar}${row}`);
-	});
+	if (text.replace(/\r/g, "").trim().length === 0) return;
+	sink.appendReplayBlock((width) => renderOperatorCommandRows(text, width));
 	sink.requestRender();
 }
 

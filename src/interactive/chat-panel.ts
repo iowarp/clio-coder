@@ -2,6 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
@@ -34,6 +35,7 @@ import {
 	type ToolExecutionFinished,
 	type ToolFoldFamily,
 	toolFoldFamily,
+	toolRowTitle,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import {
@@ -190,6 +192,8 @@ type ToolSegment = {
 	id: string;
 	name: string;
 	args: unknown;
+	/** When the call formed or started: the event's time live, the ledger's on replay. */
+	at: number;
 	/** Final result from `tool_execution_end`; undefined while the call is in flight. */
 	result?: unknown;
 	/** True once `tool_execution_end` has landed (success or error). */
@@ -270,6 +274,7 @@ type ToolSegment = {
 type ErrorSegment = {
 	kind: "error";
 	text: string;
+	at: number;
 };
 /**
  * One stretch of reasoning, in stream order with the text and tool segments
@@ -283,6 +288,8 @@ type ErrorSegment = {
 type ThinkingSegment = {
 	kind: "thinking";
 	text: string;
+	/** When the stretch began: the first delta's time live, the ledger's on replay. */
+	at: number;
 	/** Closed by the first text, tool, or message_end that follows it. */
 	finalized: boolean;
 	/** Panel clock when the first delta of this stretch arrived. */
@@ -300,9 +307,13 @@ type ReplayBlockRenderer = (
 	terminalRows?: number,
 ) => string[];
 
+/**
+ * Every entry and action carries the time it happened (`at`): the event's time
+ * live, the ledger entry's on replay. `/view` states each one's age from it.
+ */
 type TranscriptEntry =
-	| { role: "user"; text: string; status?: () => UserTurnStatus }
-	| { role: "retryStatus"; status: RetryStatusPayload }
+	| { role: "user"; text: string; at: number; status?: () => UserTurnStatus }
+	| { role: "retryStatus"; status: RetryStatusPayload; at: number }
 	| {
 			role: "assistant";
 			segments: AssistantSegment[];
@@ -323,7 +334,7 @@ type TranscriptEntry =
 	 * a streaming delta reaches the screen without copying the entry per frame.
 	 * The panel is told when that happened through `applyWorkerState`.
 	 */
-	| { role: "worker"; state: WorkerEntryState }
+	| { role: "worker"; state: WorkerEntryState; at: number }
 	/**
 	 * A block the caller renders itself. Most are settled the moment they are
 	 * appended, but a few (the operator's `!` bash row) keep mutating the state
@@ -334,6 +345,7 @@ type TranscriptEntry =
 	| {
 			role: "replayBlock";
 			renderBlock: ReplayBlockRenderer;
+			at: number;
 			isLive?: (() => boolean) | undefined;
 	  };
 
@@ -362,6 +374,11 @@ export interface ChatPanel extends Component {
 	applyEvent(event: ChatLoopEvent): void;
 	/** Mark a just-rehydrated tool segment so its mutation diff remains plain. */
 	markToolReplayed?(toolCallId: string): void;
+	/**
+	 * Stamp what a replay appends with the time of the ledger entry it replays;
+	 * undefined returns to the live clock. `/view` states each act's age from it.
+	 */
+	replayAt?(timestampMs: number | undefined): void;
 	/**
 	 * Place or refresh a worker's block. The first call for an assignment
 	 * inserts the entry (agent origin nests under the tool segment named by
@@ -561,14 +578,6 @@ function scopeTerminalErrorAfterSuccessfulTool(
 function openThinkingSegment(entry: Extract<TranscriptEntry, { role: "assistant" }>): ThinkingSegment | null {
 	const tail = entry.segments[entry.segments.length - 1];
 	return tail?.kind === "thinking" && !tail.finalized ? tail : null;
-}
-
-/** Index of the last thinking segment, which is where a settled turn's count chip rides. */
-function lastThinkingIndex(entry: Extract<TranscriptEntry, { role: "assistant" }>): number {
-	for (let index = entry.segments.length - 1; index >= 0; index -= 1) {
-		if (entry.segments[index]?.kind === "thinking") return index;
-	}
-	return -1;
 }
 
 function hasVisibleOutput(entry: Extract<TranscriptEntry, { role: "assistant" }>): boolean {
@@ -1238,43 +1247,73 @@ function renderEntryLines(
 		return [];
 	}
 	const blocks: TurnBlock[] = [];
-	// Reasoning stays between the prose and actions that surround it.
-	const chipIndex = entry.pending ? -1 : lastThinkingIndex(entry);
 	const proseWidth = Math.max(1, width - PROSE_GUTTER_WIDTH);
+	// Reasoning stays between the prose and actions that surround it, one block
+	// per run of it: stretches that nothing visible separates read as one. A run
+	// is held until the block after it is known, because what follows decides
+	// its shape: Standard shows the bounded tail of the reasoning behind Clio's
+	// words, and the marker for the reasoning behind an action.
+	let reasoning = "";
+	let lastMarker: TurnBlock | undefined;
+	const flushReasoning = (next: "action" | "words"): void => {
+		const text = reasoning;
+		reasoning = "";
+		if (text.trim().length === 0) return;
+		const rows = next === "action" ? detail.reasoningBeforeActionRows : detail.reasoningRows;
+		if (rows > 0 || unboundedToolBodies) {
+			const lines = renderThinkingRail(text, width, previewBudget(rows, terminalRows), unboundedToolBodies);
+			blocks.push({ kind: "thinking", lines });
+			return;
+		}
+		lastMarker = { kind: "thinking", lines: [renderSettledThinkingMarker(UNMEASURED_REASONING, width)] };
+		blocks.push(lastMarker);
+	};
 	for (let segIndex = 0; segIndex < entry.segments.length; segIndex += 1) {
 		const seg = entry.segments[segIndex];
 		if (seg === undefined) continue;
 		if (seg.kind === "thinking") {
-			if (seg.text.length === 0) continue;
-			if (detail.reasoningRows > 0 || unboundedToolBodies) {
-				blocks.push({
-					kind: "thinking",
-					lines: renderThinkingRail(seg.text, width, previewBudget(detail.reasoningRows, terminalRows), unboundedToolBodies),
-				});
-			} else {
-				const view = segIndex === chipIndex ? reasoningFromTurnUsage(entry.turnUsage) : UNMEASURED_REASONING;
-				blocks.push({ kind: "thinking", lines: [renderSettledThinkingMarker(view, width)] });
-			}
+			reasoning = joinReasoning(reasoning, seg.text);
 			continue;
 		}
 		if (seg.kind === "tool") {
 			// Compact folds a run of one fold family (explorations, knowledge
-			// lookups, changes) into one row; every other act keeps its own.
+			// lookups, changes) into one row; every other act keeps its own. A
+			// thinking model reasons before nearly every call, so the fold spans
+			// that reasoning, and the reasoning inside the fold joins the marker
+			// ahead of it rather than splitting the run into one-call folds.
 			const family = detail.style === "compact" && !unboundedToolBodies ? foldFamily(seg) : null;
-			let count = 1;
+			const grouped: ToolSegment[] = [seg];
+			let end = segIndex;
+			let absorbed = "";
 			if (family) {
-				while (entry.segments[segIndex + count] && foldFamily(entry.segments[segIndex + count]) === family) count++;
-			}
-			if (family && count > 1) {
-				const calls: ToolExecutionFinished[] = [];
-				for (let offset = 0; offset < count; offset++) {
-					const grouped = entry.segments[segIndex + offset];
-					if (grouped?.kind === "tool") calls.push(finishedCall(grouped));
+				let between = "";
+				for (let next = segIndex + 1; next < entry.segments.length; next += 1) {
+					const candidate = entry.segments[next];
+					if (candidate?.kind === "thinking") {
+						between = joinReasoning(between, candidate.text);
+						continue;
+					}
+					if (candidate?.kind === "text" && candidate.text.length === 0) continue;
+					if (candidate?.kind !== "tool" || foldFamily(candidate) !== family) break;
+					grouped.push(candidate);
+					end = next;
+					absorbed = joinReasoning(absorbed, between);
+					between = "";
 				}
-				const lines = renderFoldedGroup(family, calls, width, previewBudget(detail.invocationRows, terminalRows));
+			}
+			if (family && grouped.length > 1) {
+				reasoning = joinReasoning(reasoning, absorbed);
+				flushReasoning("action");
+				const lines = renderFoldedGroup(
+					family,
+					grouped.map(finishedCall),
+					width,
+					previewBudget(detail.invocationRows, terminalRows),
+				);
 				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
-				segIndex += count - 1;
+				segIndex = end;
 			} else {
+				flushReasoning("action");
 				const lines = renderToolSegmentLines(seg, width, nowMs, unboundedToolBodies, detail, terminalRows);
 				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
 			}
@@ -1291,6 +1330,7 @@ function renderEntryLines(
 		// the model put it.
 		const split = seg.kind === "text" ? skillSuggestionSplit(seg) : null;
 		if (split) {
+			flushReasoning("words");
 			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth);
 			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX) });
@@ -1298,6 +1338,7 @@ function renderEntryLines(
 		}
 		const suggestionOnly = seg.kind === "text" ? findSkillSuggestionLine(seg) : null;
 		if (seg.kind === "text" && suggestionOnly !== null) {
+			flushReasoning("words");
 			blocks.push({
 				kind: "tool",
 				lines: renderSkillSuggestionRow(seg.text.slice(suggestionOnly.start, suggestionOnly.end), width),
@@ -1313,16 +1354,29 @@ function renderEntryLines(
 			rendered = previewRows(rendered, previewBudget(detail.errorRows, terminalRows), proseWidth);
 		}
 		if (rendered.length === 0) continue;
+		flushReasoning("words");
 		if (seg.kind === "error") {
 			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR) });
 			continue;
 		}
 		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX) });
 	}
+	// Reasoning at the tail is either still streaming or the turn's last word.
+	flushReasoning("words");
+	// A settled turn's last marker states how much reasoning its folds hold.
+	if (lastMarker !== undefined && !entry.pending && detail.reasoningRows === 0) {
+		lastMarker.lines = [renderSettledThinkingMarker(reasoningFromTurnUsage(entry.turnUsage), width)];
+	}
 	if (entry.turnUsage && !entry.pending) {
 		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt) });
 	}
 	return joinTurnBlocks(blocks);
+}
+
+/** Two stretches of one run of reasoning, as one text. */
+function joinReasoning(before: string, next: string): string {
+	if (next.length === 0) return before;
+	return before.length === 0 ? next : `${before}\n${next}`;
 }
 
 const OUTPUT_STYLE_CYCLE: readonly OutputStyle[] = ["compact", "standard", "detailed"];
@@ -1488,6 +1542,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	const now = (): number => options.now?.() ?? Date.now();
+	/**
+	 * When an entry or action happened. Live, that is now; a replay pins it to
+	 * the ledger entry being replayed, so `/view` states the age of the act and
+	 * not of the resume.
+	 */
+	let replayStampMs: number | undefined;
+	const stamp = (): number => replayStampMs ?? now();
 	const currentDetail = (): TranscriptDetailPolicy => transcriptDetail(options.getOutputStyle?.());
 
 	/**
@@ -1592,7 +1653,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			open.text += delta;
 			return;
 		}
-		entry.segments.push({ kind: "thinking", text: delta, finalized: false, startedAtMs: now() });
+		entry.segments.push({ kind: "thinking", text: delta, at: stamp(), finalized: false, startedAtMs: now() });
 	};
 
 	const appendTextDelta = (entry: Extract<TranscriptEntry, { role: "assistant" }>, delta: string): void => {
@@ -1723,7 +1784,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const appendErrorSegment = (entry: Extract<TranscriptEntry, { role: "assistant" }>, text: string): void => {
 		const tail = entry.segments[entry.segments.length - 1];
 		if (tail?.kind === "error" && tail.text === text) return;
-		entry.segments.push({ kind: "error", text });
+		entry.segments.push({ kind: "error", text, at: stamp() });
 	};
 
 	/**
@@ -1966,11 +2027,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	return {
 		appendUser(text: string, status?: () => UserTurnStatus): void {
-			transcript.push({ role: "user", text, ...(status ? { status } : {}) });
+			transcript.push({ role: "user", text, at: stamp(), ...(status ? { status } : {}) });
 			markDirty();
 		},
 		appendReplayBlock(renderBlock: ReplayBlockRenderer, isLive?: () => boolean): void {
-			transcript.push({ role: "replayBlock", renderBlock, isLive });
+			transcript.push({ role: "replayBlock", renderBlock, at: stamp(), isLive });
 			markDirty();
 		},
 		applyWorkerState(state: WorkerEntryState): void {
@@ -1982,7 +2043,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
-			const entry: WorkerTranscriptEntry = { role: "worker", state };
+			const entry: WorkerTranscriptEntry = { role: "worker", state, at: stamp() };
 			workerEntries.set(state.assignmentId, entry);
 			// The card is the run's row from here on: the call that spawned it drops
 			// the task and outcome it would otherwise state. A helper's `↳` row is
@@ -2016,49 +2077,94 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		inspectionArtifacts(): ViewArtifact[] {
 			const artifacts: ViewArtifact[] = [];
-			const add = (title: string, render: () => string[]) => {
+			// Newest first by the time each act happened; acts stamped in the same
+			// millisecond keep their transcript order.
+			let previousAt = Number.NEGATIVE_INFINITY;
+			const add = (
+				title: string,
+				at: number,
+				lines: () => string[],
+				render?: (width: number) => string[],
+				extra: Partial<Pick<ViewArtifact, "toolName" | "searchText">> = {},
+			) => {
 				const index = artifacts.length;
+				const timestamp = Math.max(at, previousAt + 1);
+				previousAt = timestamp;
+				const clean = sanitizeCallTargetText(title);
 				artifacts.push({
 					id: `transcript:${index + 1}`,
 					category: "transcript",
-					title,
-					timestamp: now() + index,
-					searchText: [title],
-					load: async () => ({ format: "text", lines: render().map(redactSecretString) }),
+					title: clean,
+					timestamp,
+					searchText: [clean, ...(extra.searchText ?? [])],
+					...(extra.toolName !== undefined ? { toolName: extra.toolName } : {}),
+					load: async () => ({
+						format: "text",
+						lines: lines().map(redactSecretString),
+						...(render === undefined ? {} : { render: (width: number) => render(width).map(redactSecretString) }),
+					}),
 				});
 			};
+			/** A block's first row, plain: how the transcript states it. */
+			const firstRow = (rows: readonly string[]): string =>
+				rows.map((row) => stripTerminalSequences(row).trim()).find((row) => row.length > 0) ?? "";
+			const standard = transcriptDetail("standard");
 			for (const entry of transcript) {
 				if (entry.role === "assistant") {
 					for (const seg of entry.segments) {
-						if (seg.kind === "error") add("Provider or terminal error", () => providerErrorEvidence(seg.text).split("\n"));
-						if (seg.kind === "thinking" && seg.text) add("Thinking · supplied reasoning", () => seg.text.split("\n"));
-						if (seg.kind === "tool")
-							add(`${seg.name} · ${seg.id}`, () =>
-								renderToolExecution(
-									{
-										toolCallId: seg.id,
-										toolName: seg.name,
-										args: seg.args,
-										result: seg.result ?? seg.partialResult,
-										isError: seg.isError,
-										outcome: seg.settlement,
-										blockReason: seg.blockReason,
-										resultSummary: seg.resultSummary,
-										actionClass: seg.actionClass,
-									},
-									120,
-									{ unbounded: true, diffStyle: "plain" },
+						if (seg.kind === "error")
+							add("Provider or terminal error", seg.at, () => providerErrorEvidence(seg.text).split("\n"));
+						if (seg.kind === "thinking" && seg.text.trim().length > 0) {
+							const opening = seg.text.trim().split("\n", 1)[0] ?? "";
+							add(`Thinking · ${opening}`, seg.at, () => seg.text.split("\n"));
+						}
+						if (seg.kind === "tool") {
+							// Titled by its row as the transcript states it; inspected in full,
+							// every argument included, whatever card sits under it.
+							const call: ToolExecutionFinished = {
+								...finishedCall(seg),
+								result: seg.result ?? seg.partialResult,
+								cardAttached: undefined,
+							};
+							add(
+								toolRowTitle(
+									seg.finished
+										? finishedCall(seg)
+										: { toolCallId: seg.id, toolName: seg.name, args: seg.args, cardAttached: seg.cardAttached },
 								),
+								seg.at,
+								() => renderToolExecution(call, 120, { unbounded: true, diffStyle: "plain" }),
+								(width) => renderToolExecution(call, width, { unbounded: true, diffStyle: "plain" }),
+								{ toolName: seg.name, searchText: [seg.name, seg.id] },
 							);
+						}
 					}
 				} else if (entry.role === "retryStatus" && entry.status.errorMessage) {
-					add("Provider retry diagnostic", () => providerErrorEvidence(entry.status.errorMessage ?? "").split("\n"));
+					const status = entry.status;
+					add(firstRow(renderRetryStatus(status, 120, standard)), entry.at, () =>
+						providerErrorEvidence(status.errorMessage ?? "").split("\n"),
+					);
 				} else if (entry.role === "worker") {
-					add(`${entry.state.agentId} · worker ${entry.state.runId}`, () =>
-						renderWorkerEntryLines(entry.state, 120, { unbounded: true }),
+					const state = entry.state;
+					// A council member is titled by its own row, not the round's header.
+					const header = firstRow(renderWorkerEntryLines(state, 120, { detail: standard, group: "continues" }));
+					add(
+						header,
+						entry.at,
+						() => renderWorkerEntryLines(state, 120, { unbounded: true }),
+						(width) => renderWorkerEntryLines(state, width, { unbounded: true }),
+						{ searchText: [state.agentId, state.runId] },
 					);
 				} else if (entry.role === "replayBlock") {
-					add("Session action", () => entry.renderBlock(120, transcriptDetail("detailed"), true));
+					const detailed = transcriptDetail("detailed");
+					const title = firstRow(entry.renderBlock(120, standard, false));
+					if (title.length === 0) continue;
+					add(
+						title,
+						entry.at,
+						() => entry.renderBlock(120, detailed, true),
+						(width) => entry.renderBlock(width, detailed, true),
+					);
 				}
 			}
 			return artifacts;
@@ -2073,6 +2179,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			workerEntries.clear();
 			clearRenderCaches();
 			markDirty();
+		},
+		replayAt(timestampMs: number | undefined): void {
+			replayStampMs =
+				timestampMs !== undefined && Number.isFinite(timestampMs) && timestampMs > 0 ? timestampMs : undefined;
 		},
 		markToolReplayed(toolCallId: string): void {
 			const owner = findToolSegmentOwner(toolCallId);
@@ -2104,7 +2214,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const skillSurface = event.skillSurface;
 				if (skillSurface !== undefined) {
 					if (skillSurface.state === "loaded") return;
-					transcript.push({ role: "replayBlock", renderBlock: (width) => renderSkillSurfaceRow(skillSurface, width) });
+					transcript.push({
+						role: "replayBlock",
+						renderBlock: (width) => renderSkillSurfaceRow(skillSurface, width),
+						at: stamp(),
+					});
 					markDirty();
 					return;
 				}
@@ -2112,6 +2226,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				transcript.push({
 					role: "replayBlock",
 					renderBlock: (width) => renderNoticeRow(text, level, width),
+					at: stamp(),
 				});
 				markDirty();
 				return;
@@ -2120,10 +2235,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// A queued steer or follow-up the engine just injected. Rendering it
 				// here, at injection time, keeps the transcript in the order the
 				// model saw: enqueue time shows the text only in the queue panel.
-				transcript.push({ role: "user", text: event.display?.text ?? event.text });
+				transcript.push({ role: "user", text: event.display?.text ?? event.text, at: stamp() });
 				const note = event.display?.note;
 				if (note !== undefined) {
-					transcript.push({ role: "replayBlock", renderBlock: (width) => wrapTextWithAnsi(`  ${note}`, width) });
+					transcript.push({
+						role: "replayBlock",
+						renderBlock: (width) => wrapTextWithAnsi(`  ${note}`, width),
+						at: stamp(),
+					});
 				}
 				markDirty();
 				return;
@@ -2163,6 +2282,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						id: streamed.id,
 						name: typeof streamed.name === "string" && streamed.name.length > 0 ? streamed.name : "tool",
 						args: streamed.arguments ?? {},
+						at: stamp(),
 						finished: false,
 						executionStarted: false,
 						argsComplete: assistantEvent.type === "toolcall_end",
@@ -2236,6 +2356,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					id: event.toolCallId,
 					name: event.toolName,
 					args: event.args,
+					at: stamp(),
 					finished: false,
 					executionStarted: true,
 					argsComplete: true,
@@ -2380,7 +2501,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						.slice(messageStart)
 						.some((segment) => segment.kind === "thinking" && segment.text.length > 0);
 					if (!streamedThisMessage) {
-						assistant.segments.splice(messageStart, 0, { kind: "thinking", text: thinking, finalized: true });
+						assistant.segments.splice(messageStart, 0, { kind: "thinking", text: thinking, at: stamp(), finalized: true });
 					}
 				}
 				assistant.messageStartSegmentIndex = undefined;
@@ -2398,7 +2519,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				if (last?.role === "retryStatus" && last.status.attempt === event.status.attempt) {
 					last.status = event.status;
 				} else {
-					transcript.push({ role: "retryStatus", status: event.status });
+					transcript.push({ role: "retryStatus", status: event.status, at: stamp() });
 				}
 				markDirty();
 				return;

@@ -414,6 +414,13 @@ export function contextUsageText(context: ContextEngineFacts): string {
 	return `${source}${used === null ? "?" : formatFooterTokens(used)} / ${window ? formatFooterTokens(window) : "?"}`;
 }
 
+/** The share of the window `contextUsageText` states, in percent; null when either number is unknown. */
+export function contextUsagePercent(context: ContextEngineFacts): number | null {
+	const used = context.budget ? context.used : (context.ledger?.usedTokens ?? context.used);
+	const window = context.budget ? context.contextWindow : (context.ledger?.contextWindow ?? context.contextWindow);
+	return used === null || !window ? null : (used / window) * 100;
+}
+
 /** Reads published numbers only; never refreshes accounting from a renderer. */
 export function contextOccupancyBar(context: ContextEngineFacts, cells: number, theme: ClioTheme): string {
 	if (!context.budget && context.ledger) return renderContextMeterBar(context.ledger, cells, theme);

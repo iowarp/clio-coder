@@ -3,7 +3,10 @@ import type { OutputStyle } from "../core/defaults.js";
 
 export interface TranscriptDetailPolicy {
 	style: OutputStyle;
+	/** Rows of reasoning shown before Clio's words and while reasoning streams; 0 folds it to a marker. */
 	reasoningRows: number;
+	/** Rows of reasoning shown before an action; 0 folds it to a marker. */
+	reasoningBeforeActionRows: number;
 	invocationRows: number;
 	resultRows: number;
 	bashRows: number;
@@ -20,6 +23,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		style: "compact",
 		invocationRows: 4,
 		reasoningRows: 0,
+		reasoningBeforeActionRows: 0,
 		resultRows: 0,
 		bashRows: 0,
 		operatorBashRows: 3,
@@ -33,6 +37,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		style: "standard",
 		invocationRows: 8,
 		reasoningRows: 3,
+		reasoningBeforeActionRows: 0,
 		resultRows: 0,
 		bashRows: 0,
 		operatorBashRows: 6,
@@ -46,6 +51,7 @@ const POLICIES: Record<OutputStyle, TranscriptDetailPolicy> = {
 		style: "detailed",
 		invocationRows: 18,
 		reasoningRows: 12,
+		reasoningBeforeActionRows: 12,
 		resultRows: 8,
 		bashRows: 12,
 		operatorBashRows: 12,

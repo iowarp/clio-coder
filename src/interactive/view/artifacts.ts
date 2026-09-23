@@ -61,6 +61,13 @@ export type ViewArtifactFormat = "markdown" | "text" | "json";
 export interface ViewArtifactLoadResult {
 	lines: string[];
 	format: ViewArtifactFormat;
+	/**
+	 * The same content laid out by its own renderer at a given width. A
+	 * transcript block's rows carry a hanging indent and a `│` rail, which a
+	 * re-wrap of the rows rendered for another width loses, so the preview
+	 * renders the block at its own width instead.
+	 */
+	render?: (width: number) => string[];
 }
 
 export interface ViewArtifact {
