@@ -128,7 +128,8 @@
 	--rail-width: 204px;
 	--rail-collapsed-width: 68px;
 	--reading-measure: 72ch;
-	--conversation-max: 1000px;
+	/* About 90 characters of reading text: long enough for tables and code, short enough to read. */
+	--conversation-max: 820px;
 
 	/* ---- code surface: a contained dark instrument in BOTH themes ------- */
 	--code-paper: #15201c;

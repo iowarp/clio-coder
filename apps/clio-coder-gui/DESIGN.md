@@ -41,7 +41,7 @@ the theme.
 | Paper and surfaces | `--paper`, `--surface`, `--surface-sunken`, `--overlay` | Background depth and structural hierarchy |
 | Notebook ink | `--ink`, `--ink-strong` | Readable content and headings |
 | Quiet annotation | `--ink-muted`, `--ink-subtle` | Supporting copy and metadata |
-| Sage green | `--accent`, `--accent-strong`, `--accent-soft`, `--on-accent` | Interaction, connection, observation, the evidence spine |
+| Sage green | `--accent`, `--accent-strong`, `--accent-soft`, `--on-accent` | Interaction, connection, observation |
 | Amber | `--action-fg/tint/line` | Consequential action, active work, pending approval |
 | Green | `--status-success-*` | Explicitly completed or healthy facts only |
 | Amber-gold | `--status-warn-*` | Waiting, uncertainty, pending scope, degraded state |
@@ -61,7 +61,7 @@ group is deliberately dark in both themes. An explicit theme choice persists in
 `clio-coder-gui-theme` and wins over the system preference in both directions; without a choice, the
 `prefers-color-scheme` block in `tokens.css` paints the correct theme on the first frame.
 
-The evidence-spine hue is `--accent`, and it is not teal. The retired `apps/workbench` palette was
+The accent hue is sage green, and it is not teal. The retired `apps/workbench` palette was
 graphite and teal on a dark-only shell; the ten colour *roles* were ported and the hues were not.
 
 ## Type
@@ -81,7 +81,9 @@ sees before the font files resolve: Segoe UI / system-ui, Georgia, and Cascadia 
 `:root` carries `font-synthesis: none` so a missing weight is never faked into mush.
 
 Banned: Inter, monospaced body copy, terminal prompts, all-caps paragraphs. Uppercase is limited to
-short instrument labels (`.eyebrow`, `.status-mark`).
+short instrument labels (`.eyebrow`, `.status-mark`) on inspector pages. The conversation speaks in
+sentence case throughout: its status marks, activity kinds and outcome line are a glyph and a word
+in the interface face, because the reading voice is not an instrument panel.
 
 Scale: `--text-body` 15px and `--text-reading` 16px for reading, `--text-meta` 13px, `--text-exact`
 12px for mono keys, ids, timestamps and counts. `--text-instrument` 10px is allowed **only** for an
@@ -112,17 +114,23 @@ Three density zones:
   `--space-3`, `--text-exact` in `--font-mono`, tabular numerals throughout.
 
 **Page frame.** Most pages use `main` padding `--space-12 --space-12 --space-16` at desktop,
-`--space-8 --space-6` below 1050px, `--space-6 --space-5` below 650px. The conversation
-is a focused viewport workspace with tighter gutters: its header and composer remain visible while
-only the transcript scrolls. Permission review, a long pending-message queue, and the explicit
+`--space-8 --space-6` below 1050px, `--space-6 --space-5` below 650px, inside a `main` capped at
+1440px. The conversation is the exception and fills the whole pane: `main` is neither capped nor
+padded, the header spans the pane, and the transcript is the one scroller, with its scrollbar at the
+pane's edge and `scrollbar-gutter: stable both-edges`. The transcript content, the approval region
+and the composer share one centred column, `--conversation-max` (820px, about 90 characters) plus a
+`--chat-gutter` of `--space-8`, `--space-6` below 1050px and `--space-4` below 650px. A capped `main`
+or a capped conversation box leaves dead space beside the window and draws a scrollbar in the middle
+of the page; that was an observed bug. The document itself reserves no scrollbar gutter on this page
+because it never scrolls. Permission review, a long pending-message queue, and the explicit
 session-tools disclosure may scroll locally when their content exceeds the available space. Session
-tools open on demand, not as a
-stack of permanent cards above the transcript. The minimum side gutter at any width is `--space-4`.
+tools open on demand, not as a stack of permanent cards above the transcript. The minimum side gutter
+at any width is `--space-4`.
 
 **Radius decision rule.** `--radius-xs` for inline chips in dense rows and for code/JSON wells;
 `--radius-sm` for controls (button, input, select, badge); `--radius-md` for panels and cards;
-`--radius-lg` for dialogs and drawers; `--radius-pill` only for status marks, the live chip and the
-jump pill. Nothing gets a radius the tokens do not name.
+`--radius-lg` for dialogs, drawers, the composer and the operator's request; `--radius-pill` only for
+status marks on inspector pages and the jump pill. Nothing gets a radius the tokens do not name.
 
 **Elevation decision rule.** `--shadow-none` is the default for every card, table and panel; the
 boundary comes from `--line-strong`, not from a shadow. `--shadow-raised` is for a sticky masthead
@@ -191,7 +199,10 @@ holds whatever the control sits on. On a filled accent control the ring flips to
 around 1.3:1 by design. `--line-strong` is the boundary of every button, input, select, textarea,
 count, badge, panel, permission card, session control and table cell, and measures 3.13:1 to 3.69:1
 in light and 3.26:1 to 4.08:1 in dark. The mechanical rule: **if removing the border would make the
-control's hit area ambiguous, it is `--line-strong`.**
+control's hit area ambiguous, it is `--line-strong`.** The one relaxation is a control whose own
+words name it in a quiet row: Session tools in the conversation header, and the copy and retry
+actions under a message. These stay frameless until hovered, focused or open, and keep the focus
+ring.
 
 Under `forced-colors: active` every box-shadow is dropped, the ring becomes `2px solid Highlight`,
 and only the few marks whose shape is the information keep `forced-color-adjust: none`.
@@ -199,29 +210,43 @@ and only the few marks whose shape is the information keep `forced-color-adjust:
 `@media (prefers-contrast: more)` darkens `--line`, `--line-strong`, `--ink-muted` and `--ink-subtle`
 in both themes.
 
-## The evidence spine
+## The conversation record
 
-One continuous vertical rule runs down the left of the transcript. Requests, tool actions,
-approvals, narrative and outcomes hang off that one rule as nodes, so a turn reads as a single
-legible record rather than a stack of chat bubbles. The Conversation and the Session Timeline are
-two projections of the same array, a view switch over the same scroll region and never a second
-shell; neither may show an item the other lacks.
+A turn reads as one record: the operator's request, Clio Coder's prose with its activity folded
+between paragraphs, and one outcome line. Place and ground tell the two voices apart, so there is no
+rail, avatar, eyebrow or card around a response. The Conversation and the Session Timeline are two
+projections of the same array, a view switch over the same scroll region and never a second shell;
+neither may show an item the other lacks.
 
 1. One turn is every item sharing a `turnId`.
-2. The request is a right-aligned editorial block with an accent rule, `max-width: 84%`,
-   `margin-left: auto`, in `--font-editorial`. Not a bubble with an avatar.
-3. The response is unboxed prose under an eyebrow reading `CLIO CODER`. There is no card inside a
-   card.
+2. The request is the operator's own text, right-aligned, `max-width: min(80%, 40rem)`, on
+   `--surface-sunken` with `--radius-lg`, in the interface face and never reinterpreted as Markdown.
+   Who wrote it is announced to assistive technology rather than printed. Its time and Copy prompt
+   sit under it and surface on hover or focus, and always on a touch screen. A replayed request keeps
+   its visible "earlier record" chip.
+3. The response is unboxed prose on the page ground. Clio Coder is the default voice, so its name is
+   announced rather than printed; a delegated worker is named on screen, and a live turn shows the
+   live chip. Response headings use the interface face at reading sizes (22, 19, 17px).
 4. Tool, approval and loop items falling between two stretches of prose collapse into one
-   `<details>` activity group whose `<summary>` counts states ("4 tools completed", "1 tool running ·
-   2 done", "Approval needed"). Expanded activity is a ruled entry in the record rather than
-   another framed card inside the response; individual tool facts remain structured. The group
-   opens itself while attention is needed and then stays exactly as the operator left it.
-5. The inline approval row carries the same Allow-once / Reject decision as the sticky banner. The
-   banner exists only for discoverability when the row is scrolled out of view; they are one
-   decision, not two.
+   `<details>` activity group. Its `<summary>` is a quiet line with no frame: a glyph, a count label
+   ("6 tools completed", "1 tool running · 2 done", "1 step failed") and a digest of what the group
+   did ("listed 2 folders, ran 1 search, read 3 files"). Only a group waiting on the operator is
+   drawn as more than a line. The group opens itself while attention is needed and then stays exactly
+   as the operator left it. Opened, each call is one folded row: glyph, plain verb, target, one fact
+   (exit code, line count, `+7 −1`). A change keeps its diff open; a failure carries its last output
+   line; a change that was not approved keeps the proposal on screen, labelled "Not applied · not
+   approved", because the runtime words a denial, a cancelled turn and an abort alike. The digest
+   says "changed" only for a change that completed without an error.
+5. The approval is one decision with two surfaces. The anchored card beside the call carries the
+   review: what is asked, the proposal, the facts, Reject and Allow once. While that card is on the
+   page, the pinned banner above the transcript is a one-line strip: what is asked, the time left,
+   Review (which brings the card into view), and the same two buttons. When the call is not in the
+   timeline or its group is folded, the banner carries the full card instead. The banner owns the
+   announcement and the keyboard chords either way.
 6. Reported reasoning lives behind a disclosure, tinted `--reason-*`, never inline with prose.
-7. A one-line outcome footer closes the turn: glyph, label, detail, closed code, elapsed time.
+7. One quiet line closes the turn: the outcome as a glyph and a word, the tool count, input and
+   output tokens with the complete accounting behind a disclosure, the finish time, and the
+   response's own actions at the right. No rule above it and no pill.
 8. Agent identity is always Clio Coder. If the protocol carries no sub-agent fact, the surface
    reports which agent is active as *unavailable* rather than inferring it.
 
@@ -374,7 +399,7 @@ render `0` for unknown.
 ## Shell and wayfinding
 
 The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet,
-Evidence, Library and System. The `--masthead-height` masthead carries the Clio logo, a
+Evidence, Library and System, in two groups: the conversation pair, then Inspect & configure. The `--masthead-height` masthead carries the Clio logo, a
 discreet connection indicator, and icon controls with accessible names. App preferences hold the
 reported version, PWA installation and browser connection controls. There is no page footer; the
 application gives that space to the work.
@@ -382,6 +407,14 @@ application gives that space to the work.
 Below 750px the rail becomes a native modal `<dialog>`, so the browser owns focus containment,
 Escape and return-to-trigger. A skip link reaches the main landmark. Route changes focus that
 landmark and update the document title.
+
+The conversation header is one bar across the pane: the project link, the title (the session label,
+else the first request), the live status as a glyph and a sentence, the route (target and model,
+with the target's reported health folded into its glyph), and one **Session tools** menu. The menu
+holds the project path, switching, session controls, Clio Coder commands, dispatched workers and
+Close session, and it hangs below its own button at every width. An unhealthy target, an
+unrecognised health fact or a context warning is written out in full under the bar. Below 650px the
+project link shrinks so the status and the menu share its line, and the title takes the next.
 
 ## Acceptance floor
 

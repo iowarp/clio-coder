@@ -145,14 +145,20 @@ export const ChatTurnView = memo(function ChatTurnView({
 			data-turn-id={turn.turnId}
 			aria-label={turnAriaLabel(turn)}
 		>
+			{/* The request is the operator's own words on a quiet ground. Who wrote it is announced, not
+			    printed; when and the copy action sit under it and surface on hover or focus. */}
 			<div className="chat-request">
+				<span className="sr-only">{request.heading}</span>
+				{/* The operator's own text is never reinterpreted as Markdown. */}
+				<p className={`chat-request__prompt${request.missing ? " is-missing" : ""}`}>{request.text}</p>
 				<div className="chat-request__meta">
-					<span className="chat-request__who">{request.heading}</span>
 					{request.replay ? <span className="chat-request__replay">{REPLAY_CHIP}</span> : null}
 					{startedAt === null ? (
 						<span className="chat-request__time">{formatTime(null)}</span>
 					) : (
-						<time dateTime={startedAt}>{formatTime(startedAt)}</time>
+						<time className="chat-request__time" dateTime={startedAt}>
+							{formatTime(startedAt)}
+						</time>
 					)}
 					<MessageActions
 						sessionId={session.id}
@@ -162,15 +168,19 @@ export const ChatTurnView = memo(function ChatTurnView({
 						status={row?.status ?? "running"}
 					/>
 				</div>
-				{/* The operator's own text is never reinterpreted as Markdown. */}
-				<p className={`chat-request__prompt${request.missing ? " is-missing" : ""}`}>{request.text}</p>
 			</div>
 			<div className="chat-response">
-				<div className="chat-response__meta">
-					<span className="chat-response__who">{author.name}</span>
-					{/* A settled turn states its outcome once, in the footer. */}
-					{live || row === undefined ? <LiveChip status={status} /> : null}
-				</div>
+				{/* Clio Coder is the default voice, so its name is announced rather than printed. A delegated
+				    worker is named on screen, and a live turn shows what it is doing. */}
+				{live || row === undefined || author.delegated ? (
+					<div className="chat-response__meta">
+						<span className={author.delegated ? "chat-response__who" : "sr-only"}>{author.name}</span>
+						{/* A settled turn states its outcome once, in the footer. */}
+						{live || row === undefined ? <LiveChip status={status} /> : null}
+					</div>
+				) : (
+					<span className="sr-only">{author.name}</span>
+				)}
 				<div className="chat-response__body">
 					{turn.segments.length === 0 && live ? (
 						<p className="chat-response__placeholder">
@@ -201,7 +211,11 @@ export const ChatTurnView = memo(function ChatTurnView({
 						}
 					})}
 				</div>
-				<div className="chat-response__meta chat-response__footer">
+				{/* One quiet line closes the turn: its outcome, then what can be done with the response. */}
+				<div className="chat-response__footer">
+					{row !== undefined && row.status !== "running" ? (
+						<TurnOutcome outcome={turnOutcome(row, toolCount(turn))} formatClock={formatTime} />
+					) : null}
 					<MessageActions
 						sessionId={session.id}
 						row="response"
@@ -210,9 +224,6 @@ export const ChatTurnView = memo(function ChatTurnView({
 						status={row?.status ?? "running"}
 					/>
 				</div>
-				{row !== undefined && row.status !== "running" ? (
-					<TurnOutcome outcome={turnOutcome(row, toolCount(turn))} formatClock={formatTime} />
-				) : null}
 			</div>
 			<HealthNotices rows={notices} />
 		</article>

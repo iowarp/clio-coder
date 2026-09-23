@@ -16,6 +16,10 @@
 	--scroll-thumb-hover: color-mix(in srgb, var(--ink-muted) 85%, transparent);
 	scrollbar-gutter: stable;
 }
+/* The conversation never scrolls the document; its transcript scrolls itself at the pane's edge. */
+:root:has(main > .conversation) {
+	scrollbar-gutter: auto;
+}
 /* Code and diagrams are dark in both themes, so their thumb follows the code ink. */
 pre,
 .code-block,
@@ -1413,20 +1417,34 @@ nav a[data-group="more"] .icon {
 	min-height: 0;
 	flex: 1 1 0;
 }
+/* The conversation takes the whole pane. The transcript scrolls at the pane's edge, where a scrollbar
+   belongs, and its content, the approval region and the composer share one centred reading column. A
+   capped main or a capped conversation box left dead space beside the window and drew a scrollbar in
+   the middle of the page. */
 main:has(> .conversation) {
 	height: 100%;
+	max-width: none;
 	min-height: 0;
 	/* clip does not create a second, programmatically scrollable main viewport. */
 	overflow: clip;
-	padding: var(--space-4) var(--space-8);
+	padding: 0;
 }
 .conversation {
-	max-width: var(--conversation-max);
-	margin-inline: auto;
+	--chat-gutter: var(--space-8);
 	height: 100%;
 	min-height: 0;
 	display: grid;
 	grid-template-rows: auto auto minmax(0, 1fr) 0 auto;
+}
+.conversation__approval,
+.conversation__dock,
+.chat-transcript__content,
+.conversation > .jump-anchor {
+	box-sizing: border-box;
+	width: 100%;
+	max-width: calc(var(--conversation-max) + 2 * var(--chat-gutter));
+	margin-inline: auto;
+	padding-inline: var(--chat-gutter);
 }
 .session-status {
 	display: flex;
@@ -1439,6 +1457,7 @@ main:has(> .conversation) {
 }
 .conversation__header {
 	min-width: 0;
+	padding-inline: var(--space-6);
 	border-bottom: 1px solid var(--line);
 }
 /* One line: where you are, what this conversation is, whether Clio Coder is working, which model
@@ -1479,7 +1498,7 @@ main:has(> .conversation) {
 	min-width: 0;
 	margin: 0;
 	font-family: var(--font-ui);
-	font-size: var(--text-h3);
+	font-size: var(--text-reading);
 	font-weight: 650;
 	line-height: var(--leading-tight);
 	letter-spacing: -0.01em;
@@ -1505,11 +1524,8 @@ main:has(> .conversation) {
 	align-items: baseline;
 	gap: var(--space-2);
 	flex: 0 1 auto;
-	max-width: 15rem;
+	max-width: 18rem;
 	min-width: 0;
-	padding: var(--space-1) var(--space-2);
-	border: 1px solid var(--line);
-	border-radius: var(--radius-pill);
 	color: var(--ink-muted);
 	font-size: var(--text-exact);
 	white-space: nowrap;
@@ -1526,9 +1542,6 @@ main:has(> .conversation) {
 }
 .route-chip[data-tone="fail"] .route-chip__glyph {
 	color: var(--status-fail-fg);
-}
-.route-chip[data-tone="unverified"] {
-	border-style: dashed;
 }
 .route-chip__text {
 	overflow: hidden;
@@ -1560,15 +1573,17 @@ main:has(> .conversation) {
 	position: relative;
 	flex: none;
 }
+/* A labelled control in the header's own voice; its words identify it, so it needs no frame until
+   it is pointed at or open. */
 .conversation__tools > summary {
 	display: inline-flex;
 	align-items: center;
 	gap: var(--space-2);
 	min-height: 36px;
 	padding: var(--space-1) var(--space-3);
-	border: 1px solid var(--line-strong);
+	border: 1px solid transparent;
 	border-radius: var(--radius-sm);
-	background: var(--surface);
+	background: transparent;
 	font-size: var(--text-meta);
 	color: var(--ink);
 	cursor: pointer;
@@ -1586,6 +1601,7 @@ main:has(> .conversation) {
 .conversation__tools > summary:hover,
 .conversation__tools[open] > summary {
 	background: var(--surface-sunken);
+	border-color: var(--line-strong);
 }
 .conversation__tools-body {
 	position: absolute;
@@ -1655,7 +1671,7 @@ main:has(> .conversation) {
 }
 .conversation__dock {
 	min-width: 0;
-	padding-top: var(--space-2);
+	padding-block: var(--space-2) var(--space-5);
 }
 
 .conversation__approval {
@@ -1690,13 +1706,30 @@ main:has(> .conversation) {
 	max-height: min(38dvh, 22rem);
 	overflow-y: auto;
 }
+@media (max-width: 1050px) {
+	.conversation {
+		--chat-gutter: var(--space-6);
+	}
+}
 @media (max-width: 650px) {
-	main:has(> .conversation) {
-		padding: var(--space-1) var(--space-4) var(--space-2);
+	.conversation {
+		--chat-gutter: var(--space-4);
+	}
+	.conversation__header {
+		padding-inline: var(--space-4);
+	}
+	.conversation__dock {
+		padding-bottom: var(--space-3);
 	}
 	.conversation__bar {
 		flex-wrap: wrap;
 		row-gap: var(--space-1);
+	}
+	/* The project link takes whatever the status and the tools leave, so the three share one line
+	   and the name shortens instead of pushing the tools onto a line of their own. */
+	.conversation__project {
+		flex: 1 1 0;
+		max-width: none;
 	}
 	.conversation__title {
 		order: 5;
