@@ -838,6 +838,43 @@ describe("Pi TUI compatibility", () => {
 		}
 	});
 
+	it("keeps the transcript's last column for a scrollbar that can appear, so the bar never covers content", () => {
+		for (const [scrollbar, reserved] of [
+			["auto", true],
+			["always", true],
+			["hidden", false],
+		] as const) {
+			const widths: number[] = [];
+			// Every row fills the width it is given and ends in a marker cell.
+			const chat = {
+				render: (width: number) => {
+					widths.push(width);
+					return Array.from({ length: 60 }, () => `${"x".repeat(Math.max(0, width - 1))}Z`);
+				},
+				invalidate() {},
+			};
+			const terminal = new RenderingTerminal();
+			const tui = new TuiAltScreen(terminal);
+			const root = buildLayout(
+				{ banner: new Text("", 0, 0), chat, editor: new Text("editor", 0, 0), footer: new Text("footer", 0, 0) },
+				{ mode: "fullscreen", fullscreenScrollbar: scrollbar },
+			);
+			tui.setLayoutRoot(root);
+			tui.start();
+			try {
+				tui.renderNow(true);
+				// Scrolling shows an auto bar; the marker cell must survive it.
+				terminal.input("\x1b[<64;2;2M");
+				tui.renderNow(true);
+				strictEqual(widths.at(-1), reserved ? 79 : 80, scrollbar);
+				const screen = stripTerminalSequences(terminal.writes.join(""));
+				ok(screen.includes(`${"x".repeat(reserved ? 78 : 79)}Z`), `${scrollbar}: a content row lost its last cell`);
+			} finally {
+				tui.stop();
+			}
+		}
+	});
+
 	it("preserves themed scrollbars, wheel scrolling, follow-end, and the fixed dock", () => {
 		const terminal = new RenderingTerminal();
 		const tui = new TuiAltScreen(terminal);
@@ -1672,6 +1709,58 @@ describe("tool classes", () => {
 		deepStrictEqual(script.slice(1), ["  │ command › cd src", "  │   ls"]);
 	});
 
+	it("points an offloaded result at /view instead of printing its scratch path", () => {
+		const offloadPath = `/home/operator/.local/state/clio-coder/scratch/1t6ygq/${"a".repeat(64)}.txt`;
+		const fetched = {
+			toolCallId: "f",
+			toolName: "web_fetch",
+			args: { url: "https://nodejs.org/api/test.html", format: "markdown" },
+			result: {
+				content: [{ type: "text", text: "# Test runner" }],
+				details: { status: 200, format: "markdown", resultSize: { truncated: true, offloadPath } },
+			},
+			isError: false,
+			durationMs: 377,
+		};
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const rows = renderToolPreview(fetched, 100, transcriptDetail(style)).map(stripTerminalSequences);
+			match(rows[0] ?? "", /· full output · \/view$/u, style);
+			doesNotMatch(rows.join("\n"), /scratch\/1t6ygq|a{64}/u);
+		}
+		// The full body in /view states where the rest is.
+		match(
+			stripTerminalSequences(renderToolExecution(fetched, 140, { unbounded: true }).join("\n")),
+			new RegExp(`full output {2}${offloadPath.replaceAll(".", "\\.")}`, "u"),
+		);
+	});
+
+	it("states the command a bash call ran, not a cd into the workspace it already runs in", () => {
+		const cwd = process.cwd();
+		const rows = (args: Record<string, unknown>, result: unknown = "ok", isError = false) =>
+			renderToolPreview(
+				{ toolCallId: "b", toolName: "bash", args, result, isError },
+				100,
+				transcriptDetail("standard"),
+			).map(stripTerminalSequences);
+		deepStrictEqual(rows({ command: `cd ${cwd} && npm test 2>&1`, timeout_ms: 30_000 }), ["$ ran `npm test 2>&1` ✓"]);
+		deepStrictEqual(rows({ command: `cd "${cwd}"; npm run lint` }), ["$ ran `npm run lint` ✓"]);
+		// A cd into a subdirectory, or an explicit cwd, is where the command ran.
+		deepStrictEqual(rows({ command: `cd ${cwd}/src && ls` }), ["$ ran `ls` in src ✓"]);
+		deepStrictEqual(rows({ command: "npm test", cwd: `${cwd}/tests` }), ["$ ran `npm test` in tests ✓"]);
+		// A cd anywhere else is part of what ran.
+		deepStrictEqual(rows({ command: "cd /etc && cat hosts" }), ["$ ran `cd /etc && cat hosts` ✓"]);
+		// A command too long for its row is cut with the ellipsis glyph, never three dots.
+		const long = rows({ command: `node scripts/${"x".repeat(200)}.js --flag` });
+		match(long[0] ?? "", /^\$ ran `node scripts\/x+…` ✓$/u);
+		// A timeout the command hit is the fact; one it stayed under is not stated.
+		const timedOut = rows(
+			{ command: "npm test", timeout_ms: 30_000 },
+			{ content: [{ type: "text", text: "bash: command timed out after 30000ms" }], details: { timedOut: true } },
+			true,
+		);
+		match(timedOut[0] ?? "", /^\$ ran `npm test` · timed out after 30s ✗/u);
+	});
+
 	it("keeps every character of a command the full body echoes, a lone & included", () => {
 		for (const command of ["npm test 2>&1 | tail -5", "sleep 5 & wait", "make >out.log 2>&1 && echo ok"]) {
 			const body = renderToolExecution(
@@ -1791,6 +1880,41 @@ describe("agent invocations", () => {
 			strictEqual(settledRows[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, style);
 			doesNotMatch(settledRows.join("\n"), /1 ok|quality:.*\n.*quality|tasks -> done/u);
 		}
+	});
+
+	it("lets a shadow helper the model dispatched be the dispatch's row, stating its task once", () => {
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const panel = createChatPanel({ getOutputStyle: () => style, now: () => 50_000 });
+			panel.applyEvent({ type: "agent_start" } as never);
+			const task = "Map every caller of the retry function exported from src/net/retry.js in this repository.";
+			dispatchStart(panel, "d1", { agent: "scout", task, target: "blade", model: "dynamo/qwopus" });
+			panel.applyWorkerState(
+				card({ assignmentId: "s1", agentId: "scout", parentToolCallId: "d1", helper: true, task, startedAtMs: 39_000 }),
+			);
+			dispatchEnd(panel, "d1", 1);
+			const plain = plainRender(panel, 130);
+			strictEqual(plain.split("\n")[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, `${style}\n${plain}`);
+			strictEqual(plain.split("Map every caller").length, 2, `${style}: the task must appear once\n${plain}`);
+			doesNotMatch(plain, /task ›/u);
+		}
+		// Under a call that is not a dispatch, a helper that ran during the call
+		// stays beside the call's own output.
+		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
+		panel.applyEvent({
+			type: "tool_execution_start",
+			toolCallId: "c1",
+			toolName: "context",
+			args: { scope: "docs", query: "retry" },
+		} as never);
+		panel.applyWorkerState(card({ assignmentId: "h1", agentId: "context-scout", parentToolCallId: "c1", helper: true }));
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: "c1",
+			toolName: "context",
+			result: "Retry docs section body",
+			isError: false,
+		} as never);
+		match(plainRender(panel, 100), /Retry docs section body/u);
 	});
 
 	it("keeps one tally row over a fan-out's stacked cards and quality on each card", () => {

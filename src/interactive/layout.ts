@@ -69,12 +69,25 @@ function separatedTranscript(chat: TranscriptComponent): Component {
 	};
 }
 
+/**
+ * The fullscreen transcript keeps its last column for the scrollbar whenever
+ * one can appear. pi-tui reserves the column only for an `always` bar, so the
+ * `auto` bar, which shows while the operator scrolls, painted over the last
+ * cell of every row it passed: a table's right border, a word's last letter.
+ * Reserving it costs one column and never reflows when the bar comes and goes.
+ */
+class TranscriptScrollView extends ScrollView {
+	override getContentWidth(width: number): number {
+		return this.scrollbar !== "hidden" && width > 1 ? width - 1 : width;
+	}
+}
+
 function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}): FullscreenLayout {
 	const document = new Container();
 	document.addChild(parts.banner);
 	document.addChild(separatedTranscript(parts.chat));
 	const theme = clioTheme();
-	const transcript = new ScrollView(document, {
+	const transcript = new TranscriptScrollView(document, {
 		follow: "end",
 		primary: true,
 		overscroll: "chain",

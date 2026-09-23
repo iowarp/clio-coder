@@ -1985,9 +1985,12 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const entry: WorkerTranscriptEntry = { role: "worker", state };
 			workerEntries.set(state.assignmentId, entry);
 			// The card is the run's row from here on: the call that spawned it drops
-			// the task and outcome it would otherwise state.
+			// the task and outcome it would otherwise state. A helper's `↳` row is
+			// the run's row too when a dispatch started it (the model's shadow
+			// scout); under any other call it stays beside that call's own output.
 			const parent = state.parentToolCallId === undefined ? undefined : findToolSegmentOwner(state.parentToolCallId);
-			if (parent !== undefined && state.helper !== true && parent.segment.cardAttached !== true) {
+			const attaches = state.helper !== true || parent?.segment.name === "dispatch";
+			if (parent !== undefined && attaches && parent.segment.cardAttached !== true) {
 				parent.segment.cardAttached = true;
 				invalidateEntryCache(parent.entry);
 			}

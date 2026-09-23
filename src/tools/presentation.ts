@@ -14,6 +14,8 @@
  * Pure module: no I/O, no registry construction, no UI imports.
  */
 
+import os from "node:os";
+import path from "node:path";
 import { ToolNames } from "../core/tool-names.js";
 
 export type ToolFoldDefault = "expanded" | "folded";
@@ -157,7 +159,7 @@ export interface ToolRowSpec {
 	 */
 	object?: (args: ToolRowArgs, context: ToolRowContext) => { text: string; style?: "code" | "url" } | null;
 	/** A qualifier after the object: a search's scope (`in src`). */
-	scope?: (args: ToolRowArgs) => string | null;
+	scope?: (args: ToolRowArgs, context: ToolRowContext) => string | null;
 	/** Argument fields the row states, so they are never repeated inline or as `key ›` rows. */
 	consumes: readonly string[];
 	/** What a folded Compact row counts this call as; the class supplies it when absent. */
@@ -174,6 +176,12 @@ export interface ToolRowSpec {
 export interface ToolRowContext {
 	/** A worker card sits under this call and states the run's task and outcome. */
 	cardAttached?: boolean;
+	/**
+	 * The session workspace. A command already runs there, so a leading `cd`
+	 * into it is dropped from the row and a `cd` into a subdirectory becomes the
+	 * row's scope.
+	 */
+	cwd?: string;
 }
 
 /** One question the operator answered, or one decision recorded, as a row states it. */
@@ -311,6 +319,46 @@ function dispatchObject(args: ToolRowArgs, context: ToolRowContext): string | nu
 	}
 	if (agent === null && task === null) return null;
 	return withTask(`to ${agent ?? "coder"}`);
+}
+
+/**
+ * A plain leading `cd <dir> &&` (or `cd <dir>;`) and the command after it.
+ * Anything fancier (a subshell, `pushd`, a `cd` mid-pipeline) is left alone.
+ */
+const LEADING_CD = /^\s*cd\s+(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))\s*(?:&&|;)\s*([\s\S]+)$/u;
+
+/** `dir` relative to the workspace: "" for the workspace itself, null outside it or when unknown. */
+function workspaceRelative(dir: string, cwd: string | undefined): string | null {
+	if (cwd === undefined || cwd.length === 0) return null;
+	const expanded = dir.startsWith("~") ? path.join(os.homedir(), dir.slice(1)) : dir;
+	const relative = path.relative(cwd, path.resolve(cwd, expanded));
+	if (relative.startsWith("..") || path.isAbsolute(relative)) return null;
+	return relative;
+}
+
+/**
+ * The command a bash row states and where it ran. Bash already runs at the
+ * workspace root, so a model's `cd /abs/workspace && npm test` reads `npm test`
+ * rather than a row that shows the path and cuts the command; a `cd` into a
+ * subdirectory, or an explicit `cwd` argument, reads as ` in <dir>`. A `cd`
+ * anywhere else stays in the command, where it is a fact worth seeing.
+ */
+function commandPlacement(
+	args: ToolRowArgs,
+	context: ToolRowContext,
+): { command: string | null; scope: string | null } {
+	const command = text(args, "command");
+	const cwdArg = text(args, "cwd");
+	const explicit = cwdArg === null ? null : (workspaceRelative(cwdArg, context.cwd) ?? cwdArg);
+	const match = command === null ? null : LEADING_CD.exec(command);
+	const dir = match === null ? undefined : (match[1] ?? match[2] ?? match[3]);
+	const rest = match?.[4]?.trim();
+	if (dir === undefined || rest === undefined || rest.length === 0 || cwdArg !== null) {
+		return { command, scope: explicit === "" ? null : explicit };
+	}
+	const relative = workspaceRelative(dir, context.cwd);
+	if (relative === null) return { command, scope: null };
+	return { command: rest, scope: relative === "" ? null : relative };
 }
 
 const TASK_VERBS: Readonly<Record<string, readonly [string, string]>> = {
@@ -478,8 +526,10 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 	[ToolNames.Bash]: {
 		class: "execute",
 		verbs: CLASS_VERBS.execute,
-		object: (args) => code(text(args, "command")),
-		consumes: ["command"],
+		object: (args, context) => code(commandPlacement(args, context).command),
+		scope: (args, context) => commandPlacement(args, context).scope,
+		// A timeout is stated only when the command hit it (`timed out after 30s`).
+		consumes: ["command", "cwd", "timeout_ms"],
 	},
 	[ToolNames.RunScript]: {
 		class: "execute",
