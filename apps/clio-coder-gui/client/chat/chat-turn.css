@@ -52,10 +52,11 @@
 	overflow-wrap: anywhere;
 	min-width: 0;
 }
-/* In the conversation a status is a glyph and a word in the reading voice, not an uppercase pill: the
-   glyph's shape and the word carry the meaning, the tone only colours them. It also carries a detail,
-   which can be a whole sentence or a path, so it wraps instead of deciding how wide the page is. */
-.conversation .status-mark {
+/* In the conversation, and on the pages that open one, a status is a glyph and a word in the reading
+   voice, not an uppercase pill: the glyph's shape and the word carry the meaning, the tone only
+   colours them. It also carries a detail, which can be a whole sentence or a path, so it wraps
+   instead of deciding how wide the page is. */
+:is(.conversation, .projects) .status-mark {
 	flex-wrap: wrap;
 	align-items: baseline;
 	padding: 0;
@@ -69,7 +70,7 @@
 	overflow-wrap: anywhere;
 	min-width: 0;
 }
-.conversation .status-mark__glyph {
+:is(.conversation, .projects) .status-mark__glyph {
 	font-family: var(--font-mono);
 }
 /* The page-wide disclosure margin spaces settings forms; in the record every disclosure is a line and

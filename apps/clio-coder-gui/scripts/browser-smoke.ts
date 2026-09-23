@@ -292,9 +292,9 @@ try {
 		await check("docs-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await navigate("Sessions");
-		await page.getByLabel("Workspace path", { exact: true }).fill(h.home.path);
+		await page.getByLabel("Project folder", { exact: true }).fill(h.home.path);
 		await page.getByRole("button", { name: "View saved sessions", exact: true }).click();
-		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
+		await page.getByRole("button", { name: "New conversation", exact: true }).waitFor();
 		await check("sessions");
 		const workspaceUrl = page.url();
 		await navigate("Settings");
@@ -472,8 +472,8 @@ try {
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await page.goto(workspaceUrl);
-		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
-		await page.getByRole("button", { name: "New session", exact: true }).click();
+		await page.getByRole("button", { name: "New conversation", exact: true }).waitFor();
+		await page.getByRole("button", { name: "New conversation", exact: true }).click();
 		await page
 			.getByLabel("Message Clio Coder", { exact: true })
 			.fill("Show the fixture findings with code and a diagram.");
@@ -728,7 +728,7 @@ try {
 		await page.getByText("This conversation is closed.", { exact: true }).waitFor();
 		await check("closed");
 		await navigate("Sessions");
-		await page.getByLabel("Workspace path", { exact: true }).fill(join(h.home.path, "does-not-exist"));
+		await page.getByLabel("Project folder", { exact: true }).fill(join(h.home.path, "does-not-exist"));
 		await page.getByRole("button", { name: "Start conversation", exact: true }).click();
 		const toast = page.locator(".notice-region .notice");
 		await toast.waitFor();
