@@ -305,7 +305,7 @@ and sensitive project data.
 
 - [Report an issue or suggest an improvement](https://github.com/iowarp/clio-coder/issues)
 - [Set up a development checkout](CONTRIBUTING.md)
-- [Read the release notes](CHANGELOG.md) and [roadmap](ROADMAP.md)
+- [Read the release notes](CHANGELOG.md)
 - [Contribute a skill or workflow](library/README.md)
 
 Participation follows the [Code of Conduct](CODE_OF_CONDUCT.md).

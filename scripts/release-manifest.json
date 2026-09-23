@@ -33,7 +33,6 @@
 		"LICENSE",
 		"NOTICE",
 		"CHANGELOG.md",
-		"ROADMAP.md",
 		"library/registry.yaml",
 		".claude-plugin/marketplace.json",
 		"library/plugins/materio/plugin.json",
