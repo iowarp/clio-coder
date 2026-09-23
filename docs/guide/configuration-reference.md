@@ -8,6 +8,16 @@ Settings use one strict version-2 schema. Unknown keys and invalid values are er
 
 The table lists the leaves in `DEFAULT_SETTINGS`. Types, accepted values, optional schema fields, validation, and change timing live in [`src/core/defaults.ts`](../../src/core/defaults.ts) and [`src/core/config.ts`](../../src/core/config.ts).
 
+### Chat settings
+
+Default chat settings control interactive conversation routing, reasoning effort, token output budgets, and prefix prewarming:
+- `chat.target`: default chat target id (`null`).
+- `chat.model`: default chat model id (`null`).
+- `chat.thinkingLevel`: default reasoning effort for the chat model (`"low"`; clamped to supported provider levels: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`).
+- `chat.prewarm`: whether prompt-prefix prewarming runs on session start (`false`). When enabled, prewarming runs against local-native servers or verified LiteLLM → LM Studio deployments to prefill prompt prefixes before the first turn. Dispatched workers and headless runs do not prewarm.
+- `chat.maxOutputTokens`: per-turn output token limit (`0`, meaning model cap).
+- `chat.retry.*`: retry backoff (`baseDelayMs: 2000`, `maxDelayMs: 60000`), attempt limit (`maxRetries: 3`), and stream stall timeouts (`streamStallMs: 180000`, `firstTokenStallMs: 600000`).
+
 | Key | Default |
 | --- | --- |
 | `version` | `2` |
@@ -159,3 +169,38 @@ Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust
 CLI help is generated from the registered command surface. Run `clio-coder --help` or `clio-coder <command> --help` for the installed version; the parser lives in [`src/cli/`](../../src/cli/), with headless run options in [`src/cli/args.ts`](../../src/cli/args.ts).
 
 Tool schemas are registered in [`src/tools/`](../../src/tools/). Use [Tool usage](tool-usage.md) for operational behavior and source for exact argument types. Runtime-discovered MCP and extension schemas are supplied by those integrations rather than a static settings catalog.
+
+## CLI flags
+
+### `context`
+
+| Flag | Controls |
+|---|---|
+| `--all` | For `context reset`, also remove the local CLIO-CODER.md after a second confirmation; override files stay human-owned. |
+| `--budgets` | For `context replay`, comma-separated positive-integer token budgets each policy is replayed against. |
+| `--depth` | For `context wiki`, generation depth: `auto`, `simple`, `medium`, or `detailed`. |
+| `--help` | Print the command's usage and exit. |
+| `--json` | For `context index`, emit JSON; for `context replay`, `--json <path>` writes the stable JSON report to that path instead. |
+| `--md` | For `context replay`, path to write the Markdown report to instead of printing it. |
+| `--min-evictable-tokens` | For `context replay`, non-negative integer tool-result size in tokens below which results are never evicted. |
+| `--model` | For `context wiki`, wire model id for the documenter model instead of the configured one; pair with `--target`. |
+| `--no-filter` | For `context replay`, include every readable transcript instead of only the filtered active-path sessions. |
+| `--policies` | For `context replay`, comma-separated policy ids from none, random, age-horizon, structural-v1, oracle. |
+| `--protect-last-turns` | For `context replay`, integer (at least 1) count of recent user turns whose observations are never evicted. |
+| `--seed` | For `context replay`, integer seed for the deterministic random policy. |
+| `--session` | For `context working-set`, the session id or path whose working-set fold and path index are printed (required). |
+
+## Tool arguments
+
+### `context`
+
+| Argument | Class | Controls |
+|---|---|---|
+| `context.include_tree` | policy | scope=skills: list files under the skill base_dir. |
+| `context.limit` | policy | scope=settings: max controls (default/max 12); scope=recall discovery: max refs (default 8, max 12). |
+| `context.name` | task | scope=skills: skill name to load; omit to list. |
+| `context.query` | task | scope=settings: path, section alias, or search terms; scope=recall discovery: path, tool, or ref terms; omit to list. |
+| `context.ref` | task | scope=recall: ref of the evicted item, as named in its marker. |
+| `context.scope` | policy | workspace, settings, skills, or recall. |
+| `context.offset` | policy | Zero-based settings or recall discovery offset; follow nextOffset. |
+
