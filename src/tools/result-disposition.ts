@@ -683,24 +683,3 @@ export function toolResultPresentationText(result: unknown): string | null {
 	const presentation = metadata !== null && isRecord(metadata.presentation) ? metadata.presentation : null;
 	return presentation !== null && typeof presentation.content === "string" ? presentation.content : null;
 }
-
-/** Applied fold/excerpt policy retained with a projected result for operator surfaces. */
-export function toolResultPresentationPolicy(result: unknown): ToolPresentationPolicy | null {
-	if (!isRecord(result)) return null;
-	const details = isRecord(result.details) ? result.details : null;
-	const metadata = details !== null && isRecord(details.resultDisposition) ? details.resultDisposition : null;
-	const presentation = metadata !== null && isRecord(metadata.presentation) ? metadata.presentation : null;
-	if (
-		presentation === null ||
-		(presentation.foldDefault !== "folded" && presentation.foldDefault !== "expanded") ||
-		typeof presentation.showDiffWhenFolded !== "boolean" ||
-		typeof presentation.failureExcerpt !== "boolean"
-	) {
-		return null;
-	}
-	return {
-		foldDefault: presentation.foldDefault,
-		showDiffWhenFolded: presentation.showDiffWhenFolded,
-		failureExcerpt: presentation.failureExcerpt,
-	};
-}

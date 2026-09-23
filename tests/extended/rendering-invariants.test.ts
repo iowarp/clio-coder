@@ -30,9 +30,11 @@ import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import {
+	renderBashTranscriptExecution,
 	renderToolExecution,
 	renderToolPreview,
 	renderToolSubline,
+	type ToolExecutionFinished,
 } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
 import { createStreamPacer, type StreamPacerSlice } from "../../src/interactive/stream-pacer.js";
@@ -258,8 +260,9 @@ describe("Clio rendering invariants", () => {
 		clock += 2_300;
 		// No invalidate between the frames: only the clock moved.
 		const after = plainRender(panel);
-		match(before, /running · 0ms/u);
-		match(after, /running · 2\.3s/u);
+		// A running row's verb is progressive; its tail is the live mark and the elapsed.
+		match(before, /running `printf tool-command` ● 0ms/u);
+		match(after, /running `printf tool-command` ● 2\.3s/u);
 		strictEqual(after.match(/2\.3s/gu)?.length, 2, "the worker's elapsed advances with the tool's");
 	});
 
@@ -911,7 +914,7 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 		},
 		100,
 	);
-	match(stripTerminalSequences(call.join("\n")), /dispatching scout/);
+	match(stripTerminalSequences(call.join("\n")), /delegating to scout: Explore the source architecture/);
 	doesNotMatch(stripTerminalSequences(call.join("\n")), /tool action/);
 	const fields = workerRunEntryFields(state);
 	const entry: WorkerRunEntry = {
@@ -1053,7 +1056,7 @@ describe("transcript block grammar", () => {
 			const rows = panel.render(100).map(stripTerminalSequences);
 			const at = (pattern: RegExp) => rows.findIndex((row) => pattern.test(row));
 			const reading = at(/Reading first\./u);
-			const grep = at(/searching for `needle` in src/u);
+			const grep = at(/searched for `needle` in src/u);
 			const git = at(/git status/u);
 			const found = at(/Found it\./u);
 			ok(reading > 0 && grep > reading && found > git, rows.join("\n"));
@@ -1114,7 +1117,7 @@ describe("transcript block grammar", () => {
 		};
 		for (const style of ["compact", "standard", "detailed"] as const) {
 			const plain = stripTerminalSequences(renderToolPreview(edit, 80, transcriptDetail(style)).join("\n"));
-			match(plain, /editing src\/a\.ts · \+2 -1/u);
+			match(plain, /edited src\/a\.ts · \+2 -1/u);
 			doesNotMatch(plain, /OLD_PAYLOAD|NEW_PAYLOAD/u);
 		}
 		const failed = stripTerminalSequences(
@@ -1135,7 +1138,7 @@ describe("transcript block grammar", () => {
 			48,
 			transcriptDetail("standard"),
 		).map(stripTerminalSequences);
-		ok(rows[0]?.startsWith(`${GLYPH.toolHeader} `), rows.join("\n"));
+		ok(rows[0]?.startsWith(`${GLYPH.classExecute} `), rows.join("\n"));
 		ok(rows.length > 2, rows.join("\n"));
 		for (const row of rows.slice(1)) ok(row.startsWith("  "), `continuation or body left the gutter: ${row}`);
 		ok(
@@ -1214,5 +1217,340 @@ describe("transcript block grammar", () => {
 		doesNotMatch(render("standard"), /last: read/u);
 		match(render("detailed"), /last: read a\.ts/u);
 		doesNotMatch(render("compact"), /now:/u);
+	});
+});
+
+describe("tool classes", () => {
+	const text = (body: string, details: Record<string, unknown> = {}) => ({
+		content: [{ type: "text", text: body }],
+		details,
+	});
+	const settled = (toolName: string, args: unknown, result: unknown, extra: Partial<ToolExecutionFinished> = {}) =>
+		({
+			toolCallId: `${toolName}-1`,
+			toolName,
+			args,
+			result,
+			isError: false,
+			durationMs: 42,
+			...extra,
+		}) as ToolExecutionFinished;
+	const rows = (call: Parameters<typeof renderToolPreview>[0], style: OutputStyle = "standard", width = 100) =>
+		renderToolPreview(call, width, transcriptDetail(style)).map(stripTerminalSequences);
+
+	it("marks each class in the gutter, running rows progressive and settled rows past tense", () => {
+		const cases: Array<[string, Record<string, unknown>, string, string, string]> = [
+			["read", { path: "a.ts" }, GLYPH.toolHeader, "reading a.ts", "read a.ts"],
+			["grep", { pattern: "needle" }, GLYPH.toolHeader, "searching for `needle`", "searched for `needle`"],
+			["context", { scope: "docs", query: "q" }, GLYPH.classKnowledge, "consulting docs", "consulted docs"],
+			["edit", { path: "a.ts" }, GLYPH.classMutate, "editing a.ts", "edited a.ts"],
+			["write", { path: "a.ts" }, GLYPH.classMutate, "writing a.ts", "wrote a.ts"],
+			["bash", { command: "ls" }, GLYPH.classExecute, "running `ls`", "ran `ls`"],
+			[
+				"web_fetch",
+				{ url: "https://example.com/a" },
+				GLYPH.classNetwork,
+				"fetching example.com/a",
+				"fetched example.com/a",
+			],
+			["dispatch", { agent: "scout", task: "map" }, GLYPH.workerAgent, "delegating to scout", "delegated to scout"],
+			["ask_user", { questions: [{ question: "Keep it?" }] }, GLYPH.classInteraction, "asking Keep it?", "asked Keep it?"],
+			[
+				"mcp_github__search_issues",
+				{},
+				GLYPH.classExternal,
+				"calling github › search_issues",
+				"called github › search_issues",
+			],
+		];
+		for (const [toolName, args, mark, running, done] of cases) {
+			const live = renderToolSubline({ toolCallId: toolName, toolName, args }, 100).map(stripTerminalSequences);
+			ok(live[0]?.startsWith(`${mark} ${running}`), `${toolName} running: ${live[0]}`);
+			const row = renderToolSubline(settled(toolName, args, text("ok")), 100).map(stripTerminalSequences);
+			ok(row[0]?.startsWith(`${mark} ${done}`), `${toolName} settled: ${row[0]}`);
+		}
+	});
+
+	it("names the operation a call performs and what it acts on", () => {
+		const head = (toolName: string, args: Record<string, unknown>) =>
+			stripTerminalSequences(renderToolSubline(settled(toolName, args, text("ok")), 200)[0] ?? "");
+		const cases: Array<[string, Record<string, unknown>, string]> = [
+			["steer", { run_id: "r1", action: "cancel" }, `${GLYPH.workerAgent} cancelled run r1 ✓`],
+			["monitor", { mode: "wait", run_id: "r1" }, `${GLYPH.workerAgent} waited on run r1 ✓`],
+			["monitor", { mode: "collect", batch_id: "b7" }, `${GLYPH.workerAgent} collected batch b7 ✓`],
+			["dispatch", { list: true }, `${GLYPH.workerAgent} listed fleet agents ✓`],
+			[
+				"dispatch",
+				{ mode: "council", roster: "design", task: "Own the clock?" },
+				`${GLYPH.workerAgent} delegated a council of design: Own the clock? ✓`,
+			],
+			[
+				"dispatch",
+				{ tasks: ["a", "b", "c"], mode: "pipeline", detach: true },
+				`${GLYPH.workerAgent} delegated 3 tasks as a pipeline · detach ✓`,
+			],
+			["data", { op: "select", path: "runs.csv", limit: 5 }, `${GLYPH.toolHeader} selected from runs.csv · limit 5 ✓`],
+			[
+				"web_fetch",
+				{ url: "https://api.example.com/v1/items", method: "POST" },
+				`${GLYPH.classNetwork} sent api.example.com/v1/items · method POST ✓`,
+			],
+			["verify", {}, `${GLYPH.classExecute} listed checks ✓`],
+			["git", { op: "diff", path: "src/a.ts", cached: true }, `${GLYPH.classExecute} ran git diff src/a.ts · cached ✓`],
+			[
+				"run_script",
+				{ interpreter: "python3", script: "probe.py", args: ["--n", "5"] },
+				`${GLYPH.classExecute} ran \`python3 probe.py --n 5\` ✓`,
+			],
+			["panes", { action: "show", target: "r1" }, `${GLYPH.classExecute} ran panes show r1 ✓`],
+			[
+				"ledger",
+				{ action: "post", kind: "finding", path: "src/a.ts", line: 12 },
+				`${GLYPH.classKnowledge} consulted ledger post finding src/a.ts:12 ✓`,
+			],
+			["context", { scope: "skills", query: "profiling" }, `${GLYPH.classKnowledge} consulted skills \`profiling\` ✓`],
+			["grep", { pattern: "x", ignore_case: true }, `${GLYPH.toolHeader} searched for \`x\` · ignore_case ✓`],
+			[
+				"artifact",
+				{ kind: "plan", title: "Retry design", path: "docs/plan.md", content: "…" },
+				`${GLYPH.classMutate} wrote plan "Retry design" to docs/plan.md ✓`,
+			],
+		];
+		for (const [toolName, args, expected] of cases) strictEqual(head(toolName, args), `${expected} · 42ms`, toolName);
+	});
+
+	it("gives a running row the live mark and elapsed, never the verb twice", () => {
+		const live = renderToolSubline(
+			{ toolCallId: "b", toolName: "bash", args: { command: "sleep 5" }, elapsedMs: 1_200 },
+			100,
+		);
+		strictEqual(
+			stripTerminalSequences(live.join("\n")),
+			`${GLYPH.classExecute} running \`sleep 5\` ${GLYPH.running} 1.2s`,
+		);
+	});
+
+	it("states a failed command's exit once and keeps its output without the status line", () => {
+		const failed = rows(
+			settled(
+				"bash",
+				{ command: "pnpm run lint" },
+				text("src/a.ts:1:1 lint/style/useTemplate prefer a template\n\nCommand exited with code 1"),
+				{ isError: true, durationMs: 4_100 },
+			),
+		);
+		strictEqual(failed[0], `${GLYPH.classExecute} ran \`pnpm run lint\` · exit 1 ✗ · 4.1s`);
+		strictEqual(failed.join("\n").match(/exit 1|exited with code|command failed/gu)?.length, 1, failed.join("\n"));
+		match(failed.join("\n"), /│ src\/a\.ts:1:1 lint\/style\/useTemplate/u);
+		// The main agent's error path delivers only text; a status that carries the diagnosis keeps it.
+		const missing = rows(
+			settled("bash", { command: "pnpm lint" }, text("bash: command failed (exit 127): pnpm: not found"), {
+				isError: true,
+			}),
+		);
+		match(missing[0] ?? "", /· exit 127 ✗/u);
+		deepStrictEqual(missing.slice(1), ["  │ pnpm: not found"]);
+	});
+
+	it("states an exit code only when the result carries one", () => {
+		const panes = rows(settled("panes", { action: "list" }, text("2 panes", { action: "list", panes: [] })));
+		doesNotMatch(panes[0] ?? "", /exit/u);
+		const unknown = rows(settled("deploy_preview", { stage: "staging" }, text("deployed"), { actionClass: "execute" }));
+		ok(unknown[0]?.startsWith(`${GLYPH.classExecute} ran deploy_preview · stage staging`), unknown[0]);
+		doesNotMatch(unknown[0] ?? "", /exit/u);
+	});
+
+	it("keeps a failed edit's error once, in its body, beside the text that did not match", () => {
+		const failed = rows(
+			settled(
+				"edit",
+				{ path: "src/a.ts", edits: [{ oldText: "OLD", newText: "NEW" }] },
+				text("edit: oldText not found in src/a.ts."),
+				{ isError: true },
+			),
+		);
+		deepStrictEqual(failed, [
+			`${GLYPH.classMutate} edited src/a.ts ✗ · 42ms`,
+			"  │ oldText › OLD",
+			"  │ newText › NEW",
+			"  │ edit: oldText not found in src/a.ts.",
+		]);
+	});
+
+	it("names a web row's host and path tail, never the whole URL, and states its format once", () => {
+		const fetched = rows(
+			settled(
+				"web_fetch",
+				{ url: "https://nodejs.org/api/globals.html#abortsignaltimeoutdelay", format: "markdown" },
+				text("## AbortSignal", { status: 200, format: "markdown", bytesRead: 12_431 }),
+			),
+		);
+		deepStrictEqual(fetched, [
+			`${GLYPH.classNetwork} fetched nodejs.org/api/globals.html · 200 · markdown · 12.1KB ✓ · 42ms`,
+		]);
+		const issue = settled("web_fetch", { url: "https://github.com/iowarp/clio-coder/issues/412" }, text("# issue"));
+		match(rows(issue, "standard", 100)[0] ?? "", /fetched github\.com\/iowarp\/clio-coder\/issues\/412 /u);
+		// At 40 columns the label shortens to the path tail instead of splitting mid-token.
+		const narrow = rows(issue, "standard", 40);
+		match(narrow.join("\n"), /github\.com\/…\/issues\/412/u);
+		ok(
+			narrow.every((row) => !/https?:/u.test(row) && visibleWidth(row) <= 40),
+			narrow.join("\n"),
+		);
+	});
+
+	it("reads a gateway or MCP call as its capability, with no op, capability or args rows", () => {
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const mcp = rows(
+				settled(
+					"gateway",
+					{ op: "call", capability: "mcp_github__search_issues", args: { query: "flaky retry test", state: "open" } },
+					text("#412", { capability: "mcp_github__search_issues" }),
+				),
+				style,
+			);
+			strictEqual(
+				mcp[0],
+				`${GLYPH.classExternal} called github › search_issues · query "flaky retry test" · state open · via gateway ✓ · 42ms`,
+			);
+			doesNotMatch(mcp.join("\n"), /op ›|capability ›|args ›/u);
+			const builtin = rows(
+				settled(
+					"gateway",
+					{ op: "call", capability: "web_fetch", args: { url: "https://github.com/iowarp/clio-coder/issues/412" } },
+					text("# issue", { capability: "web_fetch", status: 200 }),
+				),
+				style,
+			);
+			match(builtin[0] ?? "", new RegExp(`^${GLYPH.classNetwork} fetched github\\.com/.* · 200 · via gateway ✓`, "u"));
+			const find = rows(
+				settled("gateway", { op: "find", query: "github issues" }, text("…", { op: "find", count: 3, total: 7 })),
+				style,
+			);
+			strictEqual(find[0], `${GLYPH.classExternal} searched capabilities for \`github issues\` · 3 of 7 found ✓ · 42ms`);
+		}
+	});
+
+	it("reads an extension tool as server › tool with its scalar arguments inline", () => {
+		const row = rows(settled("extension_hpc__queue_status", { partition: "gpu" }, text("gpu: 3 pending")));
+		deepStrictEqual(row, [`${GLYPH.classExternal} called hpc › queue_status · partition gpu ✓ · 42ms`]);
+	});
+
+	it("reads an operator question as question → answer and never renders the model's copy", () => {
+		const interview = (answers: unknown[], decisions: unknown[] = []) =>
+			text('ask_user result: answered\n\n{ "interview": {} }', { interview: {}, answers, decisions });
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const one = rows(
+				settled(
+					"ask_user",
+					{ questions: [{ question: "Keep it deprecated?", options: [{ label: "Yes" }, { label: "No" }] }] },
+					interview([{ question: "Keep it deprecated?", answer: "Yes" }]),
+				),
+				style,
+			);
+			deepStrictEqual(one, [`${GLYPH.classInteraction} asked Keep it deprecated? → Yes ✓ · 42ms`]);
+			const round = rows(
+				settled(
+					"ask_user",
+					{ questions: [{ question: "Jitter?" }, { question: "Alias?" }] },
+					interview([
+						{ question: "Jitter?", answer: "50" },
+						{ question: "Alias?", answer: "Yes" },
+					]),
+				),
+				style,
+			);
+			deepStrictEqual(round, [
+				`${GLYPH.classInteraction} asked 2 questions ✓ · 42ms`,
+				"  │ Jitter? → 50",
+				"  │ Alias? → Yes",
+			]);
+			const complete = rows(
+				settled(
+					"ask_user",
+					{ action: "complete", decisions: [{ key: "jitter_ms", value: "50", label: "Jitter" }], summary: "Jitter 50." },
+					interview([], [{ key: "jitter_ms", value: "50", label: "Jitter" }]),
+				),
+				style,
+			);
+			deepStrictEqual(complete, [`${GLYPH.classInteraction} completed the interview ✓ · 42ms`, "  │ Jitter → 50"]);
+		}
+	});
+
+	it("states evidence and run_script calls on their rows instead of as JSON", () => {
+		deepStrictEqual(rows(settled("evidence", { mode: "list" }, text("{}"))), [
+			`${GLYPH.classKnowledge} consulted evidence list ✓ · 42ms`,
+		]);
+		deepStrictEqual(
+			rows(
+				settled("run_script", { script: "scripts/check-flaky.ts", args: ["--runs", "50"] }, text("50/50", { exitCode: 0 })),
+			),
+			[`${GLYPH.classExecute} ran \`scripts/check-flaky.ts --runs 50\` · exit 0 ✓ · 42ms`],
+		);
+	});
+
+	it("repeats under a row only the argument the row had to cut", () => {
+		const task = "List every call site of retry() and the options each one passes to it.";
+		const body = rows({ toolCallId: "d", toolName: "dispatch", args: { agent: "scout", task } }, "standard", 80);
+		match(body[0] ?? "", /delegating to scout: List every call site/u);
+		deepStrictEqual(
+			body
+				.slice(1)
+				.join(" ")
+				.replace(/\s*│\s*/gu, " ")
+				.trim(),
+			`task › ${task}`,
+		);
+		const fits = rows({ toolCallId: "d", toolName: "dispatch", args: { agent: "scout", task } }, "standard", 200);
+		strictEqual(fits.length, 1, fits.join("\n"));
+		// A multiline command is flattened on its row, so its body states it whole.
+		const script = rows({ toolCallId: "b", toolName: "bash", args: { command: "cd src\nls" } }, "standard", 100);
+		deepStrictEqual(script.slice(1), ["  │ command › cd src", "  │   ls"]);
+	});
+
+	it("states the operator's local command as not sent to the model once", () => {
+		for (const running of [true, false]) {
+			const plain = renderBashTranscriptExecution(
+				{ command: "cat notes.txt", output: "notes", running, exitCode: 0, excludeFromContext: true },
+				100,
+			)
+				.map(stripTerminalSequences)
+				.join("\n");
+			strictEqual(plain.match(/not sent to model/gu)?.length, 1, plain);
+			doesNotMatch(plain, /context/u);
+		}
+	});
+
+	it("folds explorations, lookups and changes by class in Compact and never folds commands or failures", () => {
+		const panel = createChatPanel({ getOutputStyle: () => "compact" });
+		const act = (id: string, toolName: string, args: unknown, result: unknown, isError = false) => {
+			panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName, args } as never);
+			panel.applyEvent({ type: "tool_execution_end", toolCallId: id, toolName, result, isError, durationMs: 5 } as never);
+		};
+		const lines = (count: number) => text("x", { observation: { shownCount: count, totalCount: count, unit: "lines" } });
+		act("r1", "read", { path: "a.ts" }, lines(3));
+		act("r2", "grep", { pattern: "needle", path: "src" }, lines(1));
+		act("r3", "ls", { path: "src" }, lines(2));
+		act("m1", "edit", { path: "a.ts" }, text("ok", { diff: "-1 a\n+1 b" }));
+		act("m2", "write", { path: "b.ts" }, text("ok", { diff: "+1 c" }));
+		act("b1", "bash", { command: "pnpm test" }, text("ok", { exitCode: 0 }));
+		act("b2", "bash", { command: "pnpm lint" }, text("ok", { exitCode: 0 }));
+		act("f1", "read", { path: "gone.ts" }, text("read: no such file"), true);
+		act("f2", "read", { path: "c.ts" }, lines(1));
+		const plain = plainRender(panel, 100);
+		match(
+			plain,
+			new RegExp(
+				`${GLYPH.toolHeader} explored 1 file, 1 search, 1 directory ✓\\n  │ a\\.ts · \`needle\` in src · src`,
+				"u",
+			),
+		);
+		match(
+			plain,
+			new RegExp(`${GLYPH.classMutate} edited 2 files · \\+2 -1 ✓\\n  │ a\\.ts \\+1 -1 · b\\.ts \\+1 -0`, "u"),
+		);
+		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} ran`, "gmu"))?.length, 2, plain);
+		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
+		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
 	});
 });

@@ -20,9 +20,15 @@ import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../doma
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
-import { classifyResourceRead, toolPresentationPolicy } from "../../tools/presentation.js";
-import { toolResultPresentationPolicy, toolResultPresentationText } from "../../tools/result-disposition.js";
-import { effectiveToolCall } from "../../tools/surface.js";
+import {
+	CLASS_NOUNS,
+	classifyResourceRead,
+	type ResolvedToolRow,
+	resolveToolRow,
+	type ToolClass,
+	type ToolRowPair,
+} from "../../tools/presentation.js";
+import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
 import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
@@ -52,9 +58,7 @@ const BODY_INDENT_VISIBLE_WIDTH = 4;
 /** Hanging indent for a wrapped action row: continuation rows start in the content column. */
 const CONTENT_INDENT = "  ";
 const CONTENT_INDENT_WIDTH = 2;
-const HEADER_PREFIX_PLAIN = "▸ ";
 const ARG_PREVIEW_LIMIT = 60;
-const WEB_FETCH_ARG_PREVIEW_LIMIT = 140;
 const FULL_RESULT_PREVIEW_LIMIT = 60_000;
 const FULL_RESULT_ROW_LIMIT = 120;
 const STATUS_OK_GLYPH = GLYPH.ok;
@@ -74,6 +78,12 @@ export interface ToolExecutionStart {
 	elapsedMs?: number | undefined;
 	/** Pi may stream a tool call's arguments before execution starts. */
 	phase?: "forming" | "ready" | "running" | undefined;
+	/** Admission's action class, once known; an unknown dynamic tool is classified by it. */
+	actionClass?: string | undefined;
+	/** Local `!!` bash output is visible to the operator but excluded from model context. */
+	excludeFromContext?: boolean | undefined;
+	/** A worker card sits under this dispatch call and states its task and outcome. */
+	cardAttached?: boolean | undefined;
 }
 
 export interface ToolExecutionFinished {
@@ -104,6 +114,13 @@ export interface ToolExecutionFinished {
 	exitCode?: number | string | null | undefined;
 	/** Local `!!` bash output is visible to the operator but excluded from model context. */
 	excludeFromContext?: boolean | undefined;
+	/** Admission's action class; an unknown dynamic tool is classified by it. */
+	actionClass?: string | undefined;
+	/**
+	 * A worker card sits under this dispatch call and states the run's outcome,
+	 * so the row does not repeat it.
+	 */
+	cardAttached?: boolean | undefined;
 }
 
 export interface ToolBodyRenderOptions {
@@ -140,12 +157,6 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function readStringField(args: unknown, key: string): string | null {
-	if (!isPlainObject(args)) return null;
-	const value = args[key];
-	return typeof value === "string" ? redactSecretString(value) : null;
-}
-
 function isEmptyArgs(args: unknown): boolean {
 	if (args === undefined || args === null) return true;
 	if (isPlainObject(args) && Object.keys(args).length === 0) return true;
@@ -178,10 +189,6 @@ function stripShellWrapperForDisplay(command: string): string {
 	return unquoteShellScript(match[1]);
 }
 
-function displayArg(toolName: string, value: string): string {
-	return toolName === "bash" ? stripShellWrapperForDisplay(value) : value;
-}
-
 /**
  * Optional-duration guard around the single duration formatter. formatCompactMs
  * is the one formatter for elapsed time, but these call sites carry a
@@ -195,101 +202,108 @@ function optionalCompactMs(durationMs: number | undefined): string | null {
 	return formatCompactMs(durationMs);
 }
 
-function bashExitCodeFromResult(result: unknown): string | null {
-	const unwrapped = unwrapResultEnvelope(result);
-	const text = typeof unwrapped === "string" ? unwrapped : jsonStringifySafe(unwrapped);
-	const match =
-		/\bcommand failed \(exit (?<paren>[^)]+)\)/iu.exec(text) ??
-		/\bcommand exited with code (?<code>[0-9?]+)/iu.exec(text) ??
-		/\bexit (?<short>[0-9?]+)\b/iu.exec(text);
-	return match?.groups?.paren ?? match?.groups?.code ?? match?.groups?.short ?? null;
+/**
+ * The status line a failed command's error text ends with: `bash: command
+ * failed (exit 1)`, `Command exited with code 1`, a timeout or an abort. The
+ * row states it as a fact, so the body leaves it out. A status that carries the
+ * only diagnosis (`bash: command failed (exit 127): not found`) keeps that
+ * diagnosis as the body line.
+ */
+const COMMAND_STATUS_LINE =
+	/^(?:bash: command failed \(exit (?<exit>[^)]+)\)(?:: (?<message>.+))?|Command exited with code (?<code>[0-9?]+)|bash: command (?<timeout>timed out) after \d+ms|bash: command (?<aborted>aborted))$/u;
+
+interface CommandStatus {
+	/** Index of the status line in the result text's lines. */
+	index: number;
+	exit: string | null;
+	timedOut: boolean;
+	aborted: boolean;
+	/** Text the status line carried beyond the status itself. */
+	message: string | null;
 }
 
-/**
- * Map of known tools to their canonical "primary" arg field. When the arg is
- * a string the header summarises it directly and the expanded argument list
- * omits only that repeated field. Tools not in this map (or with an unexpected
- * arg shape) fall back to a JSON summary plus their complete redacted fields.
- */
-const PRIMARY_ARG_FIELD: Record<string, string> = {
-	read: "path",
-	edit: "path",
-	write: "path",
-	ls: "path",
-	bash: "command",
-	grep: "pattern",
-	find: "pattern",
-	web_read: "url",
-	web_fetch: "url",
-	git: "op",
-	verify: "check",
-	run_script: "script",
-	code_nav: "query",
-	context: "scope",
-	clio_docs: "query",
-	clio_library: "query",
-	data: "path",
-	artifact: "kind",
-	monitor: "run_id",
-	steer: "run_id",
-	tasks: "action",
-};
-
-/**
- * Returns the captured primary-arg string when the header successfully used a
- * known tool's canonical arg, otherwise null. The argument renderer uses the
- * same map to omit that one repeated field below `read(README.md)`.
- */
-function capturedPrimaryArg(toolName: string, args: unknown): string | null {
-	const field = PRIMARY_ARG_FIELD[toolName];
-	if (field === undefined) return null;
-	return readStringField(args, field);
-}
-
-/**
- * Pick the most informative single-line summary of a tool's arguments for
- * the header line. Known tools have a canonical "primary" arg (path,
- * command, pattern, url); unknown tools or unexpected shapes fall back to a
- * truncated JSON dump. Returns an empty string when args are absent so the
- * header renders as `tool: <name>()`.
- */
-function summarizeWebFetchArgs(args: unknown): string {
-	if (!isPlainObject(args)) return summarizeArgs("", args);
-	const compact: Record<string, unknown> = {};
-	for (const key of ["url", "format", "max_bytes", "timeout_ms", "method"] as const) {
-		if (args[key] !== undefined) compact[key] = args[key];
+function commandStatusLine(result: unknown): CommandStatus | null {
+	const text = unwrapResultEnvelope(result);
+	if (typeof text !== "string") return null;
+	const lines = text.split("\n");
+	for (let index = lines.length - 1; index >= 0; index -= 1) {
+		const line = (lines[index] ?? "").trim();
+		if (line.length === 0) continue;
+		const match = COMMAND_STATUS_LINE.exec(line);
+		if (match?.groups === undefined) return null;
+		return {
+			index,
+			exit: match.groups.exit ?? match.groups.code ?? null,
+			timedOut: match.groups.timeout !== undefined,
+			aborted: match.groups.aborted !== undefined,
+			message: match.groups.message ?? null,
+		};
 	}
-	return truncate(jsonStringifySafe(Object.keys(compact).length > 0 ? compact : args), WEB_FETCH_ARG_PREVIEW_LIMIT);
+	return null;
 }
+
+/** A failed command's output without the status line its row already states. */
+function withoutCommandStatus(result: unknown): unknown {
+	const status = commandStatusLine(result);
+	const text = unwrapResultEnvelope(result);
+	if (status === null || typeof text !== "string") return result;
+	const lines = text.split("\n");
+	if (status.message !== null) lines[status.index] = status.message;
+	else lines.splice(status.index, 1);
+	return lines.join("\n").replace(/\n+$/u, "");
+}
+
+/** The longest argument value a row states inline rather than as a `key ›` row. */
+const INLINE_ARG_LIMIT = 40;
 
 /**
- * A gateway call reads as the capability it reached: `find` and `describe`
- * name what was asked, `call` renders the capability's own summary so a row
- * says `git status` rather than an opaque gateway argument dump.
+ * One scalar argument as the row states it: `context 2`, `glob *.ts`,
+ * `query "flaky retry test"`. Long, multiline and structured values are not
+ * inline; they stay `key ›` rows under the action.
  */
-function summarizeGatewayArgs(args: unknown): string {
-	if (!isPlainObject(args)) return truncate(jsonStringifySafe(redactToolArgs(args)), ARG_PREVIEW_LIMIT);
-	const op = typeof args.op === "string" ? args.op : "";
-	if (op === "find") {
-		const query = readStringField(args, "query");
-		return truncate(query === null || query.length === 0 ? "find" : `find ${query}`, ARG_PREVIEW_LIMIT);
-	}
-	const capability = readStringField(args, "capability") ?? "";
-	if (op === "describe") return truncate(`describe ${capability}`.trim(), ARG_PREVIEW_LIMIT);
-	const effective = effectiveToolCall("gateway", args);
-	if (!effective.viaGateway) return truncate(jsonStringifySafe(redactToolArgs(args)), ARG_PREVIEW_LIMIT);
-	const inner = summarizeArgs(effective.toolName, effective.args);
-	return truncate(inner.length > 0 ? `${effective.toolName} ${inner}` : effective.toolName, ARG_PREVIEW_LIMIT);
+function inlineArgValue(value: unknown): string | null {
+	if (typeof value === "number" && Number.isFinite(value)) return String(value);
+	if (typeof value === "boolean") return String(value);
+	if (typeof value !== "string" || /[\r\n\t]/u.test(value)) return null;
+	const clean = sanitizeCallTargetText(redactSecretString(value)).trim();
+	if (clean.length === 0 || clean.length > INLINE_ARG_LIMIT) return null;
+	return /\s/u.test(clean) ? JSON.stringify(clean) : clean;
 }
 
-function summarizeArgs(toolName: string, args: unknown): string {
-	if (isEmptyArgs(args)) return "";
-	const safeArgs = redactToolArgs(args);
-	if (toolName === "web_fetch" || toolName === "web_read") return summarizeWebFetchArgs(safeArgs);
-	if (toolName === "gateway") return summarizeGatewayArgs(args);
-	const primary = capturedPrimaryArg(toolName, args);
-	if (primary !== null) return truncate(displayArg(toolName, primary), ARG_PREVIEW_LIMIT);
-	return truncate(jsonStringifySafe(safeArgs), ARG_PREVIEW_LIMIT);
+/** Longest URL label a row states; a narrower row gets a shorter one. */
+const URL_LABEL_LIMIT = 48;
+
+/**
+ * A URL as a row names it: the host and the tail of the path, never the whole
+ * URL. The label keeps as much of the path's tail as fits `budget`, so at 40
+ * columns it still wraps as one token instead of splitting mid-path.
+ */
+function urlLabel(raw: string, budget = URL_LABEL_LIMIT): string {
+	let url: URL;
+	try {
+		url = new URL(raw);
+	} catch {
+		return truncate(sanitizeCallTargetText(raw), ARG_PREVIEW_LIMIT);
+	}
+	const host = sanitizeCallTargetText(url.host);
+	const segments = url.pathname
+		.split("/")
+		.filter((segment) => segment.length > 0)
+		.map((segment) => sanitizeCallTargetText(segment));
+	if (segments.length === 0) return host;
+	const whole = `${host}/${segments.join("/")}`;
+	if (whole.length <= budget) return whole;
+	for (const keep of [2, 1]) {
+		if (segments.length <= keep) continue;
+		const tail = `${host}/${GLYPH.ellipsis}/${segments.slice(-keep).join("/")}`;
+		if (tail.length <= budget || keep === 1) return truncate(tail, Math.max(budget, 24));
+	}
+	return truncate(whole, Math.max(budget, 24));
+}
+
+/** The URL label budget for a row `width` columns wide: its content column, capped. */
+function urlBudget(width: number | undefined): number {
+	return width === undefined ? URL_LABEL_LIMIT : Math.max(24, Math.min(URL_LABEL_LIMIT, contentWidth(width)));
 }
 
 function detailsOf(result: unknown): Record<string, unknown> | null {
@@ -372,71 +386,137 @@ const SKILL_ACTIVATION_WORDS: Readonly<Record<string, string>> = {
 	model: "by model",
 };
 
-function outcomeSummary(finished: ToolExecutionFinished): string | null {
+/**
+ * The facts a settled row states after its object, by class. Every fact comes
+ * from the call's structured result or its arguments; none is parsed out of
+ * free text except a failed command's exit status, which the main agent's
+ * error path delivers as text alone.
+ */
+function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): string[] {
 	const skill = skillLoadFacts(finished);
 	if (skill !== null) {
-		const facts = [
+		return [
 			...(skill.activation !== null && SKILL_ACTIVATION_WORDS[skill.activation] !== undefined
 				? [SKILL_ACTIVATION_WORDS[skill.activation] as string]
 				: []),
 			...(skill.narrows ? ["narrows tools"] : []),
 		];
-		return facts.length > 0 ? facts.join(" · ") : null;
-	}
-	const observation = observationOf(finished);
-	if (observation !== null) {
-		if (finished.toolName === "read") {
-			const shown = numberField(observation, "shownCount");
-			const total = numberField(observation, "totalCount");
-			if (shown !== null && total !== null) {
-				const offsetRaw = isPlainObject(finished.args) ? finished.args.offset : undefined;
-				const start = typeof offsetRaw === "number" && offsetRaw > 0 ? Math.floor(offsetRaw) : 1;
-				return shown > 0 ? `lines ${start}-${start + shown - 1} of ${total}` : `0 of ${total} lines`;
-			}
-		}
-		return countSummary(observation);
 	}
 	const details = detailsOf(finished.result);
-	if (finished.toolName === "git" || finished.toolName === "verify") {
-		const exitCode = numberField(details, "exitCode");
-		if (exitCode !== null) return `exit ${exitCode}`;
-		const status = stringField(details, "status");
-		if (status !== null) return status;
-		return null;
-	}
-	if (finished.toolName === "dispatch") {
-		const receipts = numberField(details, "receiptCount");
-		const failed = numberField(details, "failedCount") ?? 0;
-		if (receipts !== null) {
-			const runs = Array.isArray(details?.runs) ? details.runs.slice(0, receipts) : [];
-			const qualityCounts = new Map<string, number>();
-			for (const run of runs) {
-				const trust = isPlainObject(run) && isPlainObject(run.trust) ? run.trust : null;
-				const axes = isPlainObject(trust?.axes) ? trust.axes : null;
-				const word = trustStateWord("validationGrounding", stringField(axes, "validationGrounding") ?? "unknown");
-				qualityCounts.set(word, (qualityCounts.get(word) ?? 0) + 1);
-			}
-			if (runs.length < receipts) {
-				const unknown = trustStateWord("validationGrounding", "unknown");
-				qualityCounts.set(unknown, (qualityCounts.get(unknown) ?? 0) + receipts - runs.length);
-			}
-			const quality = [...qualityCounts].map(([word, count]) => `${count} ${word}`).join(", ");
-			return `${receipts} task${receipts === 1 ? "" : "s"} -> ${receipts - failed} execution ok${failed > 0 ? `, ${failed} execution failed` : ""}${quality ? `; quality: ${quality}` : ""}`;
+	const observation = observationOf(finished);
+	const parts: string[] = [];
+	switch (row.spec.class) {
+		case "observe":
+		case "search":
+		case "knowledge": {
+			const range = observation === null ? null : lineRange(finished, observation);
+			const count = observation === null ? null : countSummary(observation);
+			if (range !== null) parts.push(range);
+			else if (count !== null) parts.push(count);
+			if (row.spec.class === "observe") parts.push(...sizeFacts(finished));
+			break;
 		}
-		return null;
-	}
-	if (finished.toolName === "tasks") {
-		const rawCounts = details?.counts;
-		const counts = isPlainObject(rawCounts) ? rawCounts : null;
-		const completed = numberField(counts, "completed");
-		const total = numberField(counts, "total");
-		if (completed !== null && total !== null) {
-			const blocked = numberField(counts, "blocked") ?? 0;
-			return `${completed}/${total} done${blocked > 0 ? ` · ${blocked} blocked` : ""}`;
+		case "mutate": {
+			const file = details?.file;
+			if (isPlainObject(file) && "before" in file && file.before === null) parts.push("new file");
+			break;
 		}
-		return null;
+		case "execute": {
+			// Only a structured exit status is stated: a tool with no exit code
+			// (panes, an unknown tool classified by admission) never shows one.
+			const exitCode = structuredExitCode(finished);
+			if (exitCode !== null) parts.push(`exit ${exitCode}`);
+			const lines = finished.isError ? 0 : resultLineCount(finished.result);
+			if (lines > 1) parts.push(`${lines} lines`);
+			else parts.push(...sizeFacts(finished));
+			break;
+		}
+		case "network": {
+			const status = numberField(details, "status");
+			if (status !== null) parts.push(String(status));
+			const format = stringField(details, "format");
+			if (format !== null) parts.push(format);
+			const bytesRead = numberField(details, "bytesRead");
+			if (bytesRead !== null) parts.push(formatSize(bytesRead));
+			else parts.push(...sizeFacts(finished));
+			if (details?.truncated === true) parts.push("truncated");
+			break;
+		}
+		case "delegate": {
+			const receipts = numberField(details, "receiptCount");
+			if (receipts !== null) {
+				// A card under the call is the run's row: a single dispatch states no
+				// tally, a fan-out keeps its execution counts, and quality stays on
+				// each card. A dispatch with no card carries both.
+				if (finished.cardAttached === true && receipts <= 1) break;
+				const failed = numberField(details, "failedCount") ?? 0;
+				parts.push(failed > 0 ? `${receipts - failed} ok, ${failed} failed` : `${receipts} ok`);
+				const quality = finished.cardAttached === true ? null : receiptQuality(details, receipts);
+				if (quality !== null) parts.push(`quality: ${quality}`);
+				break;
+			}
+			const counts = isPlainObject(details?.counts) ? details.counts : null;
+			const completed = numberField(counts, "completed");
+			const total = numberField(counts, "total");
+			if (completed !== null && total !== null) {
+				const blocked = numberField(counts, "blocked") ?? 0;
+				parts.push(`${completed}/${total} done${blocked > 0 ? ` · ${blocked} blocked` : ""}`);
+			}
+			break;
+		}
+		case "interaction":
+			if (details?.cancelled === true) parts.push("cancelled");
+			break;
+		case "external": {
+			const count = numberField(details, "count");
+			const total = numberField(details, "total");
+			if (count !== null) parts.push(total !== null && total !== count ? `${count} of ${total} found` : `${count} found`);
+			else parts.push(...sizeFacts(finished));
+			break;
+		}
 	}
-	return null;
+	return parts;
+}
+
+/**
+ * Validation quality across a dispatch's receipts, counted by state, with
+ * receipts that carry no trust summary counted as unknown. Execution success
+ * and quality stay separate facts: a run can execute cleanly and fail
+ * validation.
+ */
+function receiptQuality(details: Record<string, unknown> | null, receipts: number): string | null {
+	const runs = Array.isArray(details?.runs) ? details.runs.slice(0, receipts) : [];
+	const counts = new Map<string, number>();
+	for (const run of runs) {
+		const trust = isPlainObject(run) && isPlainObject(run.trust) ? run.trust : null;
+		const axes = isPlainObject(trust?.axes) ? trust.axes : null;
+		const word = trustStateWord("validationGrounding", stringField(axes, "validationGrounding") ?? "unknown");
+		counts.set(word, (counts.get(word) ?? 0) + 1);
+	}
+	if (runs.length < receipts) {
+		const unknown = trustStateWord("validationGrounding", "unknown");
+		counts.set(unknown, (counts.get(unknown) ?? 0) + receipts - runs.length);
+	}
+	return counts.size === 0 ? null : [...counts].map(([word, count]) => `${count} ${word}`).join(", ");
+}
+
+/** A read states the range it returned, which is truer than the window it asked for. */
+function lineRange(finished: ToolExecutionFinished, observation: Record<string, unknown>): string | null {
+	if (stringField(observation, "unit") !== "lines") return null;
+	const shown = numberField(observation, "shownCount");
+	const total = numberField(observation, "totalCount");
+	if (shown === null || total === null) return null;
+	const offsetRaw = isPlainObject(finished.args) ? finished.args.offset : undefined;
+	const start = typeof offsetRaw === "number" && offsetRaw > 0 ? Math.floor(offsetRaw) : 1;
+	return shown > 0 ? `lines ${start}-${start + shown - 1} of ${total}` : `0 of ${total} lines`;
+}
+
+/** `1.4KB`, or `1.4KB of 4.3KB` when the result kept only part of what it read. */
+function sizeFacts(finished: ToolExecutionFinished): string[] {
+	const bytes = shownBytesOf(finished);
+	if (bytes === null || bytes <= 0) return [];
+	const total = totalBytesOf(finished);
+	return [total !== null && total > bytes ? `${formatSize(bytes)} of ${formatSize(total)}` : formatSize(bytes)];
 }
 
 function offloadPathOf(finished: ToolExecutionFinished): string | null {
@@ -495,49 +575,37 @@ function structuredExitCode(finished: ToolExecutionFinished): string | null {
 	if (finished.exitCode !== undefined && finished.exitCode !== null) return String(finished.exitCode);
 	const exitCode = detailsOf(finished.result)?.exitCode;
 	if (typeof exitCode === "number" || typeof exitCode === "string") return String(exitCode);
-	return finished.toolName === "bash" && finished.isError ? bashExitCodeFromResult(finished.result) : null;
+	return finished.isError ? (commandStatusLine(finished.result)?.exit ?? null) : null;
 }
 
 /**
- * The dim ledger tail appended to a finished collapsed subline: outcome facts,
- * then byte size (duration rides on the status glyph), then the offload path
- * for truncated calls. One line of plain text carries signature and outcome
- * when copied.
+ * The dim facts after a settled row's object: the class facts, then the
+ * flags every class shares, and the offload path for a truncated call. The
+ * change stat rides first in its own colors. One line of plain text carries
+ * the call and its outcome when copied.
  */
-function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: string } {
-	const parts: string[] = [];
-	const outcome = outcomeSummary(finished);
-	if (outcome !== null) parts.push(outcome);
+function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { facts: string; offload: string } {
 	const executed = !isNonExecutedOutcome(finished.outcome);
-	const stat = executed && !finished.isError ? changeStat(finished.result) : null;
-	// A folded bash row is the only view of the call the operator gets by
-	// default, so its settlement facts have to be here rather than only in the
-	// expanded body. A failed row already carries `(exit N)` on the status glyph.
-	if (executed && finished.toolName === "bash" && !finished.isError) {
-		parts.push(`exit ${structuredExitCode(finished) ?? "0"}`);
-	}
-	const bytes = executed ? shownBytesOf(finished) : null;
-	if (bytes !== null && bytes > 0) {
-		const total = totalBytesOf(finished);
-		parts.push(
-			total !== null && total > bytes ? `${formatSize(bytes)} shown / ${formatSize(total)} total` : formatSize(bytes),
-		);
-	}
+	const parts = executed ? classFacts(finished, row) : [];
 	if (executed) {
-		if (isTruncatedResult(finished)) parts.push("truncated");
+		if (isTruncatedResult(finished) && !parts.includes("truncated")) parts.push("truncated");
 		const details = detailsOf(finished.result);
-		if (details?.timedOut === true) parts.push("timed out");
+		const status = row.spec.class === "execute" && finished.isError ? commandStatusLine(finished.result) : null;
+		if (details?.timedOut === true || status?.timedOut === true) parts.push("timed out");
+		if (status?.aborted === true) parts.push("aborted");
 		if (details?.outputCapped === true) parts.push("output capped");
 	}
+	if (row.viaGateway) parts.push("via gateway");
 	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
-	const offloadPath = executed ? offloadPathOf(finished) : null;
+	const stat = executed && !finished.isError ? changeStat(finished.result) : null;
 	const statText = stat === null ? "" : `${dim(" · ")}${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`;
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${dim(" · ")}${yellow("drifted")}` : "";
+	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? dim(` · ${parts.join(" · ")}`) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? dim(` · ${parts.map((part) => sanitizeCallTargetText(part)).join(" · ")}`) : ""}${driftText}`,
 		offload:
 			offloadPath === null
 				? ""
@@ -545,32 +613,6 @@ function ledgerTail(finished: ToolExecutionFinished): { facts: string; offload: 
 					? dim(" · full: gone after the 14-day retention sweep")
 					: dim(` · full: ${offloadPath}`),
 	};
-}
-
-/** Longest diagnostic excerpt a folded failure row may carry. */
-const FAILURE_EXCERPT_LIMIT = 80;
-
-/**
- * Last non-empty output line of a failed call, bounded so the folded row stays
- * diagnostically useful without opening the body. Sanitized to one line: the
- * source is raw tool output. The tool's presentation policy decides whether
- * its failures carry one; the renderer never names a tool here.
- */
-function failureExcerpt(finished: ToolExecutionFinished, width: number): string {
-	const presentation =
-		toolResultPresentationPolicy(finished.result) ?? toolPresentationPolicy(finished.toolName, finished.args);
-	if (!finished.isError || !presentation.failureExcerpt) return "";
-	if (isNonExecutedOutcome(finished.outcome)) return "";
-	const text = unwrapResultEnvelope(finished.result);
-	if (typeof text !== "string") return "";
-	let excerpt: string | undefined;
-	for (const raw of text.split("\n")) {
-		const line = sanitizeCallTargetText(raw).trim();
-		if (line.length > 0) excerpt = line;
-	}
-	if (excerpt === undefined) return "";
-	const limit = Math.min(FAILURE_EXCERPT_LIMIT, Math.max(20, width - 20));
-	return dim(` · ${truncate(excerpt, limit)}`);
 }
 
 /**
@@ -590,7 +632,12 @@ export function renderToolAwaitingApproval(
 	width: number,
 	view?: ApprovalRequestView,
 ): string[] {
-	const parts = sublineParts({ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args }, undefined, {});
+	const parts = sublineParts(
+		{ toolCallId: call.toolCallId, toolName: call.toolName, args: call.args },
+		undefined,
+		{},
+		width,
+	);
 	const lines = wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
 	if (view === undefined) return lines;
 	const axis = view.axis.kind === "net" ? `safety-net rail ${view.axis.ruleId}` : `autonomy level ${view.axis.level}`;
@@ -622,7 +669,6 @@ const BLOCK_REASON_LIMIT = 72;
 interface StatusMeta {
 	durationMs?: number | undefined;
 	elapsedMs?: number | undefined;
-	exitCode?: string | null;
 	outcome?: ToolExecutionFinished["outcome"];
 	/** Refusal reason, rendered only alongside a non-executed outcome. */
 	blockReason?: string | undefined;
@@ -633,265 +679,189 @@ function statusGlyph(status: HeaderStatus, meta: StatusMeta = {}): string {
 	if (status === "forming") return ` ${dim(GLYPH.queued)}${dim(" forming call")}`;
 	if (status === "ready") return ` ${dim(GLYPH.queued)}${dim(" ready")}`;
 	if (status === "running") {
+		// The progressive verb already says the call is running; the tail adds
+		// only the live mark and the elapsed time.
 		const elapsed = optionalCompactMs(meta.elapsedMs);
-		return ` ${cyan(GLYPH.running)}${dim(elapsed === null ? " running" : ` running · ${elapsed}`)}`;
+		return ` ${cyan(GLYPH.running)}${elapsed === null ? "" : dim(` ${elapsed}`)}`;
 	}
 	const duration = optionalCompactMs(meta.durationMs);
 	const durationSuffix = duration ? dim(` · ${duration}`) : "";
 	if (status === "ok") return ` ${green(STATUS_OK_GLYPH)}${durationSuffix}`;
-	const exitSuffix = meta.exitCode ? dim(` (exit ${meta.exitCode})`) : "";
-	const outcomeSuffix = meta.outcome ? dim(` ${meta.outcome}`) : "";
+	// A blocked row says `blocked` as its verb; an aborted or orphaned one names
+	// its outcome here. The exit status is a fact on the row, never a suffix.
+	const outcomeSuffix = meta.outcome !== undefined && meta.outcome !== "blocked" ? dim(` ${meta.outcome}`) : "";
 	// A refusal that names no rule tells the operator only that something was
-	// stopped. The reason rides the same tail as the outcome word so the
-	// collapsed subline and the expanded header state it identically.
+	// stopped. The reason rides the same tail as the outcome so the collapsed
+	// row and the expanded header state it identically.
 	const reason = meta.outcome !== undefined ? meta.blockReason?.trim() : undefined;
 	const reasonSuffix = reason ? dim(` · ${truncate(reason, BLOCK_REASON_LIMIT)}`) : "";
-	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${exitSuffix}${durationSuffix}`;
+	return ` ${red(STATUS_ERROR_GLYPH)}${outcomeSuffix}${reasonSuffix}${durationSuffix}`;
 }
 
-function headerLine(toolName: string, args: unknown, status: HeaderStatus, meta: StatusMeta = {}): string {
-	const body = styleSublineBody(buildSublineBody(toolName, args, status, undefined, meta.outcome), toolName);
-	const head = `${dim(HEADER_PREFIX_PLAIN)}${body}`;
-	return `${head}${statusGlyph(status, meta)}`;
-}
-
-function sublineLead(token: string, rest: string): string {
-	return `${theme.style("tool", token, { bold: true })}${rest}`;
-}
-
-function styleSublineBody(body: string, toolName?: string): string {
-	const match = /^(?<lead>[^ (]+)(?<rest>.*)$/u.exec(body);
-	if (match?.groups?.lead === undefined || match.groups.rest === undefined) return body;
-	return toolName === "dispatch"
-		? `${theme.style("agent", match.groups.lead, { bold: true })}${match.groups.rest}`
-		: sublineLead(match.groups.lead, match.groups.rest);
-}
-
-function buildGenericToolBody(toolName: string, args: unknown): string {
-	const summary = summarizeArgs(toolName, args);
-	return summary.length > 0 ? `${sanitizeCallTargetText(toolName)} ${summary}` : sanitizeCallTargetText(toolName);
-}
-
-function buildFieldSublineBody(
-	args: unknown,
-	key: string,
-	lead: string,
-	options: { wrapInBackticks?: boolean } = {},
-): string | null {
-	const value = readStringField(args, key);
-	if (value === null) return null;
-	// One array element is one terminal row to the diff renderer. A multi-line
-	// command or an escape sequence inside this row shifted every row below it.
-	const preview = truncate(
-		sanitizeCallTargetText(key === "command" ? stripShellWrapperForDisplay(value) : value),
-		ARG_PREVIEW_LIMIT,
-	);
-	if (options.wrapInBackticks) return `${lead}\`${preview}\``;
-	return `${lead}${preview}`;
-}
-
-function dispatchSublineBody(args: unknown): string | null {
-	if (!isPlainObject(args)) return null;
-	if (args.list === true) return "listing fleet agents";
-	const sharedAgent =
-		(typeof args.agent === "string" && args.agent.trim()) ||
-		(typeof args.agent_id === "string" && args.agent_id.trim()) ||
-		"coder";
-	let rawTasks: unknown = args.tasks;
-	if (typeof rawTasks === "string") {
-		const trimmed = rawTasks.trim();
-		if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-			try {
-				rawTasks = JSON.parse(trimmed) as unknown;
-			} catch {
-				// Keep the string as one plain task; dispatch itself reports malformed JSON.
-			}
-		}
-	}
-	const tasks = Array.isArray(rawTasks)
-		? rawTasks
-		: rawTasks === undefined
-			? typeof args.task === "string"
-				? [args]
-				: []
-			: [rawTasks];
-	if (tasks.length === 0) return null;
-	const first = tasks[0];
-	const record = isPlainObject(first) ? first : null;
-	const agent =
-		(record && typeof record.agent === "string" && record.agent.trim()) ||
-		(record && typeof record.agent_id === "string" && record.agent_id.trim()) ||
-		sharedAgent;
-	const taskText = typeof first === "string" ? first : record && typeof record.task === "string" ? record.task : "";
-	const taskPreview = truncate(sanitizeCallTargetText(taskText), ARG_PREVIEW_LIMIT);
-	const more = tasks.length > 1 ? ` +${tasks.length - 1} more` : "";
-	if (taskPreview.length === 0) return `dispatching ${tasks.length} task${tasks.length === 1 ? "" : "s"}${more}`;
-	return `dispatching ${agent}: ${taskPreview}${more}`;
-}
-
-/**
- * A search's scope, when it names one. The workspace root is the default and
- * stays implicit, so `path: "."` does not cost the row a word.
- */
-function searchScope(args: unknown): string | null {
-	const path = readStringField(args, "path");
-	if (path === null) return null;
-	const scope = sanitizeCallTargetText(path).trim();
-	if (scope.length === 0 || scope === "." || scope === "./") return null;
-	return truncate(scope, ARG_PREVIEW_LIMIT);
-}
-
-/** `searching for \`pattern\` in scope`: the scope rides the row instead of a `path ›` argument row. */
-function searchSublineBody(args: unknown, lead: string): string | null {
-	const body = buildFieldSublineBody(args, "pattern", lead, { wrapInBackticks: true });
-	if (body === null) return null;
-	const scope = searchScope(args);
-	return scope === null ? body : `${body} in ${scope}`;
-}
-
-const SUBLINE_BODY_BUILDERS: Readonly<Record<string, (args: unknown) => string | null>> = {
-	read: (args) => buildFieldSublineBody(args, "path", "reading "),
-	edit: (args) => buildFieldSublineBody(args, "path", "editing "),
-	write: (args) => buildFieldSublineBody(args, "path", "writing "),
-	ls: (args) => buildFieldSublineBody(args, "path", "listing ") ?? "listing workspace",
-	bash: (args) => buildFieldSublineBody(args, "command", "running ", { wrapInBackticks: true }),
-	grep: (args) => searchSublineBody(args, "searching for "),
-	find: (args) => searchSublineBody(args, "finding "),
-	web_read: (args) => buildFieldSublineBody(args, "url", "reading "),
-	web_fetch: (args) => buildFieldSublineBody(args, "url", "fetching "),
-	git: (args) => buildFieldSublineBody(args, "op", "git "),
-	verify: (args) => buildFieldSublineBody(args, "check", "verifying "),
-	run_script: (args) => buildFieldSublineBody(args, "script", "running ", { wrapInBackticks: true }),
-	data: (args) => {
-		const op = readStringField(args, "op") ?? "inspecting";
-		const path = readStringField(args, "path");
-		return path === null ? op : `${op} ${path}`;
-	},
-	gateway: (args) => {
-		if (!isPlainObject(args)) return null;
-		const op = typeof args.op === "string" ? args.op : "";
-		if (op === "find") {
-			const query = readStringField(args, "query");
-			return query === null || query.length === 0 ? "finding capabilities" : `finding capabilities \`${query}\``;
-		}
-		if (op === "describe") {
-			const capability = readStringField(args, "capability");
-			return capability === null ? "describing a capability" : `describing ${capability}`;
-		}
-		const effective = effectiveToolCall("gateway", args);
-		if (!effective.viaGateway) return null;
-		const inner = SUBLINE_BODY_BUILDERS[effective.toolName]?.(effective.args);
-		return inner !== null && inner !== undefined ? `${inner} (via gateway)` : `calling ${effective.toolName}`;
-	},
-	code_nav: (args) => {
-		const mode = readStringField(args, "mode");
-		const query = readStringField(args, "query")?.trim() ?? "";
-		const queryPart = query.length > 0 ? ` \`${truncate(query, ARG_PREVIEW_LIMIT)}\`` : "";
-		if (mode !== null && mode.length > 0) return `navigating ${mode}${queryPart}`;
-		return queryPart.length > 0 ? `navigating${queryPart}` : null;
-	},
-	context: (args) => {
-		const scope = readStringField(args, "scope");
-		if (scope === null || scope.length === 0) return null;
-		const query = readStringField(args, "query")?.trim() ?? "";
-		const name = readStringField(args, "name")?.trim() ?? "";
-		if (scope === "docs" && query.length > 0) return `context docs \`${truncate(query, ARG_PREVIEW_LIMIT)}\``;
-		if (scope === "skills" && name.length > 0) return `loading skill ${truncate(name, ARG_PREVIEW_LIMIT)}`;
-		return scope === "skills" ? "discovering skills" : `context ${scope}`;
-	},
-	artifact: (args) => buildFieldSublineBody(args, "kind", "writing "),
-	monitor: (args) => buildFieldSublineBody(args, "run_id", "monitoring "),
-	steer: (args) => buildFieldSublineBody(args, "run_id", "steering "),
-	tasks: (args) => {
-		const action = readStringField(args, "action");
-		if (action === null) return null;
-		if (action === "plan") {
-			const title = readStringField(args, "title");
-			return title === null ? "tasks plan" : `tasks plan ${truncate(`"${title}"`, ARG_PREVIEW_LIMIT)}`;
-		}
-		const id = readStringField(args, "id");
-		return id === null ? `tasks ${action}` : `tasks ${action} ${id}`;
-	},
-	dispatch: dispatchSublineBody,
+const CLASS_MARKS: Readonly<Record<ToolClass, string>> = {
+	observe: GLYPH.toolHeader,
+	search: GLYPH.toolHeader,
+	knowledge: GLYPH.classKnowledge,
+	mutate: GLYPH.classMutate,
+	execute: GLYPH.classExecute,
+	network: GLYPH.classNetwork,
+	delegate: GLYPH.workerAgent,
+	interaction: GLYPH.classInteraction,
+	external: GLYPH.classExternal,
 };
 
-/**
- * Per-tool subline templates. Maps a tool name to a function that builds the
- * verb-led subline body without the leading glyph and without the trailing
- * status glyph. Unknown tools fall back to a tool-neutral action summary.
- */
-function webFetchMeta(result: unknown): string | null {
-	if (!isPlainObject(result) || !isPlainObject(result.details)) return null;
-	const status = typeof result.details.status === "number" ? String(result.details.status) : null;
-	const format = typeof result.details.format === "string" ? result.details.format : null;
-	const bytesRead = typeof result.details.bytesRead === "number" ? result.details.bytesRead : null;
-	const truncated = result.details.truncated === true ? "truncated" : null;
-	const bytes = bytesRead === null ? null : bytesRead >= 1024 ? `${(bytesRead / 1024).toFixed(1)}KB` : `${bytesRead}B`;
-	const parts = [status, format, bytes, truncated].filter(
-		(part): part is string => typeof part === "string" && part.length > 0,
-	);
-	return parts.length > 0 ? parts.join(" · ") : null;
+/** The class mark in the gutter, dim, with the space that separates it from the verb. */
+function classMark(toolClass: ToolClass): string {
+	return dim(`${CLASS_MARKS[toolClass]} `);
+}
+
+/** The row a call reads as, from its redacted arguments and, once settled, its result. */
+function resolveRow(call: ToolExecutionStart | ToolExecutionFinished): ResolvedToolRow {
+	const finished = "result" in call ? call : null;
+	return resolveToolRow(call.toolName, redactToolArgs(call.args), detailsOf(finished?.result), call.actionClass, {
+		cardAttached: call.cardAttached === true,
+	});
 }
 
 /**
- * A call the permission gate blocked never executed, so the collapsed row must
- * not claim it did. Blocked calls keep the ordinary operator-facing action
- * description but use a neutral noun for commands; the status tail supplies the
- * blocked outcome. The ledger byte count is suppressed elsewhere because those
- * bytes are the denial text, not output.
+ * Longest object a row states before it cuts with an ellipsis. A wide row
+ * states more of a command, up to 120 characters; a question to the operator
+ * is the whole point of its row and runs to 160.
+ */
+function objectLimit(toolClass: ToolClass, width?: number): number {
+	if (toolClass === "interaction") return 160;
+	if (width === undefined) return ARG_PREVIEW_LIMIT;
+	return Math.max(ARG_PREVIEW_LIMIT, Math.min(120, contentWidth(width) - 24));
+}
+
+/**
+ * The row's object: a command or a pattern in backticks, a URL as its host
+ * and path tail, anything else plain; an MCP or extension capability as
+ * `server › tool`. Always one sanitized line.
+ */
+function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null, width?: number): string {
+	if (row.externalLabel !== null) return sanitizeCallTargetText(row.externalLabel);
+	const skill = finished === null ? null : skillLoadFacts(finished);
+	if (skill !== null) return `skill ${cyan(truncate(sanitizeCallTargetText(skill.name), ARG_PREVIEW_LIMIT))}`;
+	if (row.spec.object === undefined) return sanitizeCallTargetText(row.toolName);
+	const display = objectDisplay(row, width);
+	if (display === null) return "";
+	if (display.style === "url") return display.shown;
+	const clean = display.shown.length < display.full.length ? `${display.shown}...` : display.shown;
+	return display.style === "code" ? `\`${clean}\`` : clean;
+}
+
+/**
+ * The object as the row shows it: `full` is the sanitized one-line text, and
+ * `shown` is what survives the row's length limit (without the ellipsis). A
+ * URL shows as its host and path tail.
+ */
+function objectDisplay(
+	row: ResolvedToolRow,
+	width?: number,
+): { full: string; shown: string; style?: "code" | "url" } | null {
+	const object = row.spec.object?.(row.args, row.context) ?? null;
+	if (object === null) return null;
+	if (object.style === "url") return { full: object.text, shown: urlLabel(object.text, urlBudget(width)), style: "url" };
+	const full = displayText(object.text, object.style);
+	const limit = objectLimit(row.spec.class, width);
+	const shown = full.length <= limit ? full : full.slice(0, Math.max(0, limit - 3));
+	return object.style === undefined ? { full, shown } : { full, shown, style: object.style };
+}
+
+function displayText(value: string, style?: "code" | "url"): string {
+	return sanitizeCallTargetText(style === "code" ? stripShellWrapperForDisplay(value) : value);
+}
+
+/**
+ * Argument fields a settled row's facts already state, beyond the ones its
+ * object consumes: the format a fetch returned, the window a read asked for
+ * when the row states the range it got.
+ */
+function factConsumedFields(row: ResolvedToolRow, finished: ToolExecutionFinished | null): readonly string[] {
+	if (finished === null || finished.isError || finished.outcome !== undefined) return [];
+	if (row.spec.class === "network" && stringField(detailsOf(finished.result), "format") !== null) return ["format"];
+	const observation = observationOf(finished);
+	if (observation !== null && lineRange(finished, observation) !== null) return ["offset", "limit"];
+	return [];
+}
+
+/**
+ * Mutation payloads. A settled change is described by its diff (Standard and
+ * Detailed) or its `+N -M` change facts (Compact); the raw replacement text is
+ * inspection material. A failed mutation keeps its payload visible, bounded,
+ * because the text that did not match is the diagnosis.
+ */
+const MUTATION_PAYLOAD_FIELDS = ["edits", "oldText", "newText", "content"] as const;
+
+/** Scalar arguments the row states inline, as `key value`, in argument order. */
+function inlineArgs(row: ResolvedToolRow, finished: ToolExecutionFinished | null): string[] {
+	const skip = new Set<string>([...row.spec.consumes, ...factConsumedFields(row, finished)]);
+	if (row.spec.class === "mutate") for (const key of MUTATION_PAYLOAD_FIELDS) skip.add(key);
+	const out: string[] = [];
+	for (const [key, value] of Object.entries(row.args)) {
+		if (skip.has(key) || value === undefined || value === null) continue;
+		const shown = inlineArgValue(value);
+		// A flag that is on reads as its name (`ignore_case`, `detach`).
+		if (shown !== null)
+			out.push(value === true ? sanitizeCallTargetText(key) : `${sanitizeCallTargetText(key)} ${shown}`);
+	}
+	return out;
+}
+
+/**
+ * The question and answer pairs a settled call resolved, as its registry row
+ * reads them from the structured result. A failed or blocked call resolved
+ * nothing.
+ */
+function resolvedPairs(row: ResolvedToolRow, finished: ToolExecutionFinished | null): readonly ToolRowPair[] {
+	if (finished === null || finished.isError || finished.outcome !== undefined || row.spec.pairs === undefined) return [];
+	return row.spec.pairs(row.args, detailsOf(finished.result));
+}
+
+/**
+ * A single pair rides the row as `→ answer` when the row's object already
+ * states its question; every other set nests, one `question → answer` row each.
+ */
+function inlinePair(row: ResolvedToolRow, pairs: readonly ToolRowPair[]): ToolRowPair | null {
+	const only = pairs.length === 1 ? pairs[0] : undefined;
+	if (only === undefined) return null;
+	const display = objectDisplay(row);
+	return display !== null && display.full === displayText(only.question) ? only : null;
+}
+
+function styledVerb(verb: string, toolClass: ToolClass): string {
+	return theme.style(toolClass === "delegate" ? "agent" : "tool", verb, { bold: true });
+}
+
+function headerLine(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	status: HeaderStatus,
+	meta: StatusMeta,
+	width: number,
+): string {
+	const parts = sublineParts(call, status, meta, width);
+	return `${parts.lead}${parts.tail}`;
+}
+
+/**
+ * A call blocked at admission never executed, so its row must not claim it
+ * did: its verb is `blocked`, and the ledger byte count is suppressed because
+ * those bytes are the denial text, not output.
  */
 function isNonExecutedOutcome(outcome: ToolExecutionFinished["outcome"]): boolean {
 	return outcome === "blocked";
 }
 
-function buildSublineBody(
-	toolName: string,
-	args: unknown,
-	status: HeaderStatus,
-	result?: unknown,
-	outcome?: ToolExecutionFinished["outcome"],
-): string {
-	if (isNonExecutedOutcome(outcome)) {
-		if (toolName === "bash") {
-			return (
-				buildFieldSublineBody(args, "command", "command ", { wrapInBackticks: true }) ??
-				buildGenericToolBody(toolName, args)
-			);
-		}
-		return SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
-	}
-	if (toolName === "web_fetch" || toolName === "web_read") {
-		const meta = status === undefined ? null : webFetchMeta(result);
-		const body = SUBLINE_BODY_BUILDERS[toolName]?.(args) ?? buildGenericToolBody(toolName, args);
-		return `${body}${meta ? dim(` · ${meta}`) : ""}`;
-	}
-	if (toolName === "context" && status === "ok" && isPlainObject(args) && args.scope === "skills") {
-		const name = readStringField(args, "name");
-		if (name !== null && name.trim().length > 0) {
-			return `loaded skill ${cyan(truncate(sanitizeCallTargetText(name), ARG_PREVIEW_LIMIT))}`;
-		}
-	}
-	if (toolName === "bash") {
-		const lead = status === "ok" || status === "error" ? "ran " : "running ";
-		return (
-			buildFieldSublineBody(args, "command", lead, { wrapInBackticks: true }) ?? buildGenericToolBody(toolName, args)
-		);
-	}
-	const body = SUBLINE_BODY_BUILDERS[toolName]?.(args);
-	if (body !== null && body !== undefined) return body;
-	return buildGenericToolBody(toolName, args);
-}
-
 interface SublineParts {
-	/** Verb, object, and ledger facts. Breakable across wraps. */
+	/** Mark, verb, object and ledger facts. Breakable across wraps. */
 	lead: string;
 	/**
-	 * Status glyph, duration, and any offload path, composed as one unit. The
-	 * caller appends the expand hint here so the whole tail stays atomic: a wrap
-	 * may fall before the status glyph but never between the glyph, the
-	 * duration, and the hint. Begins with a joining space so it attaches to the
-	 * lead's last line when they share a row. Empty for in-flight calls, which
-	 * carry no status glyph.
+	 * Status glyph, duration, and any offload path, composed as one unit. A
+	 * wrap may fall before the status glyph but never between the glyph, the
+	 * duration, and the offload path. Begins with a joining space so it attaches
+	 * to the lead's last line when they share a row. Empty for a call with no
+	 * status yet.
 	 */
 	tail: string;
 }
@@ -900,22 +870,32 @@ function sublineParts(
 	call: ToolExecutionStart | ToolExecutionFinished,
 	status: HeaderStatus,
 	meta: StatusMeta,
+	width?: number,
 ): SublineParts {
 	const finished = "result" in call ? call : null;
-	const body = styleSublineBody(
-		buildSublineBody(call.toolName, call.args, status, finished?.result, finished?.outcome),
-		call.toolName,
-	);
+	const row = resolveRow(call);
+	const settled = status === "ok" || status === "error";
+	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : settled ? row.spec.verbs[1] : row.spec.verbs[0];
+	const object = rowObject(row, finished, width);
+	const scopeText = row.spec.scope?.(row.args) ?? null;
+	const scope = scopeText === null ? "" : ` in ${truncate(sanitizeCallTargetText(scopeText), ARG_PREVIEW_LIMIT)}`;
+	const inline = inlinePair(row, resolvedPairs(row, finished));
+	const answer =
+		inline === null
+			? ""
+			: ` ${dim("→")} ${theme.fg("muted", truncate(sanitizeCallTargetText(inline.answer), ARG_PREVIEW_LIMIT))}`;
+	const scalars = inlineArgs(row, finished);
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
 	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
+	const inlineText = scalars.length > 0 ? dim(` · ${scalars.join(" · ")}`) : "";
+	const head = `${classMark(row.spec.class)}${styledVerb(verb, row.spec.class)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inlineText}`;
 	if (finished !== null) {
-		const ledger = ledgerTail(finished);
-		return {
-			lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}${ledger.facts}`,
-			tail: `${statusGlyph(status, meta)}${ledger.offload}`,
-		};
+		const ledger = ledgerTail(finished, row);
+		return { lead: `${head}${ledger.facts}`, tail: `${statusGlyph(status, meta)}${ledger.offload}` };
 	}
-	return { lead: `${dim(HEADER_PREFIX_PLAIN)}${body}${resource}`, tail: statusGlyph(status, meta) };
+	const via = row.viaGateway ? dim(" · via gateway") : "";
+	const local = call.excludeFromContext === true ? dim(" · not sent to model") : "";
+	return { lead: `${head}${via}${local}`, tail: statusGlyph(status, meta) };
 }
 
 /**
@@ -981,19 +961,39 @@ function indentAndWrap(line: string, width: number, isError: boolean): string[] 
 	return out;
 }
 
+function isScalarList(value: unknown): value is Array<string | number | boolean> {
+	return (
+		Array.isArray(value) &&
+		value.length > 0 &&
+		value.every(
+			(item) =>
+				(typeof item === "string" && !/[\r\n]/u.test(item)) || typeof item === "number" || typeof item === "boolean",
+		)
+	);
+}
+
 /** Full redacted arguments are retained for inspection; transcript callers budget rows. */
 export function renderToolArguments(
 	args: unknown,
 	width: number,
 	isError = false,
 	maxRows = Number.POSITIVE_INFINITY,
+	joinScalarLists = false,
 ): string[] {
 	if (isEmptyArgs(args)) return [];
 	const safeArgs = redactToolArgs(args);
 	const out: string[] = [];
 	const entries = isPlainObject(safeArgs) ? Object.entries(safeArgs) : [["input", safeArgs] as const];
 	for (const [key, value] of entries) {
-		const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
+		// In the transcript a list of short scalars reads as one row (`paths ›
+		// a.ts · b.ts`), not as the multi-row JSON array it would pretty-print
+		// to. Inspection and approval keep the exact JSON.
+		const text =
+			typeof value === "string"
+				? value
+				: joinScalarLists && isScalarList(value)
+					? value.map((item) => String(item)).join(" · ")
+					: JSON.stringify(value, null, 2);
 		const full = String(text ?? value);
 		const chars = Number.isFinite(maxRows) ? Math.max(1, maxRows * Math.max(1, width) * 4) : full.length;
 		const lines = full.slice(0, chars).split("\n");
@@ -1309,16 +1309,12 @@ export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinish
 	const status = sublineStatus(call);
 	const meta: StatusMeta =
 		"result" in call
-			? {
-					durationMs: call.durationMs,
-					exitCode: structuredExitCode(call),
-					outcome: call.outcome,
-					blockReason: call.blockReason,
-				}
+			? { durationMs: call.durationMs, outcome: call.outcome, blockReason: call.blockReason }
 			: { elapsedMs: call.elapsedMs };
-	const parts = sublineParts(call, status, meta);
-	const excerpt = "result" in call ? failureExcerpt(call, width) : "";
-	return wrapSublineWithTail(`${parts.lead}${excerpt}`, parts.tail, width);
+	// A failed call always shows its bounded body, which carries the diagnosis;
+	// the row states the outcome once and never excerpts the body onto itself.
+	const parts = sublineParts(call, status, meta, width);
+	return wrapSublineWithTail(parts.lead, parts.tail, width);
 }
 
 /**
@@ -1336,18 +1332,18 @@ export function renderToolExecution(
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
-		exitCode: structuredExitCode(finished),
 		outcome: finished.outcome,
 		blockReason: finished.blockReason,
 	};
+	const row = resolveRow(finished);
 	const out: string[] = [];
-	out.push(...wrapHanging(headerLine(finished.toolName, finished.args, status, statusMeta), width));
+	out.push(...wrapHanging(headerLine(finished, status, statusMeta, width), width));
 
-	// Edit and write tools produce one bounded numbered diff on result.details.
-	// It is the authority because canonical edit args can contain multiple
-	// replacements and fuzzy matching can change the actual base text. Live rows
-	// receive Pi's word-level styling; replay and export request plain rows.
-	if ((finished.toolName === "edit" || finished.toolName === "write") && finished.isError === false) {
+	// A mutation produces one bounded numbered diff on result.details. It is the
+	// authority because canonical edit args can contain multiple replacements
+	// and fuzzy matching can change the actual base text. Live rows receive
+	// Pi's word-level styling; replay and export request plain rows.
+	if (row.spec.class === "mutate" && finished.isError === false) {
 		const diff = resultDiff(finished.result);
 		if (diff !== null) {
 			out.push(...renderToolArguments(finished.args, width, false));
@@ -1358,11 +1354,9 @@ export function renderToolExecution(
 		}
 	}
 
-	// Bash-tool dispatch: when `args.command` is a string, prefix the result
-	// body with `$ <cmd>` on its own line so the user sees the display command
-	// above its output. Failures use the red rail and expose the parsed exit
-	// code in the header when the result includes one.
-	if (finished.toolName === "bash") {
+	// A command echoes as `$ <cmd>` above its output, so the display command
+	// reads whole even where the row had to shorten it.
+	if (row.spec.class === "execute") {
 		const bashArgs = asBashArgs(redactToolArgs(finished.args));
 		if (bashArgs !== null) {
 			out.push(...renderToolArguments(finished.args, width, finished.isError));
@@ -1409,12 +1403,11 @@ export function renderToolResultOnly(
 	const status: HeaderStatus = finished.isError ? "error" : "ok";
 	const statusMeta: StatusMeta = {
 		durationMs: finished.durationMs,
-		exitCode: structuredExitCode(finished),
 		outcome: finished.outcome,
 		blockReason: finished.blockReason,
 	};
 	const out: string[] = [];
-	out.push(...wrapHanging(headerLine(finished.toolName, undefined, status, statusMeta), width));
+	out.push(...wrapHanging(headerLine({ ...finished, args: undefined }, status, statusMeta, width), width));
 	out.push(...renderOutputMeta(finished, width, finished.isError));
 	out.push(...renderResultBlock(finished.result, finished.isError, width, opts));
 	out.push(...renderOutputFooter(finished, width, finished.isError));
@@ -1450,7 +1443,6 @@ export function renderBashTranscriptExecution(
 	const shownBytes = Buffer.byteLength(execution.output, "utf8");
 	const totalBytes = execution.totalBytes ?? shownBytes;
 	const args: Record<string, unknown> = { command: execution.command };
-	if (execution.excludeFromContext === true) args.context = "not sent to model";
 	const details = {
 		resultSize: {
 			bytes: totalBytes,
@@ -1466,7 +1458,14 @@ export function renderBashTranscriptExecution(
 	};
 	if (execution.running) {
 		return renderToolPreview(
-			{ toolCallId: "local-bash", toolName: "bash", args, phase: "running", elapsedMs: execution.elapsedMs },
+			{
+				toolCallId: "local-bash",
+				toolName: "bash",
+				args,
+				phase: "running",
+				elapsedMs: execution.elapsedMs,
+				excludeFromContext: execution.excludeFromContext,
+			},
 			width,
 			bodyOptions.detail ?? transcriptDetail(),
 			{ ...bodyOptions, operator: true, partialResult: result },
@@ -1497,73 +1496,55 @@ export function renderBashTranscriptExecution(
 }
 
 /**
- * The argument fields a tool's action row prints. Each builder above names
- * exactly these, so a preview can drop the ones the row already shows whole
- * instead of repeating them as `key › value` rows beneath it.
+ * The arguments a row's body lists as `key ›` rows: only what the row could
+ * not state. The object and scope fields, the scalars that rode inline and the
+ * fields the facts state never repeat here, except an object the row had to
+ * shorten, which keeps its whole value (a URL never: the row names its host and
+ * path). A gateway call lists its capability's own arguments. A settled
+ * mutation's payload is inspection material; a failed one keeps it, bounded,
+ * because the text that did not match is the diagnosis.
  */
-function headerFields(toolName: string, args: Record<string, unknown>): readonly string[] {
-	switch (toolName) {
-		case "grep":
-		case "find":
-			return ["pattern", "path"];
-		case "data":
-			return ["op", "path"];
-		case "code_nav":
-			return ["mode", "query"];
-		case "context":
-			return args.scope === "docs" ? ["scope", "query"] : args.scope === "skills" ? ["scope", "name"] : ["scope"];
-		case "tasks":
-			return args.action === "plan" ? ["action", "title"] : ["action", "id"];
-		case "dispatch": {
-			// One inline task names its agent and task on the row; a task list keeps its rows.
-			if (typeof args.task !== "string" || args.tasks !== undefined) return [];
-			return typeof args.agent === "string" && args.agent.trim().length > 0 ? ["agent", "task"] : ["agent_id", "task"];
+function previewArguments(call: ToolExecutionStart | ToolExecutionFinished, width: number): Record<string, unknown> {
+	const row = resolveRow(call);
+	const finished = "result" in call ? call : null;
+	const failed = finished !== null && (finished.isError || finished.outcome !== undefined);
+	const consumed = new Set<string>([...row.spec.consumes, ...factConsumedFields(row, finished)]);
+	const display = objectDisplay(row, width);
+	const rest: Record<string, unknown> = {};
+	for (const [key, value] of Object.entries(row.args)) {
+		if (value === undefined || value === null) continue;
+		const payload = (MUTATION_PAYLOAD_FIELDS as readonly string[]).includes(key) && row.spec.class === "mutate";
+		if (payload) {
+			if (failed) rest[key] = key === "edits" ? flattenSingleEdit(value) : value;
+			continue;
 		}
-		default: {
-			const primary = PRIMARY_ARG_FIELD[toolName];
-			return primary === undefined ? [] : [primary];
+		if (consumed.has(key)) {
+			if (typeof value === "string" && cutFromRow(value, display)) rest[key] = value;
+			continue;
 		}
+		if (inlineArgValue(value) !== null) continue;
+		rest[key] = value;
 	}
-}
-
-/** A field value the row can print without truncating or folding it. */
-function shownWhole(toolName: string, key: string, value: unknown): boolean {
-	if (typeof value !== "string") return false;
-	const display = toolName === "bash" && key === "command" ? stripShellWrapperForDisplay(value) : value;
-	return display.length <= ARG_PREVIEW_LIMIT && !/[\r\n\t]/u.test(display);
+	return rest;
 }
 
 /**
- * Mutation payloads. A settled change is described by its diff (Standard and
- * Detailed) or its `+N -M` change facts (Compact); the raw replacement text is
- * inspection material. A failed mutation keeps its payload visible, bounded,
- * because the text that did not match is the diagnosis.
+ * Whether the row lost part of a field it states in its object: the length
+ * limit cut it, or the one-line row flattened a multiline value. A field the
+ * row shows whole, a URL (the row names its host and path by design), and a
+ * field that is not part of the object at all never repeat.
  */
-const MUTATION_PAYLOAD_FIELDS = ["edits", "oldText", "newText", "content"] as const;
+function cutFromRow(value: string, display: ReturnType<typeof objectDisplay>): boolean {
+	if (display === null || display.style === "url") return false;
+	const field = displayText(value, display.style);
+	if (field.length === 0 || !display.full.includes(field)) return false;
+	return /[\r\n\t]/u.test(value.trim()) || !display.shown.includes(field);
+}
 
-function previewArguments(call: ToolExecutionStart | ToolExecutionFinished): unknown {
-	if (!isPlainObject(call.args)) return call.args;
-	const safe = redactToolArgs(call.args);
-	if (!isPlainObject(safe)) return safe;
-	const rest: Record<string, unknown> = { ...safe };
-	for (const key of headerFields(call.toolName, safe)) {
-		const value = safe[key];
-		if (value === undefined) continue;
-		// `path: "."` is the implicit workspace scope a search row leaves unsaid.
-		const implicitScope = key === "path" && (call.toolName === "grep" || call.toolName === "find");
-		if (shownWhole(call.toolName, key, value) || (implicitScope && searchScope(safe) === null)) delete rest[key];
-	}
-	const finished = "result" in call ? call : null;
-	const failed = finished !== null && (finished.isError || finished.outcome !== undefined);
-	if ((call.toolName === "edit" || call.toolName === "write") && !failed) {
-		for (const key of MUTATION_PAYLOAD_FIELDS) delete rest[key];
-	}
-	// A settled read states the range it actually returned (`lines 120-159 of
-	// 400`), which is the truer fact than the window it asked for.
-	if (call.toolName === "read" && finished !== null && !failed && outcomeSummary(finished) !== null) {
-		for (const key of ["offset", "limit"]) delete rest[key];
-	}
-	return rest;
+/** One edit states its two texts as two rows; several stay the list they are. */
+function flattenSingleEdit(value: unknown): unknown {
+	if (!Array.isArray(value) || value.length !== 1 || !isPlainObject(value[0])) return value;
+	return value[0];
 }
 
 /** Invocation intent stays visible in every style; /view retains the complete arguments and output. */
@@ -1575,23 +1556,28 @@ export function renderToolPreview(
 ): string[] {
 	const finished = "result" in call ? call : undefined;
 	const failure = finished?.isError === true || finished?.outcome !== undefined;
+	const row = resolveRow(call);
+	const command = row.spec.class === "execute";
 	const limit = previewBudget(
 		failure
 			? detail.errorRows
 			: options.operator
 				? detail.operatorBashRows
-				: call.toolName === "bash"
+				: command
 					? detail.bashRows
 					: detail.resultRows,
 		options.terminalRows,
 	);
 	const rows = renderToolSubline(call, width);
+	const args = previewArguments(call, width);
+	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(
 		...renderToolArguments(
-			previewArguments(call),
+			Object.fromEntries(Object.entries(expanded).filter(([, value]) => value !== undefined)),
 			width,
 			failure,
 			previewBudget(detail.invocationRows, options.terminalRows),
+			true,
 		),
 	);
 	const skill = finished ? skillLoadFacts(finished) : null;
@@ -1600,6 +1586,31 @@ export function renderToolPreview(
 		const line = sanitizeCallTargetText(skill.description);
 		rows.push(
 			`${RAIL_DIM}${theme.fg("muted", truncateToWidth(line, Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
+		);
+	}
+	// Pairs the row could not carry inline: each question and its answer, or
+	// each decision, on its own row.
+	const pairs = resolvedPairs(row, finished ?? null);
+	if (pairs.length > 0 && inlinePair(row, pairs) === null) {
+		const pairRows: string[] = [];
+		for (const { question, answer } of pairs) {
+			pairRows.push(
+				...indentAndWrap(
+					`${dim(sanitizeCallTargetText(question))} ${dim("→")} ${theme.fg("muted", sanitizeCallTargetText(answer))}`,
+					width,
+					false,
+				),
+			);
+		}
+		rows.push(
+			...previewRows(
+				pairRows,
+				previewBudget(detail.invocationRows, options.terminalRows),
+				width,
+				false,
+				RAIL_DIM,
+				BODY_INDENT_VISIBLE_WIDTH,
+			),
 		);
 	}
 	const result = finished?.result ?? options.partialResult;
@@ -1615,19 +1626,25 @@ export function renderToolPreview(
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
-	} else if (limit > 0 && result !== undefined) {
-		const text = resultText(unwrapResultEnvelope(result), Number.POSITIVE_INFINITY);
-		const body = indentAndWrap(redactSecretString(text), width, failure);
-		rows.push(
-			...previewRows(
-				body,
-				limit,
-				width,
-				call.toolName === "bash" || !finished,
-				failure ? RAIL_ERROR : RAIL_DIM,
-				BODY_INDENT_VISIBLE_WIDTH,
-			),
-		);
+	} else if (limit > 0 && result !== undefined && !(row.spec.class === "interaction" && !failure)) {
+		// A settled question to the operator states what was asked and answered;
+		// its output is the model's copy of the same interview.
+		// A failed command's status line is on its row as `exit N`; the body keeps the output.
+		const shown = failure && command ? withoutCommandStatus(result) : result;
+		const text = resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY);
+		if (text.trim().length > 0) {
+			const body = indentAndWrap(redactSecretString(text), width, failure);
+			rows.push(
+				...previewRows(
+					body,
+					limit,
+					width,
+					command || !finished,
+					failure ? RAIL_ERROR : RAIL_DIM,
+					BODY_INDENT_VISIBLE_WIDTH,
+				),
+			);
+		}
 	}
 	return rows;
 }
@@ -1642,51 +1659,79 @@ export function hasToolBody(lines: readonly string[]): boolean {
 	return lines.some((line) => line.startsWith(RAIL_DIM) || line.startsWith(RAIL_ERROR));
 }
 
-/** What one grouped observation looked at: a read's path, a search's pattern and scope. */
-export function observationTarget(toolName: string, args: unknown): string {
-	if (toolName === "grep" || toolName === "find") {
-		const pattern = readStringField(args, "pattern");
-		const scope = searchScope(args);
-		const shown = pattern === null ? toolName : `\`${truncate(sanitizeCallTargetText(pattern), ARG_PREVIEW_LIMIT)}\``;
-		return scope === null ? shown : `${shown} in ${scope}`;
-	}
-	const path = readStringField(args, "path");
-	if (path === null) return toolName === "ls" ? "workspace" : sanitizeCallTargetText(toolName);
-	return truncate(sanitizeCallTargetText(path), ARG_PREVIEW_LIMIT);
-}
-
-const OBSERVATION_GROUP_LABELS: Readonly<Record<string, (count: number) => string>> = {
-	read: (count) => `read ${count} files`,
-	grep: (count) => `searched ${count} patterns`,
-	find: (count) => `matched ${count} file patterns`,
-	ls: (count) => `listed ${count} directories`,
-};
+/** Which Compact fold a settled call can join: explorations, knowledge lookups, or changes. */
+export type ToolFoldFamily = "explore" | "knowledge" | "mutate";
 
 /**
- * A run of consecutive successful observations in Compact: one settled action
- * row naming the count, and the targets on one nested row list. Per-call facts
- * (line ranges, byte counts, durations) stay in `/view`.
+ * The fold a settled call joins in Compact, by class. Observations and
+ * searches fold together, knowledge lookups fold, changes fold; commands,
+ * fetches, delegations and questions never do. A failure, a skill load, and a
+ * call whose result was cut, offloaded or evicted keep their own rows: each
+ * has a fact the folded row cannot carry.
  */
-export function renderObservationGroup(
-	toolName: string,
-	targets: readonly string[],
+export function toolFoldFamily(call: ToolExecutionFinished): ToolFoldFamily | null {
+	if (call.isError || call.outcome !== undefined || call.evictedReason !== undefined) return null;
+	if (isTruncatedResult(call) || offloadPathOf(call) !== null || skillLoadFacts(call) !== null) return null;
+	const toolClass = resolveRow(call).spec.class;
+	if (toolClass === "observe" || toolClass === "search") return "explore";
+	if (toolClass === "knowledge") return "knowledge";
+	if (toolClass === "mutate") return "mutate";
+	return null;
+}
+
+function countNouns(calls: readonly ToolExecutionFinished[]): string {
+	const counts = new Map<string, { singular: string; plural: string; count: number }>();
+	for (const call of calls) {
+		const [singular, plural] = resolveRow(call).spec.nouns ?? CLASS_NOUNS[resolveRow(call).spec.class];
+		const entry = counts.get(singular) ?? { singular, plural, count: 0 };
+		entry.count += 1;
+		counts.set(singular, entry);
+	}
+	return [...counts.values()]
+		.map((entry) => `${entry.count} ${entry.count === 1 ? entry.singular : entry.plural}`)
+		.join(", ");
+}
+
+/**
+ * A run of settled calls of one fold family, in Compact: one row that counts
+ * them, and their targets nested beneath it. Changes keep each file's change
+ * facts, since those are what a change is. Durations and byte counts stay in
+ * `/view`.
+ */
+export function renderFoldedGroup(
+	family: ToolFoldFamily,
+	calls: readonly ToolExecutionFinished[],
 	width: number,
 	maxRows: number,
 ): string[] {
-	const label = OBSERVATION_GROUP_LABELS[toolName]?.(targets.length) ?? `${targets.length} ${toolName} actions`;
-	const head = `${dim(HEADER_PREFIX_PLAIN)}${styleSublineBody(label)} ${green(STATUS_OK_GLYPH)}`;
+	const targets: string[] = [];
+	let added = 0;
+	let removed = 0;
+	let complete = true;
+	for (const call of calls) {
+		const row = resolveRow(call);
+		const scope = row.spec.scope?.(row.args) ?? null;
+		const target = `${rowObject(row, call, width)}${scope === null ? "" : ` in ${truncate(sanitizeCallTargetText(scope), ARG_PREVIEW_LIMIT)}`}`;
+		if (family !== "mutate") {
+			targets.push(target);
+			continue;
+		}
+		const stat = changeStat(call.result);
+		if (stat === null) complete = false;
+		else {
+			added += stat.added;
+			removed += stat.removed;
+		}
+		const file = detailsOf(call.result)?.file;
+		const created = isPlainObject(file) && "before" in file && file.before === null;
+		targets.push(
+			`${target}${stat === null ? "" : ` ${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`}${created ? dim(" new") : ""}`,
+		);
+	}
+	const toolClass: ToolClass = family === "explore" ? "observe" : family;
+	const verb = family === "explore" ? "explored" : family === "knowledge" ? "consulted" : "edited";
+	const totals = family === "mutate" && complete ? `${dim(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
+	const head = `${classMark(toolClass)}${styledVerb(verb, toolClass)} ${countNouns(calls)}${totals} ${green(STATUS_OK_GLYPH)}`;
 	const body = indentAndWrap(targets.join(dim(" · ")), width, false);
 	return [...wrapHanging(head, width), ...previewRows(body, maxRows, width, false, RAIL_DIM, BODY_INDENT_VISIBLE_WIDTH)];
-}
-
-/** Only ordinary successful observations can lose their individual metadata rows. */
-export function canGroupObservation(call: ToolExecutionFinished): boolean {
-	return (
-		["read", "grep", "find", "ls"].includes(call.toolName) &&
-		!call.isError &&
-		!call.outcome &&
-		!call.evictedReason &&
-		!isTruncatedResult(call) &&
-		offloadPathOf(call) === null
-	);
 }

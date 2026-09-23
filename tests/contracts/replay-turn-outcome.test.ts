@@ -1,9 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import type { ClioSettings } from "../../src/core/config.js";
+import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
+import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
+import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import { toolResultSummary } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
+import { createTurnPersistence } from "../../src/interactive/turn-persistence.js";
+import type { ChatTurnState } from "../../src/interactive/turn-state.js";
 
 const usage = {
 	input: 7,
@@ -114,4 +121,73 @@ test("a legacy replayed prompt drops the skill-request preamble the model receiv
 	const output = replay([{ role: "user", payload: { text: composed } }]);
 	assert.doesNotMatch(output, /\[Skill request\]|Only these pending skill names/u);
 	assert.match(output, /▌ \/skill test-hygiene pin the timers/u);
+});
+
+test("an unknown dynamic tool reads by its persisted action class, live and on replay", () => {
+	const persisted: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+	const session = {
+		append(turn: { kind: string; payload: Record<string, unknown> }) {
+			persisted.push(turn);
+			return { id: `persisted-${persisted.length}` };
+		},
+		current: () => null,
+	} as unknown as SessionContract;
+	const persistence = createTurnPersistence({
+		state: { lastTurnId: null } as ChatTurnState,
+		session,
+		getSettings: () => ({}) as ClioSettings,
+		middlewareToolChoice: {} as MiddlewareToolChoiceControl,
+		consumePersistedEcho: () => false,
+		removeQueuedMirrorEntry: () => {},
+		promptCachePayloadForAssistant: () => ({}),
+		promptSideTokens: () => 0,
+	});
+	const args = { stage: "staging" };
+	// Enriched the way the turn runtime enriches every end event it forwards.
+	const result = { content: [{ type: "text", text: "preview deployed" }], details: {} };
+	const end = {
+		type: "tool_execution_end" as const,
+		toolCallId: "deploy-1",
+		toolName: "deploy_preview",
+		result,
+		isError: false,
+		durationMs: 1_200,
+		resultSummary: toolResultSummary(result),
+		actionClass: "execute",
+	};
+	persistence.appendToolResultTurn(end);
+	assert.equal(persisted[0]?.payload.actionClass, "execute");
+
+	const rowOf = (lines: string[]) => lines.map(stripTerminalSequences).find((line) => line.includes("deploy_preview"));
+	const live = createChatPanel();
+	live.applyEvent({
+		type: "tool_execution_start",
+		toolCallId: "deploy-1",
+		toolName: "deploy_preview",
+		args,
+	} as ChatLoopEvent);
+	live.applyEvent(end as ChatLoopEvent);
+	const liveRow = rowOf(live.render(120));
+	assert.equal(liveRow, "$ ran deploy_preview · stage staging · 16B ✓ · 1.2s");
+
+	const replayed = createChatPanel();
+	rehydrateChatPanelFromTurns(replayed, [
+		{
+			turnId: "turn-0",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			kind: "message",
+			role: "tool_call",
+			payload: { name: "deploy_preview", toolCallId: "deploy-1", args },
+		},
+		{
+			turnId: "turn-1",
+			parentTurnId: "turn-0",
+			timestamp: "2026-09-17T00:00:01Z",
+			kind: "message",
+			role: "tool_result",
+			payload: persisted[0]?.payload,
+		},
+	] as SessionEntry[]);
+	assert.equal(rowOf(replayed.render(120)), liveRow);
 });

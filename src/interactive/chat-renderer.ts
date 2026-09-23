@@ -798,6 +798,8 @@ interface ReplayToolResult {
 	/** Persisted admission verdict; absent on history written before it was recorded. */
 	outcome?: string;
 	blockReason?: string;
+	/** Admission's action class; an unknown dynamic tool is classified by it, live and on replay. */
+	actionClass?: string;
 }
 
 /**
@@ -833,6 +835,7 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 	const resultSummary = payloadObject(obj?.resultSummary) ?? undefined;
 	const outcome = typeof obj?.outcome === "string" && obj.outcome.length > 0 ? obj.outcome : undefined;
 	const blockReason = typeof obj?.blockReason === "string" && obj.blockReason.length > 0 ? obj.blockReason : undefined;
+	const actionClass = typeof obj?.actionClass === "string" && obj.actionClass.length > 0 ? obj.actionClass : undefined;
 	return {
 		id,
 		name,
@@ -842,6 +845,7 @@ function extractToolResult(entry: MessageEntry): ReplayToolResult {
 		...(resultSummary !== undefined ? { resultSummary } : {}),
 		...(outcome !== undefined ? { outcome } : {}),
 		...(blockReason !== undefined ? { blockReason } : {}),
+		...(actionClass !== undefined ? { actionClass } : {}),
 	};
 }
 
@@ -1404,6 +1408,7 @@ export function rehydrateChatPanelFromTurns(
 							...(resultSummary !== undefined ? { resultSummary } : {}),
 							...(result.outcome !== undefined ? { outcome: result.outcome } : {}),
 							...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+							...(result.actionClass !== undefined ? { actionClass: result.actionClass } : {}),
 							...(evictedReason !== undefined ? { evictedReason } : {}),
 						} as ChatLoopEvent);
 					} else {
@@ -1418,6 +1423,7 @@ export function rehydrateChatPanelFromTurns(
 									...(resultSummary !== undefined ? { resultSummary } : {}),
 									...(result.outcome === "blocked" ? { outcome: "blocked" as const } : {}),
 									...(result.blockReason !== undefined ? { blockReason: result.blockReason } : {}),
+									...(result.actionClass !== undefined ? { actionClass: result.actionClass } : {}),
 									...(evictedReason !== undefined ? { evictedReason } : {}),
 								},
 								width,
