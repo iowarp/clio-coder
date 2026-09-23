@@ -561,3 +561,20 @@ test("diagnostic and retained stderr caps preserve UTF-8 code-point boundaries",
 		assert.equal(decoder.oversizedLines, 0);
 	}
 });
+
+test("grep reports the file lines it showed so a worker can ground a citation in them", async () => {
+	fs.writeFileSync(
+		join(root, "a.txt"),
+		["alpha", "needle one", "beta", "gamma", "delta", "needle two", "omega"].join("\n"),
+	);
+	const file = join(root, "a.txt");
+	const observed = (result: ToolResult) =>
+		(ok(result).details as { observedLines?: Record<string, number[]> }).observedLines;
+	assert.deepEqual(observed(await grepTool.run({ path: root, pattern: "needle" })), { [file]: [2, 6] });
+	assert.deepEqual(observed(await grepTool.run({ path: root, pattern: "needle", context: 1 })), {
+		[file]: [1, 2, 3, 5, 6, 7],
+	});
+	assert.deepEqual(observed(await grepTool.run({ path: root, pattern: "needle", limit: 1 })), { [file]: [2] });
+	assert.equal(observed(await grepTool.run({ path: root, pattern: "needle", mode: "files" })), undefined);
+	assert.equal(observed(await grepTool.run({ path: root, pattern: "absent" })), undefined);
+});

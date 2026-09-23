@@ -570,6 +570,20 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	/** Read tool call id -> what was asked for, pending that call's result. */
 	const pendingReadCitations = new Map<string, { path: string; offset: number | null; tail: boolean }>();
 	const observedReadRanges = new Map<string, Array<readonly [number, number]>>();
+	/**
+	 * Lines a grep result showed, keyed like the read spans. They ground a
+	 * citation but stay out of the repair anchors, which quote read spans back
+	 * to the model and would grow by one entry per match.
+	 */
+	const observedGrepLines = new Map<string, Set<number>>();
+	const groundingRanges = (): ObservedReadRanges => {
+		if (observedGrepLines.size === 0) return observedReadRanges;
+		const merged = new Map<string, Array<readonly [number, number]>>(observedReadRanges);
+		for (const [key, lines] of observedGrepLines) {
+			merged.set(key, [...(merged.get(key) ?? []), ...[...lines].map((line) => [line, line] as const)]);
+		}
+		return merged;
+	};
 	// The write-side equivalent: what this run changed and what it validated,
 	// so a mutation report is judged against the run instead of believed.
 	const runEffects = createRunEffectsRecorder(contractCwd);
@@ -579,7 +593,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			contract: input.resultContract,
 			data,
 			cwd: contractCwd,
-			observedReadRanges,
+			observedReadRanges: groundingRanges(),
 			observedRunEffects: runEffects.snapshot(),
 			networkAllowed: true,
 			filesystem: nodeResultContractFilesystem(),
@@ -928,6 +942,17 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			pendingReadCitations.delete(event.toolCallId);
 			if (request !== undefined && event.isError !== true) recordObservedRead(request, event.result);
 		}
+		if (event.type === "tool_execution_end" && event.toolName === ToolNames.Grep && event.isError !== true) {
+			const shown = (event.result as { details?: { observedLines?: unknown } } | null)?.details?.observedLines;
+			if (shown !== null && typeof shown === "object" && !Array.isArray(shown)) {
+				for (const [file, lines] of Object.entries(shown as Record<string, unknown>)) {
+					if (!Array.isArray(lines) || !path.isAbsolute(file)) continue;
+					const bucket = observedGrepLines.get(file) ?? new Set<number>();
+					for (const line of lines) if (Number.isInteger(line) && line > 0) bucket.add(line);
+					observedGrepLines.set(file, bucket);
+				}
+			}
+		}
 		// Synthesis-locked run: the round ships no tool surface, so a model that
 		// calls a tool anyway lands its chat template's tool-call syntax in the
 		// reply as plain text. Sanitize the finished message in place before it
@@ -998,7 +1023,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 				contract,
 				event.message,
 				contractCwd,
-				observedReadRanges,
+				groundingRanges(),
 				runEffects.snapshot(),
 			);
 			if (violation !== null) {
