@@ -158,3 +158,70 @@ it("rejects excessive ULP contracts and explains skipped numeric authoring propo
 		scratch.cleanup();
 	}
 });
+
+// #382, ported from ikourkouta-svg's fix/verifiers-validate-discovery (5c9778b7).
+function verifierCatalog(id: string): string {
+	return [
+		"version: 2",
+		"checks:",
+		`  - id: ${id}`,
+		"    description: Scratch check.",
+		'    command: ["node", "--version"]',
+		'    cwd: "."',
+		"    timeoutMs: 60000",
+		'    tags: ["scratch"]',
+		"",
+	].join("\n");
+}
+
+function validateProject(files: Record<string, string>) {
+	const scratch = makeScratchHome("clio-verifiers-validate-");
+	const project = join(scratch.dir, "project");
+	mkdirSync(project, { recursive: true });
+	for (const [relative, text] of Object.entries(files)) {
+		mkdirSync(dirname(join(project, relative)), { recursive: true });
+		writeFileSync(join(project, relative), text);
+	}
+	try {
+		return spawnSync(
+			process.execPath,
+			[
+				"--import",
+				import.meta.resolve("tsx"),
+				"--input-type=module",
+				"-e",
+				`import { runVerifiersCommand } from ${JSON.stringify(resolve("src/cli/verifiers.ts"))}; process.exitCode = await runVerifiersCommand(["validate"]);`,
+			],
+			{ cwd: project, env: { ...process.env, ...scratch.env }, encoding: "utf8" },
+		);
+	} finally {
+		scratch.cleanup();
+	}
+}
+
+it("fails verifiers validate when a catalog id collides with a package script and blocks discovery", () => {
+	const scripts = JSON.stringify({ name: "scratch", scripts: { typecheck: "tsc --noEmit" } });
+	const blocked = validateProject({
+		"package.json": scripts,
+		".clio-coder/verifiers.yaml": verifierCatalog("typecheck"),
+	});
+	strictEqual(blocked.status, 1, `validate accepted a catalog that blocks discovery:\n${blocked.stdout}`);
+	match(blocked.stderr, /check discovery is blocked: duplicate declared check id 'typecheck'/);
+	match(blocked.stderr, /package\.json \([^)]*package\.json\) and project-catalog \([^)]*verifiers\.yaml\)/);
+	strictEqual(blocked.stdout, "");
+
+	const clean = validateProject({
+		"package.json": scripts,
+		".clio-coder/verifiers.yaml": verifierCatalog("gate-typecheck"),
+	});
+	strictEqual(clean.status, 0, clean.stderr);
+	match(clean.stdout, /accepted \.clio-coder\/verifiers\.yaml \(1 check\)/);
+
+	const missing = validateProject({ "package.json": scripts });
+	strictEqual(missing.status, 0, missing.stderr);
+	match(missing.stdout, /No \.clio-coder\/verifiers\.yaml exists/);
+
+	const malformed = validateProject({ ".clio-coder/verifiers.yaml": "version: 2\nchecks: not-a-list\n" });
+	strictEqual(malformed.status, 1);
+	match(malformed.stderr, /production catalog parser rejected/);
+});
