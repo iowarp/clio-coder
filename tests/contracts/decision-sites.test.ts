@@ -7,6 +7,7 @@ import { inspectDecisionSite, resolveDecider } from "../../src/domains/providers
 import { chosen, isTrue, rating } from "../../src/domains/providers/decisions.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import typesafeJev from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
+import { askSite } from "../../src/domains/providers/site-ask.js";
 import { rankCapabilities } from "../../src/domains/providers/sites/capabilities.js";
 import { TURN_SITES } from "../../src/domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../../src/domains/providers/turn-relevance.js";
@@ -69,6 +70,40 @@ describe("fleet.decisionProfiles validation", () => {
 });
 
 describe("decision site credentials", () => {
+	it("counts credential resolution against the decision timeout", async () => {
+		const { settings } = settingsWith({ toolRisk: "system-one" });
+		let releaseAuth = () => {};
+		const waitingForAuth = new Promise<{ apiKey: string }>((resolve) => {
+			releaseAuth = () => resolve({ apiKey: "key" });
+		});
+		let decisions = 0;
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => ({
+				...typesafeJev,
+				async decide() {
+					decisions += 1;
+					return { model: "jev", answers: { q: { type: "noul", noul: 0.9 } } };
+				},
+			}),
+			auth: { resolveForTarget: () => waitingForAuth },
+		} as unknown as ProvidersContract;
+		let watchdog: ReturnType<typeof setTimeout> | undefined;
+		const late = new Promise<string>((resolve) => {
+			watchdog = setTimeout(() => resolve("still waiting"), 150);
+		});
+		const question = { q: { type: "noul" as const, instructions: "?", criteria: { true: "yes", false: "no" } } };
+		const result = await Promise.race([
+			askSite("toolRisk", { settings, providers, ctx: { ...ctx, httpTimeoutMs: 25 } }, {}, question),
+			late,
+		]);
+		clearTimeout(watchdog);
+		releaseAuth();
+		strictEqual(result, null, "the site should abstain before slow credential resolution completes");
+		await new Promise(setImmediate);
+		strictEqual(decisions, 0, "a late credential must not start the decision request");
+	});
+
 	// A Jev target's key normally lives in the credential store under
 	// auth.apiKeyRef, and the sites pass only which env vars are set. Before the
 	// decider resolved the stored key, every request went out without it, got a

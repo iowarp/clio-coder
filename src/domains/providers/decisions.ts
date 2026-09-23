@@ -134,24 +134,44 @@ export function createDecider(
 		throw new Error(`runtime '${runtime.id}' does not support decide()`);
 	}
 	const askDetailed: Decider["askDetailed"] = async (state, questions, options = {}) => {
-		// Resolved per call rather than at binding: a decider outlives a key
-		// rotation, and an operator who stores a key mid-session is answered on
-		// the next question rather than at the next restart.
-		const authToken = ctx.authToken ?? (await resolveAuthToken?.(options.signal));
-		// A per-call model wins, then the one the binding names; without either the
-		// runtime falls back to the target's default.
-		const model = options.model ?? boundModel;
-		return decide.call(
-			runtime,
-			target,
-			{
-				state,
-				questions,
-				...(model !== undefined ? { model } : {}),
-				...(options.signal !== undefined ? { signal: options.signal } : {}),
-			},
-			authToken ? { ...ctx, authToken } : ctx,
+		// The HTTP timeout starts only after credentials resolve. Own a deadline
+		// around both steps so a slow credential refresh cannot stall the turn.
+		const controller = new AbortController();
+		const signal = controller.signal;
+		const upstream = [options.signal, ctx.signal].filter((entry): entry is AbortSignal => entry !== undefined);
+		const onUpstreamAbort = () => controller.abort(upstream.find((entry) => entry.aborted)?.reason);
+		for (const entry of upstream) entry.addEventListener("abort", onUpstreamAbort, { once: true });
+		if (upstream.some((entry) => entry.aborted)) onUpstreamAbort();
+		const timer = setTimeout(
+			() => controller.abort(new Error(`decision timed out after ${ctx.httpTimeoutMs}ms`)),
+			ctx.httpTimeoutMs,
 		);
+		const aborted = new Promise<never>((_resolve, reject) => {
+			if (signal.aborted) reject(signal.reason);
+			else signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+		});
+		try {
+			return await Promise.race([
+				(async () => {
+					signal.throwIfAborted();
+					// Resolved per call rather than at binding, so a rotated key is
+					// available to the next question without restarting the session.
+					const authToken = ctx.authToken ?? (await resolveAuthToken?.(signal));
+					signal.throwIfAborted();
+					const model = options.model ?? boundModel;
+					return decide.call(
+						runtime,
+						target,
+						{ state, questions, ...(model !== undefined ? { model } : {}), signal },
+						authToken ? { ...ctx, authToken } : ctx,
+					);
+				})(),
+				aborted,
+			]);
+		} finally {
+			clearTimeout(timer);
+			for (const entry of upstream) entry.removeEventListener("abort", onUpstreamAbort);
+		}
 	};
 	return {
 		askDetailed,

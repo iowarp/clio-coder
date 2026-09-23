@@ -1008,7 +1008,9 @@ no enable flag to retire when it leaves alpha, and a site that misbehaves can be
 unbound on its own without giving up the others. Abstention below the
 confidence floor and a provider failure both land in that same path, so a bound
 site that cannot answer degrades to the unbound behavior instead of failing the
-turn.
+turn. The decision deadline starts before credential resolution as well as the
+HTTP request, so an asynchronous key refresh cannot add an unbounded wait to
+the pre-turn call.
 
 Both halves of a binding are validated where they are written. An unknown site
 name and a profile that `fleet.profiles` does not define are settings errors,
