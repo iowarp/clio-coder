@@ -1138,6 +1138,10 @@ Bound, the session registers one more capability behind the gateway,
 `consult`, and the gateway's prompt line names it. The main agent calls it
 with `gateway(op="call", capability="consult", args={questions, state})`:
 
+The prompt line suggests consulting when a diff leaves two plausible fixes or
+migration risk is unclear. It asks the agent to supply evidence and treat the
+returned probabilities as advice; the agent still decides whether to call.
+
 - `questions` holds one to four independent questions, each `yesNo` (with
   optional `whenTrue` and `whenFalse` descriptions), `pick` (2 to 8 named
   options, each defined by its description) or `rate` (a ladder of 2 to 8
