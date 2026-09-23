@@ -7,6 +7,7 @@ import {
 	setFleetProfileInSettings,
 	type TargetSelectionRole,
 	type UseTargetOptions,
+	unusedSharedModelReason,
 	updateSettings,
 	useTargetInSettings,
 } from "../core/config.js";
@@ -307,6 +308,18 @@ async function runUse(args: ReadonlyArray<string>): Promise<number> {
 		printError(`usage: ${USE_USAGE}`);
 		return 2;
 	}
+	const options: UseTargetOptions = {
+		...(parsed.model !== undefined ? { model: parsed.model } : {}),
+		...(parsed.orchestratorModel !== undefined ? { orchestratorModel: parsed.orchestratorModel } : {}),
+		...(parsed.workerModel !== undefined ? { workerModel: parsed.workerModel } : {}),
+		...(parsed.workerTarget !== undefined ? { workerTargetId: parsed.workerTarget } : {}),
+		...(parsed.backgroundModel !== undefined ? { backgroundModel: parsed.backgroundModel } : {}),
+	};
+	const refusal = unusedSharedModelReason(parsed.id, options);
+	if (refusal !== null) {
+		printError(refusal);
+		return 2;
+	}
 	ensureClioState();
 	const settings = readSettings();
 	const target = settings.targets.find((entry) => entry.id === parsed.id);
@@ -316,13 +329,6 @@ async function runUse(args: ReadonlyArray<string>): Promise<number> {
 	}
 	const registry = getRuntimeRegistry();
 	if (registry.list().length === 0) registerBuiltinRuntimes(registry);
-	const options: UseTargetOptions = {
-		...(parsed.model !== undefined ? { model: parsed.model } : {}),
-		...(parsed.orchestratorModel !== undefined ? { orchestratorModel: parsed.orchestratorModel } : {}),
-		...(parsed.workerModel !== undefined ? { workerModel: parsed.workerModel } : {}),
-		...(parsed.workerTarget !== undefined ? { workerTargetId: parsed.workerTarget } : {}),
-		...(parsed.backgroundModel !== undefined ? { backgroundModel: parsed.backgroundModel } : {}),
-	};
 	const candidate = structuredClone(settings);
 	const selection = useTargetInSettings(candidate, target.id, options);
 	if (!selection) {
