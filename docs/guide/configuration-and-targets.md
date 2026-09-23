@@ -951,7 +951,10 @@ check abstain unconditionally.
 A missing or unrecognised answer throws rather than defaulting. Callers index by
 the question ids they submitted, so a dropped answer is a contract break and not
 a soft failure, and a caller gating dispatch must never receive a decision the
-model did not make.
+model did not make. An answer of a different type than the question, a `noul`
+outside 0 to 1, a choice outside the offered options, or a score outside its
+ladder is also discarded as malformed. A bound site then falls back as though
+it had no usable answer.
 
 #### Binding a decision site
 

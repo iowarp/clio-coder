@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Reject decision answers that do not match the question's shape or range. A `choice` returned for a `noul` question could pass the certainty floor and make `consult` claim it had answered while reporting a zero probability. Such malformed replies now fall back to no usable answer.
 - Authenticate decision sites with the target's stored key. The TypeSafe runtime read its key only from the probe context's token or from `TYPESAFE_API_KEY`, and the sites passed neither, so a Jev target with its key in the credential store sent every decision unauthenticated and every site fell back silently, exactly as an unbound one would. The decider now resolves the key per call through the providers auth contract.
 - Read a TypeSafe target URL that already ends in `/systemone` as the API root instead of posting to `/systemone/systemone`.
 - Recalibrate the tool-risk ladder around what changes where. Its top rung said "reaches another machine", and jev-latest followed that literally: a plain `curl` GET rated irreversible, so the approval card cried wolf on every download. The rungs now separate reading from changing, and changing this workspace from changing another machine. Against twelve commands spanning the four rungs, the old wording agreed with the intended rung on nine and abstained on `npm install`; the new one agreed on all twelve in two consecutive live runs.
