@@ -1,8 +1,9 @@
 import type { TargetStatus } from "./contract.js";
 import { listKnownModelsForRuntime } from "./support.js";
 import type { ContextWindowSlots } from "./types/context-window-slots.js";
+import type { RuntimeDescriptor } from "./types/runtime-descriptor.js";
 
-export type ProviderModelSource = "configured" | "live" | "catalog" | "default";
+export type ProviderModelSource = "configured" | "live" | "cache" | "catalog" | "default";
 
 export interface ProviderModelCandidate {
 	id: string;
@@ -80,6 +81,53 @@ export function hasLiveModelCatalog(status: TargetStatus): boolean {
 }
 
 /**
+ * Whether the runtime can ask its provider which models exist right now. When
+ * it can and the provider answers, that answer is the model list and the static
+ * catalog is only the fallback for when no answer comes. A runtime that cannot
+ * ask has only its catalog, and every surface labels it as one. Configure and
+ * the providers domain both decide by this, so no surface lists a catalog where
+ * another lists the live answer.
+ */
+export function runtimeListsModelsLive(
+	runtime: Pick<RuntimeDescriptor, "kind" | "probe" | "probeModels" | "externalAgentLoop">,
+): boolean {
+	if (runtime.externalAgentLoop?.modelCatalog === "live-authoritative") return true;
+	return runtime.kind === "http" && (typeof runtime.probe === "function" || typeof runtime.probeModels === "function");
+}
+
+export type UnverifiedModelListOrigin = "cache" | "catalog" | "configured";
+
+/**
+ * The words every surface puts beside a model list that is not the provider's
+ * live answer: what the list is, and why the live answer is missing. `reason`
+ * is the failed probe's diagnostic when there was one.
+ */
+export function unverifiedModelListNote(
+	origin: UnverifiedModelListOrigin,
+	input: { runtimeId: string; listsLive: boolean; reason?: string | null | undefined },
+): string {
+	const list = origin === "cache" ? "cached list" : origin === "catalog" ? "provider catalog" : "configured list";
+	if (!input.listsLive) return `${list}; ${input.runtimeId} does not list its models live`;
+	return input.reason ? `${list}, not verified live: ${input.reason}` : `${list}, not verified live`;
+}
+
+/** The note for the list `modelCandidatesForStatus` returns, or null when that list is the live answer. */
+export function modelListNoteForStatus(status: TargetStatus): string | null {
+	const candidates = modelCandidatesForStatus(status);
+	if (candidates.length === 0 || candidates.some((candidate) => candidate.source === "live")) return null;
+	const origin: UnverifiedModelListOrigin = candidates.some((candidate) => candidate.source === "cache")
+		? "cache"
+		: candidates.some((candidate) => candidate.source === "catalog")
+			? "catalog"
+			: "configured";
+	return unverifiedModelListNote(origin, {
+		runtimeId: status.runtime?.id ?? status.target.runtime,
+		listsLive: status.runtime !== null && runtimeListsModelsLive(status.runtime),
+		reason: status.health.lastError,
+	});
+}
+
+/**
  * Enumerate selectable wire model ids for a target. Before a live catalog is
  * known, Clio keeps useful configured/default/catalog hints. Once the target
  * returns a live catalog, it supplies the current selectable candidates. Cached
@@ -115,7 +163,7 @@ export function modelCandidatesForStatus(status: TargetStatus): ProviderModelCan
 	if (status.discoveredModelsSource === "cache") {
 		for (const id of configured) add(id, "configured");
 		if (defaultModel) add(defaultModel, "default");
-		for (const id of discovered) add(id, "catalog");
+		for (const id of discovered) add(id, "cache");
 		if (out.length > 0) return out;
 	}
 

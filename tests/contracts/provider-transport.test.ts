@@ -1,18 +1,28 @@
 import { deepStrictEqual, ok, strictEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import type { AssistantMessageEvent, Context, Model } from "@earendil-works/pi-ai";
-
+import { runConfigureCommand } from "../../src/cli/configure.js";
+import { runModelsCommand } from "../../src/cli/models.js";
+import { runTargetsCommand } from "../../src/cli/targets.js";
 import { type ClioSettings, readSettings, updateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { loadDomains } from "../../src/core/domain-loader.js";
 import type { SafeEventBus } from "../../src/core/event-bus.js";
+import { ConfigDomainModule } from "../../src/domains/config/index.js";
 import { ensureClioState } from "../../src/domains/lifecycle/index.js";
 import { isOrchestratorEligibleRuntime } from "../../src/domains/providers/eligibility.js";
-import { listProviderSupportEntries, type ProvidersContract } from "../../src/domains/providers/index.js";
+import {
+	listProviderSupportEntries,
+	type ProvidersContract,
+	ProvidersDomainModule,
+} from "../../src/domains/providers/index.js";
 import { loadPluginRuntimes } from "../../src/domains/providers/plugins.js";
 import { createRuntimeRegistry, getRuntimeRegistry } from "../../src/domains/providers/registry.js";
 import antigravityCodeRuntime, {
@@ -20,6 +30,7 @@ import antigravityCodeRuntime, {
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
 import { registerBuiltinRuntimes } from "../../src/domains/providers/runtimes/builtins.js";
 import claudeCodeRuntime from "../../src/domains/providers/runtimes/claude/claude-code.js";
+import googleRuntime from "../../src/domains/providers/runtimes/cloud/google.js";
 import anthropicCompatRuntime from "../../src/domains/providers/runtimes/protocol/anthropic-compat.js";
 import litellmRuntime, {
 	aggregateLiteLLMCapabilities,
@@ -120,6 +131,75 @@ function selectableModelRow(): ModelRow {
 		selectable: true,
 	};
 }
+
+// biome-ignore lint/suspicious/noControlCharactersInRegex: strips the picker's ANSI styling
+const ANSI_PATTERN = /\u001b\[[0-9;]*m/gu;
+
+interface GeminiStub {
+	url: string;
+	requests: Array<{ path: string; key: string | undefined }>;
+	close(): Promise<void>;
+}
+
+/** A local Gemini model listing: two pages for "gem-test-key", 403 for any other key. */
+async function startGeminiStub(): Promise<GeminiStub> {
+	const requests: GeminiStub["requests"] = [];
+	const server = createServer((request, response) => {
+		const key = request.headers["x-goog-api-key"];
+		requests.push({ path: request.url ?? "", key: typeof key === "string" ? key : undefined });
+		if (key !== "gem-test-key") {
+			response.writeHead(403, "Forbidden").end();
+			return;
+		}
+		const secondPage = new URL(request.url ?? "/", "http://stub").searchParams.get("pageToken") === "page-2";
+		const body = secondPage
+			? {
+					models: [
+						{
+							name: "models/gemini-b",
+							displayName: "Gemini B",
+							supportedGenerationMethods: ["generateContent", "countTokens"],
+						},
+					],
+				}
+			: {
+					models: [
+						{ name: "models/gemini-a", supportedGenerationMethods: ["generateContent"] },
+						{ name: "models/text-embedding-004", supportedGenerationMethods: ["embedContent"] },
+					],
+					nextPageToken: "page-2",
+				};
+		response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify(body));
+	});
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const address = server.address() as AddressInfo;
+	return {
+		url: `http://127.0.0.1:${address.port}`,
+		requests,
+		close: () => new Promise((resolve) => server.close(() => resolve())),
+	};
+}
+
+async function captureStream(
+	stream: NodeJS.WriteStream,
+	run: () => Promise<number>,
+): Promise<{ code: number; output: string }> {
+	const written: string[] = [];
+	const original = stream.write.bind(stream);
+	stream.write = ((chunk: string | Uint8Array) => {
+		written.push(String(chunk));
+		return true;
+	}) as typeof stream.write;
+	try {
+		const code = await run();
+		return { code, output: written.join("") };
+	} finally {
+		stream.write = original;
+	}
+}
+
+const captureStdout = (run: () => Promise<number>) => captureStream(process.stdout, run);
+const captureStderr = (run: () => Promise<number>) => captureStream(process.stderr, run);
 
 describe("provider transport boundary", () => {
 	it("applies a model-picker selection after the scope confirmation", () => {
@@ -574,5 +654,185 @@ describe("provider transport boundary", () => {
 		const plugin = registry.get("contract-plugin");
 		ok(plugin !== null);
 		strictEqual(plugin.synthesizeModel({ id: "target", runtime: plugin.id }, "model", null).id, "model");
+	});
+	it("lists only the Gemini models a key can generate with, across pages, and sends nothing without a key", async () => {
+		const stub = await startGeminiStub();
+		const saved = { GOOGLE_API_KEY: process.env.GOOGLE_API_KEY, GEMINI_API_KEY: process.env.GEMINI_API_KEY };
+		try {
+			const target = { id: "gem", runtime: "google", url: `${stub.url}/v1beta` };
+			const ctx = (authToken?: string) => ({
+				credentialsPresent: new Set<string>(),
+				httpTimeoutMs: 2000,
+				...(authToken ? { authToken } : {}),
+			});
+			const listed = await googleRuntime.probe?.(target, ctx("gem-test-key"));
+			strictEqual(listed?.ok, true);
+			deepStrictEqual(listed?.models, ["gemini-a", "gemini-b"]);
+			deepStrictEqual(listed?.modelLabels, { "gemini-b": "Gemini B" });
+			deepStrictEqual(stub.requests, [
+				{ path: "/v1beta/models?pageSize=1000", key: "gem-test-key" },
+				{ path: "/v1beta/models?pageSize=1000&pageToken=page-2", key: "gem-test-key" },
+			]);
+
+			const refused = await googleRuntime.probe?.(target, ctx("bad-key"));
+			strictEqual(refused?.ok, false);
+			strictEqual(refused?.authFailed, true);
+			strictEqual(refused?.failureKind, "authentication");
+			strictEqual(refused?.error, "the Gemini API refused the key (HTTP 403: Forbidden)");
+
+			delete process.env.GOOGLE_API_KEY;
+			delete process.env.GEMINI_API_KEY;
+			const before = stub.requests.length;
+			const keyless = await googleRuntime.probe?.(target, ctx());
+			strictEqual(keyless?.failureKind, "missing");
+			strictEqual(stub.requests.length, before, "a keyless listing must not reach the API");
+		} finally {
+			for (const [name, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			await stub.close();
+		}
+	});
+
+	it("words the catalog fallback in `models` and lets a live Gemini list replace the catalog", async () => {
+		const env = await isolateClioEnv("clio-coder-models-fallback-");
+		const stub = await startGeminiStub();
+		try {
+			updateSettings((settings) => {
+				settings.targets.push({
+					id: "gem",
+					runtime: "google",
+					url: `${stub.url}/v1beta`,
+					defaultModel: "gemini-unlisted",
+				});
+			});
+			process.env.GOOGLE_API_KEY = "bad-key";
+			const refused = await captureStdout(() => runModelsCommand(["--target", "gem"]));
+			ok(refused.output.includes("gemini-2.5-pro"), `the catalog is the fallback:\n${refused.output}`);
+			ok(
+				refused.output.includes(
+					"gem: provider catalog, not verified live: the Gemini API refused the key (HTTP 403: Forbidden)",
+				),
+				refused.output,
+			);
+
+			process.env.GOOGLE_API_KEY = "gem-test-key";
+			const live = await captureStdout(() => runModelsCommand(["--target", "gem", "--json"]));
+			const rows = JSON.parse(live.output) as Array<{ modelId: string; source: string; note?: string }>;
+			deepStrictEqual(
+				rows.map((row) => [row.modelId, row.source, row.note]),
+				[
+					["gemini-a", "live", undefined],
+					["gemini-b", "live", undefined],
+				],
+			);
+
+			// A live list judges the default model too, where the catalog used to excuse it.
+			const loaded = await loadDomains([ConfigDomainModule, ProvidersDomainModule]);
+			try {
+				const providers = loaded.getContract<ProvidersContract>("providers");
+				await providers?.probeAllLive();
+				const status = providers?.list().find((entry) => entry.target.id === "gem");
+				strictEqual(status?.health.status, "degraded");
+				strictEqual(status?.health.lastError, "default model 'gemini-unlisted' is not advertised by the target");
+			} finally {
+				await loaded.stop();
+			}
+
+			process.env.GOOGLE_API_KEY = "bad-key";
+			const stale = await captureStdout(() => runModelsCommand(["--target", "gem"]));
+			ok(
+				stale.output.includes("gem: cached list, not verified live: the Gemini API refused the key (HTTP 403: Forbidden)"),
+				stale.output,
+			);
+		} finally {
+			await stub.close();
+			env.restore();
+		}
+	});
+
+	it("checks a `targets use` model against the key's live list and words the catalog fallback", async () => {
+		const env = await isolateClioEnv("clio-coder-targets-use-live-");
+		const stub = await startGeminiStub();
+		try {
+			updateSettings((settings) => {
+				for (const id of ["gem", "gem-refused"]) {
+					settings.targets.push({ id, runtime: "google", url: `${stub.url}/v1beta`, defaultModel: "gemini-a" });
+				}
+			});
+			process.env.GOOGLE_API_KEY = "gem-test-key";
+			const unlisted = await captureStderr(() => runTargetsCommand(["use", "gem", "--model", "gemini-2.5-pro"]));
+			strictEqual(unlisted.code, 1);
+			ok(
+				unlisted.output.includes("target 'gem' does not list model 'gemini-2.5-pro' for chat (probe inventory)"),
+				unlisted.output,
+			);
+			strictEqual((await captureStderr(() => runTargetsCommand(["use", "gem", "--model", "gemini-b"]))).code, 0);
+
+			process.env.GOOGLE_API_KEY = "bad-key";
+			const fallback = await captureStderr(() => runTargetsCommand(["use", "gem-refused", "--model", "gemini-2.5-pro"]));
+			strictEqual(fallback.code, 0, fallback.output);
+			ok(
+				fallback.output.includes(
+					"warning: model list for target 'gem-refused' is the provider catalog, not verified live: the Gemini API refused the key (HTTP 403: Forbidden)",
+				),
+				fallback.output,
+			);
+		} finally {
+			await stub.close();
+			env.restore();
+		}
+	});
+
+	it("refuses a configure model the key's live list lacks, and says when only the catalog checked it", async () => {
+		const env = await isolateClioEnv("clio-coder-configure-live-");
+		const stub = await startGeminiStub();
+		const configure = (id: string) =>
+			captureStderr(() =>
+				runConfigureCommand([
+					"--id",
+					id,
+					"--runtime",
+					"google",
+					"--url",
+					`${stub.url}/v1beta`,
+					"--api-key-env",
+					"GOOGLE_API_KEY",
+					"--model",
+					"gemini-2.5-pro",
+				]),
+			);
+		try {
+			process.env.GOOGLE_API_KEY = "gem-test-key";
+			const refused = await configure("gem");
+			strictEqual(refused.code, 2, refused.output);
+			ok(refused.output.includes("does not advertise model 'gemini-2.5-pro'"), refused.output);
+
+			process.env.GOOGLE_API_KEY = "bad-key";
+			const fallback = await configure("gem-offline");
+			strictEqual(fallback.code, 0, fallback.output);
+			ok(
+				fallback.output.includes(
+					"warning: model 'gemini-2.5-pro' was checked against the provider catalog, not verified live: the Gemini API refused the key (HTTP 403: Forbidden)",
+				),
+				fallback.output,
+			);
+		} finally {
+			await stub.close();
+			env.restore();
+		}
+	});
+
+	it("puts the fallback note where the model picker names a row's source", () => {
+		const view = new ModelOverlayView(
+			[{ ...selectableModelRow(), source: "catalog", sourceNote: "provider catalog, not verified live: HTTP 503" }],
+			{ totalModels: 1, targets: 1, localModels: 0, cloudModels: 1, activeRef: "" },
+			() => undefined,
+			undefined,
+			() => undefined,
+		);
+		const text = view.render(240).join("\n").replace(ANSI_PATTERN, "");
+		ok(text.includes("source provider catalog, not verified live: HTTP 503 · "), text);
 	});
 });

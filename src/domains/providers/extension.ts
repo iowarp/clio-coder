@@ -27,7 +27,6 @@ import { loadPluginRuntimes } from "./plugins.js";
 import { probeToolCall } from "./probe/tool-call.js";
 import { getRuntimeRegistry } from "./registry.js";
 import { registerBuiltinRuntimes } from "./runtimes/builtins.js";
-import { listKnownModelsForRuntime } from "./support.js";
 import { readTargetModelSnapshot, recordTargetModelSnapshot } from "./target-model-cache.js";
 import type { CapabilityFlags } from "./types/capability-flags.js";
 import { EMPTY_CAPABILITIES } from "./types/capability-flags.js";
@@ -272,23 +271,20 @@ function mergeProbeResult(
  * Whether a reachable target can serve the model it is configured to serve by
  * default. Reachability alone was the whole of `health`, so a target whose
  * `defaultModel` the server had never heard of printed `healthy` until the
- * first turn. This is judged only from a live list on a runtime with no static
- * catalog: the catalog is the authority for cloud runtimes, and a cached or
- * descriptor-supplied list says nothing about the server in front of us.
- * Returns the reason when the default is not served, null when it is or when
- * there is no live evidence either way.
+ * first turn. This is judged only from a live list. A live list replaces the
+ * static catalog, so it judges a cloud runtime's default too: a Gemini key that
+ * cannot call its default model is degraded before the first turn fails. A
+ * cached or descriptor-supplied list says nothing about the server in front of
+ * us. Returns the reason when the default is not served, null when it is or
+ * when there is no live evidence either way.
  */
 function unservedDefaultModelReason(
-	desc: Pick<RuntimeDescriptor, "id" | "externalAgentLoop">,
 	target: Pick<TargetDescriptor, "defaultModel">,
 	merge: Pick<ProbeMerge, "discoveredModels" | "discoveredModelsSource" | "discoveredModelStates">,
 ): string | null {
 	const model = target.defaultModel;
 	if (!model) return null;
 	if (merge.discoveredModelsSource !== "probe" || merge.discoveredModels.length === 0) return null;
-	if (listKnownModelsForRuntime(desc.id).length > 0 && desc.externalAgentLoop?.modelCatalog !== "live-authoritative") {
-		return null;
-	}
 	if (merge.discoveredModels.includes(model)) return null;
 	// LM Studio lists a loaded model under its instance id and keeps the model
 	// key in the state map; the request path resolves either.
@@ -402,7 +398,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 		const merge = mergeProbeResult(desc, target, probe, previous, cachedModels, cachedSnapshot?.modelLabels ?? {});
 		const { capabilities, contextWindowProvenance } = capabilitiesFor(desc, target, merge, kb);
 		const healthy = probe !== null ? probe.ok : null;
-		const unservedDefault = probe?.ok ? unservedDefaultModelReason(desc, target, merge) : null;
+		const unservedDefault = probe?.ok ? unservedDefaultModelReason(target, merge) : null;
 		// A failed probe is still failed health evidence. Separately, permit a
 		// configured HTTP inference attempt; the inference endpoint can differ.
 		const allowHttpInferenceAttempt =
