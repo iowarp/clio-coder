@@ -9,7 +9,7 @@ import { type DispatchBoardRow, dispatchStatusPresentation, renderDispatchActivi
 import { formatFooterTokens } from "../footer-panel.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
-import { clioTheme, formatCompactMs, rule } from "../theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH, rule } from "../theme/index.js";
 import { fitIdentityLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
@@ -285,17 +285,37 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 	const weekly = state.quotaRoute ? routeWeeklyQuota(state.quotaRoute, state.quota ?? []) : null;
 	const leftRoom = Math.max(1, w - rightWidth - 3);
 	const activityLabel = fit(activity, Math.min(visibleWidth(activity), Math.max(5, Math.floor(leftRoom / 3))));
+	// An armed skill narrows the tools every turn uses until `/skill off`, so it
+	// rides next to the activity and outranks the identity, the quota badge and
+	// the thinking level. Where `skill <names>` does not fit, the knowledge mark
+	// stands in for the word.
+	const skills = state.session.activeSkills ?? [];
+	const skillBudget = Math.max(5, Math.floor(leftRoom / 3));
+	const skillWords = `skill ${clean(skills.join(", "))}`;
+	const skillMark = `${GLYPH.classKnowledge} ${clean(skills.join(", "))}`;
+	const skill =
+		skills.length === 0
+			? ""
+			: theme.fg(
+					"muted",
+					visibleWidth(skillWords) <= skillBudget
+						? skillWords
+						: fit(skillMark, Math.min(visibleWidth(skillMark), skillBudget)),
+				);
+	const skillRoom = skill ? visibleWidth(skill) + 3 : 0;
 	const badge =
-		weekly && leftRoom - visibleWidth(activityLabel) - visibleWidth(weekly.label) >= 16
+		weekly && leftRoom - visibleWidth(activityLabel) - skillRoom - visibleWidth(weekly.label) >= 16
 			? theme.fg(
 					weekly.severity === "critical" ? "error" : weekly.severity === "normal" ? "muted" : "warning",
 					weekly.label,
 				)
 			: "";
-	const baseRoom = leftRoom - visibleWidth(activityLabel) - (badge ? visibleWidth(badge) + 3 : 0) - 5;
+	const baseRoom = leftRoom - visibleWidth(activityLabel) - skillRoom - (badge ? visibleWidth(badge) + 3 : 0) - 5;
 	const showThinking = baseRoom - visibleWidth(thinking) - 3 >= 12;
 	const identityRoom = Math.max(1, baseRoom - (showThinking ? visibleWidth(thinking) + 3 : 0));
-	const left = `${activityLabel}  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
+	// Too narrow for a readable identity: drop it rather than cut the row mid-label.
+	const shownIdentity = identityRoom >= 4 ? `  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : "";
+	const left = `${activityLabel}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]
 		.filter((n) => n.expiresAt === null || n.expiresAt > state.now)

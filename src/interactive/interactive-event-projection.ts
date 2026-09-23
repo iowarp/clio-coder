@@ -122,6 +122,8 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			if (event.type === "notice") {
 				if (event.surface === "transcript") {
 					deps.applyChatEvent(event);
+					// The footer names the armed skill surface; a change repaints it.
+					if (event.skillSurface !== undefined) deps.refreshFooter();
 					return;
 				}
 				deps.notify(event.level, event.text, event.key);

@@ -163,6 +163,13 @@ it("explains a discovered but untrusted skill without claiming it is unknown or 
 		);
 		ok(result.kind === "error");
 		match(result.message, /not imported into Clio/);
+		deepStrictEqual(result.details?.refusal, {
+			subject: "skill",
+			name: "foreign-only",
+			kind: "not-imported",
+			source: "claude",
+			scope: "project",
+		});
 		ok(!result.message.includes("unknown skill") && !result.message.includes("PRIVATE FOREIGN BODY"));
 		deepStrictEqual(
 			loadSkills({ cwd }).items.map((skill) => [skill.name, skill.trusted]),

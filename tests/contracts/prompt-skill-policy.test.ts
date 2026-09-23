@@ -106,6 +106,7 @@ for (const level of AUTONOMY_LEVELS) {
 		const denied = await context.run({ scope: "skills", name: "fixture-skill" }, { pendingSkillPolicy: policy });
 		assert.ok(denied.kind === "error");
 		assert.match(denied.message, /may load only its declared skill/);
+		assert.deepEqual(denied.details?.refusal, { subject: "skill", name: "fixture-skill", kind: "recipe-bound" });
 		const compiled = compileWorker(table, {
 			autonomy: level,
 			providerSupportsTools: true,

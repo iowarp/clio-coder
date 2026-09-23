@@ -15,6 +15,7 @@ import { previewBudget, previewRows } from "./preview.js";
  * two surfaces stay byte-identical.
  */
 
+import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
@@ -359,7 +360,9 @@ interface SkillLoadFacts {
 	name: string;
 	description: string | null;
 	activation: string | null;
-	narrows: boolean;
+	/** The tool surface the skill declares: an allow-list, or the tools it removes. */
+	allowedTools: string[];
+	disallowedTools: string[];
 	drifted: boolean;
 }
 
@@ -369,14 +372,64 @@ function skillLoadFacts(finished: ToolExecutionFinished): SkillLoadFacts | null 
 	const details = detailsOf(finished.result);
 	const name = stringField(details, "name");
 	if (name === null) return null;
-	const declared = (key: string) => Array.isArray(details?.[key]) && (details[key] as unknown[]).length > 0;
+	const declared = (key: string): string[] =>
+		Array.isArray(details?.[key])
+			? (details[key] as unknown[]).filter((tool): tool is string => typeof tool === "string")
+			: [];
 	return {
 		name,
 		description: stringField(details, "description"),
 		activation: stringField(details, "activation"),
-		narrows: declared("allowedTools") || declared("disallowedTools"),
+		allowedTools: declared("allowedTools"),
+		disallowedTools: declared("disallowedTools"),
 		drifted: details?.drift === "mismatch",
 	};
+}
+
+/** A skill the context tool refused to load, from the structured reason in its error details. */
+function skillRefusalOf(finished: ToolExecutionFinished | null): SkillLoadRefusal | null {
+	if (finished === null || !finished.isError) return null;
+	const refusal = detailsOf(finished.result)?.refusal;
+	return isSkillLoadRefusal(refusal) ? refusal : null;
+}
+
+/**
+ * Why a skill did not load, and the one move that changes it, in the words the
+ * row states after `skill <name> not loaded`. Commands read in the
+ * slash-command accent.
+ */
+function refusalFact(refusal: SkillLoadRefusal): string {
+	const command = (text: string) => cyan(sanitizeCallTargetText(text));
+	const skill = `/skill ${refusal.name}`;
+	switch (refusal.kind) {
+		case "manual-only":
+			return `${dim("manual-only: ")}${command(skill)}`;
+		case "untrusted":
+			return `${dim("untrusted: review it in ")}${command("/library")}`;
+		case "not-imported":
+			return dim(sanitizeCallTargetText(`not imported: found in ${refusal.source ?? "?"}/${refusal.scope ?? "?"}`));
+		case "not-installed":
+			return `${dim("not installed: ")}${command(skill)}`;
+		case "not-ready":
+			return `${dim(`installed but ${sanitizeCallTargetText(refusal.state ?? "not ready")}: `)}${command("/library")}`;
+		case "operator-only":
+			return `${dim("only you can load it: ")}${command(skill)}`;
+		case "recipe-bound":
+			return dim("not declared for this run");
+		case "not-requested":
+			return dim("not requested this turn");
+		case "already-loaded":
+			return dim("already loaded");
+		default:
+			return dim("unknown skill");
+	}
+}
+
+/** The nested row a load states its tool surface on: `narrows tools to read, edit, bash`. */
+function skillSurfaceLine(skill: SkillLoadFacts): string | null {
+	if (skill.allowedTools.length > 0) return `narrows tools to ${skill.allowedTools.join(", ")}`;
+	if (skill.disallowedTools.length > 0) return `narrows tools to all but ${skill.disallowedTools.join(", ")}`;
+	return null;
 }
 
 /** Who a skill load answered: the operator's request, a bound recipe, or the model's own choice. */
@@ -399,7 +452,6 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 			...(skill.activation !== null && SKILL_ACTIVATION_WORDS[skill.activation] !== undefined
 				? [SKILL_ACTIVATION_WORDS[skill.activation] as string]
 				: []),
-			...(skill.narrows ? ["narrows tools"] : []),
 		];
 	}
 	const details = detailsOf(finished.result);
@@ -874,6 +926,13 @@ function sublineParts(
 ): SublineParts {
 	const finished = "result" in call ? call : null;
 	const row = resolveRow(call);
+	// A refused skill load reads as plainly as a load: what did not load, why,
+	// and the move that changes it.
+	const refusal = skillRefusalOf(finished);
+	if (refusal !== null) {
+		const lead = `${classMark("knowledge")}${dim("skill")} ${cyan(sanitizeCallTargetText(refusal.name))} ${styledVerb("not loaded", "knowledge")}${dim(" · ")}${refusalFact(refusal)}`;
+		return { lead, tail: statusGlyph(status, meta) };
+	}
 	const settled = status === "ok" || status === "error";
 	const verb = isNonExecutedOutcome(finished?.outcome) ? "blocked" : settled ? row.spec.verbs[1] : row.spec.verbs[0];
 	const object = rowObject(row, finished, width);
@@ -1117,12 +1176,14 @@ function renderStructuredOutputRows(
 }
 
 function highlightBashCommand(command: string): string {
-	const tokens = command.match(/'[^']*'|"[^"]*"|\|\||&&|[|;()<>]|[^\s|;&()<>]+|\s+/gu) ?? [command];
+	// Every character lands in some token: a lone `&` (`2>&1`, a background
+	// job) is an operator, never dropped.
+	const tokens = command.match(/'[^']*'|"[^"]*"|\|\||&&|[|;&()<>]|[^\s|;&()<>]+|\s+/gu) ?? [command];
 	return tokens
 		.map((token) => {
 			if (/^\s+$/u.test(token)) return token;
 			if (/^'[^']*'$|^"[^"]*"$/u.test(token)) return green(token);
-			if (/^(?:\|\||&&|[|;()<>])$/u.test(token)) return dim(token);
+			if (/^(?:\|\||&&|[|;&()<>])$/u.test(token)) return dim(token);
 			if (/^-{1,2}[\w-]+/u.test(token)) return yellow(token);
 			return token;
 		})
@@ -1580,13 +1641,20 @@ export function renderToolPreview(
 			true,
 		),
 	);
+	// A refused skill load states its reason on the row; its message is the
+	// model's instruction and stays in /view.
+	if (finished !== undefined && skillRefusalOf(finished) !== null) return rows;
 	const skill = finished ? skillLoadFacts(finished) : null;
-	// The one line that says what a loaded skill is for; Compact keeps the row alone.
-	if (skill?.description && detail.style !== "compact") {
-		const line = sanitizeCallTargetText(skill.description);
-		rows.push(
-			`${RAIL_DIM}${theme.fg("muted", truncateToWidth(line, Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
-		);
+	// The tool surface a loaded skill declares and the one line that says what
+	// it is for; Compact keeps the row alone.
+	if (skill !== null && detail.style !== "compact") {
+		const surface = skillSurfaceLine(skill);
+		for (const line of [surface, skill.description]) {
+			if (line === null || line.length === 0) continue;
+			rows.push(
+				`${RAIL_DIM}${theme.fg("muted", truncateToWidth(sanitizeCallTargetText(line), Math.max(1, width - BODY_INDENT_VISIBLE_WIDTH), GLYPH.ellipsis))}`,
+			);
+		}
 	}
 	// Pairs the row could not carry inline: each question and its answer, or
 	// each decision, on its own row.

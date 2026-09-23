@@ -4,7 +4,7 @@ import type { ContextRecalledPayload } from "../../core/bus-events.js";
 import type { ClioSettings } from "../../core/config.js";
 import type { PrecomputedRanking } from "../../core/precomputed-rank.js";
 import { settingsAwareness } from "../../core/settings-awareness.js";
-import { SKILL_SUGGESTION_ANCHOR } from "../../core/skill-activation.js";
+import { SKILL_SUGGESTION_ANCHOR, type SkillLoadRefusal, type SkillRefusalKind } from "../../core/skill-activation.js";
 import { ToolNames } from "../../core/tool-names.js";
 import type { BudgetProvider } from "../../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../../domains/context/worker/recall.js";
@@ -195,10 +195,18 @@ const NO_PENDING_SKILL_DENIAL =
 	"context: no pending skill request is active this turn; only the operator can activate a skill, so do not retry this load. " +
 	`If a listed skill matches the task, open your reply with the line \`${SKILL_SUGGESTION_ANCHOR}\` and continue the task without it; only the operator can run it. Otherwise continue without skills.`;
 
-function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | undefined): string | null {
+/** A policy refusal: the model-facing text and the kind the transcript states. */
+interface SkillPolicyError {
+	message: string;
+	kind: SkillRefusalKind;
+}
+
+const operatorOnly = (): SkillPolicyError => ({ message: NO_PENDING_SKILL_DENIAL, kind: "operator-only" });
+
+function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | undefined): SkillPolicyError | null {
 	const policy = options?.pendingSkillPolicy;
 	if (!policy) {
-		return NO_PENDING_SKILL_DENIAL;
+		return operatorOnly();
 	}
 	const recipeBound = policyIsRecipeBound(policy);
 	// auto-edit / full-auto: the operator already chose to let the model act
@@ -209,26 +217,51 @@ function pendingSkillPolicyError(name: string, options: ToolInvokeOptions | unde
 	if (policy.modelActivation === true && !recipeBound) {
 		if (!policy.loadedSkillNames.has(name)) return null;
 		const window = policy.carriedSurface === true ? "in this session" : "this turn";
-		return `context: skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+		return {
+			message: `context: skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`,
+			kind: "already-loaded",
+		};
 	}
 	const allowed = [...new Set(policy.allowedSkillNames.map((entry) => entry.trim()).filter(Boolean))];
 	if (allowed.length === 0) {
-		return NO_PENDING_SKILL_DENIAL;
+		return operatorOnly();
 	}
 	if (!allowed.includes(name)) {
-		if (recipeBound) return `context: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`;
+		if (recipeBound)
+			return {
+				message: `context: this agent run may load only its declared skill(s): ${allowed.join(", ")}.`,
+				kind: "recipe-bound",
+			};
 		// A carried surface is a skill the operator activated on an earlier
 		// turn, not a request waiting to be loaded now. Claiming a pending
 		// request here would invite a retry of a load nothing asked for.
-		if (policy.carriedSurface === true) return NO_PENDING_SKILL_DENIAL;
-		return `context: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`;
+		if (policy.carriedSurface === true) return operatorOnly();
+		return {
+			message: `context: this turn has pending skill request(s): ${allowed.join(", ")}. Load only those before doing anything else.`,
+			kind: "not-requested",
+		};
 	}
 	if (policy.loadedSkillNames.has(name)) {
-		if (recipeBound) return `context: skill ${name} is already loaded in this run; continue with its workflow.`;
+		if (recipeBound)
+			return {
+				message: `context: skill ${name} is already loaded in this run; continue with its workflow.`,
+				kind: "already-loaded",
+			};
 		const window = policy.carriedSurface === true ? "in this session" : "this turn";
-		return `context: pending skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`;
+		return {
+			message: `context: pending skill ${name} already loaded ${window}; continue with the loaded workflow and call ask_user if an interview/choice is needed.`,
+			kind: "already-loaded",
+		};
 	}
 	return null;
+}
+
+/**
+ * A refused load as the tool returns it: the model-facing message, and the
+ * structured reason the transcript states instead of that message.
+ */
+function skillRefusal(message: string, refusal: Omit<SkillLoadRefusal, "subject">): ToolResult {
+	return { kind: "error", message, details: { refusal: { subject: "skill", ...refusal } } };
 }
 
 function pendingSkillRequestFor(name: string, options: ToolInvokeOptions | undefined) {
@@ -529,7 +562,7 @@ function runSkillsScope(
 		});
 	}
 	const policyError = pendingSkillPolicyError(name, options);
-	if (policyError) return { kind: "error", message: policyError };
+	if (policyError) return skillRefusal(policyError.message, { name, kind: policyError.kind });
 	const list = loadSkills({ cwd: cwdFromDeps(deps), ...(deps.getSkillLoaderOptions?.() ?? {}) });
 	const visible = modelVisibleSkills(list.items);
 	const pendingRequest = pendingSkillRequestFor(name, options);
@@ -544,21 +577,27 @@ function runSkillsScope(
 				deps.getSkillLoaderOptions?.().trustProjectCompatRoots === true,
 			).find((pkg) => pkg.names.includes(name));
 			if (installed && installed.state !== "ready")
-				return {
-					kind: "error",
-					message: `context: skill "${name}" is installed in ${installed.scope} scope but ${installed.state}. Inspect it in /library; do not reinstall it.`,
-				};
+				return skillRefusal(
+					`context: skill "${name}" is installed in ${installed.scope} scope but ${installed.state}. Inspect it in /library; do not reinstall it.`,
+					{ name, kind: "not-ready", scope: installed.scope, state: installed.state },
+				);
 		}
 		const unavailable = list.items.find((item) => item.name === name);
 		if (unavailable) {
-			return {
-				kind: "error",
-				message: unavailable.trusted
-					? `context: skill "${name}" requires explicit operator activation with /skill ${name}; it disables model invocation. Do not retry this load.`
-					: unavailable.source === "plugin"
-						? `context: skill "${name}" is imported but untrusted. Review it in /library, then enable integrations.projectResources.trustProjectImports to use it. Do not retry this load.`
-						: `context: skill "${name}" is discovered in ${unavailable.source}/${unavailable.scope}, not imported into Clio. Use interop adopt or library import explicitly; the trust setting alone does not activate it. Do not retry this load.`,
-			};
+			if (unavailable.trusted)
+				return skillRefusal(
+					`context: skill "${name}" requires explicit operator activation with /skill ${name}; it disables model invocation. Do not retry this load.`,
+					{ name, kind: "manual-only" },
+				);
+			if (unavailable.source === "plugin")
+				return skillRefusal(
+					`context: skill "${name}" is imported but untrusted. Review it in /library, then enable integrations.projectResources.trustProjectImports to use it. Do not retry this load.`,
+					{ name, kind: "untrusted" },
+				);
+			return skillRefusal(
+				`context: skill "${name}" is discovered in ${unavailable.source}/${unavailable.scope}, not imported into Clio. Use interop adopt or library import explicitly; the trust setting alone does not activate it. Do not retry this load.`,
+				{ name, kind: "not-imported", source: unavailable.source, scope: unavailable.scope },
+			);
 		}
 
 		// A marketplace entry is a skill that exists and is not installed. Saying
@@ -566,14 +605,14 @@ function runSkillsScope(
 		// offered; name the state and the one move that changes it.
 		const installable = marketplaceRowsFor(deps, list.items, options).some((entry) => entry.name === name);
 		if (installable) {
-			return {
-				kind: "error",
-				message: `context: skill "${name}" is not installed; it is available in the marketplace. If installation has not been declined, offer /skill ${name} to install it. If the operator chose Not now or Cancel, continue without this skill and do not offer it again. Do not retry this load.`,
-			};
+			return skillRefusal(
+				`context: skill "${name}" is not installed; it is available in the marketplace. If installation has not been declined, offer /skill ${name} to install it. If the operator chose Not now or Cancel, continue without this skill and do not offer it again. Do not retry this load.`,
+				{ name, kind: "not-installed" },
+			);
 		}
 		const available = visible.map((item) => item.name).join(", ");
 		const suffix = available.length > 0 ? ` Available skills: ${available}.` : " No skills are currently available.";
-		return { kind: "error", message: `context: unknown skill "${name}".${suffix}` };
+		return skillRefusal(`context: unknown skill "${name}".${suffix}`, { name, kind: "unknown" });
 	}
 	const includeTree = args.include_tree === true;
 	const tree = includeTree ? buildResourceTree(skill.baseDir, DEFAULT_TREE_ENTRIES) : null;

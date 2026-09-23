@@ -33,6 +33,9 @@ import {
 	armedSkillSurface,
 	type PendingSkillRequest,
 	type PendingSkillToolPolicy,
+	SKILL_SURFACE_ENTRY,
+	type SkillSurfaceChange,
+	skillSurfaceChange,
 	skillSurfaceLabels,
 	skillSurfaceNames,
 	withModelSkillActivation,
@@ -144,7 +147,7 @@ export interface QueueUpdateEvent {
  * same beat. Enqueue time shows the text only in the steering-queue panel.
  */
 export interface QueuedUserTurnEvent {
-	display?: { text: string; note: string };
+	display?: { text: string; note?: string };
 	type: "queued_user_turn";
 	text: string;
 	/** `interrupt` marks a message that cancelled the run and was submitted as a fresh prompt. */
@@ -172,6 +175,12 @@ export interface ChatNoticeEvent {
 	 * every other surface renders the notice exactly as before.
 	 */
 	admission?: { reason: string };
+	/**
+	 * Present only on a notice about the skill tool surface. The TUI transcript
+	 * states it as a `§` row (or, for a load that narrows nothing, not at all,
+	 * since the load's own row says so); every other surface renders the text.
+	 */
+	skillSurface?: SkillSurfaceChange;
 }
 
 /**
@@ -217,7 +226,7 @@ export interface ChatSubmitOptions {
 	/** Explicit host-owned task scope; never parsed from the prompt text. */
 	constraints?: TurnConstraints;
 	/** Presentation only; never part of the model message or persisted text. */
-	display?: { text: string; note: string };
+	display?: { text: string; note?: string };
 	/** Host-owned run identity, scoped to this submit and its internal continuations. */
 	hostRun?: ToolInvokeOptions["hostRun"];
 	images?: ReadonlyArray<ImageContent>;
@@ -345,6 +354,8 @@ export interface ChatLoop {
 	 * armed, or an empty list when nothing was.
 	 */
 	clearSkillSurface(): ReadonlyArray<string>;
+	/** Skills whose tool surface is armed across turns right now; the footer shows them. */
+	activeSkillSurface(): ReadonlyArray<string>;
 	clearQueuedFollowUps(): string[];
 	queuedMessages(): QueuedMessagesSnapshot;
 	cancel(options?: ChatCancelOptions): void;
@@ -751,8 +762,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 * provider-failure paths) and RunAborted carries abort provenance to the
 	 * status reducer.
 	 */
-	const emitNotice = (text: string, level: ChatNoticeEvent["level"] = "info", key?: string): void => {
-		emit({ type: "notice", level, surface: "transcript", text, ...(key === undefined ? {} : { key }) });
+	const emitNotice = (
+		text: string,
+		level: ChatNoticeEvent["level"] = "info",
+		key?: string,
+		skillSurface?: SkillSurfaceChange,
+	): void => {
+		emit({
+			type: "notice",
+			level,
+			surface: "transcript",
+			text,
+			...(key === undefined ? {} : { key }),
+			...(skillSurface === undefined ? {} : { skillSurface }),
+		});
 	};
 
 	/**
@@ -792,17 +815,46 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				deps.session.appendEntry({ kind: "custom", customType: SKILL_CONTEXT_STATE, parentTurnId: state.lastTurnId, data });
 			}
 		}
+		const change = skillSurfaceChange(skillSurfaceNames(state.activeSkillSurface), next);
 		state.activeSkillSurface = next;
+		// The change itself is recorded, so a resumed transcript states the same
+		// `§` row the live one did; the selection above is what compaction reads.
+		if (change !== null && deps.session?.current()) {
+			deps.session.appendEntry({
+				kind: "custom",
+				customType: SKILL_SURFACE_ENTRY,
+				parentTurnId: state.lastTurnId,
+				data: change,
+			});
+		}
 		const activated = skillSurfaceLabels(policy).filter((label) => !loadedBefore?.has(label.split(" ")[0] ?? label));
 		if (activated.length > 0) {
+			const loaded: SkillSurfaceChange = {
+				version: 1,
+				state: "loaded",
+				names: activated.map((label) => label.split(" ")[0] ?? label),
+				previous: [],
+				allowedTools: [],
+				disallowedTools: [],
+			};
 			emitNotice(
 				current.length > 0
 					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
 					: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
+				"info",
+				undefined,
+				change !== null && change.state !== "cleared" ? change : loaded,
 			);
 		}
-		if (current !== previous && current.length === 0 && previous.length > 0) {
-			emitNotice(`[Clio Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`);
+		if (change?.state === "cleared") {
+			emitNotice(
+				`[Clio Coder] Skill tool surface cleared: ${previous}. The full tool surface is back.`,
+				"info",
+				undefined,
+				change,
+			);
+		} else if (change?.state === "replaced" && activated.length === 0) {
+			emitNotice(`[Clio Coder] Skill tool surface replaced: ${previous} by ${current}.`, "info", undefined, change);
 		}
 	};
 
@@ -1284,6 +1336,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			armSkillSurface(undefined, undefined, true);
 			return cleared;
 		},
+		activeSkillSurface: () => skillSurfaceNames(state.activeSkillSurface),
 		clearQueuedFollowUps: () => queues.clearQueuedMirror().map((entry) => entry.text),
 		queuedMessages: () => queues.queuedMessages(),
 

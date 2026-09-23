@@ -676,6 +676,12 @@ export interface SlashCommandContext {
 	 * chat loop, where nothing can be armed in the first place.
 	 */
 	clearSkillSurface?: () => ReadonlyArray<string>;
+	/**
+	 * The host's transcript states every change to the skill surface itself
+	 * (the TUI's `§` rows), so `/skill off` adds no reply of its own when it
+	 * cleared something. A host without that row prints the reply.
+	 */
+	statesSkillSurface?: boolean;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	/**
 	 * Resolve a `/name` against the loaded prompt templates. Absent when the host
@@ -1104,10 +1110,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				ctx.submitChat(command.text);
 			} else if (command.kind === "skill-surface-clear") {
 				const cleared = ctx.clearSkillSurface?.() ?? [];
-				ctx.notice(
-					"info",
-					cleared.length > 0 ? `Skill tool surface cleared: ${cleared.join(", ")}.` : "No skill tool surface is active.",
-				);
+				if (cleared.length === 0) ctx.notice("info", "No skill tool surface is active.");
+				else if (ctx.statesSkillSurface !== true) ctx.notice("info", `Skill tool surface cleared: ${cleared.join(", ")}.`);
 			}
 		},
 	},

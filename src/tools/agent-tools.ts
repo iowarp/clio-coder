@@ -30,7 +30,11 @@ import { validateEngineToolArguments } from "../engine/ai.js";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "../engine/types.js";
 import { applyToolProfile, type ToolProfileName } from "./profiles.js";
 import type { ToolInvokeOptions, ToolRegistry, ToolResult, ToolSpec } from "./registry.js";
-import { isDispositionedToolResultError, toolResultContextText } from "./result-disposition.js";
+import {
+	isDispositionedToolResultError,
+	isRefusalToolResultError,
+	toolResultContextText,
+} from "./result-disposition.js";
 import { toolSpecPlacement, withGatewayForCapabilities } from "./surface.js";
 
 /**
@@ -221,7 +225,10 @@ async function runValidatedToolCall(input: RunValidatedToolCallInput): Promise<W
 			reason: verdict.result.message,
 			decision: verdict.decision,
 		});
-		if (input.returnDispositionedErrors === true && isDispositionedToolResultError(verdict.result)) {
+		if (
+			input.returnDispositionedErrors === true &&
+			(isDispositionedToolResultError(verdict.result) || isRefusalToolResultError(verdict.result))
+		) {
 			return projectToolResult(verdict.result);
 		}
 		throw new Error(toolResultContextText(verdict.result));

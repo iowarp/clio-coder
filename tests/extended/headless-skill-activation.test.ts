@@ -1,4 +1,4 @@
-import { match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -117,9 +117,41 @@ function jsonEvents(stdout: string): Array<Record<string, unknown>> {
 
 /** The tool result text the model was handed for its `context` call. */
 function contextToolResult(events: Array<Record<string, unknown>>): string {
-	const end = events.find((event) => event.type === "tool_execution_end" && event.toolName === "context");
+	const end = contextToolEnd(events);
 	if (!end) return "";
 	return JSON.stringify(end.result ?? end);
+}
+
+function contextToolEnd(events: Array<Record<string, unknown>>): Record<string, unknown> | undefined {
+	return events.find((event) => event.type === "tool_execution_end" && event.toolName === "context");
+}
+
+/** Every entry of the one session the run wrote. */
+function sessionEntries(root: string): Array<Record<string, unknown>> {
+	const ledgers = readdirSync(join(root, "state", "sessions"), { recursive: true, encoding: "utf8" }).filter((file) =>
+		file.endsWith("current.jsonl"),
+	);
+	strictEqual(ledgers.length, 1, ledgers.join(", "));
+	return readFileSync(join(root, "state", "sessions", ledgers[0] ?? ""), "utf8")
+		.trim()
+		.split("\n")
+		.map((line) => JSON.parse(line) as Record<string, unknown>);
+}
+
+/**
+ * A refused load reaches the transcript whole: returned rather than thrown, so
+ * the end event and the persisted result keep the structured refusal and
+ * still count as an error.
+ */
+function assertRefusal(turn: { stdout: string; root: string }, refusal: Record<string, unknown>): void {
+	const end = contextToolEnd(jsonEvents(turn.stdout));
+	strictEqual(end?.isError, true, turn.stdout);
+	deepStrictEqual((end?.result as { details?: { refusal?: unknown } } | undefined)?.details?.refusal, refusal);
+	const persisted = sessionEntries(turn.root).find(
+		(entry) => entry.role === "tool_result" && (entry.payload as { toolName?: string }).toolName === "context",
+	)?.payload as { isError?: boolean; result?: { details?: { refusal?: unknown } } } | undefined;
+	strictEqual(persisted?.isError, true);
+	deepStrictEqual(persisted?.result?.details?.refusal, refusal);
 }
 
 async function headlessSkillTurn(
@@ -230,6 +262,7 @@ describe("headless skill activation by autonomy level", () => {
 		const result = contextToolResult(jsonEvents(turn.stdout));
 		match(result, /only the operator can activate a skill/u, turn.stdout);
 		ok(!/HEADLESS_SKILL_BODY_/u.test(result), "the skill body must not reach the model at suggest");
+		assertRefusal(turn, { subject: "skill", name: "headless-interview", kind: "operator-only" });
 	});
 
 	it("still refuses an uninstalled marketplace skill at full-auto", async () => {
@@ -237,5 +270,6 @@ describe("headless skill activation by autonomy level", () => {
 		strictEqual(turn.code, 0, turn.stderr);
 		const result = contextToolResult(jsonEvents(turn.stdout));
 		ok(!/HEADLESS_SKILL_BODY_/u.test(result), "an uninstalled skill must not load");
+		assertRefusal(turn, { subject: "skill", name: "not-installed-anywhere", kind: "unknown" });
 	});
 });

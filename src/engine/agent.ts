@@ -25,7 +25,7 @@ import {
 	type BeforeToolCallContext,
 	type StreamFn,
 } from "@earendil-works/pi-agent-core";
-import { isDispositionedToolResultError } from "../tools/result-disposition.js";
+import { isDispositionedToolResultError, isRefusalToolResultError } from "../tools/result-disposition.js";
 import { engineStreamSimple } from "./api-registry.js";
 
 export type EngineStreamFn = (...args: Parameters<typeof engineStreamSimple>) => ReturnType<StreamFn>;
@@ -118,7 +118,8 @@ function dispositionAwareAfterToolCall(
 		const override = await delegate?.(context, signal);
 		const effectiveResult =
 			override?.details === undefined ? context.result : { ...context.result, details: override.details };
-		if (isDispositionedToolResultError(effectiveResult)) return { ...override, isError: true };
+		if (isDispositionedToolResultError(effectiveResult) || isRefusalToolResultError(effectiveResult))
+			return { ...override, isError: true };
 		return override;
 	};
 }

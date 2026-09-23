@@ -120,7 +120,7 @@ describe("Clio rendering invariants", () => {
 		ok(firstReasoning < before && before < tool && tool < secondReasoning && secondReasoning < after, rendered);
 	});
 
-	it("hoists a skill-suggestion line the model wrote after its narration", () => {
+	it("states a skill suggestion the model wrote after its narration as a § row ahead of the answer", () => {
 		const panel = createChatPanel({ now: () => 1_000 });
 		panel.applyEvent({ type: "message_start", message: { role: "assistant" } } as never);
 		const partial = "I checked the tests first.\nSuggested skill: /sk";
@@ -136,12 +136,19 @@ describe("Clio rendering invariants", () => {
 		} as never);
 		panel.applyEvent({ type: "agent_end", messages: [] } as never);
 		const rendered = plainRender(panel);
-		const suggestion = rendered.indexOf("Suggested skill: /skill tdd");
-		const narration = rendered.indexOf("I checked the tests first.");
-		const rest = rendered.indexOf("Now the failing test.");
-		ok(suggestion >= 0 && narration >= 0 && rest >= 0, rendered);
-		ok(suggestion < narration && narration < rest, rendered);
-		strictEqual(rendered.split("Suggested skill:").length, 2, rendered);
+		const lines = rendered.split("\n");
+		// The suggestion is advice for the operator: its own row under the
+		// knowledge mark, never the agent's prose, and never repeated.
+		strictEqual(lines[0], `${GLYPH.classKnowledge} suggests /skill tdd`, rendered);
+		doesNotMatch(rendered, /Suggested skill:/u);
+		strictEqual(rendered.split("/skill tdd").length, 2, rendered);
+		ok(
+			lines.some((line) => line === `${GLYPH.agent} I checked the tests first.`),
+			rendered,
+		);
+		ok(rendered.indexOf("I checked the tests first.") < rendered.indexOf("Now the failing test."), rendered);
+		const styled = panel.render(120).join("\n");
+		ok(styled.includes(clioTheme().fg("accent", "/skill tdd")), "the command reads in the slash-command accent");
 	});
 
 	it("changes the preset while a tool remains live", () => {
@@ -1168,14 +1175,82 @@ describe("transcript block grammar", () => {
 		};
 		const render = (style: OutputStyle) =>
 			stripTerminalSequences(renderToolPreview(load, 90, transcriptDetail(style)).join("\n"));
-		match(render("compact"), /loaded skill test-hygiene · by model · narrows tools · drifted ✓/u);
-		doesNotMatch(render("compact"), /Keep tests deterministic|1 section/u);
-		match(render("standard"), /\n {2}│ Keep tests deterministic\./u);
+		match(render("compact"), /loaded skill test-hygiene · by model · drifted ✓/u);
+		doesNotMatch(render("compact"), /narrows|Keep tests deterministic|1 section/u);
+		// Standard nests the surface the skill declares, then what it is for.
+		for (const style of ["standard", "detailed"] as const) {
+			match(render(style), /✓\n {2}│ narrows tools to read\n {2}│ Keep tests deterministic\./u);
+			doesNotMatch(render(style).split("\n")[0] ?? "", /narrows/u);
+		}
+		const excluding = {
+			...load,
+			result: {
+				...load.result,
+				details: { ...load.result.details, allowedTools: [], disallowedTools: ["bash", "write"] },
+			},
+		};
+		match(
+			stripTerminalSequences(renderToolPreview(excluding, 90, transcriptDetail("standard")).join("\n")),
+			/\n {2}│ narrows tools to all but bash, write\n/u,
+		);
 		// Until it settles, the row says the load is in progress.
 		match(
 			stripTerminalSequences(renderToolSubline({ toolCallId: "s", toolName: "context", args: load.args }, 90).join("")),
 			/loading skill test-hygiene/u,
 		);
+	});
+
+	it("states a refused skill load as plainly as a load, from the refusal in its details", () => {
+		const message =
+			'context: skill "tech-spec" requires explicit operator activation with /skill tech-spec; it disables model invocation. Do not retry this load.';
+		const refused = (refusal: Record<string, string>) => ({
+			toolCallId: "r",
+			toolName: "context",
+			args: { scope: "skills", name: "tech-spec" },
+			result: {
+				content: [{ type: "text", text: message }],
+				details: { refusal: { subject: "skill", name: "tech-spec", ...refusal } },
+			},
+			isError: true,
+		});
+		const cases: Array<[Record<string, string>, string]> = [
+			[{ kind: "manual-only" }, "manual-only: /skill tech-spec"],
+			[{ kind: "untrusted" }, "untrusted: review it in /library"],
+			[{ kind: "not-imported", source: "claude", scope: "project" }, "not imported: found in claude/project"],
+			[{ kind: "not-installed" }, "not installed: /skill tech-spec"],
+			[{ kind: "not-ready", scope: "user", state: "disabled" }, "installed but disabled: /library"],
+			[{ kind: "operator-only" }, "only you can load it: /skill tech-spec"],
+			[{ kind: "recipe-bound" }, "not declared for this run"],
+			[{ kind: "not-requested" }, "not requested this turn"],
+			[{ kind: "already-loaded" }, "already loaded"],
+			[{ kind: "unknown" }, "unknown skill"],
+		];
+		for (const [refusal, reason] of cases) {
+			for (const style of ["compact", "standard", "detailed"] as const) {
+				// One row and no body: the message is the model's instruction and stays in /view.
+				const rows = renderToolPreview(refused(refusal), 100, transcriptDetail(style));
+				deepStrictEqual(rows.map(stripTerminalSequences), [`§ skill tech-spec not loaded · ${reason} ✗`]);
+			}
+		}
+		const [row] = renderToolPreview(refused({ kind: "manual-only" }), 100, transcriptDetail("standard"));
+		ok(row?.includes(clioTheme().fg("accent", "/skill tech-spec")), "the move reads in the slash-command accent");
+		// Narrow terminals hang the reason in the content column.
+		const narrow = renderToolPreview(
+			refused({ kind: "not-imported", source: "claude", scope: "project" }),
+			40,
+			transcriptDetail("standard"),
+		).map(stripTerminalSequences);
+		ok(narrow.length > 1, narrow.join("\n"));
+		for (const line of narrow) ok(visibleWidth(line) <= 40, line);
+		for (const line of narrow.slice(1)) ok(line.startsWith("  "), `continuation left the gutter: ${line}`);
+		// An error without a refusal is still an ordinary failed load with its message.
+		const failed = stripTerminalSequences(
+			renderToolPreview({ ...refused({ kind: "manual-only" }), result: message }, 100, transcriptDetail("standard")).join(
+				"\n",
+			),
+		);
+		doesNotMatch(failed, /not loaded/u);
+		match(failed, /requires explicit operator activation/u);
 	});
 
 	it("leads an explicit /skill prompt with the command in the accent token", () => {
@@ -1510,6 +1585,19 @@ describe("tool classes", () => {
 		// A multiline command is flattened on its row, so its body states it whole.
 		const script = rows({ toolCallId: "b", toolName: "bash", args: { command: "cd src\nls" } }, "standard", 100);
 		deepStrictEqual(script.slice(1), ["  │ command › cd src", "  │   ls"]);
+	});
+
+	it("keeps every character of a command the full body echoes, a lone & included", () => {
+		for (const command of ["npm test 2>&1 | tail -5", "sleep 5 & wait", "make >out.log 2>&1 && echo ok"]) {
+			const body = renderToolExecution(
+				{ toolCallId: "b", toolName: "bash", args: { command }, result: "done", isError: false },
+				160,
+				{ unbounded: true },
+			)
+				.map(stripTerminalSequences)
+				.join("\n");
+			ok(body.includes(`$ ${command}`), body);
+		}
 	});
 
 	it("states the operator's local command as not sent to the model once", () => {

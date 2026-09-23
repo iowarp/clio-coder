@@ -72,8 +72,13 @@ export interface InteractiveSlashSubmitExpansion {
 	images: ImageContent[];
 	workingContextPaths: string[];
 	pendingSkillRequests: PendingSkillRequest[];
-	/** The typed line and a template note to paint instead of `text`; see `InteractiveSubmitExpansion`. */
-	display?: { text: string; note: string };
+	/**
+	 * The typed line to paint and persist instead of `text`, and for a prompt
+	 * template the note naming it; see `InteractiveSubmitExpansion`. An
+	 * operator `/skill` carries its editor line without a note, so its row
+	 * leads with `/skill <name>` live and on resume.
+	 */
+	display?: { text: string; note?: string };
 }
 
 type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
@@ -222,6 +227,13 @@ export function resolveAvailableThinkingLevels(
 	return resolveThinkingCapability(providers, settings)?.supportedLevels ?? ["off"];
 }
 
+/** An operator `/skill` keeps the line they typed for its prompt row. */
+function typedSkillLine(sub: InteractiveSlashSubmitExpansion, typed: string): InteractiveSlashSubmitExpansion {
+	if (sub.display !== undefined || !sub.pendingSkillRequests.some((request) => request.source === "slash-command"))
+		return sub;
+	return { ...sub, display: { text: typed.trim() } };
+}
+
 export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps): InteractiveSlashRuntime {
 	let activeContextInit = false;
 	let latestAdmission: Promise<void> = Promise.resolve();
@@ -279,7 +291,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			let rowStatus: UserTurnStatus = "pending";
 			if (!willQueue) {
 				deps.chatPanel.appendUser(sub.display?.text ?? sub.text, () => rowStatus);
-				if (sub.display) {
+				if (sub.display?.note !== undefined) {
 					appendOperatorAside(sub.display.note, {
 						appendReplayBlock: (renderBlock) => deps.chatPanel.appendReplayBlock(renderBlock),
 						requestRender: deps.requestRender,
@@ -343,7 +355,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				dispatchSlashCommand(command, context);
 				return;
 			}
-			const submitted = await deps.expandSubmit(text);
+			const submitted = typedSkillLine(await deps.expandSubmit(text), text);
 			signal?.throwIfAborted();
 			const uninstalled = submitted.pendingSkillRequests.find((request) => !request.installed);
 			if (uninstalled && !uninstalled.marketplaceRef) {
@@ -378,7 +390,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 								});
 								deps.io.stdout(`Successfully installed "${uninstalled.name}"!\n`);
 								await deps.resources?.reload();
-								const postInstallSubmitted = await deps.expandSubmit(text);
+								const postInstallSubmitted = typedSkillLine(await deps.expandSubmit(text), text);
 								if (postInstallSubmitted.pendingSkillRequests.some((request) => !request.installed)) {
 									throw new Error(
 										"Installed package is not available after reload; inspect it with clio-coder library inspect skill:" +
@@ -446,6 +458,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
 		clearSkillSurface: () => deps.chat.clearSkillSurface(),
+		statesSkillSurface: true,
 		listExtensions: () => deps.extensions?.list(cwd(), { all: true }) ?? [],
 		...(deps.keyboardActions ? { keyboardActions: deps.keyboardActions } : {}),
 		...(deps.operatorExtensions ? { operatorExtensions: deps.operatorExtensions } : {}),

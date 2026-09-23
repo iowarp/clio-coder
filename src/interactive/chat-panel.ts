@@ -23,6 +23,7 @@ import { styleTaggedNotice } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
 import { presentProviderError, providerErrorEvidence } from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
+import { renderSkillSuggestionRow, renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import {
 	hasToolBody,
 	renderFoldedGroup,
@@ -1280,13 +1281,22 @@ function renderEntryLines(
 		// protocol line is advisory rather than the answer: it renders in place
 		// without claiming the glyph.
 		if (seg.kind === "text" && seg.text.length === 0) continue;
+		// A skill suggestion is advice for the operator, not the answer: it reads
+		// `§ suggests /skill <name>` as its own row, ahead of the answer wherever
+		// the model put it.
 		const split = seg.kind === "text" ? skillSuggestionSplit(seg) : null;
 		if (split) {
-			const suggestion = hangProseLines(wrapTextWithAnsi(split.suggestion, proseWidth));
+			blocks.push({ kind: "tool", lines: renderSkillSuggestionRow(split.suggestion, width), body: false });
 			const answerLines = renderTextSegmentLines(split.answer, proseWidth);
+			if (answerLines.length > 0) blocks.push({ kind: "prose", lines: hangProseLines(answerLines, CLIO_PREFIX) });
+			continue;
+		}
+		const suggestionOnly = seg.kind === "text" ? findSkillSuggestionLine(seg) : null;
+		if (seg.kind === "text" && suggestionOnly !== null) {
 			blocks.push({
-				kind: "prose",
-				lines: answerLines.length === 0 ? suggestion : [...suggestion, ...hangProseLines(answerLines, CLIO_PREFIX)],
+				kind: "tool",
+				lines: renderSkillSuggestionRow(seg.text.slice(suggestionOnly.start, suggestionOnly.end), width),
+				body: false,
 			});
 			continue;
 		}
@@ -1302,8 +1312,7 @@ function renderEntryLines(
 			blocks.push({ kind: "error", lines: hangProseLines(rendered, CLIO_PREFIX_ERROR) });
 			continue;
 		}
-		const isSkillSuggestion = findSkillSuggestionLine(seg) !== null;
-		blocks.push({ kind: "prose", lines: hangProseLines(rendered, isSkillSuggestion ? undefined : CLIO_PREFIX) });
+		blocks.push({ kind: "prose", lines: hangProseLines(rendered, CLIO_PREFIX) });
 	}
 	if (entry.turnUsage && !entry.pending) {
 		blocks.push({ kind: "receipt", lines: renderTurnUsageLine(entry.turnUsage, width, detail.receipt) });
@@ -2075,6 +2084,15 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// Transcript notices are first-class advisory lines, not assistant
 				// messages: render with the bracketed-tag treatment replay lines get.
 				if (event.surface !== "transcript") return;
+				// A change to the armed skill surface is a `§` state row; a load that
+				// narrowed nothing already has its own row and adds none.
+				const skillSurface = event.skillSurface;
+				if (skillSurface !== undefined) {
+					if (skillSurface.state === "loaded") return;
+					transcript.push({ role: "replayBlock", renderBlock: (width) => renderSkillSurfaceRow(skillSurface, width) });
+					markDirty();
+					return;
+				}
 				const text = event.text;
 				transcript.push({
 					role: "replayBlock",
@@ -2088,8 +2106,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// here, at injection time, keeps the transcript in the order the
 				// model saw: enqueue time shows the text only in the queue panel.
 				transcript.push({ role: "user", text: event.display?.text ?? event.text });
-				if (event.display) {
-					const note = event.display.note;
+				const note = event.display?.note;
+				if (note !== undefined) {
 					transcript.push({ role: "replayBlock", renderBlock: (width) => wrapTextWithAnsi(`  ${note}`, width) });
 				}
 				markDirty();
