@@ -10,17 +10,21 @@ export const THEME_COLORS: Readonly<Record<"light" | "dark", string>> = {
 	dark: "#18211c",
 };
 
+/**
+ * The everyday path is the first group: home and the conversations. Everything used to inspect a run
+ * or configure the installation stays one click away in the second, quieter group.
+ */
 export const navigation = [
-	{ label: "Overview", path: "/", icon: "overview" },
-	{ label: "Sessions", path: "/sessions", icon: "sessions" },
-	{ label: "Traces", path: "/traces", icon: "traces" },
-	{ label: "Toolchain", path: "/toolchain", icon: "toolchain" },
-	{ label: "Docs", path: "/docs", icon: "docs" },
-	{ label: "Settings", path: "/settings", icon: "settings" },
-	{ label: "Fleet", path: "/fleet", icon: "fleet" },
-	{ label: "Evidence", path: "/evidence", icon: "evidence" },
-	{ label: "Library", path: "/library", icon: "library" },
-	{ label: "System", path: "/system", icon: "system" },
+	{ label: "Overview", path: "/", icon: "overview", group: "work" },
+	{ label: "Sessions", path: "/sessions", icon: "sessions", group: "work" },
+	{ label: "Traces", path: "/traces", icon: "traces", group: "more" },
+	{ label: "Fleet", path: "/fleet", icon: "fleet", group: "more" },
+	{ label: "Evidence", path: "/evidence", icon: "evidence", group: "more" },
+	{ label: "Library", path: "/library", icon: "library", group: "more" },
+	{ label: "Toolchain", path: "/toolchain", icon: "toolchain", group: "more" },
+	{ label: "Settings", path: "/settings", icon: "settings", group: "more" },
+	{ label: "System", path: "/system", icon: "system", group: "more" },
+	{ label: "Docs", path: "/docs", icon: "docs", group: "more" },
 ] as const;
 const SIDEBAR_KEY = "clio-coder-gui-sidebar";
 
@@ -80,23 +84,29 @@ export function SidebarToggle({ collapsed, toggle }: { collapsed: boolean; toggl
  */
 export function Navigation({ close, collapsed = false }: { close?: () => void; collapsed?: boolean }) {
 	const location = useLocation();
+	const link = (item: (typeof navigation)[number]) => (
+		<NavLink
+			key={item.path}
+			to={item.path}
+			end={item.path === "/"}
+			onClick={close}
+			data-tip={collapsed ? item.label : undefined}
+			data-group={item.group}
+			className={({ isActive }) =>
+				isActive || (item.path === "/sessions" && location.pathname.startsWith("/workspaces/")) ? "active" : ""
+			}
+		>
+			<Icon name={item.icon} />
+			<span className="nav-label">{item.label}</span>
+		</NavLink>
+	);
 	return (
 		<nav aria-label="Main navigation">
-			{navigation.map((item) => (
-				<NavLink
-					key={item.path}
-					to={item.path}
-					end={item.path === "/"}
-					onClick={close}
-					data-tip={collapsed ? item.label : undefined}
-					className={({ isActive }) =>
-						isActive || (item.path === "/sessions" && location.pathname.startsWith("/workspaces/")) ? "active" : ""
-					}
-				>
-					<Icon name={item.icon} />
-					<span className="nav-label">{item.label}</span>
-				</NavLink>
-			))}
+			{navigation.filter((item) => item.group === "work").map(link)}
+			<p className="nav-group" aria-hidden="true">
+				<span className="nav-label">Inspect &amp; configure</span>
+			</p>
+			{navigation.filter((item) => item.group === "more").map(link)}
 		</nav>
 	);
 }

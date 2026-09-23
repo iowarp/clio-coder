@@ -8,7 +8,8 @@
  */
 export type StatusTone = "neutral" | "running" | "success" | "warn" | "fail" | "unverified";
 
-const GLYPH: Record<StatusTone, string> = {
+/** One glyph per tone. Exported for compact marks that carry their words in an accessible name. */
+export const TONE_GLYPHS: Readonly<Record<StatusTone, string>> = {
 	neutral: "·",
 	running: "▸",
 	success: "●",
@@ -31,7 +32,7 @@ export function StatusMark({
 	return (
 		<span className="status-mark" data-tone={tone} title={title}>
 			<span className="status-mark__glyph" aria-hidden="true">
-				{GLYPH[tone]}
+				{TONE_GLYPHS[tone]}
 			</span>
 			{label}
 			{detail ? <span className="status-mark__detail">{detail}</span> : null}

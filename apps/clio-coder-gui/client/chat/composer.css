@@ -4,15 +4,17 @@
 
 .composer {
 	display: grid;
-	gap: var(--space-2);
+	gap: var(--space-1);
 	margin-top: 0;
-	padding: var(--space-3) var(--space-4);
+	padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
 	background: var(--surface);
 	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-lg);
+	box-shadow: var(--shadow-raised);
 }
 .composer:focus-within {
 	border-color: var(--accent-strong);
+	box-shadow: 0 0 0 1px var(--accent-strong);
 }
 .composer__label {
 	font-size: var(--text-meta);
@@ -21,20 +23,29 @@
 .composer__field {
 	width: 100%;
 	resize: none;
-	min-height: 3.25em;
+	min-height: calc(2 * var(--leading-body) * 1em + 2 * var(--space-2));
 	max-height: min(14rem, 28dvh);
 	overflow-y: hidden;
 	border: 0;
 	border-radius: var(--radius-sm);
 	padding: var(--space-2) 0;
 	font: inherit;
+	font-size: var(--text-reading);
 	line-height: var(--leading-body);
 	color: var(--ink);
 	background: transparent;
 }
+/* The tray draws a 2px accent boundary around the field while it has focus, so the field needs no
+   second ring. Forced colours drop that shadow, so there the field keeps the system ring. */
+@media (forced-colors: none) {
+	.composer__field:focus-visible {
+		outline: none;
+		box-shadow: none;
+	}
+}
 .composer__field:disabled {
 	color: var(--ink-subtle);
-	background: var(--surface-sunken);
+	background: transparent;
 }
 
 /* Mid-turn delivery. The two modes are not interchangeable, so the chosen one
@@ -83,33 +94,35 @@
 	flex-wrap: wrap;
 	align-items: center;
 	justify-content: flex-end;
-	gap: var(--space-3);
+	gap: var(--space-2);
+}
+.composer__enter-mode {
+	display: inline-flex;
+	flex: none;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-exact);
+	color: var(--ink-muted);
+	cursor: pointer;
+}
+/* The global field rule stretches every input; a checkbox must stay its own size. */
+.composer__enter-mode input {
+	flex: none;
+	inline-size: auto;
+	margin: 0;
+	accent-color: var(--accent);
 }
 .composer__hint {
-	flex: 1 1 28ch;
+	flex: 1 1 16ch;
 	margin: 0;
 	font-size: var(--text-exact);
 	color: var(--ink-muted);
 }
-.composer__enter-mode {
-	border: 0;
-	padding: var(--space-1) var(--space-2);
-	border-radius: var(--radius-sm);
-	background: transparent;
-	color: var(--ink-muted);
-	font: inherit;
-	font-size: var(--text-exact);
-	cursor: pointer;
-}
-.composer__enter-mode:hover,
-.composer__enter-mode:focus-visible {
-	background: var(--surface-sunken);
-	color: var(--ink);
-}
 .composer__submit,
 .composer__secondary {
+	min-height: 36px;
 	border-radius: var(--radius-sm);
-	padding: var(--space-2) var(--space-4);
+	padding: var(--space-1) var(--space-4);
 	font: inherit;
 	font-size: var(--text-meta);
 	cursor: pointer;
@@ -122,10 +135,15 @@
 .composer__secondary:hover:not(:disabled) {
 	background: var(--surface-sunken);
 }
+.composer__stop {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
+}
 .composer__submit {
 	border: 1px solid var(--accent-strong);
 	background: var(--accent);
 	color: var(--on-accent);
+	font-weight: 600;
 }
 .composer__submit:disabled,
 .composer__secondary:disabled {
@@ -288,5 +306,22 @@
 @media (max-width: 640px) {
 	.turn-usage__details {
 		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
+}
+
+/* A touch keyboard adds lines with Enter by default, and the checkbox beside the field already says
+   which key sends; the longer hint stays for assistive technology. */
+@media (max-width: 650px) {
+	.composer__hint {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		margin: -1px;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+	.composer__enter-mode {
+		margin-right: auto;
 	}
 }

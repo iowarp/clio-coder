@@ -228,7 +228,7 @@ export const Composer = memo(function Composer({
 				submit();
 			}}
 		>
-			<label className="composer__label" htmlFor={fieldId}>
+			<label className="composer__label sr-only" htmlFor={fieldId}>
 				Message Clio Coder
 			</label>
 			<textarea
@@ -237,9 +237,17 @@ export const Composer = memo(function Composer({
 				className="composer__field"
 				aria-describedby={hintId}
 				value={draft.text}
-				rows={2}
+				rows={1}
 				disabled={sessionState !== "open"}
-				placeholder="Ask Clio Coder to do something in this project"
+				placeholder={
+					sessionState !== "open"
+						? "This conversation is not open"
+						: running
+							? steering.steer || steering.queue
+								? "Add direction for Clio Coder while it works"
+								: "Draft your next message while Clio Coder works"
+							: "Ask Clio Coder to do something in this project"
+				}
 				onChange={(event) => {
 					store.write(event.target.value);
 					if (!send.isPending) send.reset();
@@ -269,7 +277,8 @@ export const Composer = memo(function Composer({
 					</button>
 				</p>
 			)}
-			{running && modes.length > 1 ? (
+			{/* Delivery only matters once there is something to deliver mid-turn, so the choice appears with the draft. */}
+			{running && modes.length > 1 && draft.text.trim() !== "" ? (
 				<fieldset className="composer__modes">
 					<legend>Deliver this</legend>
 					{modes.map((offer) => (
@@ -292,17 +301,13 @@ export const Composer = memo(function Composer({
 				</fieldset>
 			) : null}
 			<div className="composer__actions">
+				<label className="composer__enter-mode">
+					<input type="checkbox" checked={enterSends} onChange={(event) => setEnterSends(event.target.checked)} />
+					Enter sends
+				</label>
 				<p className="composer__hint" id={hintId}>
-					{enterSends ? "Enter sends · Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
+					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
 				</p>
-				<button
-					className="composer__enter-mode"
-					type="button"
-					aria-pressed={enterSends}
-					onClick={() => setEnterSends((current) => !current)}
-				>
-					Enter to send: {enterSends ? "On" : "Off"}
-				</button>
 				{running ? (
 					<>
 						{steering.interrupt ? (
@@ -317,13 +322,13 @@ export const Composer = memo(function Composer({
 							</button>
 						) : null}
 						<button
-							className="composer__secondary"
+							className="composer__secondary composer__stop"
 							type="button"
 							disabled={stop.isPending}
 							onClick={() => stop.mutate()}
 							title="End this turn now. Nothing further is run."
 						>
-							{stop.isPending ? "Stopping…" : "Stop turn"}
+							<span aria-hidden="true">■</span> {stop.isPending ? "Stopping…" : "Stop turn"}
 						</button>
 					</>
 				) : null}
