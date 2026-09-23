@@ -15,7 +15,17 @@ import { seedReports } from "../tests/harness/reports-fixture.js";
 import { seedSettings } from "../tests/harness/settings-fixture.js";
 import { traceFixture } from "../tests/harness/trace-fixture.js";
 
-const { values } = parseArgs({ options: { chrome: { type: "string", default: "/usr/bin/google-chrome" } } });
+const { values } = parseArgs({
+	options: {
+		chrome: { type: "string", default: "/usr/bin/google-chrome" },
+		// A comma list, for rerunning one breakpoint while fixing it. The gate is all three.
+		widths: { type: "string", default: "1600,1050,390" },
+		// A private build, so a concurrent `vite build` into dist/client cannot pull pages out from under a run.
+		client: { type: "string", default: fileURLToPath(new URL("../dist/client/", import.meta.url)) },
+	},
+});
+const widths = values.widths.split(",").map(Number);
+assert.ok(widths.length > 0 && widths.every((width) => [1600, 1050, 390].includes(width)), "widths: 1600, 1050, 390");
 const output = await mkdtemp(join(tmpdir(), "clio-web-browser-"));
 let origin = "http://127.0.0.1:0";
 const h = await harness(
@@ -24,7 +34,7 @@ const h = await harness(
 		pwa: true,
 		scenario: "markdown",
 		origin: () => origin,
-		clientDir: fileURLToPath(new URL("../dist/client/", import.meta.url)),
+		clientDir: values.client,
 	},
 );
 await seedSettings(h.home.path, h.home.env);
@@ -60,7 +70,7 @@ const statuses: { path: string; status: number }[] = [];
 let success = false;
 let failedPage: { screenshot(options: { path: string; fullPage: boolean }): Promise<unknown> } | null = null;
 try {
-	for (const width of [1600, 1050, 390]) {
+	for (const width of widths) {
 		const context = await browser.newContext({ viewport: { width, height: 1050 }, reducedMotion: "reduce" });
 		await context.route("**/*", async (route) => {
 			const url = new URL(route.request().url());
@@ -76,13 +86,18 @@ try {
 		page.on("pageerror", (error) => errors.push(error.message));
 		page.on("requestfailed", (request) => {
 			const path = new URL(request.url()).pathname;
-			// Closing a tab or leaving a trace intentionally closes its EventSource.
+			// Closing a tab or leaving a trace intentionally closes its EventSource. An image the page
+			// replaced before its bytes arrived is cancelled, not broken; a missing one is a 404 below.
 			if (
 				request.failure()?.errorText === "net::ERR_ABORTED" &&
-				(path === "/api/events" || /^\/api\/traces\/runs\/[^/]+\/live$/.test(path))
+				(path === "/api/events" ||
+					/^\/api\/traces\/runs\/[^/]+\/live$/.test(path) ||
+					request.resourceType() === "image")
 			)
 				return;
-			failures.push(`${path}: ${request.failure()?.errorText}`);
+			failures.push(
+				`${path}: ${request.failure()?.errorText} (${request.resourceType()} on ${new URL(page.url()).pathname})`,
+			);
 		});
 		page.on("response", (response) => {
 			if (response.status() >= 400) statuses.push({ path: new URL(response.url()).pathname, status: response.status() });
@@ -280,7 +295,7 @@ try {
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
 		await navigate("Sessions");
 		await page.getByLabel("Workspace path", { exact: true }).fill(h.home.path);
-		await page.getByRole("button", { name: "Open workspace", exact: true }).click();
+		await page.getByRole("button", { name: "View saved sessions", exact: true }).click();
 		await page.getByRole("button", { name: "New session", exact: true }).waitFor();
 		await check("sessions");
 		const workspaceUrl = page.url();
@@ -361,7 +376,7 @@ try {
 			.getByRole("article", { name: "fixture-target", exact: true })
 			.getByRole("button", { name: "Use for chat & fleet", exact: true })
 			.click();
-		await page.getByRole("heading", { name: "Target operation · succeeded", exact: true }).waitFor();
+		await page.getByRole("heading", { name: "Target use · succeeded", exact: true }).waitFor();
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("targets-dark");
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
@@ -600,11 +615,12 @@ try {
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		await page.getByText("Session tools", { exact: true }).click();
-		await page.getByText("Session controls", { exact: true }).click();
-		await page.getByRole("button", { name: "Save settings", exact: true }).waitFor();
+		// Everything that is not the conversation sits behind one Session tools menu. The fixture
+		// advertises no safe-settings controls, so the label form is what the menu opens on.
+		await page.locator(".conversation__tools > summary").click();
+		await page.getByRole("button", { name: "Save label", exact: true }).waitFor();
+		await page.getByText("This agent did not advertise session settings controls.", { exact: true }).waitFor();
 		await check("session-controls");
-		await page.getByText("Session controls", { exact: true }).click();
 		await page.keyboard.press("Escape");
 		assert.equal(
 			await page.locator(".conversation__tools").evaluate((element) => (element as HTMLDetailsElement).open),
@@ -614,7 +630,7 @@ try {
 			await page.locator(".conversation__tools > summary").evaluate((element) => document.activeElement === element),
 			true,
 		);
-		await page.getByText("Session tools", { exact: true }).click();
+		await page.locator(".conversation__tools > summary").click();
 		await page.getByText("Clio Coder commands", { exact: true }).click();
 		await page.locator(".command-panel__form select").first().selectOption("doctor");
 		await page.locator('.command-panel select[name="pos:0"]').selectOption("deep");
@@ -641,7 +657,7 @@ try {
 		await check("session-commands");
 		if (width === 1600) await page.screenshot({ path: join(output, "session-commands.png"), fullPage: true });
 		await page.getByText("Clio Coder commands", { exact: true }).click();
-		await page.getByText("Session tools", { exact: true }).click();
+		await page.locator(".conversation__tools > summary").click();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
@@ -665,7 +681,7 @@ try {
 		await page.getByText("Permission rejected.", { exact: true }).waitFor();
 		const refused = page.locator(".diff.is-rejected").last();
 		await refused.waitFor();
-		assert.match(await refused.innerText(), /not applied · you rejected this/i);
+		assert.match(await refused.innerText(), /not applied · not approved/i);
 		assert.match(await refused.innerText(), /Nothing was written/);
 		assert.match(await refused.innerText(), /approved/, "The refused content stays readable.");
 		await check("permission-rejected");
@@ -674,7 +690,7 @@ try {
 		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.getByText(/Session tools · 1 worker running/).click();
+		await page.locator(".conversation__tools > summary", { hasText: "Session tools · 1 worker running" }).click();
 		await page.getByRole("button", { name: "Guide scout", exact: true }).click();
 		await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
 		await page.getByRole("button", { name: "Send guidance", exact: true }).click();
@@ -696,7 +712,7 @@ try {
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
 		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
 		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
-		await page.getByText(/Session tools · 1 worker running/).click();
+		await page.locator(".conversation__tools > summary", { hasText: "Session tools · 1 worker running" }).click();
 		await page.getByRole("button", { name: "Stop scout", exact: true }).click();
 		await page.getByRole("button", { name: "Stop run", exact: true }).click();
 		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
@@ -707,11 +723,15 @@ try {
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
 		await page.waitForFunction(() => !document.querySelector(".session-status")?.textContent?.includes("working"));
 		await check("cancelled");
+		// Close lives at the foot of Session tools, away from the composer's Stop.
+		await page.locator(".conversation__tools > summary").click();
 		await page.getByRole("button", { name: "Close session", exact: true }).click();
 		await page.waitForFunction(() => document.querySelector(".session-status")?.textContent?.includes("closed"));
+		await page.getByText("This conversation is closed.", { exact: true }).waitFor();
+		await check("closed");
 		await navigate("Sessions");
 		await page.getByLabel("Workspace path", { exact: true }).fill(join(h.home.path, "does-not-exist"));
-		await page.getByRole("button", { name: "Open workspace", exact: true }).click();
+		await page.getByRole("button", { name: "Start conversation", exact: true }).click();
 		const toast = page.locator(".notice-region .notice");
 		await toast.waitFor();
 		assert.match(await toast.innerText(), /validation/);
@@ -722,7 +742,7 @@ try {
 		await page.goto(`${origin}/#token=${"stale".repeat(8)}`);
 		await page.reload();
 		await page.getByRole("heading", { name: "This browser is no longer connected", exact: true }).waitFor();
-		await page.locator('.connection[title="Not connected"]').waitFor();
+		await page.locator('.connection[data-state="Not connected"]').waitFor();
 		if ((await page.locator(".notice-region .notice").count()) > 0)
 			throw new Error("A refused token raised toasts on top of the reconnect panel.");
 		await page.getByLabel("Launch link or token", { exact: true }).fill("not a link");
