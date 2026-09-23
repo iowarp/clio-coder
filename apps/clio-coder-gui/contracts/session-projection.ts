@@ -74,6 +74,35 @@ export function emptySession(id: string, workspaceId: string): SessionSnapshot {
 		health: [],
 	};
 }
+type NarrativeKind = "text" | "thought";
+const provenanceKey = (provenance: TimelineItem["provenance"]) =>
+	provenance ? `:${provenance.map((agent) => `${agent.agentId}:${agent.runId ?? ""}`).join("|")}` : "";
+
+/**
+ * The id a narrative chunk appends to. Chunks from one agent stream keep extending the same item until
+ * something else happens in the turn: a tool call, a notice, or the same agent switching between reasoning
+ * and prose. After that break the agent is writing a new passage, and appending it to the item above the tool
+ * calls would print text written after them before them. Another agent's narrative is not a break, so
+ * interleaved workers still read as one passage each. Ids derive only from the timeline, so the server's
+ * snapshot and a browser applying the same deltas agree on them.
+ */
+function narrativeId(timeline: readonly TimelineItem[], turnId: string, kind: NarrativeKind, identity: string): string {
+	const base = `${turnId}:${kind}${identity}`;
+	let broken = false;
+	for (let index = timeline.length - 1; index >= 0; index -= 1) {
+		const item = timeline[index];
+		if (item === undefined || item.turnId !== turnId) break;
+		if (item.id === base || item.id.startsWith(`${base}#`)) {
+			if (!broken) return item.id;
+			return `${base}#${(timeline.at(-1)?.sequence ?? 0) + 1}`;
+		}
+		if (item.kind === "tool" || item.kind === "notice") broken = true;
+		else if ((item.kind === "text" || item.kind === "thought") && provenanceKey(item.provenance) === identity)
+			broken = true;
+	}
+	return base;
+}
+
 export function applySessionDelta(current: SessionSnapshot, event: SessionDelta): SessionSnapshot {
 	if (event.payload.resource !== current.id || event.payload.revision <= current.revision) return current;
 	if (event.payload.revision !== current.revision + 1) throw new Error("Session revision gap requires a snapshot.");
@@ -162,9 +191,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 		case "turn.user": {
 			const { turnId, text, origin, provenance } = event.payload,
 				kind = event.type === "turn.text" ? "text" : event.type === "turn.thought" ? "thought" : "user";
-			const identity = provenance
-				? `:${provenance.map((agent) => `${agent.agentId}:${agent.runId ?? ""}`).join("|")}`
-				: "";
+			const identity = provenanceKey(provenance);
 			if (kind === "user" && origin === "replay")
 				state = {
 					...state,
@@ -174,7 +201,7 @@ export function applySessionDelta(current: SessionSnapshot, event: SessionDelta)
 				};
 			upsert(
 				{
-					id: `${turnId}:${kind}${identity}`,
+					id: kind === "user" ? `${turnId}:user${identity}` : narrativeId(state.timeline, turnId, kind, identity),
 					turnId,
 					kind,
 					text,
