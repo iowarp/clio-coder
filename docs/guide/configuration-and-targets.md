@@ -933,20 +933,19 @@ Three answer primitives are covered:
   carries what each answer means, so the caller defines the scale rather than
   hoping a prompt implies it.
 
-Confidence is parsed as a separate axis from the answer, because they are
-different questions. A `noul` of 0.5 at high confidence is a decided coin-flip;
-at low confidence it is an abstention, and a caller gating on the result has to
-be able to tell the two apart. `src/domains/providers/decisions.ts` holds the
-readers that do, returning `null` rather than `false` below a confidence floor.
+Certainty is read separately from the answer. A `noul` of 0.5 gives yes and no
+equal probability and reads as uncertain; a `noul` has no separate confidence
+field. `src/domains/providers/decisions.ts` holds the readers that return `null`
+rather than `false` below a certainty floor.
 
-The two axes are not carried the same way on the wire. `choice` and `score`
-return a `confidence` field directly. A `noul` returns none at all, so its
-certainty is derived rather than read: a `noul` is a two-outcome distribution,
-and the provider's own peakedness formula `(n * max - 1) / (n - 1)` reduces at
-`n = 2` to the probability's distance from the coin-flip. A `noul` of 0.65
-therefore reports 0.30, the same certainty a two-option `choice` at that mass
-reports. Reading the absent field as zero instead made every `minConfidence`
-check abstain unconditionally.
+`choice` and `score` return both a distribution and a `confidence` field, but
+providers use different formulas for that field: Jev reports peakedness and
+Laya reports normalized entropy. The readers compute peakedness from the
+distribution for a shared floor. A `noul` returns no confidence field, so its
+certainty comes from its two-outcome distribution: the peakedness formula
+`(n * max - 1) / (n - 1)` reduces at `n = 2` to its distance from the
+coin-flip. A `noul` of 0.65 therefore reports 0.30, the same certainty a
+two-option `choice` at that mass reports.
 
 A missing or unrecognised answer throws rather than defaulting. Callers index by
 the question ids they submitted, so a dropped answer is a contract break and not

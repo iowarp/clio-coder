@@ -347,6 +347,29 @@ describe("answer certainty", () => {
 		strictEqual(isTrue({ type: "noul", noul: 0.65 }, { minConfidence: 0.31 }), null);
 	});
 
+	it("uses the distribution for choice and score certainty across provider scales", () => {
+		const uncertainChoice = {
+			type: "choice" as const,
+			choice: "yes",
+			probabilities: { yes: 0.52, no: 0.48 },
+			confidence: 0.99,
+		};
+		strictEqual(chosen(uncertainChoice, { minConfidence: 0.2 }), null);
+		const decisiveChoice = {
+			...uncertainChoice,
+			probabilities: { yes: 0.8, no: 0.2 },
+			confidence: 0.1,
+		};
+		strictEqual(chosen(decisiveChoice, { minConfidence: 0.5 }), "yes");
+		strictEqual(
+			rating(
+				{ type: "score", score: 0.48, probabilities: { "0": 0.52, "1": 0.48 }, confidence: 0.99 },
+				{ minConfidence: 0.2 },
+			),
+			null,
+		);
+	});
+
 	it("still reads an explicit confidence when the answer carries one", () => {
 		strictEqual(rating({ type: "score", score: 0.81, confidence: 0.28 }, { minConfidence: 0.5 }), null);
 		strictEqual(rating({ type: "score", score: 0.81, confidence: 0.28 }, { minConfidence: 0.2 }), 0.81);

@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Apply one certainty floor across Jev and Laya choice and score answers. Jev reports distribution peakedness while Laya reports normalized entropy as `confidence`, so reading the field directly could admit an uncertain answer or reject a decisive one. Readers now derive peakedness from the returned distribution when present; Noul continues to derive it from its yes probability.
 - Count credential resolution against a decision site's timeout. The HTTP timer started only after resolving a stored key, so a slow refresh could hold the pre-turn brief past its 1.5s bound. A deadline now covers both steps and prevents a late key from starting a request after timeout.
 - Reject decision answers that do not match the question's shape or range. A `choice` returned for a `noul` question could pass the certainty floor and make `consult` claim it had answered while reporting a zero probability. Such malformed replies now fall back to no usable answer.
 - Authenticate decision sites with the target's stored key. The TypeSafe runtime read its key only from the probe context's token or from `TYPESAFE_API_KEY`, and the sites passed neither, so a Jev target with its key in the credential store sent every decision unauthenticated and every site fell back silently, exactly as an unbound one would. The decider now resolves the key per call through the providers auth contract.
