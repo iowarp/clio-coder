@@ -2,8 +2,8 @@
 // and model Clio Coder reports; when the agent lets the GUI edit its safe settings, the chip opens a
 // small picker for target, model and thinking. The runtime's only write is `settings/patch_safe`,
 // which saves to the operator's user settings, so the picker says "Saved for every project" before
-// its button and names what else starts with the choice. A route for one conversation alone needs
-// the runtime method described in CHAT_HANDOFF.md.
+// its button and names what else starts with the choice. A route for one conversation alone needs a
+// session-scoped routing method in the runtime, which ACP does not offer yet.
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useRef, useState } from "react";

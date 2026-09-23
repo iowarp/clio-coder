@@ -22,7 +22,6 @@ The compact footer remains two lines. A small Tip appears for about ten seconds,
 | Command | Purpose |
 | --- | --- |
 | `clio-coder` | Launch the interactive terminal UI. |
-| `clio-coder gui [--open]` | Start the graphical application. Early preview for browsing documentation, inspecting sessions and workspace telemetry; `--open` opens the browser automatically. |
 | `clio-coder run "<task>" [flags]` | Run one headless main-agent turn. Use `--json` for JSONL events. |
 | `clio-coder run "<task>" --agent <id> [flags]` | Dispatch one explicit fleet agent non-interactively and write a receipt. |
 | `clio-coder acp [--cwd PATH] [--permission-timeout MS]` | Serve Clio as an ACP v1 agent over stdio for ACP frontends. |
@@ -87,6 +86,7 @@ The compact footer remains two lines. A small Tip appears for about ten seconds,
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
+| `clio-coder gui [--open]` | Start the graphical application, an opt-in alpha for power users; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](../gui/README.md). |
 | `clio-coder docs [topic] [--no-open] [--foreground]`, `clio-coder docs --stop` | Open the documentation in your browser, rendered directly from the canonical Markdown. Use the installed background app when there is one. Otherwise start a loopback server in the background, reuse it on the next call, and stop it with `--stop` or after 15 minutes without an open page. `--no-open` prints the launch link. `--foreground` serves privately in this terminal until Ctrl+C. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
