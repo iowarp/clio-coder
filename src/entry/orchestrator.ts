@@ -141,6 +141,7 @@ import { preTurnHints, preTurnRecord } from "../domains/providers/pre-turn-brief
 import { getRuntimeRegistry } from "../domains/providers/registry.js";
 import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
+import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
 import { TURN_SITES } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
@@ -344,6 +345,12 @@ interface CompactionResolution {
  * cannot beat it is one the turn is better off without.
  */
 const RELEVANCE_DECISION_TIMEOUT_MS = 1_500;
+/**
+ * The main agent waits on a consult call like any tool result. Every
+ * jev-latest call measured for 0.5.4 finished within 370ms, so 3s only bounds
+ * an outage.
+ */
+const CONSULT_DECISION_TIMEOUT_MS = 3_000;
 
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
@@ -1935,6 +1942,27 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				request.entries,
 				signal,
 			),
+		// consult exists only when its site is bound at startup, so an operator
+		// who never bound it keeps the registry, tool signature and prompt they
+		// had. A binding removed mid-session answers "no usable answer".
+		...(resolvedSettings.fleet.decisionProfiles.consult !== undefined
+			? {
+					consult: {
+						ask: (state, questions, signal) =>
+							askSite(
+								"consult",
+								{
+									settings: getCurrentSettings(),
+									providers,
+									ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: CONSULT_DECISION_TIMEOUT_MS }),
+								},
+								state,
+								questions,
+								signal === undefined ? {} : { signal },
+							),
+					},
+				}
+			: {}),
 		getContextBudget: () => chat.inspectLiveBudget(),
 		requestSelfCompact: (note, toolCallId, signal) => chat.requestSelfCompact(note, toolCallId, signal),
 		getSettings: () => getCurrentSettings(),

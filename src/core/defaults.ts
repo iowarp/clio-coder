@@ -70,9 +70,10 @@ export type FleetAgentProfiles = Record<string, string>;
  * `toolRisk` rates a command's blast radius for the approval prompt,
  * `drafts` picks the strongest of the candidates `/draft` generated,
  * `turnScope` and `dispatchForecast` hint the main agent before a turn about
- * whether it needs the workspace and whether workers fit, and `capabilities`
- * ranks what a gateway find lists. The main agent stays responsible for every
- * choice; a site only informs it.
+ * whether it needs the workspace and whether workers fit, `capabilities`
+ * ranks what a gateway find lists, and `consult` answers the typed questions
+ * the main agent asks through the gateway. The main agent stays responsible
+ * for every choice; a site only informs it.
  */
 export const DECISION_SITES = [
 	"routing",
@@ -83,6 +84,7 @@ export const DECISION_SITES = [
 	"turnScope",
 	"dispatchForecast",
 	"capabilities",
+	"consult",
 ] as const;
 export type DecisionSite = (typeof DECISION_SITES)[number];
 

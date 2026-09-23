@@ -81,6 +81,9 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	// nothing else. Read class so it never trips a safety gate; sequential so
 	// two decisions in one batch never race the supersede lookup.
 	[ToolNames.Decide]: { plane: "orchestrate", actionClass: "read", executionMode: "sequential" },
+	// consult asks the bound decision model and changes nothing. Read class;
+	// parallel because each call is independent and bounded per turn.
+	[ToolNames.Consult]: { plane: "orchestrate", actionClass: "read", executionMode: "parallel" },
 	// web_read is the GET-only half of the split: no method, headers, or body,
 	// so it is never an outward action.
 	[ToolNames.WebRead]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
@@ -126,6 +129,12 @@ const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
  * schema was 444 tokens of every first turn for nothing.
  */
 const LEDGER_BOUND_TOOLS = new Set<ToolName>([ToolNames.Ledger]);
+/**
+ * Registered only on the session registry, and only when the `consult`
+ * decision site is bound at startup. Unbound, the registry is exactly what it
+ * was before the tool existed.
+ */
+const DECISION_BOUND_TOOLS = new Set<ToolName>([ToolNames.Consult]);
 /** The RETRIEVE plane, omitted wholesale by a hermetic run (tools/network-policy.ts). */
 const NETWORK_BOUND_TOOLS = new Set<ToolName>([ToolNames.WebRead, ToolNames.WebFetch]);
 
@@ -201,6 +210,7 @@ export function validateBuiltinToolPolicy(
 		if (!includePanesTools && PANES_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeLedgerTools && LEDGER_BOUND_TOOLS.has(tool)) required.delete(tool);
 		if (!includeNetworkTools && NETWORK_BOUND_TOOLS.has(tool)) required.delete(tool);
+		if (DECISION_BOUND_TOOLS.has(tool)) required.delete(tool);
 	}
 	for (const tool of required) {
 		if (!registered.has(tool)) errors.push(`builtin tool ${tool} is not registered`);

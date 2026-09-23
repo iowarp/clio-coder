@@ -1430,6 +1430,7 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 	[ToolNames.Panes]: ["tests/contracts/panes-tool.test.ts"],
 	[ToolNames.Limitation]: ["tests/contracts/finish-contract-limitation.test.ts"],
 	[ToolNames.Decide]: ["tests/contracts/decide-tool.test.ts"],
+	[ToolNames.Consult]: ["tests/contracts/consult-tool.test.ts"],
 	[ToolNames.WebRead]: ["tests/contracts/tool-boundaries.test.ts", "tests/contracts/gateway-web-context.test.ts"],
 	[ToolNames.WebFetch]: ["tests/contracts/egress-remediation.test.ts", "tests/contracts/tool-boundaries.test.ts"],
 	[ToolNames.AskUser]: ["tests/contracts/ask-user-tool.test.ts"],
@@ -1475,6 +1476,7 @@ async function registeredToolSources(): Promise<Map<string, string>> {
 			askUser: async () => ({ answers: [] }),
 			requestSelfCompact: async () => "",
 			includeLedgerTools: true,
+			consult: { ask: async () => null },
 		});
 	} finally {
 		for (const [key, value] of saved) if (value !== undefined) process.env[key] = value;

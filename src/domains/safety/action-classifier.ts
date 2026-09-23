@@ -133,6 +133,10 @@ function baseClassify(tool: string): ActionClass | null {
 		// decide appends the model's own design decision to the session
 		// decision board. One ledger append, no workspace effect, never gated.
 		case ToolNames.Decide:
+		// consult sends at most 2 KB the model wrote to the decision model the
+		// operator bound, the same endpoint the pre-turn brief already sends the
+		// task to, and changes nothing anywhere.
+		case ToolNames.Consult:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

@@ -58,7 +58,7 @@ export interface ReadThresholds {
  * probability's distance from the coin-flip scaled to that axis. So a noul of
  * 0.65 reports 0.30, exactly as a two-option `choice` at the same mass would.
  */
-function certainty(answer: DecisionAnswer): number {
+export function answerCertainty(answer: DecisionAnswer): number {
 	if (answer.confidence !== undefined) return answer.confidence;
 	if (answer.type === "noul" && answer.noul !== undefined) return Math.abs(answer.noul * 2 - 1);
 	return 0;
@@ -66,7 +66,7 @@ function certainty(answer: DecisionAnswer): number {
 
 function confident(answer: DecisionAnswer, minConfidence: number | undefined): boolean {
 	if (minConfidence === undefined) return true;
-	return certainty(answer) >= minConfidence;
+	return answerCertainty(answer) >= minConfidence;
 }
 
 /**
