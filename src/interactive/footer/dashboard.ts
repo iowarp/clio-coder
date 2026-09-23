@@ -35,6 +35,7 @@ import {
 import type { AgentStatus, TurnSummary } from "../status/index.js";
 import { resolveFooterVerb, spinnerFrame } from "../status/index.js";
 import {
+	animationStep,
 	barSep,
 	brandMark,
 	clioTheme,
@@ -367,12 +368,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	const view = new Text("", 0, 0);
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
-	let frame = 0;
 	let dashboardMode: FooterDashboardMode = "compact";
 	let page: DashboardPage = "Activity";
 	let disposed = false;
 	const now = (): number => deps.now?.() ?? Date.now();
 	const state = (width: number): FooterDashboardRenderState => {
+		// Every refresh within one animation step composes the same spinner, so a
+		// refresh the status stream asks for between ticks costs no bytes.
+		const frame = animationStep(now());
 		const dispatch = deps.getDispatchRows?.() ?? [];
 		const tools = deps.getToolCounts?.() ?? { tools: {}, errors: 0 };
 		const status = deps.getAgentStatus?.();
@@ -528,7 +531,6 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 		if (disposed) return;
 		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
 		const current = state(width);
-		if (current.agent.statusText) frame = (frame + 1) % 10;
 		const notices =
 			dashboardMode === "compact" ? [] : renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
 		const contributed = deps.getExtensionStatus?.() ?? [];

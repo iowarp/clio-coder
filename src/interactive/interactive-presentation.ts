@@ -271,6 +271,18 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getOutputStyle: () => deps.getSettings?.().interface.outputDetail ?? "standard",
 		getTerminalRows: () => process.stdout.rows ?? 40,
 		...(renderTrace ? { onRenderMetrics: (metrics) => renderTrace.recordPanelRender(metrics) } : {}),
+		// Rendering ahead yields to input between steps and waits out a stream.
+		scheduleIdle: (step) => {
+			const run = (): void => {
+				if (tickersStopped) return;
+				if (deps.chat.isStreaming()) {
+					setTimeout(run, 250).unref();
+					return;
+				}
+				if (step()) setImmediate(run).unref();
+			};
+			setImmediate(run).unref();
+		},
 	});
 	const followUpQueuePanel = factories.createFollowUpQueuePanel({
 		getDequeueKey: () => {
@@ -599,20 +611,22 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const clearScheduledInterval =
 		deps.clearScheduledInterval ??
 		((handle: PresentationTickerHandle): void => clearInterval(handle as ReturnType<typeof setInterval>));
+	// The one presentation ticker. Its frames also advance every counting row in
+	// the transcript: the panel keys its render on a 100 ms tick whenever a
+	// running tool, live reasoning or a pending worker is on screen, so nothing
+	// has to invalidate the panel to move an elapsed counter. A worker that
+	// outlives the turn keeps the ticker running for its live row.
 	const footerTicker = scheduleInterval(() => {
 		const statusActive =
-			statusController.current().phase !== "idle" || localBashStartedAt !== null || deps.isAwaitingApproval?.() === true;
+			statusController.current().phase !== "idle" ||
+			localBashStartedAt !== null ||
+			deps.isAwaitingApproval?.() === true ||
+			dispatchBoardStore.rows().some((row) => row.status === "running");
 		if (!deps.chat.isStreaming() && !statusActive && !footer.isExpanded()) return;
 		footer.refresh();
 		requestRender();
 	}, 120);
 	footerTicker.unref?.();
-	const toolElapsedTicker = scheduleInterval(() => {
-		if (!deps.chat.isStreaming()) return;
-		chatPanel.invalidate?.();
-		requestRender();
-	}, 1_000);
-	toolElapsedTicker.unref?.();
 	const workspaceTicker = scheduleInterval(() => {
 		refreshLiveWorkspaceGit(true);
 		footer.refresh();
@@ -627,7 +641,6 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		if (tickersStopped) return;
 		tickersStopped = true;
 		clearScheduledInterval(footerTicker);
-		clearScheduledInterval(toolElapsedTicker);
 		clearScheduledInterval(workspaceTicker);
 	};
 	const disposeBeforeStatus = (): void => {

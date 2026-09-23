@@ -28,16 +28,17 @@ test("streamed tool arguments show preparation before execution and clear on ans
 		{ type: "message_update", assistantMessageEvent: { type: "toolcall_start" } } as never,
 		ctx,
 	);
-	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Preparing tool call · 100ms");
+	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Preparing tool call");
+	strictEqual(resolveFooterVerb(state, 3400, 100)?.text, "Preparing tool call · 2s");
 	strictEqual(state.toolStartedAt, undefined);
 	state = reduceStatus(state, { type: "text_delta", delta: "Answer" } as never, ctx);
-	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Writing · 100ms");
+	strictEqual(resolveFooterVerb(state, 3400, 100)?.text, "Writing · 2s");
 	state = reduceStatus(
 		state,
 		{ type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: {} } as never,
 		ctx,
 	);
-	strictEqual(resolveFooterVerb(state, 1100, 100)?.text, "Running read · 100ms");
+	strictEqual(resolveFooterVerb(state, 13_400, 100)?.text, "Running read · 12s");
 });
 
 test("legacy preferences normalize without changing other settings or the input", () => {

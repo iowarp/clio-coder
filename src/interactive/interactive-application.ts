@@ -35,6 +35,7 @@ import type { AskUserHandler } from "../tools/ask-user.js";
 import type { ToolRegistry } from "../tools/registry.js";
 import { APPLICATION_DOUBLE_TAP_MS, type ApplicationController } from "./application-controller.js";
 import type { ChatLoop, ChatLoopEvent } from "./chat-loop.js";
+import { warmTranscriptRender } from "./chat-panel.js";
 import { emitCommandNotice } from "./command-fallbacks.js";
 import { appendNotice } from "./command-output.js";
 import { dispatchCouncilThroughRegistry } from "./council-dispatch.js";
@@ -1463,6 +1464,11 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	};
 	void shell.nextCommittedFrame().then((frame) => {
 		if (frame === null || startupAbort.signal.aborted) return;
+		// Pay the transcript renderers' first-use cost now, between the hydrated
+		// frame and the first answer, rather than in the middle of that answer.
+		setImmediate(() => {
+			if (!startupAbort.signal.aborted && !deps.chat.isStreaming()) warmTranscriptRender(terminal.columns);
+		});
 		startupTimer = setTimeout(prepareStartup, 1000);
 		startupTimer.unref();
 	});

@@ -158,11 +158,19 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 	let transactionNeedsRender = false;
 	let disposed = false;
 	let pacer: StreamPacer | null = null;
+	const clock = deps.now ?? (() => performance.now());
+	/** When this renderer last asked for a frame; the coalesce window runs from here. */
+	let lastRequestAt = Number.NEGATIVE_INFINITY;
+
+	const requestNow = (): void => {
+		lastRequestAt = clock();
+		deps.requestRender();
+	};
 
 	const fireCoalesced = (): void => {
 		if (disposed) return;
 		pendingTimer = null;
-		deps.requestRender();
+		requestNow();
 	};
 
 	const cancelPending = (): boolean => {
@@ -179,11 +187,21 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 		}
 		if (!coalesce) {
 			cancelPending();
-			deps.requestRender();
+			requestNow();
 			return;
 		}
 		deps.onDelta?.();
-		if (pendingTimer === null) pendingTimer = setTimer(fireCoalesced, coalesceMs);
+		if (pendingTimer !== null) return;
+		// Leading edge: a delta that arrives after a quiet window asks for its
+		// frame at once, and only the deltas inside a window wait for its end.
+		// A trailing-only timer held every first token of a burst for a full
+		// window before the renderer's own frame throttle added another.
+		const wait = coalesceMs - (clock() - lastRequestAt);
+		if (wait <= 0) {
+			requestNow();
+			return;
+		}
+		pendingTimer = setTimer(fireCoalesced, wait);
 	};
 	const transaction = (operation: () => void, coalesce = false): void => {
 		mutationDepth += 1;
@@ -294,7 +312,7 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 			if (disposed) return;
 			transaction(() => drainPacer("explicit-flush"));
 			const wasPending = cancelPending();
-			if (wasPending) deps.requestRender();
+			if (wasPending) requestNow();
 		},
 		mutate(mutation, reason = "panel-mutation") {
 			if (disposed) return;
@@ -316,6 +334,7 @@ export function createCoalescingChatRenderer(deps: CreateCoalescingChatRendererD
 			if (disposed) return;
 			transaction(() => drainPacer(reason));
 			cancelPending();
+			lastRequestAt = clock();
 			if (deps.commitFrame) await deps.commitFrame(reason);
 			else deps.requestRender();
 		},

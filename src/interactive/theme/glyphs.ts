@@ -68,6 +68,19 @@ export const GLYPH = {
 
 export const SPINNER_FRAMES = ["⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"] as const;
 
+/**
+ * The one clock every live mark steps on. The footer spinner and the composer
+ * rail pulse advance at most once per step, whatever the frame rate, so a
+ * frame driven by a streamed token repaints only the transcript. Before this,
+ * the spinner advanced on every footer refresh and the rail on every frame,
+ * and the two were most of the bytes a streamed token cost.
+ */
+export const ANIMATION_STEP_MS = 120;
+
+export function animationStep(nowMs: number): number {
+	return Math.floor(nowMs / ANIMATION_STEP_MS);
+}
+
 export function spinnerFrame(tick: number): string {
 	const index = ((tick % SPINNER_FRAMES.length) + SPINNER_FRAMES.length) % SPINNER_FRAMES.length;
 	return SPINNER_FRAMES[index] ?? SPINNER_FRAMES[0];

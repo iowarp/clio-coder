@@ -450,3 +450,39 @@ test("compact quota stays beside the selected model while workspace and rotating
 	snapshot.quotaRoute = { runtimeId: "litellm", wireModelId: "claude-opus" };
 	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });
+
+test("the footer spinner and live elapsed change once per animation step, not once per refresh", () => {
+	let now = 10_000;
+	const footer = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		resolveCurrentBranch: async () => null,
+		getTerminalColumns: () => 120,
+		getTerminalRows: () => 40,
+		now: () => now,
+		getAgentStatus: () => ({
+			phase: "writing",
+			since: 8_000,
+			lastMeaningfulAt: now,
+			watchdogTier: 0,
+			watchdogPeak: 0,
+			localRuntime: false,
+		}),
+	});
+	try {
+		const line = () => footer.view.render(120)[0] ?? "";
+		footer.refresh();
+		const first = line();
+		match(stripTerminalSequences(first), /Writing · 2s/);
+		// The status stream and the ticker both refresh; inside one step neither moves anything.
+		now = 10_050;
+		footer.refresh();
+		footer.refresh();
+		strictEqual(line(), first);
+		now = 10_130;
+		footer.refresh();
+		ok(line() !== first, "the next step advances the spinner");
+		match(stripTerminalSequences(line()), /Writing · 2s/);
+	} finally {
+		footer.dispose();
+	}
+});

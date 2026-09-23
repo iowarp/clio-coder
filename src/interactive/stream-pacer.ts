@@ -169,7 +169,13 @@ const DEFAULT_MAX_QUEUE_GRAPHEMES = 8_192;
 const DEFAULT_MAX_QUEUE_BYTES = 512 * 1_024;
 const DEFAULT_MAX_SLICE_GRAPHEMES = 64;
 const DEFAULT_MAX_SLICE_BYTES = 16 * 1_024;
-const DEFAULT_FIRST_SLICE_GRAPHEMES = 1;
+/**
+ * The first slice of an epoch is the whole first delta, up to one slice. It
+ * used to be one grapheme, which put the first character on screen at once and
+ * held the rest of the model's first token for the first 25 ms tick, so the
+ * first whole token reached the terminal about 45 ms after it arrived.
+ */
+const DEFAULT_FIRST_SLICE_GRAPHEMES = DEFAULT_MAX_SLICE_GRAPHEMES;
 
 function positiveFinite(value: number | undefined, fallback: number): number {
 	return value !== undefined && Number.isFinite(value) && value > 0 ? value : fallback;

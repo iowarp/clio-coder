@@ -24,6 +24,7 @@ import {
 	visibleWidth,
 } from "../../src/engine/tui.js";
 import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-panel.js";
+import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
 import { buildLayout } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
@@ -34,6 +35,7 @@ import {
 	renderToolSubline,
 } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { createStreamPacer, type StreamPacerSlice } from "../../src/interactive/stream-pacer.js";
 import { clioTheme, formatContextPercent, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { workerEntriesFromRunEntries, workerRunEntryFields } from "../../src/interactive/worker-replay.js";
@@ -230,6 +232,35 @@ describe("Clio rendering invariants", () => {
 			endTool(panel, "Progress 1\x1b[1A\x1b[2K\rProgress 2\b\b\x07");
 			assertRows("settled");
 		}
+	});
+
+	it("advances a running tool's and a pending worker's elapsed on the panel's own clock", () => {
+		let clock = 10_000;
+		const panel = createChatPanel({ now: () => clock });
+		panel.applyEvent({ type: "agent_start" } as never);
+		startTool(panel);
+		panel.applyWorkerState({
+			assignmentId: "helper-1",
+			runId: "h1lp3r",
+			origin: "agent",
+			helper: true,
+			agentId: "context-scout",
+			task: "Summarize prior probe benchmarks.",
+			runtime: { kind: "clio", targetId: "dynamo", wireModelId: "qwen3.8-27b" },
+			text: "",
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: "h1lp3r", targetLabel: "dynamo/qwen3.8-27b" }],
+			pending: true,
+			startedAtMs: clock,
+		});
+		const before = plainRender(panel);
+		clock += 2_300;
+		// No invalidate between the frames: only the clock moved.
+		const after = plainRender(panel);
+		match(before, /running · 0ms/u);
+		match(after, /running · 2\.3s/u);
+		strictEqual(after.match(/2\.3s/gu)?.length, 2, "the worker's elapsed advances with the tool's");
 	});
 
 	it("clears partial state at terminal settlement and ignores late updates", () => {
@@ -510,6 +541,81 @@ describe("streamed answers settle in place", () => {
 		deepStrictEqual(root.render(80), expected());
 	});
 
+	it("renders settled entries ahead in the other styles so a first Alt+O renders nothing", () => {
+		let style: OutputStyle = "standard";
+		let rendered = 0;
+		const steps: Array<() => boolean> = [];
+		const panel = createChatPanel({
+			now: () => 0,
+			getOutputStyle: () => style,
+			onRenderMetrics: (metrics) => {
+				rendered = metrics.entriesRendered;
+			},
+			scheduleIdle: (step) => steps.push(step),
+		});
+		const idle = () => {
+			while (steps.length > 0) {
+				const step = steps.shift();
+				if (step?.()) steps.push(step);
+			}
+		};
+		for (let turn = 0; turn < 6; turn += 1) {
+			panel.appendUser(`Question ${turn}.`);
+			streamAnswer(panel, `Answer ${turn}.`);
+			settleAnswer(panel, `Answer ${turn}.`);
+		}
+		panel.render(80);
+		// A streaming answer holds the job at its entry instead of being skipped.
+		panel.appendUser("Still streaming.");
+		streamAnswer(panel, "Partial");
+		panel.render(80);
+		idle();
+		settleAnswer(panel, "Partial answer.");
+		panel.render(80);
+		idle();
+		for (const next of ["detailed", "compact"] as const) {
+			style = next;
+			panel.render(80);
+			strictEqual(rendered, 0, `the first switch to ${next} renders every entry from the cache`);
+		}
+	});
+
+	it("caches a settled replay block per render key and re-renders a live one until it settles", () => {
+		let style: OutputStyle = "standard";
+		let clock = 0;
+		const panel = createChatPanel({ now: () => clock, getOutputStyle: () => style });
+		let settledCalls = 0;
+		panel.appendReplayBlock((width) => {
+			settledCalls += 1;
+			return [`notice at ${width}`];
+		});
+		let running = true;
+		let liveCalls = 0;
+		panel.appendReplayBlock(
+			() => {
+				liveCalls += 1;
+				return [running ? "running" : "done"];
+			},
+			() => running,
+		);
+		for (const next of ["standard", "detailed", "standard", "detailed"] as const) {
+			style = next;
+			panel.render(80);
+			clock += 150;
+		}
+		strictEqual(settledCalls, 2, "one render per style, then served from the cache");
+		ok(liveCalls >= 4, "a live block renders on every frame that asks");
+		running = false;
+		clock += 150;
+		match(plainRender(panel, 80), /done/u);
+		const settledLive = liveCalls;
+		style = "standard";
+		panel.render(80);
+		style = "detailed";
+		panel.render(80);
+		strictEqual(liveCalls, settledLive + 1, "once settled, the formerly live block caches too");
+	});
+
 	it("never full-redraws the regular screen when an answer taller than it finalizes", () => {
 		const terminal = new RenderingTerminal();
 		terminal.rows = 12;
@@ -536,6 +642,57 @@ describe("streamed answers settle in place", () => {
 		} finally {
 			tui.stop();
 		}
+	});
+});
+
+describe("stream presentation timing", () => {
+	it("asks for a frame on the first delta after a quiet window and coalesces the rest", () => {
+		let clock = 1_000;
+		let requests = 0;
+		const timers: Array<{ callback: () => void; ms: number }> = [];
+		const renderer = createCoalescingChatRenderer({
+			chatPanel: createChatPanel({ now: () => clock }),
+			requestRender: () => {
+				requests += 1;
+			},
+			now: () => clock,
+			setTimer: (callback, ms) => timers.push({ callback, ms }),
+			clearTimer: () => {},
+		});
+		const delta = (text: string) =>
+			renderer.applyEvent({ type: "text_delta", contentIndex: 0, delta: text, partialText: "" } as never);
+		delta("First");
+		strictEqual(requests, 1, "the first token does not wait out a coalesce window");
+		strictEqual(timers.length, 0);
+		clock += 5;
+		delta(" token");
+		delta(" burst");
+		strictEqual(requests, 1, "deltas inside the window share one frame");
+		strictEqual(timers.length, 1);
+		strictEqual(timers[0]?.ms, 11, "the window runs from the last request, not from this delta");
+		timers[0]?.callback();
+		strictEqual(requests, 2);
+		clock += 40;
+		delta(" again");
+		strictEqual(requests, 3, "a delta after a quiet window is on the leading edge again");
+	});
+
+	it("shows the whole first delta of a paced stream at once", () => {
+		const slices: StreamPacerSlice[] = [];
+		const timers: Array<{ callback: () => void; ms: number }> = [];
+		const pacer = createStreamPacer({
+			mode: "on",
+			onSlice: (slice) => slices.push(slice),
+			now: () => 0,
+			setTimer: (callback, ms) => timers.push({ callback, ms }),
+			clearTimer: () => {},
+		});
+		pacer.enqueue({ sequence: 1, generation: 1, kind: "text", contentIndex: 0, text: "Hello there" });
+		strictEqual(timers[0]?.ms, 0);
+		timers[0]?.callback();
+		strictEqual(slices[0]?.text, "Hello there");
+		strictEqual(slices[0]?.reason, "first");
+		strictEqual(slices[0]?.finalForItem, true);
 	});
 });
 
