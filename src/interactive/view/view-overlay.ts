@@ -1,4 +1,5 @@
 import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
+import { redactSecretString } from "../../domains/safety/redaction.js";
 import {
 	type Component,
 	Input,
@@ -27,21 +28,18 @@ export const VIEW_OVERLAY_WIDTH = "100%";
 export const VIEW_OVERLAY_MAX_HEIGHT = "100%";
 export const VIEW_OVERLAY_MARGIN = { top: 0, right: 0, bottom: 0, left: 0 } as const;
 
-const LEFT_PANE_TARGET_WIDTH = 38;
-const LEFT_PANE_MIN_WIDTH = 30;
-const LEFT_PANE_MAX_WIDTH = 44;
+const LEFT_PANE_MIN_WIDTH = 36;
+const LEFT_PANE_MAX_WIDTH = 72;
 const SEPARATOR = " │ ";
 const ELLIPSIS = "…";
 
 /**
  * Below this the two panes cannot both be read.
  *
- * The list holds a 30-column floor and the detail pane takes what is left, so
- * at 40 columns the detail got three: `accountability` came out as `ac…/Acc/
- * oun/tab/ili/ty` down the right edge. One pane at a time is the readable
- * answer, and Tab already switches between them.
+ * The list needs 36 columns and a useful detail pane needs 45. Below that,
+ * one pane at a time keeps titles and content readable; Tab switches focus.
  */
-const TWO_PANE_MIN_WIDTH = LEFT_PANE_MIN_WIDTH + 3 + 24;
+const TWO_PANE_MIN_WIDTH = LEFT_PANE_MIN_WIDTH + 3 + 45;
 
 /** Whether a body this wide shows one pane instead of two. */
 function viewUsesSinglePane(bodyWidth: number): boolean {
@@ -88,6 +86,7 @@ interface LoadedContent {
 	error?: string;
 	renderWidth?: number;
 	renderedLines?: string[];
+	renderingWidth?: number;
 }
 
 export interface ViewOverlayOptions {
@@ -337,42 +336,34 @@ function verificationText(state: ViewVerificationState | undefined): string {
 	return `${GLYPH.error} verify fail ${state.detail}`;
 }
 
-function buildArtifactHeader(
-	artifact: ViewArtifact | undefined,
-	verification: ViewVerificationState | undefined,
-	width: number,
-): string {
-	if (!artifact) return padAnsi(clioTheme().fg("muted", "No artifact selected"), width, ELLIPSIS);
-	const theme = clioTheme();
-	const timestamp = formatLocalTime(artifact.timestamp);
-	const size = formatArtifactSize(artifact.sizeBytes);
-	const parts = [theme.fg("dim", artifact.category), theme.fg("muted", artifact.id), theme.fg("dim", timestamp)];
-	if (size.length > 0) parts.push(theme.fg("dim", size));
-	const verify = verificationText(verification);
-	if (verify.length > 0) {
-		const token =
-			verification?.status === "ok"
-				? "success"
-				: verification?.status === "fail"
-					? "error"
-					: verification?.status === "retired"
-						? "warning"
-						: "info";
-		parts.push(theme.fg(token, verify));
-	}
-	return padAnsi(parts.join("  "), width, ELLIPSIS);
-}
-
 /** Put verification on wrapped rows so a canonical receipt verdict is never reduced to a prefix. */
 function buildArtifactHeaderLines(
 	artifact: ViewArtifact | undefined,
 	verification: ViewVerificationState | undefined,
 	width: number,
 ): string[] {
-	const metadata = buildArtifactHeader(artifact, undefined, width);
-	const verify = verificationText(verification);
-	if (artifact === undefined || verify.length === 0) return [metadata];
+	if (!artifact) return [padAnsi(clioTheme().fg("muted", "No artifact selected"), width, ELLIPSIS)];
 	const theme = clioTheme();
+	// The list may cut a title, especially in a split pane. Give the selected
+	// act its own readable heading before the full body, while bounding a very
+	// long command so it cannot consume the entire preview.
+	const title = redactSecretString(sanitizeCallTargetText(artifact.title));
+	const wrappedTitle = wrapTextWithAnsi(
+		theme.fg("title", truncateToWidth(title, Math.max(1, width * 3), ELLIPSIS, true)),
+		Math.max(1, width),
+	);
+	const titleRows =
+		wrappedTitle.length <= 3
+			? wrappedTitle
+			: [...wrappedTitle.slice(0, 2), truncateToWidth(`${wrappedTitle[2] ?? ""}${ELLIPSIS}`, width, ELLIPSIS, true)];
+	const size = formatArtifactSize(artifact.sizeBytes);
+	const metadata = [artifact.category, formatLocalTime(artifact.timestamp), size].filter(Boolean).join(" · ");
+	const verify = verificationText(verification);
+	const heading = [
+		...titleRows.map((row) => padAnsi(row, width, ELLIPSIS)),
+		padAnsi(theme.fg("dim", metadata), width, ELLIPSIS),
+	];
+	if (verify.length === 0) return heading;
 	const token =
 		verification?.status === "ok"
 			? "success"
@@ -382,15 +373,14 @@ function buildArtifactHeaderLines(
 					? "warning"
 					: "info";
 	return [
-		metadata,
+		...heading,
 		...wrapTextWithAnsi(theme.fg(token, verify), Math.max(1, width)).map((line) => padAnsi(line, width, ELLIPSIS)),
 	];
 }
 
 function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: number): string {
-	// One pane at a time means Tab is how the other one is reached, so the
-	// narrow footer states it. The generic elider drops middle entries, and Tab
-	// sits in the middle.
+	// One pane at a time needs an explicit Enter and Escape route in the hint;
+	// the generic elider can drop the action in the middle of a long hint.
 	if (innerWidth !== undefined && viewUsesSinglePane(innerWidth - 2)) {
 		const budget = innerWidth - 3;
 		const tiers =
@@ -400,7 +390,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 						"[↑↓] select · [Enter] detail · [Esc] close",
 						"[↑↓] select · [Enter] detail",
 					]
-				: ["[↑↓] scroll · [Esc] back", "[↑↓] scroll · [Tab] list"];
+				: ["[n/p] item · [↑↓] scroll · [Esc] back", "[n/p] item · [Esc] back"];
 		return tiers.find((tier) => visibleWidth(tier) <= budget) ?? (tiers.at(-1) as string);
 	}
 	if (focus === "list") {
@@ -414,6 +404,7 @@ function viewFooterHint(focus: ViewPaneFocus, canVerify: boolean, innerWidth?: n
 	}
 	return buildHint(
 		[
+			{ key: "n/p", verb: "item" },
 			{ key: "↑↓", verb: "scroll" },
 			{ key: "←→", verb: "category" },
 			{ key: "PgUp/PgDn", verb: "page" },
@@ -549,6 +540,7 @@ export class ViewOverlayView implements Component {
 					format: loaded.format,
 					...(loaded.render === undefined ? {} : { render: loaded.render }),
 				};
+				this.queueContentRender(this.content, this.lastContentWidth);
 			} catch (err) {
 				if (token !== this.loadToken) return;
 				const message = err instanceof Error ? err.message : String(err);
@@ -565,6 +557,38 @@ export class ViewOverlayView implements Component {
 		})();
 	}
 
+	/** Lay out selected content after the paint call, including on resize. */
+	private queueContentRender(content: LoadedContent, width: number): void {
+		if (content.status !== "loaded" || content.renderingWidth === width) return;
+		content.renderingWidth = width;
+		const token = this.loadToken;
+		void Promise.resolve()
+			.then(() => {
+				if (token !== this.loadToken || this.content !== content || content.renderingWidth !== width) return;
+				const rows =
+					content.render !== undefined
+						? content.render(Math.max(1, width))
+						: content.format === "markdown"
+							? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
+							: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+				content.renderWidth = width;
+				content.renderedLines = rows;
+				this.options.requestRender?.();
+			})
+			.catch((err) => {
+				if (token !== this.loadToken || this.content !== content || content.renderingWidth !== width) return;
+				const message = err instanceof Error ? err.message : String(err);
+				this.content = {
+					key: content.key,
+					status: "error",
+					lines: [clioTheme().fg("error", `layout failed: ${message}`)],
+					format: "text",
+					error: message,
+				};
+				this.options.requestRender?.();
+			});
+	}
+
 	private renderedContentLines(width: number): string[] {
 		if (this.showProvenance) {
 			const artifact = this.selectedArtifact();
@@ -578,21 +602,17 @@ export class ViewOverlayView implements Component {
 				...(artifact.runId ? [`Run: ${artifact.runId}`] : []),
 				...(artifact.correlationId ? [`Correlation: ${artifact.correlationId}`] : []),
 				...(artifact.description ? [`Details: ${artifact.description}`] : []),
-			].flatMap((line) => wrapTextWithAnsi(sanitizeCallTargetText(line), Math.max(1, width)));
+			].flatMap((line) => wrapTextWithAnsi(redactSecretString(sanitizeCallTargetText(line)), Math.max(1, width)));
 		}
 		const content = this.content;
 		if (!content) return [];
-		if (content.status === "error") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
-		if (content.renderedLines && content.renderWidth === width) return content.renderedLines;
-		const rendered =
-			content.render !== undefined
-				? content.render(Math.max(1, width))
-				: content.format === "markdown"
-					? new Markdown(content.lines.join("\n"), 0, 0, markdownTheme(clioTheme())).render(width)
-					: content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
-		content.renderWidth = width;
-		content.renderedLines = rendered;
-		return rendered;
+		if (content.status !== "loaded") return content.lines.flatMap((line) => wrapTextWithAnsi(line, Math.max(1, width)));
+		if (content.renderedLines && content.renderWidth === width) {
+			content.renderingWidth = width;
+			return content.renderedLines;
+		}
+		this.queueContentRender(content, width);
+		return [clioTheme().fg("dim", "laying out preview…")];
 	}
 
 	private renderList(width: number, height: number): string[] {
@@ -657,7 +677,8 @@ export class ViewOverlayView implements Component {
 			if (!row.item) continue;
 			const selected = row.itemIndex === this.selectedIndex;
 			const cursor = selected ? theme.fg("accent", `${GLYPH.cursor} `) : "  ";
-			const title = selected ? theme.style("accent", row.item.title, { bold: true }) : row.item.title;
+			const safeTitle = redactSecretString(sanitizeCallTargetText(row.item.title));
+			const title = selected ? theme.style("accent", safeTitle, { bold: true }) : safeTitle;
 			const metaParts = [formatRelativeTime(row.item.timestamp), formatArtifactSize(row.item.sizeBytes)].filter(Boolean);
 			const meta = metaParts.length > 0 ? theme.fg("dim", metaParts.join(" ")) : "";
 			const available = Math.max(1, width - visibleWidth(cursor));
@@ -675,29 +696,31 @@ export class ViewOverlayView implements Component {
 		const artifact = this.selectedArtifact();
 		this.ensureContentLoaded(artifact);
 		this.lastContentWidth = width;
+		const filtered = this.filteredArtifacts();
+		const position = artifact ? ` · ${this.selectedIndex + 1}/${filtered.length}` : "";
 		const verification = artifact ? this.verifications.get(artifactKey(artifact)) : undefined;
+		const narrowHeader = width < 50;
+		const headerLabel = this.showProvenance
+			? narrowHeader
+				? `Provenance${position} · i preview`
+				: `Provenance${position} · i preview · Esc list`
+			: this.focus === "content"
+				? narrowHeader
+					? `Preview${position} · i info`
+					: `Preview${position} · n/p item · i info · Esc list`
+				: `Preview${position} · Enter/Tab focus`;
 		const header = [
-			padAnsi(
-				clioTheme().fg(
-					this.focus === "content" ? "accent" : "dim",
-					this.showProvenance
-						? "Provenance · i preview · Esc list"
-						: this.focus === "content"
-							? "Preview · i info · Esc list"
-							: "Preview · Enter/Tab focus",
-				),
-				width,
-				ELLIPSIS,
-			),
+			padAnsi(clioTheme().fg(this.focus === "content" ? "accent" : "dim", headerLabel), width, ELLIPSIS),
 			...buildArtifactHeaderLines(artifact, verification, width),
 		];
 		const bodyHeight = Math.max(0, height - header.length);
 		this.lastContentBodyHeight = Math.max(1, bodyHeight);
 		const body = this.renderedContentLines(width);
+		const layoutPending = !this.showProvenance && this.content?.status === "loaded" && this.content.renderWidth !== width;
 		const maxOffset = Math.max(0, body.length - Math.max(1, bodyHeight));
-		if (this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
+		if (!layoutPending && this.contentScrollOffset > maxOffset) this.contentScrollOffset = maxOffset;
 		const visible = body
-			.slice(this.contentScrollOffset, this.contentScrollOffset + bodyHeight)
+			.slice(layoutPending ? 0 : this.contentScrollOffset, (layoutPending ? 0 : this.contentScrollOffset) + bodyHeight)
 			.map((line) => padAnsi(line, width, ELLIPSIS));
 		const lines = [...header, ...visible];
 		return this.fixedLines(lines, width, height);
@@ -715,10 +738,7 @@ export class ViewOverlayView implements Component {
 			return this.focus === "content" ? this.renderContent(width, bodyHeight) : this.renderList(width, bodyHeight);
 		}
 		const separatorWidth = visibleWidth(SEPARATOR);
-		const leftWidth = Math.min(
-			LEFT_PANE_MAX_WIDTH,
-			Math.max(LEFT_PANE_MIN_WIDTH, Math.min(LEFT_PANE_TARGET_WIDTH, Math.floor(width * 0.38))),
-		);
+		const leftWidth = Math.min(LEFT_PANE_MAX_WIDTH, Math.max(LEFT_PANE_MIN_WIDTH, Math.floor(width * 0.4)));
 		const rightWidth = Math.max(1, width - leftWidth - separatorWidth);
 		const list = this.renderList(leftWidth, bodyHeight);
 		const content = this.renderContent(rightWidth, bodyHeight);
@@ -758,6 +778,10 @@ export class ViewOverlayView implements Component {
 		}
 		if (this.focus === "content" && data === "o") {
 			this.openPathNotice();
+			return;
+		}
+		if (this.focus === "content" && (data === "n" || data === "p")) {
+			this.selectIndex(this.selectedIndex + (data === "n" ? 1 : -1));
 			return;
 		}
 		if (matchesKey(data, "esc")) {
@@ -800,6 +824,8 @@ export class ViewOverlayView implements Component {
 
 	private handleContentInput(data: string): boolean {
 		const bodyHeight = this.lastContentBodyHeight;
+		if (!this.showProvenance && this.content?.status === "loaded" && this.content.renderWidth !== this.lastContentWidth)
+			return true;
 		const total = this.renderedContentLines(this.lastContentWidth).length;
 		let action: ViewScrollAction | null = null;
 		if (matchesKey(data, "up") || data === "k") action = "line-up";

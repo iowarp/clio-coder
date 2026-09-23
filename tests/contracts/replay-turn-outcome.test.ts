@@ -236,7 +236,9 @@ test("a refused skill load reads the same live and on replay, from its persisted
 	};
 	persistence.appendToolResultTurn(end);
 
-	const live = createChatPanel();
+	// A fixed clock keeps the live row's optional duration out of this replay
+	// parity check, even when the suite pauses between start and end events.
+	const live = createChatPanel({ now: () => Date.parse("2026-09-17T00:00:00Z") });
 	live.applyEvent({ type: "tool_execution_start", toolCallId: "load-1", toolName: "context", args } as ChatLoopEvent);
 	live.applyEvent(end as ChatLoopEvent);
 	const plain = (lines: string[]) => lines.map(stripTerminalSequences).filter((line) => line.length > 0);
