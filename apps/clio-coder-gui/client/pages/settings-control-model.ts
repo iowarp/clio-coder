@@ -61,6 +61,24 @@ export function selectOptions(control: SettingControl): Array<{ value: string; l
 	return control.optional ? [{ value: "", label: emptyMeaning(control) }, ...options] : options;
 }
 
+/**
+ * Controls whose value is one of a few words or an exact value only the operator knows. The engine
+ * accepts these words (`src/core/settings-controls.ts`: `parseControlInput` for concurrency, the help
+ * text for worktrees) but does not yet publish them as choices, so they are named here until it does.
+ */
+export interface OpenChoice {
+	readonly words: readonly string[];
+	/** The select's escape to an exact value, and the field it opens. */
+	readonly other: { readonly label: string; readonly field: "whole-number" | "folder" };
+}
+export const OPEN_CHOICES: Readonly<Record<string, OpenChoice>> = {
+	"fleet.concurrency": { words: ["auto"], other: { label: "A fixed number…", field: "whole-number" } },
+	"fleet.worktrees.root": {
+		words: ["auto", "disk", "tmpfs"],
+		other: { label: "A folder you choose…", field: "folder" },
+	},
+};
+
 /** Sentences for a completed write: the requested change first, then every side effect the engine applied. */
 export function writtenSentences(
 	changed: Array<{ path: string; value: string }>,

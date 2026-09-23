@@ -13,6 +13,7 @@ export function ModelSelect({
 	value,
 	models,
 	defaultModel = null,
+	emptyLabel,
 	disabled = false,
 	describedBy,
 	note,
@@ -23,6 +24,8 @@ export function ModelSelect({
 	/** The target's catalog, or null when there is no target or it has not been read. */
 	models: readonly string[] | null;
 	defaultModel?: string | null;
+	/** Replaces "Target default" as the empty choice's words. */
+	emptyLabel?: string;
 	disabled?: boolean;
 	describedBy?: string;
 	/** Where the catalog came from and how fresh it is, in a sentence. */
@@ -31,7 +34,7 @@ export function ModelSelect({
 }) {
 	const [typing, setTyping] = useState(false);
 	const catalog = models !== null && models.length > 0;
-	const options: readonly ModelOption[] = catalog ? modelOptions(models, value, defaultModel) : [];
+	const options: readonly ModelOption[] = catalog ? modelOptions(models, value, defaultModel, emptyLabel) : [];
 	return (
 		<div className="model-select">
 			{catalog && !typing ? (
@@ -60,7 +63,7 @@ export function ModelSelect({
 						disabled={disabled}
 						spellCheck={false}
 						autoComplete="off"
-						placeholder="Target default"
+						placeholder={emptyLabel ?? "Target default"}
 						aria-describedby={describedBy}
 						onChange={(event) => onChange(event.target.value)}
 						// biome-ignore lint/a11y/noAutofocus: the operator just asked to type an id; the field is where they type it.

@@ -35,6 +35,8 @@ const h = await harness(
 		scenario: "markdown",
 		origin: () => origin,
 		clientDir: values.client,
+		// The real runtime always reports its safe settings and targets, so the smoke does too.
+		env: { CLIO_CODER_WEB_FIXTURE_ROUTE: "1" },
 	},
 );
 await seedSettings(h.home.path, h.home.env);
@@ -615,11 +617,32 @@ try {
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
-		// Everything that is not the conversation sits behind one Session tools menu. The fixture
-		// advertises no safe-settings controls, so the label form is what the menu opens on.
+		// The route beside Send is the one place to change target, model and thinking. The runtime can
+		// only save them for every project, and the picker says so before its button.
+		const route = page.locator(".route-picker");
+		await route.locator("summary").click();
+		await route.getByText("Saved for every project.", { exact: true }).waitFor();
+		await route.getByLabel("Target", { exact: true }).selectOption("field-station");
+		assert.equal(await route.getByLabel("Model", { exact: true }).inputValue(), "");
+		await route.getByLabel("Model", { exact: true }).selectOption("survey-small");
+		await route.getByText(/^field-station answered at /).waitFor();
+		await check("route-picker");
+		if (width === 1600 || width === 390) await page.screenshot({ path: join(output, `route-picker-${width}.png`) });
+		await route.getByRole("button", { name: "Save for every project", exact: true }).click();
+		await route.locator("summary").getByText("field-station · survey-small", { exact: true }).waitFor();
+		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
+		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+		// Escape closes it without saving and hands focus back to the chip.
+		await route.locator("summary").click();
+		await route.getByLabel("Thinking", { exact: true }).selectOption("high");
+		await page.keyboard.press("Escape");
+		assert.equal(await route.evaluate((element) => (element as HTMLDetailsElement).open), false);
+		assert.equal(await route.locator("summary").evaluate((element) => document.activeElement === element), true);
+		// Everything else that is not the conversation sits behind one Session tools menu.
 		await page.locator(".conversation__tools > summary").click();
 		await page.getByRole("button", { name: "Save label", exact: true }).waitFor();
-		await page.getByText("This agent did not advertise session settings controls.", { exact: true }).waitFor();
+		await page.getByText(/^Choose the target and model beside Send, under the message field\./).waitFor();
+		await page.getByRole("combobox", { name: /^Working freedom for new conversations/ }).waitFor();
 		await check("session-controls");
 		await page.keyboard.press("Escape");
 		assert.equal(

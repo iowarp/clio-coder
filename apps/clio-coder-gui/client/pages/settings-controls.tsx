@@ -11,6 +11,8 @@ import {
 	emptyMeaning,
 	groupControls,
 	matchesControl,
+	OPEN_CHOICES,
+	type OpenChoice,
 	selectOptions,
 	sentence,
 	sourceLabel,
@@ -25,6 +27,76 @@ interface ModelCatalog {
 	readonly models: readonly string[] | null;
 	readonly defaultModel: string | null;
 	readonly note: ReactNode;
+}
+
+const OTHER = "\u0000other";
+
+/**
+ * One of the engine's words, or an exact value. A saved exact value opens as the field, so the page
+ * never rewrites it, and the field offers a way back to the words.
+ */
+function OpenChoiceField({
+	id,
+	describedBy,
+	choice,
+	value,
+	disabled,
+	onChange,
+}: {
+	id: string;
+	describedBy: string;
+	choice: OpenChoice;
+	value: string;
+	disabled: boolean;
+	onChange: (value: string) => void;
+}) {
+	const [typing, setTyping] = useState(value !== "" && !choice.words.includes(value));
+	const [asked, setAsked] = useState(false);
+	if (!typing)
+		return (
+			<select
+				id={id}
+				aria-describedby={describedBy}
+				value={value}
+				disabled={disabled}
+				onChange={(event) => {
+					if (event.target.value !== OTHER) onChange(event.target.value);
+					else {
+						setTyping(true);
+						setAsked(true);
+					}
+				}}
+			>
+				{choice.words.includes(value) ? null : <option value={value}>{value || "Not set"}</option>}
+				{choice.words.map((word) => (
+					<option key={word} value={word}>
+						{word}
+					</option>
+				))}
+				<option value={OTHER}>{choice.other.label}</option>
+			</select>
+		);
+	return (
+		<div className="model-select__typed">
+			<input
+				id={id}
+				aria-describedby={describedBy}
+				value={choice.words.includes(value) ? "" : value}
+				disabled={disabled}
+				spellCheck={false}
+				autoComplete="off"
+				{...(choice.other.field === "whole-number"
+					? { type: "number", min: 1, step: 1, inputMode: "numeric" as const, placeholder: "4" }
+					: { type: "text", placeholder: "/absolute/path/to/worktrees" })}
+				onChange={(event) => onChange(event.target.value)}
+				// biome-ignore lint/a11y/noAutofocus: the operator just asked to type the value; the field is where they type it.
+				autoFocus={asked}
+			/>
+			<button type="button" className="model-select__back" disabled={disabled} onClick={() => setTyping(false)}>
+				Choose from the list
+			</button>
+		</div>
+	);
 }
 
 function ControlRow({
@@ -107,6 +179,15 @@ function ControlRow({
 								defaultModel={catalog.defaultModel}
 								disabled={write.isPending}
 								note={catalog.note}
+								onChange={edit}
+							/>
+						) : OPEN_CHOICES[control.path] ? (
+							<OpenChoiceField
+								id={fieldId}
+								describedBy={helpId}
+								choice={OPEN_CHOICES[control.path] as OpenChoice}
+								value={value}
+								disabled={write.isPending}
 								onChange={edit}
 							/>
 						) : options ? (

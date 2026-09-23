@@ -17,10 +17,16 @@ export interface ModelOption {
  * no longer lists it (so opening the form never rewrites it), the catalog sorted for scanning, and a
  * way to type an id the catalog does not show.
  */
-export function modelOptions(models: readonly string[], value: string, defaultModel: string | null): ModelOption[] {
+export function modelOptions(
+	models: readonly string[],
+	value: string,
+	defaultModel: string | null,
+	/** What the empty choice means where "the target's default" is not the right words. */
+	emptyLabel?: string,
+): ModelOption[] {
 	const catalog = [...new Set(models)].sort((left, right) => left.localeCompare(right, "en-US"));
 	const options: ModelOption[] = [
-		{ value: "", label: defaultModel ? `Target default · ${defaultModel}` : "Target default" },
+		{ value: "", label: emptyLabel ?? (defaultModel ? `Target default · ${defaultModel}` : "Target default") },
 	];
 	if (value !== "" && !catalog.includes(value)) options.push({ value, label: `${value} · not in this target's list` });
 	for (const model of catalog) options.push({ value: model, label: model });

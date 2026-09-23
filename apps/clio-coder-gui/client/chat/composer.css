@@ -3,6 +3,7 @@
    no state is carried by colour alone. */
 
 .composer {
+	position: relative;
 	display: grid;
 	gap: var(--space-1);
 	margin-top: 0;
@@ -119,7 +120,9 @@
 	color: var(--ink-muted);
 }
 /* The route beside Send: which target and model the next request goes to, with the target's
-   reported health as the glyph. It is a fact, not a control; the words carry it in greyscale. */
+   reported health as the glyph; the words carry it in greyscale. When the agent lets the GUI edit
+   its safe settings the chip is the summary of the route picker, a frameless control in this quiet
+   row until it is pointed at, focused or open. */
 .route-chip {
 	display: inline-flex;
 	align-items: baseline;
@@ -147,6 +150,97 @@
 .route-chip__text {
 	overflow: hidden;
 	text-overflow: ellipsis;
+}
+.route-picker {
+	display: flex;
+	flex: 0 1 auto;
+	min-width: 0;
+}
+.route-picker > summary {
+	align-items: center;
+	min-height: 36px;
+	max-width: 20rem;
+	padding: var(--space-1) var(--space-2);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	cursor: pointer;
+	list-style: none;
+	transition:
+		background-color var(--motion-fast),
+		border-color var(--motion-fast);
+}
+.route-picker > summary::-webkit-details-marker {
+	display: none;
+}
+.route-picker > summary:hover,
+.route-picker[open] > summary {
+	color: var(--ink);
+	background: var(--surface-sunken);
+	border-color: var(--line-strong);
+}
+.route-chip__caret {
+	flex: none;
+	font-size: var(--text-exact);
+}
+/* The panel hangs above the whole composer, right-aligned, so it never runs off a narrow screen. */
+.route-picker__panel {
+	position: absolute;
+	z-index: 6;
+	right: 0;
+	bottom: calc(100% + var(--space-2));
+	display: grid;
+	gap: var(--space-3);
+	width: min(30rem, 100%);
+	max-height: min(70dvh, 36rem);
+	overflow: auto;
+	padding: var(--space-4) var(--space-5);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-lg);
+	background: var(--overlay);
+	box-shadow: var(--shadow-panel);
+	font-size: var(--text-meta);
+	color: var(--ink);
+}
+.route-picker__panel p {
+	margin: 0;
+	line-height: var(--leading-body);
+}
+.route-picker__title {
+	font-size: var(--text-body);
+	font-weight: 600;
+	color: var(--ink-strong);
+}
+.route-picker__fields {
+	display: grid;
+	grid-template-columns: max-content minmax(0, 1fr);
+	gap: var(--space-3) var(--space-4);
+	align-items: baseline;
+}
+.route-picker__fields > label {
+	color: var(--ink-muted);
+}
+.route-picker__fields select,
+.route-picker__fields input {
+	width: 100%;
+	min-width: 0;
+	min-height: 36px;
+	padding: var(--space-1) var(--space-2);
+}
+.route-picker__scope {
+	padding-top: var(--space-3);
+	border-top: 1px solid var(--line);
+}
+.route-picker__wait {
+	color: var(--ink-muted);
+}
+.route-picker__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.route-picker__actions button {
+	min-height: 36px;
+	padding: var(--space-1) var(--space-4);
 }
 .composer__submit,
 .composer__secondary {
@@ -358,5 +452,19 @@
 	}
 	.route-chip {
 		max-width: 11rem;
+	}
+	/* Padding and the caret take the difference, so Send keeps its place on the row. */
+	.route-picker > summary {
+		max-width: 9rem;
+	}
+	.route-picker__panel {
+		padding-inline: var(--space-4);
+	}
+	.route-picker__fields {
+		grid-template-columns: minmax(0, 1fr);
+		gap: var(--space-1);
+	}
+	.route-picker__fields > label:not(:first-child) {
+		margin-top: var(--space-2);
 	}
 }
