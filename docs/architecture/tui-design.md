@@ -287,7 +287,7 @@ Source: `src/interactive/footer/dashboard.ts`, `src/interactive/footer/pages.ts`
 
 - **Compact Mode (Two-Line Ambient Strip)**:
   - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · the armed skill surface while one narrows the tools (`skill tdd` in `muted`, or `§ tdd` where the words do not fit; it outranks everything after it) · Target/model identity (dropped when fewer than four cells remain for it) (`fitIdentityLabel`) · Selected model’s weekly quota (`weekly N% left`, when the local credential owner and model group are known) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right. The phase spinner steps once per 120 ms animation step, however often the footer refreshes, and a live elapsed counter shows whole seconds (`Writing · 3s`) and nothing under one second.
-  - **Line 2 (Status & Hints)**: Persistent workspace cwd and Git branch/dirty (`*`) on the left; rotating shortcut hints on the right. Urgent input prompts (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`), and demo tips borrow only the hint area. Quota never occupies this row.
+  - **Line 2 (Status & Hints)**: Persistent workspace cwd and Git branch/dirty (`*`) on the left; rotating shortcut hints on the right. Urgent input prompts (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`, such as `• cache may be cold: prompt recompiled` before a response the context engine expects to miss the prompt cache), and demo tips borrow only the hint area. Quota never occupies this row.
 - **Expanded Mode (`Alt+U`)**: Renders across one-quarter of the viewport (minimum 8 rows), keeping the composer anchored below. Repeated presses cycle through three responsive pages (`DASHBOARD_PAGES`) and closed:
   1. `Activity`: Live agent phase, tool counts, session metrics, active worker cards (route, task, token usage, tool calls, timing, budget, `/view dispatch:<id>`), and finished worker history.
   2. `Context`: Context meter bar and category occupancy grid (system, tools, files, turns, memory), compaction/cache telemetry, headroom.
@@ -336,6 +336,7 @@ Every transcript row belongs to a two-cell gutter and a content column. The gutt
 | `▸` `§` `±` `$` `↗` `◆` `?` `⇢` | Action | One row per call, marked by its class ([6.3](#63-tool-ledger)); its body nests beneath it (`  │ `). |
 | `◆` / `◇` / `↳` | Worker | `◆` a run the model started, `◇` one the operator started, `↳` Clio's own helper work. The card body nests beneath the header (`  │ `); a council round opens with one header row and its members follow in the content column ([6.9](#69-agent-invocations)). |
 | `✦` (error) | Terminal error | Clio's account of why the turn ended, in the error token. |
+| `ℹ` / `✓` / `⚠` / `✗` / `↻` | Notice | Its level; the text is `muted` and wraps in the content column ([6.5](#65-transcript-notices)). |
 | `✓` / `✗` / `⊘` / `⚠` | Receipt | Closes a settled turn with its outcome. |
 
 Blocks of different kinds are separated by one blank row inside a turn, as turns and workers are separated from each other. Consecutive actions without a body stack as one run, even when a narrow terminal wraps one of their rows; an action with a body (arguments, output, a diff, approval facts) gets a blank row on both sides. The same rule applies in every output style: Compact saves rows by folding bodies and grouping observations, not by removing the separation between what the agent said and what it did.
@@ -364,7 +365,7 @@ Blocks of different kinds are separated by one blank row inside a turn, as turns
 
 ### 6.2 Thinking Blocks
 
-Supplied reasoning stays in stream order on the `reason` gutter rail, dim and italic. Compact shows the folded marker on the same rail; Standard and Detailed show the bounded tail defined in [Output styles](#output-styles), with the overflow hint on the rail. The footer alone reports current activity.
+Supplied reasoning stays in stream order on the `reason` gutter rail, dim and italic. Compact shows the folded marker on the same rail, and a settled turn's last marker states how much reasoning the provider reported (`Thinking · /view · 241 tokens`, `≈` when Clio estimated it); Standard and Detailed show the bounded tail defined in [Output styles](#output-styles), with the overflow hint on the rail. The footer alone reports current activity. The excerpt is what the provider supplied, not verification.
 
 ### 6.3 Tool Ledger
 
@@ -420,24 +421,44 @@ The main agent returns such an error instead of throwing it, because a thrown er
 
 A skill that narrows the tools stays armed across turns until another skill replaces it or the operator runs `/skill off`, so each change of the armed surface is one `§` row after the turn's receipt: `§ tdd armed · read, grep, ls, bash, write, edit · /skill off`, `§ tdd replaced by perf`, `§ skill surface cleared`. A skill that loads without narrowing anything changes no surface and adds no row, since its load row already says so. The chat loop records each change as a `skillSurface` session entry, so `/resume` states the same rows; headless and ACP output keep the notice text. `/skill off` in the TUI states the change once, as the row, and adds no reply of its own; a host without the row prints `Skill tool surface cleared: <names>.`
 
-Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. Compact folds by class: a run of consecutive successful observations and searches becomes one `▸ explored 3 files, 2 searches ✓` row, knowledge lookups one `§ consulted 5 sources ✓` row, and changes one `± edited 2 files · +6 -2 ✓` row with each file's change facts; the targets nest beneath the row. Commands, fetches, delegations and questions never fold, and a failure, a skill load, and a call whose result was cut, offloaded or evicted keep their own rows. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
+Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and a diff row too long for the terminal wraps its content under itself, past the sign and the line number, so the number column stays readable at 40 columns. Failures keep actionable context in every preset. Compact folds by class: a run of consecutive successful observations and searches becomes one `▸ explored 3 files, 2 searches ✓` row, knowledge lookups one `§ consulted 5 sources ✓` row, and changes one `± edited 2 files · +6 -2 ✓` row with each file's change facts; the targets nest beneath the row. Commands, fetches, delegations and questions never fold, and a failure, a skill load, and a call whose result was cut, offloaded or evicted keep their own rows. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
 
 ### 6.5 Transcript Notices
-Replay and system tags (e.g. `[retry]`, `[model]`) are wrapped in `dim` brackets with a `muted` message. Retry tags use `warning` amber.
+
+Every notice the transcript keeps is one block with a mark in the gutter: `ℹ` information, `✓` success, `⚠` a warning, `✗` an error and `↻` a provider retry. The mark carries the level in shape and its token; the text is `muted`, and a wrapped notice hangs in the content column. The `[Clio Coder]` product tag is dropped, because the whole transcript is Clio's; a subsystem tag such as `[/context compact]`, `[model]` or `[handoff]` stays, `dim`, because it names which part of Clio is speaking. Live notices and replayed system entries (model and thinking changes, file and protected-artifact records, session labels, checkpoints, continuity records) share one renderer, so `/resume` reads like the live session. A skill activation record adds no replayed line; the load's own row states it. A slash command's reply keeps its own marks (`·`, `✓`, `!`, `✗`) and the same hanging wrap.
+
+```text
+ℹ interrupt refused: a dispatch is attached. Queued for the next slot
+  instead.
+⚠ [/context compact] auto-compaction failed: the summary exceeded its budget
+↻ provider retry 1/3 scheduled in 2s: HTTP 503 Service Unavailable
+✓ [/export] wrote 2301 lines to
+  …/demo-repo/.clio-coder/exports/1t6ygqmc7kuu-2026-09-23.html
+```
+
+A middleware reminder is advice to the model. It keeps the `ℹ` mark (`⚠` for a warning or a hard stop) so the operator sees what Clio told the model, live and on `/resume`. The `[middleware:…]` annotations middleware appends to a tool result are the model's too: a bounded body states them as one dim `note to model · …` row after the output, and `/view` keeps the result as the model read it. Telemetry about a run is not a transcript notice: an expected cold prompt cache goes to the footer's notice slot (`cache may be cold: prompt recompiled`) and to the Detailed receipt ([6.6](#66-output-style-receipts)).
 
 Provider failures use a bounded, sanitized diagnosis in the primary transcript,
-retaining available HTTP status and actionable route advice. Provider retry labels
-identify their layer; running and waiting phases do not repeat the same error body.
+retaining available HTTP status and actionable route advice. A provider retry is one
+`↻` row (`↻ provider retry 1/3 scheduled in 2s`) whose diagnosis hangs beneath it;
+running and waiting phases do not repeat the same error body.
 Live and replay previews use the current terminal height and output-style row
 budget. `/view transcript` and export retain the available redacted diagnostic;
 upstream SDK truncation cannot be undone by the presentation layer.
 
 ### 6.6 Output Style Receipts
 
-Compact omits the separate turn receipt. Standard closes a settled turn with its outcome glyph in the gutter and a dim line naming the outcome and available duration (`✓ Done · 58s`, `✗ Failed`, `⊘ Cancelled`, `⚠ Output limit`). A run that a worker block or a notice split across several transcript entries keeps one receipt, after its last output. Replay treats tool-use messages as intermediate; they cannot create a successful receipt on an earlier failed or cancelled turn. Detailed adds model calls, input/output tokens, cache usage, and supplied reasoning usage with provenance to the same line. Reasoning text is an excerpt, not verification. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
+Compact omits the separate turn receipt. Standard closes a settled turn with its outcome glyph in the gutter and a dim line naming the outcome and available duration (`✓ Done · 58s`, `✗ Failed`, `⊘ Cancelled`, `⚠ Output limit`). A run that a worker block or a notice split across several transcript entries keeps one receipt, after its last output. Replay treats tool-use messages as intermediate; they cannot create a successful receipt on an earlier failed or cancelled turn. Detailed adds what the run spent to the same line, one fact per field, and leaves out a field with nothing to say: the model calls when there was more than one, input and output tokens in the compact token format, `cached N` when the provider served tokens from its prompt cache, `cache write N`, the reasoning tokens the provider reported (`≈` when Clio estimated them), and `cold:` with the reasons the run expected a cold cache when nothing was reused.
+
+```text
+✓ Done · 14s · 3 calls · in 100.1k · out 381 · reasoning 98 · cold: prompt recompiled
+✓ Done · 1m36s · in 7.2k · out 5 · cached 68.6k
+```
+
+`/resume`, `/view` and `/export` state the same receipt as the live turn: the duration from the ledger's timestamps (the prompt's to its final answer's) and the cold reasons from the first call's prompt-cache record. The quiet footer keeps the style and session cost visible; detailed telemetry is available through Detailed or the expanded dashboard.
 
 ### 6.7 Code Ink (Syntax Highlighting)
 

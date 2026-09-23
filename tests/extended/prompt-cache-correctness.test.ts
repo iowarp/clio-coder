@@ -395,6 +395,8 @@ describe("main compiled-prompt cache identity", () => {
 				},
 			}).agent,
 		};
+		const transcriptNotices: string[] = [];
+		const cacheNotices: string[][] = [];
 		const context = createTurnContext({
 			state,
 			getSettings: () => ({ safety: { autonomy: "auto-edit" } }) as never,
@@ -420,7 +422,8 @@ describe("main compiled-prompt cache identity", () => {
 				},
 			} as never,
 			middleware: {} as TurnMiddleware,
-			emitNotice: () => {},
+			emitNotice: (text: string) => transcriptNotices.push(text),
+			emitCacheNotice: (reasons) => cacheNotices.push([...reasons]),
 		});
 		const agentRuntime = runtime as unknown as AgentRuntime;
 
@@ -452,6 +455,10 @@ describe("main compiled-prompt cache identity", () => {
 			expectedColdReasons?: string[];
 		};
 		deepStrictEqual(changedPayload.expectedColdReasons, ["prompt_recompiled"]);
+		// Expected-cold telemetry goes to the footer's notice slot with its reasons,
+		// never to the transcript.
+		deepStrictEqual(cacheNotices, [["prompt_recompiled"]]);
+		deepStrictEqual(transcriptNotices, []);
 		context.dispose();
 	});
 });

@@ -70,6 +70,11 @@ export interface TurnMiddleware {
 	emitDeferredNotice(text: string, level?: "info" | "warning"): void;
 }
 
+/** The transcript level of a reminder: advice informs, a warning or a hard stop warns. */
+function reminderNoticeLevel(severity: MiddlewareReminderSeverity): "info" | "warning" {
+	return severity === "warn" || severity === "hard-block" ? "warning" : "info";
+}
+
 export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 	const { state, middlewareToolChoice } = deps;
 
@@ -156,12 +161,12 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (state.toolProseAbortReason === null) {
 				state.toolProseAbortReason = message;
 				agentRuntime.agent.abort();
-				deps.emitNotice(message);
+				deps.emitNotice(message, "warning");
 			}
 			return;
 		}
 		appendMiddlewareReminderEntry(message, severity);
-		deps.emitNotice(message);
+		deps.emitNotice(message, reminderNoticeLevel(severity));
 	};
 
 	const applyRequestContinuation = (message: string): void => {
@@ -369,7 +374,7 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			if (pendingReminders.some((entry) => entry.message === text)) return;
 			bufferReminder(text, level, true, isCurrent);
 			appendMiddlewareReminderEntry(text, level);
-			deps.emitNotice(text);
+			deps.emitNotice(text, reminderNoticeLevel(level));
 		},
 
 		emitDeferredNotice(text, level = "warning"): void {

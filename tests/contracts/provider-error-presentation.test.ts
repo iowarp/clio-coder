@@ -51,8 +51,14 @@ test("retry countdown replaces its row and preserves a visible final failure", a
 		panel.applyEvent({ type: "retry_status", status: { phase, attempt: 1, maxAttempts: 3, errorMessage } });
 	}
 	const rendered = plain(panel.render(80));
-	assert.equal((rendered.match(/\[retry\]/g) ?? []).length, 1);
-	assert.match(rendered, /provider retry exhausted/);
+	// One retry row, marked `↻` in the gutter; the mark replaces the old `[retry]` tag.
+	assert.equal((rendered.match(/↻/g) ?? []).length, 1);
+	assert.doesNotMatch(rendered, /\[retry\]/);
+	assert.match(rendered, /^↻ provider retry exhausted/mu);
+	const recovered = createChatPanel();
+	recovered.applyEvent({ type: "retry_status", status: { phase: "retrying", attempt: 1, maxAttempts: 3 } });
+	recovered.applyEvent({ type: "retry_status", status: { phase: "recovered", attempt: 1, maxAttempts: 3 } });
+	assert.equal(plain(recovered.render(80)).trim(), "↻ provider retry recovered after 1 attempt");
 	assert.match(rendered, /502/);
 	assert.match(rendered, /Bad Gateway/);
 	assert.ok(rendered.length < 1000);

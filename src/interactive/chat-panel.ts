@@ -16,10 +16,11 @@ import {
 import type { AgentMessage } from "../engine/types.js";
 import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
+import { coldReasonText } from "./cold-reasons.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
 import { codeInk } from "./renderers/code-ink.js";
 import { createMermaidMarkdownTransform } from "./renderers/mermaid.js";
-import { styleTaggedNotice } from "./renderers/notice.js";
+import { renderNoticeRow } from "./renderers/notice.js";
 import { previewBudget, previewRows } from "./renderers/preview.js";
 import { presentProviderError, providerErrorEvidence } from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
@@ -39,8 +40,6 @@ import {
 	compactReasoningTokens,
 	emptyRunTally,
 	foldMessageIntoRunTally,
-	formatReasoningChip,
-	formatReasoningLabel,
 	type ReasoningTokenProvenance,
 	type ReasoningUsageView,
 	reasoningFromTally,
@@ -118,6 +117,17 @@ export interface ChatPanelTurnUsage {
 	reasoningTokenProvenance?: ReasoningTokenProvenance;
 	/** Model calls the totals were summed over; absent when the count is unknown. */
 	modelCalls?: number;
+	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
+	coldReasons?: ReadonlyArray<string>;
+}
+
+/**
+ * What a replayed run end knows that a live one measures: the duration from
+ * the ledger's timestamps and the cold-cache reasons its first call recorded.
+ */
+export interface ReplayedRunFacts {
+	elapsedMs?: number;
+	coldReasons?: ReadonlyArray<string>;
 }
 
 export interface ChatPanelRenderMetrics {
@@ -964,9 +974,13 @@ const REASON_RAIL = `${BLUE_REASON}│${RESET} `;
  * measuring the excerpt the panel happens to be holding.
  */
 function renderSettledThinkingMarker(view: ReasoningUsageView, width: number): string {
-	const chip = formatReasoningChip(view, compactReasoningTokens);
+	// The count says how much reasoning the fold holds, `≈` when Clio estimated it.
+	const count =
+		view.provenance === "unmeasured" || view.tokens <= 0
+			? null
+			: `${view.provenance === "provider" ? "" : "≈"}${compactReasoningTokens(view.tokens)} tokens`;
 	return `${REASON_RAIL}${dimLine(
-		chip === null ? THINKING_HIDDEN_LABEL : `${THINKING_HIDDEN_LABEL} · ${chip} ${formatReasoningLabel(view)}`,
+		count === null ? THINKING_HIDDEN_LABEL : `${THINKING_HIDDEN_LABEL} · ${count}`,
 		Math.max(1, width - PROSE_GUTTER_WIDTH),
 	)}`;
 }
@@ -1004,35 +1018,26 @@ function renderTurnUsageLine(
 	if (receipt === "compact") {
 		return [`${glyph}${dimLine(settled, Math.max(1, width - PROSE_GUTTER_WIDTH))}`];
 	}
-	const calls = usage.modelCalls !== undefined && usage.modelCalls > 1 ? ` over ${usage.modelCalls} calls` : "";
-	// The label stays separated from the count in both provenances. Deriving the
-	// separator from the `≈` marker glued them together whenever the provider
-	// reported a total, which is the common case, and rendered `reason0 provider`.
-	// The field is named for reasoning tokens rather than `reason`, which the
-	// memory step rows already use for a fixed decision vocabulary.
-	//
-	// A turn that spent no reasoning tokens states nothing by naming the
-	// provenance of zero, and at narrow widths `reasoning 0 provider` orphaned
-	// the word `provider` on its own line. Zero suppresses the whole suffix, the
-	// same rule the caveat below already follows.
+	// Detailed states what the run spent, one fact per field: the calls it made,
+	// input and output tokens in the compact token format, what the provider
+	// served from its prompt cache, the reasoning it reported (`≈` when Clio
+	// estimated it), and why the cache was expected to be cold when nothing was
+	// reused. A field with nothing to say is left out.
+	const tokens = compactReasoningTokens;
+	const facts: string[] = [settled];
+	if (usage.modelCalls !== undefined && usage.modelCalls > 1) facts.push(`${usage.modelCalls} calls`);
+	facts.push(`in ${tokens(usage.inputTokens)}`, `out ${tokens(usage.outputTokens)}`);
+	if (usage.cacheReadTokens > 0) facts.push(`cached ${tokens(usage.cacheReadTokens)}`);
+	if (usage.cacheWriteTokens > 0) facts.push(`cache write ${tokens(usage.cacheWriteTokens)}`);
 	const view = reasoningFromTurnUsage(usage);
-	const reason =
-		view.tokens > 0 && view.provenance !== "unmeasured"
-			? ` · reasoning ${view.provenance === "provider" ? "" : "≈"}${view.tokens} ${formatReasoningLabel(view)}`
-			: "";
-	const cache =
-		usage.cacheReadTokens > 0 || usage.cacheWriteTokens > 0
-			? ` · cache ${usage.cacheReadTokens}/${usage.cacheWriteTokens}`
-			: "";
-	// The caveat is about reasoning text the panel displayed. A turn that spent
-	// no reasoning tokens displayed none, so appending it there warned about
-	// something absent and cost a wrapped line per turn at narrow widths.
-	const caveat = view.tokens > 0 ? " · reasoning text is a UI excerpt, not a verification" : "";
+	if (view.tokens > 0 && view.provenance !== "unmeasured") {
+		facts.push(`reasoning ${view.provenance === "provider" ? "" : "≈"}${tokens(view.tokens)}`);
+	}
+	if (usage.cacheReadTokens === 0 && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
+		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
+	}
 	return hangProseLines(
-		wrapTextWithAnsi(
-			`${DIM}${settled} · turn · in ${usage.inputTokens}${calls} · out ${usage.outputTokens}${cache}${reason}${caveat}${RESET}`,
-			Math.max(1, width - PROSE_GUTTER_WIDTH),
-		),
+		wrapTextWithAnsi(`${DIM}${facts.join(" · ")}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)),
 		glyph,
 	);
 }
@@ -1389,6 +1394,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const workerEntries = new Map<string, WorkerTranscriptEntry>();
 	let dirty = true;
 	let runStartedAt: number | undefined;
+	/** Why the current run's prompt cache may be cold, from the chat loop's cache notice. */
+	let runColdReasons: ReadonlyArray<string> = [];
 	/**
 	 * Transcript index where the current run's entries begin. A worker block or
 	 * a mid-turn notice splits one run across several assistant entries, and
@@ -2075,14 +2082,19 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (event.type === "agent_start") {
 				runStartedAt = now();
 				runStartIndex = transcript.length;
+				runColdReasons = [];
 				return;
 			}
 			if (event.type === "agent_status") {
 				return;
 			}
 			if (event.type === "notice") {
-				// Transcript notices are first-class advisory lines, not assistant
-				// messages: render with the bracketed-tag treatment replay lines get.
+				// The cache notice lives in the footer; the run keeps its reasons
+				// for the Detailed receipt.
+				if (event.coldReasons !== undefined) runColdReasons = [...event.coldReasons];
+				// Transcript notices are first-class advisory blocks, not assistant
+				// messages: a level mark in the gutter, the text hanging beside it,
+				// exactly as replay renders the persisted ones.
 				if (event.surface !== "transcript") return;
 				// A change to the armed skill surface is a `§` state row; a load that
 				// narrowed nothing already has its own row and adds none.
@@ -2093,10 +2105,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					markDirty();
 					return;
 				}
-				const text = event.text;
+				const { text, level } = event;
 				transcript.push({
 					role: "replayBlock",
-					renderBlock: (width) => wrapTextWithAnsi(styleTaggedNotice(text), width),
+					renderBlock: (width) => renderNoticeRow(text, level, width),
 				});
 				markDirty();
 				return;
@@ -2410,9 +2422,20 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						const stop = event.messages.filter((message) => message.role === "assistant").at(-1) as
 							| { stopReason?: string }
 							| undefined;
+						// A replayed run end brings the duration and cold reasons the
+						// ledger recorded; a live one measures its own.
+						const replayed = (event as { replayed?: ReplayedRunFacts }).replayed;
+						const elapsedMs =
+							replayed !== undefined
+								? replayed.elapsedMs
+								: runStartedAt === undefined
+									? undefined
+									: Math.max(0, now() - runStartedAt);
+						const coldReasons = replayed !== undefined ? (replayed.coldReasons ?? []) : runColdReasons;
 						target.turnUsage = {
 							...runUsage,
-							...(runStartedAt === undefined ? {} : { elapsedMs: Math.max(0, now() - runStartedAt) }),
+							...(elapsedMs === undefined ? {} : { elapsedMs }),
+							...(coldReasons.length > 0 ? { coldReasons: [...coldReasons] } : {}),
 							outcome:
 								stop?.stopReason === "error"
 									? "Failed"

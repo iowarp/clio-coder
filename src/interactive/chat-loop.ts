@@ -97,6 +97,7 @@ import {
 	toolSignatureFromState,
 } from "./chat-loop-messages.js";
 import { normalizeRetrySettings } from "./chat-loop-policy.js";
+import { coldReasonText } from "./cold-reasons.js";
 import { DRAFT_MAX_TOKENS, DRAFT_SYSTEM_PROMPT, DRAFT_TEMPERATURES } from "./drafts.js";
 import { type HandoffRepairInput, runHandoffRound } from "./handoff-round.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -181,6 +182,12 @@ export interface ChatNoticeEvent {
 	 * since the load's own row says so); every other surface renders the text.
 	 */
 	skillSurface?: SkillSurfaceChange;
+	/**
+	 * Present only on the footer notice that the next response's prompt cache
+	 * may be cold, naming why (`prompt_recompiled`, `dispatch`, …). The TUI
+	 * transcript keeps them for the run and the Detailed receipt states them.
+	 */
+	coldReasons?: ReadonlyArray<string>;
 }
 
 /**
@@ -975,6 +982,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 		middleware,
 		emitNotice,
+		emitCacheNotice: (reasons) =>
+			emit({
+				type: "notice",
+				level: "info",
+				surface: "footer",
+				text: `cache may be cold: ${reasons.map(coldReasonText).join(", ")}`,
+				key: "context.cache.cold",
+				coldReasons: [...reasons],
+			}),
 	});
 
 	let continuityReplayInstalled = false;
