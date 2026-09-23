@@ -8,19 +8,19 @@
 	overflow-y: auto;
 	overflow-x: hidden;
 	overscroll-behavior: contain;
-	scrollbar-gutter: stable;
+	/* Both edges, so the centred column lines up with the composer below, which has no scrollbar. */
+	scrollbar-gutter: stable both-edges;
 	/* This is the single everyday scroller. The header and composer stay within reach. */
-	padding-inline: var(--space-2);
 }
 .chat-transcript__content {
 	display: grid;
-	gap: var(--space-8);
-	padding-block: var(--space-5) var(--space-8);
+	gap: var(--space-10);
+	padding-block: var(--space-8) var(--space-10);
 }
 
 .chat-turn {
 	display: grid;
-	gap: var(--space-4);
+	gap: var(--space-6);
 	min-width: 0;
 }
 
@@ -52,14 +52,25 @@
 	overflow-wrap: anywhere;
 	min-width: 0;
 }
-/* A status pill is `white-space: nowrap` so a two-word state never splits. In the transcript it also
-   carries a detail, which can be a whole sentence or a path, so here the pill wraps instead of
-   deciding how wide the page is. */
+/* In the conversation a status is a glyph and a word in the reading voice, not an uppercase pill: the
+   glyph's shape and the word carry the meaning, the tone only colours them. It also carries a detail,
+   which can be a whole sentence or a path, so it wraps instead of deciding how wide the page is. */
 .conversation .status-mark {
 	flex-wrap: wrap;
+	align-items: baseline;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	font-family: var(--font-ui);
+	font-size: var(--text-meta);
+	letter-spacing: 0;
+	text-transform: none;
 	white-space: normal;
 	overflow-wrap: anywhere;
 	min-width: 0;
+}
+.conversation .status-mark__glyph {
+	font-family: var(--font-mono);
 }
 /* The page-wide disclosure margin spaces settings forms; in the record every disclosure is a line and
    its rhythm comes from the transcript grid. */
@@ -75,14 +86,14 @@
 	opacity: 0.92;
 }
 
-/* One pale note for the operator. Agent prose and tool activity remain on the page ground. */
+/* The operator's words on one quiet ground, right-aligned. Agent prose and tool activity remain on the
+   page ground, so the two voices are told apart by place and ground rather than by labels. */
 .chat-request {
-	background: var(--accent-soft);
-	border-left: 2px solid var(--accent);
-	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-	padding: var(--space-3) var(--space-4);
+	display: grid;
+	justify-items: end;
+	gap: var(--space-1);
 	min-width: 0;
-	max-width: 85%;
+	max-width: min(80%, 40rem);
 	margin-left: auto;
 }
 .chat-request__meta,
@@ -95,7 +106,24 @@
 	color: var(--ink-muted);
 	font-variant-numeric: tabular-nums;
 }
-.chat-request__who,
+.chat-request__meta {
+	justify-content: flex-end;
+	min-height: 24px;
+}
+/* When the request was sent is a lookup, not reading matter: it surfaces with the copy action. */
+.chat-request__time {
+	opacity: 0;
+	transition: opacity var(--motion-fast) var(--ease-standard);
+}
+.chat-request:hover .chat-request__time,
+.chat-request:focus-within .chat-request__time {
+	opacity: 1;
+}
+@media (hover: none) {
+	.chat-request__time {
+		opacity: 1;
+	}
+}
 .chat-response__who {
 	font-weight: 600;
 	color: var(--ink-strong);
@@ -110,11 +138,15 @@
 	font-size: var(--text-instrument);
 }
 .chat-request__prompt {
+	margin: 0;
+	padding: var(--space-3) var(--space-4);
+	border-radius: var(--radius-lg);
+	background: var(--surface-sunken);
+	color: var(--ink-strong);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
-	line-height: var(--leading-reading);
-	font-size: var(--text-body);
-	margin-top: var(--space-2);
+	line-height: var(--leading-body);
+	font-size: var(--text-reading);
 }
 /* A stated absence is not the operator's words and must not be read as them. */
 .chat-request__prompt.is-missing {
@@ -125,8 +157,6 @@
 .chat-response {
 	display: grid;
 	gap: var(--space-3);
-	border-left: 2px solid var(--accent);
-	padding-left: var(--space-5);
 	min-width: 0;
 }
 .chat-response__body {
@@ -139,7 +169,48 @@
 	font-size: var(--text-meta);
 }
 .chat-response__footer {
-	min-height: 20px;
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: var(--space-2) var(--space-4);
+	min-height: 28px;
+}
+.chat-response__footer > .turn-outcome {
+	flex: 1 1 auto;
+}
+.chat-response__footer > .message-actions {
+	margin-left: auto;
+}
+
+/* Response prose. Headings speak in the interface voice at reading sizes, and a table or a code block
+   gets the same breathing room as a paragraph. */
+.chat-response .markdown > :first-child {
+	margin-top: 0;
+}
+.chat-response .markdown .md-heading {
+	font-family: var(--font-ui);
+	font-weight: 650;
+	letter-spacing: -0.01em;
+	color: var(--ink-strong);
+	margin: 1.4em 0 0.4em;
+}
+.chat-response .markdown > .md-heading:first-child {
+	margin-top: 0;
+}
+.chat-response .markdown .md-heading--1 {
+	font-size: 22px;
+}
+.chat-response .markdown .md-heading--2 {
+	font-size: 19px;
+}
+.chat-response .markdown .md-heading--3 {
+	font-size: 17px;
+}
+.chat-response .markdown :is(.md-heading--4, .md-heading--5, .md-heading--6) {
+	font-size: var(--text-reading);
+}
+.chat-response .markdown > :is(.md-table, .code-block, .diagram) {
+	margin-block: 1.1em;
 }
 
 .live-chip {
@@ -222,8 +293,8 @@
    invisible, so the transcript restates it in tokens that follow the theme. */
 .message-actions .code-block__copy {
 	min-height: auto;
-	border: 1px solid var(--line);
-	border-radius: var(--radius-xs);
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
 	padding: var(--space-1) var(--space-2);
 	background: transparent;
 	color: var(--ink-muted);
@@ -233,7 +304,7 @@
 }
 .message-actions .code-block__copy:hover {
 	color: var(--ink);
-	border-color: var(--line-strong);
+	background: var(--surface-sunken);
 }
 .message-actions .code-block__copy.is-copied {
 	color: var(--status-success-fg);
@@ -255,11 +326,11 @@
 	min-width: 0;
 	width: fit-content;
 	max-width: 100%;
-	padding: 5px var(--space-3) 5px var(--space-2);
+	padding: 4px var(--space-2);
 	margin-left: calc(-1 * var(--space-2));
-	border: 1px solid var(--line);
+	border: 1px solid transparent;
 	border-radius: var(--radius-sm);
-	background: var(--surface);
+	color: var(--ink-muted);
 	font-size: var(--text-meta);
 	line-height: var(--leading-tight);
 	list-style: none;
@@ -278,17 +349,14 @@
 	transform: rotate(90deg);
 }
 .activity__summary:hover {
-	border-color: var(--line-strong);
+	background: var(--surface-sunken);
+	color: var(--ink);
 }
-.activity--action > .activity__summary {
-	border-color: var(--status-running-line);
-}
+/* Only a group that is waiting on the operator is drawn as more than a line. */
 .activity--warning > .activity__summary {
 	border-color: var(--status-warn-line);
 	background: var(--status-warn-tint);
-}
-.activity--error > .activity__summary {
-	border-color: var(--status-fail-line);
+	color: var(--status-warn-fg);
 }
 .activity__glyph {
 	flex: none;
@@ -310,8 +378,12 @@
 .activity__label {
 	flex: none;
 	font-weight: 600;
-	color: var(--ink);
+	color: inherit;
 	white-space: nowrap;
+}
+.activity--error .activity__label,
+.activity--action .activity__label {
+	color: var(--ink);
 }
 .activity__current {
 	color: var(--ink-muted);
@@ -337,10 +409,6 @@
 	min-width: 0;
 }
 .activity__kind {
-	font-family: var(--font-mono);
-	text-transform: uppercase;
-	letter-spacing: var(--tracking-instrument);
-	font-size: var(--text-instrument);
 	color: var(--ink-muted);
 }
 .activity__notice {
@@ -434,10 +502,7 @@
 
 @media (max-width: 640px) {
 	.chat-request {
-		max-width: 100%;
-	}
-	.chat-response {
-		padding-left: var(--space-3);
+		max-width: 92%;
 	}
 }
 
