@@ -4,7 +4,7 @@ import { Link, useNavigate, useParams } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
-import { clock, formatTime, formatTokens } from "../api/clock.js";
+import { clock, formatTime } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
@@ -222,6 +222,49 @@ function EmptyTranscript({ sessionId }: { sessionId: string }) {
 	);
 }
 
+function SessionTools({
+	client,
+	session,
+	liveWorkers,
+}: {
+	client: Client;
+	session: SessionSnapshot;
+	liveWorkers: number;
+}) {
+	const panel = useRef<HTMLDetailsElement>(null);
+	const [open, setOpen] = useState(false);
+	useEffect(() => {
+		if (!open) return;
+		const closeOutside = (event: PointerEvent) => {
+			if (event.target instanceof Node && !panel.current?.contains(event.target) && panel.current)
+				panel.current.open = false;
+		};
+		const closeOnEscape = (event: KeyboardEvent) => {
+			if (event.key !== "Escape" || !(event.target instanceof Node) || !panel.current?.contains(event.target)) return;
+			event.preventDefault();
+			panel.current.open = false;
+			panel.current.querySelector("summary")?.focus();
+		};
+		document.addEventListener("pointerdown", closeOutside);
+		document.addEventListener("keydown", closeOnEscape);
+		return () => {
+			document.removeEventListener("pointerdown", closeOutside);
+			document.removeEventListener("keydown", closeOnEscape);
+		};
+	}, [open]);
+	return (
+		<details className="conversation__tools" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>
+			<summary>
+				Session tools{liveWorkers > 0 ? ` · ${liveWorkers} ${liveWorkers === 1 ? "worker" : "workers"} running` : ""}
+			</summary>
+			<div className="conversation__tools-body">
+				<SessionControls client={client} session={session} />
+				<FleetStrip client={client} session={session} />
+			</div>
+		</details>
+	);
+}
+
 function SessionHealth({ session }: { session: SessionSnapshot }) {
 	const summary = useMemo(() => summarizeHealth(session.health), [session.health]);
 	const providers = summary.providers;
@@ -311,28 +354,35 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const workspaceRoot = workspace.data?.path;
 	return (
 		<section className="conversation">
-			<Link to={`/workspaces/${snapshot.workspaceId}/sessions`}>← Workspace sessions</Link>
-			<div className="page-heading">
-				<div>
-					<p className="eyebrow">Conversation</p>
-					<h1>{snapshot.label ?? "Clio Coder"}</h1>
+			<header className="conversation__header">
+				<Link className="conversation__back" to={`/workspaces/${snapshot.workspaceId}/sessions`}>
+					← Workspace sessions
+				</Link>
+				<div className="conversation__titlebar">
+					<div>
+						<p className="eyebrow">Conversation</p>
+						<h1>{snapshot.label ?? "Clio Coder"}</h1>
+					</div>
+					<button type="button" onClick={() => close.mutate()} disabled={close.isPending || snapshot.state !== "open"}>
+						Close session
+					</button>
 				</div>
-				<button type="button" onClick={() => close.mutate()} disabled={close.isPending || snapshot.state !== "open"}>
-					Close session
-				</button>
+				<div className="conversation__meta">
+					<p className="session-status" role="status">
+						{snapshot.recoveredOrphan ? "Recovered after server interruption · " : ""}
+						{snapshot.state}
+						{running ? " · Clio Coder is working…" : ""}
+					</p>
+					<SessionHealth session={snapshot} />
+					<SessionTools client={client} session={snapshot} liveWorkers={liveWorkers} />
+				</div>
+			</header>
+			<div className="conversation__approval">
+				<ApprovalBanner client={client} session={snapshot} />
 			</div>
-			<p className="session-status" role="status">
-				{snapshot.recoveredOrphan ? "Recovered after server interruption · " : ""}
-				{snapshot.state}
-				{running ? " · Clio Coder is working…" : ""}
-			</p>
-			<SessionHealth session={snapshot} />
-			<SessionControls client={client} session={snapshot} />
-			<ApprovalBanner client={client} session={snapshot} />
-			<FleetStrip client={client} session={snapshot} />
-			{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
 			<div className="chat-transcript" ref={scroll}>
 				<div className="chat-transcript__content">
+					{snapshot.timelineTruncated ? <p className="trace-warning">{TRUNCATION_NOTE}</p> : null}
 					{notices.leading.length > 0 ? (
 						<ul className="turn-health">
 							{notices.leading.map((row) => (
@@ -366,20 +416,15 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 			<div className="jump-anchor">
 				<JumpToLatest follow={follow} />
 			</div>
-			{turn?.usage ? (
-				<p className="chat-usage">
-					Latest turn · Input {formatTokens(turn.usage.input)} · Output {formatTokens(turn.usage.output)} · Cache read{" "}
-					{formatTokens(turn.usage.cacheRead)} · Cache write {formatTokens(turn.usage.cacheWrite)} · Reasoning{" "}
-					{formatTokens(turn.usage.reasoning)}
-				</p>
-			) : null}
-			{close.error ? <p role="alert">{close.error.message}</p> : null}
-			<Composer
-				client={client}
-				sessionId={snapshot.id}
-				sessionState={snapshot.state}
-				runningTurnId={turn?.status === "running" ? turn.id : null}
-			/>
+			<div className="conversation__dock">
+				{close.error ? <p role="alert">{close.error.message}</p> : null}
+				<Composer
+					client={client}
+					sessionId={snapshot.id}
+					sessionState={snapshot.state}
+					runningTurnId={turn?.status === "running" ? turn.id : null}
+				/>
+			</div>
 		</section>
 	);
 }

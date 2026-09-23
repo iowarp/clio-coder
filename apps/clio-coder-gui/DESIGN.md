@@ -111,9 +111,13 @@ Three density zones:
 - **Dense** (tables, event lists, JSON wells, activity groups, rail items): `--space-2` and
   `--space-3`, `--text-exact` in `--font-mono`, tabular numerals throughout.
 
-**Page frame.** `main` padding is `--space-12 --space-12 --space-16` at desktop, `--space-8
---space-6` below 1050px, `--space-6 --space-5` below 650px. The minimum side gutter at any width is
-`--space-4`.
+**Page frame.** Most pages use `main` padding `--space-12 --space-12 --space-16` at desktop,
+`--space-8 --space-6` below 1050px, `--space-6 --space-5` below 650px. The conversation
+is a focused viewport workspace with tighter gutters: its header and composer remain visible while
+only the transcript scrolls. Permission review, a long pending-message queue, and the explicit
+session-tools disclosure may scroll locally when their content exceeds the available space. Session
+tools open on demand, not as a
+stack of permanent cards above the transcript. The minimum side gutter at any width is `--space-4`.
 
 **Radius decision rule.** `--radius-xs` for inline chips in dense rows and for code/JSON wells;
 `--radius-sm` for controls (button, input, select, badge); `--radius-md` for panels and cards;
@@ -210,9 +214,9 @@ shell; neither may show an item the other lacks.
    card.
 4. Tool, approval and loop items falling between two stretches of prose collapse into one
    `<details>` activity group whose `<summary>` counts states ("4 tools completed", "1 tool running ·
-   2 done", "Approval needed"). The group opens itself while attention is needed and then stays
-   exactly as the operator left it. Latch that with a ref, not a controlled `open` prop, so a
-   re-render never reopens a group the operator closed.
+   2 done", "Approval needed"). Expanded activity is a ruled entry in the record rather than
+   another framed card inside the response; individual tool facts remain structured. The group
+   opens itself while attention is needed and then stays exactly as the operator left it.
 5. The inline approval row carries the same Allow-once / Reject decision as the sticky banner. The
    banner exists only for discoverability when the row is scrolled out of view; they are one
    decision, not two.

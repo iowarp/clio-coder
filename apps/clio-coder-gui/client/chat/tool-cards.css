@@ -284,6 +284,31 @@
 	color: var(--ink-muted);
 }
 
+/* In the conversation, the tool is already inside an activity disclosure. A second
+   framed surface and a third internal vertical scroller make the record hard to read. */
+.conversation .tool-card {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 0;
+}
+.conversation .tool-card__chip {
+	border: 0;
+	border-radius: 0;
+	padding: 0;
+}
+.conversation .tool-card__pre,
+.conversation .diff__grid {
+	max-height: none;
+	overflow-y: visible;
+}
+.conversation .diff {
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	padding: 0;
+}
+
 @media (prefers-reduced-motion: no-preference) {
 	.tool-card {
 		transition: border-left-color var(--motion-fast) var(--ease-standard);

@@ -89,8 +89,11 @@ export function useFollowLatest(
 				: new ResizeObserver(() => {
 						if (followingRef.current) pin();
 					});
+		// The viewport itself changes height as the dock grows, while its child changes
+		// height as output arrives. Both must retain the live edge when follow is on.
+		observer?.observe(element);
 		// The transcript element is replaced when a session opens or the route
-		// changes, so the size observation follows whichever child is current.
+		// changes, so the content observation follows whichever child is current.
 		let observed: Element | null = null;
 		const observeContent = () => {
 			const content = element.firstElementChild;

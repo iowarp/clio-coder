@@ -3,18 +3,19 @@
 
 .chat-transcript {
 	position: relative;
+	min-height: 0;
+	min-width: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 	overscroll-behavior: contain;
-	/* A bounded region is what lets the transcript scroll while the composer stays reachable. */
-	max-height: min(68vh, 900px);
-	padding-right: var(--space-2);
-	margin: var(--space-6) 0;
-	border-block: 1px solid var(--line);
+	scrollbar-gutter: stable;
+	/* This is the single everyday scroller. The header and composer stay within reach. */
+	padding-inline: var(--space-2);
 }
 .chat-transcript__content {
 	display: grid;
 	gap: var(--space-8);
-	padding-block: var(--space-5);
+	padding-block: var(--space-5) var(--space-8);
 }
 
 .chat-turn {
@@ -69,14 +70,15 @@
 	opacity: 0.92;
 }
 
-/* Only the request is a card. Model prose stays unboxed so it reads as a document. */
+/* One pale note for the operator. Agent prose and tool activity remain on the page ground. */
 .chat-request {
 	background: var(--accent-soft);
-	border: 1px solid var(--line-strong);
 	border-left: 2px solid var(--accent);
-	border-radius: var(--radius-md);
-	padding: var(--space-4) var(--space-5);
+	border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+	padding: var(--space-3) var(--space-4);
 	min-width: 0;
+	max-width: 85%;
+	margin-left: auto;
 }
 .chat-request__meta,
 .chat-response__meta {
@@ -211,24 +213,22 @@
 	color: var(--ink);
 }
 
-/* The activity group: one line closed, the per-tool cards open. */
+/* Activity is a ruled entry in the record, not a card inside the response. */
 .activity {
-	border: 1px solid var(--line);
-	border-radius: var(--radius-md);
-	background: var(--surface-sunken);
-	padding: var(--space-2) var(--space-3);
+	border-top: 1px solid var(--line);
+	padding: var(--space-2) 0;
 }
 .activity--warning {
-	border-color: var(--status-warn-line);
-	background: var(--status-warn-tint);
+	border-top-color: var(--status-warn-line);
 }
 .activity--error {
-	border-color: var(--status-fail-line);
-	background: var(--status-fail-tint);
+	border-top-color: var(--status-fail-line);
 }
 .activity--action {
-	border-color: var(--action-line);
-	background: var(--action-tint);
+	border-top-color: var(--action-line);
+}
+.activity[open] {
+	border-bottom: 1px solid var(--line);
 }
 .activity__summary {
 	cursor: pointer;
@@ -263,15 +263,16 @@
 }
 .activity__rows {
 	list-style: none;
-	margin: var(--space-3) 0 0;
+	margin: var(--space-2) 0 0;
 	padding: 0;
 	display: grid;
-	gap: var(--space-3);
 }
 .activity__row {
 	display: grid;
 	gap: var(--space-2);
 	min-width: 0;
+	padding: var(--space-3) 0;
+	border-top: 1px solid var(--line);
 }
 .activity__rowhead {
 	display: flex;
@@ -375,11 +376,8 @@
 }
 
 @media (max-width: 640px) {
-	/* The region stays a scroll container at every width. Letting the page grow instead would both
-	   defeat `useFollowLatest`, which measures a scroller, and leave the composer moving under the
-	   operator's thumb for as long as a turn streams. */
-	.chat-transcript {
-		max-height: 60vh;
+	.chat-request {
+		max-width: 100%;
 	}
 	.chat-response {
 		padding-left: var(--space-3);

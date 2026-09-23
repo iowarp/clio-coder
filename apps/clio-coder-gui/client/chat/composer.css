@@ -4,12 +4,15 @@
 
 .composer {
 	display: grid;
-	gap: var(--space-3);
-	margin-top: var(--space-6);
-	padding: var(--space-4);
+	gap: var(--space-2);
+	margin-top: 0;
+	padding: var(--space-3) var(--space-4);
 	background: var(--surface);
-	border: 1px solid var(--line);
+	border: 1px solid var(--line-strong);
 	border-radius: var(--radius-lg);
+}
+.composer:focus-within {
+	border-color: var(--accent-strong);
 }
 .composer__label {
 	font-size: var(--text-meta);
@@ -17,15 +20,17 @@
 }
 .composer__field {
 	width: 100%;
-	resize: vertical;
-	min-height: 5.5em;
-	border: 1px solid var(--line-strong);
-	border-radius: var(--radius-md);
-	padding: var(--space-3) var(--space-4);
+	resize: none;
+	min-height: 3.25em;
+	max-height: min(14rem, 28dvh);
+	overflow-y: hidden;
+	border: 0;
+	border-radius: var(--radius-sm);
+	padding: var(--space-2) 0;
 	font: inherit;
 	line-height: var(--leading-body);
 	color: var(--ink);
-	background: var(--paper);
+	background: transparent;
 }
 .composer__field:disabled {
 	color: var(--ink-subtle);
@@ -147,6 +152,9 @@
 	padding: 0;
 	list-style: none;
 	width: 100%;
+	/* Many queued messages must not push the transcript or Send below the viewport. */
+	max-height: min(25dvh, 12rem);
+	overflow-y: auto;
 }
 .composer__queue-row {
 	display: flex;
@@ -223,4 +231,47 @@
 }
 .turn-outcome__fact {
 	white-space: nowrap;
+}
+
+/* The compact outcome keeps only input/output in the reading line. Complete reported
+   accounting opens in place, where it belongs to the turn rather than crowding the composer. */
+.turn-usage {
+	min-width: 0;
+}
+.turn-usage > summary {
+	cursor: pointer;
+	color: var(--ink-muted);
+}
+.turn-usage[open] {
+	flex: 1 0 100%;
+}
+.turn-usage__details {
+	display: grid;
+	grid-template-columns: repeat(5, minmax(0, 1fr));
+	gap: var(--space-2) var(--space-4);
+	margin: var(--space-2) 0 0;
+	padding: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--surface-sunken);
+}
+.turn-usage__details div {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+}
+.turn-usage__details dt {
+	color: var(--ink-muted);
+}
+.turn-usage__details dd {
+	margin: 0;
+	font-family: var(--font-mono);
+	font-variant-numeric: tabular-nums;
+	color: var(--ink);
+}
+
+@media (max-width: 640px) {
+	.turn-usage__details {
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+	}
 }

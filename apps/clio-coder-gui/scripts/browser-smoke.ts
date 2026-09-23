@@ -466,6 +466,9 @@ try {
 			.fill("Show the fixture findings with code and a diagram.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.locator(".diagram.is-rendered svg").waitFor();
+		// Highlighting waits until code nears the visible transcript; the composer is no longer
+		// displaced by page scrolling, so bring that block into the one reading viewport.
+		await page.locator(".code-block pre").first().scrollIntoViewIfNeeded();
 		await page.locator(".token.keyword").first().waitFor();
 		const diagram = await page.locator(".diagram svg").evaluate((node) => {
 			const svg = node as SVGSVGElement;
@@ -511,16 +514,106 @@ try {
 		assert.equal(await page.locator('.chat-transcript a[href^="javascript:"]').count(), 0);
 		assert.equal(await page.evaluate(() => Object.hasOwn(window, "modelMarkupExecuted")), false);
 		assert.ok((await page.locator(".chat-transcript").innerText()).includes("<script>window.modelMarkupExecuted"));
+		await page.locator(".chat-transcript").evaluate((element) => {
+			element.scrollTop = element.scrollHeight;
+		});
+
+		// Complete accounting lives with the turn outcome, not as a repeated line above the
+		// composer. Its native disclosure must work from the keyboard and remain accessible open.
+		assert.equal(await page.locator(".conversation__dock > .chat-usage").count(), 0);
+		const usage = page.locator(".turn-usage").last();
+		const usageSummary = usage.locator("summary");
+		await usageSummary.focus();
+		await page.keyboard.press("Enter");
+		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), true);
+		assert.equal(
+			await usage
+				.locator("dt")
+				.allTextContents()
+				.then((labels) => labels.join(" · ")),
+			"Input · Output · Cache read · Cache write · Reasoning",
+		);
+		assert.deepEqual(await usage.locator("dd").allTextContents(), ["11", "12", "13", "14", "15"]);
+		await check("conversation-usage");
+		await page.keyboard.press("Enter");
+		assert.equal(await usage.evaluate((element) => (element as HTMLDetailsElement).open), false);
+
+		// The resting tray is compact, grows with a multiline draft, and keeps a followed
+		// transcript at its live edge while that grid row changes height.
+		const composerField = page.getByLabel("Message Clio Coder", { exact: true });
+		const restingComposer = await page.locator(".composer").evaluate((element) => element.getBoundingClientRect().height);
+		assert.ok(restingComposer <= 180, `resting composer is ${restingComposer}px tall at ${width}px`);
+		const restingField = await composerField.evaluate((element) => element.getBoundingClientRect().height);
+		await composerField.fill("one\ntwo\nthree\nfour\nfive\nsix\nseven\neight");
+		await page.waitForFunction(
+			(before) => (document.querySelector(".composer__field")?.getBoundingClientRect().height ?? 0) > before + 20,
+			restingField,
+		);
+		await page.waitForFunction(() => {
+			const transcript = document.querySelector(".chat-transcript");
+			return !!transcript && transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight <= 32;
+		});
+		const grownComposer = await page.evaluate(() => {
+			const composer = document.querySelector(".composer")?.getBoundingClientRect();
+			const transcript = document.querySelector(".chat-transcript");
+			return {
+				composerBottom: composer?.bottom ?? Number.POSITIVE_INFINITY,
+				bottomGap: transcript
+					? transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight
+					: Number.POSITIVE_INFINITY,
+			};
+		});
+		assert.ok(grownComposer.composerBottom <= 1050, "a growing draft pushed the composer below the viewport");
+		assert.ok(grownComposer.bottomGap <= 32, "a growing draft moved a followed transcript away from its live edge");
+		await composerField.fill("");
+		await page.waitForFunction(
+			(before) =>
+				(document.querySelector(".composer__field")?.getBoundingClientRect().height ?? Number.POSITIVE_INFINITY) <=
+				before + 1,
+			restingField,
+		);
+		await composerField.evaluate((element) => (element as HTMLTextAreaElement).blur());
+
 		await check("conversation");
+		const conversationLayout = await page.evaluate(() => {
+			const transcript = document.querySelector(".chat-transcript");
+			const composer = document.querySelector(".composer");
+			const header = document.querySelector(".conversation__header");
+			const main = document.querySelector("main");
+			return {
+				pageScrolls: (document.scrollingElement?.scrollHeight ?? 0) > innerHeight + 2,
+				mainScrolls: !!main && (main.scrollTop !== 0 || main.scrollLeft !== 0),
+				transcriptScrolls: !!transcript && transcript.scrollHeight > transcript.clientHeight,
+				headerVisible: !!header && header.getBoundingClientRect().top >= 50,
+				composerVisible: !!composer && composer.getBoundingClientRect().bottom <= innerHeight,
+			};
+		});
+		assert.deepEqual(conversationLayout, {
+			pageScrolls: false,
+			mainScrolls: false,
+			transcriptScrolls: true,
+			headerVisible: true,
+			composerVisible: true,
+		});
 		await page.screenshot({ path: join(output, `conversation-${width}.png`), fullPage: true });
 		await page.getByRole("button", { name: "Dark theme", exact: true }).click();
 		await check("conversation-dark");
 		if (width === 1600) await page.screenshot({ path: join(output, "conversation-dark.png"), fullPage: true });
 		await page.getByRole("button", { name: "Light theme", exact: true }).click();
+		await page.getByText("Session tools", { exact: true }).click();
 		await page.getByText("Session controls", { exact: true }).click();
 		await page.getByRole("button", { name: "Save settings", exact: true }).waitFor();
 		await check("session-controls");
 		await page.getByText("Session controls", { exact: true }).click();
+		await page.keyboard.press("Escape");
+		assert.equal(
+			await page.locator(".conversation__tools").evaluate((element) => (element as HTMLDetailsElement).open),
+			false,
+		);
+		assert.equal(
+			await page.locator(".conversation__tools > summary").evaluate((element) => document.activeElement === element),
+			true,
+		);
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[approval] Write the fixture file.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Allow once", exact: true }).first().waitFor();
@@ -553,6 +646,7 @@ try {
 		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
+		await page.getByText(/Session tools · 1 worker running/).click();
 		await page.getByRole("button", { name: "Guide scout", exact: true }).click();
 		await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
 		await page.getByRole("button", { name: "Send guidance", exact: true }).click();
@@ -574,10 +668,12 @@ try {
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
 		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
 		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
+		await page.getByText(/Session tools · 1 worker running/).click();
 		await page.getByRole("button", { name: "Stop scout", exact: true }).click();
 		await page.getByRole("button", { name: "Stop run", exact: true }).click();
 		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
 		assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
+		await page.locator(".conversation__tools > summary").click();
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();
