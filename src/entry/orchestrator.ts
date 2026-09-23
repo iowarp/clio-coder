@@ -53,6 +53,7 @@ import type { DispatchContract } from "../domains/dispatch/contract.js";
 import { createDispatchDedupRegistration } from "../domains/dispatch/dedup.js";
 import { agentRoleFactsResolver } from "../domains/dispatch/execution-role.js";
 import { readGateDecisionArtifacts, readPendingGateDecisions } from "../domains/dispatch/gate-decisions.js";
+import { scheduleSpeculativeHold } from "../domains/dispatch/held-workers.js";
 import { createDispatchDomainModule } from "../domains/dispatch/index.js";
 import { configureRunEventJournal } from "../domains/dispatch/run-event-journal.js";
 import { type ExtensionsContract, ExtensionsDomainModule } from "../domains/extensions/index.js";
@@ -2352,6 +2353,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		}),
 	);
+	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	const chat = createChatLoop({
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
@@ -2378,17 +2380,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
 		refreshTurnRelevance: async (taskText, previous) => {
 			await turnRelevance.refresh({ task: taskText, previous });
-			// Speculative dispatch starts after the brief and is never awaited: the
-			// turn goes on at once, and a forecast that turns out wrong costs one
-			// idle process until the turn settles.
+			// The hold runs before the awaiting turn resumes, so an immediate
+			// dispatch can adopt it. Settlement cancels a queued hold first.
 			const forecast = turnRelevance.current().get("dispatchForecast")?.value as DispatchForecast | undefined;
 			const recipe = forecast?.recipe;
 			if (forecast === undefined || typeof recipe !== "string" || !dispatchForecastConfident(forecast)) return;
 			const count = forecast.shape === "parallel" ? 2 : 1;
-			setImmediate(() => dispatch?.speculate?.({ agentId: recipe, count }));
+			cancelQueuedSpeculativeHold = scheduleSpeculativeHold(() => {
+				cancelQueuedSpeculativeHold = null;
+				dispatch?.speculate?.({ agentId: recipe, count });
+			});
 		},
 		// Held processes a turn did not use die with the turn, cancelled or not.
 		onTurnSettled: () => {
+			cancelQueuedSpeculativeHold?.();
+			cancelQueuedSpeculativeHold = null;
 			dispatch?.releaseSpeculative?.("turn settled");
 		},
 		getMemoryRelevance: () => turnRelevance.memory(),
