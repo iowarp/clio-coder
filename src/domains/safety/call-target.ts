@@ -318,5 +318,6 @@ export function describeCallTarget(tool: string, args: Record<string, unknown> |
 		if (allowed.has(field)) continue;
 		parts.push(`${targetFieldName(field)}=${summarizeUnlistedTargetValue(value)}`);
 	}
-	return sanitizeCallTargetText(parts.join(" · ")).slice(0, CALL_TARGET_MAX_CHARS);
+	const target = sanitizeCallTargetText(parts.join(" · "));
+	return target.length <= CALL_TARGET_MAX_CHARS ? target : `${target.slice(0, CALL_TARGET_MAX_CHARS - 1)}…`;
 }

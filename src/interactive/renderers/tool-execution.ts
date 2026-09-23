@@ -17,11 +17,7 @@ import { previewBudget, previewRows } from "./preview.js";
 
 import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
-import {
-	CALL_TARGET_MAX_CHARS,
-	sanitizeCallTargetText,
-	sanitizeMultilineDisplayText,
-} from "../../domains/safety/call-target.js";
+import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -693,15 +689,6 @@ const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${dim(" awaiting a
  * No elapsed counter (nothing is running) and no status glyph (nothing has
  * finished): the awaiting-approval tail is the segment's whole state.
  */
-/**
- * An approval's target as the card states it. The safety layer describes a
- * call's target in at most CALL_TARGET_MAX_CHARS characters and cuts it there
- * without a mark, so a target of exactly that length was cut and says so.
- */
-export function approvalTarget(target: string): string {
-	return target.length === CALL_TARGET_MAX_CHARS ? `${target}${GLYPH.ellipsis}` : target;
-}
-
 export function renderToolAwaitingApproval(
 	call: ToolExecutionStart,
 	width: number,
@@ -719,7 +706,7 @@ export function renderToolAwaitingApproval(
 	const facts = [
 		["action", view.actionClass],
 		["axis", axis],
-		...(view.target !== undefined && view.target.length > 0 ? [["target", approvalTarget(view.target)]] : []),
+		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
@@ -1810,7 +1797,12 @@ export function renderToolPreview(
 		// A refusal's tail names it (`✗ · bash blocked: system_modify`), so its
 		// body keeps the rest of what the call was told, not that line again.
 		const refusal = finished?.outcome !== undefined ? finished.blockReason?.trim() : undefined;
-		const text = refusal ? withoutLeadingLine(told, refusal) : told;
+		let text = refusal ? withoutLeadingLine(told, refusal) : told;
+		// The action row already names this run. A short monitor summary can
+		// start with the same id; keep the remainder here and the raw result in
+		// inspection, where it is useful as an exact model-facing record.
+		const runId = row.toolName === "monitor" ? row.args.run_id : undefined;
+		if (typeof runId === "string" && text.startsWith(`${runId} · `)) text = text.slice(runId.length + 3);
 		if (text.trim().length > 0) {
 			const body = indentAndWrap(redactSecretString(text), width, failure);
 			rows.push(

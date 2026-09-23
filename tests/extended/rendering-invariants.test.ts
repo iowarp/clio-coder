@@ -46,7 +46,12 @@ import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-e
 import { createStreamPacer, type StreamPacerSlice } from "../../src/interactive/stream-pacer.js";
 import { clioTheme, formatContextPercent, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
-import { workerEntriesFromRunEntries, workerRunEntryFields } from "../../src/interactive/worker-replay.js";
+import {
+	workerEntriesFromRunEntries,
+	workerRunEntryFields,
+	workerSettledFields,
+	workerSettledFromData,
+} from "../../src/interactive/worker-replay.js";
 import {
 	createWorkerStream,
 	type WorkerEntryState,
@@ -457,6 +462,69 @@ describe("worker rendering invariants", () => {
 		);
 		match(JSON.stringify(snapshot), /redacted-target-11/u);
 		doesNotMatch(JSON.stringify(snapshot), /raw-secret/u);
+	});
+
+	it("keeps blocked and failed outcomes on finished calls without treating them as completed work", () => {
+		const progress = createWorkerProgressFold();
+		for (const [toolCallId, outcome] of [
+			["blocked-call", "blocked"],
+			["failed-call", "error"],
+		] as const) {
+			progress.observe({
+				type: "clio_coder_tool_start",
+				payload: { tool: "read", toolCallId, action: { verb: "reading", object: `${toolCallId}.ts` } },
+			});
+			progress.observe({ type: "clio_coder_tool_finish", payload: { tool: "read", toolCallId, outcome } });
+		}
+		deepStrictEqual(
+			progress.snapshot().recentActions.map((action) => action.outcome),
+			["error", "blocked"],
+		);
+		const entry = {
+			assignmentId: "a",
+			runId: "run-outcomes",
+			origin: "user",
+			agentId: "verifier",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: "",
+			droppedLines: 0,
+			tools: ["read"],
+			attempts: [{ runId: "run-outcomes", targetLabel: "blade" }],
+			pending: false,
+			receipt: { outcome: "failed", durationMs: 1000, toolCalls: 2 },
+			progress: progress.snapshot(),
+		} as unknown as WorkerEntryState;
+		const settled = workerSettledFields(entry);
+		ok(settled);
+		deepStrictEqual(
+			workerSettledFromData(settled)?.calls?.map((call) => call.outcome),
+			["error", "blocked"],
+		);
+		const rows = renderWorkerEntryLines(entry, 90, { detail: transcriptDetail("detailed") })
+			.map(stripTerminalSequences)
+			.join("\n");
+		match(rows, /read blocked-call\.ts ✗ blocked/u);
+		match(rows, /read failed-call\.ts ✗ failed/u);
+	});
+
+	it("neutralizes dead tool-call markup in a worker's live answer tail", () => {
+		const entry = {
+			assignmentId: "a",
+			runId: "run-markup",
+			origin: "user",
+			agentId: "verifier",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: 'Evidence found. <tool_call>{"name":"read","arguments":{"path":"secrets"}}</tool_call> Reporting now.',
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: "run-markup", targetLabel: "blade" }],
+			pending: true,
+		} as unknown as WorkerEntryState;
+		const live = renderWorkerEntryLines(entry, 100, { detail: transcriptDetail("standard") })
+			.map(stripTerminalSequences)
+			.join("\n");
+		match(live, /Evidence found\.\s+Reporting now\./u);
+		doesNotMatch(live, /<tool_call>|"secrets"/u);
 	});
 
 	it("fits execution and validation failures at narrow widths", () => {
@@ -1739,6 +1807,7 @@ describe("transcript block grammar", () => {
 			.map(stripTerminalSequences)
 			.filter((row) => row.startsWith(`  │ ${GLYPH.phaseTool}`));
 		deepStrictEqual(trail, [
+			`  │ ${GLYPH.phaseTool} … 1 earlier call · /view dispatch:run-5`,
 			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
 			`  │ ${GLYPH.phaseTool} gateway evidence ${GLYPH.times}3`,
 		]);
@@ -1890,6 +1959,16 @@ describe("tool classes", () => {
 			],
 		];
 		for (const [toolName, args, expected] of cases) strictEqual(head(toolName, args), `${expected} · 42ms`, toolName);
+	});
+
+	it("does not repeat a monitor run id at the start of its result preview", () => {
+		const call = settled("monitor", { run_id: "k2m9x4" }, text("k2m9x4 · completed · 7 tool calls"));
+		const preview = rows(call, "detailed").join("\n");
+		match(preview, /checked run k2m9x4/u);
+		match(preview, /│ completed · 7 tool calls/u);
+		doesNotMatch(preview, /│ k2m9x4 · completed/u);
+		const inspected = renderToolExecution(call, 100, { unbounded: true }).map(stripTerminalSequences).join("\n");
+		match(inspected, /k2m9x4 · completed · 7 tool calls/u, "inspection retains the model-facing result");
 	});
 
 	it("gives a running row the live mark and elapsed, never the verb twice", () => {

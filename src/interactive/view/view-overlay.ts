@@ -237,7 +237,8 @@ function artifactsInCategoryOrder(artifacts: ReadonlyArray<ViewArtifact>): ViewA
 
 function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFilter = ""): number {
 	const filtered = filterViewArtifacts(artifacts, initialFilter);
-	const first = filtered[0];
+	const ordered = artifactsInCategoryOrder(filtered);
+	const first = ordered[0];
 	if (!first) return 0;
 	let selected = first;
 	const parsed = parseViewFilterQuery(initialFilter);
@@ -254,7 +255,7 @@ function initialViewSelection(artifacts: ReadonlyArray<ViewArtifact>, initialFil
 		);
 		if (exactArtifact) selected = exactArtifact;
 	}
-	return Math.max(0, artifactsInCategoryOrder(filtered).indexOf(selected));
+	return Math.max(0, ordered.indexOf(selected));
 }
 
 function nextCategorySelection(
@@ -811,11 +812,20 @@ export class ViewOverlayView implements Component {
 			return true;
 		}
 		const previous = this.filterText;
-		if (matchesKey(data, "ctrl+u")) {
+		const clearing = matchesKey(data, "ctrl+u");
+		const selected = clearing ? this.selectedArtifact() : undefined;
+		if (clearing) {
 			this.filterInput.applyEdit("clear");
 		} else this.filterInput.handleInput(data);
 		this.filterText = this.filterInput.getValue();
 		if (previous !== this.filterText) {
+			const retainedIndex = selected
+				? this.filteredArtifacts().findIndex((artifact) => artifactKey(artifact) === artifactKey(selected))
+				: -1;
+			if (retainedIndex >= 0) {
+				this.selectIndex(retainedIndex);
+				return true;
+			}
 			this.selectInitialFilterMatch();
 			return true;
 		}

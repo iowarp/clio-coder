@@ -68,6 +68,9 @@ export interface SessionFacts {
 	throughputDetail: string | null;
 	cost: string | null;
 	target: string | null;
+	/** Raw route fields for boundary-aware fitting in the compact footer. */
+	targetId?: string | null;
+	modelId?: string | null;
 	thinking: string | null;
 	capabilities: string[] | null;
 	safety: string | null;
@@ -822,11 +825,10 @@ function workerLine(theme: ClioTheme, row: DispatchBoardRow, _width: number): st
 	const presentation = dispatchStatusPresentation(row.status, { compact: true });
 	// The Activity section already promotes the fleet summary (or dispatch phase)
 	// to action orange. Worker rows remain readable without repeating that signal.
-	const token = presentation.token === "action" ? "accent" : presentation.token;
 	const units = [
 		theme.fg("muted", agentDisplayLabel(row)),
 		theme.fg("dim", row.node ?? "local"),
-		theme.fg(token, presentation.glyph),
+		theme.fg(presentation.token, presentation.glyph),
 		theme.fg("dim", formatCompactMs(row.elapsedMs)),
 		...(row.receiptId !== undefined ? [theme.fg("dim", row.receiptId)] : []),
 	];

@@ -17,7 +17,7 @@ export interface InteractiveShellTui {
 	setLayoutRoot?(component: Component | undefined): void;
 	setFocus(component: Component): void;
 	start(): void;
-	stop(): void;
+	stop(options?: { preserveScreen?: boolean }): void;
 	requestRender(): void;
 	renderNow?(force?: boolean): void;
 }
@@ -70,7 +70,7 @@ const KEEP_ALIVE_INTERVAL_MS = 1 << 30;
  * before the keep-alive anchor. Keeping that seam explicit prevents an
  * extraction from silently changing initialization order.
  */
-function createInteractiveShell<TTerminal extends Terminal, TTui extends InteractiveShellTui>(
+export function createInteractiveShell<TTerminal extends Terminal, TTui extends InteractiveShellTui>(
 	deps: InteractiveShellDeps<TTerminal, TTui>,
 ): InteractiveShell<TTerminal, TTui> {
 	const terminal = deps.createTerminal();
@@ -121,7 +121,10 @@ function createInteractiveShell<TTerminal extends Terminal, TTui extends Interac
 			if (stopped) return;
 			stopped = true;
 			try {
-				tui.stop();
+				// pi-tui prints the docked fullscreen frame on the main screen by
+				// default. Exit the alternate screen without replaying that frame;
+				// its width can differ from the restored main screen's width.
+				tui.stop(tui.mode === "fullscreen" ? { preserveScreen: true } : undefined);
 			} catch {
 				// TUI may already be stopped by a closed input stream.
 			} finally {

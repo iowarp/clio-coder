@@ -1,13 +1,18 @@
 import assert from "node:assert/strict";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { BusChannels } from "../../src/core/bus-events.js";
 import type { ClioSettings } from "../../src/core/config.js";
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import type { MiddlewareToolChoiceControl } from "../../src/domains/middleware/index.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { SessionEntry } from "../../src/domains/session/entries.js";
 import { stripTerminalSequences } from "../../src/engine/tui.js";
-import type { ChatLoopEvent } from "../../src/interactive/chat-loop.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { toolResultSummary } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { buildReplayAgentMessagesFromTurns, rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
@@ -21,6 +26,7 @@ import { createTurnPersistence } from "../../src/interactive/turn-persistence.js
 import type { ChatTurnState } from "../../src/interactive/turn-state.js";
 import type { WorkerRunEntryFields, WorkerSettledFields } from "../../src/interactive/worker-replay.js";
 import type { WorkerEntryState, WorkerReceiptFacts } from "../../src/interactive/worker-stream.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
 
 const usage = {
 	input: 7,
@@ -98,6 +104,60 @@ test("transient error followed by tool use and recovery retains one final succes
 	assert.match(output, /Recovered answer/);
 	assert.equal((output.match(/\bDone\b/g) ?? []).length, 1);
 	assert.ok(output.indexOf("Done") > output.indexOf("Recovered answer"));
+});
+
+test("speculative dispatch counts land in the Detailed receipt live and on replay", () => {
+	const message = {
+		role: "assistant" as const,
+		stopReason: "stop",
+		content: [{ type: "text", text: "The task is done." }],
+		usage,
+	};
+	const counts = { held: 2, adopted: 1, discarded: 1 };
+	const entries: SessionEntry[] = [
+		{
+			kind: "message",
+			turnId: "u",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			role: "user",
+			payload: { text: "Do it" },
+		},
+		{
+			kind: "message",
+			turnId: "a",
+			parentTurnId: "u",
+			timestamp: "2026-09-17T00:00:01Z",
+			role: "assistant",
+			payload: message,
+		},
+		{
+			kind: "custom",
+			turnId: "p",
+			parentTurnId: "a",
+			timestamp: "2026-09-17T00:00:01Z",
+			customType: "speculativeDispatch",
+			display: false,
+			data: counts,
+		},
+	];
+	const live = createChatPanel({ getOutputStyle: () => "detailed", now: () => 1_000 });
+	live.appendUser("Do it");
+	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.applyEvent({ type: "message_start", message } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "agent_end", messages: [message] } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "speculative_dispatch", counts } as unknown as ChatLoopEvent);
+	const resumed = createChatPanel({ getOutputStyle: () => "detailed" });
+	rehydrateChatPanelFromTurns(resumed, entries);
+	for (const panel of [live, resumed]) {
+		const rendered = panel.render(100).map(stripTerminalSequences).join("\n");
+		assert.match(rendered, /prewarm 1 adopted, 1 unused/u);
+		assert.equal((rendered.match(/prewarm/g) ?? []).length, 1);
+	}
+	const standard = createChatPanel({ getOutputStyle: () => "standard" });
+	rehydrateChatPanelFromTurns(standard, entries);
+	assert.doesNotMatch(standard.render(100).map(stripTerminalSequences).join("\n"), /prewarm/u);
 });
 
 test("actual final failure after tool use retains a failed outcome while success remains Done", () => {
@@ -652,4 +712,74 @@ test("the TUI echoes an operator command and hands the host the same line to rec
 	assert.deepEqual(blocks.flatMap((block) => block(80)).map(stripTerminalSequences), [
 		"▌ /run documenter document the retry options",
 	]);
+});
+
+test("/export reports a workspace file by its relative path", () => {
+	const workspace = mkdtempSync(join(tmpdir(), "clio-export-notice-"));
+	const blocks: Array<(width: number) => string[]> = [];
+	const target = join(workspace, ".clio-coder", "exports", "session.html");
+	try {
+		const runtime = createInteractiveSlashRuntime({
+			io: { stdout() {}, stderr() {} },
+			chat: { getSessionId: () => "session" },
+			chatPanel: { appendReplayBlock: (block: (width: number) => string[]) => blocks.push(block) },
+			readStructuredEntries: () => [],
+			getCwd: () => workspace,
+			requestRender() {},
+			now: () => new Date("2026-09-23T12:00:00Z"),
+		} as unknown as InteractiveSlashRuntimeDeps);
+		runtime.context.exportTranscript?.(target);
+		assert.equal(existsSync(target), true);
+		const notice = blocks
+			.flatMap((block) => block(100))
+			.map(stripTerminalSequences)
+			.join("\n");
+		assert.match(notice, /\[\/export\] wrote \d+ lines to \.clio-coder\/exports\/session\.html/u);
+		assert.doesNotMatch(notice, new RegExp(workspace));
+	} finally {
+		rmSync(workspace, { recursive: true, force: true });
+	}
+});
+
+test("settled speculative counts reach the live event stream after persistence", async () => {
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	settings.chat.prewarm = false;
+	const context = dispatchStubContext({ settings });
+	const target = settings.targets[0];
+	assert.ok(target);
+	settings.chat.target = target.id;
+	settings.chat.model = target.defaultModel ?? "gpt-4o";
+	const counts = { held: 2, adopted: 1, discarded: 1 };
+	let persisted = false;
+	const events: ChatLoopEvent[] = [];
+	const loop = createChatLoop({
+		getSettings: () => settings,
+		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+		knownTargets: () => new Set([target.id]),
+		createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => ({
+			agent: {
+				state: options?.initialState,
+				subscribe: () => () => {},
+				abort() {},
+				async prompt() {},
+			},
+		})) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+		onTurnSettled: () => {
+			persisted = true;
+			return counts;
+		},
+	});
+	loop.onEvent((event) => {
+		if (event.type === "speculative_dispatch") {
+			assert.equal(persisted, true);
+			events.push(event);
+		}
+	});
+	try {
+		await loop.submit("Summarize the fixture");
+		assert.deepEqual(events, [{ type: "speculative_dispatch", counts }]);
+	} finally {
+		loop.dispose();
+		await loop.whenSettled();
+	}
 });

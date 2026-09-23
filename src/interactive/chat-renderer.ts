@@ -54,7 +54,7 @@ import {
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
 import { toolResultPresentationText } from "../tools/result-disposition.js";
-import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "./chat-loop.js";
 import { hasStructuredToolCall, isSelfExplainingAbort, toolResultSummary } from "./chat-loop-messages.js";
 import type { ChatPanel, ReplayedRunFacts } from "./chat-panel.js";
 import { OPERATOR_COMMAND_ENTRY, renderOperatorCommandRows } from "./command-output.js";
@@ -1361,6 +1361,17 @@ export function rehydrateChatPanelFromTurns(
 	}
 }
 
+function speculativeDispatchCounts(data: unknown): SpeculativeDispatchCounts | null {
+	if (data === null || typeof data !== "object" || Array.isArray(data)) return null;
+	const { held, adopted, discarded } = data as Record<string, unknown>;
+	if (
+		![held, adopted, discarded].every((value) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
+	) {
+		return null;
+	}
+	return { held: held as number, adopted: adopted as number, discarded: discarded as number };
+}
+
 function replayEntries(
 	chatPanel: ChatPanel,
 	turns: ReadonlyArray<SessionEntry>,
@@ -1523,6 +1534,11 @@ function replayEntries(
 				break;
 			}
 			case "custom":
+				if (entry.customType === "speculativeDispatch") {
+					const counts = speculativeDispatchCounts(entry.data);
+					if (counts !== null) chatPanel.applyEvent({ type: "speculative_dispatch", counts });
+					break;
+				}
 				if (rendersCustomEntry(entry))
 					chatPanel.appendReplayBlock((width, detail, unbounded, terminalRows = 40) =>
 						renderCustomEntry(entry, width, detail, unbounded === true || options.unboundedToolBodies === true, terminalRows),

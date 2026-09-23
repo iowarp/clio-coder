@@ -7,6 +7,7 @@ import { type CompactionCallObservation, compact } from "../../src/domains/sessi
 import { calculateContextTokens, estimateTokens } from "../../src/domains/session/compaction/tokens.js";
 import { estimateAgentContextTokens } from "../../src/domains/session/context-accounting.js";
 import type { MessageEntry, SessionEntry } from "../../src/domains/session/entries.js";
+import { HANDOFF_SEED_CUSTOM_TYPE } from "../../src/domains/session/handoff.js";
 import { registerEngineFauxProvider } from "../../src/engine/api-registry.js";
 import { resolvedRequestContext } from "../../src/engine/context.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
@@ -19,6 +20,30 @@ function message(turnId: string, role: MessageEntry["role"], payload: unknown): 
 function chain(entries: SessionEntry[]): SessionEntry[] {
 	return entries.map((entry, index) => ({ ...entry, parentTurnId: entries[index - 1]?.turnId ?? null }));
 }
+
+it("charges custom entries only when replay turns them into model context", () => {
+	const base = [message("u1", "user", { text: "Answer briefly" })];
+	const displayTypes = ["operatorCommand", "workerSettled", "skillSurface", "speculativeDispatch", "promptRecompiled"];
+	const display = displayTypes.map((customType, index) => ({
+		kind: "custom" as const,
+		turnId: `display-${index}`,
+		parentTurnId: null,
+		timestamp,
+		customType,
+		data: { text: "display-only".repeat(10_000) },
+	}));
+	strictEqual(calculateContextTokens([...base, ...display]), calculateContextTokens(base));
+	for (const entry of display) strictEqual(estimateTokens(entry), 0, entry.customType);
+	const seed = {
+		kind: "custom" as const,
+		turnId: "seed",
+		parentTurnId: null,
+		timestamp,
+		customType: HANDOFF_SEED_CUSTOM_TYPE,
+		data: { fromSessionId: "source", goal: "Finish", document: "The reviewed handoff" },
+	};
+	ok(estimateTokens(seed) > 0);
+});
 function evictedHistory(): SessionEntry[] {
 	return chain([
 		message("u1", "user", { text: "Keep the exact constraint CONSTRAINT_42" }),

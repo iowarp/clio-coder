@@ -19,20 +19,53 @@ import {
 	type ObservabilityProjection,
 } from "../../src/domains/observability/projection.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
+import { councilGroupBody, councilIslandLines } from "../../src/interactive/council-grid.js";
 import {
 	createDispatchBoardStore,
 	createDispatchBoardView,
 	type DispatchBoardRow,
+	dispatchStatusPresentation,
 	formatTaskIslandLines,
 } from "../../src/interactive/dispatch-board.js";
+
 import { dispatchSegment } from "../../src/interactive/footer-panel.js";
 import { renderToolSubline } from "../../src/interactive/renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
+import { clioTheme, GLYPH } from "../../src/interactive/theme/index.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import { createWorkerStream } from "../../src/interactive/worker-stream.js";
 import { createMonitorTool } from "../../src/tools/monitor.js";
 import { fixtureEnvelope, fixtureReceiptDraft } from "../harness/receipt.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
+
+it("uses orange only for a running Fleet glyph and mutes queued work", () => {
+	const running = dispatchStatusPresentation("running");
+	strictEqual(running.token, "muted");
+	strictEqual(running.glyphToken, "action");
+	const queued = dispatchStatusPresentation("enqueued");
+	strictEqual(queued.token, "muted");
+	strictEqual(queued.glyphToken, undefined);
+});
+
+it("keeps the council status word neutral while a running glyph carries action", () => {
+	const theme = clioTheme();
+	const status = { glyph: GLYPH.running, label: "running", glyphToken: "action" as const, token: "muted" as const };
+	const member = {
+		runId: "council-run",
+		label: "Reviewer",
+		round: 1,
+		route: "blade/model",
+		status,
+		tailText: "",
+		droppedLines: 0,
+	};
+	const group = { group: "review", members: [member], synthesis: null, status, round: 1, elapsed: "3s" };
+	for (const rows of [councilIslandLines(theme, group, 80), councilGroupBody(theme, group, 80)]) {
+		const rendered = rows.join("\n");
+		ok(rendered.includes(theme.fg("action", GLYPH.running)));
+		ok(rendered.includes(theme.fg("muted", "running")));
+	}
+});
 
 const IDENTITY: DispatchEnqueuedPayload = {
 	runId: "board-run",

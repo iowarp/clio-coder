@@ -279,6 +279,8 @@ export function dispatchRowPrefix(
 export interface DispatchStatusPresentation {
 	glyph: string;
 	label: string;
+	/** A live glyph may take the scarce action token while its word stays neutral. */
+	glyphToken?: ClioToken;
 	token: ClioToken;
 }
 
@@ -295,12 +297,13 @@ export function dispatchStatusPresentation(
 	const compact = options.compact === true;
 	switch (status) {
 		case "running":
-			// Running fleet work is Clio acting, so it joins queued work under the
-			// action token rather than the old teal-running/orange-queued split.
+			// The glyph alone signals live action; several active rows must not
+			// paint an entire column of words orange.
 			return {
 				glyph: options.tick !== undefined ? spinnerFrame(options.tick) : GLYPH.running,
 				label: "running",
-				token: "action",
+				glyphToken: "action",
+				token: "muted",
 			};
 		case "cancelling":
 			return { glyph: GLYPH.cancelled, label: "cancelling", token: "warning" };
@@ -317,7 +320,7 @@ export function dispatchStatusPresentation(
 		case "stale":
 			return { glyph: GLYPH.warnInline, label: "stale", token: "warning" };
 		case "enqueued":
-			return { glyph: GLYPH.queued, label: "queued", token: "action" };
+			return { glyph: GLYPH.queued, label: "queued", token: "muted" };
 	}
 }
 
@@ -465,7 +468,7 @@ function progressPhaseUnit(theme: ClioTheme, progress: WorkerProgressSnapshot): 
 		case "writing":
 			return theme.fg("accent", `${GLYPH.phaseWriting} writing`);
 		case "tool":
-			return theme.fg("action", `${GLYPH.phaseTool} tool`);
+			return theme.fg("muted", `${GLYPH.phaseTool} tool`);
 		case "waiting":
 			return theme.fg("info", `${GLYPH.phaseWaiting} waiting`);
 		case "settled":
@@ -617,10 +620,9 @@ function renderDispatchCard(
 	const presentation = dispatchStatusPresentation(row.status, {
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
 	});
-	// The status value (glyph plus word) is the single status-colored element on
-	// the card. Cost and TTFT are neutral telemetry, so they render muted rather
-	// than amber or the accentDeep structure color.
-	const statusStr = theme.fg(presentation.token, `${presentation.glyph} ${presentation.label}`);
+	// Only a running glyph takes action orange; its word and the card's cost and
+	// TTFT remain neutral telemetry.
+	const statusStr = `${theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph)} ${theme.fg(presentation.token, presentation.label)}`;
 
 	const ttft = row.ttftMs !== null ? `${row.ttftMs}ms` : row.status === "running" ? `waiting${GLYPH.ellipsis}` : "n/a";
 
@@ -738,7 +740,7 @@ function renderDispatchCard(
 	const recentTools = row.recentTools ?? [];
 	if (!row.progress && (currentTool !== null || recentTools.length > 0)) {
 		const toolUnits = [
-			currentTool !== null ? theme.fg("action", `${currentTool} running`) : theme.fg("dim", "idle"),
+			currentTool !== null ? theme.fg("muted", `${currentTool} running`) : theme.fg("dim", "idle"),
 			...(recentTools.length > 0 ? [theme.fg("muted", `recent ${recentTools.join(" ")}`)] : []),
 		];
 		bodyLines.push(cardUnitsLine(theme, "tools", toolUnits, contentWidth));
@@ -794,7 +796,7 @@ function renderTaskIslandRow(row: DispatchBoardRow, width: number, quota: Readon
 		compact: true,
 		...(row.status === "running" ? { tick: Math.floor(Date.now() / 100) } : {}),
 	});
-	const glyph = theme.fg(presentation.token, presentation.glyph);
+	const glyph = theme.fg(presentation.glyphToken ?? presentation.token, presentation.glyph);
 	const statusStr = theme.fg(presentation.token, presentation.label);
 
 	// Reserve the glyph, separators, status word, and elapsed so a long agent
@@ -891,7 +893,7 @@ function councilMemberView(
 		...(council.color !== undefined ? { color: council.color } : {}),
 		round: council.round,
 		route: `${row.targetId}/${row.wireModelId}`,
-		status: { glyph: presentation.glyph, label: presentation.label, token: presentation.token },
+		status: { ...presentation },
 		tailText: sanitizeCallTargetText(row.progress?.tailText ?? ""),
 		droppedLines: row.progress?.droppedLines ?? 0,
 	};
@@ -947,7 +949,7 @@ function foldCouncilGroup(
 		members,
 		// biome-ignore lint/style/noNonNullAssertion: the synthesis row was matched on its own council badge.
 		synthesis: synthesisRow === null ? null : councilMemberView(synthesisRow, synthesisRow.council!),
-		status: { glyph: presentation.glyph, label: presentation.label, token: presentation.token },
+		status: { ...presentation },
 		round,
 		elapsed: formatCompactMs(elapsedMs),
 		...(selectedInGroup !== undefined ? { selectedRunId: selectedInGroup } : {}),

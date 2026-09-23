@@ -35,6 +35,29 @@ import {
 } from "../../src/engine/instrumented-tui.js";
 import { Text, TUI_KEYBINDINGS } from "../../src/engine/tui.js";
 import type { AgentEvent, AgentTool, EngineModel } from "../../src/engine/types.js";
+import { createInteractiveShell, type InteractiveShellTui } from "../../src/interactive/interactive-shell.js";
+
+it("leaves the main screen intact when a fullscreen shell stops", () => {
+	for (const mode of ["fullscreen", "regular"] as const) {
+		const stops: Array<{ preserveScreen?: boolean } | undefined> = [];
+		const tui: InteractiveShellTui = {
+			mode,
+			addChild() {},
+			setFocus() {},
+			start() {},
+			stop(options) {
+				stops.push(options);
+			},
+			requestRender() {},
+		};
+		const shell = createInteractiveShell({
+			createTerminal: () => ({}) as Terminal,
+			createTui: () => tui,
+		});
+		shell.stop();
+		deepStrictEqual(stops, [mode === "fullscreen" ? { preserveScreen: true } : undefined]);
+	}
+});
 
 const MODEL: EngineModel = {
 	id: "stub-model",

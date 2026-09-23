@@ -2416,6 +2416,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					display: false,
 					data: counts,
 				});
+				return counts;
 			} catch {
 				// Accounting is best effort and cannot change turn settlement.
 			}

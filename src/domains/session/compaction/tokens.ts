@@ -12,8 +12,7 @@
  */
 
 import type { Usage } from "../../../engine/types.js";
-import { ceilChars, contentChars, estimateAgentMessageTokens } from "../context-accounting.js";
-import { HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE } from "../continuity/operator-request.js";
+import { ceilChars, estimateAgentMessageTokens } from "../context-accounting.js";
 import type {
 	BashExecutionEntry,
 	BranchSummaryEntry,
@@ -22,6 +21,7 @@ import type {
 	MessageEntry,
 	SessionEntry,
 } from "../entries.js";
+import { HANDOFF_SEED_CUSTOM_TYPE, handoffSeedContextText, isHandoffSeedData } from "../handoff.js";
 
 /** Contract future alternate estimators must satisfy. */
 export interface TokenEstimator {
@@ -53,13 +53,12 @@ function estimateBashExecution(entry: BashExecutionEntry): number {
 }
 
 function estimateCustom(entry: CustomEntry): number {
-	if (entry.data === undefined) return 0;
-	// The reserved operator recovery request is a control record, not model text.
-	// Model replay skips it by design (it is never turned into a user turn), so
-	// charging its data to the context budget would claim the model can see a
-	// record it is never shown.
-	if (entry.customType === HANDOFF_RECOVERY_REQUEST_CUSTOM_TYPE) return 0;
-	return ceilChars(contentChars(entry.data));
+	// Keep this in step with buildReplayAgentMessagesFromTurns: a handoff seed
+	// becomes one model-facing context message; all other custom entries are
+	// presentation or control records, even when their data is large.
+	return entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)
+		? ceilChars(handoffSeedContextText(entry.data).length)
+		: 0;
 }
 
 function estimateSummary(entry: BranchSummaryEntry | CompactionSummaryEntry): number {

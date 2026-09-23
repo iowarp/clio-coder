@@ -17,6 +17,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Persist a settled worker's call trail for `/resume`, compress repeated identical calls into a `×N` row, and end a cut descriptor in `…`. Previously replay lost the trail and a repeated call occupied one row per occurrence.
 - State a blocked call's refusal once. Its body now omits the first line already quoted by the action row, and the safety-net notice uses the footer instead of adding a live-only transcript row.
 - Keep short receipt, action and spend facts together across a narrow wrap, such as `18 lines` and `context 3.2k`, rather than splitting their number from its label.
+- Keep a quantized model suffix whole in the compact footer. The footer now fits the structured target and model at the width it has, dropping placement first and cutting only at model-token boundaries; narrow routes no longer read `dynamo/qwop….8-27b-flash@q4_k_m` or `blade · …sh@q4_k_m`.
+- Carry a worker call's failed or blocked outcome into its Detailed trail, live and on `/resume`, and name calls omitted by the four-action trail (`⚙ … 48 earlier calls · /view dispatch:<id>`). A blocked read no longer looks like one that succeeded.
+- Show speculative worker prewarm counts on a Detailed turn receipt, live and on `/resume`, after the session journal records them (`prewarm 1 adopted, 1 unused`). Standard and Compact remain quiet.
+- Keep Fleet orange on a running status glyph alone; running words, tool activity and queued rows now use muted text, including in council cards. Exit fullscreen without printing its docked frame over the main screen.
+- Report `/export` destinations inside the workspace by relative path, and omit the leading run id from a monitor preview when its action row already names that run. Inspection keeps the complete tool result.
+- Start an unfiltered `/view` on its first displayed transcript detail. The list groups transcript entries ahead of global artifacts; previously a newer global artifact held the cursor below the visible transcript rows when the overlay opened. Clearing a filter now keeps the selected item in view while exposing the other categories.
 
 - Give the transcript one gutter grammar in every output style. The two-cell gutter holds one mark per block and content starts in column 2: `▌` on every row of an operator prompt, whose text is now bold; `✦` on every agent prose block rather than only the first of a turn; a class mark for an action; the purple `│` rail for reasoning only; `◆`/`◇` for a worker. Tool and worker bodies nest under their header at `  │ ` instead of sharing the gutter rail with reasoning. Before this, the prompt carried only a teal `›` in the same color and weight as the agent's `✦`, and narration that resumed after a run of tool rows hung at column 2 with no mark while the tool rows sat at column 0, so the actions outranked what the agent said.
 - Separate the blocks of a turn. Reasoning, prose, actions and the terminal error were concatenated with no blank row between them. Blocks of different kinds are now one blank row apart; consecutive body-less actions stack as one run, and an action with arguments, output or a diff gets a blank row on each side.
@@ -74,6 +80,19 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Transcript speed
 
+Fresh built-binary PTY samples against `5a8289ce` at 120×40, Node 24.20.0 on WSL2, with five interleaved runs per side and compile cache disabled. The long fixture contains 40,000 settled source lines across four turns under a 1,000,000-token mock context, so both sides display the full history without a benchmark-triggered compaction. Times are milliseconds; pairs are p50/p99 except the first-token and startup rows, which are medians. The earlier step-2 measurements below used a different long fixture and should be compared within their own runs.
+
+| Measure | Short before | Short after | 40k lines before | 40k lines after |
+| --- | ---: | ---: | ---: | ---: |
+| Idle key to stdout | 1.09 / 3.12 | 1.11 / 3.07 | 4.70 / 12.00 | 2.63 / 3.14 |
+| Streaming key to stdout | 0.70 / 6.36 | 0.69 / 1.42 | 5.27 / 14.22 | 2.17 / 2.89 |
+| First token to stdout | 33.11 | 8.57 | 34.02 | 6.96 |
+| Stream frame | 0.52 / 2.45 | 0.53 / 1.21 | 5.23 / 14.55 | 2.04 / 9.94 |
+| Stdout bytes per token | 149.58 | 140.12 | 143.70 | 138.21 |
+| Stage 0 / Stage 1 startup | 112.6 / 745.6 | 113.3 / 743.5 | 118.6 / 778.8 | 122.6 / 767.5 |
+
+Each run committed all 400 streamed deltas and recorded zero full redraws. In a separate three-pair short run with an empty composer, stdout bytes per token fell from 141.37 to 130.94. The largest measured gains here are lower long-history key latency and faster first-token display; startup stayed near baseline.
+
 - Stop re-scanning the whole transcript on every regular-screen frame. pi-tui normalized, rebuilt and scanned every row three times for Kitty image headers on every frame, so a keystroke that changed only the composer cost time proportional to the session's length. The tracked pi-tui patch now reuses each unchanged row's reset output by reference and scans only rows that hold images, and the regular-mode root and lease host no longer copy every row two extra times per frame. Measured in-process at 120x40 over 2,000 entries (22,800 rows), interleaved against the previous tree on the same loaded host: a keystroke frame went from 16.5 ms to 2.4 ms at the median (32.7 to 4.8 ms p99) and a streamed-token frame from 17.7 ms to 2.6 ms. Through the built binary in a PTY over a 40,000-row transcript, keystroke to stdout commit had measured 10.4 ms median and 23.7 ms p99 before the change.
 - Fix a crash waiting in long regular-mode sessions. The lease host was a flex stack that appended the whole transcript with a spread call, which throws `Maximum call stack size exceeded` once a transcript passes roughly 150,000 rows. Regular mode now uses a host that only delegates.
 - Step over rows that did not change inside a rewritten range. A streamed token that also moved the footer rewrote every row between the answer's last line and the footer.
@@ -107,6 +126,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Admit verification requests that ask whether tests pass to the verifier, and keep a read-shaped request about a test file classified as a read for scout. A test file's name alone no longer implies that the task will mutate tests.
 - Record per-turn speculative worker counts in the session journal after settlement. A `speculativeDispatch` entry now shows held, adopted and discarded processes, including unused holds; turns without a hold write no entry.
 - Carry turn cancellation into the awaited pre-turn brief. Escape during a pending decision now aborts the model request and ends before chat admission, instead of waiting for the brief and then sending the cancelled turn to the main model.
 - Preserve valid decisions in a batch when one sibling answer is missing or malformed. The runtime previously rejected the entire response, making unrelated sites abstain even though TypeSafe evaluates each question independently. A wholly unusable response still fails closed.
@@ -149,6 +169,9 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Fixes
 
+- Mark call targets exceeding the safety cap at their source, reserving the final character for `…`; an exact 120-character target stays unmarked. Approval cards, ACP decisions and safety records now share the same account of truncation.
+- Charge the context estimate only for custom session entries that replay into model messages. Display records such as worker trails, skill surfaces, operator commands and speculative dispatch no longer inflate the footer meter or prompt an early compaction.
+- Strip inert `<tool_call>` markup from a worker's pending live answer tail while retaining the full available raw answer in settled inspection and export.
 - List `inception` and `typesafe-jev` in the runtime boot manifest. The TUI refused a Mercury chat target at startup because the manifest is read before the providers domain loads and neither row had been added; headless `run` hydrates the full registry and never hit the check. A contract test now diffs the manifest against the built-in runtimes in both directions. The v0.5.3 tag shipped with this defect.
 - Demote dated release handoffs in documentation search, as proposals and audits already are. The v0.5.3 handoff outranked the configuration guide on an ordinary question about choosing a worker model.
 - Stop the skills listing from claiming a relevance order when the decision model abstained on every row it shows. The catalog order was untouched, so the sentence credited an order nothing made.
