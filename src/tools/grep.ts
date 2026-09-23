@@ -76,6 +76,28 @@ function statIsDirectory(searchPath: string): { ok: true; isDirectory: boolean }
 interface RenderedLine {
 	text: string;
 	isMatch: boolean;
+	/** Absolute file and 1-based line a content-mode line shows. */
+	location?: { file: string; line: number };
+}
+
+/**
+ * The file lines a content-mode result put in front of the model, keyed by
+ * absolute path. A worker's result contract counts them as observed, because a
+ * line quoted in a match is a line the model saw, exactly as a read span is.
+ */
+export type GrepObservedLines = Record<string, number[]>;
+
+function observedGrepLines(lines: ReadonlyArray<RenderedLine>): GrepObservedLines | undefined {
+	const observed: GrepObservedLines = {};
+	let any = false;
+	for (const { location } of lines) {
+		if (location === undefined) continue;
+		const bucket = observed[location.file] ?? [];
+		bucket.push(location.line);
+		observed[location.file] = bucket;
+		any = true;
+	}
+	return any ? observed : undefined;
 }
 
 interface GrepRenderInput {
@@ -151,6 +173,10 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 	}
 	const truncated = !search.complete || limitHit || truncation.truncated;
 	const next = limitHit ? `limit=${limit * 2}` : truncation.truncated && mode === "content" ? "mode=files" : undefined;
+	const observedLines =
+		mode === "content"
+			? observedGrepLines(truncation.truncated ? lines.slice(0, truncation.outputLines) : lines)
+			: undefined;
 	let output = truncation.content;
 	if (linesTruncated) {
 		output += `\n\n[Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read to see full lines.]`;
@@ -160,7 +186,7 @@ function renderGrepResult(input: GrepRenderInput): ToolResult {
 		withheldPaths: input.withheldPaths,
 		unit: MODE_UNITS[mode],
 		output: output + searchNotice(search, shownCount, "matches") + fallbackNotice,
-		details: { search },
+		details: observedLines === undefined ? { search } : { search, observedLines },
 		// Offload only when the byte cap cut collected content; a bare match
 		// limit continues via `next`, and the offload would duplicate the body.
 		...(truncation.truncated ? { fullOutput } : {}),
@@ -242,6 +268,7 @@ async function runRipgrep(input: RgSearchInput): Promise<ToolResult> {
 		rendered.push({
 			text: isMatch ? `${relPath(filePath)}:${lineNumber}: ${text}` : `${relPath(filePath)}-${lineNumber}- ${text}`,
 			isMatch,
+			location: { file: path.resolve(filePath), line: lineNumber },
 		});
 		if (isMatch) {
 			matchCount += 1;
@@ -376,10 +403,10 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 	let linesTruncated = false;
 	const signal = input.options?.signal;
 
-	const pushLine = (text: string, isMatch: boolean): void => {
+	const pushLine = (text: string, isMatch: boolean, location?: RenderedLine["location"]): void => {
 		const truncatedLine = truncateLine(text);
 		if (truncatedLine.wasTruncated) linesTruncated = true;
-		rendered.push({ text: truncatedLine.text, isMatch });
+		rendered.push({ text: truncatedLine.text, isMatch, ...(location !== undefined ? { location } : {}) });
 	};
 
 	const searchFile = async (filePath: string): Promise<void> => {
@@ -423,8 +450,9 @@ async function fallbackGrep(input: FallbackSearchInput): Promise<ToolResult> {
 				const end = input.context > 0 ? Math.min(lines.length, i + 1 + input.context) : i + 1;
 				for (let current = start; current <= end; current += 1) {
 					const text = lines[current - 1] ?? "";
-					if (current === i + 1) pushLine(`${rel}:${current}: ${text}`, true);
-					else pushLine(`${rel}-${current}- ${text}`, false);
+					const location = { file: path.resolve(filePath), line: current };
+					if (current === i + 1) pushLine(`${rel}:${current}: ${text}`, true, location);
+					else pushLine(`${rel}-${current}- ${text}`, false, location);
 				}
 				matchCount += 1;
 				if (matchCount >= input.limit) {
