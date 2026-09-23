@@ -222,7 +222,7 @@ starts and stops.
 | --- | --- |
 | A map of the documentation | [Documentation index](docs/README.md) |
 | First connection and effective settings | [Configuration and targets](docs/guide/configuration-and-targets.md) |
-| Every settings key, flag, and environment variable | [Configuration reference](docs/guide/configuration-reference.md) |
+| Default settings keys and source pointers for CLI flags, environment variables, and project schemas | [Configuration reference](docs/guide/configuration-reference.md) |
 | Commands and keyboard controls | [Commands and modes](docs/guide/commands-and-modes.md) |
 | Connection or installation trouble | [Troubleshooting](docs/guide/troubleshooting.md) and `clio-coder doctor` |
 | Scientific checks and measurements | [Scientific validation](docs/process/scientific-validation.md) |
