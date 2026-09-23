@@ -1721,13 +1721,11 @@ main:has(> .conversation) {
 	.conversation__tools > summary {
 		padding-inline: var(--space-2);
 	}
+	/* The menu still hangs below its own summary, which sits at the right gutter, so the control that
+	   opened it stays visible and closes it. A fixed panel at a guessed offset covered it. */
 	.conversation__tools-body {
-		position: fixed;
-		left: var(--space-4);
-		right: var(--space-4);
-		top: calc(var(--masthead-height) + var(--space-12));
-		width: auto;
-		max-height: calc(100dvh - var(--masthead-height) - var(--space-16));
+		max-height: min(70dvh, 44rem);
+		padding-inline: var(--space-4);
 	}
 }
 
