@@ -104,11 +104,20 @@ export function inspectDecisionSite(site: DecisionSite, input: ResolveDeciderInp
 				}
 			}
 		: undefined;
+	// The profile's model is the one that answers, and the one the brief records
+	// as the source; without it the runtime asks the target's default.
+	const model = profile.model?.trim() || undefined;
 	return {
 		bound: true,
-		decider: createDecider(runtime, target, typeof input.ctx === "function" ? input.ctx() : input.ctx, resolveAuthToken),
+		decider: createDecider(
+			runtime,
+			target,
+			typeof input.ctx === "function" ? input.ctx() : input.ctx,
+			resolveAuthToken,
+			model,
+		),
 		targetId: target.id,
-		model: profile.model ?? null,
+		model: model ?? null,
 	};
 }
 

@@ -118,6 +118,49 @@ describe("decision site credentials", () => {
 		deepStrictEqual(resolved, ["jev", "jev"], "the key is read per call, so a rotation applies on the next one");
 	});
 
+	// The profile names the model that answers, and the brief records it as the
+	// source. The decider sent the target's default instead, so a profile bound
+	// to jev-preview was answered by jev-latest and recorded as jev-preview.
+	it("asks the model the bound profile names, not the target's default", async () => {
+		const settings = validateSettings({
+			targets: [{ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }],
+			fleet: {
+				profiles: {
+					"system-one": { target: "jev", model: "jev-preview" },
+					"target-default": { target: "jev" },
+				},
+				decisionProfiles: { toolRisk: "system-one", drafts: "target-default" },
+			},
+		}).settings;
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => typesafeJev,
+		} as unknown as ProvidersContract;
+		const models: unknown[] = [];
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async (_url: unknown, init?: RequestInit) => {
+			models.push(JSON.parse(String(init?.body)).model);
+			return new Response(JSON.stringify({ answers: { q: { type: "noul", noul: 0.9 } } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as typeof fetch;
+		const question = { q: { type: "noul" as const, instructions: "?", criteria: { true: "y", false: "n" } } };
+		try {
+			for (const site of ["toolRisk", "drafts"] as const) {
+				const status = inspectDecisionSite(site, { settings, providers, ctx });
+				ok(status.bound);
+				await status.decider.ask({ task: "x" }, question);
+			}
+			const bound = inspectDecisionSite("toolRisk", { settings, providers, ctx });
+			ok(bound.bound);
+			await bound.decider.ask({ task: "x" }, question, { model: "jev-override" });
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+		deepStrictEqual(models, ["jev-preview", "jev-latest", "jev-override"]);
+	});
+
 	it("posts to the decision endpoint once when the target URL already names it", async () => {
 		const target = { id: "jev", runtime: "typesafe-jev", url: "https://api.typesafe.ai/v1/systemone/" };
 		const urls: string[] = [];
