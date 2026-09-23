@@ -2378,8 +2378,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
-		refreshTurnRelevance: async (taskText, previous) => {
-			await turnRelevance.refresh({ task: taskText, previous });
+		refreshTurnRelevance: async (taskText, previous, signal) => {
+			await turnRelevance.refresh({ task: taskText, previous }, signal);
 			// The hold runs before the awaiting turn resumes, so an immediate
 			// dispatch can adopt it. Settlement cancels a queued hold first.
 			const forecast = turnRelevance.current().get("dispatchForecast")?.value as DispatchForecast | undefined;

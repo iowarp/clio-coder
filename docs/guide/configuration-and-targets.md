@@ -1234,6 +1234,8 @@ so the rule that null means "behave as before" lives in one place. A reply
 carries the surviving answers, the model build, the bound target and model,
 and the latency. Pass `ctx` as a function, as every host does, so an operator
 with nothing bound never pays for reading the credential store.
+Cancelling while the pre-turn brief is pending aborts its decision request and
+ends the turn before a chat request or user ledger entry is admitted.
 
 #### Turning the alpha on, end to end
 

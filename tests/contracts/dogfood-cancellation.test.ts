@@ -191,7 +191,10 @@ function readFixtureEntries(path: string): SessionEntry[] {
 	return entries;
 }
 
-function fixture(initialMode: WireMode) {
+function fixture(
+	initialMode: WireMode,
+	refreshTurnRelevance?: (taskText: string, previous: string, signal?: AbortSignal) => Promise<void>,
+) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
 	settings.chat.target = target.id;
@@ -236,6 +239,7 @@ function fixture(initialMode: WireMode) {
 	const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 	const loop = createChatLoop({
 		getSettings: () => settings,
+		...(refreshTurnRelevance ? { refreshTurnRelevance } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
 		session,
@@ -283,6 +287,43 @@ function fixture(initialMode: WireMode) {
 		},
 	};
 }
+
+it("cancel aborts an awaited decision brief before the chat request and leaves the next turn usable", {
+	timeout: 10_000,
+}, async () => {
+	let startedBrief!: () => void;
+	const started = new Promise<void>((resolve) => {
+		startedBrief = resolve;
+	});
+	let releaseBrief!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		releaseBrief = resolve;
+	});
+	let seenSignal: AbortSignal | undefined;
+	let briefs = 0;
+	const h = fixture("success", async (_task, _previous, signal) => {
+		briefs += 1;
+		if (briefs > 1) return;
+		seenSignal = signal;
+		startedBrief();
+		await gate;
+	});
+	try {
+		const pending = h.loop.submit("Cancel while the brief is pending.");
+		await started;
+		h.loop.cancel();
+		releaseBrief();
+		await pending;
+		ok(seenSignal?.aborted, "cancel never reached the decision brief");
+		strictEqual(h.wire().calls(), 0, "the cancelled turn reached the chat model");
+
+		await h.loop.submit("A later turn still works.");
+		strictEqual(h.wire().calls(), 1);
+	} finally {
+		releaseBrief();
+		await h.close();
+	}
+});
 
 for (const mode of ["partial", "thinking", "empty"] as const) {
 	it(`${mode} cancellation closes once and remains usable live, after resume, and in export`, {
