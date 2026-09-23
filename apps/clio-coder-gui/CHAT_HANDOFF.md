@@ -1,71 +1,81 @@
 # Conversation-first GUI handoff
 
-Work stays inside `apps/clio-coder-gui`. Another agent changes the Clio runtime, CLI and TUI in the same working tree, so stage and commit only GUI paths and never touch their files. The priority is the ordinary path: choose a project, open a conversation, send a request, follow a live run, understand what the agent did, and stay in control. Inspector and administration pages stay reachable but secondary.
+Work stays inside `apps/clio-coder-gui`. Another agent changes the Clio runtime, CLI and TUI in the same working tree, so stage and commit only GUI paths and never touch their files. A GUI need that only the runtime can meet (a new ACP field or method) is written down here or filed as an issue, not patched into `src/`. The priority is the ordinary path: choose a project, open a conversation, pick a model, send a request, follow a live run, understand what the agent did, and stay in control. Inspector and administration pages stay reachable but secondary.
 
 ## Ethos
 
 The operator's bar is the fluency of the Claude and Codex desktop apps: a full-width pane, one centred reading column, the operator's words in a quiet bubble, unboxed prose, activity folded to a muted line, and nothing on screen that is not information. Match that fluency without copying either app, and keep what makes Clio Coder its own:
 
-- **Honest status and provenance.** Say what the runtime reported in the runtime's own terms. A refused call reads "not approved", not "you rejected this", because `src/tools/registry.ts:1277` words a denial, a cancelled turn and an abort alike. A group says "changed 1 file" only for a change that completed without an error. Never invent a value, a rate or an author.
+- **Honest status and provenance.** Say what the runtime reported in the runtime's own terms. A refused call reads "not approved", not "you rejected this", because `src/tools/registry.ts:1277` words a denial, a cancelled turn and an abort alike. A group says "changed 1 file" only for a change that completed without an error. A model list says where it came from and when. Never invent a value, a rate, a default or an author.
 - **Meaning survives greyscale.** Every status is a glyph and a word; colour only supports them.
-- **Keyboard and screen reader parity.** A visually hidden label is still announced; hover-revealed actions also appear on focus and on touch.
+- **Keyboard and screen reader parity.** A visually hidden label is still announced; hover-revealed actions also appear on focus and on touch; a control that unmounts hands focus back to the one that opened it.
+- **Choices come from the source.** Anything the runtime can enumerate (targets, models, levels, modes) is a select fed by the runtime, with an explicit escape for an exact value; free text is for things only the operator knows.
 - **Draft safety and the local boundary.** The composer never loses a draft; the server stays authenticated and local.
 - **DESIGN.md is the authority.** Change the code and the document together; a disagreement between them is a bug.
-- **Evidence from real renders.** Photograph the change at 2000×1040 dark, 1440×900 light and 390×844 light before calling it done, and look at the images.
+- **Evidence from real renders.** Photograph the change at 2000×1040 dark, 1440×900 light and 390×844 light before calling it done, and look at the images. Check anything that depends on real targets against the operator's real configuration too.
 - **Small self-contained commits.** Each one passes the gate below.
 
 ## Current checkpoint
 
-Eight GUI commits follow `7b0d2405`:
+Six GUI commits follow `7afc3975`:
 
-- `745ad21f` `tests/pages.test.ts` reads both `element:` and `lazy:` routes.
-- `4a8cf8ae` The Targets operation panel keeps its heading role (`aria-live` instead of `role="status"` on the h2).
-- `50aab4c9` The Session tools menu hangs below its button at every width; below 650px it used to cover its own toggle.
-- `24375b9e` A refused change keeps its proposal on screen as "Not applied · not approved" with the error under it; the row reads "Not approved" instead of the model-facing last line; group digests say "changed" only for completed changes, and edits and writes share one phrase.
-- `9be273d3`, `ecd637ac` `scripts/browser-smoke.ts` is green again for the current flow, with `--widths` and `--client` options.
-- `2e15e81a` A pending approval shows its full card once, beside the call. The pinned banner is a one-line strip (what, time left, Review, Reject, Allow once) while that card is mounted, and the full card only when the call is missing or its group is folded.
-- `93463c04` The conversation fills the pane: the transcript scrolls at the pane's edge and its content, the approval region and the composer share one centred 820px column (`--conversation-max`). The request is a quiet rounded bubble, responses have no rail or printed author, activity summaries are unframed lines, conversation status marks are sentence-case glyph and word, and the outcome and response actions share one line. DESIGN.md's evidence spine became "The conversation record", with the page frame, status voice, radius and header rules updated to match.
+- `56054ff8` Code blocks and diagrams keep their chrome to one frameless line inside the dark well (language, Copy; Show source and Copy source on a diagram). The line count appears only past the 24 lines a block shows before scrolling. The conversation and Docs share it, and the Mermaid theme uses the sage `--code-*` palette instead of the retired teal. New token `--code-ink-muted`; the contrast check covers 92 pairs.
+- `74bba5a2` The route (target · model, health as the glyph) moved from the header into the composer's actions row beside Send, passed as one object memoized on reported settings and health (`client/chat/route.ts`). Without settings it says "Model not reported".
+- `f66f18a0` The Sessions and project-history pages became one reading column of hairline rows (`client/pages/projects.css`), one primary action per page, 36px controls, sentence-case status. Deleting a saved conversation is a two-press in place with focus on Keep. The path field is "Project folder"; the project's action is "New conversation".
+- `ba7a4d07` Running workers show in a strip at the transcript's live edge (`LiveWorkers` in `client/chat/FleetStrip.tsx`) with Guide and a two-press Stop; Session tools keep the full fleet history. The held-worker fixture emits the `dispatch` tool call the runtime keeps open, and the smoke steers from the strip.
+- `9970bcd9` Model fields pick from the target's catalog (`client/pages/model-select.tsx`, `model-options.ts`) in Session tools and on the Settings page (`chat.model`, `fleet.default.model`, `context.memory.model`, `context.compaction.model`). Choosing a target in Session tools probes its endpoint; the Settings page can check a target again. Verified against the operator's real targets (inception offers mercury-2.5 and mercury-2; openrouter's probe reports `not-configured` and the list falls back to the last catalog).
+- The commit carrying this file adds `scripts/visual-review.ts` (`pnpm run visual`) and `tests/harness/history-fixture.ts`.
 
-Verified at that checkpoint: typecheck, Biome, `test:full` (340/340), build, contrast (88 pairs), and the smoke at 1600, 1050 and 390px (186 Axe checks, no violations of any impact, no overflow, no script errors or failed requests).
+Verified at `9970bcd9`: typecheck, Biome, `test:full` (345/345), build, contrast (92 pairs), and the smoke at 1600, 1050 and 390px (189 Axe checks, no violations of any impact, no overflow, no script errors or failed requests).
 
 ## Pending, in order
 
-1. **Code-block and diagram chrome.** The `ts · 2 lines` bar, the bordered mono Copy button, and the mermaid Show source / Copy source buttons are the heaviest thing left in a response. `client/render/markdown.css` and `Markdown.tsx` are shared with the Docs page, so either scope the change to `.chat-response` or restyle both deliberately.
-2. **Model in the composer.** Move the route (target and model, with the target's reported health folded into its glyph) from the header into the composer's actions row, as Claude and Codex show it. The header keeps project, title, status and Session tools. The composer is isolated for streaming performance (DESIGN.md "Streaming cadence"), so pass it stable, memoized props or render the chip beside it; do not let every delta re-render the composer. An unhealthy target must still be written out in full under the header (`SessionHealth` in `client/pages/sessions.tsx`).
-3. **Sessions and project-history pages.** `Workspaces` and `Sessions` in `client/pages/sessions.tsx` still use the old `trace-panel` / `trace-run-card` layout with mismatched button sizes. Bring them to the conversation's quieter language: one clear primary action, list rows rather than cards, consistent control heights.
-4. **Running workers in the conversation.** Decided: live worker runs belong in the transcript. Guide and Stop now sit at the bottom of Session tools below settings and targets; at 1440px they were cut off inside the menu, and below 650px the "1 worker running" label is visually hidden. Build a compact live-workers strip at the transcript's live edge (after the last turn, so detached runs from earlier turns also show) that reuses `FleetRunRows` with steering from `client/chat/FleetStrip.tsx`; Stop stays a two-press control. The menu keeps the full fleet history. The fixture does not yet emit the attached `dispatch` tool call the runtime keeps running for a worker's life; add it in `heldWorker()` in `tests/fixtures/acp-fixture-child.mjs`: an `in_progress` `tool_call` titled `dispatch` with `rawInput: { agent: "scout", task: "Survey the fixture" }` before `dispatch.enqueued`, and a `failed` `tool_call_update` with an error message and `details.runId` after the run settles. Then move the smoke's Guide/Stop steps from the menu to the strip, and check the Delegate row at 390px, where its state word clipped.
-5. **Streaming performance.** Nothing has been measured since the conversation-first changes. Measure per DESIGN.md "Streaming cadence" against the reference budgets there (keystroke→input p95, keystroke→next frame p95, event→paint p50/p95, long tasks during a ~16 KB stream), and record the numbers and the exact workload in a new `PERFORMANCE.md`. Never state a display rate that was not measured.
-
-Smaller known issues:
-
-- A group whose only failure is a declined change still reads "1 step failed" in the error tone. It should say "not approved" in a neutral tone and fold like a settled group (`summarizeActivity` in `client/chat/activity.ts`).
-- The approval card's "Waiting 0ms." fact reads oddly in its first second.
-- The fixture's permission call is titled "Write fixture" in `tool_call` and "write" in the update, so `gatedPreview` shows only the path. Check what the real runtime sends before changing the GUI.
-- Inspector pages still use the uppercase pill `StatusMark`; only the conversation changed voice.
-- With no advertised settings, the header route chip reads only "Target".
+1. **Streaming performance.** Nothing has been measured since the conversation-first changes. Measure per DESIGN.md "Streaming cadence" against its reference budgets (keystroke→`input` p95, keystroke→next frame p95, event→paint p50/p95, long tasks over 50 ms during a ~16 KB Markdown stream in 5-char chunks) and record the numbers, the machine, the browser, the display rate and the exact workload in a new `PERFORMANCE.md`. Also prove the composer does not re-render on streamed deltas now that it takes a `route` prop (a React Profiler commit count, or a render counter behind a test-only flag). Never state a display rate that was not measured.
+2. **A route for this conversation only.** Session tools can change only the saved user defaults, because the runtime's `clio-coder/settings/patch_safe` writes user settings; choosing inception there changes the default for every project, the CLI and the TUI. The operator expects to switch the model for one conversation, as in Claude and Codex. This needs a session-scoped routing method in the runtime (the TUI already keeps session routing state in `src/core/session-routing.ts`). Do not patch `src/`: write the ACP shape the GUI needs, ask for it, and meanwhile make the saved-default consequence plain at the point of change (the composer's route chip could open a small picker that says "Saved for every project").
+3. **The rest of the choices audit.** Every field the runtime can enumerate should be a select. Known candidates: `fleet.concurrency` ("auto" or a number), `fleet.worktrees.root`, `integrations.library.remote`, profile and binding models on the Routing page if they become editable, and the target onboarding form's "Default model", which cannot list a catalog before the connection exists (consider saving the connection first, then picking from its probed catalog). The ACP target list carries no `defaultModel`, so Session tools labels the first option "Target default" without naming it; a runtime field would fix that.
+4. **Simplify and make it obvious.** The operator's goal is a GUI that a scientist can use without a manual. Candidates, each judged from real renders: Session tools is a long mixed menu (label, a paragraph about saved defaults, settings, a target list with probes, commands, fleet history, close); group it by intent and say less. The Overview and Sessions pages both list recent projects. The Sessions eyebrow ("YOUR WORK · WORKSPACES ON THIS MACHINE · OPEN, RESUME AND DELETE") is instrument voice on a conversation page. First run should reach a conversation in two actions. Inspector pages still use uppercase pill `StatusMark`s.
+5. **Smaller known issues.**
+   - A worker the operator stopped leaves its delegation row reading "1 tool failed · Failed" in the error tone. The fleet fact says `outcome: cancelled`, `reason: operator_cancel`; it should read "Stopped" in a neutral tone, like "not approved".
+   - A group whose only failure is a declined change still reads "1 step failed" in the error tone (`summarizeActivity` in `client/chat/activity.ts`).
+   - The approval card's "Waiting 0ms." fact reads oddly in its first second.
+   - The fixture's permission call is titled "Write fixture" in `tool_call` and "write" in the update, so `gatedPreview` shows only the path. Check what the real runtime sends before changing the GUI.
+   - At 390px a failed delegation row's failure excerpt squeezes its headline to "scout ·…".
 
 ## Running and verifying
 
-From the repository root, build the client, then start the server with a fixed token so `node --watch` restarts keep the same URL:
-
-```sh
-pnpm --filter @iowarp/clio-coder-gui build
-cd apps/clio-coder-gui && node --watch --import tsx server/main.ts --port 4317 --token <32+ url-safe chars>
-pnpm --filter @iowarp/clio-coder-gui dev:client
-```
-
-Open `http://127.0.0.1:4318/#token=<token>`. The server reads local Clio state unless launched with `--fixture`. Use a scratch project for live runs and do not touch the operator's existing sessions. Stop every server and browser when finished.
-
-The gate before each commit, from `apps/clio-coder-gui`: `pnpm run typecheck`, `npx biome check .` (run Biome from this directory; the repository root's config formats differently), `pnpm run test:full`, `pnpm run build`, `node scripts/check-contrast.mjs`, and the smoke. The other agent's root `pnpm test` rebuilds `dist/client` and deletes `index.html` mid-run, so run the smoke against a private build:
+**The gate** before each commit, from `apps/clio-coder-gui`: `pnpm run typecheck`, `npx biome check .` (run Biome from this directory; the repository root's config formats differently), `pnpm run test:full`, `pnpm run build`, `node scripts/check-contrast.mjs`, and the smoke at all three widths with zero serious or critical Axe violations. The other agent's root `pnpm test` rebuilds `dist/client` and deletes `index.html` mid-run, so the smoke and the visual review run against a private build:
 
 ```sh
 npx vite build --outDir <scratch>/client-build --emptyOutDir
-pnpm run smoke:browser --client <scratch>/client-build/            # all three widths
-pnpm run smoke:browser --client <scratch>/client-build/ --widths 390  # one breakpoint while fixing
+pnpm run smoke:browser --client <scratch>/client-build/                # 1600, 1050 and 390
+pnpm run smoke:browser --client <scratch>/client-build/ --widths 390   # one width while fixing
 ```
 
 A failed smoke leaves `failure.png` and `report.json` in the `clio-web-browser-*` directory it prints.
 
-For visual review, write a scratch script that starts `harness()` from `tests/harness/app.ts` with `scenario: "markdown"` and `clientDir` pointing at the private build, serves it with `@hono/node-server`, and drives `playwright-core` (Chrome at `/usr/bin/google-chrome`). Prompts containing `[approval]`, `[fleet]` and `[stream]` exercise approvals, a held worker and a cancellable stream. Two traps: a scratch directory needs a `package.json` with `"type": "module"` and a `node_modules` symlink to this app's, and `page.evaluate` must take a string rather than a function with named inner functions, because tsx injects `__name`.
+**Visual review** uses the ACP fixture with a seeded project (three earlier conversations) and photographs every surface at the three review viewports:
 
-Useful entry points: `client/pages/sessions.tsx` (header, Session tools, project pages), `client/chat/ChatTurn.tsx`, `ActivityGroup.tsx`, `activity.ts`, `tool-cards.tsx`, `tool-presentation.ts`, `diff.ts`, `Approval.tsx`, `Composer.tsx`, `FleetStrip.tsx`, `fleet-facts.ts`, `message-actions.tsx`, `chat-turn.css`, `composer.css`, `approval.css`, `client/styles.css`, `client/design/tokens.css`, `client/render/markdown.css`, and `server/acp/supervisor.ts`.
+```sh
+pnpm run visual --client <scratch>/client-build/ --out <scratch>/shots/before
+pnpm run visual --client <scratch>/client-build/ --out <scratch>/shots/after --only conv,fleet,steer --route
+pnpm run visual --serve        # fixture API on 4317; then pnpm dev:client and open http://127.0.0.1:4318/#token=test-token
+```
+
+Shots: `workspaces`, `history`, `delete`, `empty`, `conv`, `docs`, `approval`, `fleet`, `steer`, `tools`. `--route` makes the fixture advertise safe settings and a healthy target so the composer shows a reported model. Prompts containing `[approval]`, `[fleet]` and `[stream]` reach those fixture turns. In your own Playwright scripts, pass functions without named inner functions to `page.evaluate`/`waitForFunction` (tsx injects `__name`), and never a string: the page's CSP forbids `eval`.
+
+**The real GUI** for the operator runs from an exact snapshot of a commit, so neither agent's uncommitted work reaches it, and uses the operator's real configuration, targets and credentials:
+
+```sh
+git archive HEAD | tar -x -C <scratch>/clio-head
+ln -s <repo>/node_modules <scratch>/clio-head/node_modules
+ln -s <repo>/apps/clio-coder-gui/node_modules <scratch>/clio-head/apps/clio-coder-gui/node_modules
+cd <scratch>/clio-head && node --import tsx scripts/build.ts && node --import tsx scripts/build-codewiki-asset.ts
+cd apps/clio-coder-gui && npx vite build
+node --import tsx server/main.ts --port 4317 --token <32+ url-safe chars>
+```
+
+Open `http://127.0.0.1:4317/#token=<token>`. For live checks, open a scratch folder such as `/tmp/clio-gui-scratch` as the project so the operator's existing sessions stay untouched, and remember that a turn spends real tokens and that saved defaults are global. To check work in progress against real targets without disturbing that server, run the working tree's server on another port (`pnpm run build`, then `node --import tsx server/main.ts --port 4319 --token …`). Stop every server, child and browser you started when finished; `pgrep -af "index.js acp --cwd"` lists stray ACP children.
+
+## Entry points
+
+`client/pages/sessions.tsx` (conversation view, header, Session tools, Sessions pages), `projects.css`, `session-controls.tsx` (saved defaults, delete), `settings-controls.tsx`, `model-select.tsx`, `model-options.ts`, `client/chat/ChatTurn.tsx`, `ActivityGroup.tsx`, `activity.ts`, `tool-cards.tsx`, `tool-presentation.ts`, `diff.ts`, `Approval.tsx`, `Composer.tsx`, `route.ts`, `FleetStrip.tsx`, `fleet-facts.ts`, `live-status.ts`, `message-actions.tsx`, `chat-turn.css`, `composer.css`, `approval.css`, `client/styles.css`, `client/design/tokens.css`, `client/render/Markdown.tsx`, `markdown.css`, `mermaid.ts`, `server/acp/supervisor.ts`, `tests/fixtures/acp-fixture-child.mjs`, `scripts/browser-smoke.ts` and `scripts/visual-review.ts`.
