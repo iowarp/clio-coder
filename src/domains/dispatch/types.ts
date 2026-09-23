@@ -319,6 +319,8 @@ export interface RunPhaseMarks {
 	queuedAt?: string;
 	admittedAt?: string;
 	workerSpawnedAt?: string;
+	/** Set when the worker was a process held for this dispatch by speculative dispatch. */
+	heldWorkerAdoptedAt?: string;
 	firstModelTokenAt?: string;
 	firstToolAt?: string;
 	endedAt?: string;

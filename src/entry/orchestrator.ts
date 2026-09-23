@@ -143,7 +143,7 @@ import { resolveModelReference } from "../domains/providers/resolver.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
-import { TURN_SITES } from "../domains/providers/sites/index.js";
+import { type DispatchForecast, dispatchForecastConfident, turnSites } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
 import {
 	createResourcesDomainModule,
@@ -1925,7 +1925,17 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 						summary: entry.description,
 					})),
 		// Turn-level sites join the same request; each one only asks when bound.
-		sites: TURN_SITES,
+		// The recipe question joins `dispatchForecast` only with the experimental
+		// speculative dispatch leaf on; off, the request is what it always was.
+		sites: turnSites({
+			recipes: () =>
+				agents !== undefined && getCurrentSettings().fleet.speculativeDispatch
+					? agents
+							.listSpecs()
+							.filter((spec) => spec.audience !== "internal")
+							.map((spec) => ({ id: spec.id, description: spec.description }))
+					: null,
+		}),
 	});
 	const toolBootstrap = registerAllTools(toolRegistry, {
 		getSkillRelevance: () => turnRelevance.skills(),
@@ -2366,7 +2376,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(prompts ? { prompts } : {}),
 		...(session ? { session } : {}),
 		getMemorySection: createMemoryPromptReader({ getDataDir: clioDataDir }),
-		refreshTurnRelevance: (taskText, previous) => turnRelevance.refresh({ task: taskText, previous }),
+		refreshTurnRelevance: async (taskText, previous) => {
+			await turnRelevance.refresh({ task: taskText, previous });
+			// Speculative dispatch starts after the brief and is never awaited: the
+			// turn goes on at once, and a forecast that turns out wrong costs one
+			// idle process until the turn settles.
+			const forecast = turnRelevance.current().get("dispatchForecast")?.value as DispatchForecast | undefined;
+			const recipe = forecast?.recipe;
+			if (forecast === undefined || typeof recipe !== "string" || !dispatchForecastConfident(forecast)) return;
+			const count = forecast.shape === "parallel" ? 2 : 1;
+			setImmediate(() => dispatch?.speculate?.({ agentId: recipe, count }));
+		},
+		// Held processes a turn did not use die with the turn, cancelled or not.
+		onTurnSettled: () => {
+			dispatch?.releaseSpeculative?.("turn settled");
+		},
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
 		getTaskMemoryHandoffSource: () => {

@@ -1366,6 +1366,7 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				"rosters",
 				"agentProfiles",
 				"decisionProfiles",
+				"speculativeDispatch",
 				"adaptiveRouting",
 				"nodes",
 				"permissions",
@@ -1540,6 +1541,10 @@ export function validateSettings(raw: unknown): SettingsValidationResult {
 				}
 				settings.fleet.decisionProfiles = bindings;
 			}
+		}
+		if ("speculativeDispatch" in rawFleet) {
+			const parsed = expectBoolean(issues, "fleet.speculativeDispatch", rawFleet.speculativeDispatch);
+			if (parsed !== undefined) settings.fleet.speculativeDispatch = parsed;
 		}
 		if ("adaptiveRouting" in rawFleet) {
 			if (!isPlainObject(rawFleet.adaptiveRouting))

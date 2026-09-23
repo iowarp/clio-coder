@@ -592,6 +592,8 @@ export interface CreateChatLoopDeps {
 	 * ordering rather than the turn.
 	 */
 	refreshTurnRelevance?: (taskText: string, previous: string) => Promise<void>;
+	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
+	onTurnSettled?: () => void;
 	getMemoryRelevance?: () => PrecomputedRanking | undefined;
 	/**
 	 * This turn's pre-turn decisions as ledger rows, recorded once after the user
@@ -2038,6 +2040,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		turnActive = true;
 		const run = submitInner(text, options).finally(() => {
 			turnActive = false;
+			try {
+				deps.onTurnSettled?.();
+			} catch {
+				// Settle hooks are housekeeping and never cost the turn.
+			}
 		});
 		activeSubmit = run.catch(() => {});
 		return run;

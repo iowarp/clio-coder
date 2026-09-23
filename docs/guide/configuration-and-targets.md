@@ -1157,6 +1157,42 @@ startup, so binding the site takes effect in the next session. Only the main
 agent gets `consult`. Dispatch never admits it for a worker, because a worker
 carries out one assigned task and the main agent is the one that decides.
 
+#### Speculative dispatch (experimental)
+
+`fleet.speculativeDispatch` is off by default. It works like speculative
+decoding for workers. With it on and `dispatchForecast` bound, the pre-turn
+forecast gains one more question: which installed recipe the main agent would
+dispatch first. The options are every recipe the agents domain loads except the
+internal ones, each described by its own recipe description. When the forecast
+says the turn suits workers (at least 0.7) and names a recipe with at least 0.6
+confidence, the harness starts that recipe's worker process right after the
+brief and holds it waiting for its spec, while the main model generates. Two
+are held when the forecast also reads the work as independent pieces in
+parallel. Nothing is awaited: the turn goes on at once.
+
+The main agent never sees the prediction. The hint line does not name a
+recipe, and the agent's dispatch is not changed, delayed or narrowed. When its
+dispatch resolves to exactly the recipe, target, model, runtime and working
+directory the process was held for, the dispatch writes its spec to the held
+process instead of starting a new one. The spec, the admission, the capacity
+lease and the attestation are the dispatch's own, so an adopted run is the run
+a cold spawn would have started, and the run's timing records
+`heldWorkerAdoptedAt`. Anything else starts cold as it always does.
+
+Only native workers on the local node are held. Nothing is held for an ACP or
+subprocess recipe, a remote node, or an endpoint or fleet already at its
+limit. A held process takes no capacity lease and at most two are held at once,
+so a speculative process never takes a slot from a real dispatch. Held
+processes are killed when the turn settles or is cancelled, when the session
+ends and when Clio exits, and one whose parent is killed reads end-of-file on
+its stdin and exits on its own.
+
+What it saves is process start: booting Node and loading the worker's modules,
+before the worker's first model request. Prefix prewarm for a local model is
+not built, because on the fleet it was measured on every recipe ran on a cloud
+target. With the leaf off, the forecast asks its two original questions and
+nothing is held.
+
 #### Asking a site from harness code
 
 A harness decision point that wants a System One answer makes one call:
@@ -1447,7 +1483,8 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `fleet.profiles` | `{}` | map of profile name to target/model/thinking/optional-node routes | next dispatch |
 | `fleet.rosters` | `{}` | map of roster name to council members | next dispatch |
 | `fleet.agentProfiles` | `{}` | map of native agent id to an existing fleet profile | next dispatch |
-| `fleet.decisionProfiles` | `{}` | map of `routing`, `skills`, `memory`, `toolRisk`, `drafts` to an existing fleet profile | next turn |
+| `fleet.decisionProfiles` | `{}` | map of `routing`, `skills`, `memory`, `toolRisk`, `drafts`, `turnScope`, `dispatchForecast`, `capabilities`, `consult` to an existing fleet profile | next turn; `consult` next session |
+| `fleet.speculativeDispatch` | `false` | boolean; experimental worker prewarm from the `dispatchForecast` forecast | next turn |
 | `fleet.nodes` | `[]` | list of validated local/SSH node descriptors | next dispatch |
 | `fleet.adaptiveRouting.roles` | `[]` | subset of `researcher`, `verifier`, `reviewer`, `judge` | next dispatch |
 | `fleet.adaptiveRouting.postures` | `[]` | subset of `quality`, `balanced`, `latency`, `economy` | next dispatch |

@@ -438,6 +438,8 @@ export interface FleetWorktreesSettings {
 }
 
 export interface FleetSettings extends FleetRouteSettings {
+	/** Experimental worker prewarm driven by the `dispatchForecast` site; off by default. */
+	speculativeDispatch: boolean;
 	nodes: FleetNodeSettings[];
 	adaptiveRouting: AdaptiveRoutingSettings;
 	permissions: FleetPermissionsSettings;
@@ -555,6 +557,13 @@ export const DEFAULT_SETTINGS = {
 		rosters: {} as WorkerRosters,
 		agentProfiles: {} as FleetAgentProfiles,
 		decisionProfiles: {} as FleetDecisionProfiles,
+		/**
+		 * Experimental. With `dispatchForecast` bound, a confident forecast of the
+		 * worker the main agent is about to dispatch starts that worker's process
+		 * ahead of the call and holds it until a matching dispatch adopts it or
+		 * the turn settles. Off, no recipe question is asked and nothing is held.
+		 */
+		speculativeDispatch: false,
 		nodes: [] as FleetNodeSettings[],
 		adaptiveRouting: {
 			roles: [] as ActiveRoutingRole[],
@@ -692,6 +701,7 @@ fleet:
   rosters: {}
   agentProfiles: {}
   decisionProfiles: {}
+  speculativeDispatch: false
   adaptiveRouting:
     roles: []
     postures: []
