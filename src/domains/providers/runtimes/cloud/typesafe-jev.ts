@@ -113,7 +113,11 @@ function parseAnswer(raw: unknown): DecisionAnswer | null {
 	if (score !== undefined) answer.score = score;
 	const legend = stringMap(row.legend);
 	if (legend) answer.legend = legend;
-	const confidence = numberOrUndefined(row.confidence);
+	// A noul's certainty is read from its probability (`answerCertainty`). Jev
+	// sends no confidence on a noul; laya-serve, which speaks this wire, sends
+	// max(p, 1 - p), a scale that never falls below 0.5 and so would clear every
+	// abstention floor with a coin-flip.
+	const confidence = type === "noul" ? undefined : numberOrUndefined(row.confidence);
 	if (confidence !== undefined) answer.confidence = confidence;
 	return answer;
 }
