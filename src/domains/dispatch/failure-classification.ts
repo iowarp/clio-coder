@@ -1,5 +1,5 @@
 import { isResponseSchemaRejection } from "../../core/response-schema.js";
-import { isEngineContextOverflow } from "../../engine/ai.js";
+import { isEngineContextOverflow, isProviderContentFilter } from "../../engine/ai.js";
 import { WORKER_EXIT_PERMISSION_REQUIRED } from "../../worker/spec-contract.js";
 import { isDeterministicOutcomeCode } from "./backoff.js";
 import type { RunTerminationEvidence } from "./outcome.js";
@@ -12,6 +12,7 @@ export type FailureClass =
 	| "permission"
 	| "deterministic-task"
 	| "model-quality"
+	| "provider-refusal"
 	| "target-auth"
 	| "target-rate-limit"
 	| "target-transient"
@@ -63,12 +64,18 @@ export function isContextOverflowFailure(
 	return isEngineContextOverflow(diagnostic);
 }
 
-/** Classify coordinator-owned termination evidence without mutating routing state. */
+/**
+ * Classify coordinator-owned termination evidence without mutating routing state.
+ * `providerError` is the worker's last provider error message. A worker that
+ * ends on a structured handoff writes nothing to stderr, so the diagnostic
+ * text alone can miss what the provider said.
+ */
 export function classifyFailure(
 	evidence: RunTerminationEvidence,
 	result: SpawnedWorkerResult | null,
 	outcome: RunOutcome,
 	code: RunOutcomeCode | null | undefined,
+	providerError?: string | null,
 ): FailureClass {
 	if (evidence.abortedByOperator || outcome === "canceled") return "operator-cancel";
 	if (evidence.policyDenied !== null || outcome === "denied_by_policy") return "policy";
@@ -83,6 +90,14 @@ export function classifyFailure(
 		return "node-channel";
 	}
 	const diagnostic = resultText(result);
+	// The provider's content filter answered, so the endpoint is up and the
+	// worker runtime did nothing wrong. Charging it to the target breaker let
+	// three filtered scouts in a row park a healthy Mercury endpoint for every
+	// other run. The filter is stochastic: over 28 scout attempts on this
+	// repository it stopped 13, and a same-route retry recovered half of the
+	// filtered assignments.
+	if (outcome === "failed" && (isProviderContentFilter(diagnostic) || isProviderContentFilter(providerError ?? "")))
+		return "provider-refusal";
 	// A response schema the server will not compile into a grammar is a verdict
 	// on the request Clio sent, not on the target. Retrying the identical bytes
 	// earns the identical 400, and letting it reach the target breaker parks a
@@ -138,6 +153,8 @@ export function decideRetry(failureClass: FailureClass, attempt: number, maxRetr
 				qualityEscalation: null,
 				reasonCode: `non-retryable-${failureClass}`,
 			};
+		case "provider-refusal":
+			return base([], "retry-provider-refusal");
 		case "model-quality":
 			return base(["agent", "model"], "retry-model-quality", {
 				kind: "model-quality",

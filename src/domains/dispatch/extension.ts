@@ -5406,6 +5406,7 @@ export function createDispatchBundle(
 		let finishContractAssistantText = "";
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
+		let providerErrorMessage: string | null = null;
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
 		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
@@ -5594,7 +5595,10 @@ export function createDispatchBundle(
 				});
 				if (event.message.stopReason === "error") {
 					const message = readStringOrNull(event.message.errorMessage);
-					if (message !== null) failureMessage = message;
+					if (message !== null) {
+						failureMessage = message;
+						providerErrorMessage = message;
+					}
 				}
 			}
 			if (event.type === "clio_coder_permission_resolved" && event.payload && typeof event.payload.tool === "string") {
@@ -6329,7 +6333,7 @@ export function createDispatchBundle(
 					}
 				}
 				const status = runStatusForOutcome(finalOutcome);
-				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode);
+				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode, providerErrorMessage);
 				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode);
 				const receiptDraft = buildReceiptDraft(
 					result,

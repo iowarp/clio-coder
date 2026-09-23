@@ -205,6 +205,24 @@ export function isEngineContextOverflow(errorMessage: string, contextWindow?: nu
 	return piIsContextOverflow(message, contextWindow);
 }
 
+/**
+ * The provider's own content filter stopped the response. pi-ai reports a
+ * `content_filter` finish reason as "Provider finish_reason: content_filter",
+ * and the completions adapter rewrites an in-stream `content_filter` error
+ * frame to `providerContentFilterMessage`, so both carry the code.
+ */
+const PROVIDER_CONTENT_FILTER_PATTERN = /\bcontent[_ ]filter\b/i;
+
+export function isProviderContentFilter(errorMessage: string): boolean {
+	return PROVIDER_CONTENT_FILTER_PATTERN.test(errorMessage);
+}
+
+/** How a provider's content filter refusal reads wherever an error message does. */
+export function providerContentFilterMessage(providerText: string): string {
+	const text = providerText.trim();
+	return `provider content filter refused the response (content_filter)${text.length > 0 ? `: ${text}` : ""}`;
+}
+
 /** Classify one provider error through pi-ai without leaking its message shape across the engine boundary. */
 export function isEngineRetryableAssistantError(errorMessage: string): boolean {
 	const message: AssistantMessage = {
