@@ -17,6 +17,7 @@
  * Pure: the receipt reader is a parameter, so nothing here touches disk.
  */
 
+import type { WorkerAction } from "../domains/observability/worker-progress.js";
 import type { SessionEntryInput, WorkerRunEntry } from "../domains/session/index.js";
 import {
 	boundSettledText,
@@ -35,30 +36,91 @@ export type WorkerRunEntryFields = Omit<WorkerRunEntryInput, "parentTurnId">;
 
 /**
  * The custom session entry that records what a settled run's live stream knew
- * and its receipt does not: the context its last model call occupied. Never
- * rendered, never model context; replay reads it back onto the block.
+ * and its receipt does not: the context its last model call occupied, and the
+ * calls it finished last, which its Detailed card lists. Never rendered, never
+ * model context; replay reads it back onto the block.
  */
 export const WORKER_SETTLED_ENTRY = "workerSettled";
 
-export interface WorkerSettledFields {
-	runId: string;
-	contextTokens: number;
+/** One finished call as a settled card's trail states it: the tool and the safety layer's descriptor. */
+export interface WorkerSettledCall {
+	tool: string;
+	verb?: string;
+	object?: string;
+	truncated?: true;
 }
 
-/** What a settled block records for replay; null when its stream reported no context. */
+export interface WorkerSettledFields {
+	runId: string;
+	/** The context the run's last model call occupied, when its stream reported one. */
+	contextTokens?: number;
+	/** The calls the run finished last, newest first, bounded as the live trail is. */
+	calls?: WorkerSettledCall[];
+}
+
+function settledCall(action: WorkerAction): WorkerSettledCall {
+	const descriptor = action.descriptor;
+	return {
+		tool: action.tool,
+		...(descriptor !== undefined ? { verb: descriptor.verb } : {}),
+		...(descriptor?.object !== undefined ? { object: descriptor.object } : {}),
+		...(descriptor?.truncated === true ? { truncated: true as const } : {}),
+	};
+}
+
+/** What a settled block records for replay; null when its stream reported neither context nor calls. */
 export function workerSettledFields(state: WorkerEntryState): WorkerSettledFields | null {
-	const contextTokens = state.progress?.contextTokens;
-	if (contextTokens === undefined || !Number.isFinite(contextTokens) || contextTokens <= 0) return null;
-	return { runId: state.runId, contextTokens };
+	const reported = state.progress?.contextTokens;
+	const contextTokens = reported !== undefined && Number.isFinite(reported) && reported > 0 ? reported : undefined;
+	const calls = (state.progress?.recentActions ?? []).map(settledCall);
+	if (contextTokens === undefined && calls.length === 0) return null;
+	return {
+		runId: state.runId,
+		...(contextTokens !== undefined ? { contextTokens } : {}),
+		...(calls.length > 0 ? { calls } : {}),
+	};
+}
+
+function settledCallFromData(value: unknown): WorkerSettledCall[] {
+	if (value === null || typeof value !== "object") return [];
+	const { tool, verb, object, truncated } = value as Record<string, unknown>;
+	if (typeof tool !== "string" || tool.length === 0) return [];
+	return [
+		{
+			tool,
+			...(typeof verb === "string" && verb.length > 0 ? { verb } : {}),
+			...(typeof object === "string" && object.length > 0 ? { object } : {}),
+			...(truncated === true ? { truncated: true as const } : {}),
+		},
+	];
 }
 
 /** A recorded settled-run fact, from a custom entry's data; null when it is not one. */
 export function workerSettledFromData(data: unknown): WorkerSettledFields | null {
 	if (data === null || typeof data !== "object") return null;
-	const { runId, contextTokens } = data as Record<string, unknown>;
-	return typeof runId === "string" && typeof contextTokens === "number" && Number.isFinite(contextTokens)
-		? { runId, contextTokens }
-		: null;
+	const { runId, contextTokens, calls } = data as Record<string, unknown>;
+	if (typeof runId !== "string") return null;
+	const context = typeof contextTokens === "number" && Number.isFinite(contextTokens) ? contextTokens : undefined;
+	const trail = Array.isArray(calls) ? calls.flatMap(settledCallFromData) : [];
+	if (context === undefined && trail.length === 0) return null;
+	return {
+		runId,
+		...(context !== undefined ? { contextTokens: context } : {}),
+		...(trail.length > 0 ? { calls: trail } : {}),
+	};
+}
+
+/** A recorded call as the trail action the card renders. */
+function settledCallAction(call: WorkerSettledCall): WorkerAction {
+	if (call.verb === undefined) return { tool: call.tool };
+	return {
+		tool: call.tool,
+		descriptor: {
+			verb: call.verb,
+			...(call.object !== undefined ? { object: call.object } : {}),
+			...(call.truncated === true ? { truncated: true } : {}),
+		},
+	};
 }
 
 /**
@@ -103,8 +165,8 @@ export function workerRunEntryFields(state: WorkerEntryState): WorkerRunEntryFie
 export function workerEntriesFromRunEntries(
 	entries: ReadonlyArray<WorkerRunEntry>,
 	readReceipt: WorkerReceiptReader,
-	/** The context each settled run's last call occupied, by run id, from `workerSettled` entries. */
-	settledContext: ReadonlyMap<string, number> = new Map(),
+	/** What each settled run's live stream knew, by run id, from `workerSettled` entries. */
+	settledRuns: ReadonlyMap<string, WorkerSettledFields> = new Map(),
 ): Map<string, WorkerEntryState> {
 	const byAssignment = new Map<string, WorkerRunEntry[]>();
 	for (const entry of entries) {
@@ -119,7 +181,8 @@ export function workerEntriesFromRunEntries(
 		if (last === undefined) continue;
 		const facts = readReceipt(last.runId);
 		const bounded = boundSettledText(facts?.text ?? "");
-		const contextTokens = settledContext.get(last.runId);
+		const settled = settledRuns.get(last.runId);
+		const contextTokens = settled?.contextTokens;
 		const trail: WorkerAttempt[] = attempts.map((attempt) => ({
 			runId: attempt.runId,
 			targetLabel: workerTargetLabel(attempt.runtime),
@@ -140,6 +203,7 @@ export function workerEntriesFromRunEntries(
 			pending: false,
 			receipt: workerReceiptSummary(facts),
 			...(contextTokens !== undefined ? { contextTokens } : {}),
+			...(settled?.calls !== undefined ? { recentActions: settled.calls.map(settledCallAction) } : {}),
 			...(last.parentToolCallId !== undefined ? { parentToolCallId: last.parentToolCallId } : {}),
 		});
 	}

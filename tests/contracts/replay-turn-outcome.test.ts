@@ -115,6 +115,75 @@ test("actual final failure after tool use retains a failed outcome while success
 	}
 });
 
+test("the reasoning behind a final answer replays where it streamed, in every style", () => {
+	const plan = { type: "thinking", thinking: "Plan: read the notes first." };
+	const weigh = { type: "thinking", thinking: "Weigh it: the notes answer the question." };
+	const call = { type: "toolCall", id: "read-1", name: "read", arguments: { path: "notes.txt" } };
+	const answer = { type: "text", text: "The notes answer it." };
+	const first = { role: "assistant", stopReason: "toolUse", content: [plan, call], usage };
+	const last = { role: "assistant", stopReason: "stop", content: [weigh, answer], usage };
+	const at = (second: number) => `2026-09-17T00:00:0${second}.000Z`;
+	const entries = [
+		{ turnId: "u", parentTurnId: null, timestamp: at(0), kind: "message", role: "user", payload: { text: "Q" } },
+		{ turnId: "a1", parentTurnId: "u", timestamp: at(1), kind: "message", role: "assistant", payload: first },
+		{
+			turnId: "c1",
+			parentTurnId: "a1",
+			timestamp: at(1),
+			kind: "message",
+			role: "tool_call",
+			payload: { name: "read", toolCallId: "read-1", args: { path: "notes.txt" } },
+		},
+		{
+			turnId: "r1",
+			parentTurnId: "c1",
+			timestamp: at(2),
+			kind: "message",
+			role: "tool_result",
+			payload: { toolCallId: "read-1", toolName: "read", result: "notes", isError: false, durationMs: 5 },
+		},
+		{ turnId: "a2", parentTurnId: "r1", timestamp: at(3), kind: "message", role: "assistant", payload: last },
+	] as SessionEntry[];
+	for (const style of ["compact", "standard", "detailed"] as const) {
+		// The live clock stands still, so a loaded machine cannot give the live
+		// read a duration the ledger does not have.
+		const live = createChatPanel({ getOutputStyle: () => style, now: () => 1_000 });
+		live.appendUser("Q");
+		live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+		for (const message of [first, last]) {
+			live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+			const thinking = message.content[0] as { thinking: string };
+			live.applyEvent({ type: "thinking_delta", contentIndex: 0, delta: thinking.thinking } as ChatLoopEvent);
+			live.applyEvent({ type: "message_end", message } as unknown as ChatLoopEvent);
+			if (message === first) {
+				live.applyEvent({ type: "tool_execution_start", toolCallId: "read-1", toolName: "read", args: call.arguments });
+				live.applyEvent({
+					type: "tool_execution_end",
+					toolCallId: "read-1",
+					toolName: "read",
+					result: "notes",
+					isError: false,
+					durationMs: 5,
+				} as ChatLoopEvent);
+			}
+		}
+		live.applyEvent({ type: "agent_end", messages: [first, last] } as unknown as ChatLoopEvent);
+		const replayed = createChatPanel({ getOutputStyle: () => style });
+		rehydrateChatPanelFromTurns(replayed, entries);
+		const plain = (panel: ReturnType<typeof createChatPanel>) =>
+			panel
+				.render(100)
+				.map(stripTerminalSequences)
+				.filter((row) => !/Done/u.test(row))
+				.join("\n");
+		assert.equal(plain(replayed), plain(live), style);
+		if (style === "standard") {
+			const rows = plain(replayed);
+			assert.ok(rows.indexOf("Weigh it") >= 0 && rows.indexOf("Weigh it") < rows.indexOf("The notes answer it."), rows);
+		}
+	}
+});
+
 test("a replay ending at an intermediate tool-use message does not invent completion", () => {
 	const output = replay([{ role: "user", payload: { text: "Incomplete request" } }, toolCall]);
 	assert.doesNotMatch(output, /\bDone\b/);
@@ -279,10 +348,12 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 		usage,
 	};
 	// Live: the run measures its own clock, and the chat loop's footer cache
-	// notice hands the transcript the reasons it expected a cold cache for.
+	// notice hands the transcript the reasons it expected a cold cache for. The
+	// loop consumes those reasons just before it prompts, so the notice lands
+	// ahead of the run's agent_start.
 	let clock = 1_000;
 	const live = createChatPanel({ now: () => clock, getOutputStyle: () => "detailed" });
-	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.appendUser("Question");
 	live.applyEvent({
 		type: "notice",
 		level: "info",
@@ -291,12 +362,20 @@ test("a replayed receipt states the duration and cold-cache reasons the live one
 		key: "context.cache.cold",
 		coldReasons: ["prompt_recompiled"],
 	} as ChatLoopEvent);
+	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
 	live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
 	live.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
 	clock += 5_000;
 	live.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
 	const liveRows = plainRows(live);
 	assert.equal(liveRows.at(-1), "✓ Done · 5.0s · in 7 · out 5 · cold: prompt recompiled");
+	// The reasons belong to that run alone: the next one, a queued follow-up
+	// here, starts warm.
+	live.applyEvent({ type: "agent_start" } as ChatLoopEvent);
+	live.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "message_end", message: final } as unknown as ChatLoopEvent);
+	live.applyEvent({ type: "agent_end", messages: [final] } as unknown as ChatLoopEvent);
+	assert.equal(plainRows(live).at(-1), "✓ Done · 0ms · in 7 · out 5");
 	assert.doesNotMatch(liveRows.join("\n"), /cache may be cold/u, "the notice itself stays in the footer");
 
 	// Replay: the same facts from the ledger's timestamps and prompt-cache record.
@@ -441,7 +520,7 @@ test("a replayed act states the age its ledger entry records in /view, not the a
 	assert.equal(panel.inspectionArtifacts().at(-1)?.timestamp, clock);
 });
 
-test("an operator /run resumes with its command above its card and the spend its live card stated", () => {
+test("an operator /run resumes with its command above its card, the spend its live card stated and its calls", () => {
 	const noop = (): void => undefined;
 	const receipt: WorkerReceiptFacts = {
 		outcome: "succeeded",
@@ -492,11 +571,30 @@ test("an operator /run resumes with its command above its card and the spend its
 			message: { role: "assistant", usage: { input: 5_000, output: 1_000, cacheRead: 0, cacheWrite: 200 } },
 		},
 	} as never);
+	const calls = [
+		{ tool: "read", toolCallId: "t1", action: { verb: "reading", object: "docs/retry.md" } },
+		{ tool: "grep", toolCallId: "t2", action: { verb: "searching", object: "retry|opt", truncated: true } },
+	];
+	for (const payload of calls) {
+		for (const type of ["clio_coder_tool_start", "clio_coder_tool_finish"]) {
+			bus.emit(BusChannels.DispatchProgress, { ...identity, runId: "run-d", event: { type, payload } } as never);
+		}
+	}
 	bus.emit(BusChannels.DispatchCompleted, { ...identity, runId: "run-d", outcome: "succeeded" } as never);
 	subscriptions.dispose();
-	assert.deepEqual(settled, [{ runId: "run-d", contextTokens: 6_200 }]);
+	assert.deepEqual(settled, [
+		{
+			runId: "run-d",
+			contextTokens: 6_200,
+			calls: [
+				{ tool: "grep", verb: "searching", object: "retry|opt", truncated: true },
+				{ tool: "read", verb: "reading", object: "docs/retry.md" },
+			],
+		},
+	]);
 	const command = "/run documenter --target blade --model dynamo/qwopus document the retry options";
-	const live = createChatPanel();
+	let style: "standard" | "detailed" = "standard";
+	const live = createChatPanel({ getOutputStyle: () => style });
 	appendOperatorCommand(command, { appendReplayBlock: (block) => live.appendReplayBlock(block), requestRender: noop });
 	assert.ok(liveState);
 	live.applyWorkerState(liveState);
@@ -522,11 +620,17 @@ test("an operator /run resumes with its command above its card and the spend its
 			data: settled[0],
 		},
 	] as SessionEntry[];
-	const replayed = createChatPanel();
+	const replayed = createChatPanel({ getOutputStyle: () => style });
 	rehydrateChatPanelFromTurns(replayed, entries, { readWorkerReceipt: () => receipt });
 	const plain = (panel: ReturnType<typeof createChatPanel>) => panel.render(100).map(stripTerminalSequences).join("\n");
 	assert.match(plain(replayed), /^▌ \/run documenter --target blade/u);
 	assert.match(plain(replayed), /context 6\.2k/u);
+	assert.equal(plain(replayed), plain(live));
+	// Detailed lists the calls the run made, oldest first, on /resume as it did live.
+	style = "detailed";
+	live.invalidate();
+	replayed.invalidate();
+	assert.match(plain(replayed), /│ ⚙ read docs\/retry\.md\n {2}│ ⚙ searched retry\|opt…/u);
 	assert.equal(plain(replayed), plain(live));
 	// The echo is a display record: the model's replayed context never carries it.
 	assert.doesNotMatch(JSON.stringify(buildReplayAgentMessagesFromTurns(entries)), /document the retry options/u);

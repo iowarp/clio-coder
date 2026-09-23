@@ -52,7 +52,9 @@ import {
 	fgSequence,
 	formatCompactMs,
 	GLYPH,
+	joinFacts,
 	markdownTheme,
+	releaseSpaces,
 	SGR_BOLD,
 	SGR_BOLD_OFF,
 	SGR_DIM,
@@ -1046,7 +1048,7 @@ function renderTurnUsageLine(
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
 	return hangProseLines(
-		wrapTextWithAnsi(`${DIM}${facts.join(" · ")}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)),
+		wrapTextWithAnsi(`${DIM}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(releaseSpaces),
 		glyph,
 	);
 }
@@ -1576,17 +1578,6 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	};
 
 	/**
-	 * Locate the most recent tool segment with this call id anywhere in the
-	 * transcript. A mid-turn notice entry (safety-net block, approval parked,
-	 * context-engine notice) splits the transcript, so an in-flight call's
-	 * segment can live in an earlier assistant entry than the tail. Unfinished
-	 * segments win over finished ones so an id the model reuses binds to the
-	 * live call, not the settled one. Among finished segments only a
-	 * force-settled one (no end event of its own) is returned: a late true
-	 * result may upgrade the synthetic settle, but a segment that finished
-	 * with its own result is never rewritten after the fact.
-	 */
-	/**
 	 * First entry of the run that owns `target` when no `agent_start` marked it
 	 * (a replayed turn): the entry after the operator prompt that opened it.
 	 */
@@ -1598,6 +1589,17 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		return 0;
 	};
 
+	/**
+	 * Locate the most recent tool segment with this call id anywhere in the
+	 * transcript. A mid-turn notice entry (safety-net block, approval parked,
+	 * context-engine notice) splits the transcript, so an in-flight call's
+	 * segment can live in an earlier assistant entry than the tail. Unfinished
+	 * segments win over finished ones so an id the model reuses binds to the
+	 * live call, not the settled one. Among finished segments only a
+	 * force-settled one (no end event of its own) is returned: a late true
+	 * result may upgrade the synthetic settle, but a segment that finished
+	 * with its own result is never rewritten after the fact.
+	 */
 	const findToolSegmentOwner = (toolCallId: string): { segment: ToolSegment; entry: TranscriptEntry } | undefined => {
 		let settledMatch: { segment: ToolSegment; entry: TranscriptEntry } | undefined;
 		for (let entryIndex = transcript.length - 1; entryIndex >= 0; entryIndex -= 1) {
@@ -1611,6 +1613,28 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 		}
 		return settledMatch;
+	};
+
+	/**
+	 * The call a worker card belongs under: the one that spawned it, running or
+	 * settled. A dispatch that returns before its worker's first event (a
+	 * detached batch) has settled by the time the card arrives, and the card is
+	 * still that call's run, so a settled call of the current run takes it too.
+	 * A call from an earlier turn keeps its own row, and the card appends at
+	 * the tail.
+	 */
+	const findSpawningCall = (toolCallId: string): { segment: ToolSegment; entry: TranscriptEntry } | undefined => {
+		const live = findToolSegmentOwner(toolCallId);
+		if (live !== undefined) return live;
+		const runStart = runStartIndex ?? runStartFallback(transcript.length);
+		for (let entryIndex = transcript.length - 1; entryIndex >= runStart; entryIndex -= 1) {
+			const entry = transcript[entryIndex];
+			if (entry?.role !== "assistant") continue;
+			for (const segment of entry.segments) {
+				if (segment.kind === "tool" && segment.id === toolCallId) return { segment, entry };
+			}
+		}
+		return undefined;
 	};
 
 	const ensureAssistant = (): Extract<TranscriptEntry, { role: "assistant" }> => {
@@ -1798,7 +1822,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const workerInsertionIndex = (state: WorkerEntryState): number | null => {
 		const parentToolCallId = state.parentToolCallId;
 		if (parentToolCallId === undefined) return null;
-		const owner = findToolSegmentOwner(parentToolCallId);
+		const owner = findSpawningCall(parentToolCallId);
 		if (owner === undefined) return null;
 		const parentIndex = transcript.indexOf(owner.entry);
 		if (parentIndex < 0) return null;
@@ -2049,7 +2073,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			// the task and outcome it would otherwise state. A helper's `↳` row is
 			// the run's row too when a dispatch started it (the model's shadow
 			// scout); under any other call it stays beside that call's own output.
-			const parent = state.parentToolCallId === undefined ? undefined : findToolSegmentOwner(state.parentToolCallId);
+			const parent = state.parentToolCallId === undefined ? undefined : findSpawningCall(state.parentToolCallId);
 			const attaches = state.helper !== true || parent?.segment.name === "dispatch";
 			if (parent !== undefined && attaches && parent.segment.cardAttached !== true) {
 				parent.segment.cardAttached = true;
@@ -2184,6 +2208,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			transcript.length = 0;
 			runStartedAt = undefined;
 			runStartIndex = undefined;
+			runColdReasons = [];
 			workerEntries.clear();
 			clearRenderCaches();
 			markDirty();
@@ -2201,9 +2226,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		applyEvent(event: ChatLoopEvent): void {
 			if (event.type === "agent_start") {
+				// The run's cold-cache reasons arrive just before it starts, as the
+				// chat loop consumes them ahead of the prompt, so they are kept here
+				// and cleared once the run's receipt has stated them.
 				runStartedAt = now();
 				runStartIndex = transcript.length;
-				runColdReasons = [];
 				return;
 			}
 			if (event.type === "agent_status") {
@@ -2588,6 +2615,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					}
 				}
 				runStartIndex = undefined;
+				runColdReasons = [];
 				// The run is over: no tool can still be executing anywhere in the
 				// transcript, not just in the tail entry (a mid-turn notice splits
 				// entries). Settle any tool segment whose `tool_execution_end` never

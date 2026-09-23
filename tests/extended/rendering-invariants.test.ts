@@ -27,7 +27,12 @@ import { type ChatPanel, createChatPanel } from "../../src/interactive/chat-pane
 import { createCoalescingChatRenderer } from "../../src/interactive/chat-renderer.js";
 import { appendNotice } from "../../src/interactive/command-output.js";
 import { openContextOverlay } from "../../src/interactive/context-overlay.js";
-import { buildLayout } from "../../src/interactive/layout.js";
+import { createEditorSubmitController, type EditorSubmitDeps } from "../../src/interactive/editor-submit.js";
+import {
+	createInteractiveSlashRuntime,
+	type InteractiveSlashRuntimeDeps,
+} from "../../src/interactive/interactive-slash-runtime.js";
+import { buildLayout, returnToLiveEdge } from "../../src/interactive/layout.js";
 import { showClioOverlayFrame } from "../../src/interactive/overlay-frame.js";
 import { openAskUserOverlay } from "../../src/interactive/overlays/ask-user.js";
 import {
@@ -485,7 +490,7 @@ describe("worker rendering invariants", () => {
 			);
 			const plain = lines.map(stripTerminalSequences).join(" ").replace(/│/gu, " ").replace(/\s+/gu, " ");
 			match(plain, /execution ok/u);
-			match(plain, /quality: validation failed/u);
+			match(plain, /quality validation failed/u);
 			doesNotMatch(plain, /Ctrl\+O/u);
 		}
 	});
@@ -1035,6 +1040,81 @@ describe("Pi TUI compatibility", () => {
 			tui.stop();
 		}
 	});
+
+	it("returns a scrolled-up fullscreen transcript to its live edge when the operator submits", async () => {
+		const terminal = new RenderingTerminal();
+		const tui = new TuiAltScreen(terminal);
+		const lines = Array.from({ length: 100 }, (_, i) => `line ${i}`);
+		const chat = new Text(lines.join("\n"), 0, 0);
+		const root = buildLayout(
+			{ banner: new Text("banner", 0, 0), chat, editor: new Text("editor", 0, 0), footer: new Text("footer", 0, 0) },
+			{ mode: "fullscreen", fullscreenScrollbar: "auto" },
+		);
+		ok(root instanceof VStack);
+		const scroll = root.children[0];
+		ok(scroll instanceof ScrollView);
+		tui.setLayoutRoot(root);
+		tui.start();
+		const noop = (): void => undefined;
+		const liveEdge = (): void => returnToLiveEdge(tui);
+		const runtime = createInteractiveSlashRuntime({
+			io: { stdout: noop, stderr: noop },
+			chat: { isStreaming: () => false, submit: async () => undefined },
+			chatPanel: { appendReplayBlock: noop, appendUser: noop },
+			requestRender: noop,
+			refreshFooter: noop,
+			recordSubmittedTurn: noop,
+			returnToLiveEdge: liveEdge,
+		} as unknown as InteractiveSlashRuntimeDeps);
+		const editor = createEditorSubmitController({
+			editor: { getText: () => "", getTextForSubmit: () => "", setText: noop, addToHistory: noop },
+			ui: { start: noop, stop: noop, requestRender: noop },
+			io: { stdout: noop, stderr: noop },
+			chat: { isStreaming: () => false },
+			dispatch: {},
+			sessionTranscript: {
+				ensureSessionForLocalEntry: noop,
+				refreshChatContextFromSession: noop,
+				recordSubmittedTurn: noop,
+			},
+			chatPanel: { appendReplayBlock: noop },
+			dispatchCommand: noop,
+			expandSubmit: async (text: string) => ({ text, images: [] }),
+			notify: noop,
+			runBash: async () => ({ output: "", exitCode: 0 }),
+			returnToLiveEdge: liveEdge,
+		} as unknown as EditorSubmitDeps);
+		const scrollUp = (): void => {
+			terminal.input("\x1b[<64;2;2M");
+			tui.renderNow(true);
+			strictEqual(tui.isFollowingOutput, false);
+		};
+		try {
+			tui.renderNow(true);
+			strictEqual(tui.isFollowingOutput, true);
+			scrollUp();
+			// New output alone keeps the operator where they scrolled.
+			chat.setText([...lines, "more output"].join("\n"));
+			tui.renderNow(true);
+			strictEqual(tui.isFollowingOutput, false);
+			const submits: Array<[string, () => unknown]> = [
+				["a prompt", () => runtime.context.submitOperatorNote?.("what next?")],
+				["a /run echo", () => runtime.context.echoOperatorCommand?.("/run scout map the retry module")],
+				["a local ! command", () => editor.runEditorBash("!ls")],
+			];
+			for (const [name, submit] of submits) {
+				scrollUp();
+				await submit();
+				tui.renderNow(true);
+				strictEqual(tui.isFollowingOutput, true, name);
+			}
+			await editor.shutdownEditorBash();
+		} finally {
+			tui.stop();
+		}
+		// The regular screen has no viewport to move.
+		returnToLiveEdge(new TuiMainScreen(new RenderingTerminal()));
+	});
 });
 
 it("renders helper work as one subordinate row outside Detailed and keeps its identity on replay", () => {
@@ -1351,6 +1431,53 @@ describe("transcript block grammar", () => {
 		}
 	});
 
+	it("puts a card that arrives after its dispatch settled under that call, and one from an earlier turn at the tail", () => {
+		const reviewer = (assignmentId: string, parentToolCallId: string) =>
+			({
+				assignmentId,
+				runId: `run-${assignmentId}`,
+				origin: "agent",
+				agentId: "reviewer",
+				runtime: { kind: "clio", targetId: "mini", wireModelId: "coder" },
+				text: "looks fine",
+				droppedLines: 0,
+				tools: [],
+				attempts: [{ runId: `run-${assignmentId}`, targetLabel: "mini" }],
+				pending: false,
+				parentToolCallId,
+				receipt: { outcome: "succeeded" },
+			}) as WorkerEntryState;
+		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
+		panel.appendUser("Delegate the review");
+		panel.applyEvent({ type: "agent_start" } as never);
+		act(panel, "d1", "dispatch", { agent: "reviewer", task: "review the diff", detach: true }, "1 task dispatched");
+		act(panel, "d2", "dispatch", { agent: "reviewer", task: "audit the docs", detach: true }, "1 task dispatched");
+		appendNotice("info", "a notice between the call and its card", {
+			appendReplayBlock: (block) => panel.appendReplayBlock(block),
+			requestRender: () => undefined,
+		});
+		panel.applyWorkerState(reviewer("a1", "d1"));
+		say(panel, "The reviewer found nothing.");
+		panel.applyEvent({ type: "agent_end", messages: [assistantMessage("The reviewer found nothing.")] } as never);
+		const rows = plainRender(panel, 100).split("\n");
+		const call = rows.findIndex((row) => row.startsWith(`${GLYPH.workerAgent} delegated`));
+		const card = rows.findIndex((row) => row.startsWith(`${GLYPH.workerAgent} reviewer`));
+		const notice = rows.findIndex((row) => row.includes("a notice between the call and its card"));
+		ok(call >= 0 && card > call && card < notice, rows.join("\n"));
+		// The card states the run, so the call drops its task and its receipt body.
+		strictEqual(rows[call], `${GLYPH.workerAgent} delegated to reviewer ✓ · 5ms`, rows.join("\n"));
+		doesNotMatch(rows.join("\n"), /review the diff/u);
+		// A call from an earlier turn keeps its row; a card for it lands at the tail.
+		panel.appendUser("Something else");
+		panel.applyWorkerState(reviewer("a2", "d2"));
+		const later = plainRender(panel, 100).split("\n");
+		match(later.join("\n"), /delegated to reviewer: audit the docs/u);
+		const lastCard = later
+			.flatMap((row, index) => (row.startsWith(`${GLYPH.workerAgent} reviewer`) ? [index] : []))
+			.at(-1);
+		ok((lastCard ?? -1) > later.indexOf("▌ Something else"), later.join("\n"));
+	});
+
 	it("keeps header facts off argument rows, hides settled mutation payloads, and states change facts", () => {
 		const policy = transcriptDetail("standard");
 		const bash = renderToolPreview(
@@ -1584,6 +1711,85 @@ describe("transcript block grammar", () => {
 			`  │ ${GLYPH.phaseTool} limitation`,
 		]);
 		deepStrictEqual(trail(true), [`  │ ${GLYPH.phaseTool} running npm test`, `  │ ${GLYPH.phaseTool} last: limitation`]);
+	});
+
+	it("states a run of one repeated call once, counted, and marks a call object the safety layer cut", () => {
+		const evidence = { tool: "gateway", descriptor: { verb: "gateway", object: "evidence" } };
+		const entry = {
+			assignmentId: "a",
+			runId: "run-5",
+			origin: "user",
+			agentId: "verifier",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: "",
+			droppedLines: 0,
+			tools: ["gateway", "read"],
+			attempts: [{ runId: "run-5", targetLabel: "blade" }],
+			pending: false,
+			receipt: { outcome: "succeeded", durationMs: 9_000, toolCalls: 5 },
+			// Newest first, as the worker progress fold keeps them.
+			recentActions: [
+				evidence,
+				evidence,
+				evidence,
+				{ tool: "read", descriptor: { verb: "reading", object: "docs/a-long-name", truncated: true } },
+			],
+		} as unknown as WorkerEntryState;
+		const trail = renderWorkerEntryLines(entry, 80, { detail: transcriptDetail("detailed") })
+			.map(stripTerminalSequences)
+			.filter((row) => row.startsWith(`  │ ${GLYPH.phaseTool}`));
+		deepStrictEqual(trail, [
+			`  │ ${GLYPH.phaseTool} read docs/a-long-name${GLYPH.ellipsis}`,
+			`  │ ${GLYPH.phaseTool} gateway evidence ${GLYPH.times}3`,
+		]);
+	});
+
+	it("inspects a card in /view and /export as the Detailed card states it, with the answer whole and raw", () => {
+		const answer = `{"verdict":"pass","checks":[{"name":"docs match","passed":true,"evidence":"${"read both files. ".repeat(40)}"}]}`;
+		const entry = {
+			assignmentId: "a",
+			runId: "run-4",
+			origin: "user",
+			agentId: "verifier",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: answer,
+			droppedLines: 0,
+			tools: ["read"],
+			attempts: [{ runId: "run-4", targetLabel: "blade" }],
+			pending: false,
+			contextTokens: 3_164,
+			receipt: { outcome: "succeeded", durationMs: 8_200, toolCalls: 1, tokenCount: 19_100, contract: "pass" },
+			progress: {
+				revision: 1,
+				phase: "writing",
+				tailText: "",
+				droppedLines: 0,
+				droppedBytes: 0,
+				currentAction: null,
+				recentActions: [{ tool: "read", descriptor: { verb: "reading", object: "docs/retry.md" } }],
+				toolNames: ["read"],
+				settled: true,
+			},
+		} as unknown as WorkerEntryState;
+		const detailed = renderWorkerEntryLines(entry, 80, { detail: transcriptDetail("detailed") }).map(
+			stripTerminalSequences,
+		);
+		const inspected = renderWorkerEntryLines(entry, 80, { unbounded: true }).map(stripTerminalSequences);
+		// The same header, spend, trail and quality rows, in the same words.
+		strictEqual(inspected[0], detailed[0]);
+		strictEqual(inspected[0], "◇ verifier · blade/m · run run-4 ✓ execution ok · 8.2s");
+		strictEqual(inspected[1], "  │ 19.1k tokens processed · context 3.2k · 1 tool call · contract pass");
+		strictEqual(detailed[1], "  │ 19.1k tokens processed · context 3.2k · 1 tool call");
+		for (const row of detailed.filter((line) => /│ (⚙|quality )/u.test(line))) ok(inspected.includes(row), row);
+		doesNotMatch(inspected.join("\n"), /└|\btok\b|… \d+ rows/u);
+		// The answer is whole and as the run returned it.
+		const body = inspected
+			.map((row) => row.replace(/^ {2}│ /u, ""))
+			.join(" ")
+			.replace(/\s+/gu, " ");
+		match(body, /\{"verdict":"pass","checks":/u);
+		strictEqual(body.split("read both files.").length - 1, 40, body);
+		match(detailed.join("\n"), /… \d+ rows · \/view/u, "the transcript bounds what inspection shows whole");
 	});
 });
 
@@ -1967,6 +2173,109 @@ describe("tool classes", () => {
 		]);
 	});
 
+	it("wraps a narrow row of facts between the facts, never inside one, on rows, cards and receipts", () => {
+		const output = Array.from({ length: 18 }, (_, index) => `line ${index}`).join("\n");
+		const command = "npm test -- --test-reporter spec --test-concurrency 1 --test-timeout 60000";
+		const card = {
+			assignmentId: "a",
+			runId: "run-6",
+			origin: "user",
+			agentId: "verifier",
+			runtime: { kind: "clio", targetId: "blade", wireModelId: "m" },
+			text: "",
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: "run-6", targetLabel: "blade" }],
+			pending: false,
+			contextTokens: 3_164,
+			receipt: { outcome: "succeeded", durationMs: 8_200, toolCalls: 6, tokenCount: 19_100 },
+		} as unknown as WorkerEntryState;
+		const panel = createChatPanel({ getOutputStyle: () => "detailed" });
+		const usage = { input: 47_200, output: 465, cacheRead: 0, cacheWrite: 0, reasoning: 138, totalTokens: 47_665 };
+		const message = { role: "assistant", content: [{ type: "text", text: "Done." }], usage, stopReason: "stop" };
+		panel.appendUser("Q");
+		panel.applyEvent({ type: "agent_start" } as never);
+		panel.applyEvent({ type: "message_start", message: { role: "assistant", content: [] } } as never);
+		panel.applyEvent({ type: "message_end", message } as never);
+		panel.applyEvent({ type: "agent_end", messages: [message, message] } as never);
+		for (const width of [40, 60, 95]) {
+			const row = rows(settled("bash", { command }, text(output, { exitCode: 0 })), "standard", width);
+			const spend = renderWorkerEntryLines(card, width, { detail: transcriptDetail("standard") }).map(
+				stripTerminalSequences,
+			);
+			const receipt = panel.render(width).map(stripTerminalSequences);
+			for (const [rendered, facts] of [
+				[row, ["exit 0", "18 lines"]],
+				[spend, ["context 3.2k", "6 tool calls"]],
+				[receipt, ["in 94.4k", "out 930", "reasoning 276"]],
+			] as const) {
+				for (const fact of facts)
+					ok(
+						rendered.some((line) => line.includes(fact)),
+						`${width}: "${fact}" split\n${rendered.join("\n")}`,
+					);
+			}
+		}
+	});
+
+	it("states a refusal once: on the blocked row's tail, not again as its body's first line", () => {
+		const rejection = [
+			"bash blocked: system_modify",
+			"Clio refused to run bash.",
+			"- matched rm-recursive-or-force: rm with recursive or force flags",
+			"rule: rm-recursive-or-force",
+		].join("\n");
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const plain = rows(
+				settled("bash", { command: "rm -rf ./build" }, text(rejection), {
+					isError: true,
+					outcome: "blocked",
+					blockReason: "bash blocked: system_modify",
+				}),
+				style,
+			).join("\n");
+			strictEqual(plain.split("bash blocked: system_modify").length - 1, 1, plain);
+			match(plain, /^\$ blocked `rm -rf \.\/build` ✗ · bash blocked: system_modify/u);
+			match(plain, /rule: rm-recursive-or-force/u, "the rest of the rejection stays");
+		}
+	});
+
+	it("states a path inside the workspace relative to it and keeps the tail of one it must cut", () => {
+		const cwd = process.cwd();
+		const listing = text("a.ts", { observation: { unit: "entries", shownCount: 7, totalCount: 7, shownBytes: 55 } });
+		// A model that sends absolute paths reads the same as one that sends
+		// relative ones: no cut prefix, no `path ›` row repeating it.
+		deepStrictEqual(rows(settled("ls", { path: cwd }, listing)), [
+			`${GLYPH.toolHeader} listed workspace · 7 entries ✓ · 42ms`,
+		]);
+		deepStrictEqual(rows(settled("read", { path: `${cwd}/docs/retry.md` }, text("x"))), [
+			`${GLYPH.toolHeader} read docs/retry.md ✓ · 42ms`,
+		]);
+		deepStrictEqual(rows(settled("grep", { pattern: "needle", path: `${cwd}/src` }, text("x"))), [
+			`${GLYPH.toolHeader} searched for \`needle\` in src ✓ · 42ms`,
+		]);
+		deepStrictEqual(rows(settled("edit", { path: `${cwd}/src/a.ts` }, text("ok"))), [
+			`${GLYPH.classMutate} edited src/a.ts ✓ · 42ms`,
+		]);
+		// A resource read the path already names carries no second label.
+		deepStrictEqual(rows(settled("read", { path: "docs/retry.md" }, text("x"))), [
+			`${GLYPH.toolHeader} read docs/retry.md ✓ · 42ms`,
+		]);
+		match(rows(settled("read", { path: "CLIO-CODER.md" }, text("x")))[0] ?? "", /read CLIO-CODER\.md · handbook ✓/u);
+		// A path that fits beside its verb stays whole, so nothing repeats it.
+		const whole = rows(settled("read", { path: "library/skills/perf/SKILL.md" }, text("x")), "standard", 40);
+		match(whole[0] ?? "", /^▸ read library\/skills\/perf\/SKILL\.md/u, whole.join("\n"));
+		doesNotMatch(whole.join("\n"), /path ›/u);
+		// A path outside the workspace that must be cut keeps its file name, on
+		// the row's first line with its outcome, and repeats in full beneath it.
+		const outside = `/opt/${"deep/".repeat(20)}src/net/retry.js`;
+		for (const width of [40, 60, 100]) {
+			const cut = rows(settled("read", { path: outside }, text("x")), "standard", width);
+			match(cut[0] ?? "", /^▸ read …\/[^ ]*\/net\/retry\.js ✓/u, `${width}: ${cut.join("\n")}`);
+			match(cut.join("\n"), /path ›/u);
+		}
+	});
+
 	it("folds explorations, lookups and changes by class in Compact and never folds commands or failures", () => {
 		const panel = createChatPanel({ getOutputStyle: () => "compact" });
 		const act = (id: string, toolName: string, args: unknown, result: unknown, isError = false) => {
@@ -2058,7 +2367,7 @@ describe("agent invocations", () => {
 			dispatchEnd(panel, "d1", 1);
 			const settledRows = plainRender(panel, 100).split("\n");
 			strictEqual(settledRows[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, style);
-			doesNotMatch(settledRows.join("\n"), /1 ok|quality:.*\n.*quality|tasks -> done/u);
+			doesNotMatch(settledRows.join("\n"), /1 ok|quality .*\n.*quality|tasks -> done/u);
 		}
 	});
 
@@ -2119,7 +2428,7 @@ describe("agent invocations", () => {
 		strictEqual(cards.length, 3);
 		const lastCard = rows.lastIndexOf(cards[2] ?? "");
 		ok(!rows.slice(2, lastCard).includes(""), "sibling cards stack with no blank row between them");
-		strictEqual(rows.filter((row) => /│ quality: /u.test(row)).length, 3);
+		strictEqual(rows.filter((row) => /│ quality /u.test(row)).length, 3);
 	});
 
 	it("groups a council round under one header with each member's roster label", () => {

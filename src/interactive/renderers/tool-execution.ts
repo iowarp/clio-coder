@@ -17,7 +17,11 @@ import { previewBudget, previewRows } from "./preview.js";
 
 import { isSkillLoadRefusal, type SkillLoadRefusal } from "../../core/skill-activation.js";
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
-import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../../domains/safety/call-target.js";
+import {
+	CALL_TARGET_MAX_CHARS,
+	sanitizeCallTargetText,
+	sanitizeMultilineDisplayText,
+} from "../../domains/safety/call-target.js";
 import { redactSecretString, redactToolArgs } from "../../domains/safety/redaction.js";
 import { formatSize } from "../../engine/truncate.js";
 import { stripTerminalSequences, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
@@ -32,7 +36,7 @@ import {
 import { toolResultPresentationText } from "../../tools/result-disposition.js";
 import { mutationFactsLine } from "../mutation-preview.js";
 import type { ApprovalRequestView } from "../permission-overlay.js";
-import { clioTheme, formatCompactMs, GLYPH } from "../theme/index.js";
+import { clioTheme, formatCompactMs, GLYPH, holdFact, joinFacts, releaseSpaces } from "../theme/index.js";
 import { renderDiffLines } from "./diff.js";
 import { tryRenderJson, tryRenderXml } from "./structured.js";
 
@@ -504,7 +508,7 @@ function classFacts(finished: ToolExecutionFinished, row: ResolvedToolRow): stri
 				const failed = numberField(details, "failedCount") ?? 0;
 				parts.push(failed > 0 ? `${receipts - failed} ok, ${failed} failed` : `${receipts} ok`);
 				const quality = finished.cardAttached === true ? null : receiptQuality(details, receipts);
-				if (quality !== null) parts.push(`quality: ${quality}`);
+				if (quality !== null) parts.push(`quality ${quality}`);
 				break;
 			}
 			const counts = isPlainObject(details?.counts) ? details.counts : null;
@@ -655,7 +659,10 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	if (finished.excludeFromContext === true) parts.push("not sent to model");
 	if (finished.evictedReason !== undefined) parts.push("evicted", finished.evictedReason);
 	const stat = executed && !finished.isError ? changeStat(finished.result) : null;
-	const statText = stat === null ? "" : `${dim(" · ")}${green(`+${stat.added}`)} ${red(`-${stat.removed}`)}`;
+	// Every fact is held together, so a narrow row wraps between facts
+	// (`… · exit 0 ·` then `18 lines`), never inside one.
+	const statText =
+		stat === null ? "" : `${dim(" · ")}${green(`+${stat.added}`)}${holdFact(" ")}${red(`-${stat.removed}`)}`;
 	// A skill whose content no longer matches its recorded hash is the one
 	// skill fact that is a warning rather than provenance.
 	const driftText = skillLoadFacts(finished)?.drifted === true ? `${dim(" · ")}${yellow("drifted")}` : "";
@@ -664,7 +671,7 @@ function ledgerTail(finished: ToolExecutionFinished, row: ResolvedToolRow): { fa
 	// full body's footer state it.
 	const offloadPath = executed ? offloadPathOf(finished) : null;
 	return {
-		facts: `${statText}${parts.length > 0 ? dim(` · ${parts.map((part) => sanitizeCallTargetText(part)).join(" · ")}`) : ""}${driftText}`,
+		facts: `${statText}${parts.length > 0 ? dim(joinFacts(["", ...parts.map((part) => sanitizeCallTargetText(part))])) : ""}${driftText}`,
 		offload:
 			offloadPath === null
 				? ""
@@ -686,6 +693,15 @@ const AWAITING_APPROVAL_TAIL = ` ${yellow(GLYPH.phaseBlocked)}${dim(" awaiting a
  * No elapsed counter (nothing is running) and no status glyph (nothing has
  * finished): the awaiting-approval tail is the segment's whole state.
  */
+/**
+ * An approval's target as the card states it. The safety layer describes a
+ * call's target in at most CALL_TARGET_MAX_CHARS characters and cuts it there
+ * without a mark, so a target of exactly that length was cut and says so.
+ */
+export function approvalTarget(target: string): string {
+	return target.length === CALL_TARGET_MAX_CHARS ? `${target}${GLYPH.ellipsis}` : target;
+}
+
 export function renderToolAwaitingApproval(
 	call: ToolExecutionStart,
 	width: number,
@@ -703,7 +719,7 @@ export function renderToolAwaitingApproval(
 	const facts = [
 		["action", view.actionClass],
 		["axis", axis],
-		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
+		...(view.target !== undefined && view.target.length > 0 ? [["target", approvalTarget(view.target)]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
 		...(view.mutation !== undefined ? [["mutation", mutationFactsLine(view.mutation)]] : []),
@@ -796,8 +812,8 @@ function objectLimit(toolClass: ToolClass, width?: number): number {
 
 /**
  * The row's object: a command or a pattern in backticks, a URL as its host
- * and path tail, anything else plain; an MCP or extension capability as
- * `server › tool`. Always one sanitized line.
+ * and path tail, a path as its tail when it must be cut, anything else plain;
+ * an MCP or extension capability as `server › tool`. Always one sanitized line.
  */
 function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null, width?: number): string {
 	if (row.externalLabel !== null) return sanitizeCallTargetText(row.externalLabel);
@@ -806,7 +822,7 @@ function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null,
 	if (row.spec.object === undefined) return sanitizeCallTargetText(row.toolName);
 	const display = objectDisplay(row, width);
 	if (display === null) return "";
-	if (display.style === "url") return display.shown;
+	if (display.style === "url" || display.style === "path") return display.shown;
 	const clean = display.shown.length < display.full.length ? `${display.shown}${GLYPH.ellipsis}` : display.shown;
 	return display.style === "code" ? `\`${clean}\`` : clean;
 }
@@ -814,22 +830,44 @@ function rowObject(row: ResolvedToolRow, finished: ToolExecutionFinished | null,
 /**
  * The object as the row shows it: `full` is the sanitized one-line text, and
  * `shown` is what survives the row's length limit (without the ellipsis). A
- * URL shows as its host and path tail.
+ * URL shows as its host and path tail, and a cut path as `…` and its tail,
+ * ellipsis included.
  */
 function objectDisplay(
 	row: ResolvedToolRow,
 	width?: number,
-): { full: string; shown: string; style?: "code" | "url" } | null {
+): { full: string; shown: string; style?: "code" | "url" | "path" } | null {
 	const object = row.spec.object?.(row.args, row.context) ?? null;
 	if (object === null) return null;
 	if (object.style === "url") return { full: object.text, shown: urlLabel(object.text, urlBudget(width)), style: "url" };
 	const full = displayText(object.text, object.style);
 	const limit = objectLimit(row.spec.class, width);
+	if (object.style === "path") {
+		// A path that fits beside its verb stays whole, so no `path ›` row repeats
+		// it. One that must be cut leaves room for the outcome too, so its tail
+		// and the row's status share the first line.
+		if (width === undefined) return { full, shown: full.length <= limit ? full : pathTail(full, limit), style: "path" };
+		const whole = Math.min(limit, contentWidth(width) - 10);
+		const cut = Math.max(16, Math.min(limit, contentWidth(width) - 20));
+		return { full, shown: full.length <= whole ? full : pathTail(full, cut), style: "path" };
+	}
 	const shown = full.length <= limit ? full : full.slice(0, Math.max(0, limit - 1));
 	return object.style === undefined ? { full, shown } : { full, shown, style: object.style };
 }
 
-function displayText(value: string, style?: "code" | "url"): string {
+/**
+ * A path cut to `limit` characters from the left, so the file name survives:
+ * `…/src/net/retry.js`. The tail starts at a directory boundary when one falls
+ * inside it.
+ */
+function pathTail(full: string, limit: number): string {
+	const chars = Array.from(full);
+	const tail = chars.slice(Math.max(0, chars.length - Math.max(1, limit - 1))).join("");
+	const slash = tail.indexOf("/");
+	return `${GLYPH.ellipsis}${slash > 0 && slash < tail.length - 1 ? tail.slice(slash) : tail}`;
+}
+
+function displayText(value: string, style?: "code" | "url" | "path"): string {
 	return sanitizeCallTargetText(style === "code" ? stripShellWrapperForDisplay(value) : value);
 }
 
@@ -955,8 +993,13 @@ function sublineParts(
 			? ""
 			: ` ${dim("→")} ${theme.fg("muted", truncate(sanitizeCallTargetText(inline.answer), ARG_PREVIEW_LIMIT))}`;
 	const scalars = inlineArgs(row, finished);
+	// A resource read names what it read (`handbook`) unless the path the row
+	// shows already says so (`docs/retry.md`, `SKILL.md`).
 	const resourceLabel = classifyResourceRead(call.toolName, call.args);
-	const resource = resourceLabel !== null ? dim(` · ${resourceLabel}`) : "";
+	const resource =
+		resourceLabel !== null && !stripTerminalSequences(object).toLowerCase().includes(resourceLabel)
+			? dim(` · ${resourceLabel}`)
+			: "";
 	const inlineText = scalars.length > 0 ? dim(` · ${scalars.join(" · ")}`) : "";
 	const head = `${classMark(row.spec.class)}${styledVerb(verb, row.spec.class)}${object.length > 0 ? ` ${object}` : ""}${scope}${answer}${resource}${inlineText}`;
 	if (finished !== null) {
@@ -978,11 +1021,11 @@ function sublineParts(
  */
 function wrapSublineWithTail(lead: string, tail: string, width: number): string[] {
 	if (tail.length === 0) return wrapHanging(lead, width);
-	if (visibleWidth(`${lead}${tail}`) <= width) return [`${lead}${tail}`];
+	if (visibleWidth(`${lead}${tail}`) <= width) return [releaseSpaces(`${lead}${tail}`)];
 	const leadLines = wrapHanging(lead, width);
 	const last = leadLines[leadLines.length - 1];
 	if (last !== undefined && visibleWidth(`${last}${tail}`) <= width) {
-		leadLines[leadLines.length - 1] = `${last}${tail}`;
+		leadLines[leadLines.length - 1] = releaseSpaces(`${last}${tail}`);
 		return leadLines;
 	}
 	// The tail cannot sit beside the lead: give it its own row in the content
@@ -991,7 +1034,7 @@ function wrapSublineWithTail(lead: string, tail: string, width: number): string[
 }
 
 function wrap(line: string, width: number): string[] {
-	return wrapTextWithAnsi(line, width);
+	return wrapTextWithAnsi(line, width).map(releaseSpaces);
 }
 
 function contentWidth(width: number): number {
@@ -1009,7 +1052,7 @@ function indentRows(rows: string[]): string[] {
  * action.
  */
 function wrapHanging(line: string, width: number): string[] {
-	if (visibleWidth(line) <= width) return [line];
+	if (visibleWidth(line) <= width) return [releaseSpaces(line)];
 	const rows = wrap(line, contentWidth(width));
 	return rows.map((row, index) => (index === 0 ? row : `${CONTENT_INDENT}${row}`));
 }
@@ -1426,7 +1469,7 @@ export function renderToolSubline(call: ToolExecutionStart | ToolExecutionFinish
 export function toolRowTitle(call: ToolExecutionStart | ToolExecutionFinished): string {
 	const status = sublineStatus(call);
 	const meta: StatusMeta = "result" in call ? { outcome: call.outcome } : {};
-	return stripTerminalSequences(sublineParts(call, status, meta).lead);
+	return releaseSpaces(stripTerminalSequences(sublineParts(call, status, meta).lead));
 }
 
 /**
@@ -1653,6 +1696,13 @@ function cutFromRow(value: string, display: ReturnType<typeof objectDisplay>): b
 	return /[\r\n\t]/u.test(value.trim()) || !display.shown.includes(field);
 }
 
+/** `text` without its first non-blank line when that line is `line`. */
+function withoutLeadingLine(text: string, line: string): string {
+	const lines = text.split("\n");
+	const first = lines.findIndex((entry) => entry.trim().length > 0);
+	return first >= 0 && lines[first]?.trim() === line ? lines.slice(first + 1).join("\n") : text;
+}
+
 /** One edit states its two texts as two rows; several stay the list they are. */
 function flattenSingleEdit(value: unknown): unknown {
 	if (!Array.isArray(value) || value.length !== 1 || !isPlainObject(value[0])) return value;
@@ -1756,7 +1806,11 @@ export function renderToolPreview(
 		// worker card sits under it leaves the outcome to the card.
 		// A failed command's status line is on its row as `exit N`; the body keeps the output.
 		const shown = failure && command ? withoutCommandStatus(result) : result;
-		const { body: text, notes } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
+		const { body: told, notes } = splitModelNotes(resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY));
+		// A refusal's tail names it (`✗ · bash blocked: system_modify`), so its
+		// body keeps the rest of what the call was told, not that line again.
+		const refusal = finished?.outcome !== undefined ? finished.blockReason?.trim() : undefined;
+		const text = refusal ? withoutLeadingLine(told, refusal) : told;
 		if (text.trim().length > 0) {
 			const body = indentAndWrap(redactSecretString(text), width, failure);
 			rows.push(
@@ -1865,6 +1919,6 @@ export function renderFoldedGroup(
 	const verb = family === "explore" ? "explored" : family === "knowledge" ? "consulted" : "edited";
 	const totals = family === "mutate" && complete ? `${dim(" · ")}${green(`+${added}`)} ${red(`-${removed}`)}` : "";
 	const head = `${classMark(toolClass)}${styledVerb(verb, toolClass)} ${countNouns(calls)}${totals} ${green(STATUS_OK_GLYPH)}`;
-	const body = indentAndWrap(targets.join(dim(" · ")), width, false);
+	const body = indentAndWrap(joinFacts(targets, dim), width, false);
 	return [...wrapHanging(head, width), ...previewRows(body, maxRows, width, false, RAIL_DIM, BODY_INDENT_VISIBLE_WIDTH)];
 }

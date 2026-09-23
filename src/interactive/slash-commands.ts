@@ -178,7 +178,7 @@ type SlashCommandVariant =
 	| { kind: "oracle"; question: string }
 	| { kind: "oracle-usage" }
 	/** `/council <task>`: one read-only council of roster members, dispatched through the dispatch tool. */
-	| { kind: "council"; task: string; options: CouncilCommandOptions }
+	| { kind: "council"; task: string; options: CouncilCommandOptions; source: string }
 	| { kind: "council-usage"; reason?: string }
 	| { kind: "handoff"; goal: string }
 	| { kind: "handoff-usage" }
@@ -1649,7 +1649,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			],
 			positionals: [{ name: "task", required: true, rest: true }],
 		},
-		fromArgs(parsed) {
+		fromArgs(parsed, trimmed) {
 			const task = parsed.rest?.trim() ?? "";
 			if (parsed.error) return { kind: "council-usage", reason: parsed.error };
 			if (task.length === 0) return { kind: "council-usage" };
@@ -1672,7 +1672,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				if (!isCouncilSynthesisMode(synthesis)) return { kind: "council-usage" };
 				options.synthesis = synthesis;
 			}
-			return { kind: "council", task, options };
+			return { kind: "council", task, options, source: trimmed };
 		},
 		handle(command, ctx) {
 			if (command.kind === "council-usage") {
@@ -1682,6 +1682,8 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				return;
 			}
 			if (command.kind !== "council") return;
+			// The question the round answers sits above its cards, as a /run's does.
+			ctx.echoOperatorCommand?.(command.source);
 			void (async () => {
 				await handleCouncil(command.task, command.options, ctx);
 				ctx.render();

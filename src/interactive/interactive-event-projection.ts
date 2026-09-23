@@ -339,10 +339,13 @@ export function createInteractiveEventProjection(deps: InteractiveEventProjectio
 			deps.appendTranscriptNotice(notice.level, notice.text);
 			deps.requestRender();
 		}),
+		// The blocked call's row states the refusal and its body the rule that
+		// fired, live and on /resume; the policy source and scope pass through
+		// the footer's notice slot rather than a third, live-only transcript copy.
 		deps.bus.on(BusChannels.SafetyBlocked, (payload) => {
 			const notice = safetyBlockedNotice(payload);
 			if (notice === null) return;
-			deps.appendTranscriptNotice(notice.level, notice.text);
+			deps.notify("warning", notice.text, "safety:blocked");
 			deps.requestRender();
 		}),
 	);

@@ -1,5 +1,6 @@
 import { doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
+import { CALL_TARGET_MAX_CHARS, describeCallTarget } from "../../src/domains/safety/call-target.js";
 import { stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { routeOverlayKey } from "../../src/interactive/overlay-key-routing.js";
 import { permissionHintEntries } from "../../src/interactive/permission-hint.js";
@@ -9,6 +10,7 @@ import {
 	PERMISSION_OVERLAY_WIDTH,
 	permissionOverlayHint,
 } from "../../src/interactive/permission-overlay.js";
+import { renderToolAwaitingApproval } from "../../src/interactive/renderers/tool-execution.js";
 
 const DEEP_TARGET =
 	"/home/researcher/projects/high-entropy-alloys/sigma-phase-onset/.research/tasks/task-03/task-03-protocol-arc-melting-and-aging.md · content=<string 4173 bytes>";
@@ -149,4 +151,23 @@ test("local invocation inspection scrolls complete redacted arguments without ad
 	strictEqual(JSON.stringify(view), before);
 	body.toggleInspect();
 	ok(!body.isInspecting());
+});
+
+test("a target the safety layer cut at its cap ends in an ellipsis on the card and the transcript row", () => {
+	const command = `cd /tmp/work/demo-repo && npm test -- ${"--reporter spec ".repeat(12)}`;
+	const cut = describeCallTarget("bash", { command });
+	strictEqual(cut.length, CALL_TARGET_MAX_CHARS, "the safety layer cuts at its cap");
+	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "execute", target: cut };
+	delete view.mutation;
+	const card = plain(createPermissionOverlayBody(view).render(76)).join(" ").replace(/\s+/g, " ");
+	match(card, /Target: cd \/tmp\/work\/demo-repo && npm test -- .*--… Requested by/u, card);
+	const row = plain(
+		renderToolAwaitingApproval({ toolCallId: "b", toolName: "bash", args: { command } }, 100, view),
+	).join(" ");
+	match(row, /target · cd .*…/u, row);
+	// A target under the cap is whole, so it carries no mark.
+	const whole = describeCallTarget("bash", { command: "npm test" });
+	const short = plain(createPermissionOverlayBody({ ...view, target: whole }).render(76)).join(" ");
+	match(short, /Target: npm test/u);
+	doesNotMatch(short, /npm test…/u);
 });

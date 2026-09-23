@@ -159,6 +159,27 @@ test("resolved dashboard shortcut cycles Activity, Context, Status and closed wi
 	}
 });
 
+test("the footer composes at the width a frame renders it, so a resize never stacks rows fitted to the old width", () => {
+	let columns = 120;
+	const footer = buildFooterDashboard({
+		providers: { list: () => [] } as never,
+		resolveCurrentBranch: async () => null,
+		getTerminalColumns: () => columns,
+		getTerminalRows: () => 40,
+	});
+	try {
+		strictEqual(footer.view.render(120).length, 2);
+		// The first frame after a resize renders before the footer's next refresh.
+		columns = 40;
+		const narrow = footer.view.render(40);
+		strictEqual(narrow.length, 2, plain(narrow));
+		for (const row of narrow) ok(visibleWidth(row) <= 40, row);
+		deepStrictEqual(footer.view.render(40), narrow, "a repeat frame at the same width reuses the rows");
+	} finally {
+		footer.dispose();
+	}
+});
+
 test("invocation previews omit redundant short primary values, retain options and preserve full inspection", () => {
 	for (const style of ["compact", "standard", "detailed"] as const) {
 		const call = {

@@ -366,8 +366,34 @@ function workspaceFacts(deps: FooterDashboardDeps, branchSlot: string | null): W
 	};
 }
 
+/**
+ * The footer's text, composed for the width it renders at. A refresh composes
+ * it at the terminal's width; a frame that renders it at another width, such
+ * as the first frame after a resize, composes it again at that width rather
+ * than wrapping rows fitted to the old one into a stack of broken halves.
+ */
+class FooterText extends Text {
+	private composedWidth: number | null = null;
+	private readonly compose: (width: number) => string;
+
+	constructor(compose: (width: number) => string) {
+		super("", 0, 0);
+		this.compose = compose;
+	}
+
+	composeAt(width: number): void {
+		this.composedWidth = width;
+		this.setText(this.compose(width));
+	}
+
+	override render(width: number): string[] {
+		if (width !== this.composedWidth) this.composeAt(width);
+		return super.render(width);
+	}
+}
+
 export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboardPanel {
-	const view = new Text("", 0, 0);
+	const view = new FooterText((width) => composeFooter(width));
 	const demoHints = createDemoHints();
 	let branchSlot: string | null = null;
 	let dashboardMode: FooterDashboardMode = "compact";
@@ -530,9 +556,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 			now: now(),
 		};
 	};
-	const refresh = (): void => {
-		if (disposed) return;
-		const width = deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80;
+	function composeFooter(width: number): string {
 		const current = state(width);
 		const notices =
 			dashboardMode === "compact" ? [] : renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
@@ -551,8 +575,11 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						getKeybindings().getKeys("clio-coder.status.toggle").join(" / "),
 					)
 				: renderFooterDashboardLines(current, width, dashboardMode);
-		view.setText([...grid, ...extensionLine, ...notices].join("\n"));
-		view.invalidate();
+		return [...grid, ...extensionLine, ...notices].join("\n");
+	}
+	const refresh = (): void => {
+		if (disposed) return;
+		view.composeAt(deps.getTerminalColumns?.() ?? process.stdout.columns ?? 80);
 	};
 	const setExpanded = (expanded: boolean): void => {
 		dashboardMode = expanded ? "expanded" : "compact";

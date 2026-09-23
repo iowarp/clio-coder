@@ -49,6 +49,7 @@ import { createProcessInteractiveShell, getActiveRenderTrace } from "./interacti
 import { createInteractiveSlashRuntime, resolveAvailableThinkingLevels } from "./interactive-slash-runtime.js";
 import { createInteractiveSubscriptions } from "./interactive-subscriptions.js";
 import { createInteractiveTickers } from "./interactive-tickers.js";
+import { returnToLiveEdge } from "./layout.js";
 import type { createMuxBridge } from "./mux-bridge.js";
 import { createOverlayLifecycle, type OverlayLifecycleController, type OverlayState } from "./overlay-lifecycle.js";
 import { interopOverlaySurface } from "./overlays/interop.js";
@@ -492,6 +493,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			...(deps.onFirstFrameCommit ? { onFirstFrameCommit: deps.onFirstFrameCommit } : {}),
 		});
 	const { terminal, tui } = shell;
+	const liveEdge = (): void => returnToLiveEdge(tui);
 	const renderTrace = getActiveRenderTrace();
 	// SIGTERM is the kill an operator reaches for when a pane stops answering, so
 	// it is where the always-on input-wedge ring has to land (#224). It writes
@@ -819,6 +821,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			appendUser: (text, status) => chatRenderer.mutate(() => chatPanel.appendUser(text, status), "user-submit"),
 		},
 		beforeSemanticSubmit: () => chatRenderer.flush(),
+		returnToLiveEdge: liveEdge,
 		// A `/run` or `/delegate` echo is recorded like the run it starts, so a
 		// resumed session states the command above its card. Best effort, and
 		// never model context.
@@ -902,6 +905,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 
 	const editorSubmit = createEditorSubmitController({
 		onLocalBashRunning: presentation.setLocalBashRunning,
+		returnToLiveEdge: liveEdge,
 		editor,
 		ui: tui,
 		io,

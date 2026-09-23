@@ -24,6 +24,38 @@ export function fitIdentityLabel(value: string, width: number): string {
 	return `${head}…${tail}`;
 }
 
+/**
+ * A space a wrap never breaks at. It holds a short fact together (`18 lines`,
+ * `context 3.2k`, `reasoning 138`), so a row of facts wraps between them, never
+ * inside one; {@link releaseSpaces} turns it back into an ordinary space once
+ * the row is wrapped.
+ */
+const HELD_SPACE = "\u00a0";
+
+/**
+ * A fact longer than this reads as a phrase and may wrap at its spaces
+ * (`lines 1-40` then `of 120`), rather than cost the row a line of its own.
+ */
+const HELD_FACT_MAX = 16;
+
+/** The spaces of one short fact, held so a wrap cannot split it. */
+export function holdFact(fact: string): string {
+	return fact.length <= HELD_FACT_MAX ? fact.replaceAll(" ", HELD_SPACE) : fact;
+}
+
+/**
+ * Facts joined by ` · ` so a narrow row wraps between facts, never inside a
+ * short one. `style` paints the separator (a dim dot among colored facts).
+ */
+export function joinFacts(facts: ReadonlyArray<string>, style: (separator: string) => string = (dot) => dot): string {
+	return facts.map(holdFact).join(` ${style("·")} `);
+}
+
+/** A wrapped row as the terminal shows it: its held spaces back to ordinary ones. */
+export function releaseSpaces(row: string): string {
+	return row.replaceAll(HELD_SPACE, " ");
+}
+
 /** Compact wire identity with explicit omission and its version/quantization suffix. */
 export function abbreviateModelId(modelId: string | null | undefined): string {
 	const value = sanitizeCallTargetText(modelId ?? "");
