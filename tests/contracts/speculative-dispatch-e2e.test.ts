@@ -44,15 +44,26 @@ async function startJev(): Promise<JevFixture> {
 		const answers: Record<string, unknown> = {};
 		for (const id of Object.keys(body.questions)) {
 			if (id === "dispatchForecast.dispatch") answers[id] = { type: "noul", noul: 0.95 };
-			else if (id === "dispatchForecast.shape")
-				answers[id] = { type: "choice", choice: "single", confidence: 1, probabilities: { single: 1 } };
-			else if (id === "dispatchForecast.recipe")
+			else if (id === "dispatchForecast.shape") {
+				const criteria = (body.questions[id] as { criteria: Record<string, string> }).criteria;
+				answers[id] = {
+					type: "choice",
+					choice: "single",
+					confidence: 1,
+					probabilities: Object.fromEntries(Object.keys(criteria).map((option) => [option, option === "single" ? 1 : 0])),
+				};
+			} else if (id === "dispatchForecast.recipe") {
+				const criteria = (body.questions[id] as { criteria: Record<string, string> }).criteria;
+				const options = Object.keys(criteria);
 				answers[id] = {
 					type: "choice",
 					choice: fixture.predict,
 					confidence: 0.95,
-					probabilities: { [fixture.predict]: 0.97 },
+					probabilities: Object.fromEntries(
+						options.map((option) => [option, option === fixture.predict ? 0.97 : 0.03 / (options.length - 1)]),
+					),
 				};
+			}
 		}
 		res.writeHead(200, { "content-type": "application/json" });
 		res.end(JSON.stringify({ model: "jev-fixture", answers }));
