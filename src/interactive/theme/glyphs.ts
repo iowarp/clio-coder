@@ -13,7 +13,17 @@ export const GLYPH = {
 	// Selection focus marker for list overlays. It is deliberately distinct from
 	// the tool ledger's toolHeader so a focused row never reads as a tool line.
 	cursor: "❯",
+	// Action rows carry their class in the gutter: `▸` observes or searches,
+	// `§` consults Clio's knowledge, `±` changes files, `$` executes, `↗`
+	// reaches the network, `◆` delegates, `?` asks the operator and `⇢` calls a
+	// capability outside Clio. The shape alone tells the acts apart.
 	toolHeader: "▸",
+	classKnowledge: "§",
+	classMutate: "±",
+	classExecute: "$",
+	classNetwork: "↗",
+	classInteraction: "?",
+	classExternal: "⇢",
 	running: "●",
 	queued: "◌",
 	speed: "⚡",

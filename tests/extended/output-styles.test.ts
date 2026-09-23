@@ -97,7 +97,8 @@ test("large successful cat output stays bounded in every style; errors and local
 		toolCallId: "cat",
 		toolName: "bash",
 		args: { command: "cat large.txt" },
-		result: output,
+		// The bash tool's own result shape: the output, and the exit status as a fact.
+		result: { content: [{ type: "text", text: output }], details: { exitCode: 0 } },
 		isError: false,
 	};
 	for (const style of ["compact", "standard", "detailed"] as const) {

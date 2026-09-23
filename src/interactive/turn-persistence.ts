@@ -73,6 +73,7 @@ export interface TurnPersistence {
 			resultSummary?: Record<string, unknown>;
 			outcome?: string;
 			blockReason?: string;
+			actionClass?: string;
 		},
 	): void;
 	/** Synthesized terminal row for a turn ended by a terminating tool result. */
@@ -371,6 +372,9 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			// instead of re-deriving it from result text.
 			if (event.outcome !== undefined) payload.outcome = event.outcome;
 			if (event.blockReason !== undefined) payload.blockReason = event.blockReason;
+			// Admission's action class, so a resumed session classifies an unknown
+			// dynamic tool by the same rule the live row used.
+			if (event.actionClass !== undefined) payload.actionClass = event.actionClass;
 			const turn = appendTurn(deps.session, {
 				kind: "tool_result",
 				payload,

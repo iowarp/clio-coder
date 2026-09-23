@@ -624,16 +624,34 @@ describe("dispatch quality presentation", () => {
 			result: { details: { receiptCount: 3, failedCount: 0, runs: [{ trust: trusts[0] }, { trust: trusts[1] }, {}] } },
 		};
 		const plain = renderToolSubline(finished, 44).map(stripTerminalSequences).join(" ").replace(/\s+/gu, " ");
-		match(plain, /3 execution ok/u);
+		// With no card under it, the dispatch row carries execution and quality as separate facts.
+		match(plain, /delegated · 3 ok · quality: /u);
 		match(plain, /1 grounded/u);
 		match(plain, /1 validation failed/u);
 		match(plain, /1 validation unknown/u);
+		// Cards state each run's quality: a fan-out keeps only its execution tally,
+		// and a single dispatch's card is its whole outcome.
+		const fanOut = renderToolSubline({ ...finished, cardAttached: true }, 76)
+			.map(stripTerminalSequences)
+			.join(" ");
+		match(fanOut, /delegated · 3 ok ✓/u);
+		doesNotMatch(fanOut, /quality|grounded|validation/u);
+		const single = renderToolSubline(
+			{
+				...finished,
+				args: { agent: "scout", task: "map callers" },
+				result: { details: { receiptCount: 1, failedCount: 0, runs: [{ trust: trusts[0] }] } },
+				cardAttached: true,
+			},
+			76,
+		).map(stripTerminalSequences);
+		doesNotMatch(single.join(" "), /\bok\b|quality/u);
 		// Wrapped action rows hang in the content column, so rows join on any run of whitespace.
 		const historical = renderToolSubline({ ...finished, result: { details: { receiptCount: 3, failedCount: 1 } } }, 76)
 			.map(stripTerminalSequences)
 			.join(" ")
 			.replace(/\s+/gu, " ");
-		match(historical, /2 execution ok, 1 execution failed/u);
+		match(historical, /2 ok, 1 failed/u);
 		match(historical, /3 validation unknown/u);
 		doesNotMatch(historical, /validation failed/u);
 	});
@@ -697,7 +715,7 @@ describe("dispatch quality presentation", () => {
 					},
 					76,
 				);
-				match(plain(collapsed), /3 execution ok/u);
+				match(plain(collapsed), /3 ok · quality: /u);
 				ok(plain(collapsed).includes(wording), plain(collapsed));
 				const island = formatTaskIslandLines([{ ...row, agentAudience: "base" }]);
 				ok(plain(island).replace(/\s+/gu, " ").includes(wording), plain(island));

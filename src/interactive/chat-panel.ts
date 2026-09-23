@@ -24,14 +24,14 @@ import { previewBudget, previewRows } from "./renderers/preview.js";
 import { presentProviderError, providerErrorEvidence } from "./renderers/provider-error.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
 import {
-	canGroupObservation,
 	hasToolBody,
-	observationTarget,
-	renderObservationGroup,
+	renderFoldedGroup,
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
 	type ToolExecutionFinished,
+	type ToolFoldFamily,
+	toolFoldFamily,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import {
@@ -238,6 +238,11 @@ type ToolSegment = {
 	evictedReason?: string | undefined;
 	/** View-only marker: historical calls render mutation diffs without live color. */
 	replayed?: true;
+	/**
+	 * Admission's action class, from the end event (live) or the persisted
+	 * result (replay). An unknown dynamic tool is classified by it.
+	 */
+	actionClass?: string | undefined;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -1050,6 +1055,7 @@ function renderToolSegmentLines(
 		toolCallId: seg.id,
 		toolName: seg.name,
 		args: seg.args,
+		actionClass: seg.actionClass,
 		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
 		phase: seg.executionStarted ? ("running" as const) : seg.argsComplete ? ("ready" as const) : ("forming" as const),
 	};
@@ -1075,19 +1081,27 @@ function renderToolSegmentLines(
 	});
 }
 
-function observation(seg: AssistantSegment | undefined): string | null {
-	if (seg?.kind !== "tool" || !seg.finished) return null;
-	return canGroupObservation({
+/** A settled tool segment as the renderers read a finished call. */
+function finishedCall(seg: ToolSegment): ToolExecutionFinished {
+	return {
 		toolCallId: seg.id,
 		toolName: seg.name,
+		args: seg.args,
 		result: seg.result,
 		isError: seg.isError,
+		durationMs: seg.durationMs,
 		outcome: seg.settlement,
+		blockReason: seg.blockReason,
 		evictedReason: seg.evictedReason,
 		resultSummary: seg.resultSummary,
-	})
-		? seg.name
-		: null;
+		actionClass: seg.actionClass,
+	};
+}
+
+/** The Compact fold a settled tool segment joins, or null when it keeps its own row. */
+function foldFamily(seg: AssistantSegment | undefined): ToolFoldFamily | null {
+	if (seg?.kind !== "tool" || !seg.finished) return null;
+	return toolFoldFamily(finishedCall(seg));
 }
 
 /**
@@ -1189,18 +1203,20 @@ function renderEntryLines(
 			continue;
 		}
 		if (seg.kind === "tool") {
-			const kind = detail.style === "compact" && !unboundedToolBodies ? observation(seg) : null;
+			// Compact folds a run of one fold family (explorations, knowledge
+			// lookups, changes) into one row; every other act keeps its own.
+			const family = detail.style === "compact" && !unboundedToolBodies ? foldFamily(seg) : null;
 			let count = 1;
-			if (kind) {
-				while (entry.segments[segIndex + count] && observation(entry.segments[segIndex + count]) === kind) count++;
+			if (family) {
+				while (entry.segments[segIndex + count] && foldFamily(entry.segments[segIndex + count]) === family) count++;
 			}
-			if (kind && count > 1) {
-				const targets: string[] = [];
+			if (family && count > 1) {
+				const calls: ToolExecutionFinished[] = [];
 				for (let offset = 0; offset < count; offset++) {
 					const grouped = entry.segments[segIndex + offset];
-					if (grouped?.kind === "tool") targets.push(observationTarget(grouped.name, grouped.args));
+					if (grouped?.kind === "tool") calls.push(finishedCall(grouped));
 				}
-				const lines = renderObservationGroup(kind, targets, width, previewBudget(detail.invocationRows, terminalRows));
+				const lines = renderFoldedGroup(family, calls, width, previewBudget(detail.invocationRows, terminalRows));
 				blocks.push({ kind: "tool", lines, body: hasToolBody(lines) });
 				segIndex += count - 1;
 			} else {
@@ -1949,6 +1965,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 										outcome: seg.settlement,
 										blockReason: seg.blockReason,
 										resultSummary: seg.resultSummary,
+										actionClass: seg.actionClass,
 									},
 									120,
 									{ unbounded: true, diffStyle: "plain" },
@@ -2182,7 +2199,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 						outcome?: unknown;
 						blockReason?: unknown;
 						evictedReason?: unknown;
+						actionClass?: unknown;
 					};
+					if (typeof enriched.actionClass === "string" && enriched.actionClass.length > 0) {
+						tool.actionClass = enriched.actionClass;
+					}
 					// Replay-only: the rehydrator reads the working-set fold and tags
 					// the rows whose bodies the projection has replaced for the model.
 					tool.evictedReason =

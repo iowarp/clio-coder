@@ -14,8 +14,10 @@ The governing principle: **the user reads state from color, structure from frame
 | --- | --- | --- | --- |
 | Answers and user messages | Complete | Complete | Complete |
 | Supplied reasoning | Marker | 3 rows | 12 rows |
-| Reads and searches | Consecutive successful observations grouped | Action and outcome | 8 result rows |
-| File changes | Paths and change facts | 8 diff rows | 20 diff rows |
+| Reads and searches | A run of them folds into one `explored` row | Action and outcome | 8 result rows |
+| Knowledge lookups | A run of them folds into one `consulted` row | Action and outcome | 8 result rows |
+| File changes | A run of them folds into one `edited` row with each file's change facts | 8 diff rows | 20 diff rows |
+| Questions to you | Question and answer on one row; a round nests one answer per row | Same | Same |
 | Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
 | Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
 | Workers | Identity, execution and validation outcome | 3 summary rows and the current action while running | 8 summary rows and bounded tool activity |
@@ -84,7 +86,13 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../
 | `▌` | `userBar` | Operator input | Every row of a transcript prompt (accent); command echoes (dim). |
 | `›` | `user` | Quoted operator text | Steering queue marker (action); request echoes in overlays. |
 | `❯` | `cursor` | Selection focus | Settings, list overlays, selectors. |
-| `▸` | `toolHeader` | Tool ledger line | Tool sublines and expanded tool headers. |
+| `▸` | `toolHeader` | Observe or search | Action rows for reads, listings, data inspection and searches. |
+| `§` | `classKnowledge` | Consult Clio's knowledge | Action rows for context, docs, library, evidence, ledger and compaction calls, and skill loads. |
+| `±` | `classMutate` | Change files | Action rows for edits, writes and artifacts. |
+| `$` | `classExecute` | Execute | Action rows for commands, scripts, checks, git and panes. |
+| `↗` | `classNetwork` | Reach the network | Action rows for web fetches and reads. |
+| `?` | `classInteraction` | Ask the operator | Action rows for questions, decisions and noted limitations. |
+| `⇢` | `classExternal` | Call outside Clio | Gateway, MCP and extension calls. |
 | `✓` | `ok` | Success | Everywhere. |
 | `✗` | `error` | Failure | Everywhere. |
 | `⊘` | `cancelled` | Cancelled or aborted | Everywhere. |
@@ -110,6 +118,8 @@ All symbols are defined as constants in [src/interactive/theme/glyphs.ts](../../
 | `╌` | `innerDivider` | Divider inside a frame | Task island, any framed list. |
 | `·` | (dotSep) | Chip separator (dim) | Everywhere. |
 | `◆ ◇` | `active/scoped` | Active and scoped marks | Model selector, thinking selector, Settings profile workbench. |
+| `◆ ◇` | `workerAgent/workerHuman` | Who started a run | Delegate action rows and worker cards: `◆` the model, `◇` the operator (`/run`, `/delegate`). |
+| `↳` | `subProcess` | Clio's own helper work | Helper and shadow worker rows. |
 
 ---
 
@@ -322,7 +332,7 @@ Every transcript row belongs to a two-cell gutter and a content column. The gutt
 | `▌` (accent, every row) | Operator prompt | Bold text. A prompt Clio has not committed yet shows a dim bar, plain text and `· preparing`; a refused one `· not sent`. |
 | `✦` (accent) | Agent prose | Each prose block, not only the first of a turn, so narration that resumes after actions reads as the agent speaking again. Skill suggestion lines do not claim it. |
 | `│` (reason) | Supplied reasoning | Dim italic excerpt, or the folded `Thinking · /view` marker. No other block uses a gutter rail. |
-| `▸` | Action | One row per call; its body nests beneath it (`  │ `). |
+| `▸` `§` `±` `$` `↗` `◆` `?` `⇢` | Action | One row per call, marked by its class ([6.3](#63-tool-ledger)); its body nests beneath it (`  │ `). |
 | `◆` / `◇` / `↳` | Worker | The card body nests beneath the header (`  │ `), closing on `  └ `. |
 | `✦` (error) | Terminal error | Clio's account of why the turn ended, in the error token. |
 | `✓` / `✗` / `⊘` / `⚠` | Receipt | Closes a settled turn with its outcome. |
@@ -336,12 +346,12 @@ Blocks of different kinds are separated by one blank row inside a turn, as turns
 
 ✦ I'll read the retry module and its test first.
 
-▸ reading src/net/retry.ts · lines 1-10 of 10 ✓ · 42ms
-▸ searching for `Math.random` in src · 1 match ✓ · 42ms
+▸ read src/net/retry.ts · lines 1-10 of 10 ✓ · 42ms
+▸ searched for `Math.random` in src · 1 match ✓ · 42ms
 
 ✦ Found it. The test races the jitter; I'll make it injectable.
 
-▸ editing src/net/retry.ts · +5 -2 ✓ · 18ms
+± edited src/net/retry.ts · +5 -2 ✓ · 18ms
   │ - 1 export async function retry<T>(fn, attempts = 3) {
   │ + 1 export async function retry<T>(
   │ … 8 rows · /view
@@ -359,15 +369,40 @@ Supplied reasoning stays in stream order on the `reason` gutter rail, dim and it
 
 Each call owns one stable action row. Argument fragments stay hidden until the call is formed. A formed call becomes ready, then running, then settles with its actual outcome. Cumulative output replaces the live preview; late partials cannot overwrite a settled result. The same policy applies during replay.
 
+Every call belongs to one class, resolved by the registry in [src/tools/presentation.ts](../../src/tools/presentation.ts). The class gives the row its gutter mark, its verbs and the facts it may state, and the renderers read the class instead of branching on a tool name. A running row uses the progressive verb and ends in the live mark and its elapsed time (`● 3.4s`); a settled row uses the past tense, even when it failed. Marks are `dim`, so the shape tells the acts apart and color only confirms the outcome.
+
+| Class | Tools | Mark | Running / settled | Row facts |
+| --- | --- | --- | --- | --- |
+| observe | read, ls, data, credential_present | `▸` | reading / read | path, `lines a-b of N`, size, resource kind |
+| search | grep, find, code_nav | `▸` | searching / searched | pattern, scope, inline flags, match count |
+| knowledge | context, clio_docs, clio_library, evidence, ledger, self_compact | `§` | consulting / consulted | scope, query, section count |
+| mutate | edit, write, artifact | `±` | editing / edited, writing / wrote | path, `+a -r`, `new file` |
+| execute | bash, run_script, verify, git, panes | `$` | running / ran | command, exit code, lines or bytes |
+| network | web_fetch, web_read | `↗` | fetching / fetched | host and path tail, status, type, bytes |
+| delegate | dispatch, monitor, steer, tasks, consult | `◆` | delegating / delegated | agent, task, run id, execution tally |
+| interaction | ask_user, decide, limitation | `?` | asking / asked | the question and its answer |
+| external | gateway find, describe and call; `mcp_*`; `extension_*` | `⇢` | calling / called | server and tool, `via gateway`, count or bytes |
+
+Per-tool verbs refine a class where the act differs: `listed`, `found`, `navigated`, `inspected`, `checked`, `wrote`, `steered`, `planned`/`started`/`completed` for tasks, `decided`, `noted`, and `searched capabilities` for a gateway find. Verbs also follow the operation a call's arguments name: a web request other than GET is `sent`, a steer that cancels reads `cancelled`, a monitor call `waited on`, `collected` or `peeked at` its runs, a data call `selected from` or `validated` its file, and a dispatch `listed fleet agents` or `applied` a compete winner. A flag that is on reads as its name (`ignore_case`, `detach`). A gateway `call` reads as the capability it reached: a builtin keeps its own class and adds `via gateway`, and an MCP or extension capability reads `server › tool`. Names in the MCP and extension namespaces are external wherever they appear. An unknown dynamic tool falls back by the action class admission gave it: read observes, write mutates, execute and system changes execute, dispatch delegates, and anything else is external. The action class is persisted with the result, so `/resume` classifies the call the way the live row did.
+
 ```text
-▸ ran `cat README.md` · exit 0 ✓ · 230ms
+▸ read src/net/retry.ts · lines 1-40 of 120 · 1.4KB of 4.3KB ✓ · 42ms
+▸ searched for `Math.random` in src · context 2 · glob *.ts · 1 match ✓ · 42ms
+± edited tests/net/retry.test.ts ✗ · 42ms
+$ ran `pnpm run lint` · exit 1 ✗ · 4.1s
+↗ fetched nodejs.org/api/globals.html · 200 · markdown · 12.1KB ✓ · 820ms
+§ consulted evidence list ✓ · 42ms
+? asked Delete src/net/legacy-retry.ts or keep it deprecated? → Keep deprecated ✓ · 9.4s
+⇢ called github › search_issues · query "flaky retry test" · state open · via gateway ✓ · 1.9s
 ```
 
-The action row states the facts the call's arguments carry: a command, a path, a search pattern and its scope (``searching for `needle` in src``), a single dispatch's agent and task. Argument rows under it list only what the row could not show whole, so a short command or path is never repeated as `command ›` or `path ›`. A settled read drops its requested `offset`/`limit` because the row states the range it returned. A successful edit or write carries its change facts (`+5 -2`) on the row in every style and never previews its replacement payload; a failed one keeps the payload, bounded, because the text that did not match is the diagnosis. A row too long for the terminal wraps with a hanging indent into the content column.
+The row states the facts the call's arguments and structured result carry. Scalar arguments up to 40 characters ride the row as `key value` (`context 2`, `glob *.ts`, quoted when they contain spaces); only long, multiline or structured arguments become `key ›` rows, and a list of short values reads as one `a · b` row. A field the row states is never repeated beneath it unless the row had to cut or flatten it, so a dispatch whose task the row shortened lists `task ›` and never `agent ›`. The row's object grows with the terminal from 60 characters to 120, and a question to the operator runs to 160. A URL reads as its host and path tail and shortens to fit a narrow row (`github.com/…/issues/412` at 40 columns) rather than splitting mid-path. A settled read drops its requested `offset`/`limit` because the row states the range it returned, and a fetch drops the `format` its facts state.
 
-A skill load is its own action identity. A settled `context(scope="skills")` load reads `▸ loaded skill <name>` with the name in `accent`, states who asked for it (`by operator` for `/skill`, the selector or a marketplace install; `by recipe` for a bound worker; `by model` under model activation), `narrows tools` when the skill declares a tool surface, and `drifted` in `warning` when its content no longer matches its recorded hash. Standard and Detailed add the skill's description as one nested row. A load refused for trust, installation or activation reasons settles as a failed row carrying the refusal. An operator prompt that starts with `/skill <name>` leads with that command in `accent`.
+A failed command states its exit status once, as the `exit N` fact, and its body drops the status line (`bash: command failed (exit 1)`, `Command exited with code 1`, a timeout or an abort) unless that line carries the only diagnosis. A row states an exit code only when the result carries one. A blocked call's verb is `blocked` and its tail names the refusal. A failed call always shows its bounded body, so the row never excerpts it. A successful edit or write carries its change facts (`+5 -2`) on the row in every style and never previews its replacement payload; a failed one keeps the payload, bounded, because the text that did not match is the diagnosis. A question to the operator reads `question → answer`; a round of several questions, or an interview's closing decisions, nests one `question → answer` row each, and the model's copy of the interview never renders. A dispatch row states its execution tally (`3 ok`, `4 ok, 1 failed`) and the validation quality of its receipts. A row too long for the terminal wraps with a hanging indent into the content column.
 
-Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. In Compact, a run of consecutive successful reads, searches, globs or listings folds into one row (`▸ read 3 files ✓`) with the targets on one nested row. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
+A skill load is its own action identity. A settled `context(scope="skills")` load reads `§ loaded skill <name>` with the name in `accent`, states who asked for it (`by operator` for `/skill`, the selector or a marketplace install; `by recipe` for a bound worker; `by model` under model activation), `narrows tools` when the skill declares a tool surface, and `drifted` in `warning` when its content no longer matches its recorded hash. Standard and Detailed add the skill's description as one nested row. A load refused for trust, installation or activation reasons settles as a failed row carrying the refusal. An operator prompt that starts with `/skill <name>` leads with that command in `accent`.
+
+Successful reads and shell commands keep raw content out of Standard. Mutations show bounded diffs, and failures keep actionable context in every preset. Compact folds by class: a run of consecutive successful observations and searches becomes one `▸ explored 3 files, 2 searches ✓` row, knowledge lookups one `§ consulted 5 sources ✓` row, and changes one `± edited 2 files · +6 -2 ✓` row with each file's change facts; the targets nest beneath the row. Commands, fetches, delegations and questions never fold, and a failure, a skill load, and a call whose result was cut, offloaded or evicted keep their own rows. `/view transcript` exposes full available arguments and results. Approval rows show the sanitized action and target, with no running spinner. Truncation, context exclusion, offload paths, refusal, cancellation, and missing results remain visible.
 
 ### 6.4 Editor Rail
 The right-hand label shows `model · thinking`. Thinking level colors map as: `off` (dim), `minimal`/`low` (muted), `medium`/`high` (`reason` purple), and `xhigh`/`max`/`on` (bold `reason` purple).
