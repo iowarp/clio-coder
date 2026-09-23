@@ -26,16 +26,28 @@ function formatStatusElapsed(elapsedMs: number): string {
 	return formatCompactMs(elapsedMs);
 }
 
-function elapsedSince(status: AgentStatus, now: number): string {
+/**
+ * A counter that keeps running, in whole seconds, and nothing under one
+ * second. A live `578ms` or `4.2s` changed on every refresh, so the footer row
+ * was rewritten several times a second for a digit nobody reads; a whole
+ * second changes once a second and a sub-second wait needs no number at all.
+ */
+function formatLiveElapsed(elapsedMs: number): string | null {
+	if (elapsedMs < 1_000) return null;
+	const seconds = Math.floor(elapsedMs / 1_000);
+	return seconds < 10 ? `${seconds}s` : formatCompactMs(seconds * 1_000);
+}
+
+function elapsedSince(status: AgentStatus, now: number): string | null {
 	// A running tool times from its own start, not from turn start, so the
 	// footer never shows turn-elapsed as tool-elapsed.
 	const from =
 		status.phase === "tool_running" && status.toolStartedAt !== undefined ? status.toolStartedAt : status.since;
-	return formatStatusElapsed(Math.max(0, now - from));
+	return formatLiveElapsed(Math.max(0, now - from));
 }
 
 function noProgressSince(status: AgentStatus, now: number): string {
-	return formatStatusElapsed(Math.max(0, now - status.lastMeaningfulAt));
+	return formatLiveElapsed(Math.max(0, now - status.lastMeaningfulAt)) ?? "under a second";
 }
 
 function coreVerb(status: AgentStatus): { text: string; toneHint: VerbRender["toneHint"] } | null {
@@ -98,14 +110,14 @@ export function resolveFooterVerb(status: AgentStatus, now: number, terminalCols
 	if (status.phase === "stuck") {
 		const elapsed = elapsedSince(status, now);
 		return {
-			text: terminalCols < 60 ? "No output" : `No output · ${elapsed} · Esc to cancel`,
+			text: terminalCols < 60 ? "No output" : `No output${elapsed === null ? "" : ` · ${elapsed}`} · Esc to cancel`,
 			toneHint: "error",
 		};
 	}
 	const showElapsed = terminalCols >= 60;
 	if (!showElapsed) return core;
 	const elapsed = elapsedSince(status, now);
-	return { text: `${core.text} · ${elapsed}`, toneHint: core.toneHint };
+	return elapsed === null ? core : { text: `${core.text} · ${elapsed}`, toneHint: core.toneHint };
 }
 
 /**
@@ -127,7 +139,8 @@ function inlineParts(
 		return { text, hint, toneHint: core.toneHint };
 	}
 	if (terminalCols < 50 || status.phase === "tool_blocked") return { text, hint: null, toneHint: core.toneHint };
-	return { text, hint: `· ${elapsedSince(status, now)}`, toneHint: core.toneHint };
+	const elapsed = elapsedSince(status, now);
+	return { text, hint: elapsed === null ? null : `· ${elapsed}`, toneHint: core.toneHint };
 }
 
 /**

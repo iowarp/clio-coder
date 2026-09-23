@@ -8,7 +8,7 @@ The governing principle: **the user reads state from color, structure from frame
 
 ## Output styles
 
-**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
+**Alt+O** cycles **Compact → Standard → Detailed → Compact**. Standard is the default, so the first press reveals Detailed. The current style appears in the footer. Cycling applies immediately to the current session, including streaming output and history. Settled entries are rendered ahead in the two styles not on screen during idle time, so the first press into a style costs what a return to one costs. Save a preferred startup style through **/settings interface → Output style → Apply and save globally**, or `clio-coder configure --section panes`.
 
 | Content | Compact | Standard | Detailed |
 | --- | --- | --- | --- |
@@ -202,7 +202,7 @@ The Clio screen maintains a responsive, four-zone structure: the launchpad / ses
 
 In fullscreen mode, `PageUp` and `PageDown` scroll one viewport, `Ctrl+G Home` and `Ctrl+G End` jump to its bounds, `Ctrl+Up` and `Ctrl+Down` jump between semantic prompts; plain Home/End edit the composer, and the mouse wheel scrolls the transcript. Dragging the scrollbar thumb moves the viewport directly. `interface.fullscreenScrollbar` is `hidden`, `auto` (visible during interaction), or `always`. Manual scrolling suspends follow-end so new output does not steal the operator's position; returning to the bottom resumes it. Both fullscreen settings are restart-scoped because Clio constructs its terminal renderer and component graph once at startup.
 
-`interface.smoothStreaming` controls presentation-only pacing of derived assistant text and thinking. The shipped `off` value uses the immediate 16 ms coalescer. `auto` paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. `on` explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.
+`interface.smoothStreaming` controls presentation-only pacing of derived assistant text and thinking. The default `auto` paces only on a capable local TTY and bypasses pacing for non-TTY, SSH, multiplexers, CI, screen-reader/reduced-motion markers, or observed stdout backpressure. `on` explicitly requests grapheme-safe pacing, while still stopping frame production behind stdout backpressure. `off` uses the 16 ms coalescer alone. Paced or not, the first delta of a stream is shown whole in the frame it arrives, and the coalescer asks for a frame on the leading edge of a quiet window, so only the deltas inside one window wait for its end. Raw provider wrappers never enter the panel, canonical events and persistence remain synchronous, and tool/message/turn/abort/retry/submit/teardown boundaries drain visible state before they continue.
 
 Interactive startup uses one terminal lease across both boot stages. Stage 0 owns the terminal, renderer, root host, exact editor instance, input decoder, raw mode, resize subscription, protocol queries, signals, and stop lifecycle, and commits a measured minimal frame while services hydrate. Hydration synchronously swaps the root and input/signal delegates without reconstructing the editor or initializing terminal protocols again. Early Enter submissions become immutable, visibly queued admissions and drain once through the ordinary command pipeline; a later draft and cursor stay in the same editor. Boot failure or an early signal closes the lease exactly once, restores the terminal, and prints recoverable queued input and draft text. `CLIO_CODER_INSTANT_SHELL=0` selects the legacy fully hydrated first frame; ACP, headless, ordinary non-TTY invocation, and subcommand execution never acquire the lease. An explicit `CLIO_CODER_INTERACTIVE=1` retains its established force-interactive behavior on a non-TTY stream.
 
@@ -268,21 +268,30 @@ Starting Clio · you can type now
   - Preparing turn: `Clio has your prompt and is preparing the turn`
   - Compacting: `Clio is compacting the session context`
 - **Bottom Rail Affordance**: During normal drafting, the bottom rail remains clean. In `CONFIRM` mode, the bottom rail displays fitted decision keys (`confirmRailHint` via `src/interactive/permission-hint.ts`: `Enter allow`, or `Backspace clear draft to allow` if a draft is present; `Esc deny`; `s stop turn`; `v inspect mutation`; standing approval terms toggle via `?` on the permission card itself).
-- **Rail Dynamics & Safety Accents**: `renderEditorRail` renders subtle pulse animations when Clio is working or in attention phase (unless reduced motion or dumb terminal is detected), and applies fixed bold `editorDanger` endcaps whenever `fullAuto` is active.
+- **Rail Dynamics & Safety Accents**: `renderEditorRail` renders subtle pulse animations when Clio is working or in attention phase (unless reduced motion or dumb terminal is detected), and applies fixed bold `editorDanger` endcaps whenever `fullAuto` is active. The pulse steps on the same 120 ms animation clock as the footer spinner (`animationStep` in `theme/glyphs.ts`), so a frame that only appends streamed text leaves the rail untouched.
 
 ### 5.3 Progressively Disclosed Footer
 
 Source: `src/interactive/footer/dashboard.ts`, `src/interactive/footer/pages.ts`.
 
 - **Compact Mode (Two-Line Ambient Strip)**:
-  - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · Target/model identity (`fitIdentityLabel`) · Selected model’s weekly quota (`weekly N% left`, when the local credential owner and model group are known) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right.
+  - **Line 1 (Workload & Identity)**: Active phase (`accent` e.g. `Ready`) and worker counts (`agent` e.g. `· 2 active`) · Target/model identity (`fitIdentityLabel`) · Selected model’s weekly quota (`weekly N% left`, when the local credential owner and model group are known) · Thinking level (`reason`) on the left; Context meter bar (8–14 cells) and token occupancy (`used / contextWindow`) on the right. The phase spinner steps once per 120 ms animation step, however often the footer refreshes, and a live elapsed counter shows whole seconds (`Writing · 3s`) and nothing under one second.
   - **Line 2 (Status & Hints)**: Persistent workspace cwd and Git branch/dirty (`*`) on the left; rotating shortcut hints on the right. Urgent input prompts (`Ctrl+C again to quit`, `Ctrl+G → choose key`), active notices (`• text`), and demo tips borrow only the hint area. Quota never occupies this row.
 - **Expanded Mode (`Alt+U`)**: Renders across one-quarter of the viewport (minimum 8 rows), keeping the composer anchored below. Repeated presses cycle through three responsive pages (`DASHBOARD_PAGES`) and closed:
   1. `Activity`: Live agent phase, tool counts, session metrics, active worker cards (route, task, token usage, tool calls, timing, budget, `/view dispatch:<id>`), and finished worker history.
   2. `Context`: Context meter bar and category occupancy grid (system, tools, files, turns, memory), compaction/cache telemetry, headroom.
   3. `Status`: A session line (recorded tokens and tracked cost) above one compact row per connected subscription account (`renderQuotaAccounts`, `src/interactive/quota-view.ts`), then Cost & Connections (session cost, MCP servers, plugins, extensions) and Local Machine metrics (CPU, memory, disk I/O sampled on 2s cadence), plus memory bank entries and free tokens.
 
-### 5.4 State Choreography Table
+### 5.4 Frame Cost
+
+A frame costs the rows that changed, not the length of the session.
+
+- The transcript hands the layout its settled prefix and its live tail as two arrays. The prefix is the same array from frame to frame until another entry settles, the regular-screen root keeps its row buffer and skips the prefix rows it already holds, and pi-tui's `Container.render` returns one exact-size copy (tracked patch). At 2,000 entries a streamed frame allocates 231 KB on the regular screen and 405 KB fullscreen, down from 3.2 MB and 2.1 MB.
+- Every settled entry, replay blocks included, keeps its render for the last three layouts (width, height budget and style). Idle time renders settled entries ahead in the two styles not on screen, a few milliseconds per step and never while a turn streams.
+- The transcript renderers are warmed once after the first hydrated frame, so the first Markdown render in the process, 13 to 17 ms cold, does not land inside the first answer.
+- Live marks step on one 120 ms clock: the footer spinner, the composer rail pulse, and the 100 ms tick that advances a running tool's, live reasoning's or a pending worker's elapsed. A streamed token's frame rewrites only the transcript rows that changed.
+
+### 5.5 State Choreography Table
 
 State is signaled through the status pill in the footer and matches the following table:
 

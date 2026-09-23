@@ -31,6 +31,7 @@ import {
 	renderToolAwaitingApproval,
 	renderToolExecution,
 	renderToolPreview,
+	type ToolExecutionFinished,
 } from "./renderers/tool-execution.js";
 import { renderWorkerEntryLines } from "./renderers/worker-entry.js";
 import {
@@ -377,6 +378,14 @@ export interface ChatPanelOptions {
 	 * instead of the terminal's bounded view.
 	 */
 	unboundedToolBodies?: boolean;
+	/**
+	 * Run `step` when the process is otherwise idle, again after each call that
+	 * returns true. The panel uses it to render settled entries in the two
+	 * output styles it is not showing, a few milliseconds at a time, so the
+	 * first Alt+O into a style is as cheap as a return to one. Omitted, nothing
+	 * is rendered ahead.
+	 */
+	scheduleIdle?: (step: () => boolean) => void;
 }
 
 /**
@@ -1237,6 +1246,69 @@ function renderEntryLines(
 	return joinTurnBlocks(blocks);
 }
 
+const OUTPUT_STYLE_CYCLE: readonly OutputStyle[] = ["compact", "standard", "detailed"];
+
+const WARM_ANSWER = [
+	"## Warm",
+	"",
+	"A paragraph with **bold**, `code`, a [link](https://example.com) and $x^2$.",
+	"",
+	"- one item",
+	"- another item",
+	"",
+	"```ts",
+	'export const answer = 42; // "warm"',
+	"```",
+].join("\n");
+
+/**
+ * Render one representative answer and one action row of each common kind
+ * through the transcript's own renderers, in every output style, and throw the
+ * rows away. The first Markdown render in a process pays for the lexer, the
+ * LaTeX extension, code ink and the compiler: 13 to 17 ms measured in a fresh
+ * process, against 0.06 ms warm. Paid mid-stream, that was a stall in the
+ * first paragraph of the first answer, and the p99 streamed frame of a short
+ * session. Call once after the first hydrated frame, never while streaming.
+ */
+export function warmTranscriptRender(width: number): void {
+	const safeWidth = Math.max(20, Math.floor(width));
+	renderUserLines("Warm the transcript.", safeWidth, "committed");
+	renderTextSegmentLines({ kind: "text", text: WARM_ANSWER, finalized: true }, safeWidth - PROSE_GUTTER_WIDTH);
+	const calls: ToolExecutionFinished[] = [
+		{
+			toolCallId: "warm-read",
+			toolName: "read",
+			args: { path: "src/index.ts" },
+			result: { content: [{ type: "text", text: "1  export const a = 1;" }], details: {} },
+			isError: false,
+			durationMs: 4,
+		},
+		{
+			toolCallId: "warm-bash",
+			toolName: "bash",
+			args: { command: "pnpm test" },
+			result: { content: [{ type: "text", text: "ok" }], details: { exitCode: 0 } },
+			isError: false,
+			durationMs: 900,
+		},
+		{
+			toolCallId: "warm-edit",
+			toolName: "edit",
+			args: { path: "src/index.ts", edits: [{ oldText: "a = 1", newText: "a = 2" }] },
+			result: {
+				content: [{ type: "text", text: "Edited src/index.ts" }],
+				details: { diff: "-1 export const a = 1;\n+1 export const a = 2;" },
+			},
+			isError: false,
+			durationMs: 6,
+		},
+	];
+	for (const style of ["standard", "compact", "detailed"] as const) {
+		const detail = transcriptDetail(style);
+		for (const call of calls) renderToolPreview(call, safeWidth, detail);
+	}
+}
+
 export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	const transcript: TranscriptEntry[] = [];
 	/** Assignment to its placed block, in placement order, so a streaming delta is O(1) to route. */
@@ -1296,18 +1368,34 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 */
 	let frozen: { lines: string[]; through: number; key: string } | null = null;
 	const unboundedToolBodies = options.unboundedToolBodies === true;
+	/**
+	 * Settled entries are rendered ahead, in idle time, in the styles Alt+O
+	 * cycles to, into the same per-entry cache a revisit reads. A first visit to
+	 * a style used to render every entry on the keystroke: 195 ms at 2,000
+	 * entries, against about 1 ms for a style already shown. `next` is the first
+	 * entry not yet rendered ahead; an invalidation or an insertion behind it
+	 * moves it back. Each step spends at most a few milliseconds, and the
+	 * scheduler runs steps only while nothing streams.
+	 */
+	let prerender: { width: number; terminalRows: number; style: OutputStyle; next: number } | null = null;
+	let prerenderScheduled = false;
+	const PRERENDER_STEP_MS = 3;
 
 	const markDirty = (): void => {
 		dirty = true;
 	};
 	const invalidateEntryCache = (entry: TranscriptEntry): void => {
 		entryRenderCache.delete(entry);
-		if (frozen !== null && transcript.indexOf(entry) < frozen.through) frozen = null;
+		if (frozen === null && prerender === null) return;
+		const index = transcript.indexOf(entry);
+		if (frozen !== null && index < frozen.through) frozen = null;
+		if (prerender !== null && index >= 0 && index < prerender.next) prerender.next = index;
 	};
 	/** Full drop of both render caches; used by the toggle paths that touch many entries. */
 	const clearRenderCaches = (): void => {
 		entryRenderCache.clear();
 		frozen = null;
+		if (prerender !== null) prerender.next = 0;
 	};
 	/**
 	 * A mutation is about to land on the tail entry without an explicit
@@ -1664,7 +1752,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			if (i > 0 && !stacksOnPrevious) out.push("");
 			const renders = entryRenderCache.get(entry);
 			const cached = renders?.get(baseKey);
-			const cacheable = i >= transcript.length - capacity && entry.role !== "replayBlock" && entryIsStable(entry);
+			// A replay block that is not live is a pure function of the render key,
+			// so it caches like any settled entry. Excluding every replay block made
+			// a long session's notices and `!` commands re-render on each rebuild:
+			// 1,400 of them turned a 0.7 ms warm Alt+O revisit into 45 ms.
+			const cacheable = i >= transcript.length - capacity && entryIsStable(entry);
 			if (cacheable && cached !== undefined) {
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
@@ -1713,7 +1805,71 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		renderedRunningTool = sawRunningTool;
 		dirty = false;
 		options.onRenderMetrics?.({ durationMs: performance.now() - startedAt, cacheHit: false, entriesRendered });
+		schedulePrerender(width, terminalRows, detail.style);
 		return cachedRegions;
+	};
+
+	const prerenderStep = (): boolean => {
+		const job = prerender;
+		if (job === null) {
+			prerenderScheduled = false;
+			return false;
+		}
+		const deadline = performance.now() + PRERENDER_STEP_MS;
+		let index = Math.max(job.next, transcript.length - entryCacheCapacity());
+		let blocked = false;
+		for (; index < transcript.length; index += 1) {
+			if (performance.now() >= deadline) break;
+			const entry = transcript[index];
+			if (entry === undefined) continue;
+			// Resume here once the entry settles; stepping past it would leave
+			// every streamed answer out of the styles rendered ahead.
+			if (!entryIsStable(entry)) {
+				blocked = true;
+				break;
+			}
+			for (const style of OUTPUT_STYLE_CYCLE) {
+				if (style === job.style) continue;
+				const key = `${job.width}|${job.terminalRows}|${style}`;
+				const renders = entryRenderCache.get(entry);
+				if (renders?.has(key)) continue;
+				const lines = renderEntryLines(
+					entry,
+					job.width,
+					now(),
+					unboundedToolBodies,
+					transcriptDetail(style),
+					job.terminalRows,
+				);
+				const byKey = renders ?? new Map<string, string[]>();
+				byKey.set(key, lines);
+				if (byKey.size > RENDERS_PER_ENTRY) {
+					const oldestKey = byKey.keys().next().value;
+					if (oldestKey !== undefined) byKey.delete(oldestKey);
+				}
+				if (renders === undefined) entryRenderCache.set(entry, byKey);
+			}
+		}
+		job.next = index;
+		const more = !blocked && index < transcript.length;
+		if (!more) prerenderScheduled = false;
+		return more;
+	};
+	const schedulePrerender = (width: number, terminalRows: number, style: OutputStyle): void => {
+		if (options.scheduleIdle === undefined || unboundedToolBodies) return;
+		if (
+			prerender === null ||
+			prerender.width !== width ||
+			prerender.terminalRows !== terminalRows ||
+			prerender.style !== style
+		) {
+			prerender = { width, terminalRows, style, next: 0 };
+		} else if (prerender.next >= transcript.length) {
+			return;
+		}
+		if (prerenderScheduled) return;
+		prerenderScheduled = true;
+		options.scheduleIdle(prerenderStep);
 	};
 
 	/**
@@ -1756,6 +1912,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// A frozen prefix is a run of indices. Inserting inside it renumbers
 				// every entry behind the cut, so the freeze has to go.
 				if (frozen !== null && at < frozen.through) frozen = null;
+				if (prerender !== null && at < prerender.next) prerender.next = at;
 			}
 			markDirty();
 		},

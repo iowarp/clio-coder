@@ -11,7 +11,7 @@ import { type EditorRailState, renderEditorRail } from "./editor-rails.js";
 import { fitHintEntries } from "./overlay-frame.js";
 import { type PermissionInspectionHint, permissionHintEntries } from "./permission-hint.js";
 import type { ClioTheme } from "./theme/index.js";
-import { clioTheme, editorTheme, GLYPH } from "./theme/index.js";
+import { ANIMATION_STEP_MS, animationStep, clioTheme, editorTheme, GLYPH } from "./theme/index.js";
 import type { TargetIdentity } from "./theme/labels.js";
 import type { TurnPreparationPhase } from "./turn-state.js";
 
@@ -214,7 +214,9 @@ export class ClioEditor extends Editor {
 				process.env.CLIO_CODER_SCREEN_READER !== "1" &&
 				process.env.TERM !== "dumb" &&
 				process.env.NO_COLOR === undefined,
-			now: this.chrome.getAnimationTime?.() ?? performance.now(),
+			// The pulse steps with the footer spinner rather than on every frame, so
+			// a frame that only appends streamed text leaves the rail untouched.
+			now: this.chrome.getAnimationTime?.() ?? animationStep(performance.now()) * ANIMATION_STEP_MS,
 		};
 
 		// Normal composition needs no mode or model label on the input rail.
