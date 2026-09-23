@@ -90,9 +90,7 @@ try {
 			// replaced before its bytes arrived is cancelled, not broken; a missing one is a 404 below.
 			if (
 				request.failure()?.errorText === "net::ERR_ABORTED" &&
-				(path === "/api/events" ||
-					/^\/api\/traces\/runs\/[^/]+\/live$/.test(path) ||
-					request.resourceType() === "image")
+				(path === "/api/events" || /^\/api\/traces\/runs\/[^/]+\/live$/.test(path) || request.resourceType() === "image")
 			)
 				return;
 			failures.push(
