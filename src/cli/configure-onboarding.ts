@@ -60,10 +60,12 @@ import {
 	deriveTargetId,
 	describeAuthStatus,
 	inventoryGap,
+	inventoryNote,
 	modelChoiceRefusal,
 	modelSupportsThinking,
 	normalizeUrl,
 	PROTOCOL_COMPAT_RUNTIME_IDS,
+	preferredModelFor,
 	probeReadings,
 	railPrefix,
 	resolveSupportedWireModels,
@@ -638,15 +640,10 @@ const MODEL_STEP: Step = {
 		const inventory = await modelInventory(answers, runtime);
 		// A catalog-ordered list has no head worth recommending: openai's first of
 		// 38 ids is `gpt-4` because g sorts early.
-		const catalogOrdered = support.modelSource === "catalog";
-		const preferred =
-			answers.model ??
-			(inventory.source === "probe" ? inventory.models[0] : support.defaultModel) ??
-			(catalogOrdered ? undefined : inventory.models[0]) ??
-			undefined;
+		const preferred = answers.model ?? preferredModelFor(inventory, support);
 
 		if (inventory.models.length === 0) {
-			wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }));
+			wizard.presenter.warn(inventoryGap(runtime, { url: answers.url }, inventory.probeError));
 			const result = await promptText({
 				heading: ["", chalk.bold("Which model?")],
 				initial: preferred ?? "",
@@ -671,13 +668,7 @@ const MODEL_STEP: Step = {
 			heading: [
 				"",
 				chalk.bold("Which model?"),
-				chalk.dim(
-					inventory.source === "probe"
-						? "read live from the target just now"
-						: inventory.source === "cache"
-							? "cached model snapshot; not verified in this run"
-							: "model hints; not a live account catalog",
-				),
+				chalk.dim(inventoryNote(runtime, inventory) ?? "read live from the target just now"),
 			],
 			choices: inventory.models.map((model) => {
 				const state = inventory.modelStates?.[model]?.state;

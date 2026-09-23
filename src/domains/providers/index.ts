@@ -77,10 +77,14 @@ export {
 	type ModelResidency,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
+	modelListNoteForStatus,
 	modelLoadStateLabel,
 	modelResidencyForStatus,
 	type ProviderModelCandidate,
 	type ProviderModelSource,
+	runtimeListsModelsLive,
+	type UnverifiedModelListOrigin,
+	unverifiedModelListNote,
 } from "./model-discovery.js";
 export {
 	inferLocalModelFamily,

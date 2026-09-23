@@ -1,9 +1,9 @@
 import type { Api, Model } from "../../../../engine/types.js";
 
-import { listCatalogModelsForRuntime, synthesizeCatalogBackedModel } from "../../catalog.js";
+import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type { ProbeContext, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -29,9 +29,6 @@ const openaiCodexRuntime: RuntimeDescriptor = {
 	apiFamily: "openai-codex-responses",
 	auth: "oauth",
 	defaultCapabilities,
-	async probeModels(_target: TargetDescriptor, _ctx: ProbeContext): Promise<string[]> {
-		return listCatalogModelsForRuntime("openai-codex").map((model) => model.id);
-	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
 			target,

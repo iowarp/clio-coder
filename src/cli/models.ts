@@ -5,6 +5,7 @@ import { ensureClioState } from "../domains/lifecycle/index.js";
 import type { ProvidersContract, TargetStatus } from "../domains/providers/contract.js";
 import {
 	modelCandidatesForStatus,
+	modelListNoteForStatus,
 	ProvidersDomainModule,
 	resolveModelCapabilities,
 } from "../domains/providers/index.js";
@@ -21,11 +22,15 @@ export interface ModelRow {
 	maxTokens: number;
 	reasoning: boolean;
 	state: string;
+	/** Present when this target's list is not the provider's live answer: what it is instead, and why. */
+	note?: string;
 }
 
 const HELP = `clio-coder models [search] [--target <id>] [--json] [--offline]
 
-List live-discovered models for configured targets.
+List the models each configured target serves. A target whose provider lists
+its models live is asked; when it cannot be asked or does not answer, the list
+is the cached list or the provider catalog, with a note saying why.
 
 Options:
   --offline   use cached/configured/catalog model hints without probing targets
@@ -124,6 +129,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 	for (const status of entries) {
 		const runtimeId = status.runtime?.id ?? status.target.runtime;
 		const candidates = modelCandidatesForStatus(status);
+		const note = modelListNoteForStatus(status);
 		if (candidates.length === 0) {
 			const caps = resolveRowCapabilities(status, status.target.defaultModel ?? null, providers);
 			rows.push({
@@ -147,6 +153,7 @@ function collectRows(entries: ReadonlyArray<TargetStatus>, providers: ProvidersC
 				source: candidate.source,
 				state: candidate.loadState ?? "-",
 				...formatCapabilities(caps),
+				...(note ? { note } : {}),
 			});
 		}
 	}
@@ -242,7 +249,10 @@ function modelTableLines(rows: ReadonlyArray<ModelRow>): string[] {
 			.map((value, col) => value.padEnd(widths[col] ?? 0))
 			.join(COLUMN_GAP)
 			.trimEnd();
-	return [formatLine(headers), ...cells.map(formatLine)];
+	const notes = new Map<string, string>();
+	for (const row of rows) if (row.note && !notes.has(row.targetId)) notes.set(row.targetId, row.note);
+	const noteLines = [...notes].map(([targetId, note]) => `${targetId}: ${note}`);
+	return [formatLine(headers), ...cells.map(formatLine), ...(noteLines.length > 0 ? ["", ...noteLines] : [])];
 }
 
 function renderRows(rows: ReadonlyArray<ModelRow>): void {

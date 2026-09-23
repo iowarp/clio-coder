@@ -7,14 +7,28 @@ import { Readable } from "node:stream";
 import { after, afterEach, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { modelChoiceRefusal, resolveSupportedWireModels } from "../../src/cli/configure-target.js";
+import {
+	inventoryNote,
+	modelChoiceRefusal,
+	preferredModelFor,
+	resolveSupportedWireModels,
+} from "../../src/cli/configure-target.js";
 import { boundedExternalDiagnostic } from "../../src/core/external-diagnostic.js";
 import type { SafeCommandResult } from "../../src/core/safe-exec.js";
+import {
+	listKnownModelsForRuntime,
+	recordTargetModelSnapshot,
+	runtimeListsModelsLive,
+} from "../../src/domains/providers/index.js";
 import antigravityCodeRuntime, {
 	ANTIGRAVITY_MAX_DISCOVERED_MODELS,
 	parseAntigravityModelCatalogDetails,
 	probeAntigravityModelCatalog,
 } from "../../src/domains/providers/runtimes/antigravity/antigravity-code.js";
+import anthropicMaxRuntime from "../../src/domains/providers/runtimes/cloud/anthropic-max.js";
+import deepseekRuntime from "../../src/domains/providers/runtimes/cloud/deepseek.js";
+import openaiCodexRuntime from "../../src/domains/providers/runtimes/cloud/openai-codex.js";
+import type { ProbeResult } from "../../src/domains/providers/types/runtime-descriptor.js";
 import {
 	ANTIGRAVITY_MAX_STREAM_BYTES,
 	ANTIGRAVITY_MAX_STREAM_LINE_BYTES,
@@ -329,8 +343,11 @@ describe("Antigravity external subprocess contract", () => {
 		match(modelChoiceRefusal(runtime, target, "gemini-3.8-flash-high", inventory) ?? "", /does not advertise/);
 	});
 
-	it("keeps a static catalog authoritative for runtimes that do not declare live discovery", async () => {
-		isolated = await isolateClioEnv("clio-coder-catalog-first-");
+	// #390: this pinned the opposite order on purpose. A runtime with a static
+	// catalog was never probed, so a Gemini key saw every catalog model.
+	it("lets a live list replace a static catalog, and labels the catalog it falls back to", async () => {
+		isolated = await isolateClioEnv("clio-coder-live-first-");
+		let answer: ProbeResult = { ok: true, models: ["live-only"] };
 		let probed = 0;
 		const { externalAgentLoop: _external, ...base } = antigravityCodeRuntime;
 		const runtime = {
@@ -339,14 +356,52 @@ describe("Antigravity external subprocess contract", () => {
 			kind: "http" as const,
 			probe: async () => {
 				probed += 1;
-				return { ok: true, models: ["live-only"] };
+				return answer;
 			},
 		};
-		const inventory = await resolveSupportedWireModels(runtime, { id: "oa", runtime: "openai" });
-		equal(inventory.source, "catalog");
-		equal(probed, 0);
-		ok(inventory.models.length > 0);
-		ok(!inventory.models.includes("live-only"));
+		const live = await resolveSupportedWireModels(runtime, { id: "oa", runtime: "openai" });
+		equal(probed, 1);
+		equal(live.source, "probe");
+		deepStrictEqual(live.models, ["live-only"]);
+		equal(inventoryNote(runtime, live), null);
+
+		answer = { ok: false, error: "HTTP 503: Service Unavailable" };
+		const fallback = await resolveSupportedWireModels(runtime, { id: "oa-offline", runtime: "openai" });
+		equal(fallback.source, "catalog");
+		ok(fallback.models.length > 1 && !fallback.models.includes("live-only"));
+		equal(inventoryNote(runtime, fallback), "provider catalog, not verified live: HTTP 503: Service Unavailable");
+
+		// The last live answer for this target outranks the catalog, and says it is stale.
+		const cached = await resolveSupportedWireModels(runtime, { id: "oa", runtime: "openai" });
+		equal(cached.source, "cache");
+		deepStrictEqual(cached.models, ["live-only"]);
+		equal(inventoryNote(runtime, cached), "cached list, not verified live: HTTP 503: Service Unavailable");
+	});
+
+	it("never calls a catalog-backed runtime's list live", async () => {
+		isolated = await isolateClioEnv("clio-coder-catalog-backed-");
+		for (const runtime of [anthropicMaxRuntime, openaiCodexRuntime, deepseekRuntime]) {
+			equal(runtimeListsModelsLive(runtime), false, `${runtime.id} has no live model listing`);
+			const target = { id: runtime.id, runtime: runtime.id };
+			// No live answer was ever cached for these, so a snapshot cannot outrank the catalog.
+			recordTargetModelSnapshot(target, ["stale-id"]);
+			const inventory = await resolveSupportedWireModels(runtime, target);
+			equal(inventory.source, "catalog", runtime.id);
+			equal(inventoryNote(runtime, inventory), `provider catalog; ${runtime.id} does not list its models live`);
+		}
+		// #386: pi-ai 0.87.1's Anthropic catalog carries Opus 5.5; 0.86.1's stopped at claude-opus-5.
+		ok(listKnownModelsForRuntime("anthropic-max").includes("claude-opus-5-5"));
+	});
+
+	it("preselects a curated default the provider lists, and never a provider-ordered head", () => {
+		const live = { source: "probe" as const, models: ["mercury-edit-2", "mercury-2.5"] };
+		equal(preferredModelFor(live, { defaultModel: "mercury-2.5", modelSource: "runtime" }), "mercury-2.5");
+		equal(preferredModelFor(live, { defaultModel: "retired", modelSource: "runtime" }), "mercury-edit-2");
+		equal(preferredModelFor(live, { modelSource: "none" }), "mercury-edit-2");
+		equal(preferredModelFor(live, { modelSource: "catalog" }), undefined);
+		const catalog = { source: "catalog" as const, models: ["gpt-4", "gpt-5"] };
+		equal(preferredModelFor(catalog, { modelSource: "catalog" }), undefined);
+		equal(preferredModelFor(catalog, { defaultModel: "gpt-5", modelSource: "runtime" }), "gpt-5");
 	});
 
 	it("sends a literal one-turn stdin record and only allowlisted environment values", async () => {

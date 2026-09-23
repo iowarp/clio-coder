@@ -22,13 +22,14 @@ import {
 	isDispatchEligibleRuntime,
 	isOrchestratorEligibleRuntime,
 	ProvidersDomainModule,
+	runtimeListsModelsLive,
 } from "../domains/providers/index.js";
 import { closestRuntimeId, getRuntimeRegistry } from "../domains/providers/registry.js";
 import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.js";
 import type { CapabilityFlags } from "../domains/providers/types/capability-flags.js";
 import type { RuntimeTier } from "../domains/providers/types/runtime-descriptor.js";
 import { runConfigureCommand, runTargetRemove, runTargetRename } from "./configure.js";
-import { resolveSupportedWireModels } from "./configure-target.js";
+import { inventoryNote, resolveSupportedWireModels } from "./configure-target.js";
 import { printError, printOk } from "./shared.js";
 import { column, terminalColumns, truncate, wrapPlain } from "./text-layout.js";
 
@@ -367,15 +368,15 @@ async function runUse(args: ReadonlyArray<string>): Promise<number> {
 			);
 			return 1;
 		}
+		const note = inventoryNote(runtime, inventory);
 		if (inventory.models.length === 0) {
 			// Keep offline selection possible, but never imply that an unknown id was verified.
 			process.stderr.write(
 				`warning: could not verify model '${route.model}' for ${labels[role]}: target '${selectedTarget.id}' returned no model list; saving the id as written\n`,
 			);
-		} else if (inventory.source === "cache" || inventory.source === "legacy") {
-			process.stderr.write(
-				`warning: using ${inventory.source} model inventory for target '${selectedTarget.id}'; live availability was not verified\n`,
-			);
+		} else if (note !== null && (inventory.source !== "catalog" || runtimeListsModelsLive(runtime))) {
+			// A catalog is the whole answer for a runtime that cannot list live; anywhere else it is a fallback.
+			process.stderr.write(`warning: model list for target '${selectedTarget.id}' is the ${note}\n`);
 		}
 	}
 	// Re-read under the settings lock. A changed endpoint/default invalidates the

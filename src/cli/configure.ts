@@ -73,8 +73,10 @@ import {
 	defaultUrlFor,
 	deriveTargetId,
 	describeAuthStatus,
+	inventoryNote,
 	normalizeUrl,
 	PROTOCOL_COMPAT_RUNTIME_IDS,
+	preferredModelFor,
 	probeLines,
 	railPrefix,
 	resolveSupportedWireModels,
@@ -543,15 +545,14 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	seed.capabilities = { ...existing?.capabilities, ...seed.capabilities };
 	if (seed.auth) seed.auth = { ...existing?.auth, ...seed.auth };
 	const inventory = await resolveSupportedWireModels(runtime, seed, existing, args.apiKey);
-	const wireModels = inventory.models;
-	const model =
-		args.model ??
-		existing?.defaultModel ??
-		(inventory.source === "probe" ? wireModels[0] : support.defaultModel) ??
-		(support.modelSource === "catalog" ? undefined : wireModels[0]);
+	const model = args.model ?? existing?.defaultModel ?? preferredModelFor(inventory, support);
 	if (model === undefined && support.modelSource === "catalog") {
 		refuseCatalogSeededModel(runtime, support);
 		return 2;
+	}
+	const fallback = inventory.probeError !== undefined ? inventoryNote(runtime, inventory) : null;
+	if (model !== undefined && fallback !== null) {
+		process.stderr.write(`warning: model '${model}' was checked against the ${fallback}\n`);
 	}
 	if (!validateResolvedModel(runtime, seed, model, args.force, inventory)) return 2;
 	if (!validateContextWindowOverride(runtime, model, args.contextWindow, args.force)) return 2;
@@ -922,11 +923,7 @@ async function runTargetSetupInteractive(
 	// --model here the way the non-interactive path does. It does need to stop
 	// offering the alphabetically first id as though it were the recommended one.
 	const catalogOrdered = support.modelSource === "catalog";
-	model =
-		model ??
-		existing?.defaultModel ??
-		(inventory.source === "probe" ? wireModels[0] : support.defaultModel) ??
-		(catalogOrdered ? undefined : wireModels[0]);
+	model = model ?? existing?.defaultModel ?? preferredModelFor(inventory, support);
 	if (wireModels.length > 0) {
 		process.stdout.write("\nSelectable models:\n");
 		for (const [index, wireModel] of wireModels.entries()) {
@@ -935,8 +932,8 @@ async function runTargetSetupInteractive(
 				`  ${index + 1}. ${wireModel}${label && label !== wireModel ? ` — ${label}` : ""}${wireModel === model ? "  [default]" : ""}\n`,
 			);
 		}
-		if (inventory.source === "cache") process.stdout.write("  cached model snapshot (not verified in this run)\n");
-		if (inventory.probeError) process.stdout.write(`  live probe unavailable: ${inventory.probeError}\n`);
+		const note = inventoryNote(runtime, inventory);
+		if (note) process.stdout.write(`  ${note}\n`);
 		if (!model && catalogOrdered) {
 			process.stdout.write(`  listed in provider catalog order, which recommends none of them; pick one.\n`);
 		}

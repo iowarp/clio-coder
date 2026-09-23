@@ -16,6 +16,7 @@ import {
 	isOrchestratorEligibleRuntime,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
+	modelListNoteForStatus,
 	type ProviderModelSource,
 	resolveRuntimeTarget,
 	supportsAgentRoleTools,
@@ -172,6 +173,8 @@ export interface ModelRow {
 	apiFamily: string;
 	bucket: ModelBucket;
 	source: ModelSource;
+	/** Present when the target's list is not the provider's live answer: what it is instead, and why. */
+	sourceNote?: string;
 	loadState?: string;
 	loadStateDetail?: string;
 	authText: string;
@@ -389,6 +392,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 		const runtimeName = status.runtime?.displayName ?? target.runtime;
 		const runtimeShortName = shortRuntimeName(runtimeName);
 		const candidates = modelCandidatesForStatus(status);
+		const sourceNote = modelListNoteForStatus(status);
 		const authText = authLabel({ providers: deps.providers, status });
 		const bucket = modelBucket(status);
 		const singleTarget = list.length === 1;
@@ -478,6 +482,7 @@ function buildModelItems(deps: { settings: Readonly<ClioSettings>; providers: Pr
 				apiFamily: status.runtime?.apiFamily ?? "unknown",
 				bucket,
 				source: candidate.source,
+				...(sourceNote ? { sourceNote } : {}),
 				...(candidate.loadState ? { loadState: candidate.loadState } : {}),
 				...(candidate.loadStateDetail ? { loadStateDetail: candidate.loadStateDetail } : {}),
 				authText,
@@ -636,6 +641,8 @@ function sourceLabel(source: ModelSource): string {
 			return "configured";
 		case "live":
 			return "live probe";
+		case "cache":
+			return "cached list";
 		case "catalog":
 			return "catalog";
 		case "default":
@@ -666,7 +673,7 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 		...wrapTextWithAnsi(
 			theme.fg(
 				"dim",
-				`source ${sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
+				`source ${row.sourceNote ?? sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
 			),
 			width,
 		),

@@ -1,9 +1,9 @@
 import type { Api, Model } from "../../../../engine/types.js";
 
-import { listCatalogModelsForRuntime, synthesizeCatalogBackedModel } from "../../catalog.js";
+import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
-import type { ProbeContext, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
+import type { RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
 
 const defaultCapabilities: CapabilityFlags = {
@@ -37,6 +37,9 @@ const defaultCapabilities: CapabilityFlags = {
  * `anthropic`, which already names the api-key Anthropic runtime. `oauthProviderId`
  * bridges this runtime back to that provider so login/refresh/storage all key on
  * `anthropic`, leaving the api-key path untouched.
+ *
+ * It has no live model listing. Its models are pi-ai's Anthropic catalog, and
+ * every surface labels them as the catalog rather than as a provider answer.
  */
 const anthropicMaxRuntime: RuntimeDescriptor = {
 	id: "anthropic-max",
@@ -51,9 +54,6 @@ const anthropicMaxRuntime: RuntimeDescriptor = {
 		"Using subscription credentials outside Anthropic's first-party apps may not align with their " +
 		"terms of service; enable at your own discretion.",
 	defaultCapabilities,
-	async probeModels(_target: TargetDescriptor, _ctx: ProbeContext): Promise<string[]> {
-		return listCatalogModelsForRuntime("anthropic-max").map((model) => model.id);
-	},
 	synthesizeModel(target: TargetDescriptor, wireModelId: string, kb: KnowledgeBaseHit | null): Model<Api> {
 		return synthesizeCatalogBackedModel({
 			target,

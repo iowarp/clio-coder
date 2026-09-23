@@ -21,6 +21,8 @@ import {
 	readTargetModelSnapshot,
 	recordTargetModelSnapshot,
 	resolveRuntimeAuthTarget,
+	runtimeListsModelsLive,
+	unverifiedModelListNote,
 } from "../domains/providers/index.js";
 import { probeCapabilitiesForModel } from "../domains/providers/model-capabilities.js";
 import { loadedContextWindowForModel } from "../domains/providers/model-discovery.js";
@@ -478,7 +480,7 @@ export interface WireModelInventory {
 	models: string[];
 	source: "catalog" | "probe" | "cache" | "legacy" | "none";
 	labels?: Readonly<Record<string, string>>;
-	/** Redacted explanation when a live catalog could not replace cache/hints. */
+	/** Why a runtime that lists its models live gave no live list: the probe's redacted diagnostic. */
 	probeError?: string;
 	/** Per-model load state when the probe reported it. */
 	modelStates?: Readonly<Record<string, ProbeModelStatus>> | undefined;
@@ -519,13 +521,12 @@ export async function resolveSupportedWireModels(
 	existing?: TargetDescriptor,
 	authToken?: string,
 ): Promise<WireModelInventory> {
-	const known = listKnownModelsForRuntime(runtime.id);
-	const liveAuthoritative = runtime.externalAgentLoop?.modelCatalog === "live-authoritative";
-	// A static catalog stays authoritative unless the runtime declares its live
-	// catalog authoritative; only then are the known ids demoted to hints.
-	if (known.length > 0 && !liveAuthoritative) return { models: known, source: "catalog" };
 	let probeError: string | undefined;
-	if (runtime.kind === "http" || liveAuthoritative) {
+	const listsLive = runtimeListsModelsLive(runtime);
+	// A runtime that can list its models live is asked first, and its answer
+	// replaces the static catalog. The catalog, like the cache, is what the
+	// screen falls back to when that answer does not come, labeled with why.
+	if (listsLive) {
 		// The full probe carries load state alongside the ids; a runtime that
 		// lists models only through probeModels still gets its ids checked.
 		const probe = await runtimeProbe(runtime, target, authToken);
@@ -538,13 +539,16 @@ export async function resolveSupportedWireModels(
 				...(probe.modelLabels ? { labels: probe.modelLabels } : {}),
 			};
 		}
-		probeError = probe?.error;
+		probeError = probe?.error ?? (probe?.ok ? "the provider listed no models" : undefined);
 		const discovered = await runtimeProbeModels(runtime, target, authToken);
 		if (discovered.length > 0) {
 			recordTargetModelSnapshot(target, discovered);
 			return { models: discovered, source: "probe" };
 		}
 	}
+	const known = listKnownModelsForRuntime(runtime.id);
+	// A runtime that cannot list live never cached a live answer, so its catalog outranks the cache.
+	if (!listsLive && known.length > 0) return { models: known, source: "catalog" };
 	const cached = readTargetModelSnapshot(target);
 	if (cached && cached.models.length > 0) {
 		return {
@@ -557,18 +561,58 @@ export async function resolveSupportedWireModels(
 	if (known.length > 0) return { models: known, source: "catalog", ...(probeError ? { probeError } : {}) };
 	if (existing?.wireModels && existing.wireModels.length > 0) {
 		recordTargetModelSnapshot(target, existing.wireModels);
-		return { models: [...existing.wireModels], source: "legacy" };
+		return { models: [...existing.wireModels], source: "legacy", ...(probeError ? { probeError } : {}) };
 	}
 	return { models: [], source: "none", ...(probeError ? { probeError } : {}) };
 }
 
+/**
+ * What the configure surfaces print beside a model list that is not the
+ * provider's live answer, in the same words `models` and the picker use. Null
+ * when the list is live or empty.
+ */
+export function inventoryNote(runtime: RuntimeDescriptor, inventory: WireModelInventory): string | null {
+	if (inventory.source === "probe" || inventory.source === "none") return null;
+	const origin =
+		inventory.source === "cache" ? "cache" : inventory.source === "catalog" ? "catalog" : ("configured" as const);
+	return unverifiedModelListNote(origin, {
+		runtimeId: runtime.id,
+		listsLive: runtimeListsModelsLive(runtime),
+		reason: inventory.probeError,
+	});
+}
+
+/**
+ * The model to preselect from an inventory, or undefined when nothing in it is
+ * worth recommending. A curated default the provider still lists wins. A live
+ * list's head is taken only where list order means something, and a provider's
+ * order, live or catalog, does not: Gemini's first entry is whatever sorts first.
+ */
+export function preferredModelFor(
+	inventory: Pick<WireModelInventory, "models" | "source">,
+	support: Pick<ProviderSupportEntry, "defaultModel" | "modelSource">,
+): string | undefined {
+	const curated = support.defaultModel;
+	if (inventory.source === "probe") {
+		if (curated !== undefined && inventory.models.includes(curated)) return curated;
+		return support.modelSource === "catalog" ? undefined : inventory.models[0];
+	}
+	return curated ?? (support.modelSource === "catalog" ? undefined : inventory.models[0]);
+}
+
 /** Why a target offered no model list, in the words the screen shows. */
-export function inventoryGap(runtime: RuntimeDescriptor, target: { url?: string | undefined }): string {
+export function inventoryGap(
+	runtime: RuntimeDescriptor,
+	target: { url?: string | undefined },
+	probeError?: string | undefined,
+): string {
 	if (runtime.externalAgentLoop?.modelCatalog === "live-authoritative") {
 		return "Antigravity returned no live model catalog; run `agy` yourself, complete sign-in, then probe again";
 	}
-	if (runtime.kind !== "http") return `${runtime.id} does not list its models; type the id the provider documents`;
-	return `${target.url ?? runtime.id} answered no model list; type the id the server serves`;
+	if (!runtimeListsModelsLive(runtime))
+		return `${runtime.id} does not list its models; type the id the provider documents`;
+	const why = probeError ? ` (${probeError})` : "";
+	return `${target.url ?? runtime.id} answered no model list${why}; type the id the server serves`;
 }
 
 const LOCAL_APP_RUNTIME_IDS: ReadonlySet<string> = new Set(["ollama", "lmstudio"]);
