@@ -17,7 +17,7 @@ import { memo, useEffect, useId, useLayoutEffect, useRef, useState, useSyncExter
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { StatusMark, TONE_GLYPHS } from "../design/status.js";
+import { StatusMark } from "../design/status.js";
 import { useLayersActive } from "../interaction/use-shortcut.js";
 import { countRender } from "../render/render-probe.js";
 import {
@@ -35,6 +35,7 @@ import {
 	submitIntent,
 	submitLabel,
 } from "./composer.js";
+import { RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import "./composer.css";
 
@@ -75,19 +76,6 @@ export interface ComposerProps {
 	readonly runningTurnId: string | null;
 	/** Where the next request goes. Memoize it: a new object on every render re-renders the field. */
 	readonly route: RouteFacts;
-}
-
-/** The target and model beside Send, with the target's reported health as its glyph. */
-function RouteChip({ route }: { route: RouteFacts }) {
-	return (
-		<span className="route-chip" data-tone={route.tone} title={route.title}>
-			<span className="route-chip__glyph" aria-hidden="true">
-				{TONE_GLYPHS[route.tone]}
-			</span>
-			<span className="route-chip__text">{route.text}</span>
-			<span className="sr-only">{route.spoken}</span>
-		</span>
-	);
 }
 
 export const Composer = memo(function Composer({
@@ -328,7 +316,13 @@ export const Composer = memo(function Composer({
 				<p className="composer__hint" id={hintId}>
 					{enterSends ? "Shift+Enter adds a line" : "Enter adds a line · Ctrl/⌘+Enter sends"}
 				</p>
-				<RouteChip route={route} />
+				<RoutePicker
+					client={client}
+					sessionId={sessionId}
+					route={route}
+					running={running}
+					capabilities={capabilities.data}
+				/>
 				{running ? (
 					<>
 						{steering.interrupt ? (

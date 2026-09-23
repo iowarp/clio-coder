@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useId, useState } from "react";
 import { routes } from "../../contracts/routes.js";
 import { type Client, emptyInput } from "../api/client.js";
+import { ModelSelect } from "./model-select.js";
 import { authGuidance, type Draft, draftProblems, suggestId, toRequest } from "./target-onboarding-model.js";
 import "./target-onboarding.css";
 
@@ -57,9 +58,9 @@ export function AddConnection({
 		>
 			<h2 id={`${form}-title`}>Add a connection</h2>
 			<p>
-				Clio checks the endpoint, lists its models when it can, and saves the connection to your user settings. This form
-				has no key field: a credential is named by environment variable or stored from a terminal, and never passes through
-				the browser.
+				Clio Coder checks the endpoint, lists its models when it can, and saves the connection to your user settings. This
+				form has no key field: a credential is named by environment variable or stored from a terminal, and never passes
+				through the browser.
 			</p>
 			{runtimes.isPending && <p>Reading runtimes…</p>}
 			{runtimes.error && <p role="alert">{runtimes.error.message}</p>}
@@ -118,19 +119,19 @@ export function AddConnection({
 						</>
 					)}
 					<label htmlFor={`${form}-model`}>Default model{runtime.modelRequired ? "" : " (optional)"}</label>
-					<input
+					<ModelSelect
 						id={`${form}-model`}
-						disabled={busy}
 						value={draft.model}
-						list={`${form}-models`}
-						placeholder={runtime.modelRequired ? "Choose a model" : "Leave blank to use the first model the endpoint reports"}
-						onChange={(event) => set({ model: event.target.value })}
+						models={runtime.modelHints.length > 0 ? runtime.modelHints : null}
+						emptyLabel={runtime.modelRequired ? "Choose a model" : "The first model the endpoint reports"}
+						disabled={busy}
+						note={
+							runtime.modelHints.length > 0
+								? "Models this runtime usually offers. Once the connection is saved, the models the endpoint reports are offered beside Send and on the Settings page."
+								: "Once the connection is saved, the models the endpoint reports are offered beside Send and on the Settings page."
+						}
+						onChange={(model) => set({ model })}
 					/>
-					<datalist id={`${form}-models`}>
-						{runtime.modelHints.map((hint) => (
-							<option key={hint} value={hint} />
-						))}
-					</datalist>
 					{runtime.auth !== "none" && runtime.auth !== "connected" && runtime.auth !== "other" && (
 						<>
 							<label htmlFor={`${form}-env`}>Environment variable holding the key (optional)</label>
@@ -142,7 +143,7 @@ export function AddConnection({
 								autoComplete="off"
 								onChange={(event) => set({ apiKeyEnv: event.target.value })}
 							/>
-							<small>Clio reads the variable when it makes a request. Only its name is saved.</small>
+							<small>Clio Coder reads the variable when it makes a request. Only its name is saved.</small>
 						</>
 					)}
 					<label className="add-connection__check">

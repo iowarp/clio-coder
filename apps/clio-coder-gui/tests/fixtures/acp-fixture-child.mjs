@@ -61,7 +61,7 @@ const permission = async () => {
 	const toolCall = {
 		sessionUpdate: "tool_call",
 		toolCallId,
-		title: "Write fixture",
+		title: "write", // The runtime titles a call, and its permission request, with the tool name.
 		kind: "edit",
 		status: "pending",
 		rawInput: { path: "fixture.txt", content: "approved" },
@@ -187,7 +187,14 @@ const heldWorker = async () => {
 		kind: "other",
 		status: "failed",
 		content: [{ type: "content", content: { type: "text", text: message } }],
-		rawOutput: { result: { content: [{ type: "text", text: message }], details: { runId } }, isError: true },
+		rawOutput: {
+			result: {
+				content: [{ type: "text", text: message }],
+				// src/tools/dispatch-runner.ts reports a stopped run's outcome in the result details.
+				details: { runId, outcome: "canceled", outcomeDetail: reason },
+			},
+			isError: true,
+		},
 	});
 	if (!cancelled) text("The worker was stopped.");
 };
@@ -468,6 +475,17 @@ async function handle(frame) {
 							isOrchestrator: true,
 							apiKey: "must-be-stripped",
 						},
+						// A second target with a catalog, so choosing one in the route picker changes the model list.
+						...(ROUTE
+							? [
+									{
+										id: "field-station",
+										runtime: "openai-compatible",
+										models: ["survey-large", "survey-small"],
+										isOrchestrator: true,
+									},
+								]
+							: []),
 					],
 					_meta: { "clio-coder/truncated": true },
 				};

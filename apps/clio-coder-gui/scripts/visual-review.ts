@@ -19,7 +19,20 @@ import { chromium } from "playwright-core";
 import { harness } from "../tests/harness/app.js";
 import { seedHistory } from "../tests/harness/history-fixture.js";
 
-const SHOTS = ["workspaces", "history", "delete", "empty", "conv", "docs", "approval", "fleet", "steer", "tools"];
+const SHOTS = [
+	"home",
+	"workspaces",
+	"history",
+	"delete",
+	"empty",
+	"picker",
+	"conv",
+	"docs",
+	"approval",
+	"fleet",
+	"steer",
+	"tools",
+];
 const { values } = parseArgs({
 	options: {
 		client: { type: "string" },
@@ -106,6 +119,11 @@ if (values.serve) {
 				}, edge);
 			await page.goto(`${origin}/#token=test-token`);
 			await page.getByRole("heading", { level: 1 }).waitFor();
+			if (want("home")) {
+				await page.goto(`${origin}/`);
+				await page.getByLabel("Project folder", { exact: true }).waitFor();
+				await shot("home", true);
+			}
 			if (want("workspaces")) {
 				await page.goto(`${origin}/sessions`);
 				await page.getByRole("heading", { name: "Recent projects" }).waitFor();
@@ -129,12 +147,21 @@ if (values.serve) {
 				if (await block.count()) await block.evaluate((element) => element.scrollIntoView({ block: "start" }));
 				await shot("docs");
 			}
-			if (["empty", "conv", "approval", "fleet", "steer", "tools"].some(want)) {
+			if (["empty", "picker", "conv", "approval", "fleet", "steer", "tools"].some(want)) {
 				await page.goto(`${origin}/workspaces/${workspace.id}/sessions`);
 				await page.getByRole("button", { name: "New conversation", exact: true }).click();
 				const field = page.getByLabel("Message Clio Coder", { exact: true });
 				await field.waitFor();
 				if (want("empty")) await shot("empty");
+				// The route picker needs the route facts, so it is photographed only with --route.
+				if (want("picker") && values.route) {
+					const picker = page.locator(".route-picker");
+					await picker.locator("summary").click();
+					await picker.getByLabel("Target", { exact: true }).selectOption("field-station");
+					await picker.getByText(/^field-station answered at /).waitFor();
+					await shot("picker");
+					await page.keyboard.press("Escape");
+				}
 				const send = async (text: string) => {
 					await field.fill(text);
 					await page.locator(".composer__submit").click();

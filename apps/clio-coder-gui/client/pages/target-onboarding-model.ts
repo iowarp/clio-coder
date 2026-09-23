@@ -9,9 +9,9 @@ export type Draft = { runtime: string; id: string; url: string; model: string; a
 export function authGuidance(runtime: Runtime): { tone: "ready" | "action"; text: string } {
 	switch (runtime.auth) {
 		case "connected":
-			return { tone: "ready", text: "Clio is already signed in to this provider." };
+			return { tone: "ready", text: "Clio Coder is already signed in to this provider." };
 		case "credential":
-			return { tone: "ready", text: "Clio already holds a stored key for this provider." };
+			return { tone: "ready", text: "Clio Coder already holds a stored key for this provider." };
 		case "none":
 			return { tone: "ready", text: "This runtime needs no credential." };
 		case "key-optional":
