@@ -971,7 +971,7 @@ fleet:
     toolRisk: system-one
 ```
 
-Eight sites are accepted, and each names a moment in the session rather than a
+Nine sites are accepted, and each names a moment in the session rather than a
 component:
 
 - `routing` is retired. A binding still validates, is never asked, and is named
@@ -995,6 +995,9 @@ component:
 - `capabilities` ranks the gateway's capabilities against what a
   `gateway(op="find")` call asked for, when the substring filter alone would
   leave the model with a long unordered list or with nothing.
+- `consult` answers typed questions the main agent asks through the gateway,
+  when the agent wants a quick second reading of a choice. See
+  [what `consult` changes](#what-consult-changes).
 
 A site with no entry resolves to nothing and its caller keeps the behavior it
 had before the site existed. The capability is therefore opt-in by absence, with
@@ -1036,7 +1039,7 @@ Task features are host-resolved and never accepted from model arguments.
 the same terms as the reservation, so a model cannot author the features its
 own routing reads.
 
-Seven of the eight sites have call sites. Measured live against `jev-latest`
+Eight of the nine sites have call sites. Measured live against `jev-latest`
 for 0.5.4, four tool-risk ratings took 113 to 259ms, a batched memory and skills
 pass 159ms, and a three-candidate draft judgment 264ms. The pre-turn memory and
 skills pass is bounded at 1.5s because it sits on the turn's critical path, and
@@ -1120,6 +1123,62 @@ is byte-identical to the unranked one. Worker gateways never rank. Against a
 two live runs, the substring filter alone surfaced the right capability 2 times
 in 48, and 48 times in 48 once related entries were added. Calls took 165ms at
 p50 and 369ms at most, under the same 1.5s bound as the pre-turn brief.
+
+#### What `consult` changes
+
+Bound, the session registers one more capability behind the gateway,
+`consult`, and the gateway's prompt line names it. The main agent calls it
+with `gateway(op="call", capability="consult", args={questions, state})`:
+
+- `questions` holds one to four independent questions, each `yesNo` (with
+  optional `whenTrue` and `whenFalse` descriptions), `pick` (2 to 8 named
+  options, each defined by its description) or `rate` (a ladder of 2 to 8
+  rungs, lowest first).
+- `state` is the evidence the questions are about, at most 2 KB as JSON. The
+  decision model sees nothing else.
+
+The result is advice. It carries the probability for a `yesNo`, the mass per
+option for a `pick` and the position and mass per rung for a `rate`, with the
+certainty of each, the model build that answered and the latency. A `pick`
+never names a winner, so the agent reads a distribution and makes the choice.
+A question below the 0.2 certainty floor comes back as abstained. A refused
+connection, a timeout, a 401, a malformed body and an answer in which every
+question abstained all come back as `answered: false` with a note to proceed on
+the agent's own judgment.
+
+A turn gets three calls. A fourth, a call with more than four questions and a
+call with more than 2 KB of state are refused with a message naming the limit,
+and a refused call never reaches the decision model. Calls wait at most 3s.
+
+Unbound, `consult` is not registered at all: `gateway` find does not list it,
+describe and call report an unknown capability, and the gateway's prompt line
+reads exactly as it did before the capability existed. The binding is read at
+startup, so binding the site takes effect in the next session. Only the main
+agent gets `consult`. Dispatch never admits it for a worker, because a worker
+carries out one assigned task and the main agent is the one that decides.
+
+#### Asking a site from harness code
+
+A harness decision point that wants a System One answer makes one call:
+
+```ts
+import { askSite } from "../domains/providers/site-ask.js";
+import { rate } from "../domains/providers/decisions.js";
+
+const reply = await askSite("toolRisk", input, { command }, {
+  risk: rate("How far does this command reach?", ["reads only", "changes this workspace", "changes another machine"]),
+});
+if (reply === null) return behaviorBeforeTheSiteExisted();
+```
+
+`askSite` resolves the binding, asks once, reads each answer's certainty and
+drops the ones below the floor (0.2 unless the caller passes `minConfidence`).
+It returns null for an unbound or misconfigured site, a transport failure, a
+timeout, a malformed answer, and a reply in which every question abstained,
+so the rule that null means "behave as before" lives in one place. A reply
+carries the surviving answers, the model build, the bound target and model,
+and the latency. Pass `ctx` as a function, as every host does, so an operator
+with nothing bound never pays for reading the credential store.
 
 #### Turning the alpha on, end to end
 

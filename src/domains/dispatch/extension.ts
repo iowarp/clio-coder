@@ -1715,6 +1715,9 @@ function effectiveToolNames(
 		(tool): tool is ToolName =>
 			(isBuiltinToolName(tool) || harnessTools.has(tool)) &&
 			tool !== ToolNames.AskUser &&
+			// consult is registered on the session alone, so a worker registry
+			// never holds it and a recipe naming it would drift the attestation.
+			tool !== ToolNames.Consult &&
 			!(networkStripped && (tool === ToolNames.WebFetch || tool === ToolNames.WebRead)) &&
 			!denied.has(tool) &&
 			!(writeConfined && WRITE_ROOT_REFUSED_TOOLS.has(tool)) &&

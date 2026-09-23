@@ -14,8 +14,9 @@ import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
-import { builtin } from "./builtin-tool-catalog.js";
+import { builtin, gatewayPromptHint } from "./builtin-tool-catalog.js";
 import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
+import { type ConsultDeps, createConsultTool } from "./consult.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
 import { createDecideTool } from "./decide.js";
@@ -89,6 +90,12 @@ export interface CoreToolBootstrapDeps {
 	 * session binds it; without it find lists exactly as it always has.
 	 */
 	rankCapabilities?: GatewayCapabilityRanker;
+	/**
+	 * The `consult` decision site, when it is bound at startup. Only the session
+	 * passes it; without it the tool is not registered and the gateway listing,
+	 * the tool signature and the prompt are unchanged.
+	 */
+	consult?: ConsultDeps;
 }
 
 export interface CoreToolRegistration {
@@ -268,21 +275,27 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 			{ path: "src/tools/gateway/clio-context-tools.ts", scope: "core" },
 		),
 	});
+	if (deps.consult) {
+		registry.register(builtin(createConsultTool(deps.consult), { path: "src/tools/consult.ts", scope: "core" }));
+	}
 	// The gateway itself: direct, one fixed schema, reaching every
 	// gateway-placed spec above through the registry's own admission.
-	registry.register({
-		...builtin(
-			createGatewayTool({
-				registry,
-				...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
-				...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
-			}),
-			{
-				path: "src/tools/gateway/index.ts",
-				scope: "core",
-			},
-		),
-	});
+	const gateway = builtin(
+		createGatewayTool({
+			registry,
+			...(deps.mcpCapabilities ? { mcp: deps.mcpCapabilities } : {}),
+			...(deps.rankCapabilities ? { rankCapabilities: deps.rankCapabilities } : {}),
+		}),
+		{
+			path: "src/tools/gateway/index.ts",
+			scope: "core",
+		},
+	);
+	registry.register(
+		deps.consult && gateway.metadata
+			? { ...gateway, metadata: { ...gateway.metadata, promptHint: gatewayPromptHint(true) } }
+			: gateway,
+	);
 	// The coordination board exists only inside a dispatch: a worker process
 	// binds the port, the session never does, and without a port the tool can
 	// only answer "no ledger". Registering it on the session put its schema on
