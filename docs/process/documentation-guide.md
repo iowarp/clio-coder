@@ -85,13 +85,10 @@ Classify claims clearly:
 | [interop.md](../guide/interop.md) | `src/cli/interop.ts`, `src/domains/interop/**`, `src/interactive/overlays/interop.ts` | External coding agent interoperability: host discovery, resource inspection, safe adoption of prompts and skills into the library. |
 | [model-catalog.md](../architecture/model-catalog.md) | `src/domains/providers/catalog.ts`, `src/domains/providers/models/**`, `src/domains/providers/probe/**`, `src/domains/providers/model-capabilities.ts` | Model catalog, live probes (`--offline` toggle), exact-id selector `probeCapabilitiesForModel`, field-note promotion. |
 | [middleware-and-components.md](../architecture/middleware-and-components.md) | `src/domains/components/**`, `src/domains/middleware/**`, `src/cli/components.ts` | Active component snapshots, phase-aware middleware hook budgets (`DEFAULT_MIDDLEWARE_HOOK_BUDGETS_MS`). |
-| [tool-audit-v0.4.9.md](tool-audit-v0.4.9.md) | `src/tools/**`, `src/core/safe-exec.ts`, `src/domains/gateway/mcp/**` | Individual tool purpose, placement, contracts, implementation bounds, scientific integrity, and landed disposition. |
 | [scientific-validation.md](scientific-validation.md) | `src/domains/safety/rigor.ts`, `src/domains/safety/finish-contract.ts` | Advisory validation-contract patterns for scientific artifacts and HPC assumptions. |
 | [evolution.md](evolution.md) | `src/domains/evolution/**`, `src/cli/evolve.ts` | Falsifiable Change Manifest JSON templates, evidence-linked validation, and `clio-coder evolve`. |
 | [gui/README.md](../gui/README.md) | `apps/clio-coder-gui/**`, `dist/gui/**` | Opt-in alpha graphical application: its commands, lifecycle and model picker. |
-| [battletest-2026-09-20-fixes.md](battletest-2026-09-20-fixes.md) | `src/**`, `tests/**` | Historical record of the Pi 0.86.1 battletest verification and defect resolutions. |
 | [configure-tree-proposal.md](configure-tree-proposal.md) | `src/core/defaults.ts` | Historical design proposal for configure and `/settings` information architecture. |
-| [config-knobs-audit.md](../history/config-knobs-audit.md) | `src/cli/config.ts` | Point-in-time inventory of legacy environment variables (Historical Appendix). |
 
 ---
 
