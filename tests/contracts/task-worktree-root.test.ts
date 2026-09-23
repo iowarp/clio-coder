@@ -9,6 +9,7 @@ import {
 	rmSync,
 	statSync,
 	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -213,7 +214,8 @@ describe("task worktree root", () => {
 		mkdirSync(join(scratch, "planted"));
 		symlinkSync(join(scratch, "planted"), join(shm, "clio-coder-test"));
 		match(prepareWorktreeParent(resolved) ?? "", /is not a plain directory/u);
-		rmSync(join(shm, "clio-coder-test"));
+		// unlink, not rmSync: Node 24.9's rmSync refuses a link to a directory with EISDIR.
+		unlinkSync(join(shm, "clio-coder-test"));
 		mkdirSync(join(shm, "clio-coder-test"), { mode: 0o777 });
 		spawnSync("chmod", ["777", join(shm, "clio-coder-test")]);
 		match(prepareWorktreeParent(resolved) ?? "", /is writable by other users/u);

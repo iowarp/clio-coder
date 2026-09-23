@@ -24,6 +24,26 @@ test("home and system scope require confirmation; project and scratch folders op
 		strictEqual(workspaceConcern(cwd, home), null, cwd);
 });
 
+test("macOS names /etc, /tmp and /var by their canonical /private paths, and they keep their concern", () => {
+	const home = "/Users/researcher";
+	for (const cwd of [
+		"/private",
+		"/private/etc",
+		"/private/etc/ssh",
+		"/private/var/log",
+		"/private/tmp",
+		"/private/var/tmp",
+	])
+		strictEqual(workspaceConcern(cwd, home), "system", cwd);
+	for (const cwd of [
+		"/private/tmp/project",
+		"/private/var/tmp/project",
+		"/private/var/folders/ab/T/project",
+		"/private/etcetera",
+	])
+		strictEqual(workspaceConcern(cwd, home), null, cwd);
+});
+
 test("noninteractive home startup exits before the orchestrator, including through a symlink", (t) => {
 	const root = mkdtempSync(path.join(tmpdir(), "clio-workspace-check-"));
 	t.after(() => rmSync(root, { recursive: true, force: true }));

@@ -9,9 +9,12 @@ export type WorkspaceConcern = "home" | "system" | null;
 /** Inputs are canonical paths so a symlink cannot hide a broad workspace. */
 export function workspaceConcern(cwd: string, home: string): WorkspaceConcern {
 	if (cwd === home || ["/home", "/Users"].includes(path.dirname(cwd)) || cwd === "/root") return "home";
-	const under = (root: string) => cwd === root || cwd.startsWith(`${root}${path.sep}`);
-	if ([path.parse(cwd).root, "/home", "/Users", "/tmp", "/var/tmp", "/opt", "/srv", "/mnt", "/media"].includes(cwd))
-		return "system";
+	// macOS keeps /etc, /tmp and /var in /private behind links from the root, so
+	// their canonical paths start there. Judge them by the names the lists use.
+	const named = /^\/private\/(?:etc|tmp|var)(?:\/|$)/u.test(cwd) ? cwd.slice("/private".length) : cwd;
+	const under = (root: string) => named === root || named.startsWith(`${root}${path.sep}`);
+	const shared = ["/home", "/Users", "/private", "/tmp", "/var/tmp", "/opt", "/srv", "/mnt", "/media"];
+	if (named === path.parse(named).root || shared.includes(named)) return "system";
 	if (["/var/tmp", "/var/folders", "/usr/local/src"].some(under)) return null;
 	return [
 		"/etc",
