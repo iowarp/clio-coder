@@ -21,7 +21,7 @@ import {
 	STARTER_PROMPTS,
 	TRUNCATION_NOTE,
 } from "../chat/chat-turn.js";
-import { FleetStrip } from "../chat/FleetStrip.js";
+import { FleetStrip, LiveWorkers, workerCount } from "../chat/FleetStrip.js";
 import { foldFleetRuns, isLiveRun } from "../chat/fleet-facts.js";
 import { type HealthRow, type HealthSummary, summarizeHealth } from "../chat/health.js";
 import { routeFacts } from "../chat/route.js";
@@ -433,7 +433,6 @@ function SessionTools({
 	client,
 	session,
 	workspaceRoot,
-	liveWorkers,
 	capabilities,
 	capabilitiesError,
 	openSessions,
@@ -443,7 +442,6 @@ function SessionTools({
 	client: Client;
 	session: SessionSnapshot;
 	workspaceRoot: string | undefined;
-	liveWorkers: number;
 	capabilities: AgentCapabilities | undefined;
 	capabilitiesError: Error | null;
 	openSessions: readonly SessionSnapshot[];
@@ -477,10 +475,7 @@ function SessionTools({
 		<details className="conversation__tools" ref={panel} onToggle={(event) => setOpen(event.currentTarget.open)}>
 			<summary>
 				<Icon name="settings" />
-				<span className="conversation__tools-label">
-					Session tools
-					{liveWorkers > 0 ? ` · ${liveWorkers} ${liveWorkers === 1 ? "worker" : "workers"} running` : ""}
-				</span>
+				<span className="conversation__tools-label">Session tools</span>
 			</summary>
 			{open ? (
 				<div className="conversation__tools-body">
@@ -655,7 +650,10 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 	const activity = pending
 		? { tone: "warn" as const, label: "Waiting for your approval" }
 		: running
-			? { tone: "running" as const, label: "Clio Coder is working" }
+			? {
+					tone: "running" as const,
+					label: liveWorkers > 0 ? `Clio Coder is waiting on ${workerCount(liveWorkers)}` : "Clio Coder is working",
+				}
 			: snapshot.state === "open"
 				? { tone: "success" as const, label: "Ready for your message" }
 				: snapshot.state === "starting"
@@ -687,7 +685,6 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 						client={client}
 						session={snapshot}
 						workspaceRoot={workspaceRoot}
-						liveWorkers={liveWorkers}
 						capabilities={capabilities.data}
 						capabilitiesError={capabilities.error}
 						openSessions={openSessions.data ?? []}
@@ -754,6 +751,12 @@ function SessionView({ client, id }: { client: Client; id: string }) {
 							liveWorkers={item.settled ? 0 : liveWorkers}
 						/>
 					))}
+					<LiveWorkers
+						client={client}
+						sessionId={snapshot.id}
+						sessionOpen={snapshot.state === "open"}
+						fleet={snapshot.fleet}
+					/>
 					{turns.length === 0 ? <EmptyTranscript sessionId={snapshot.id} /> : null}
 				</div>
 			</div>

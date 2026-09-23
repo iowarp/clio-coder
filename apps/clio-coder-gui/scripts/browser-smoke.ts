@@ -688,13 +688,41 @@ try {
 		// paths on a run are pressed for real: guidance is queued, then the run is stopped.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[fleet] Survey the fixture.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
-		await page.locator(".conversation__tools > summary", { hasText: "Session tools · 1 worker running" }).click();
-		await page.getByRole("button", { name: "Guide scout", exact: true }).click();
+		// A running worker is steered from the strip at the transcript's live edge, not from a menu.
+		const workers = page.getByRole("region", { name: "1 worker running", exact: true });
+		await workers.getByRole("button", { name: "Guide scout", exact: true }).click();
 		await page.getByLabel("Guidance for scout", { exact: true }).fill("Only read the README.");
 		await page.getByRole("button", { name: "Send guidance", exact: true }).click();
 		await page.getByText("Guidance queued. The worker reads it at its next step.", { exact: true }).waitFor();
+		assert.equal(
+			await workers
+				.getByRole("button", { name: "Guide scout", exact: true })
+				.evaluate((node) => node === document.activeElement),
+			true,
+			"sending guidance returns focus to Guide",
+		);
+		// The runtime keeps the delegation open for the worker's life, so its group stays open too. The
+		// row names the agent once and keeps its state word whole, which clipped at 390px while the agent
+		// was repeated beside it.
+		const delegation = page.locator(".tool-card.is-dispatch").last();
+		await delegation.getByText("Running", { exact: true }).waitFor();
+		assert.equal(
+			await delegation.locator(".tool-card__head").evaluate((head) => {
+				const state = head.querySelector(".tool-card__state");
+				const bounds = head.getBoundingClientRect();
+				const box = state?.getBoundingClientRect();
+				return !!state && !!box && box.right <= bounds.right + 1 && state.scrollWidth <= state.clientWidth + 1;
+			}),
+			true,
+			`the delegation's state word is clipped at ${width}px`,
+		);
 		await check("fleet-steer");
-		if (width === 1600) await page.screenshot({ path: join(output, "fleet-steer.png"), fullPage: true });
+		if (width === 1600 || width === 390)
+			await page.screenshot({ path: join(output, `fleet-steer-${width}.png`), fullPage: true });
+		// Session tools keep the whole fleet history, the running row included.
+		await page.locator(".conversation__tools > summary").click();
+		await page.locator(".conversation__tools .fleet-strip").getByText("Survey the fixture", { exact: true }).waitFor();
+		await page.keyboard.press("Escape");
 		// Mid-turn steering from the composer: queue a message for after the turn, see it listed,
 		// take it back into the field, then hear the engine's refusal to interrupt as a sentence.
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("Then summarise it.");
@@ -710,12 +738,19 @@ try {
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("");
 		await page.getByRole("button", { name: "Interrupt", exact: true }).click();
 		await page.getByText("A dispatched worker is attached; stop the turn instead.").waitFor();
-		await page.locator(".conversation__tools > summary", { hasText: "Session tools · 1 worker running" }).click();
-		await page.getByRole("button", { name: "Stop scout", exact: true }).click();
+		// Stop takes two presses, and the question puts focus on the answer that keeps the work.
+		await workers.getByRole("button", { name: "Stop scout", exact: true }).click();
+		assert.equal(
+			await page
+				.getByRole("button", { name: "Keep running", exact: true })
+				.evaluate((node) => node === document.activeElement),
+			true,
+		);
+		await check("fleet-stop");
 		await page.getByRole("button", { name: "Stop run", exact: true }).click();
 		await page.getByText("The worker was stopped.", { exact: true }).waitFor();
 		assert.equal(await page.getByRole("button", { name: "Guide scout", exact: true }).count(), 0);
-		await page.locator(".conversation__tools > summary").click();
+		assert.equal(await page.locator(".live-workers").count(), 0, "a settled run leaves the live strip");
 		await page.getByLabel("Message Clio Coder", { exact: true }).fill("[stream] Show progress until cancelled.");
 		await page.getByRole("button", { name: "Send", exact: true }).click();
 		await page.getByRole("button", { name: "Stop turn", exact: true }).click();

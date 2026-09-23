@@ -592,8 +592,7 @@ function digestFor(
 			const status = fact("status");
 			return status === undefined ? { text: null, tone: null } : { text: status.value, tone: status.tone ?? null };
 		}
-		case "dispatch":
-			return { text: fact("agent")?.value ?? null, tone: null };
+		// A delegation's headline already names its agent, so the row adds nothing after it.
 		default:
 			return { text: null, tone: null };
 	}

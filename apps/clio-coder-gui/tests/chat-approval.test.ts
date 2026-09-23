@@ -314,7 +314,18 @@ test("five events about one run fold into one row that carries every reported va
 	assert.equal(run.progressCount, 7);
 	assert.equal(run.progressTruncated, true);
 	assert.equal(run.tokenCount, 910);
-	assert.equal(fleetRunDetail(run), "done · succeeded · 7+ steps · 4.2s");
+	assert.equal(fleetRunDetail(run), "Done · succeeded · 7+ steps · 4.2s");
+	assert.equal(
+		fleetRunDetail({
+			...run,
+			state: "progress",
+			outcome: null,
+			progressCount: 1,
+			progressTruncated: false,
+			durationMs: null,
+		}),
+		"Working · 1 step",
+	);
 	assert.equal(isLiveRun(run), false);
 });
 
@@ -329,7 +340,7 @@ test("progress is a working run, not a phase of its own, and a failure carries i
 		runs.map((run) => run.state),
 		["progress", "queued", "failed"],
 	);
-	assert.equal(FLEET_STATE_LABELS.progress, "working");
+	assert.equal(FLEET_STATE_LABELS.progress, "Working");
 	const [working, queued, failed] = runs;
 	assert.ok(working && queued && failed);
 	assert.ok(isLiveRun(working) && isLiveRun(queued) && !isLiveRun(failed));

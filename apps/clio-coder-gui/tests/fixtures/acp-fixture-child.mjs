@@ -151,8 +151,11 @@ const queues = { steer: [], followUp: [] };
 /** runId -> resolve. A held worker settles when it is stopped or the turn is cancelled. */
 const liveRuns = new Map();
 let liveRunCount = 0;
+// The runtime keeps the orchestrator's `dispatch` call open for the worker's whole life and settles
+// it after the run does, so the transcript shows the delegation as one running row beside the run.
 const heldWorker = async () => {
 	const runId = `run-live-${++liveRunCount}`;
+	const toolCallId = `dispatch-${liveRunCount}`;
 	const identity = {
 		runId,
 		agentId: "scout",
@@ -161,21 +164,30 @@ const heldWorker = async () => {
 		origin: "tool",
 		attempt: 1,
 	};
+	update({
+		sessionUpdate: "tool_call",
+		toolCallId,
+		title: "dispatch",
+		kind: "other",
+		status: "in_progress",
+		rawInput: { agent: "scout", task: "Survey the fixture" },
+	});
 	event("dispatch.enqueued", identity);
 	event("dispatch.started", identity);
 	const stopped = await new Promise((resolve) => liveRuns.set(runId, resolve));
 	liveRuns.delete(runId);
-	event(
-		"dispatch.failed",
-		{
-			runId,
-			agentId: "scout",
-			outcome: "cancelled",
-			reason: stopped ? "operator_cancel" : "turn_cancelled",
-			durationMs: 25,
-		},
-		true,
-	);
+	const reason = stopped ? "operator_cancel" : "turn_cancelled";
+	event("dispatch.failed", { runId, agentId: "scout", outcome: "cancelled", reason, durationMs: 25 }, true);
+	const message = `dispatch failed: run ${runId} was cancelled (${reason})`;
+	update({
+		sessionUpdate: "tool_call_update",
+		toolCallId,
+		title: "dispatch",
+		kind: "other",
+		status: "failed",
+		content: [{ type: "content", content: { type: "text", text: message } }],
+		rawOutput: { result: { content: [{ type: "text", text: message }], details: { runId } }, isError: true },
+	});
 	if (!cancelled) text("The worker was stopped.");
 };
 const fleet = () => {

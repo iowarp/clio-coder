@@ -52,12 +52,13 @@ export const FLEET_GLYPHS: Readonly<Record<FleetRunState, string>> = {
 	failed: "✕",
 };
 
+/** Sentence case, because a run row speaks in the conversation's voice. */
 export const FLEET_STATE_LABELS: Readonly<Record<FleetRunState, string>> = {
-	queued: "queued",
-	running: "running",
-	progress: "working",
-	done: "done",
-	failed: "failed",
+	queued: "Queued",
+	running: "Running",
+	progress: "Working",
+	done: "Done",
+	failed: "Failed",
 };
 
 export const FLEET_STATE_TONES: Readonly<Record<FleetRunState, StatusTone>> = {
@@ -181,7 +182,10 @@ export function foldFleetRuns(items: readonly FleetItemLike[]): readonly FleetRu
 export function fleetRunDetail(run: FleetRun): string {
 	const parts = [FLEET_STATE_LABELS[run.state]];
 	if (run.outcome !== null) parts.push(run.outcome);
-	if (run.progressCount > 0) parts.push(`${run.progressCount}${run.progressTruncated ? "+" : ""} steps`);
+	if (run.progressCount > 0)
+		parts.push(
+			`${run.progressCount}${run.progressTruncated ? "+" : ""} ${run.progressCount === 1 && !run.progressTruncated ? "step" : "steps"}`,
+		);
 	if (run.durationMs !== null) parts.push(formatDuration(run.durationMs));
 	return parts.join(" · ");
 }
