@@ -7,12 +7,12 @@
 // only way to review the thing being approved.
 
 import { useIsMutating, useMutation, useMutationState, useQueryClient } from "@tanstack/react-query";
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useState, useSyncExternalStore } from "react";
 import type { Permission, PermissionDecision } from "../../contracts/permissions.js";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot, TimelineItem } from "../../contracts/sessions.js";
 import type { Client } from "../api/client.js";
-import { clock } from "../api/clock.js";
+import { clock, formatDuration } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
 import {
 	announce,
@@ -41,6 +41,32 @@ import {
 	safetyFacts,
 } from "./approval.js";
 import "./approval.css";
+
+/**
+ * Which permissions currently have their anchored card on the page. The banner reads this to decide
+ * whether it must carry the whole review or can stay one line that points at the card, because the
+ * anchored card is not rendered when its call is missing from the timeline or its group is folded.
+ */
+const anchoredCards = new Map<string, number>();
+const anchorListeners = new Set<() => void>();
+function registerAnchor(id: string): () => void {
+	anchoredCards.set(id, (anchoredCards.get(id) ?? 0) + 1);
+	for (const listener of anchorListeners) listener();
+	return () => {
+		const count = (anchoredCards.get(id) ?? 1) - 1;
+		if (count > 0) anchoredCards.set(id, count);
+		else anchoredCards.delete(id);
+		for (const listener of anchorListeners) listener();
+	};
+}
+function subscribeAnchors(listener: () => void): () => void {
+	anchorListeners.add(listener);
+	return () => anchorListeners.delete(listener);
+}
+function useAnchored(id: string | null): boolean {
+	return useSyncExternalStore(subscribeAnchors, () => id !== null && anchoredCards.has(id));
+}
+const anchorId = (permissionId: string) => `approval-${permissionId}`;
 
 /** One shared second. A countdown phrased as a consequence still has to move. */
 function useSecond(active: boolean): number {
@@ -181,6 +207,42 @@ const RawRequest = memo(function RawRequest({ input }: { input: Readonly<Record<
 	);
 });
 
+/** The decision itself. The banner and the anchored card render the same buttons into one mutation. */
+function ApprovalButtons({
+	sessionId,
+	permission,
+	answer,
+}: {
+	sessionId: string;
+	permission: Permission;
+	answer: AnswerApproval;
+}) {
+	const answering = useIsMutating({ mutationKey: permissionMutationKey(sessionId) }) > 0;
+	const answerSent = useAnswerSent(sessionId, permission.id);
+	return (
+		<>
+			{approvalActions(permission).map((action) => (
+				<button
+					key={action.decision}
+					type="button"
+					className={action.variant === "primary" ? "primary" : ""}
+					title={action.description}
+					disabled={answering || answerSent}
+					onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
+				>
+					{action.label}
+					{action.keybinding === null ? null : (
+						<span className="approval-card__chord" aria-hidden="true">
+							{KEYBINDINGS[action.keybinding].modifiers.includes("alt") ? "Alt+" : ""}
+							{KEYBINDINGS[action.keybinding].key.toUpperCase()}
+						</span>
+					)}
+				</button>
+			))}
+		</>
+	);
+}
+
 interface CardProps {
 	readonly sessionId: string;
 	readonly permission: Permission;
@@ -192,8 +254,6 @@ interface CardProps {
 }
 
 function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, variant }: CardProps) {
-	const answering = useIsMutating({ mutationKey: permissionMutationKey(sessionId) }) > 0;
-	const answerSent = useAnswerSent(sessionId, permission.id);
 	const now = useSecond(true);
 	const timings = deriveApprovalTimings(permission, now);
 	const facts = safetyFacts(permission, call?.locations, timings);
@@ -204,6 +264,7 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 			className={`approval-card approval-card--${variant}`}
 			data-escalated={timings.escalated}
 			aria-label="Permission request"
+			{...(variant === "anchored" ? { id: anchorId(permission.id), tabIndex: -1 } : {})}
 		>
 			<p className="approval-card__eyebrow">{eyebrow}</p>
 			<h2 className="approval-card__title">{permission.title}</h2>
@@ -239,24 +300,7 @@ function ApprovalCard({ sessionId, permission, call, answer, eyebrow, hint, vari
 				))}
 			</ul>
 			<div className="approval-card__actions">
-				{approvalActions(permission).map((action) => (
-					<button
-						key={action.decision}
-						type="button"
-						className={action.variant === "primary" ? "primary" : ""}
-						title={action.description}
-						disabled={answering || answerSent}
-						onClick={() => answer.mutate({ id: permission.id, decision: action.decision })}
-					>
-						{action.label}
-						{action.keybinding === null ? null : (
-							<span className="approval-card__chord" aria-hidden="true">
-								{KEYBINDINGS[action.keybinding].modifiers.includes("alt") ? "Alt+" : ""}
-								{KEYBINDINGS[action.keybinding].key.toUpperCase()}
-							</span>
-						)}
-					</button>
-				))}
+				<ApprovalButtons sessionId={sessionId} permission={permission} answer={answer} />
 			</div>
 			{hint === undefined ? null : <p className="approval-card__hint">{hint}</p>}
 			{answer.error && answer.variables?.id === permission.id ? <p role="alert">{answer.error.message}</p> : null}
@@ -309,7 +353,39 @@ export function ApprovalBanner({ client, session }: { client: Client; session: S
 	});
 	useShortcut("reject", () => permission && answer.mutate({ id: permission.id, decision: "reject" }), { enabled });
 
+	const anchored = useAnchored(id);
 	if (!permission) return null;
+	// The anchored card beside the call carries the review, so the pinned surface stays one line: what
+	// is asked, how long is left, the decision, and a way back to the card if it has scrolled away.
+	if (anchored)
+		return (
+			<section className="approval-banner approval-banner--strip" aria-label="Approval needed">
+				<p className="approval-strip" data-escalated={escalated}>
+					<span className="approval-strip__glyph" aria-hidden="true">
+						!
+					</span>
+					<span className="approval-strip__eyebrow">{escalated ? "Approval waiting" : "Approval needed"}</span>
+					<strong className="approval-strip__title">{permission.title}</strong>
+					{timings?.budgetKnown ? (
+						<span className="approval-strip__left">stops in {formatDuration(timings.remainingMs)}</span>
+					) : null}
+				</p>
+				<div className="approval-strip__actions">
+					<button
+						type="button"
+						className="approval-strip__review"
+						onClick={() => {
+							const card = document.getElementById(anchorId(permission.id));
+							card?.scrollIntoView({ block: "center" });
+							card?.focus({ preventScroll: true });
+						}}
+					>
+						Review
+					</button>
+					<ApprovalButtons sessionId={session.id} permission={permission} answer={answer} />
+				</div>
+			</section>
+		);
 	return (
 		// A named `section` already exposes the region role, which is what the banner needs; spelling
 		// the role out as well is the redundancy the linter rejects.
@@ -342,6 +418,8 @@ export function AnchoredApproval({
 }) {
 	const answer = useAnswerApproval(client, session.id);
 	const permission = permissionForCall(session, item);
+	const permissionId = permission?.id ?? null;
+	useEffect(() => (permissionId === null ? undefined : registerAnchor(permissionId)), [permissionId]);
 	if (!permission) return null;
 	return (
 		<ApprovalCard
