@@ -171,6 +171,20 @@ export interface RuntimeDescriptor {
 	 * considerations so OAuth subscription paths are an explicit, informed opt-in.
 	 */
 	authNotice?: string;
+	/**
+	 * Set by a runtime that reaches a remote gateway whose URL the operator has
+	 * to supply. Configure then offers no localhost default and asks for this URL
+	 * by name, with an example: a local default looks usable, lets setup finish,
+	 * and leaves the target down.
+	 */
+	gatewayUrl?: {
+		/** What configure asks for, as the prompt's heading. */
+		label: string;
+		/** One real URL of the right shape. */
+		example: string;
+		/** What else decides the URL, as one sentence. */
+		detail?: string;
+	};
 	knownModels?: string[];
 	binaryName?: string;
 	defaultBinaryPath?: string;

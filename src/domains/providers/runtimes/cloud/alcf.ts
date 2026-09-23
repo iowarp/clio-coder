@@ -143,6 +143,11 @@ const alcfRuntime: RuntimeDescriptor = {
 	tier: "cloud",
 	apiFamily: "openai-completions",
 	auth: "oauth",
+	gatewayUrl: {
+		label: "ALCF gateway URL",
+		example: "https://inference-api.alcf.anl.gov/resource_server/sophia/vllm/v1",
+		detail: "The right URL and model depend on the ALCF cluster or resource, such as Sophia or Metis.",
+	},
 	knownModels: KNOWN_MODELS,
 	defaultCapabilities,
 	probe(target: TargetDescriptor, ctx: ProbeContext): Promise<ProbeResult> {

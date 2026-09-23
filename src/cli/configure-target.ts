@@ -82,6 +82,18 @@ export function defaultUrlFor(runtimeId: string): string {
 	return port ? `http://127.0.0.1:${port}` : "http://127.0.0.1:8080";
 }
 
+/** The URL configure offers for a runtime, or undefined when the operator has to name its gateway. */
+export function offeredUrlFor(runtime: Pick<RuntimeDescriptor, "id" | "gatewayUrl">): string | undefined {
+	return runtime.gatewayUrl ? undefined : defaultUrlFor(runtime.id);
+}
+
+/** What configure says above a gateway URL prompt; empty for a runtime with a local default. */
+export function gatewayUrlGuidance(runtime: Pick<RuntimeDescriptor, "gatewayUrl">): string[] {
+	const gateway = runtime.gatewayUrl;
+	if (!gateway) return [];
+	return [`Required. For example ${gateway.example}`, ...(gateway.detail ? [gateway.detail] : [])];
+}
+
 export function deriveTargetId(runtimeId: string, existing: ReadonlyArray<TargetDescriptor>): string {
 	const base = runtimeId;
 	const taken = new Set(existing.map((e) => e.id));

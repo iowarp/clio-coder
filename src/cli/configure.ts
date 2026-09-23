@@ -73,8 +73,10 @@ import {
 	defaultUrlFor,
 	deriveTargetId,
 	describeAuthStatus,
+	gatewayUrlGuidance,
 	inventoryNote,
 	normalizeUrl,
+	offeredUrlFor,
 	PROTOCOL_COMPAT_RUNTIME_IDS,
 	preferredModelFor,
 	probeLines,
@@ -481,7 +483,12 @@ async function runNonInteractive(runtime: RuntimeDescriptor, args: ParsedArgs): 
 	}
 	let url: string | undefined = args.url ? normalizeUrl(args.url, runtime.id) : existing?.url;
 	if (!url && support.supportsCustomUrl) {
-		url = defaultUrlFor(runtime.id);
+		url = offeredUrlFor(runtime);
+	}
+	if (!url && runtime.gatewayUrl) {
+		printError(`--url is required for ${runtime.id}: give the ${runtime.gatewayUrl.label}`);
+		for (const line of gatewayUrlGuidance(runtime)) process.stderr.write(`  ${line}\n`);
+		return 2;
 	}
 	if (url && runtime.id === "lmstudio") {
 		const greeting = await greetLmStudio(
@@ -802,7 +809,19 @@ async function runTargetSetupInteractive(
 	const targetId = idInput;
 
 	let url: string | undefined = existing?.url;
-	if (support.supportsCustomUrl) {
+	if (runtime.gatewayUrl) {
+		process.stdout.write(`\n${runtime.gatewayUrl.label}:\n`);
+		for (const line of gatewayUrlGuidance(runtime)) process.stdout.write(`  ${line}\n`);
+		for (;;) {
+			const urlInput = await ask(rl, runtime.gatewayUrl.label, defaults.url ?? existing?.url);
+			if (urlInput === null) return 0;
+			if (urlInput.length > 0) {
+				url = normalizeUrl(urlInput, runtime.id);
+				break;
+			}
+			process.stdout.write(`  the ${runtime.gatewayUrl.label} is required.\n`);
+		}
+	} else if (support.supportsCustomUrl) {
 		const urlDefault = defaults.url ?? existing?.url ?? defaultUrlFor(runtime.id);
 		const urlInput = await ask(
 			rl,
