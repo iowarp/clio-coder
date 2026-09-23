@@ -203,10 +203,10 @@ describe("decisions readers", () => {
 		strictEqual(isTrue(undefined), null);
 	});
 
-	// An abstention is not a negative; both must be distinguishable.
+	// A noul uses its probability, not a provider-specific confidence field.
 	it("returns null rather than false below the confidence floor", () => {
-		strictEqual(isTrue({ type: "noul", noul: 0.9, confidence: 0.2 }, { minConfidence: 0.5 }), null);
-		strictEqual(isTrue({ type: "noul", noul: 0.9, confidence: 0.8 }, { minConfidence: 0.5 }), true);
+		strictEqual(isTrue({ type: "noul", noul: 0.6, confidence: 0.9 }, { minConfidence: 0.5 }), null);
+		strictEqual(isTrue({ type: "noul", noul: 0.9, confidence: 0.2 }, { minConfidence: 0.5 }), true);
 	});
 
 	it("reads a choice, withholding one whose mass is too thin", () => {
