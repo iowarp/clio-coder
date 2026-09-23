@@ -65,7 +65,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Topic | Guide |
 | --- | --- |
 | Targets, providers, auth, settings v2, routing, and fleet profiles | [Configuration and Targets](guide/configuration-and-targets.md) |
-| Every settings key, environment variable, flag, and project-file key with its default and precedence | [Configuration Reference](guide/configuration-reference.md) |
+| Default settings keys, layering, and source pointers for CLI, environment, and project schemas | [Configuration Reference](guide/configuration-reference.md) |
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
 | Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](architecture/context-engine.md) |
@@ -117,7 +117,7 @@ validation, reference data, or human scientific judgment.
 | --- | --- |
 | Agent Client Protocol server, stdio transport, and permission mediation | [ACP](architecture/acp.md) |
 | Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
-| All built-in worker tools, arguments, outputs, and error examples | [Tool Usage](guide/tool-usage.md) |
+| Built-in tool contracts, operating boundaries, and core workflows | [Tool Usage](guide/tool-usage.md) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
 | External coding agent discovery, inspection, and safe resource adoption | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |
