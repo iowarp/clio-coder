@@ -51,6 +51,10 @@ home, the launch folder, and parent folders. It lists directories and links to
 directories, and starts a conversation directly from the selected folder. An absolute path can still
 be entered directly, and saved sessions remain one action away.
 
+The next GUI iteration is focused on the project-to-chat path and the feel of a
+live conversation. See [the conversation handoff](CHAT_HANDOFF.md) for the current
+checkpoint, relevant files, and the remaining live-run and visual-design work.
+
 
 The application exposes Clio through a browser or installed local PWA.
 It includes toolchain management, sessions, traces, documentation, settings and
@@ -113,8 +117,9 @@ pnpm --filter @iowarp/clio-coder-gui dev:client
 
 The server uses port 4317 and Vite uses port 4318. Open the printed launch link
 with its port changed to 4318, retaining the token fragment. The Vite proxy
-rewrites its own development Origin to the backend Origin; unrelated origins
-remain subject to the backend's rejection.
+rewrites its own development Origin to the backend Origin and leaves frontend
+`client/api/*.ts` imports with Vite; unrelated origins remain subject to the
+backend's rejection.
 
 ```sh
 pnpm --filter @iowarp/clio-coder-gui verify
