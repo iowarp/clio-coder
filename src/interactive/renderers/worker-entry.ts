@@ -15,6 +15,7 @@ import {
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
+import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
 import { type ClioToken, clioTheme, fitUnits, formatCompactMs, GLYPH } from "../theme/index.js";
 import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
@@ -39,10 +40,21 @@ export interface WorkerEntryRenderOptions {
 	terminalRows?: number;
 	/** Render the full body without the line cap; `/export` sets this. */
 	unbounded?: boolean;
+	/**
+	 * `continues` when this card follows a card of the same council round, so
+	 * the round's header row is not repeated above it.
+	 */
+	group?: "leads" | "continues";
 }
 
+/**
+ * Who started the run, in the gutter: `◆` the model, `◇` the operator, `↳`
+ * Clio's own helper work. Settled or running, the mark keeps its token; the
+ * live state is the `●` on the row, never an orange mark.
+ */
 function originGlyph(entry: WorkerEntryState): string {
-	return workerAskedByModel(entry) ? theme.fg("action", GLYPH.workerAgent) : theme.fg("accent", GLYPH.workerHuman);
+	if (entry.helper) return dim(GLYPH.subProcess);
+	return workerAskedByModel(entry) ? theme.fg("agent", GLYPH.workerAgent) : theme.fg("accent", GLYPH.workerHuman);
 }
 
 /**
@@ -55,23 +67,40 @@ function identityUnits(entry: WorkerEntryState): string[] {
 	const { kind, targetId, wireModelId } = entry.runtime;
 	const route =
 		targetId !== undefined && wireModelId !== undefined ? `${targetId}/${wireModelId}` : (targetId ?? wireModelId);
+	// A council member reads by its roster label in its roster color, the name
+	// the operator configured, rather than by its agent id.
+	const who =
+		entry.council !== undefined
+			? councilLabelText(theme, entry.council.label, entry.council.color)
+			: theme.fg("muted", kind === "acp" ? `${entry.agentId} (acp)` : entry.agentId);
 	return [
-		theme.fg(
-			"muted",
-			entry.helper
-				? `Clio-Coder → ${entry.agentId.replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)} · internal agent`
-				: kind === "acp"
-					? `${entry.agentId} (acp)`
-					: entry.agentId,
-		),
+		who,
+		...(entry.helper ? [dim("internal")] : []),
 		...(kind !== "acp" && route !== undefined ? [dim(route)] : []),
 		dim(`run ${entry.runId}`),
+		// A failover keeps the card; the header says which attempt it shows.
+		...(entry.attempts.length > 1 ? [dim(`attempt ${entry.attempts.length}`)] : []),
 	];
 }
 
 /** Whole header units, closing on a dim ellipsis rather than cutting a unit mid-word. */
 function headerLine(entry: WorkerEntryState, width: number): string {
 	return fitUnits(theme, `${originGlyph(entry)} `, identityUnits(entry), width);
+}
+
+/**
+ * The gutter mark and the row a council round opens with. Its members follow
+ * in the content column, each under its roster label, so the round reads as
+ * one question put to several voices rather than as unrelated cards.
+ */
+function councilHeader(entry: WorkerEntryState, width: number): string {
+	const round = entry.council?.round ?? 1;
+	return fitUnits(theme, `${originGlyph(entry)} `, [theme.fg("muted", "council"), dim(`round ${round}`)], width);
+}
+
+/** A card's own row starts in the gutter, or, for a council member, in the content column. */
+function cardPrefix(entry: WorkerEntryState): string {
+	return entry.council !== undefined ? "  " : `${originGlyph(entry)} `;
 }
 
 /**
@@ -112,12 +141,12 @@ function needsInputUnit(): string {
 	return theme.fg("warning", `${GLYPH.phaseBlocked} needs input`);
 }
 
-/** A block with no settled receipt yet: a spinner-free, honest "running". */
-function pendingUnit(entry: WorkerEntryState): string {
-	return theme.fg(
-		"action",
-		entry.attempts.length > 1 ? `${GLYPH.running} attempt ${entry.attempts.length}` : `${GLYPH.running} running`,
-	);
+/**
+ * A block with no settled receipt yet: the live mark, spinner-free. The row's
+ * progress line says what the run is doing; `/view` spells the state out.
+ */
+function pendingUnit(word = false): string {
+	return theme.fg("accent", word ? `${GLYPH.running} running` : GLYPH.running);
 }
 
 /**
@@ -273,7 +302,7 @@ function failureLines(entry: WorkerEntryState, width: number): string[] {
 /** The receipt line, whole units only; a unit that would not fit is dropped behind a dim ellipsis. */
 function footerLine(entry: WorkerEntryState, width: number): string {
 	const units =
-		isPending(entry) || entry.receipt === undefined ? [pendingUnit(entry)] : footerUnits(entry, entry.receipt);
+		isPending(entry) || entry.receipt === undefined ? [pendingUnit(true)] : footerUnits(entry, entry.receipt);
 	return fitUnits(theme, dim(FOOTER), units, width);
 }
 
@@ -287,10 +316,10 @@ function footerLine(entry: WorkerEntryState, width: number): string {
  * unbound key never advertises a wrong chord.
  */
 function actionLine(entry: WorkerEntryState, width: number): string {
-	const identity = `${originGlyph(entry)} ${identityUnits(entry).join(dim(SEPARATOR))}`;
+	const identity = `${cardPrefix(entry)}${identityUnits(entry).join(dim(SEPARATOR))}`;
 	const status =
 		isPending(entry) || entry.receipt === undefined
-			? pendingUnit(entry)
+			? pendingUnit()
 			: workerNeedsInput(entry)
 				? needsInputUnit()
 				: outcomeUnit(entry.receipt, false);
@@ -316,8 +345,65 @@ function workerMetrics(entry: WorkerEntryState): string[] {
 	return metrics;
 }
 
-/** A helper is an agent invocation, but its report belongs to the coordinator. */
-function helperCard(
+/** What a running worker is doing when no call is in flight, by the phase its stream is in. */
+const PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, words: string]>> = {
+	starting: [GLYPH.phaseWaiting, "starting"],
+	waiting: [GLYPH.phaseWaiting, "waiting on the model"],
+	thinking: [GLYPH.phaseThinking, "thinking"],
+	writing: [GLYPH.phaseWriting, "writing"],
+	tool: [GLYPH.phaseTool, "between calls"],
+};
+
+/** The running call as `verb object`, or its tool name when the runtime sent no descriptor. */
+function describedAction(entry: WorkerEntryState): string | null {
+	const action = entry.progress?.currentAction;
+	if (action === null || action === undefined) return null;
+	return action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object ?? ""}`.trim() : action.tool;
+}
+
+function elapsedMsOf(entry: WorkerEntryState, nowMs: number): number | undefined {
+	if (isPending(entry)) return entry.startedAtMs === undefined ? undefined : Math.max(0, nowMs - entry.startedAtMs);
+	return entry.receipt?.durationMs;
+}
+
+/**
+ * A running card's one live line, rewritten in place: what it is doing now,
+ * how long it has run, and what it has spent. No spinner; the panel's clock
+ * moves the elapsed.
+ */
+function progressLine(entry: WorkerEntryState, width: number, nowMs: number): string {
+	const action = describedAction(entry);
+	const [glyph, idle] = PHASE_ACTIVITY[entry.progress?.phase ?? "starting"] ?? [GLYPH.phaseWaiting, "starting"];
+	const doing = action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${action}`;
+	const elapsedMs = elapsedMsOf(entry, nowMs);
+	const tokens = entry.progress?.processedTokens;
+	const calls = entry.progress?.toolCalls;
+	const facts = [
+		...(elapsedMs === undefined ? [] : [formatCompactMs(elapsedMs)]),
+		...(tokens === undefined ? [] : [`${formatFooterTokens(tokens)} tokens`]),
+		...(calls === undefined ? [] : [`${calls} call${calls === 1 ? "" : "s"}`]),
+	];
+	// The elapsed time is the line's live signal, so a narrow row cuts the
+	// action's text and then drops the spend, never the clock.
+	const room = Math.max(1, width - RAIL_WIDTH);
+	const activity = sanitizeCallTargetText(redactSecretString(doing));
+	for (let kept = facts.length; kept >= 0; kept -= 1) {
+		const tail = kept === 0 ? "" : `${SEPARATOR}${facts.slice(0, kept).join(SEPARATOR)}`;
+		const activityRoom = room - tail.length;
+		if (kept > 1 && activityRoom < Math.min(24, activity.length)) continue;
+		const shown = truncateToWidth(activity, Math.max(1, activityRoom), GLYPH.ellipsis, false);
+		return `${dim(RAIL)}${theme.fg("muted", shown)}${dim(tail)}`;
+	}
+	return `${dim(RAIL)}${theme.fg("muted", truncateToWidth(activity, room, GLYPH.ellipsis, false))}`;
+}
+
+/**
+ * Helper and shadow work, outside Detailed: one subordinate row naming the
+ * helper, what it was asked to do (or, while it runs, the call it is making),
+ * and how it ended. A failure adds its reason beneath. Detailed shows the full
+ * card.
+ */
+function helperRow(
 	entry: WorkerEntryState,
 	width: number,
 	detail: TranscriptDetailPolicy,
@@ -326,44 +412,26 @@ function helperCard(
 ): string[] {
 	const pending = isPending(entry);
 	const failed = !pending && (entry.receipt?.outcome !== "succeeded" || entry.receipt?.contract === "fail");
+	const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text)).replace(/\.$/u, "");
+	const what = (pending ? describedAction(entry) : null) ?? entry.task ?? "assisting the main agent";
 	const status = pending
-		? "working"
+		? pendingUnit()
 		: entry.receipt?.outcome === "canceled"
-			? "canceled"
+			? theme.fg("dim", GLYPH.cancelled)
 			: failed
-				? "failed"
-				: "completed";
-	const action = entry.progress?.currentAction;
-	const activity = pending
-		? action
-			? `${action.descriptor?.verb ?? action.tool} ${action.descriptor?.object ?? ""}`
-			: "Gathering findings for Clio-Coder"
-		: failed
-			? (entry.receipt?.failureMessage ?? entry.receipt?.outcomeCode ?? "Open details for the failure")
-			: "Findings returned to Clio-Coder";
-	const clean = (text: string) => sanitizeCallTargetText(redactSecretString(text));
-	const elapsedMs =
-		pending && entry.startedAtMs !== undefined ? Math.max(0, nowMs - entry.startedAtMs) : entry.receipt?.durationMs;
-	const elapsed = elapsedMs === undefined ? "" : ` · ${formatCompactMs(elapsedMs)}`;
-	const header = `${theme.fg("agent", `↳ Clio-Coder → ${clean(entry.agentId).replace(/(^|[-_ ])([a-z])/g, (_, gap: string, letter: string) => `${gap ? " " : ""}${letter.toUpperCase()}`)}`)}${dim(" · internal agent · ")}${theme.fg(failed ? "warning" : pending ? "accent" : "success", status)}${dim(elapsed)}`;
-	const body = railLines(clean(entry.task ?? "Assisting the main agent"), "muted", width);
-	const metrics = workerMetrics(entry);
+				? theme.fg("error", GLYPH.error)
+				: theme.fg("success", GLYPH.ok);
+	const elapsedMs = elapsedMsOf(entry, nowMs);
+	// A running row's tail is the live mark and its clock (`● 3.1s`), a settled
+	// one its outcome and duration (`✓ · 7.3s`), as on an action row.
+	const elapsed = elapsedMs === undefined ? "" : formatCompactMs(elapsedMs);
+	const tail = ` ${status}${elapsed.length === 0 ? "" : dim(pending ? ` ${elapsed}` : `${SEPARATOR}${elapsed}`)}`;
+	const lead = `${originGlyph(entry)} ${theme.fg("muted", clean(entry.agentId))}${dim(SEPARATOR)}${theme.fg("muted", clean(what))}`;
+	const row = `${truncateToWidth(lead, Math.max(1, width - visibleWidth(tail)), GLYPH.ellipsis, false)}${tail}`;
 	return [
-		...wrapTextWithAnsi(header, width),
-		...previewRows(body, previewBudget(detail.invocationRows, terminalRows), width, false, dim(RAIL), RAIL_WIDTH),
-		...railLines(clean(activity), pending ? "accent" : "muted", width),
-		...(metrics.length ? railLines(metrics.join(" · "), "dim", width) : []),
-		...wrapTextWithAnsi(`${dim(FOOTER)}${dim(`/view dispatch:${entry.runId}`)}`, width),
+		truncateToWidth(row, width, GLYPH.ellipsis, false),
 		...previewRows(
-			failureLines(entry, width),
-			previewBudget(detail.errorRows, terminalRows),
-			width,
-			false,
-			dim(RAIL),
-			RAIL_WIDTH,
-		),
-		...previewRows(
-			attemptLines(entry, width),
+			[...failureLines(entry, width), ...attemptLines(entry, width)],
 			previewBudget(detail.errorRows, terminalRows),
 			width,
 			false,
@@ -383,7 +451,9 @@ export function renderWorkerEntryLines(
 	const safeWidth = Math.max(1, Math.floor(width));
 	const detail = options.detail ?? transcriptDetail();
 	if (entry.helper && !options.unbounded && detail.style !== "detailed" && !workerNeedsInput(entry))
-		return helperCard(entry, safeWidth, detail, options.terminalRows, options.nowMs);
+		return helperRow(entry, safeWidth, detail, options.terminalRows, options.nowMs);
+	// The first card of a council round carries the round's header row.
+	const council = entry.council !== undefined && options.group !== "continues" ? [councilHeader(entry, safeWidth)] : [];
 	const integrity = entry.receipt?.trust;
 	const provenance =
 		isPending(entry) || integrity?.artifactIntegrity.state === "verified"
@@ -403,7 +473,8 @@ export function renderWorkerEntryLines(
 	if (options.unbounded) {
 		const tools = toolLine(entry, safeWidth);
 		return [
-			headerLine(entry, safeWidth),
+			...council,
+			entry.council !== undefined ? fitUnits(theme, "  ", identityUnits(entry), safeWidth) : headerLine(entry, safeWidth),
 			...(entry.helper && entry.task ? railLines(entry.task, "muted", safeWidth) : []),
 			...bodyLines(entry, safeWidth, true),
 			...attemptLines(entry, safeWidth),
@@ -420,9 +491,13 @@ export function renderWorkerEntryLines(
 	// it renders in the warning token rather than as folded prose.
 	const needsInput = workerNeedsInput(entry);
 	const summaryRows = needsInput ? CHECKPOINT_PREVIEW_ROWS : budget(detail.workerRows);
-	const summary = bodySourceLines(entry).flatMap((line) =>
-		railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
-	);
+	// A run that produced no prose has no summary rows, rather than one blank rail row.
+	const summary =
+		entry.text.length === 0
+			? []
+			: bodySourceLines(entry).flatMap((line) =>
+					railLines(redactSecretString(line), needsInput ? "warning" : "muted", safeWidth),
+				);
 	// Current work leads the bounded preview; completed calls remain explicitly historical.
 	const current = isPending(entry) ? entry.progress?.currentAction : null;
 	const actions = [
@@ -436,17 +511,18 @@ export function renderWorkerEntryLines(
 			safeWidth,
 		),
 	);
-	// Standard keeps no activity history, but a running worker still says what
-	// it is doing right now; without it the card reads as idle until it settles.
-	const now =
-		!detail.workerActivity && detail.workerRows > 0 && current
-			? railLines(
-					`${GLYPH.phaseTool} now: ${current.descriptor ? `${current.descriptor.verb} ${current.descriptor.object}` : current.tool}`,
-					"muted",
-					safeWidth,
-				)
-			: [];
-	const tools = detail.workerActivity && trail.length === 0 ? toolLine(entry, safeWidth) : null;
+	// A running card says what it is doing on one live line in every style;
+	// Detailed adds the calls it already finished beneath it.
+	const pending = isPending(entry);
+	const history = actions.filter(({ label }) => label === "last");
+	const lastTrail = history.flatMap(({ action }) =>
+		railLines(
+			`${GLYPH.phaseTool} last: ${action.descriptor ? `${action.descriptor.verb} ${action.descriptor.object}` : action.tool}`,
+			"muted",
+			safeWidth,
+		),
+	);
+	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
 		failureLines(entry, safeWidth),
 		budget(detail.errorRows),
@@ -456,9 +532,13 @@ export function renderWorkerEntryLines(
 		RAIL_WIDTH,
 	);
 	const presented = presentedContractAnswer(entry)?.footer;
+	// Compact states identity, execution and quality; the spend is a keystroke away.
+	const metrics = pending || detail.style === "compact" ? [] : workerMetrics(entry);
 	return [
+		...council,
 		actionLine(entry, safeWidth),
-		...(workerMetrics(entry).length ? railLines(workerMetrics(entry).join(" · "), "dim", safeWidth) : []),
+		...(pending ? [progressLine(entry, safeWidth, options.nowMs ?? Date.now())] : []),
+		...(metrics.length ? railLines(metrics.join(" · "), "dim", safeWidth) : []),
 		...(entry.helper && entry.task
 			? previewRows(
 					railLines(entry.task, "muted", safeWidth),
@@ -474,7 +554,9 @@ export function renderWorkerEntryLines(
 			: []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, dim(RAIL), RAIL_WIDTH),
 		...(tools ? [tools] : []),
-		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, false, dim(RAIL), RAIL_WIDTH) : now),
+		...(detail.workerActivity
+			? previewRows(pending ? lastTrail : trail, budget(4), safeWidth, false, dim(RAIL), RAIL_WIDTH)
+			: []),
 		...failure,
 		...(presented ? railLines(presented, "muted", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),

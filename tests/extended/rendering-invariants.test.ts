@@ -871,7 +871,7 @@ describe("Pi TUI compatibility", () => {
 	});
 });
 
-it("renders a distinct compact helper card and preserves its identity on replay", () => {
+it("renders helper work as one subordinate row outside Detailed and keeps its identity on replay", () => {
 	const stream = createWorkerStream({ readReceipt: () => null });
 	const started = stream.started({
 		runId: "helper-run",
@@ -893,17 +893,20 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 7000 }).join("\n")), /6.0s/);
 	match(stripTerminalSequences(renderWorkerEntryLines(state, 100, { nowMs: 13000 }).join("\n")), /12s/);
 	const lines = renderWorkerEntryLines(state, 100, { nowMs: 1000 });
-	strictEqual(lines.length, 4);
-	const plain = stripTerminalSequences(lines.join("\n"));
-	match(plain, /Clio-Coder → Scout.*internal agent.*working/);
-	match(plain, /Explore the source architecture/);
-	match(plain, /Gathering findings for Clio/);
+	deepStrictEqual(lines.map(stripTerminalSequences), [
+		`${GLYPH.subProcess} scout · Explore the source architecture ${GLYPH.running} 0ms`,
+	]);
 	ok(lines.every((line) => visibleWidth(line) <= 100));
 	for (const style of ["compact", "standard", "detailed"] as const) {
 		for (const width of [32, 80, 120]) {
-			const rendered = renderWorkerEntryLines(state, width, { detail: transcriptDetail(style), terminalRows: 24 });
+			const rendered = renderWorkerEntryLines(state, width, {
+				detail: transcriptDetail(style),
+				terminalRows: 24,
+				nowMs: 7000,
+			});
 			ok(rendered.every((line) => visibleWidth(line) <= width));
-			if (style === "compact") match(stripTerminalSequences(rendered.join("\n")), /Explore the source/);
+			if (style === "compact")
+				match(stripTerminalSequences(rendered.join("\n")), width >= 80 ? /Explore the source/ : /· Explore.* ● 6\.0s$/u);
 		}
 	}
 	const call = renderToolSubline(
@@ -930,13 +933,11 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 	})).get("helper-task");
 	ok(replayed);
 	const done = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(done, /internal agent.*completed/);
-	match(done, /Explore the source architecture/);
-	match(done, /Findings returned to Clio/);
-	doesNotMatch(done, /full findings/);
+	match(done, new RegExp(`^${GLYPH.subProcess} scout · Explore the source architecture ✓`, "u"));
+	doesNotMatch(done, /full findings|\n/u);
 	const expanded = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, { unbounded: true }).join("\n"));
 	match(expanded, /full findings/);
-	match(expanded, /internal agent/);
+	match(expanded, new RegExp(`^${GLYPH.subProcess} scout · internal`, "u"));
 	const detailed = stripTerminalSequences(
 		renderWorkerEntryLines(replayed, 100, { detail: transcriptDetail("detailed") }).join("\n"),
 	);
@@ -944,8 +945,8 @@ it("renders a distinct compact helper card and preserves its identity on replay"
 
 	replayed.receipt = { outcome: "failed", failureMessage: "Invalid helper result" };
 	const failed = stripTerminalSequences(renderWorkerEntryLines(replayed, 100, {}).join("\n"));
-	match(failed, /internal agent.*failed/);
-	match(failed, /Invalid helper result/);
+	match(failed, new RegExp(`^${GLYPH.subProcess} scout · Explore the source architecture ✗`, "u"));
+	match(failed, /\n {2}│ ✗ Invalid helper result/u);
 });
 
 it("preserves complete invocation arguments in inspection and meaningful intent in every style", () => {
@@ -1213,10 +1214,13 @@ describe("transcript block grammar", () => {
 			renderWorkerEntryLines(entry, 80, { detail: transcriptDetail(style) })
 				.map(stripTerminalSequences)
 				.join("\n");
-		match(render("standard"), /now: searching retry\(/u);
+		// One live line in every style says what the run is doing now.
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			match(render(style), /^◇ scout · blade\/m · run run-2 ●\n {2}│ ⚙ searching retry\(/u);
+		}
 		doesNotMatch(render("standard"), /last: read/u);
 		match(render("detailed"), /last: read a\.ts/u);
-		doesNotMatch(render("compact"), /now:/u);
+		doesNotMatch(render("compact"), /last:/u);
 	});
 });
 
@@ -1552,5 +1556,188 @@ describe("tool classes", () => {
 		strictEqual(plain.match(new RegExp(`^\\${GLYPH.classExecute} ran`, "gmu"))?.length, 2, plain);
 		match(plain, new RegExp(`${GLYPH.toolHeader} read gone\\.ts ✗`, "u"));
 		match(plain, new RegExp(`${GLYPH.toolHeader} read c\\.ts · lines 1-1 of 1 ✓`, "u"));
+	});
+});
+
+describe("agent invocations", () => {
+	/** A settled card by default; a running one passes `pending: true` and gets no receipt. */
+	const card = (
+		overrides: Partial<Omit<WorkerEntryState, "receipt">> &
+			Pick<WorkerEntryState, "assignmentId" | "agentId"> & { receipt?: WorkerEntryState["receipt"] | undefined },
+	) => {
+		const state = {
+			runId: `${overrides.assignmentId}-r1`,
+			origin: "agent",
+			runtime: { kind: "clio", targetId: "dynamo", wireModelId: "qwen" },
+			text: "Found 4 call sites.",
+			droppedLines: 0,
+			tools: [],
+			attempts: [{ runId: `${overrides.assignmentId}-r1`, targetLabel: "dynamo/qwen" }],
+			pending: false,
+			receipt: { outcome: "succeeded", durationMs: 38_000, tokenCount: 18_200, toolCalls: 7 },
+			...overrides,
+		} as WorkerEntryState;
+		if (state.pending) delete state.receipt;
+		return state;
+	};
+	const dispatchStart = (panel: ChatPanel, id: string, args: unknown) =>
+		panel.applyEvent({ type: "tool_execution_start", toolCallId: id, toolName: "dispatch", args } as never);
+	const dispatchEnd = (panel: ChatPanel, id: string, receiptCount: number, failedCount = 0) =>
+		panel.applyEvent({
+			type: "tool_execution_end",
+			toolCallId: id,
+			toolName: "dispatch",
+			result: {
+				content: [{ type: "text", text: `${receiptCount} tasks -> done` }],
+				details: { receiptCount, failedCount, runs: [] },
+			},
+			isError: false,
+			durationMs: 38_000,
+		} as never);
+
+	it("lets a card under a dispatch call be the run's row: no task, no tally, no body", () => {
+		for (const style of ["compact", "standard", "detailed"] as const) {
+			const panel = createChatPanel({ getOutputStyle: () => style, now: () => 50_000 });
+			panel.applyEvent({ type: "agent_start" } as never);
+			const task = "List every call site of retry() and the options each one passes.";
+			dispatchStart(panel, "d1", { agent: "scout", task });
+			panel.applyWorkerState(
+				card({
+					assignmentId: "a1",
+					agentId: "scout",
+					parentToolCallId: "d1",
+					pending: true,
+					startedAtMs: 40_000,
+				}),
+			);
+			const running = plainRender(panel, 100);
+			match(running, new RegExp(`^${GLYPH.workerAgent} delegating to scout ${GLYPH.running}`, "mu"));
+			doesNotMatch(running, /List every call site|task ›/u);
+			dispatchEnd(panel, "d1", 1);
+			const settledRows = plainRender(panel, 100).split("\n");
+			strictEqual(settledRows[0], `${GLYPH.workerAgent} delegated to scout ✓ · 38s`, style);
+			doesNotMatch(settledRows.join("\n"), /1 ok|quality:.*\n.*quality|tasks -> done/u);
+		}
+	});
+
+	it("keeps one tally row over a fan-out's stacked cards and quality on each card", () => {
+		const panel = createChatPanel({ getOutputStyle: () => "standard" });
+		panel.applyEvent({ type: "agent_start" } as never);
+		dispatchStart(panel, "fan", { tasks: [{ task: "a" }, { task: "b" }, { task: "c" }] });
+		for (const index of [0, 1, 2]) {
+			panel.applyWorkerState(
+				card({
+					assignmentId: `f${index}`,
+					agentId: "scout",
+					parentToolCallId: "fan",
+					...(index === 2 ? { receipt: { outcome: "failed", failureMessage: "context overflow", durationMs: 9_000 } } : {}),
+				}),
+			);
+		}
+		dispatchEnd(panel, "fan", 3, 1);
+		const rows = plainRender(panel, 100).split("\n");
+		strictEqual(rows[0], `${GLYPH.workerAgent} delegated 3 tasks · 2 ok, 1 failed ✓ · 38s`);
+		strictEqual(rows[1], "", "the cards follow the call as the next entry");
+		const cards = rows.filter((row) => row.startsWith(`${GLYPH.workerAgent} scout`));
+		strictEqual(cards.length, 3);
+		const lastCard = rows.lastIndexOf(cards[2] ?? "");
+		ok(!rows.slice(2, lastCard).includes(""), "sibling cards stack with no blank row between them");
+		strictEqual(rows.filter((row) => /│ quality: /u.test(row)).length, 3);
+	});
+
+	it("groups a council round under one header with each member's roster label", () => {
+		const panel = createChatPanel({ getOutputStyle: () => "standard" });
+		panel.appendUser("/council should retry() own its clock?");
+		const members: Array<[string, string, number]> = [
+			["Architect", "#7fb2e5", 1],
+			["Skeptic", "warning", 1],
+			["Architect", "#7fb2e5", 2],
+		];
+		for (const [index, [label, color, round]] of members.entries()) {
+			panel.applyWorkerState(
+				card({
+					assignmentId: `c${index}`,
+					agentId: label.toLowerCase(),
+					origin: "user",
+					council: { group: "g1", label, color, round },
+				}),
+			);
+		}
+		const styled = panel.render(100);
+		const rows = styled.map(stripTerminalSequences);
+		deepStrictEqual(
+			rows.filter((row) => row.startsWith(GLYPH.workerHuman)),
+			[`${GLYPH.workerHuman} council · round 1`, `${GLYPH.workerHuman} council · round 2`],
+		);
+		ok(
+			rows.some((row) => row.startsWith("  Architect · dynamo/qwen · run c0-r1 ✓ execution ok")),
+			rows.join("\n"),
+		);
+		ok(
+			rows.some((row) => row.startsWith("  Skeptic · dynamo/qwen")),
+			rows.join("\n"),
+		);
+		doesNotMatch(rows.join("\n"), /^. architect|^. skeptic/mu);
+		const round1 = rows.indexOf(`${GLYPH.workerHuman} council · round 1`);
+		const round2 = rows.indexOf(`${GLYPH.workerHuman} council · round 2`);
+		ok(!rows.slice(round1, round2 - 1).includes(""), "one round's members stack under its header");
+		// The label is painted in the member's roster color, or its token.
+		ok(
+			styled.some((row) => row.includes("\u001b[38;2;127;178;229mArchitect") || row.includes("38;5;")),
+			styled.join("\n"),
+		);
+	});
+
+	it("names a failover's attempt in the card header as well as on its rail row", () => {
+		const entry = card({
+			assignmentId: "b1",
+			agentId: "benchmarker",
+			attempts: [
+				{ runId: "b1-r0", targetLabel: "mini/qwen", outcome: "failed" },
+				{ runId: "b1-r1", targetLabel: "dynamo/qwen" },
+			],
+		});
+		const rows = renderWorkerEntryLines(entry, 120, { detail: transcriptDetail("standard") }).map(stripTerminalSequences);
+		match(rows[0] ?? "", /run b1-r1 · attempt 2 ✓ execution ok/u);
+		ok(
+			rows.some((row) => row.includes("↻ failed over → attempt 2 on dynamo/qwen")),
+			rows.join("\n"),
+		);
+	});
+
+	it("keeps a running card's clock on its live line at every width", () => {
+		const entry = card({
+			assignmentId: "l1",
+			agentId: "link-checker",
+			pending: true,
+			startedAtMs: 1_000,
+			progress: {
+				revision: 1,
+				phase: "tool",
+				tailText: "",
+				droppedLines: 0,
+				droppedBytes: 0,
+				processedTokens: 6_200,
+				toolCalls: 4,
+				currentAction: { tool: "bash", descriptor: { verb: "running", object: "lychee dist/**/*.html --verbose" } },
+				recentActions: [],
+				toolNames: ["bash"],
+				settled: false,
+			} as unknown as NonNullable<WorkerEntryState["progress"]>,
+		});
+		for (const width of [40, 60, 100, 200]) {
+			const rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("standard"), nowMs: 13_000 }).map(
+				stripTerminalSequences,
+			);
+			match(rows[1] ?? "", /^ {2}│ ⚙ running lychee.* · 12s/u, `${width}: ${rows[1]}`);
+			ok(
+				rows.every((row) => visibleWidth(row) <= width),
+				rows.join("\n"),
+			);
+		}
+		match(
+			stripTerminalSequences(renderWorkerEntryLines(entry, 200, { nowMs: 13_000 })[1] ?? ""),
+			/⚙ running lychee dist\/\*\*\/\*\.html --verbose · 12s · 6\.2k tokens · 4 calls$/u,
+		);
 	});
 });

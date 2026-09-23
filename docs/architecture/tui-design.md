@@ -20,7 +20,8 @@ The governing principle: **the user reads state from color, structure from frame
 | Questions to you | Question and answer on one row; a round nests one answer per row | Same | Same |
 | Agent shell commands | Command and outcome | Command and outcome | 12 output rows |
 | Your `!` / `!!` shell commands | 3 output rows | 6 output rows | 12 output rows |
-| Workers | Identity, execution and validation outcome | 3 summary rows and the current action while running | 8 summary rows and bounded tool activity |
+| Workers | Identity, execution and validation outcome; a running card's live line | Adds spend and 3 summary rows | 8 summary rows and bounded tool activity |
+| Helper work | One row | One row | The full card |
 | Failures and refusals | Actionable reason, up to 4 rows | Actionable reason, up to 4 rows | Up to 12 rows |
 | Turn receipt | None | Outcome and available duration | Outcome, duration, usage and model-call facts |
 
@@ -333,7 +334,7 @@ Every transcript row belongs to a two-cell gutter and a content column. The gutt
 | `✦` (accent) | Agent prose | Each prose block, not only the first of a turn, so narration that resumes after actions reads as the agent speaking again. Skill suggestion lines do not claim it. |
 | `│` (reason) | Supplied reasoning | Dim italic excerpt, or the folded `Thinking · /view` marker. No other block uses a gutter rail. |
 | `▸` `§` `±` `$` `↗` `◆` `?` `⇢` | Action | One row per call, marked by its class ([6.3](#63-tool-ledger)); its body nests beneath it (`  │ `). |
-| `◆` / `◇` / `↳` | Worker | The card body nests beneath the header (`  │ `), closing on `  └ `. |
+| `◆` / `◇` / `↳` | Worker | `◆` a run the model started, `◇` one the operator started, `↳` Clio's own helper work. The card body nests beneath the header (`  │ `); a council round opens with one header row and its members follow in the content column ([6.9](#69-agent-invocations)). |
 | `✦` (error) | Terminal error | Clio's account of why the turn ended, in the error token. |
 | `✓` / `✗` / `⊘` / `⚠` | Receipt | Closes a settled turn with its outcome. |
 
@@ -398,7 +399,7 @@ $ ran `pnpm run lint` · exit 1 ✗ · 4.1s
 
 The row states the facts the call's arguments and structured result carry. Scalar arguments up to 40 characters ride the row as `key value` (`context 2`, `glob *.ts`, quoted when they contain spaces); only long, multiline or structured arguments become `key ›` rows, and a list of short values reads as one `a · b` row. A field the row states is never repeated beneath it unless the row had to cut or flatten it, so a dispatch whose task the row shortened lists `task ›` and never `agent ›`. The row's object grows with the terminal from 60 characters to 120, and a question to the operator runs to 160. A URL reads as its host and path tail and shortens to fit a narrow row (`github.com/…/issues/412` at 40 columns) rather than splitting mid-path. A settled read drops its requested `offset`/`limit` because the row states the range it returned, and a fetch drops the `format` its facts state.
 
-A failed command states its exit status once, as the `exit N` fact, and its body drops the status line (`bash: command failed (exit 1)`, `Command exited with code 1`, a timeout or an abort) unless that line carries the only diagnosis. A row states an exit code only when the result carries one. A blocked call's verb is `blocked` and its tail names the refusal. A failed call always shows its bounded body, so the row never excerpts it. A successful edit or write carries its change facts (`+5 -2`) on the row in every style and never previews its replacement payload; a failed one keeps the payload, bounded, because the text that did not match is the diagnosis. A question to the operator reads `question → answer`; a round of several questions, or an interview's closing decisions, nests one `question → answer` row each, and the model's copy of the interview never renders. A dispatch row states its execution tally (`3 ok`, `4 ok, 1 failed`) and the validation quality of its receipts. A row too long for the terminal wraps with a hanging indent into the content column.
+A failed command states its exit status once, as the `exit N` fact, and its body drops the status line (`bash: command failed (exit 1)`, `Command exited with code 1`, a timeout or an abort) unless that line carries the only diagnosis. A row states an exit code only when the result carries one. A blocked call's verb is `blocked` and its tail names the refusal. A failed call always shows its bounded body, so the row never excerpts it. A successful edit or write carries its change facts (`+5 -2`) on the row in every style and never previews its replacement payload; a failed one keeps the payload, bounded, because the text that did not match is the diagnosis. A question to the operator reads `question → answer`; a round of several questions, or an interview's closing decisions, nests one `question → answer` row each, and the model's copy of the interview never renders. A dispatch row states its execution tally (`3 ok`, `4 ok, 1 failed`) and, when no worker card sits under it, its receipts' validation quality; a card under the call states the run's task and outcome instead ([6.9](#69-agent-invocations)). A row too long for the terminal wraps with a hanging indent into the content column.
 
 A skill load is its own action identity. A settled `context(scope="skills")` load reads `§ loaded skill <name>` with the name in `accent`, states who asked for it (`by operator` for `/skill`, the selector or a marketplace install; `by recipe` for a bound worker; `by model` under model activation), `narrows tools` when the skill declares a tool surface, and `drifted` in `warning` when its content no longer matches its recorded hash. Standard and Detailed add the skill's description as one nested row. A load refused for trust, installation or activation reasons settles as a failed row carrying the refusal. An operator prompt that starts with `/skill <name>` leads with that command in `accent`.
 
@@ -447,6 +448,37 @@ silently dropping it. Mermaid transformation runs only after an assistant text s
 so partial fences never flicker into incomplete diagrams while streaming.
 
 ---
+
+### 6.9 Agent Invocations
+
+Every run the transcript shows is a card, and the gutter says who started it: `◆` (the `agent` token) a run the model started by calling `dispatch`, `◇` (`accent`) one the operator started with `/run`, `/delegate` or `/council`, and `↳` (dim) Clio's own helper or shadow work. A run Clio starts for itself without either asking, such as a wiki pass or a judge, never reaches the transcript. The card's header names the agent, its route and its run id; a failover keeps the card and adds `attempt 2` to the header as well as the `↻ failed over → attempt 2 on <route>` rail row. A settled card states its execution outcome and, on its own rail row, its validation quality, because a run can execute cleanly and fail validation.
+
+```text
+◆ delegated to scout ✓ · 38s
+
+◆ scout · dynamo/qwen3.8-27b · run k2m9x4 ✓ execution ok · 38s
+  │ 18.2k tokens processed · 7 tool calls
+  │ Found 4 call sites.
+  │ quality: grounded
+```
+
+A card that sits under the dispatch call that spawned it is that run's row. The call's row drops the task and the receipt facts the card states, so a single dispatch reads `◆ delegated to scout ✓ · 38s` over its card, and a fan-out keeps one row with its execution tally (`◆ delegated 3 tasks · 2 ok, 1 failed`) over its cards, which stack with no blank row between them. A dispatch refused before any worker ran has no card and stays a failed action row. A dispatch with no card under it, such as a detached batch, states its tally and its receipts' validation quality itself. The panel marks the call when its first card arrives, live and on `/resume`, and re-renders only the entry that holds the call.
+
+A running card shows one live line in every style, rewritten in place without a spinner: what the run is doing now, how long it has run, and what it has spent (`⚙ running lychee dist/**/*.html · 12s · 6.2k tokens · 4 calls`). Between calls the line names the stream's phase (`◐ thinking`, `◑ writing`). A narrow row cuts the action's text and then drops the spend, never the clock. Standard adds the live answer tail beneath it and Detailed adds the calls already finished (`⚙ last: read dist/index.html`).
+
+A council round is one question put to several members, so it reads as one block. The round opens with a `◇ council · round 1` row, and each member follows in the content column under its roster label in its roster color (a theme token name or a `#rrggbb` value, else `accent`), with its own outcome, answer and quality nested beneath. A later round opens its own header.
+
+```text
+◇ council · round 1
+  Architect · dynamo/qwen3.8-27b · run c0unc0 ✓ execution ok · 12s
+  │ Yes. Inject a clock; tests and fleet probes both need it.
+  │ quality: grounded
+  Skeptic · dynamo/qwen3.8-27b · run c0unc1 ✓ execution ok · 14s
+  │ No. Pass a sleep function; a clock object is more surface than it needs.
+  │ quality: grounded
+```
+
+Helper and shadow work is one subordinate row outside Detailed: the helper, what it was asked to do (or, while it runs, the call it is making), and how it ended (`↳ context-scout · Summarize prior probe benchmarks ✓ · 7.3s`). A failure adds its reason on one nested row. Detailed shows the full card. Consecutive helper rows stack, and every run of cards stacks in Compact.
 
 ## 7. Settings Center & Command Overlays
 

@@ -166,7 +166,8 @@ for (const width of widths) {
 		const original = structuredClone(entry);
 		let rows = renderWorkerEntryLines(entry, width, { detail: transcriptDetail("detailed"), terminalRows: 14 });
 		bounded(rows, width);
-		assert.match(plain(rows), /now: current-研究/u);
+		// The live progress line comes first under the header; finished calls follow.
+		assert.match(plain(rows), /^[^\n]*\n {2}│ ⚙ current-研究/u);
 		assert.match(plain(rows), /last: newest/u);
 		assert.deepEqual(entry, original);
 		entry.receipt = { outcome: "succeeded", durationMs: 1000 };
@@ -176,7 +177,7 @@ for (const width of widths) {
 		bounded(rows, width);
 		assert.match(plain(rows), /needs input/u);
 		assert.match(plain(rows), /dataset should I inspect\?/u);
-		assert.doesNotMatch(plain(rows), /now:/u);
+		assert.doesNotMatch(plain(rows), /⚙ current/u);
 	});
 }
 
