@@ -82,6 +82,10 @@ Every run committed all 400 streamed deltas with zero full redraws. In three int
 - Normalized worker error classification and grounded citations to grep matches.
 - Bound pre-turn memory and skill query latency.
 - Mark a call target only when its source description is actually truncated at 120 characters; ACP, audit, and TUI use the same mark. Charge the context estimate only for custom handoff seeds replayed to the model, rather than display-only session records. Strip inert `<tool_call>` markup from a pending worker answer tail while preserving the settled raw answer for inspection.
+- `verifiers validate` fails when discovery would block the catalog, and names the colliding check id and both of its sources. Ported from ikourkouta-svg's fix (#382).
+- Model lists come from the provider when it answers. A cached list or catalog shown as a fallback says why in `configure`, `targets use`, `models` and the model picker. Gemini lists the models its API key can generate with (#390, #386).
+- ALCF targets ask for a gateway URL, with the Sophia endpoint as the example, instead of offering `http://127.0.0.1:8080` (#388).
+- On macOS, the safety classifier and the startup workspace check treat `/private/etc`, `/private/var` and `/private/tmp` as the system paths they are, and the root test suites pass there (#391).
 
 ### Tool contract coverage
 
