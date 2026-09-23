@@ -114,6 +114,31 @@ function workersIn(cwd: string): number[] {
 	return pids;
 }
 
+function speculativeJournalRows(stateDir: string): Array<{
+	turnId: string;
+	counts: { held: number; adopted: number; discarded: number };
+}> {
+	let files: string[];
+	try {
+		files = readdirSync(join(stateDir, "sessions"), { recursive: true })
+			.map(String)
+			.filter((name) => name.endsWith("current.jsonl"));
+	} catch {
+		return [];
+	}
+	return files.flatMap((name) =>
+		readFileSync(join(stateDir, "sessions", name), "utf8")
+			.split("\n")
+			.filter(Boolean)
+			.map((line) => JSON.parse(line) as { kind?: string; customType?: string; turnId?: string; data?: unknown })
+			.filter((entry) => entry.kind === "custom" && entry.customType === "speculativeDispatch")
+			.map((entry) => ({
+				turnId: entry.turnId ?? "",
+				counts: entry.data as { held: number; adopted: number; discarded: number },
+			})),
+	);
+}
+
 describe("speculative dispatch through the built binary", {
 	timeout: 180_000,
 	skip: process.platform !== "linux",
@@ -172,6 +197,7 @@ describe("speculative dispatch through the built binary", {
 	async function turn(speculativeDispatch: boolean, predict: string) {
 		configure(speculativeDispatch);
 		jev.predict = predict;
+		const journalBefore = new Set(speculativeJournalRows(scratch.stateDir).map((entry) => entry.turnId));
 		const before = new Set(readRunJournal(scratch.stateDir)?.envelopes.keys() ?? []);
 		const jevBefore = jev.requests.length;
 		const result = await runCli(
@@ -191,30 +217,40 @@ describe("speculative dispatch through the built binary", {
 		ok(run);
 		const receipt = journal.receipts.find((entry) => entry.runId === run.id);
 		ok(receipt, "the run sealed no receipt");
-		return { run, receipt, jevRequest: jev.requests[jevBefore] };
+		return {
+			run,
+			receipt,
+			jevRequest: jev.requests[jevBefore],
+			speculativeRows: speculativeJournalRows(scratch.stateDir)
+				.filter((entry) => !journalBefore.has(entry.turnId))
+				.map((entry) => entry.counts),
+		};
 	}
 
 	it("adopts the held process when the forecast names the recipe dispatched", async () => {
-		const { run, receipt, jevRequest } = await turn(true, "documenter");
+		const { run, receipt, jevRequest, speculativeRows } = await turn(true, "documenter");
 		ok(jevRequest);
 		ok("dispatchForecast.recipe" in jevRequest.questions, "the leaf on asks the recipe question");
 		ok(run.timing?.heldWorkerAdoptedAt, "the dispatch spawned cold despite a matching forecast");
 		strictEqual(receipt.outcome, "succeeded", receipt.outcomeDetail ?? "");
 		ok(verifyReceiptIntegrity(receipt, run).ok, "the adopted run's receipt does not verify");
+		deepStrictEqual(speculativeRows, [{ held: 1, adopted: 1, discarded: 0 }]);
 		deepStrictEqual(workersIn(scratch.root), [], "a worker process outlived the run");
 	});
 
 	it("spawns cold when the forecast names another recipe, and leaves nothing behind", async () => {
-		const { run, receipt } = await turn(true, "coder");
+		const { run, receipt, speculativeRows } = await turn(true, "coder");
 		strictEqual(run.timing?.heldWorkerAdoptedAt, undefined);
 		strictEqual(receipt.outcome, "succeeded", receipt.outcomeDetail ?? "");
+		deepStrictEqual(speculativeRows, [{ held: 1, adopted: 0, discarded: 1 }]);
 		deepStrictEqual(workersIn(scratch.root), [], "the unused held process outlived the run");
 	});
 
 	it("asks the forecast its two questions and holds nothing with the leaf off", async () => {
-		const { run, jevRequest } = await turn(false, "documenter");
+		const { run, jevRequest, speculativeRows } = await turn(false, "documenter");
 		ok(jevRequest);
 		deepStrictEqual(Object.keys(jevRequest.questions).sort(), ["dispatchForecast.dispatch", "dispatchForecast.shape"]);
 		strictEqual(run.timing?.heldWorkerAdoptedAt, undefined);
+		deepStrictEqual(speculativeRows, []);
 	});
 });
