@@ -262,6 +262,32 @@ describe("decision site credentials", () => {
 			globalThis.fetch = realFetch;
 		}
 	});
+
+	it("keeps valid answers when another question in the batch is malformed", async () => {
+		const { settings } = settingsWith({ toolRisk: "system-one" });
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => typesafeJev,
+		} as unknown as ProvidersContract;
+		const realFetch = globalThis.fetch;
+		globalThis.fetch = (async () =>
+			new Response(JSON.stringify({ answers: { valid: { type: "noul", noul: 0.9 }, malformed: { type: "choice" } } }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			})) as typeof fetch;
+		try {
+			const questions = {
+				valid: { type: "noul" as const, instructions: "Is this valid?", criteria: { true: "Yes", false: "No" } },
+				malformed: { type: "noul" as const, instructions: "Is this malformed?", criteria: { true: "Yes", false: "No" } },
+			};
+			const reply = await askSite("toolRisk", { settings, providers, ctx }, {}, questions);
+			ok(reply, "a malformed sibling erased the valid answer");
+			strictEqual(reply.answers.valid?.answer.noul, 0.9);
+			strictEqual(reply.answers.malformed, null);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
 });
 
 describe("decision site resolution", () => {

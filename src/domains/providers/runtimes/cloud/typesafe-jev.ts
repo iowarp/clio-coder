@@ -238,11 +238,11 @@ const typesafeJevRuntime: RuntimeDescriptor = {
 			const parsed = parseAnswer(raw, question);
 			if (parsed) answers[id] = parsed;
 		}
-		// A dropped or absent answer is a contract break, not a soft failure:
-		// callers index by the ids they submitted.
-		const missing = questionIds.filter((id) => !(id in answers));
-		if (missing.length > 0) {
-			throw new Error(`TypeSafe decide returned no usable answer for: ${missing.join(", ")}`);
+		// Questions in one request are independent. Preserve valid siblings when
+		// one answer is missing or malformed; their readers treat absence as an
+		// abstention. A wholly unusable batch remains a failed request.
+		if (Object.keys(answers).length === 0) {
+			throw new Error(`TypeSafe decide returned no usable answer for: ${questionIds.join(", ")}`);
 		}
 		const result: DecideResult = {
 			model: typeof response.data.model === "string" ? response.data.model : model,

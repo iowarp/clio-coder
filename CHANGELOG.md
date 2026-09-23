@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Preserve valid decisions in a batch when one sibling answer is missing or malformed. The runtime previously rejected the entire response, making unrelated sites abstain even though TypeSafe evaluates each question independently. A wholly unusable response still fails closed.
 - Start a forecast's speculative hold before the main turn resumes, and cancel any queued hold when the turn settles. The previous next-tick callback could miss an immediate dispatch or start an orphaned hold after settlement had already released the pool.
 - Give the bound `consult` gateway prompt line concrete occasions to ask, such as two plausible fixes in a diff or unclear migration risk, and remind the main agent to supply evidence and treat probabilities as advice. The unbound gateway line remains byte-identical. This changes prompt wording; whether it increases consult usage still needs a live turn measurement.
 - Lower the dispatch hint and speculative prewarm bar from 0.7 to 0.65 at the operator's request. With the recipe question enabled, "explore this repo fully" drew 0.68 in two live turns and previously got neither a hint nor a hold; the highest observed negative was 0.54. The main agent still decides whether to dispatch.
