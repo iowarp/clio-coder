@@ -15,7 +15,7 @@ import type { Api, Model } from "../../../../engine/types.js";
 import { synthesizeCatalogBackedModel } from "../../catalog.js";
 import { probeJson } from "../../probe/http.js";
 import type { CapabilityFlags } from "../../types/capability-flags.js";
-import type { DecideOptions, DecideResult, DecisionAnswer } from "../../types/inference.js";
+import type { DecideOptions, DecideResult, DecisionAnswer, DecisionQuestion } from "../../types/inference.js";
 import type { KnowledgeBaseHit } from "../../types/knowledge-base.js";
 import type { ProbeContext, ProbeResult, RuntimeDescriptor } from "../../types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../../types/target-descriptor.js";
@@ -98,18 +98,23 @@ function numberMap(value: unknown): Record<string, number> | undefined {
  * rather than coerced: a caller gating on a decision must not receive a
  * silently defaulted one.
  */
-function parseAnswer(raw: unknown): DecisionAnswer | null {
+function parseAnswer(raw: unknown, question: DecisionQuestion): DecisionAnswer | null {
 	if (typeof raw !== "object" || raw === null) return null;
 	const row = raw as Record<string, unknown>;
-	const type = row.type;
-	if (type !== "noul" && type !== "choice" && type !== "score") return null;
+	const type = question.type;
+	if (row.type !== type) return null;
 	const answer: DecisionAnswer = { type };
 	const noul = numberOrUndefined(row.noul);
+	if (type === "noul" && (noul === undefined || noul < 0 || noul > 1)) return null;
 	if (noul !== undefined) answer.noul = noul;
+	if (type === "choice" && (typeof row.choice !== "string" || !Object.hasOwn(question.criteria, row.choice)))
+		return null;
 	if (typeof row.choice === "string") answer.choice = row.choice;
 	const probabilities = numberMap(row.probabilities);
 	if (probabilities) answer.probabilities = probabilities;
 	const score = numberOrUndefined(row.score);
+	if (question.type === "score" && (score === undefined || score < 0 || score > question.criteria.length - 1))
+		return null;
 	if (score !== undefined) answer.score = score;
 	const legend = stringMap(row.legend);
 	if (legend) answer.legend = legend;
@@ -202,7 +207,9 @@ const typesafeJevRuntime: RuntimeDescriptor = {
 		}
 		const answers: Record<string, DecisionAnswer> = {};
 		for (const [id, raw] of Object.entries(response.data.answers ?? {})) {
-			const parsed = parseAnswer(raw);
+			const question = opts.questions[id];
+			if (question === undefined) continue;
+			const parsed = parseAnswer(raw, question);
 			if (parsed) answers[id] = parsed;
 		}
 		// A dropped or absent answer is a contract break, not a soft failure:

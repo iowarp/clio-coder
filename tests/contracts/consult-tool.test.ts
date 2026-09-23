@@ -255,6 +255,17 @@ describe("contracts/consult through a decision endpoint", () => {
 			["401", () => ({ status: 401, body: JSON.stringify({ error: "unauthorized" }) })],
 			["malformed", () => ({ status: 200, body: "not json" })],
 			["missing answer", () => ({ status: 200, body: JSON.stringify({ answers: {} }) })],
+			[
+				"wrong answer shape",
+				() => ({
+					status: 200,
+					body: JSON.stringify({ answers: { risky: { type: "choice", choice: "yes", confidence: 0.9 } } }),
+				}),
+			],
+			[
+				"invalid probability",
+				() => ({ status: 200, body: JSON.stringify({ answers: { risky: { type: "noul", noul: 1.4 } } }) }),
+			],
 			["abstain", () => ({ status: 200, body: JSON.stringify({ answers: { risky: { type: "noul", noul: 0.52 } } }) })],
 		];
 		for (const [label, respond] of cases) {
