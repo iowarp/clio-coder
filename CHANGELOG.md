@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Lower the dispatch hint and speculative prewarm bar from 0.7 to 0.65 at the operator's request. With the recipe question enabled, "explore this repo fully" drew 0.68 in two live turns and previously got neither a hint nor a hold; the highest observed negative was 0.54. The main agent still decides whether to dispatch.
 - Reject incomplete or contradictory Choice and Score distributions. TypeSafe's response contract includes mass for every offered option or level, but a missing map could previously clear the certainty floor using a reported confidence and make `consult` return an empty distribution as an answer. The parser now checks the full map, the selected Choice, and Score's weighted position before any site reads them.
 - Rank installed skills beyond the first 24 names. The loader orders skills alphabetically, and the old shared 24-candidate cap left every later name unscored even though the listing can page it. The skills site now asks about up to 200 names in the same batched request; memory keeps its 24-record bound.
 - Apply one certainty floor across Jev and Laya choice and score answers. Jev reports distribution peakedness while Laya reports normalized entropy as `confidence`, so reading the field directly could admit an uncertain answer or reject a decisive one. Readers now derive peakedness from the returned distribution when present; Noul continues to derive it from its yes probability.

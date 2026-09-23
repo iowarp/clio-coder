@@ -25,10 +25,11 @@ export const DISPATCH_FORECAST_VERSION = "dispatchforecast-v1";
  * requests that warranted workers measured 0.81 to 0.95 apart from two
  * borderline prompts near 0.5, and the rest at most 0.25; the highest live
  * negative in the scenario runs was 0.54. "explore this repo fully" measured
- * 0.74 to 0.82, so a bar at 0.85 never hinted the case the site exists for.
- * An unwarranted dispatch is still a cost, so the bar sits above 0.54.
+ * 0.68 twice with the recipe question on, below the old 0.7 bar. The operator
+ * chose 0.65 so those forecasts hint and can prewarm while the bar remains
+ * above the highest observed negative.
  */
-const HINT_THRESHOLD = 0.7;
+const HINT_THRESHOLD = 0.65;
 
 /** Below this certainty the shape is left out of the hint rather than guessed. */
 const SHAPE_MIN_CONFIDENCE = 0.5;
