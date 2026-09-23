@@ -13,6 +13,7 @@ import {
 import { relevanceSite } from "../../src/domains/providers/relevance-pass.js";
 import typesafeJev from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import {
+	dispatchForecastConfident,
 	dispatchForecastHint,
 	dispatchForecastSite,
 	TURN_SCOPE_HINT,
@@ -236,7 +237,7 @@ describe("turn sites", () => {
 	});
 
 	it("hints a plan only on a confident dispatch forecast, naming the shape it read", () => {
-		strictEqual(dispatchForecastHint({ dispatch: 0.69, shape: "parallel" }), null);
+		strictEqual(dispatchForecastHint({ dispatch: 0.64, shape: "parallel" }), null);
 		strictEqual(
 			dispatchForecastHint({ dispatch: 0.9, shape: "parallel" }),
 			"[Plan] This reads as work suited to workers; it splits into independent pieces that could run in parallel. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.",
@@ -245,6 +246,12 @@ describe("turn sites", () => {
 			dispatchForecastHint({ dispatch: 0.9, shape: null }),
 			"[Plan] This reads as work suited to workers. Your delegation rules apply: dispatch before you read or edit, so your own context stays free. Whether and how to dispatch stays your call.",
 		);
+	});
+
+	it("hints and admits prewarm for the measured 0.68 exploration forecast", () => {
+		const forecast = { dispatch: 0.68, shape: "single" as const };
+		ok(dispatchForecastHint(forecast)?.startsWith("[Plan]"));
+		strictEqual(dispatchForecastConfident(forecast), true);
 	});
 
 	it("drops a shape that is undecided or outside the options it was given", () => {

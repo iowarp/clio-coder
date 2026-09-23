@@ -1076,7 +1076,7 @@ turn_start reminder goes:
   that the main model tends to explore anyway. Session ledgers showed a
   self-introduction question spending 40 tool calls and a dispatch.
 - `dispatchForecast` adds `[Plan] This reads as work suited to workers...` when
-  the answer is at least 0.7. The line also names the shape the work reads
+  the answer is at least 0.65. The line also names the shape the work reads
   as (one worker, independent pieces in parallel, dependent steps in order, or
   independent opinions) when that answer is confident, and points at the
   delegation rules: dispatch before reading or editing. On a local 27B main
@@ -1172,7 +1172,7 @@ decoding for workers. With it on and `dispatchForecast` bound, the pre-turn
 forecast gains one more question: which installed recipe the main agent would
 dispatch first. The options are every recipe the agents domain loads except the
 internal ones, each described by its own recipe description. When the forecast
-says the turn suits workers (at least 0.7) and names a recipe with at least 0.6
+says the turn suits workers (at least 0.65) and names a recipe with at least 0.6
 confidence, the harness starts that recipe's worker process right after the
 brief and holds it waiting for its spec, while the main model generates. Two
 are held when the forecast also reads the work as independent pieces in
