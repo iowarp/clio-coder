@@ -7,6 +7,9 @@ import { inspectDecisionSite, resolveDecider } from "../../src/domains/providers
 import { chosen, isTrue, rating } from "../../src/domains/providers/decisions.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import typesafeJev from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
+import { rankCapabilities } from "../../src/domains/providers/sites/capabilities.js";
+import { TURN_SITES } from "../../src/domains/providers/sites/index.js";
+import { createTurnRelevanceStore } from "../../src/domains/providers/turn-relevance.js";
 import type { ProbeContext } from "../../src/domains/providers/types/runtime-descriptor.js";
 
 const ctx: ProbeContext = { credentialsPresent: new Set(), httpTimeoutMs: 5000 };
@@ -149,6 +152,41 @@ describe("decision site resolution", () => {
 			bound: false,
 			reason: "unbound",
 		});
+	});
+
+	// Building a probe context reads the credential store. Every host passes it
+	// as a function, so an operator with nothing bound pays for no read on any
+	// turn, gateway find or approval.
+	it("never builds the probe context while nothing is bound", async () => {
+		const { settings } = settingsWith({});
+		let built = 0;
+		const lazy = (): ProbeContext => {
+			built += 1;
+			return ctx;
+		};
+		const input = { settings, providers: noProviders, ctx: lazy };
+		for (const site of DECISION_SITES) strictEqual(inspectDecisionSite(site, input).bound, false);
+		const turn = createTurnRelevanceStore({
+			resolve: () => input,
+			listMemory: () => [{ id: "m", summary: "a lesson" }],
+			listSkills: () => [{ id: "s", summary: "a skill" }],
+			sites: TURN_SITES,
+		});
+		await turn.refresh({ task: "explore this repository", previous: "" });
+		strictEqual(turn.current().size, 0);
+		strictEqual(
+			await rankCapabilities(input, { query: "open a pr", task: "t" }, [{ name: "gh", description: "d" }]),
+			null,
+		);
+		strictEqual(built, 0);
+
+		const bound = settingsWith({ memory: "system-one" }).settings;
+		const providers = {
+			getTarget: () => ({ id: "jev", runtime: "typesafe-jev", defaultModel: "jev-latest" }),
+			getRuntime: () => typesafeJev,
+		} as unknown as ProvidersContract;
+		strictEqual(inspectDecisionSite("memory", { settings: bound, providers, ctx: lazy }).bound, true);
+		strictEqual(built, 1);
 	});
 
 	it("reports a binding whose profile disappeared", () => {

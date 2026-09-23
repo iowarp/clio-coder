@@ -27,7 +27,12 @@ export type { DecisionSite } from "../../core/defaults.js";
 export interface ResolveDeciderInput {
 	settings: ClioSettings;
 	providers: ProvidersContract;
-	ctx: ProbeContext;
+	/**
+	 * The probe context, or a function that builds it. Building one reads the
+	 * credential store, and an unbound site must cost nothing, so hosts pass a
+	 * function and it is called only once a site turns out to be bound.
+	 */
+	ctx: ProbeContext | (() => ProbeContext);
 }
 
 /** Why a site is not answering, for a caller that wants to say so once. */
@@ -101,7 +106,7 @@ export function inspectDecisionSite(site: DecisionSite, input: ResolveDeciderInp
 		: undefined;
 	return {
 		bound: true,
-		decider: createDecider(runtime, target, input.ctx, resolveAuthToken),
+		decider: createDecider(runtime, target, typeof input.ctx === "function" ? input.ctx() : input.ctx, resolveAuthToken),
 		targetId: target.id,
 		model: profile.model ?? null,
 	};

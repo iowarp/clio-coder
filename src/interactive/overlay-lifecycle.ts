@@ -305,7 +305,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const status = inspectDecisionSite("toolRisk", {
 				settings,
 				providers: deps.app.providers,
-				ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: TOOL_RISK_DECISION_TIMEOUT_MS },
+				ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: TOOL_RISK_DECISION_TIMEOUT_MS }),
 			});
 			if (!status.bound) return "";
 			return toolRiskAdvisoryLine(
@@ -507,7 +507,7 @@ export function createOverlayLifecycle(deps: OverlayLifecycleRuntimeDeps): Overl
 			const status = inspectDecisionSite("drafts", {
 				settings,
 				providers: deps.app.providers,
-				ctx: { credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS },
+				ctx: () => ({ credentialsPresent: credentialsPresent(), httpTimeoutMs: DRAFT_JUDGE_TIMEOUT_MS }),
 			});
 			if (!status.bound) {
 				return {
