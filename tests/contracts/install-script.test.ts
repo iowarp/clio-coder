@@ -289,7 +289,7 @@ describe("contracts/install-script", () => {
 		}
 	});
 
-	it("installs into $HOME/.local, prints the launcher path, runs post-install, and promises no graphical command the CLI lacks", () => {
+	it("installs into $HOME/.local, prints the launcher path, runs post-install, and names the terminal only", () => {
 		const s = scratch();
 		try {
 			const r = run(s, []);
@@ -303,9 +303,7 @@ describe("contracts/install-script", () => {
 			match(r.stdout, new RegExp(`^  ${launcher} --version$`, "mu"));
 			ok(r.stdout.includes(`Terminal (interactive TUI):\n  ${launcher}\n`));
 			match(r.stdout, /clio-coder configure$/mu);
-			doesNotMatch(r.stdout, /clio-coder gui --open/u, "0.4.7 has no graphical command");
-			doesNotMatch(r.stdout, /gui background install/u);
-			match(r.stdout, /this version has no 'clio-coder gui' command/iu);
+			doesNotMatch(r.stdout, /\bgui\b/u, "the opt-in graphical application is not a next step");
 			ok(
 				cliCalls(s).includes("upgrade --post-install"),
 				`post-install ran through the launcher:\n${cliCalls(s).join("\n")}`,
@@ -315,7 +313,7 @@ describe("contracts/install-script", () => {
 				/doctor --fix/u,
 				"the npm lifecycle is upgrade --post-install, not doctor --fix",
 			);
-			doesNotMatch(cliCalls(s).join("\n"), /gui/u, "the installer never touches a graphical command the CLI lacks");
+			doesNotMatch(cliCalls(s).join("\n"), /gui/u, "the installer never touches the graphical application");
 		} finally {
 			s.cleanup();
 		}
@@ -324,14 +322,12 @@ describe("contracts/install-script", () => {
 	it("printed next steps work before PATH is updated, including a prefix with spaces", () => {
 		const s = scratch();
 		try {
-			writeFileSync(s.helpFile, HELP_WITH_GUI);
-			writeFileSync(s.guiHelpFile, GUI_HELP_WITH_BACKGROUND);
 			const result = run(s, ["--prefix", join(s.home, "my tools")]);
 			strictEqual(result.code, 0, result.all);
 			const steps = result.stdout
 				.split("\n")
-				.filter((line) => /^ {2}.*clio-coder(?: configure| gui --open| gui background install --open)?$/u.test(line));
-			ok(steps.length >= 3, result.stdout);
+				.filter((line) => /^ {2}.*clio-coder(?: --version| doctor| configure)?$/u.test(line));
+			strictEqual(steps.length, 4, result.stdout);
 			for (const step of steps) {
 				const executed = spawnSync("bash", ["-c", step], {
 					encoding: "utf8",
@@ -341,42 +337,21 @@ describe("contracts/install-script", () => {
 				strictEqual(executed.status, 0, `${step}: ${executed.stderr}`);
 			}
 			ok(cliCalls(s).includes("configure"));
-			ok(cliCalls(s).includes("gui --open"));
+			ok(cliCalls(s).includes("doctor"));
 		} finally {
 			s.cleanup();
 		}
 	});
 
-	it("offers gui --open when the installed help lists it, and the Linux background step only when listed", () => {
+	it("keeps the graphical application out of the next steps even when the installed CLI has it", () => {
 		const s = scratch();
 		try {
 			writeFileSync(s.helpFile, HELP_WITH_GUI, "utf8");
 			writeFileSync(s.guiHelpFile, GUI_HELP_WITH_BACKGROUND, "utf8");
 			const r = run(s, ["--prefix", join(s.home, "clio")]);
 			strictEqual(r.code, 0, r.all);
-			ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} gui --open\n`));
-			strictEqual(
-				cliCalls(s)
-					.filter((call) => call.startsWith("gui"))
-					.join("\n"),
-				"gui --help",
-				"the installer reads gui --help and never starts the app",
-			);
-			if (process.platform === "linux")
-				ok(r.stdout.includes(`  ${join(s.home, "clio", "bin", "clio-coder")} gui background install --open\n`));
-			else doesNotMatch(r.stdout, /background install/u);
-			doesNotMatch(r.stdout, /this version has no 'clio-coder gui' command/iu);
-
-			const s2 = scratch();
-			try {
-				writeFileSync(s2.helpFile, `${HELP_WITHOUT_GUI}  clio-coder gui [--open]  serve the app\n`, "utf8");
-				const r2 = run(s2, []);
-				strictEqual(r2.code, 0, r2.all);
-				match(r2.stdout, /clio-coder gui --open/u);
-				doesNotMatch(r2.stdout, /background install/u, "a graphical command without a background subcommand promises none");
-			} finally {
-				s2.cleanup();
-			}
+			doesNotMatch(r.stdout, /\bgui\b|graphical/iu, "an opt-in alpha is not advertised at install time");
+			doesNotMatch(cliCalls(s).join("\n"), /gui/u, "the installer never reads or starts the graphical application");
 		} finally {
 			s.cleanup();
 		}

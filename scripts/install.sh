@@ -243,19 +243,12 @@ run_post_install() {
 	warn "post-install checks did not finish; the package is installed. Run: $launcher doctor --fix"
 }
 
-# The next steps promise only what the installed CLI actually lists. An older
-# published version has no graphical command, and a tutorial that names one would
-# send the operator to an error.
+# The next steps name the terminal only. The graphical application is an opt-in
+# alpha for power users, listed under `clio-coder --help --all`, so the
+# installer neither advertises nor runs it.
 print_next_steps() {
-	local help gui_help="" gui_listed=0 background_listed=0 launcher_command
+	local launcher_command
 	printf -v launcher_command '%q' "$launcher"
-	help="$("$launcher" --help 2>/dev/null </dev/null || true)"
-	if grep -Eq '^ *clio-coder gui( |$)' <<<"$help"; then
-		gui_listed=1
-		# The background subcommand is documented one level down.
-		gui_help="$("$launcher" gui --help 2>/dev/null </dev/null || true)"
-	fi
-	grep -Eq 'clio-coder gui background install' <<<"$help$gui_help" && background_listed=1
 
 	printf '\nInstalled: %s\n' "$launcher"
 	cat <<NEXT
@@ -268,26 +261,6 @@ Verify this exact install, then configure a model target:
 Terminal (interactive TUI):
   $launcher_command
 NEXT
-	if [[ $gui_listed -eq 1 ]]; then
-		cat <<NEXT
-
-Graphical app (local, opens once you ask):
-  $launcher_command gui --open
-NEXT
-		if [[ $background_listed -eq 1 && "$(uname -s 2>/dev/null || true)" == "Linux" ]]; then
-			cat <<NEXT
-
-Optional on Linux: keep it available in the background and install it as a PWA:
-  $launcher_command gui background install --open
-NEXT
-		fi
-	else
-		cat <<NEXT
-
-The graphical app ships with a newer Clio Coder release.
-This version has no 'clio-coder gui' command; check later with: $launcher_command --help
-NEXT
-	fi
 	cat <<NEXT
 
 If this shell still finds an old clio-coder, run \`hash -r\` (Bash) or \`rehash\` (Zsh).
