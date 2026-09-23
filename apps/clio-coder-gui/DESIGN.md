@@ -246,11 +246,18 @@ neither may show an item the other lacks.
    Review (which brings the card into view), and the same two buttons. When the call is not in the
    timeline or its group is folded, the banner carries the full card instead. The banner owns the
    announcement and the keyboard chords either way.
-6. Reported reasoning lives behind a disclosure, tinted `--reason-*`, never inline with prose.
-7. One quiet line closes the turn: the outcome as a glyph and a word, the tool count, input and
+6. Workers running right now stand at the transcript's live edge, after the last turn, so a run an
+   earlier turn dispatched still shows where the operator reads. Each is one row (glyph, agent,
+   task, state in sentence case) with Guide and a two-press Stop at its end; the stop question puts
+   focus on Keep running, and leaving a form or question returns focus to the button that opened it.
+   A run leaves the strip when it settles: the delegation row in its turn, which the runtime keeps
+   running for the worker's life, records how it ended, and Session tools keep the full fleet
+   history. While a turn waits on workers the header says so ("Clio Coder is waiting on 1 worker").
+7. Reported reasoning lives behind a disclosure, tinted `--reason-*`, never inline with prose.
+8. One quiet line closes the turn: the outcome as a glyph and a word, the tool count, input and
    output tokens with the complete accounting behind a disclosure, the finish time, and the
    response's own actions at the right. No rule above it and no pill.
-8. Agent identity is always Clio Coder. If the protocol carries no sub-agent fact, the surface
+9. Agent identity is always Clio Coder. If the protocol carries no sub-agent fact, the surface
    reports which agent is active as *unavailable* rather than inferring it.
 
 **Render budget.** Settled turns are memoized by turn object identity and skip re-rendering
@@ -427,11 +434,11 @@ The route (target and model, with the target's reported health folded into its g
 composer's actions row beside Send, because that is where the next request leaves from. Without
 reported settings it reads "Model not reported", or the target a health fact names, and never a
 guessed default. The composer takes the route as one object memoized on the reported settings and
-health, so a streamed delta still leaves the composer unrendered. The menu
-holds the project path, switching, session controls, Clio Coder commands, dispatched workers and
-Close session, and it hangs below its own button at every width. An unhealthy target, an
-unrecognised health fact or a context warning is written out in full under the bar. Below 650px the
-project link shrinks so the status and the menu share its line, and the title takes the next.
+health, so a streamed delta still leaves the composer unrendered. The menu holds the project path,
+switching, session controls, Clio Coder commands, the full history of dispatched workers and Close
+session, and it hangs below its own button at every width. An unhealthy target, an unrecognised
+health fact or a context warning is written out in full under the bar. Below 650px the project link
+shrinks so the status and the menu share its line, and the title takes the next.
 
 The Sessions pages, where a conversation starts or resumes, speak the conversation's language rather
 than the inspector's: one column capped at `--conversation-max`, rows divided by `--line` hairlines

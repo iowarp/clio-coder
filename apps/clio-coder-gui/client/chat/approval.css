@@ -399,3 +399,83 @@
 .fleet-steer__outcome[data-tone="fail"] {
 	border-inline-start-color: var(--status-fail-line);
 }
+
+/* ---- running workers at the live edge ------------------------------------------------------ */
+
+/* The workers running now, after the last turn: one quiet row each in the record's column, with the
+   glyph, the agent, its task, how it stands, and Guide and Stop at the row's end. It belongs to the
+   live edge, so it sits closer to the last turn than one turn does to the next. */
+.live-workers {
+	min-width: 0;
+	margin-top: calc(-1 * var(--space-6));
+}
+.live-workers .fleet-runs {
+	display: grid;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	border-block: 1px solid var(--line);
+}
+.live-workers .fleet-run {
+	grid-template-columns: 1.25rem auto minmax(0, 1fr) auto auto;
+	align-items: center;
+	gap: var(--space-1) var(--space-3);
+	padding-block: var(--space-2);
+}
+.live-workers .fleet-run:first-child {
+	border-top: 0;
+}
+.live-workers .fleet-run__task {
+	color: var(--ink);
+}
+/* Idle, the controls are the row's last cell and a steering outcome takes the line under the task.
+   An open guidance form or stop question takes that line instead. */
+.live-workers .fleet-steer[data-mode="idle"] {
+	display: contents;
+}
+.live-workers .fleet-steer,
+.live-workers .fleet-steer__outcome {
+	grid-column: 2 / -1;
+}
+.live-workers .fleet-steer__actions {
+	justify-content: flex-end;
+}
+.live-workers .fleet-steer:not([data-mode="idle"]) .fleet-steer__actions {
+	justify-content: flex-start;
+}
+.live-workers .fleet-steer button {
+	min-height: 32px;
+	padding: 0 var(--space-3);
+	font-size: var(--text-meta);
+}
+.fleet-steer__stop {
+	border-color: var(--status-fail-line);
+	color: var(--status-fail-fg);
+}
+
+@media (max-width: 760px) {
+	/* The row keeps who and how it stands on one line, the task under them, and the controls last. */
+	.live-workers .fleet-run {
+		grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+	}
+	.live-workers .fleet-run__glyph {
+		grid-area: 1 / 1;
+	}
+	.live-workers .fleet-run__agent {
+		grid-area: 1 / 2;
+	}
+	.live-workers .fleet-run__state {
+		grid-area: 1 / 3;
+	}
+	.live-workers .fleet-run__task {
+		grid-area: 2 / 2 / auto / -1;
+	}
+	.live-workers .fleet-steer,
+	.live-workers .fleet-steer[data-mode="idle"] > .fleet-steer__actions {
+		grid-area: 3 / 2 / auto / -1;
+		justify-content: flex-start;
+	}
+	.live-workers .fleet-steer[data-mode="idle"] > .fleet-steer__outcome {
+		grid-area: 4 / 2 / auto / -1;
+	}
+}
