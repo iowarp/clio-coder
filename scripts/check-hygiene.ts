@@ -617,6 +617,9 @@ function collectInteractiveSources(dir: string): string[] {
 	const files: string[] = [];
 	for (const entry of readdirSync(dir, { withFileTypes: true })) {
 		if (entry.name === "theme") continue;
+		// The dev harness paints HTML pages of transcript frames and carries
+		// fixture roster colors; it never paints the terminal.
+		if (entry.name === "dev" && dir === join(root, "src/interactive")) continue;
 		const full = join(dir, entry.name);
 		if (entry.isDirectory()) {
 			files.push(...collectInteractiveSources(full));
