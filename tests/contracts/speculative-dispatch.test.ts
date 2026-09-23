@@ -207,7 +207,10 @@ describe("contracts/speculative dispatch", () => {
 		strictEqual(value?.recipe, "scout");
 		ok(!site.hint?.(value as NonNullable<typeof value>)?.includes("scout"));
 		strictEqual(
-			site.read({ ...answers, recipe: { ...answers.recipe, confidence: 0.4 } }, ask)?.recipe,
+			site.read(
+				{ ...answers, recipe: { ...answers.recipe, confidence: 0.4, probabilities: { scout: 0.7, coder: 0.3 } } },
+				ask,
+			)?.recipe,
 			null,
 			"below the 0.6 bar the recipe abstains",
 		);

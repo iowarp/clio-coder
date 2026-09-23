@@ -953,7 +953,9 @@ a soft failure, and a caller gating dispatch must never receive a decision the
 model did not make. An answer of a different type than the question, a `noul`
 outside 0 to 1, a choice outside the offered options, or a score outside its
 ladder is also discarded as malformed. A bound site then falls back as though
-it had no usable answer.
+it had no usable answer. Choice and Score require a probability for every
+offered option or level. The selected Choice must be a highest-probability
+option, and a Score must agree with the distribution's weighted position.
 
 #### Binding a decision site
 
