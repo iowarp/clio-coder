@@ -643,10 +643,15 @@ function TableViewport({ children }: { children: ReactNode }) {
 		if (!element) return;
 		const measure = () => setScrolls(element.scrollWidth > element.clientWidth + 1);
 		measure();
-		const observer = new ResizeObserver(measure);
-		observer.observe(element);
-		if (element.firstElementChild) observer.observe(element.firstElementChild);
-		return () => observer.disconnect();
+		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+		if (observer !== null) {
+			observer.observe(element);
+			if (element.firstElementChild) observer.observe(element.firstElementChild);
+			return () => observer.disconnect();
+		}
+		// A browser without ResizeObserver can still render and keyboard-scroll wide tables.
+		window.addEventListener("resize", measure);
+		return () => window.removeEventListener("resize", measure);
 	}, []);
 	// Name and focus the scroll container without adding a page landmark for every table.
 	const scrolling = scrolls ? ({ tabIndex: 0, role: "group", "aria-label": "Scrollable table" } as const) : {};

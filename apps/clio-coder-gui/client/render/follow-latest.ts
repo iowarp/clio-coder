@@ -1,4 +1,4 @@
-import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import { type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /** Where a view was left: its scroll offset and whether it was following the latest output. */
 export interface ScrollPosition {
@@ -92,6 +92,7 @@ export function useFollowLatest(
 		// The viewport itself changes height as the dock grows, while its child changes
 		// height as output arrives. Both must retain the live edge when follow is on.
 		observer?.observe(element);
+		if (observer === null) window.addEventListener("resize", pin);
 		// The transcript element is replaced when a session opens or the route
 		// changes, so the content observation follows whichever child is current.
 		let observed: Element | null = null;
@@ -108,9 +109,21 @@ export function useFollowLatest(
 		return () => {
 			element.removeEventListener("scroll", onScroll);
 			observer?.disconnect();
+			if (observer === null) window.removeEventListener("resize", pin);
 			children?.disconnect();
 		};
 	}, [scrollRef, enabled, setFollow]);
+
+	// Older browsers without ResizeObserver still follow streamed text, whose edits do not
+	// necessarily change the transcript's child list. Pin before paint to avoid a visible jump.
+	// biome-ignore lint/correctness/useExhaustiveDependencies: activityKey is the trigger, not a read value.
+	useLayoutEffect(() => {
+		if (!enabled || typeof ResizeObserver !== "undefined" || !followingRef.current) return;
+		const element = scrollRef.current;
+		if (element === null) return;
+		element.scrollTop = element.scrollHeight;
+		programmaticTop.current = element.scrollTop;
+	}, [activityKey, enabled, scrollRef]);
 
 	const snapshot = useCallback(
 		(): ScrollPosition => ({ top: scrollRef.current?.scrollTop ?? 0, following: followingRef.current }),
