@@ -31,6 +31,21 @@ export interface HeldWorkerKey {
 /** Held processes alive at once, across every prediction. */
 export const MAX_HELD_WORKERS = 2;
 
+/**
+ * Run a forecast hold before the caller awaiting the brief resumes. A later
+ * event-loop task can miss a fast dispatch or run after turn settlement. The
+ * returned cancellation prevents that late hold if the turn settles first.
+ */
+export function scheduleSpeculativeHold(hold: () => void): () => void {
+	let cancelled = false;
+	queueMicrotask(() => {
+		if (!cancelled) hold();
+	});
+	return () => {
+		cancelled = true;
+	};
+}
+
 export interface HeldWorkerStats {
 	/** Processes started on a prediction. */
 	readonly held: number;

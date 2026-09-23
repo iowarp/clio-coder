@@ -16,7 +16,11 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { resolvePackageRoot } from "../../src/core/package-root.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
-import { createHeldWorkerPool, type HeldWorkerKey } from "../../src/domains/dispatch/held-workers.js";
+import {
+	createHeldWorkerPool,
+	type HeldWorkerKey,
+	scheduleSpeculativeHold,
+} from "../../src/domains/dispatch/held-workers.js";
 import {
 	type HeldWorkerProcess,
 	type SpawnedWorker,
@@ -110,6 +114,20 @@ async function dispatchOnce(h: Harness, request: DispatchRequest = REQUEST) {
 describe("contracts/speculative dispatch", () => {
 	beforeEach(() => isolateDispatchState());
 	afterEach(() => restoreDispatchState());
+
+	it("starts a forecast hold before the resumed turn and suppresses one after settle", async () => {
+		const started: string[] = [];
+		async function refresh() {
+			scheduleSpeculativeHold(() => started.push("first"));
+		}
+		await refresh();
+		deepStrictEqual(started, ["first"], "the main turn resumed before its forecast hold started");
+
+		const cancel = scheduleSpeculativeHold(() => started.push("settled"));
+		cancel();
+		await Promise.resolve();
+		deepStrictEqual(started, ["first"], "a queued hold started after turn settlement");
+	});
 
 	it("adopts a held process for a matching dispatch and writes it the spec a cold spawn gets", async () => {
 		const h = harness(true);

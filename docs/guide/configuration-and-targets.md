@@ -1180,7 +1180,9 @@ says the turn suits workers (at least 0.65) and names a recipe with at least 0.6
 confidence, the harness starts that recipe's worker process right after the
 brief and holds it waiting for its spec, while the main model generates. Two
 are held when the forecast also reads the work as independent pieces in
-parallel. Nothing is awaited: the turn goes on at once.
+parallel. The hold runs before the main turn resumes after the brief, so an
+immediate dispatch can adopt it. Settlement cancels any queued hold before
+releasing unused processes.
 
 The main agent never sees the prediction. The hint line does not name a
 recipe, and the agent's dispatch is not changed, delayed or narrowed. When its
