@@ -632,7 +632,8 @@ const OUTCOME: Readonly<Record<Turn["status"], { tone: OutcomeTone; glyph: strin
 	running: { tone: "running", glyph: "▸", label: "Turn running" },
 	succeeded: { tone: "success", glyph: "✓", label: "Turn complete" },
 	failed: { tone: "fail", glyph: "✕", label: "Turn failed" },
-	cancelled: { tone: "warn", glyph: "–", label: "Turn stopped" },
+	// Stopping is not failing, and it is not waiting either: a stopped turn is a neutral report.
+	cancelled: { tone: "neutral", glyph: "–", label: "Turn stopped" },
 };
 
 /**

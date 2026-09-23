@@ -93,6 +93,11 @@ export interface ToolPresentation {
 	readonly statusLabel: string;
 	readonly settled: boolean;
 	readonly failed: boolean;
+	/**
+	 * The call ended without breaking: it was not approved, or it delegated a run that was stopped.
+	 * Its row reads that outcome in the neutral tone with a dash, never as a failure.
+	 */
+	readonly ended: boolean;
 	readonly facts: readonly ToolFact[];
 	/** A truthful sentence about a cap, a block or a skipped diff. Never model prose. */
 	readonly note: string | null;
@@ -312,6 +317,21 @@ export function notApproved(
 	wire: Pick<ToolWire, "resultText" | "isError">,
 ): boolean {
 	return (item.status === "failed" || wire.isError) && (wire.resultText?.includes(NOT_APPROVED_NOTE) ?? false);
+}
+
+/**
+ * Whether a `dispatch` call settled because its run was stopped, by the operator or with its turn.
+ * The runtime reports the run's outcome in the result details (`src/tools/dispatch-runner.ts`), spelt
+ * `canceled`; the fleet event spells it `cancelled`, so both are accepted.
+ */
+export function stoppedRun(
+	item: Pick<TimelineItem, "status" | "title">,
+	wire: Pick<ToolWire, "details" | "isError">,
+): boolean {
+	if (item.title !== "dispatch") return false;
+	if (item.status === "cancelled") return true;
+	const outcome = str(wire.details?.outcome);
+	return (item.status === "failed" || wire.isError) && (outcome === "canceled" || outcome === "cancelled");
 }
 
 export function isSettledStatus(status: string): boolean {
@@ -691,7 +711,7 @@ const STATUS_LABEL: Readonly<Record<string, string>> = {
 
 function toneFor(status: string, isError: boolean): StatusTone {
 	if (isError || status === "failed") return "fail";
-	if (status === "cancelled") return "fail";
+	if (status === "cancelled") return "neutral";
 	if (status === "completed") return "success";
 	if (status === "in_progress") return "running";
 	return "warn";
@@ -782,12 +802,14 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 	// A call that never got its approval did not break, so its row says that instead of echoing the
 	// last line of the refusal, which is an instruction to the model ("Do not retry the same call.").
 	const refused = notApproved(item, wire);
-	const excerpt = failed && !refused ? failureExcerpt(output.text) : null;
-	const digest = refused
-		? { text: null, tone: null }
-		: excerpt === null
-			? digestFor(kind.body, facts, diff, matches, settled)
-			: { text: excerpt, tone: "fail" as const };
+	const stopped = stoppedRun(item, wire);
+	const excerpt = failed && !refused && !stopped ? failureExcerpt(output.text) : null;
+	const digest =
+		refused || stopped
+			? { text: null, tone: null }
+			: excerpt === null
+				? digestFor(kind.body, facts, diff, matches, settled)
+				: { text: excerpt, tone: "fail" as const };
 	return {
 		chip: kind.chip,
 		verb: VERBS[kind.chip] ?? "Tool",
@@ -796,15 +818,18 @@ export function presentTool(item: TimelineItem, options: PresentOptions = {}): T
 		name,
 		headline,
 		body: kind.body,
-		tone: toneFor(item.status, wire.isError),
+		tone: refused || stopped ? "neutral" : toneFor(item.status, wire.isError),
 		// A result that reports an error is a failure even when its frame said completed.
 		statusLabel: refused
 			? "Not approved"
-			: wire.isError && item.status === "completed"
-				? "Failed"
-				: (STATUS_LABEL[item.status] ?? item.status),
+			: stopped
+				? "Stopped"
+				: wire.isError && item.status === "completed"
+					? "Failed"
+					: (STATUS_LABEL[item.status] ?? item.status),
 		settled,
 		failed,
+		ended: refused || stopped,
 		facts,
 		note,
 		locations: (item.locations ?? []).map((location) => ({

@@ -685,3 +685,38 @@ test("a call that was not approved says so on its row instead of echoing the ref
 	assert.equal(refused.diff?.diff?.adds, 1, "the refused change stays readable");
 	assert.equal(refused.failed, true);
 });
+
+test("a delegation whose run was stopped reads Stopped with a dash, not Failed", () => {
+	const stopped = presentTool(
+		toolItem({
+			title: "dispatch",
+			toolKind: "other",
+			status: "failed",
+			rawInput: { agent: "scout", task: "Survey the fixture" },
+			rawOutput: {
+				result: {
+					content: [{ type: "text", text: "dispatch failed: run r1 was cancelled (operator_cancel)" }],
+					details: { runId: "r1", outcome: "canceled", outcomeDetail: "operator_cancel" },
+				},
+				isError: true,
+			},
+		}),
+	);
+	assert.deepEqual(
+		[stopped.statusLabel, stopped.tone, stopped.ended, stopped.digest],
+		["Stopped", "neutral", true, null],
+	);
+	// A run that failed on its own is still a failure with its last line on the row.
+	const failed = presentTool(
+		toolItem({
+			title: "dispatch",
+			toolKind: "other",
+			status: "failed",
+			rawOutput: {
+				result: { content: [{ type: "text", text: "worker exited 1" }], details: { outcome: "failed" } },
+				isError: true,
+			},
+		}),
+	);
+	assert.deepEqual([failed.statusLabel, failed.tone, failed.ended], ["Failed", "fail", false]);
+});

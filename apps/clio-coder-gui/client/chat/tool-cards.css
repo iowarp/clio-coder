@@ -415,3 +415,17 @@
 	background: transparent;
 	padding: 0;
 }
+
+/* On a phone a failed row's trail (its last output line and state) takes its own line under the
+   headline, so the excerpt cannot squeeze the call's target down to a few characters. */
+@media (max-width: 650px) {
+	.tool-card__head:has(.tool-card__digest[data-tone="fail"]) {
+		flex-wrap: wrap;
+		row-gap: 2px;
+	}
+	.tool-card__head:has(.tool-card__digest[data-tone="fail"]) .tool-card__trail {
+		flex-basis: 100%;
+		max-width: none;
+		padding-left: 1.5em;
+	}
+}

@@ -60,9 +60,11 @@ export function toneForOutcome(outcome: string | null | undefined): StatusTone {
 			return "warn";
 		case "failed":
 		case "error":
+			return "fail";
+		// Stopping is not failing: nothing broke, so a stop reads as a neutral report.
 		case "cancelled":
 		case "stopped":
-			return "fail";
+			return "neutral";
 		case "unavailable":
 		case "unverified":
 		case null:

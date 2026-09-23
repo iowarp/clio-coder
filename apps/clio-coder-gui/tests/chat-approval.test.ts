@@ -20,6 +20,7 @@ import {
 	resolutionSummary,
 	SAFETY_POSTURE,
 	safetyFacts,
+	waitedSentence,
 } from "../client/chat/approval.js";
 import {
 	FLEET_RUN_CAP,
@@ -468,4 +469,21 @@ test("every engine refusal reason reads as a sentence, and an unknown one is pri
 test("whitespace is not guidance", () => {
 	assert.equal(guidanceReady("  \n\t"), false);
 	assert.equal(guidanceReady(" read the README "), true);
+});
+
+test("the first second of a wait says the request just arrived instead of printing 0ms", () => {
+	const at = (waitedMs: number) =>
+		waitedSentence({
+			escalated: false,
+			waitedMs,
+			waitedSeconds: Math.floor(waitedMs / 1000),
+			remainingMs: 0,
+			remainingSeconds: 0,
+			expired: false,
+			budgetKnown: false,
+			declaredEscalationSeconds: 45,
+		});
+	assert.equal(at(0), "Asked just now.");
+	assert.equal(at(999), "Asked just now.");
+	assert.match(at(30_000), /^Waiting 30s\.$/);
 });
