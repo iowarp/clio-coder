@@ -243,6 +243,11 @@ type ToolSegment = {
 	 * result (replay). An unknown dynamic tool is classified by it.
 	 */
 	actionClass?: string | undefined;
+	/**
+	 * A worker card spawned by this call sits in the transcript. The card
+	 * states the run's task and outcome, so the call's row does not repeat them.
+	 */
+	cardAttached?: true;
 };
 /**
  * A turn's terminal-error marker (`[error] ...`, `[aborted] ...`,
@@ -1056,6 +1061,7 @@ function renderToolSegmentLines(
 		toolName: seg.name,
 		args: seg.args,
 		actionClass: seg.actionClass,
+		cardAttached: seg.cardAttached,
 		elapsedMs: seg.startedAtMs === undefined ? undefined : Math.max(0, rawDurationMs(seg.startedAtMs, nowMs)),
 		phase: seg.executionStarted ? ("running" as const) : seg.argsComplete ? ("ready" as const) : ("forming" as const),
 	};
@@ -1095,6 +1101,7 @@ function finishedCall(seg: ToolSegment): ToolExecutionFinished {
 		evictedReason: seg.evictedReason,
 		resultSummary: seg.resultSummary,
 		actionClass: seg.actionClass,
+		cardAttached: seg.cardAttached,
 	};
 }
 
@@ -1155,6 +1162,41 @@ function trimBlankEdges(lines: string[]): string[] {
 	return start === 0 && end === lines.length ? lines : lines.slice(start, end);
 }
 
+/**
+ * Where a worker card sits in a group of cards: `continues` when it follows a
+ * card of the same council round, so the council header is not repeated.
+ */
+function workerGroupPosition(
+	entry: WorkerTranscriptEntry,
+	previous: TranscriptEntry | undefined,
+): "leads" | "continues" {
+	const council = entry.state.council;
+	if (council === undefined || previous?.role !== "worker") return "leads";
+	const before = previous.state.council;
+	return before !== undefined && before.group === council.group && before.round === council.round
+		? "continues"
+		: "leads";
+}
+
+/**
+ * Whether a worker card stacks directly under the entry before it, with no
+ * blank row: a card of the same council round, a sibling from the same
+ * fan-out, a helper row after a helper row, and any card after a card in
+ * Compact, where cards are a list.
+ */
+function stacksUnder(
+	entry: TranscriptEntry,
+	previous: TranscriptEntry | undefined,
+	detail: TranscriptDetailPolicy,
+): boolean {
+	if (entry.role !== "worker" || previous?.role !== "worker") return false;
+	if (detail.style === "compact") return true;
+	if (workerGroupPosition(entry, previous) === "continues") return true;
+	const parent = entry.state.parentToolCallId;
+	if (parent !== undefined && parent === previous.state.parentToolCallId) return true;
+	return detail.style !== "detailed" && entry.state.helper === true && previous.state.helper === true;
+}
+
 function renderEntryLines(
 	entry: TranscriptEntry,
 	width: number,
@@ -1162,6 +1204,7 @@ function renderEntryLines(
 	unboundedToolBodies: boolean,
 	detail: TranscriptDetailPolicy,
 	terminalRows: number,
+	previous?: TranscriptEntry,
 ): string[] {
 	if (entry.role === "replayBlock") {
 		return entry.renderBlock(width, detail, unboundedToolBodies, terminalRows);
@@ -1173,7 +1216,13 @@ function renderEntryLines(
 		return renderRetryStatus(entry.status, width, detail, unboundedToolBodies, terminalRows);
 	}
 	if (entry.role === "worker") {
-		return renderWorkerEntryLines(entry.state, width, { detail, terminalRows, unbounded: unboundedToolBodies, nowMs });
+		return renderWorkerEntryLines(entry.state, width, {
+			detail,
+			terminalRows,
+			unbounded: unboundedToolBodies,
+			nowMs,
+			group: workerGroupPosition(entry, previous),
+		});
 	}
 	// A settled assistant entry that rendered nothing at all contributes nothing.
 	// A mid-turn notice splits the transcript, so the events after it open a
@@ -1760,12 +1809,11 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const entry = transcript[i];
 			if (!entry) continue;
 			if (!sawRunningTool && entryHasRunningTool(entry)) sawRunningTool = true;
-			// Folded worker cards are a list, not a series of blocks: a fan-out of
-			// five scouts costs five rows, which is what makes the folded default
-			// worth having. Anything else keeps the blank line between entries.
+			// Cards of one council round, of one fan-out, and helper rows are a
+			// list, not a series of blocks, and so is every run of cards in
+			// Compact. Anything else keeps the blank line between entries.
 			const previous = i > 0 ? transcript[i - 1] : undefined;
-			const stacksOnPrevious = entry.role === "worker" && previous?.role === "worker" && detail.style === "compact";
-			if (i > 0 && !stacksOnPrevious) out.push("");
+			if (i > 0 && !stacksUnder(entry, previous, detail)) out.push("");
 			const renders = entryRenderCache.get(entry);
 			const cached = renders?.get(baseKey);
 			// A replay block that is not live is a pure function of the render key,
@@ -1779,7 +1827,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				for (const line of cached) out.push(line);
 			} else {
 				entriesRendered += 1;
-				const renderedEntry = renderEntryLines(entry, width, nowMs, unboundedToolBodies, detail, terminalRows);
+				const renderedEntry = renderEntryLines(entry, width, nowMs, unboundedToolBodies, detail, terminalRows, previous);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
 					const byKey = renders ?? new Map<string, string[]>();
@@ -1856,6 +1904,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					unboundedToolBodies,
 					transcriptDetail(style),
 					job.terminalRows,
+					transcript[index - 1],
 				);
 				const byKey = renders ?? new Map<string, string[]>();
 				byKey.set(key, lines);
@@ -1919,6 +1968,13 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			}
 			const entry: WorkerTranscriptEntry = { role: "worker", state };
 			workerEntries.set(state.assignmentId, entry);
+			// The card is the run's row from here on: the call that spawned it drops
+			// the task and outcome it would otherwise state.
+			const parent = state.parentToolCallId === undefined ? undefined : findToolSegmentOwner(state.parentToolCallId);
+			if (parent !== undefined && state.helper !== true && parent.segment.cardAttached !== true) {
+				parent.segment.cardAttached = true;
+				invalidateEntryCache(parent.entry);
+			}
 			const at = workerInsertionIndex(state);
 			if (at === null) {
 				transcript.push(entry);
@@ -1929,6 +1985,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				// every entry behind the cut, so the freeze has to go.
 				if (frozen !== null && at < frozen.through) frozen = null;
 				if (prerender !== null && at < prerender.next) prerender.next = at;
+				// The entry behind the new card has a new predecessor, which decides
+				// whether it stacks or opens a council group.
+				const behind = transcript[at + 1];
+				if (behind !== undefined) invalidateEntryCache(behind);
 			}
 			markDirty();
 		},

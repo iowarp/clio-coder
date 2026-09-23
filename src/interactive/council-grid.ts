@@ -92,7 +92,7 @@ function councilGridLayout(memberCount: number, contentWidth: number): CouncilLa
  * member with no color at all, takes the accent, which is what the board paints
  * the operator's own work in.
  */
-function councilLabelText(theme: ClioTheme, label: string, color?: string): string {
+export function councilLabelText(theme: ClioTheme, label: string, color?: string): string {
 	if (color !== undefined && isClioToken(color)) return theme.style(color, label, { bold: true });
 	if (color !== undefined) {
 		const painted = paintHex(label, color);

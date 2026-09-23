@@ -1626,9 +1626,15 @@ export function renderToolPreview(
 				BODY_INDENT_VISIBLE_WIDTH,
 			),
 		);
-	} else if (limit > 0 && result !== undefined && !(row.spec.class === "interaction" && !failure)) {
+	} else if (
+		limit > 0 &&
+		result !== undefined &&
+		!(row.spec.class === "interaction" && !failure) &&
+		row.context.cardAttached !== true
+	) {
 		// A settled question to the operator states what was asked and answered;
-		// its output is the model's copy of the same interview.
+		// its output is the model's copy of the same interview. A call whose
+		// worker card sits under it leaves the outcome to the card.
 		// A failed command's status line is on its row as `exit N`; the body keeps the output.
 		const shown = failure && command ? withoutCommandStatus(result) : result;
 		const text = resultText(unwrapResultEnvelope(shown), Number.POSITIVE_INFINITY);
