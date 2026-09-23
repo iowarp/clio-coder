@@ -258,7 +258,7 @@ try {
 				expanded,
 			);
 			await check("docs-rail-collapsed");
-			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 11);
+			assert.equal(await page.getByRole("navigation", { name: "Main navigation" }).getByRole("link").count(), 10);
 			assert.equal(await page.getByRole("link", { name: "Settings", exact: true }).getAttribute("data-tip"), "Settings");
 			await page.getByRole("button", { name: "Expand sidebar", exact: true }).click();
 			await page.waitForFunction(
