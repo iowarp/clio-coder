@@ -37,6 +37,7 @@ import {
 import type { ThinkingLevel } from "../../domains/providers/types/capability-flags.js";
 import type { LocalModelQuirks } from "../../domains/providers/types/local-model-quirks.js";
 import type { LiteLLMTargetSettings, LmStudioTargetSettings } from "../../domains/providers/types/target-descriptor.js";
+import { isProviderContentFilter, providerContentFilterMessage } from "../ai.js";
 import { normalizeContext, resolvedRequestContext } from "../context.js";
 import { filterGemmaChannelStream, usesGemmaChannelMarkers } from "../gemma-channel-filter.js";
 import { HarmonyResponseParser } from "../harmony-response.js";
@@ -125,6 +126,12 @@ interface ResponseModelIdCapture {
 	errorBody: Promise<string | null> | null;
 	/** Whole-response frames seen on the wire, in order; null when frames were not requested. */
 	diffusionFrames: DiffusionFrame[] | null;
+	/**
+	 * An in-stream error frame said the provider's content filter stopped the
+	 * response. The SDK throws on that frame with no HTTP status and keeps only
+	 * its message, so this is the one place the code is still visible.
+	 */
+	contentFilter: boolean;
 	buffer: string;
 	decoder: TextDecoder | null;
 }
@@ -177,6 +184,7 @@ function observeResponseMetadataLine(line: string, capture: ResponseModelIdCaptu
 		const payload = JSON.parse(data) as unknown;
 		if (!isPlainRecord(payload)) return;
 		if (capture.diffusionFrames !== null) observeDiffusionFrameChunk(payload, capture.diffusionFrames);
+		if (isContentFilterErrorFrame(payload.error)) capture.contentFilter = true;
 		const usage = isPlainRecord(payload.usage) ? payload.usage : {};
 		const details = isPlainRecord(usage.prompt_tokens_details) ? usage.prompt_tokens_details : {};
 		if (
@@ -200,6 +208,16 @@ function observeResponseMetadataLine(line: string, capture: ResponseModelIdCaptu
 		// A partial or vendor-specific event is pi-ai's parsing concern. This
 		// observer records only complete OpenAI-compatible JSON data lines.
 	}
+}
+
+/**
+ * Inception answers with HTTP 200 and one SSE frame,
+ * `{"error": {"type": "content_filter_error", "code": "content_filter", ...}}`,
+ * whose message is a refusal written as if the model were speaking.
+ */
+function isContentFilterErrorFrame(error: unknown): boolean {
+	if (!isPlainRecord(error)) return false;
+	return [error.code, error.type].some((value) => typeof value === "string" && isProviderContentFilter(value));
 }
 
 function observeResponseModelIdBytes(
@@ -273,6 +291,7 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 		gatewayRouting: null,
 		errorBody: null,
 		diffusionFrames: diffusionFramesActive(model) ? [] : null,
+		contentFilter: false,
 		buffer: "",
 		decoder: new TextDecoder(),
 	};
@@ -301,6 +320,9 @@ function withResponseModelIdCapture<TOptions extends StreamOptions>(
 				} else if (event.type === "error") {
 					if (event.error.errorMessage !== undefined && capture.errorBody !== null) {
 						event.error.errorMessage = restoreTruncatedErrorBody(event.error.errorMessage, await capture.errorBody);
+					}
+					if (capture.contentFilter && event.error.stopReason === "error") {
+						event.error.errorMessage = providerContentFilterMessage(event.error.errorMessage ?? "");
 					}
 					event.error.usage.cacheReadReported = capture.cacheReadReported;
 					event.error.responseModelIdObservation = observation;
