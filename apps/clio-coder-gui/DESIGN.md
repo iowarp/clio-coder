@@ -81,10 +81,11 @@ sees before the font files resolve: Segoe UI / system-ui, Georgia, and Cascadia 
 `:root` carries `font-synthesis: none` so a missing weight is never faked into mush.
 
 Banned: Inter, monospaced body copy, terminal prompts, all-caps paragraphs. Uppercase is limited to
-short instrument labels (`.eyebrow`, `.status-mark`) on inspector pages. The conversation and the
-Sessions pages that open it speak in sentence case throughout: their status marks, activity kinds
-and outcome line are a glyph and a word in the interface face, because the reading voice is not an
-instrument panel.
+the short `.eyebrow` label on inspector pages. Every status mark is a glyph and a word in sentence
+case in the interface face. Inspector pages keep its pill, which is what carries the dashed
+`unverified` rule; the conversation and the Sessions pages that open it drop the pill as well, so
+their status marks, activity kinds and outcome line read as plain words, because the reading voice
+is not an instrument panel.
 
 Scale: `--text-body` 15px and `--text-reading` 16px for reading, `--text-meta` 13px, `--text-exact`
 12px for mono keys, ids, timestamps and counts. `--text-instrument` 10px is allowed **only** for an
@@ -153,12 +154,16 @@ they collapse onto six tones where the tone never carries the meaning alone.
 
 | Tone | Means | Glyph | Typical labels |
 | --- | --- | --- | --- |
-| `neutral` | Reported, no judgement | `·` | REPORTED, QUEUED, SKIPPED |
-| `running` | In flight, observed live | `▸` | RUNNING, STREAMING, PROBING |
-| `success` | Explicitly completed or measured healthy | `●` | COMPLETED, HEALTHY, VERIFIED |
-| `warn` | Waiting, degraded, estimated, pending scope | `◐` | WAITING, ESTIMATED, DEGRADED, TRUNCATED |
-| `fail` | Failed or stopped | `✕` | FAILED, CANCELLED, STOPPED |
-| `unverified` | No probe has run; not zero, not success | `◌` | UNAVAILABLE, UNVERIFIED, NOT MEASURED |
+| `neutral` | Reported, no judgement | `·` | Reported, Queued, Skipped, Not approved |
+| `running` | In flight, observed live | `▸` | Running, Streaming, Probing |
+| `success` | Explicitly completed or measured healthy | `●` | Completed, Healthy, Verified |
+| `warn` | Waiting, degraded, estimated, pending scope | `◐` | Waiting, Estimated, Degraded, Truncated |
+| `fail` | Failed | `✕` | Failed |
+| `unverified` | No probe has run; not zero, not success | `◌` | Unavailable, Unverified, Not measured |
+
+Stopping is not failing. A turn, a call or a run that was stopped, and a call that was not
+approved, did not break: they read "Stopped", "Last turn stopped" or "Not approved" in the neutral
+tone, and a tool row carries a dash rather than a cross.
 
 `unverified` renders with a **dashed** rule, which is what makes "missing evidence is not success"
 visible in a greyscale screenshot.
@@ -202,9 +207,9 @@ around 1.3:1 by design. `--line-strong` is the boundary of every button, input, 
 count, badge, panel, permission card, session control and table cell, and measures 3.13:1 to 3.69:1
 in light and 3.26:1 to 4.08:1 in dark. The mechanical rule: **if removing the border would make the
 control's hit area ambiguous, it is `--line-strong`.** The one relaxation is a control whose own
-words name it in a quiet row: Session tools in the conversation header, the copy and retry actions
-under a message, the copy and source actions in a code block's head, and the first Delete on an
-earlier conversation's row. These stay frameless until hovered, focused or open, and keep the focus
+words name it in a quiet row: Session tools in the conversation header, the route chip beside Send,
+the copy and retry actions under a message, the copy and source actions in a code block's head, and
+the first Delete on an earlier conversation's row. These stay frameless until hovered, focused or open, and keep the focus
 ring.
 
 Under `forced-colors: active` every box-shadow is dropped, the ring becomes `2px solid Highlight`,
@@ -233,15 +238,19 @@ neither may show an item the other lacks.
 4. Tool, approval and loop items falling between two stretches of prose collapse into one
    `<details>` activity group. Its `<summary>` is a quiet line with no frame: a glyph, a count label
    ("6 tools completed", "1 tool running · 2 done", "1 step failed") and a digest of what the group
-   did ("listed 2 folders, ran 1 search, read 3 files"). Only a group waiting on the operator is
-   drawn as more than a line. The group opens itself while attention is needed and then stays exactly
+   did ("listed 2 folders, ran 1 search, read 3 files"). A call that was not approved or a run that
+   was stopped is counted apart from failures ("1 tool not approved", "2 tools completed · 1
+   stopped") in the neutral tone. Only a group waiting on the operator is drawn as more than a line. The group opens itself while attention is needed and then stays exactly
    as the operator left it. Opened, each call is one folded row: glyph, plain verb, target, one fact
    (exit code, line count, `+7 −1`). A change keeps its diff open; a failure carries its last output
    line; a change that was not approved keeps the proposal on screen, labelled "Not applied · not
-   approved", because the runtime words a denial, a cancelled turn and an abort alike. The digest
-   says "changed" only for a change that completed without an error.
+   approved", because the runtime words a denial, a cancelled turn and an abort alike. A delegation
+   whose run was stopped (the dispatch result's `details.outcome` is `canceled`) reads "Stopped" with
+   a dash, never "Failed". The digest says "changed" only for a change that completed without an
+   error.
 5. The approval is one decision with two surfaces. The anchored card beside the call carries the
-   review: what is asked, the proposal, the facts, Reject and Allow once. While that card is on the
+   review: what is asked, the proposal, the facts ("Asked just now" in its first second, then how long
+   it has waited), Reject and Allow once. While that card is on the
    page, the pinned banner above the transcript is a one-line strip: what is asked, the time left,
    Review (which brings the card into view), and the same two buttons. When the call is not in the
    timeline or its group is folded, the banner carries the full card instead. The banner owns the
@@ -422,7 +431,11 @@ render `0` for unknown.
 ## Shell and wayfinding
 
 The persistent desktop rail contains Overview, Sessions, Traces, Toolchain, Docs, Settings, Fleet,
-Evidence, Library and System, in two groups: the conversation pair, then Inspect & configure. The `--masthead-height` masthead carries the Clio logo, a
+Evidence, Library and System, in two groups: the conversation pair, then Inspect & configure.
+Overview is the front door: the project folder field (so a first visit reaches a conversation in two
+actions, choosing a folder and Start conversation), the open conversations, and the five most recent
+projects with their New conversation. It does not repeat the rail's links. Sessions holds the same
+field and every project. The `--masthead-height` masthead carries the Clio logo, a
 discreet connection indicator, and icon controls with accessible names. App preferences hold the
 reported version, PWA installation and browser connection controls. There is no page footer; the
 application gives that space to the work.
@@ -437,9 +450,18 @@ The route (target and model, with the target's reported health folded into its g
 composer's actions row beside Send, because that is where the next request leaves from. Without
 reported settings it reads "Model not reported", or the target a health fact names, and never a
 guessed default. The composer takes the route as one object memoized on the reported settings and
-health, so a streamed delta still leaves the composer unrendered. The menu holds the project path,
-switching, session controls, Clio Coder commands, the full history of dispatched workers and Close
-session, and it hangs below its own button at every width. An unhealthy target, an unrecognised
+health, so a streamed delta still leaves the composer unrendered. When the agent lets the GUI edit
+its safe settings, the route chip is the summary of the route picker, the one place to change target,
+model and thinking. It opens above the composer, right-aligned, and states its scope before its
+button: "Saved for every project. This conversation uses it from its next request, and so do new
+conversations, the CLI and the TUI." The runtime's only write is `settings/patch_safe`, which saves
+the operator's user settings, so the button reads "Save for every project" and nothing on the page
+suggests a choice for this conversation alone until the runtime offers one. It is disabled while a
+turn runs, because the runtime refuses the write then. The menu holds the project path, switching,
+the conversation's label and working freedom (for this conversation, and the saved default for new
+ones, again "Saved for every project"), a pointer to the route beside Send and to the Targets page,
+Clio Coder commands, the full history of dispatched workers and Close session, and it hangs below its
+own button at every width. An unhealthy target, an unrecognised
 health fact or a context warning is written out in full under the bar. Below 650px the project link
 shrinks so the status and the menu share its line, and the title takes the next.
 
@@ -449,19 +471,29 @@ instead of cards, one primary action per page (Start conversation on the project
 conversation on a project), every control 36px tall, and statuses as a glyph and a word in sentence
 case. A row's title is its action: a project's name opens its history, an open conversation's title
 returns to it, and an earlier conversation's title loads it. A row's facts sit apart by space rather
-than dots, so a narrow row that wraps them never starts a line with a separator. Deleting a saved
-conversation takes two presses in place, and the second question puts focus on Keep.
+than dots, so a narrow row that wraps them never starts a line with a separator. These pages carry no
+inspector eyebrow. Deleting a saved conversation takes two presses in place, and the second question
+puts focus on Keep.
 
-A model is always picked from its target's catalog, never typed from memory. Session tools and the
+A model is always picked from its target's catalog, never typed from memory. The route picker, the
 Settings page (`chat.model`, `fleet.default.model`, `context.memory.model` and
-`context.compaction.model`, which runs on the chat target) share one `ModelSelect`: the target's
-default, the saved id when the target no longer lists it (so opening a form never rewrites it), the
-catalog sorted for scanning, and "Another model id…" for an exact id the catalog cannot show. Choosing
-a target in Session tools asks that endpoint for its catalog through the runtime's probe, at most
-every five minutes, and drops a model the new target does not list back to its default. Beneath the
+`context.compaction.model`, which runs on the chat target) and the new-connection form share one
+`ModelSelect`: the target's default, the saved id when the target no longer lists it (so opening a form
+never rewrites it), the catalog sorted for scanning, and "Another model id…" for an exact id the
+catalog cannot show. The new-connection form offers the runtime's model hints, because no catalog
+exists before the connection does, and says the endpoint's own models appear beside Send once it is
+saved. Opening the route picker asks the chosen target for its catalog through the runtime's probe,
+at most every five minutes, and choosing another target drops a model it does not list back to its
+default. Beneath the
 field a sentence says where the list came from: when the target answered, that it did not answer and
 why, or that this is the list Clio Coder last read, with a way to check again. A catalog as long as
 the wire allows (64 models over ACP, 200 from the CLI inventory) says it may be cut.
+
+The same rule holds for every setting the runtime can enumerate: a select of its values, with an
+escape for an exact value only the operator knows. `fleet.concurrency` offers `auto` or "A fixed
+number…", and `fleet.worktrees.root` offers `auto`, `disk` and `tmpfs` or "A folder you choose…";
+their words are named in `settings-control-model.ts` until the runtime publishes them as choices.
+Free text is left for values only the operator knows, such as a library's Git remote.
 
 ## Acceptance floor
 

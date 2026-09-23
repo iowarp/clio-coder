@@ -1,13 +1,13 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef } from "react";
-import { Link, useNavigate } from "react-router";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "react-router";
 import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
-import { sessionBuffer } from "../api/sessions.js";
 import { isAwaitingAnswer } from "../chat/approval.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
+import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
+import "./projects.css";
 
 const RECENT_PROJECTS = 5;
 
@@ -22,29 +22,15 @@ function sessionState(session: SessionSnapshot): { tone: StatusTone; label: stri
 }
 
 /**
- * The front door. Someone arriving here wants to get back to work, so the page leads with the open
- * conversations and the recent projects, each one action away from a conversation. Inspection and
- * configuration are linked below, not in front.
+ * The front door. Someone arriving here wants to get to work, so the page leads with the project
+ * folder field (a first visit reaches a conversation in two actions), then the open conversations and
+ * the recent projects, each one action away from a conversation. Inspection and configuration live in
+ * the rail and are not repeated here.
  */
 export function Home({ client }: { client: Client }) {
-	const navigate = useNavigate();
-	const queries = useQueryClient();
-	const starting = useRef(false);
+	const launch = useProjectLaunch(client);
 	const sessions = useQuery({ queryKey: ["sessions"], queryFn: () => client.call(routes.sessions, emptyInput) });
 	const workspaces = useQuery({ queryKey: ["workspaces"], queryFn: () => client.call(routes.workspaces, emptyInput) });
-	const start = useMutation({
-		mutationFn: (workspaceId: string) =>
-			client.call(routes.newSession, { params: { id: workspaceId }, query: {}, body: {} }),
-		onSuccess: (session) => {
-			sessionBuffer(session.id).snapshot(session);
-			queries.setQueryData(["session", session.id], session);
-			void queries.invalidateQueries({ queryKey: ["sessions"] });
-			void navigate(`/sessions/${session.id}`);
-		},
-		onSettled: () => {
-			starting.current = false;
-		},
-	});
 	const open = sessions.data?.filter((session) => session.state === "open" || session.state === "starting") ?? [];
 	const names = new Map(workspaces.data?.map((workspace) => [workspace.id, workspace.name]) ?? []);
 	const projects = [...(workspaces.data ?? [])]
@@ -64,9 +50,7 @@ export function Home({ client }: { client: Client }) {
 						Work with Clio Coder in your own projects. Follow the conversation, review each consequential action, and inspect
 						the evidence behind the result.
 					</p>
-					<Link className="primary home-link" to="/sessions">
-						Open a project <span aria-hidden="true">↗</span>
-					</Link>
+					<ProjectOpenForm client={client} launch={launch} />
 				</div>
 				<section className="home-resume" aria-labelledby="home-resume-title">
 					<div className="home-resume__heading">
@@ -79,8 +63,8 @@ export function Home({ client }: { client: Client }) {
 						</Link>
 					</div>
 					{sessions.isPending || workspaces.isPending ? <p className="home-resume__empty">Loading your work…</p> : null}
-					{sessions.error || workspaces.error || start.error ? (
-						<p role="alert">{sessions.error?.message ?? workspaces.error?.message ?? start.error?.message}</p>
+					{sessions.error || workspaces.error || launch.error ? (
+						<p role="alert">{sessions.error?.message ?? workspaces.error?.message ?? launch.error?.message}</p>
 					) : null}
 					{open.length > 0 ? (
 						<div className="home-resume__grid">
@@ -114,45 +98,21 @@ export function Home({ client }: { client: Client }) {
 									</div>
 									<button
 										type="button"
-										disabled={start.isPending}
-										onClick={() => {
-											if (starting.current) return;
-											starting.current = true;
-											start.mutate(workspace.id);
-										}}
+										disabled={launch.busy}
+										onClick={() => launch.start(workspace.id)}
+										aria-label={`New conversation in ${workspace.name}`}
 									>
-										{start.isPending && start.variables === workspace.id ? "Starting…" : "New conversation"}
+										{launch.starting === workspace.id ? "Starting…" : "New conversation"}
 									</button>
 								</li>
 							))}
 						</ul>
 					) : !workspaces.isPending && !workspaces.error && open.length === 0 ? (
 						<p className="home-resume__empty">
-							No project has been opened yet. Open a project folder to start your first conversation.
+							No project has been opened yet. Choose its folder to start your first conversation.
 						</p>
 					) : null}
 				</section>
-			</div>
-
-			<div className="home-instruments">
-				<Link to="/traces">
-					<span className="eyebrow">Evidence</span>
-					<h2>See what happened.</h2>
-					<p>Inspect phases, tool calls, receipts, and recorded outcomes.</p>
-					<span aria-hidden="true">↗</span>
-				</Link>
-				<Link to="/settings">
-					<span className="eyebrow">Configuration</span>
-					<h2>Make it yours.</h2>
-					<p>Review and adjust the settings Clio Coder uses for your projects.</p>
-					<span aria-hidden="true">↗</span>
-				</Link>
-				<Link to="/docs">
-					<span className="eyebrow">Guide</span>
-					<h2>Learn how it works.</h2>
-					<p>Read how Clio Coder routes work, asks for approval, and records evidence.</p>
-					<span aria-hidden="true">↗</span>
-				</Link>
 			</div>
 		</section>
 	);
