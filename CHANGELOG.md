@@ -29,6 +29,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Step over rows that did not change inside a rewritten range. A streamed token that also moved the footer rewrote every row between the answer's last line and the footer.
 - Fix pi-tui's ANSI wrap stranding a space at the start of a row after a styled word that exactly filled the previous row, in the tracked patch rather than by trimming Clio's Markdown output.
 
+### Streaming Markdown
+
+- Render a streamed answer block by block. Every finished top-level Markdown block renders through Markdown as soon as the next block begins, and an open code fence, list or quote renders through Markdown while it grows; only an open paragraph or table stays plain. The settled answer renders from the same blocks, so finalizing no longer restyles rows already on screen. Before, a streamed answer taller than the viewport changed rows in scrollback when it finalized, and pi-tui answered with a full redraw of the entire transcript: 62 KB at 50 entries and 1.99 MB at 2,000. Finalize now appends only the receipt, and headings, emphasis and code are formatted while they stream.
+- Keep each transcript entry's render for the last three layouts. Alt+O re-rendered the whole transcript on every press, including a switch back to the style shown a moment earlier; a second cycle over 2,000 entries now takes 32 ms instead of about 450 ms. The first visit to a style still renders every entry once.
+- Drop blank rows a reply opens with, which put the agent's voice glyph on an empty row above the answer.
+
 ### Diffusion frames
 
 - Stream Inception Mercury's answers as diffusion frames in the TUI. With `diffusing: true` each SSE chunk carries the whole response so far, with unresolved positions still noise, and pi-ai appends every `delta.content`, so frames concatenated into garbage without intervention. The adapter recognizes each frame on the wire in the same byte path the SDK reads, marks the matching `text_delta`, and rewrites the shared text block to the frame, so the agent's context and the final message always hold exactly one frame. The transcript replaces the live answer per frame, renders the unsettled remainder dim, and hands the settled message to Markdown. Measured live, a long code answer arrived as five to eleven frames over one to three seconds.

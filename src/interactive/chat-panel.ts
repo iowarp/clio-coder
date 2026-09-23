@@ -6,6 +6,7 @@ import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
 	type Component,
+	lexMarkdownBlocks,
 	Markdown,
 	stripTerminalSequences,
 	truncateToWidth,
@@ -128,20 +129,20 @@ type TextSegment = {
 	text: string;
 	finalized: boolean;
 	/**
-	 * Lazy pi-tui Markdown instance owned by the segment. Markdown caches its
-	 * output by (text, width) internally, so reusing the instance keeps the
-	 * per-frame cost O(1) for stable segments and lets the active entry
-	 * invalidate only the tail segment's cache on re-canonicalization.
+	 * The segment's Markdown, block by block. Every top-level block the model
+	 * has finished is a chunk with its own pi-tui Markdown instance, which
+	 * caches by (text, width), so a stable block costs nothing per frame.
 	 */
-	md?: Markdown;
+	blocks?: MarkdownBlocks;
 	/**
-	 * Wrapped output for every source line except the last, plus the width and
-	 * source-line count it was built at. A streaming segment only ever grows at
-	 * its tail: source lines before the last one are terminated by a newline and
-	 * can never change, yet every frame re-wrapped all of them. On a 16k-char
-	 * answer that was 5-22 ms per frame to reproduce identical rows.
+	 * Wrapped output of the open tail block's source lines except the last,
+	 * plus the width, the tail's start offset and the line count it was built
+	 * at. The tail only grows while streaming: lines before its last one are
+	 * newline-terminated and never change, yet every frame re-wrapped all of
+	 * them. On a 16k-char answer that was 5-22 ms per frame to reproduce
+	 * identical rows.
 	 */
-	wrapCache?: { width: number; completedLines: number; lines: string[] };
+	wrapCache?: { width: number; start: number; completedLines: number; lines: string[] };
 	/**
 	 * Live denoising state while a diffusion model streams whole frames. The
 	 * text before `settled` agreed between the last two frames and is shown as
@@ -603,7 +604,6 @@ function skillSuggestionSplit(seg: TextSegment): { suggestion: string; answer: T
 	answer.text = answerText;
 	answer.finalized = seg.finalized;
 	if (!appendOnly) delete answer.wrapCache;
-	if (answer.md) answer.md.setText(answerText);
 	return split;
 }
 
@@ -630,46 +630,175 @@ function renderDiffusionFrameLines(seg: TextSegment, settled: number, width: num
 	return lines;
 }
 
+/**
+ * One finished top-level Markdown block and the blank rows (`space` tokens)
+ * that follow it. `firstType` and `lastType` are the block's first and last
+ * token types, which decide the spacing Markdown puts between two blocks.
+ */
+interface MarkdownChunk {
+	raw: string;
+	firstType: string;
+	lastType: string;
+	md: Markdown;
+}
+
+interface MarkdownBlocks {
+	/**
+	 * Tab-expanded source the finished chunks cover, always a prefix of the
+	 * segment's tab-expanded text. Tabs expand one for one, so a prefix of the
+	 * text expands to a prefix of its expansion.
+	 */
+	covered: string;
+	chunks: MarkdownChunk[];
+	/** Markdown for an open growing block (fence, list, quote) at the tail, reused across frames. */
+	openFence?: Markdown;
+}
+
+/**
+ * Split tab-expanded Markdown into top-level chunks with pi-tui's own block
+ * lexer: each non-space token opens a chunk and the blank-line tokens after it
+ * stay with it. Concatenated, the chunks' `raw` reproduce the source, so a
+ * caller can track how much of the text a run of chunks covers.
+ */
+function markdownChunks(source: string): Array<{ raw: string; firstType: string; lastType: string }> {
+	const chunks: Array<{ raw: string; firstType: string; lastType: string }> = [];
+	let leading = "";
+	for (const token of lexMarkdownBlocks(source)) {
+		const raw = token.raw;
+		if (token.type === "space") {
+			const last = chunks[chunks.length - 1];
+			if (last === undefined) leading += raw;
+			else {
+				last.raw += raw;
+				last.lastType = "space";
+			}
+			continue;
+		}
+		chunks.push({ raw: `${leading}${raw}`, firstType: token.type, lastType: token.type });
+		leading = "";
+	}
+	if (leading.length > 0) chunks.push({ raw: leading, firstType: "space", lastType: "space" });
+	return chunks;
+}
+
+/**
+ * Whether Markdown puts a blank row between two adjacent blocks, per pi-tui's
+ * renderer: after a heading, code, quote, rule, LaTeX block or table when a
+ * non-space block follows, and after a paragraph unless a list follows. A
+ * chunk that ends in blank-line tokens already renders its own blank row.
+ */
+function blankBetweenBlocks(previousLast: string, nextFirst: string): boolean {
+	if (previousLast === "space" || nextFirst === "space") return false;
+	if (previousLast === "paragraph") return nextFirst !== "list";
+	return ["heading", "code", "blockquote", "hr", "latexBlock", "table"].includes(previousLast);
+}
+
+function chatMarkdown(text: string): Markdown {
+	return new Markdown(text, 0, 0, CHAT_MARKDOWN_THEME, undefined, CHAT_MARKDOWN_OPTIONS);
+}
+
+/**
+ * pi-tui Markdown right-pads lines to the render width. A streamed row is
+ * unpadded, so the padding is trimmed to keep the two shapes identical.
+ */
+function markdownRows(md: Markdown, width: number): string[] {
+	return md.render(width).map((line) => line.replace(/ +$/, ""));
+}
+
+/**
+ * The open tail block while it streams, as plain wrapped source. Lines before
+ * the last are newline-terminated and final, so their wrapped rows are cached.
+ */
+function plainTailRows(seg: TextSegment, text: string, start: number, width: number): string[] {
+	const source = text.slice(start).split("\n");
+	const completedCount = source.length - 1;
+	const cache = seg.wrapCache;
+	const reusable =
+		cache !== undefined && cache.width === width && cache.start === start && cache.completedLines <= completedCount;
+	const completed = reusable ? cache.lines.slice() : [];
+	for (let i = reusable ? cache.completedLines : 0; i < completedCount; i += 1) {
+		for (const line of wrapTextWithAnsi(source[i] ?? "", width)) completed.push(line);
+	}
+	seg.wrapCache = { width, start, completedLines: completedCount, lines: completed };
+	const wrapped = completed.slice();
+	for (const line of wrapTextWithAnsi(source[completedCount] ?? "", width)) wrapped.push(line);
+	return wrapped;
+}
+
+/**
+ * Open blocks whose Markdown rendering only grows at the end as text arrives:
+ * a fence renders as a code block that gains rows, a list or quote gains items
+ * and lines. They render through Markdown while open, so a tall one is never
+ * restyled after its top has scrolled away. A paragraph or table stays plain
+ * until it is finished, because a half-typed emphasis marker or a new column
+ * width would restyle rows already shown.
+ */
+const GROWING_BLOCKS: ReadonlySet<string> = new Set(["code", "list", "blockquote"]);
+
+/**
+ * A text segment renders block by block, streaming or settled. Each finished
+ * top-level block renders through Markdown as soon as a later block begins;
+ * only the open block at the tail stays plain while it streams, unless it is
+ * one whose rendering only grows (a fence, a list, a quote). A settled
+ * answer renders from the same chunks, so finalizing rewrites at most the
+ * tail block. Rendering the whole answer through Markdown only at the end
+ * changed every row it had streamed, and on a regular-screen terminal a
+ * changed row above the viewport costs a full redraw of the transcript.
+ */
 function renderTextSegmentLines(seg: TextSegment, width: number): string[] {
 	if (!seg.finalized && seg.diffusion) {
 		return renderDiffusionFrameLines(seg, seg.diffusion.settled, width);
 	}
-	if (!seg.finalized) {
-		const source = seg.text.split("\n");
-		// The final element is the live tail; everything before it is newline-
-		// terminated and frozen.
-		const completedCount = source.length - 1;
-		const cache = seg.wrapCache;
-		const reusable = cache !== undefined && cache.width === width && cache.completedLines <= completedCount;
-		const completed = reusable ? cache.lines.slice() : [];
-		for (let i = reusable ? cache.completedLines : 0; i < completedCount; i += 1) {
-			for (const line of wrapTextWithAnsi(source[i] ?? "", width)) completed.push(line);
-		}
-		seg.wrapCache = { width, completedLines: completedCount, lines: completed };
-		const wrapped = completed.slice();
-		for (const line of wrapTextWithAnsi(source[completedCount] ?? "", width)) wrapped.push(line);
-		return wrapped;
+	const source = seg.text.includes("\t") ? seg.text.replace(/\t/g, "   ") : seg.text;
+	let blocks = seg.blocks;
+	if (blocks === undefined || !source.startsWith(blocks.covered)) {
+		blocks = { covered: "", chunks: [] };
+		seg.blocks = blocks;
+		delete seg.wrapCache;
 	}
-	if (!seg.md) {
-		seg.md = new Markdown(seg.text, 0, 0, CHAT_MARKDOWN_THEME, undefined, CHAT_MARKDOWN_OPTIONS);
+	const pending = markdownChunks(source.slice(blocks.covered.length));
+	// A block is finished once another block follows it; a settled segment has no open block.
+	const finished = seg.finalized ? pending.length : Math.max(0, pending.length - 1);
+	for (let index = 0; index < finished; index += 1) {
+		const chunk = pending[index];
+		if (chunk === undefined) continue;
+		blocks.chunks.push({ ...chunk, md: chatMarkdown(chunk.raw) });
+		blocks.covered += chunk.raw;
 	}
-	// pi-tui Markdown right-pads lines to the render width. If a long streaming
-	// reply has already scrolled, flipping the finalized segment from unpadded
-	// plain text to padded Markdown changes historical rows and forces a full
-	// redraw on terminals that cannot clear scrollback. Trim only that render
-	// padding so finalized prose remains byte-stable with the streamed shape.
-	return seg.md.render(width).map((line) => line.replace(/ +$/, "").replace(WRAPPED_STYLED_SPACE, "$1"));
+	const lines: string[] = [];
+	let previousLast: string | undefined;
+	for (const chunk of blocks.chunks) {
+		if (previousLast !== undefined && blankBetweenBlocks(previousLast, chunk.firstType)) lines.push("");
+		for (const row of markdownRows(chunk.md, width)) lines.push(row);
+		previousLast = chunk.lastType;
+	}
+	const open = seg.finalized ? undefined : pending[finished];
+	if (open === undefined) {
+		delete blocks.openFence;
+		return withoutLeadingBlanks(lines);
+	}
+	if (previousLast !== undefined && blankBetweenBlocks(previousLast, open.firstType)) lines.push("");
+	if (GROWING_BLOCKS.has(open.firstType)) {
+		blocks.openFence ??= chatMarkdown(open.raw);
+		blocks.openFence.setText(open.raw);
+		for (const row of markdownRows(blocks.openFence, width)) lines.push(row);
+		return withoutLeadingBlanks(lines);
+	}
+	delete blocks.openFence;
+	for (const row of plainTailRows(seg, source, blocks.covered.length, width)) lines.push(row);
+	return withoutLeadingBlanks(lines);
 }
 
 /**
- * pi-tui's ANSI wrap breaks a styled word that exactly fills the row before
- * the word's closing SGR, so the continuation row opens with that reset and
- * then the space that followed the word (`Math.random()⏎ jitter`). A wrapped
- * paragraph row never begins with meaningful whitespace behind a style reset;
- * indented Markdown (code, lists) puts its indent before any style. Only that
- * one stranded space is dropped.
+ * Blank lines a model opens its reply with render as blank rows, and the
+ * first row of a prose block carries the voice glyph: it landed on an empty
+ * row above the answer.
  */
-const WRAPPED_STYLED_SPACE = new RegExp(`^((?:${String.fromCharCode(27)}\\[[0-9;]*m)+) (?=\\S)`, "u");
+function withoutLeadingBlanks(lines: string[]): string[] {
+	let start = 0;
+	while (start < lines.length - 1 && (lines[start] ?? "").length === 0) start += 1;
+	return start === 0 ? lines : lines.slice(start);
+}
 
 /**
  * Render a terminal-error segment in the error token. Terminal markers such as
@@ -1116,7 +1245,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * transcript with nothing running keeps the old mutation-only invalidation.
 	 */
 	let renderedRunningTool = false;
-	const entryRenderCache = new Map<TranscriptEntry, { key: string; lines: string[] }>();
+	/**
+	 * Each stable entry keeps its render for the last few layout keys (width,
+	 * height budget, style). Alt+O cycles three styles, and holding one render
+	 * per entry made every switch re-render the whole transcript, including a
+	 * switch back to the style shown a moment earlier.
+	 */
+	const entryRenderCache = new Map<TranscriptEntry, Map<string, string[]>>();
+	const RENDERS_PER_ENTRY = 3;
 	/**
 	 * The cache follows the transcript instead of stopping at a fixed 256
 	 * entries, which re-rendered everything past the cap on every dirty frame
@@ -1364,11 +1500,10 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			segment.text = value;
 			segment.finalized = true;
 			delete segment.diffusion;
-			// The streaming wrap cache assumes append-only text. This is the one
-			// path that rewrites it wholesale, and finalized segments render through
-			// Markdown instead, so the cache is dead here either way.
+			// The plain-tail wrap cache is dead once nothing is open. The finished
+			// blocks stay: they cover a prefix of the settled text, and a rewrite
+			// that breaks that prefix resets them on the next render.
 			delete segment.wrapCache;
-			if (segment.md) segment.md.setText(value);
 		};
 		if (replaceTail && streamed.length > 0) {
 			const [first, ...rest] = streamed;
@@ -1500,19 +1635,25 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 			const previous = i > 0 ? transcript[i - 1] : undefined;
 			const stacksOnPrevious = entry.role === "worker" && previous?.role === "worker" && detail.style === "compact";
 			if (i > 0 && !stacksOnPrevious) out.push("");
-			const entryKey = baseKey;
-			const cached = entryRenderCache.get(entry);
+			const renders = entryRenderCache.get(entry);
+			const cached = renders?.get(baseKey);
 			const cacheable = i >= transcript.length - capacity && entry.role !== "replayBlock" && entryIsStable(entry);
-			if (cacheable && cached?.key === entryKey) {
+			if (cacheable && cached !== undefined) {
 				// A spread here is slower than a loop for large arrays and blows the
 				// stack outright for a single entry that renders enough lines.
-				for (const line of cached.lines) out.push(line);
+				for (const line of cached) out.push(line);
 			} else {
 				entriesRendered += 1;
 				const renderedEntry = renderEntryLines(entry, width, nowMs, unboundedToolBodies, detail, terminalRows);
 				for (const line of renderedEntry) out.push(line);
 				if (cacheable) {
-					entryRenderCache.set(entry, { key: entryKey, lines: renderedEntry });
+					const byKey = renders ?? new Map<string, string[]>();
+					byKey.set(baseKey, renderedEntry);
+					if (byKey.size > RENDERS_PER_ENTRY) {
+						const oldestKey = byKey.keys().next().value;
+						if (oldestKey !== undefined) byKey.delete(oldestKey);
+					}
+					if (renders === undefined) entryRenderCache.set(entry, byKey);
 					while (entryRenderCache.size > capacity) {
 						const oldest = entryRenderCache.keys().next().value;
 						if (oldest === undefined) break;
