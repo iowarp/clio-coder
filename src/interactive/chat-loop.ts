@@ -591,7 +591,7 @@ export interface CreateChatLoopDeps {
 	 * from inside a tool handler. It always settles, so a provider outage costs
 	 * ordering rather than the turn.
 	 */
-	refreshTurnRelevance?: (taskText: string, previous: string) => Promise<void>;
+	refreshTurnRelevance?: (taskText: string, previous: string, signal: AbortSignal) => Promise<void>;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
 	onTurnSettled?: () => void;
 	getMemoryRelevance?: () => PrecomputedRanking | undefined;
@@ -1236,6 +1236,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// `streaming`, so it can never be the request the operator's turn queues
 	// behind.
 	let turnActive = false;
+	let pendingDecisionBrief: AbortController | null = null;
 
 	const prewarm = createTurnPrewarm({
 		state,
@@ -1390,6 +1391,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			// dependency on the turn's critical path, and no ranking is worth a
 			// turn. Both sites read an empty store as no ranking.
 			if (deps.refreshTurnRelevance) {
+				const briefAbort = new AbortController();
+				pendingDecisionBrief = briefAbort;
 				try {
 					// The last assistant message is evidence for a short follow-up: "ok go
 					// ahead" is an action after a proposal and a pleasantry without one.
@@ -1401,10 +1404,15 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 							break;
 						}
 					}
-					await deps.refreshTurnRelevance(text, previous);
+					await deps.refreshTurnRelevance(text, previous, briefAbort.signal);
 				} catch {
 					// Ranking degrades to the order each site had before the pass.
+				} finally {
+					if (pendingDecisionBrief === briefAbort) pendingDecisionBrief = null;
 				}
+				// Cancellation before prompt admission leaves no user turn or model
+				// request behind, even if an injected brief ignored its signal.
+				if (briefAbort.signal.aborted) return;
 			}
 			// A skill the operator activated narrows the tools for the workflow
 			// it started, and that workflow outlives the turn it began in. A
@@ -1725,6 +1733,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		cancel(options?: ChatCancelOptions): void {
 			continuity.cancel();
+			pendingDecisionBrief?.abort();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
