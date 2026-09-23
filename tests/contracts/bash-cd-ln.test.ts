@@ -80,7 +80,8 @@ describe("bash write targets after cd, and links made in the same command", () =
 			`write-path-outside-cwd: ${join(deep, "if.txt")}`,
 		]);
 		// A cd hidden in a subshell or an if body is still a cd out of the workspace.
-		assertEscalated("(cd /tmp && echo x > out.txt)", ["bash-cd-outside-workspace: /tmp"]);
+		// The reason names where the cd lands, which on macOS is /private/tmp.
+		assertEscalated("(cd /tmp && echo x > out.txt)", [`bash-cd-outside-workspace: ${realpathSync("/tmp")}`]);
 		shell("(cd data && echo x > linkdir/sub.txt)");
 		ok(existsSync(join(deep, "sub.txt")));
 	});
@@ -152,7 +153,7 @@ describe("bash write targets after cd, and links made in the same command", () =
 		// After a cd the link may be made in data or, if the cd failed, in the root.
 		ok(bashClass("cd data && ln -s ../../elsewhere l").reasons.includes(outside));
 		assertEscalated('ln -s "$T" l', ["bash-symlink-outside-workspace: $T"]);
-		assertEscalated("cp -s /etc/passwd p", ["bash-symlink-outside-workspace: /etc/passwd"]);
+		assertEscalated("cp -s /etc/passwd p", [`bash-symlink-outside-workspace: ${realpathSync("/etc/passwd")}`]);
 		// -t names the link directory; the target resolves from there.
 		ok(bashClass("ln -s -t data ../../elsewhere").reasons.includes(outside));
 		assertExecute("ln -s ./a ./b");

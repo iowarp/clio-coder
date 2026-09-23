@@ -1,11 +1,21 @@
 import { deepStrictEqual, strictEqual } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	symlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { classify } from "../../src/domains/safety/action-classifier.js";
 import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine, type SafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
@@ -654,5 +664,29 @@ describe("safety gate boundary", () => {
 		strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm test" } }).kind, "block");
 		strictEqual(policy.evaluate({ tool: ToolNames.Read, args: { path: ".env" } }).kind, "block");
 		strictEqual(policy.evaluate({ tool: ToolNames.Read, args: { path: "notes.txt" } }).kind, "allow");
+	});
+
+	it("keeps /etc and /var system roots where macOS lands them, under /private", () => {
+		// A write is classified where it lands, and on macOS /etc and /var are
+		// links into /private, so a workspace opened in /etc there is /private/etc.
+		process.chdir("/etc");
+		deepStrictEqual(classify({ tool: ToolNames.Write, args: { path: "clio.conf" } }), {
+			actionClass: "system_modify",
+			reasons: [`write-path-system-root: ${realpathSync("/etc")}`],
+		});
+		for (const [target, root] of [
+			["/private/etc/hosts", "/private/etc"],
+			["/private/var/log/clio.log", "/private/var"],
+		]) {
+			deepStrictEqual(classify({ tool: ToolNames.Write, args: { path: target } }).reasons, [
+				`write-path-system-root: ${root}`,
+			]);
+		}
+		// The scratch trees stay carved out under their canonical names too.
+		for (const target of ["/private/var/folders/ab/T/clio/x.txt", "/private/var/tmp/clio/x.txt"]) {
+			deepStrictEqual(classify({ tool: ToolNames.Write, args: { path: target } }).reasons, [
+				`write-path-outside-cwd: ${target}`,
+			]);
+		}
 	});
 });

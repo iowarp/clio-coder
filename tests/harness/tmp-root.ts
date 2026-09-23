@@ -19,7 +19,7 @@
  * the environment, so the run has exactly one root and only the process that
  * created it removes it.
  */
-import { lstatSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve, sep } from "node:path";
 import { installTmpGitGuard } from "./tmp-git-guard.js";
@@ -38,8 +38,24 @@ delete process.env.NO_COLOR;
 /** Names every root this harness makes, and the only names it will remove. */
 export const TEST_TMP_ROOT_PREFIX = "clio-coder-tests-";
 
-/** The real temp dir, read before TMPDIR is repointed at the run root. */
-const systemTmp = resolve(tmpdir());
+/**
+ * The real temp dir, read before TMPDIR is repointed at the run root, and
+ * canonical. Every path contract reports where a path lands, and macOS hands
+ * out a temp dir behind a link (`/var/folders/...` resolves under
+ * `/private/var`), so a lexical root made each of those contracts compare
+ * `/var/...` against `/private/var/...`. On Linux `/tmp` is already canonical.
+ */
+const systemTmp = canonicalTmp();
+
+function canonicalTmp(): string {
+	const lexical = resolve(tmpdir());
+	try {
+		return realpathSync(lexical);
+	} catch {
+		// A temp dir that does not resolve fails at mkdtemp below, as it always has.
+		return lexical;
+	}
+}
 
 /**
  * Whether `dir` is a directory this module could have made, checked immediately

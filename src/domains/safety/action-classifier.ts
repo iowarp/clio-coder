@@ -59,9 +59,20 @@ const SYSTEM_MODIFY_PATTERNS: ReadonlyArray<NamedPattern> = [
  * `/run/lock`, so a write aimed at either landed on a path no prefix covered
  * and escaped the system-root rule whenever the workspace happened to sit
  * under it. Found while auditing the `/var` subdirectories for the carve-out
- * below.
+ * below. `/private/etc` and `/private/var` close the same hole on macOS, where
+ * `/etc` and `/var` are links into `/private`: a workspace opened in `/etc`
+ * there is `/private/etc`, and every write inside it looked like a plain write.
  */
-const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = ["/etc", "/usr", "/var", "/bin", "/sbin", "/run"];
+const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = [
+	"/etc",
+	"/usr",
+	"/var",
+	"/bin",
+	"/sbin",
+	"/run",
+	"/private/etc",
+	"/private/var",
+];
 
 /**
  * Temp trees that sit under a protected root but are ordinary scratch space,
@@ -77,9 +88,16 @@ const SYSTEM_WRITE_ROOT_PREFIXES: ReadonlyArray<string> = ["/etc", "/usr", "/var
  * list has never heard of, stay exactly as protected as before.
  *
  * `rm -rf` already reads the same line (SYSTEM_MODIFY_PATTERNS rm-rf-root
- * exempts `/tmp` and `/var/tmp`), so the two checks now agree.
+ * exempts `/tmp` and `/var/tmp`), so the two checks now agree. Write targets
+ * are canonical, so on macOS both trees are named where they land, in
+ * `/private/var`.
  */
-const SYSTEM_WRITE_EXEMPT_PREFIXES: ReadonlyArray<string> = ["/var/tmp", "/var/folders"];
+const SYSTEM_WRITE_EXEMPT_PREFIXES: ReadonlyArray<string> = [
+	"/var/tmp",
+	"/var/folders",
+	"/private/var/tmp",
+	"/private/var/folders",
+];
 
 function isUnderPrefix(abs: string, prefix: string): boolean {
 	return abs === prefix || abs.startsWith(`${prefix}/`);

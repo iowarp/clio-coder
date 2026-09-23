@@ -92,7 +92,8 @@ installed Pi versions differ from the checked-in snapshot.
 
 `pnpm test` uses Node's test runner over every `tests/contracts/*.test.ts` and
 `tests/smoke/*.test.ts` file, with `tests/harness/tmp-root.ts` preloaded to
-isolate test state. Its `pretest` hook builds `dist/` when the CLI bundle is
+isolate test state. Its `pretest` hook, and `pretest:full` for
+`pnpm run test:full`, builds `dist/` when the CLI bundle or its metafile is
 absent. Run one focused file while iterating with:
 
 ```bash

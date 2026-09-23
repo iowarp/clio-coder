@@ -8,6 +8,7 @@ import {
 	readFileSync,
 	rmSync,
 	symlinkSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { createRequire, syncBuiltinESMExports } from "node:module";
@@ -328,7 +329,8 @@ describe("agent plugin engine", () => {
 		installPlugin(fixture(), { cwd: project });
 		reloadPluginResources(project);
 		cpSync(join(first, "plugins"), join(second, "plugins"), { recursive: true });
-		rmSync(alias);
+		// unlink, not rmSync: Node 24.9's rmSync refuses a link to a directory with EISDIR.
+		unlinkSync(alias);
 		symlinkSync(second, alias, "dir");
 		writeFileSync(join(first, "plugins", "research-kit", "skills", "research", "SKILL.md"), "changed old profile");
 		strictEqual(listInstalledPlugins(project).find((entry) => entry.id === "research-kit")?.loadable, true);
