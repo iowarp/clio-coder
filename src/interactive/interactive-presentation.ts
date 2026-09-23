@@ -425,6 +425,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getContextActivity: () => contextActivityStore.current(),
 		...(deps.getLeaderArmed ? { getLeaderArmed: deps.getLeaderArmed } : {}),
 		...(deps.getShutdownArmed ? { getShutdownArmed: deps.getShutdownArmed } : {}),
+		getActiveSkillSurface: () => deps.chat.activeSkillSurface(),
 		getToolCounts: () => ({
 			tools: Object.fromEntries(footerToolCounts),
 			errors: footerToolErrors,

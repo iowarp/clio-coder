@@ -88,6 +88,11 @@ export interface SessionFacts {
 	 * that a second press quits, and no way to tell the first press registered.
 	 */
 	shutdownArmed?: boolean;
+	/**
+	 * Skills whose tool surface stays armed across turns. Shown on the compact
+	 * line while it lasts, so a narrowed tool set is never implicit.
+	 */
+	activeSkills?: ReadonlyArray<string>;
 	/** Proactive-memory status; kept as one atomic fact row in the expanded dashboard. */
 	memoryIntervention?: {
 		enabled: boolean;

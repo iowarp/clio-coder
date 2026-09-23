@@ -564,6 +564,7 @@ function presentation(over: Partial<InteractivePresentationDeps> = {}, realEdito
 			contextLedger: () => null,
 			isStreaming: () => false,
 			turnPreparation: () => ({ phase: "idle" }),
+			activeSkillSurface: () => [],
 		},
 		workspaceFacts: {
 			getExtensionStats: () => ({ active: 0, installed: 0 }),

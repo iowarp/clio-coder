@@ -675,6 +675,19 @@ export function isDispositionedToolResultError(result: unknown): boolean {
 	return kind === "error" && metadata?.version === 1 && metadata.applications === 1;
 }
 
+/**
+ * An error result whose details carry a structured refusal, such as a skill
+ * the context tool would not load. Like a dispositioned error it is returned
+ * rather than thrown, because a thrown error reaches the transcript with its
+ * details replaced by `{}`; the model sees the same message either way.
+ */
+export function isRefusalToolResultError(result: unknown): boolean {
+	if (!isRecord(result)) return false;
+	const details = isRecord(result.details) ? result.details : null;
+	const kind = result.kind ?? details?.kind;
+	return kind === "error" && details !== null && isRecord(details.refusal) && typeof details.refusal.kind === "string";
+}
+
 /** Operator text retained beside an independently projected AgentToolResult. */
 export function toolResultPresentationText(result: unknown): string | null {
 	if (!isRecord(result)) return null;

@@ -14,6 +14,7 @@
  */
 
 import { existsSync } from "node:fs";
+import { isSkillSurfaceChange, SKILL_SURFACE_ENTRY } from "../core/skill-activation.js";
 import { foldWorkingSet } from "../domains/context/working-set/fold.js";
 import { compactionCut } from "../domains/context/working-set/visible.js";
 import { captureSkillContext } from "../domains/session/compaction/compact.js";
@@ -60,6 +61,7 @@ import { renderBranchSummaryEntry } from "./renderers/branch-summary.js";
 import { renderCompactionSummaryEntry } from "./renderers/compaction-summary.js";
 import { styleTaggedNotice } from "./renderers/notice.js";
 import { renderRetryStatus } from "./renderers/retry-status.js";
+import { renderSkillSurfaceRow } from "./renderers/skill-rows.js";
 import { renderBashTranscriptExecution, renderToolResultOnly } from "./renderers/tool-execution.js";
 import {
 	classifyStreamEvent,
@@ -930,6 +932,7 @@ function renderRetryStatusEntry(
 function rendersCustomEntry(entry: CustomEntry): boolean {
 	if (entry.display === false) return false;
 	if (entry.customType === "retryStatus") return true;
+	if (entry.customType === SKILL_SURFACE_ENTRY) return isSkillSurfaceChange(entry.data) && entry.data.state !== "loaded";
 	if (entry.customType === "finishContractAdvisory" || entry.customType === "middlewareReminder") return true;
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE || entry.customType === HANDOFF_NOTE_CUSTOM_TYPE) return true;
 	return entry.display === true;
@@ -943,6 +946,9 @@ function renderCustomEntry(
 	terminalRows: number,
 ): string[] {
 	if (entry.customType === "retryStatus") return renderRetryStatusEntry(entry, width, detail, unbounded, terminalRows);
+	if (entry.customType === SKILL_SURFACE_ENTRY && isSkillSurfaceChange(entry.data)) {
+		return renderSkillSurfaceRow(entry.data, width);
+	}
 	if (entry.customType === HANDOFF_SEED_CUSTOM_TYPE && isHandoffSeedData(entry.data)) {
 		return wrapTextWithAnsi(styleTaggedNotice(`[handoff] carried from session ${entry.data.fromSessionId}`), width);
 	}

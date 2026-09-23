@@ -451,6 +451,34 @@ test("compact quota stays beside the selected model while workspace and rotating
 	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });
 
+test("the compact footer names an armed skill surface beside the activity, unpadded, until it clears", () => {
+	const snapshot = state();
+	snapshot.session.target = "blade · dynamo/qwopus3.8-27b-flash@q4_k_m";
+	const line = (width: number) => stripTerminalSequences(renderCompactDashboard(snapshot, width)[0] ?? "");
+	for (const width of [60, 100, 200]) doesNotMatch(line(width), /skill|§/u);
+	snapshot.session.activeSkills = ["tdd"];
+	for (const width of [100, 200]) match(line(width), /^exploring · 1 active · skill tdd {2}· {2}blade/u);
+	for (const width of [60, 100, 200]) {
+		match(line(width), / · skill tdd {2}· {2}/u);
+		ok(visibleWidth(line(width)) <= width);
+	}
+	// Narrow: the knowledge mark stands in for the word, and an identity with
+	// no room left is dropped rather than cut to a stub.
+	snapshot.session.activeSkills = ["tdd", "perf-review"];
+	for (const width of [40, 60]) {
+		const row = line(width);
+		match(row, /§ tdd/u);
+		doesNotMatch(row, /……|skill t…/u);
+		ok(visibleWidth(row) <= width, row);
+	}
+	match(line(40), /§ tdd… +▰/u, "no room for the identity at 40 columns, so the meter follows the badge");
+	// The mark form is never padded out to the badge's budget.
+	snapshot.session.activeSkills = ["tdd-go"];
+	match(line(60), /· § tdd-go {2}· {2}/u);
+	snapshot.session.activeSkills = [];
+	doesNotMatch(line(100), /skill|§/u);
+});
+
 test("the footer spinner and live elapsed change once per animation step, not once per refresh", () => {
 	let now = 10_000;
 	const footer = buildFooterDashboard({

@@ -108,6 +108,101 @@ export function skillSurfaceNames(policy: PendingSkillToolPolicy | undefined): R
 }
 
 /**
+ * Why a skill did not load, as the context tool's error details state it, so
+ * a refusal reads as plainly as a load instead of as the model-facing text.
+ */
+export type SkillRefusalKind =
+	| "manual-only"
+	| "untrusted"
+	| "not-imported"
+	| "not-installed"
+	| "not-ready"
+	| "unknown"
+	| "operator-only"
+	| "recipe-bound"
+	| "not-requested"
+	| "already-loaded";
+
+export interface SkillLoadRefusal {
+	subject: "skill";
+	name: string;
+	kind: SkillRefusalKind;
+	/** Where an installed or discovered skill sits (`not-ready`, `not-imported`). */
+	scope?: string;
+	/** Where a discovered skill came from (`not-imported`). */
+	source?: string;
+	/** The installed package's state (`not-ready`). */
+	state?: string;
+}
+
+export function isSkillLoadRefusal(value: unknown): value is SkillLoadRefusal {
+	if (value === null || typeof value !== "object") return false;
+	const record = value as Record<string, unknown>;
+	return record.subject === "skill" && typeof record.name === "string" && typeof record.kind === "string";
+}
+
+/** Session custom entry that records a change to the armed skill surface, so a resume states it again. */
+export const SKILL_SURFACE_ENTRY = "skillSurface";
+
+/**
+ * A change to the tool surface skills arm across turns, as the transcript
+ * states it: `armed` (a surface now narrows the tools), `replaced` (another
+ * skill's surface took over), `cleared` (the full tool surface is back).
+ * `loaded` is a skill that loaded without narrowing anything; its load row
+ * already says so, and no surface changed.
+ */
+export interface SkillSurfaceChange {
+	version: 1;
+	state: "armed" | "replaced" | "cleared" | "loaded";
+	/** Skills whose surface is armed now (armed, replaced), or that loaded (loaded). */
+	names: string[];
+	/** Skills whose surface this change replaced or cleared. */
+	previous: string[];
+	/** Tools the armed surface allows, when its skills declared an allow-list. */
+	allowedTools: string[];
+	/** Tools the armed surface removes, when its skills declared only exclusions. */
+	disallowedTools: string[];
+}
+
+/** The change from one armed surface to the next, or null when the surface did not change. */
+export function skillSurfaceChange(
+	previous: ReadonlyArray<string>,
+	next: PendingSkillToolPolicy | undefined,
+): SkillSurfaceChange | null {
+	const names = [...skillSurfaceNames(next)];
+	if (names.join("\u0000") === previous.join("\u0000")) return null;
+	const declarations = next === undefined ? [] : [...next.loadedSkillPolicies.values()];
+	const unique = (lists: ReadonlyArray<ReadonlyArray<string> | undefined>) => [
+		...new Set(lists.flatMap((list) => list ?? [])),
+	];
+	return {
+		version: 1,
+		state: names.length === 0 ? "cleared" : previous.length === 0 ? "armed" : "replaced",
+		names,
+		previous: [...previous],
+		allowedTools: unique(declarations.map((declaration) => declaration.allowedTools)),
+		disallowedTools: unique(declarations.map((declaration) => declaration.disallowedTools)),
+	};
+}
+
+export function isSkillSurfaceChange(value: unknown): value is SkillSurfaceChange {
+	if (value === null || typeof value !== "object") return false;
+	const record = value as Record<string, unknown>;
+	const strings = (field: unknown) => Array.isArray(field) && field.every((item) => typeof item === "string");
+	return (
+		record.version === 1 &&
+		(record.state === "armed" ||
+			record.state === "replaced" ||
+			record.state === "cleared" ||
+			record.state === "loaded") &&
+		strings(record.names) &&
+		strings(record.previous) &&
+		strings(record.allowedTools) &&
+		strings(record.disallowedTools)
+	);
+}
+
+/**
  * The same names, each tagged with who activated it. A skill the operator
  * named arrives as a pending request; anything else was activated by the model
  * under `modelActivation`, and the operator's one line about the surface is

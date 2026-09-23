@@ -126,6 +126,8 @@ export interface FooterDashboardDeps {
 	getLeaderArmed?: () => boolean;
 	/** Whether a Ctrl+C armed the double tap and its window is still open. */
 	getShutdownArmed?: () => boolean;
+	/** Skills whose tool surface is armed across turns; the compact line names them. */
+	getActiveSkillSurface?: () => ReadonlyArray<string>;
 	dismissKeyLabel?: string;
 	now?: () => number;
 	resolveCurrentBranch?: (cwd: string) => Promise<string | null>;
@@ -452,6 +454,7 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				outputStyle: settings?.interface.outputDetail ?? "standard",
 				leaderArmed: deps.getLeaderArmed?.() ?? false,
 				shutdownArmed: deps.getShutdownArmed?.() ?? false,
+				activeSkills: deps.getActiveSkillSurface?.() ?? [],
 				memoryIntervention: taskMemory
 					? {
 							enabled: taskMemory.enabled,

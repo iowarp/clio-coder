@@ -191,3 +191,65 @@ test("an unknown dynamic tool reads by its persisted action class, live and on r
 	] as SessionEntry[]);
 	assert.equal(rowOf(replayed.render(120)), liveRow);
 });
+
+test("a refused skill load reads the same live and on replay, from its persisted refusal", () => {
+	const persisted: Array<{ kind: string; payload: Record<string, unknown> }> = [];
+	const session = {
+		append(turn: { kind: string; payload: Record<string, unknown> }) {
+			persisted.push(turn);
+			return { id: `persisted-${persisted.length}` };
+		},
+		current: () => null,
+	} as unknown as SessionContract;
+	const persistence = createTurnPersistence({
+		state: { lastTurnId: null } as ChatTurnState,
+		session,
+		getSettings: () => ({}) as ClioSettings,
+		middlewareToolChoice: {} as MiddlewareToolChoiceControl,
+		consumePersistedEcho: () => false,
+		removeQueuedMirrorEntry: () => {},
+		promptCachePayloadForAssistant: () => ({}),
+		promptSideTokens: () => 0,
+	});
+	const args = { scope: "skills", name: "tech-spec" };
+	const result = {
+		content: [{ type: "text", text: 'context: skill "tech-spec" requires explicit operator activation.' }],
+		details: { refusal: { subject: "skill", name: "tech-spec", kind: "manual-only" } },
+	};
+	const end = {
+		type: "tool_execution_end" as const,
+		toolCallId: "load-1",
+		toolName: "context",
+		result,
+		isError: true,
+		resultSummary: toolResultSummary(result),
+	};
+	persistence.appendToolResultTurn(end);
+
+	const live = createChatPanel();
+	live.applyEvent({ type: "tool_execution_start", toolCallId: "load-1", toolName: "context", args } as ChatLoopEvent);
+	live.applyEvent(end as ChatLoopEvent);
+	const plain = (lines: string[]) => lines.map(stripTerminalSequences).filter((line) => line.length > 0);
+	assert.deepEqual(plain(live.render(120)), ["§ skill tech-spec not loaded · manual-only: /skill tech-spec ✗"]);
+
+	const replayed = createChatPanel();
+	rehydrateChatPanelFromTurns(replayed, [
+		{
+			turnId: "turn-0",
+			parentTurnId: null,
+			timestamp: "2026-09-17T00:00:00Z",
+			kind: "message",
+			role: "tool_call",
+			payload: { name: "context", toolCallId: "load-1", args },
+		},
+		{
+			turnId: "turn-1",
+			parentTurnId: "turn-0",
+			timestamp: "2026-09-17T00:00:01Z",
+			kind: "message",
+			role: "tool_result",
+			payload: persisted[0]?.payload,
+		},
+	] as SessionEntry[]);
+	assert.deepEqual(plain(replayed.render(120)), plain(live.render(120)));
+});

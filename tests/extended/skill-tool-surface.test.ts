@@ -5,15 +5,17 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { Type } from "typebox";
-
+import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import {
 	armedSkillSurface,
 	evaluateSkillToolSurface,
 	type PendingSkillToolPolicy,
+	SKILL_SURFACE_ENTRY,
 	skillSurfaceNames,
 	withModelSkillActivation,
 } from "../../src/core/skill-activation.js";
 import { ToolNames } from "../../src/core/tool-names.js";
+import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import { registerLibraryPackage } from "../../src/domains/resources/library.js";
 import {
 	type LoadSkillsInput,
@@ -23,7 +25,15 @@ import {
 import { type AutonomyLevel, modelMayActivateSkills } from "../../src/domains/safety/autonomy.js";
 import { assessFinishContract } from "../../src/domains/safety/finish-contract.js";
 import { CONFIRMED_SCOPE, READONLY_SCOPE, WORKSPACE_SCOPE } from "../../src/domains/safety/scope.js";
+import { createSessionBundle } from "../../src/domains/session/extension.js";
+import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
+import { readSessionFileEntries, sessionPaths } from "../../src/engine/session.js";
+import { stripTerminalSequences } from "../../src/engine/tui.js";
+import type { AgentEvent, AgentMessage } from "../../src/engine/types.js";
+import { type ChatLoopEvent, type CreateChatLoopDeps, createChatLoop } from "../../src/interactive/chat-loop.js";
 import { createPendingSkillToolPolicy } from "../../src/interactive/chat-loop-messages.js";
+import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import {
 	createInteractiveSlashRuntime,
 	type InteractiveSlashRuntimeDeps,
@@ -35,6 +45,8 @@ import { limitationTool } from "../../src/tools/limitation.js";
 import { createRegistry, type ToolSpec } from "../../src/tools/registry.js";
 import { verifyTool } from "../../src/tools/verify/index.js";
 import { writeTool } from "../../src/tools/write.js";
+import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
+import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 
@@ -334,6 +346,7 @@ describe("skill tool surface lifetime", () => {
 			let held: PendingSkillToolPolicy | undefined = armed;
 			let expanded = 0;
 			let asked = 0;
+			const cleared: Array<ReadonlyArray<string>> = [];
 			const errors: string[] = [];
 			const runtime = createInteractiveSlashRuntime({
 				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
@@ -347,9 +360,10 @@ describe("skill tool surface lifetime", () => {
 						submitted += 1;
 					},
 					clearSkillSurface: () => {
-						const cleared = skillSurfaceNames(held);
+						const names = skillSurfaceNames(held);
+						cleared.push(names);
 						held = undefined;
-						return cleared;
+						return names;
 					},
 				},
 				expandSubmit: async (text: string) => {
@@ -372,7 +386,10 @@ describe("skill tool surface lifetime", () => {
 			strictEqual(asked, 0);
 			strictEqual(submitted, 0);
 			strictEqual(held, undefined);
-			match(notices.at(-1)?.[1] ?? "", /Skill tool surface cleared: interview\./u);
+			// The TUI states the cleared surface once, as the chat loop's `§`
+			// row; `/skill off` adds no reply that repeats it.
+			deepStrictEqual(cleared, [["interview"]]);
+			deepStrictEqual(notices, []);
 
 			// The next turn runs with the full surface back.
 			const turnTwo = turnPolicy("keep going", root, held);
@@ -384,6 +401,131 @@ describe("skill tool surface lifetime", () => {
 			strictEqual(verdict.kind, "ok");
 		});
 	}
+
+	it("states each surface change once, as a § row live and on resume, and names the armed skills for the footer", async () => {
+		const env = await isolateClioEnv("clio-coder-skill-surface-rows-");
+		const root = scratchRoot();
+		explicitPaths = [writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"])];
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.chat.prewarm = false;
+		const context = dispatchStubContext({ settings });
+		const target = settings.targets[0];
+		ok(target);
+		settings.chat.target = target.id;
+		settings.chat.model = target.defaultModel ?? "gpt-4o";
+		const session = createSessionBundle(context).contract;
+		const entries = (): SessionEntry[] => {
+			const meta = session.current();
+			if (!meta) return [];
+			return readSessionFileEntries(sessionPaths(meta).current).filter(
+				(entry): entry is SessionEntry => !isSessionHeader(entry) && isSessionEntry(entry),
+			);
+		};
+		const registry = createRegistry({ safety: allowAllSafety([]) });
+		registry.register(contextToolFor(root));
+		const events: ChatLoopEvent[] = [];
+		const loop = createChatLoop({
+			getSettings: () => settings,
+			providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
+			knownTargets: () => new Set([target.id]),
+			session,
+			readSessionEntries: entries,
+			toolRegistry: registry,
+			createAgent: ((options: Parameters<NonNullable<CreateChatLoopDeps["createAgent"]>>[0]) => {
+				const state = options?.initialState;
+				ok(state);
+				let listener: ((event: AgentEvent) => void) | undefined;
+				return {
+					agent: {
+						state,
+						abort() {},
+						subscribe: (callback: (event: AgentEvent) => void) => {
+							listener = callback;
+							return () => {};
+						},
+						// The model loads the skill the operator asked for, through the
+						// same agent tool, policy and persistence a real turn uses.
+						prompt: async () => {
+							const tool = state.tools?.find((entry) => entry.name === ToolNames.Context);
+							ok(tool);
+							const args = { scope: "skills", name: "interview" };
+							listener?.({ type: "tool_execution_start", toolName: tool.name, toolCallId: "load", args });
+							const result = await tool.execute("load", args);
+							listener?.({ type: "tool_execution_end", toolName: tool.name, toolCallId: "load", result, isError: false });
+							const message = {
+								role: "assistant",
+								content: [{ type: "text", text: "Interview started." }],
+								stopReason: "stop",
+								timestamp: Date.now(),
+							} as AgentMessage;
+							state.messages?.push(message);
+							listener?.({ type: "message_end", message });
+						},
+					},
+					requestCorrelationId: () => undefined,
+				};
+			}) as unknown as NonNullable<CreateChatLoopDeps["createAgent"]>,
+		});
+		loop.onEvent((event) => events.push(event));
+		const surfaceNotices = () =>
+			events.flatMap((event) =>
+				event.type === "notice" && event.skillSurface !== undefined ? [event.skillSurface.state] : [],
+			);
+		try {
+			const skills = loadSkills({ cwd: root, disableDiscovery: true, explicitSkillPaths: explicitPaths });
+			const pending = parsePendingSkillRequests("/skill interview start", skills, { cwd: root });
+			await loop.submit(pending.text, {
+				pendingSkillRequests: pending.pendingSkillRequests,
+				display: { text: "/skill interview start" },
+			});
+			deepStrictEqual(loop.activeSkillSurface(), ["interview"]);
+			deepStrictEqual(surfaceNotices(), ["armed"]);
+			deepStrictEqual(loop.clearSkillSurface(), ["interview"]);
+			deepStrictEqual(loop.activeSkillSurface(), []);
+			deepStrictEqual(surfaceNotices(), ["armed", "cleared"]);
+			// Nothing armed: a second `/skill off` changes nothing and states nothing.
+			deepStrictEqual(loop.clearSkillSurface(), []);
+			deepStrictEqual(surfaceNotices(), ["armed", "cleared"]);
+
+			const recorded = entries().flatMap((entry) =>
+				entry.kind === "custom" && entry.customType === SKILL_SURFACE_ENTRY ? [entry.data] : [],
+			);
+			deepStrictEqual(recorded, [
+				{
+					version: 1,
+					state: "armed",
+					names: ["interview"],
+					previous: [],
+					allowedTools: ["read", "grep"],
+					disallowedTools: [],
+				},
+				{ version: 1, state: "cleared", names: [], previous: ["interview"], allowedTools: [], disallowedTools: [] },
+			]);
+
+			// Each change reads as one `§` row and never also as the notice text.
+			const surfaceRows = (lines: string[]) => {
+				const plain = lines.map(stripTerminalSequences);
+				ok(!plain.some((line) => /Skill activated|surface cleared:/u.test(line)), plain.join("\n"));
+				return plain.filter((line) => line.startsWith("§ "));
+			};
+			const live = createChatPanel();
+			for (const event of events) live.applyEvent(event);
+			const replayed = createChatPanel();
+			rehydrateChatPanelFromTurns(replayed, entries());
+			// A resumed prompt row leads with the command, as the live row did.
+			ok(replayed.render(100).map(stripTerminalSequences).includes("▌ /skill interview start"));
+			for (const panel of [live, replayed]) {
+				const [load, ...changes] = surfaceRows(panel.render(100));
+				match(load ?? "", /^§ loaded skill interview · by operator ✓/u);
+				deepStrictEqual(changes, ["§ interview armed · read, grep · /skill off", "§ skill surface cleared"]);
+			}
+		} finally {
+			loop.dispose();
+			await loop.whenSettled();
+			await session.close();
+			env.restore();
+		}
+	});
 
 	for (const mode of ["installed", "user", "project"] as const) {
 		const installed = mode === "installed";
@@ -398,11 +540,15 @@ describe("skill tool surface lifetime", () => {
 			let submitted = 0;
 			let expanded = 0;
 			let held: PendingSkillToolPolicy | undefined;
+			const painted: string[] = [];
 			const errors: string[] = [];
 			const runtime = createInteractiveSlashRuntime({
 				io: { stdout() {}, stderr: (text: string) => errors.push(text) },
 				getCwd: () => root,
-				chatPanel: { appendReplayBlock() {}, appendUser() {} },
+				chatPanel: {
+					appendReplayBlock() {},
+					appendUser: (text: string) => painted.push(text),
+				},
 				requestRender() {},
 				refreshFooter() {},
 				recordSubmittedTurn() {},
@@ -411,6 +557,8 @@ describe("skill tool surface lifetime", () => {
 					submit: async (...[text, options]: Parameters<InteractiveSlashRuntimeDeps["chat"]["submit"]>) => {
 						submitted += 1;
 						strictEqual(text, "start");
+						// The ledger keeps the line the operator typed, with no template note.
+						deepStrictEqual(options?.display, { text: "/skill interview start" });
 						const policy = createPendingSkillToolPolicy(options?.pendingSkillRequests ?? []);
 						ok(policy);
 						strictEqual(
@@ -461,6 +609,8 @@ describe("skill tool surface lifetime", () => {
 			await new Promise<void>((resolve) => setImmediate(resolve));
 			deepStrictEqual(errors, []);
 			strictEqual(submitted, 1);
+			// The prompt row leads with the command the operator typed; the model gets the task.
+			deepStrictEqual(painted, ["/skill interview start"]);
 			strictEqual(asked, installed ? 0 : 1);
 			strictEqual(installs, installed ? 0 : 1);
 			strictEqual(reloads, installed ? 0 : 1);
@@ -536,6 +686,7 @@ describe("model skill activation by autonomy level", () => {
 			if (refused.kind === "error") {
 				match(refused.message, /only the operator can activate a skill/u);
 				match(refused.message, /Suggested skill: \/skill/u);
+				deepStrictEqual(refused.details?.refusal, { subject: "skill", name: "interview", kind: "operator-only" });
 			}
 		});
 	}
@@ -578,6 +729,36 @@ describe("model skill activation by autonomy level", () => {
 		if (refused.kind === "error") {
 			match(refused.message, /is not installed; it is available in the marketplace/u);
 			match(refused.message, /offer \/skill marketplace-only to install it/u);
+			deepStrictEqual(refused.details?.refusal, { subject: "skill", name: "marketplace-only", kind: "not-installed" });
 		}
+	});
+
+	it("states why a load was refused as structured details beside the model's unchanged message", async () => {
+		const root = scratchRoot();
+		explicitPaths = [
+			writeNarrowingSkill(root, "interview", ["allowed-tools: read, grep"]),
+			writeNarrowingSkill(root, "manual", ["disable-model-invocation: true"]),
+		];
+		const context = contextToolFor(root);
+		const refusal = async (name: string, policy: PendingSkillToolPolicy | undefined) => {
+			const result = await context.run({ scope: "skills", name }, invokeOptions(policy));
+			ok(result.kind === "error", `${name} must be refused`);
+			match(result.message, /^context: /u, "the model still reads the policy text");
+			return result.details?.refusal;
+		};
+		const auto = turnPolicy("look at the failing test", root, undefined, "full-auto");
+		deepStrictEqual(await refusal("manual", auto), { subject: "skill", name: "manual", kind: "manual-only" });
+		deepStrictEqual(await refusal("absent", auto), { subject: "skill", name: "absent", kind: "unknown" });
+		strictEqual((await context.run({ scope: "skills", name: "interview" }, invokeOptions(auto))).kind, "ok");
+		deepStrictEqual(await refusal("interview", auto), { subject: "skill", name: "interview", kind: "already-loaded" });
+		// An operator request this turn admits only the skill it names.
+		const requested = turnPolicy("/skill interview start", root, undefined);
+		deepStrictEqual(await refusal("manual", requested), { subject: "skill", name: "manual", kind: "not-requested" });
+		strictEqual((await context.run({ scope: "skills", name: "interview" }, invokeOptions(requested))).kind, "ok");
+		deepStrictEqual(await refusal("interview", requested), {
+			subject: "skill",
+			name: "interview",
+			kind: "already-loaded",
+		});
 	});
 });

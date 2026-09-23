@@ -25,7 +25,7 @@ export type SteeringMode = "interrupt" | "next-slot" | "end-of-turn";
 export const DEFAULT_STEERING_MODE: SteeringMode = "next-slot";
 
 export interface QueuedChatMessage {
-	display?: { text: string; note: string };
+	display?: { text: string; note?: string };
 	text: string;
 	kind: QueuedMessageKind;
 }

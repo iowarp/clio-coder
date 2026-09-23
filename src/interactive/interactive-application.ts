@@ -294,7 +294,7 @@ export interface InteractiveSubmitExpansion {
 	 * lines the operator never wrote, and painting it as their message buried
 	 * the command under it.
 	 */
-	display?: { text: string; note: string };
+	display?: { text: string; note?: string };
 }
 
 export async function expandInteractiveSubmitAsync(
