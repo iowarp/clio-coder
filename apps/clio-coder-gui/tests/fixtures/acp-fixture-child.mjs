@@ -144,6 +144,9 @@ const COMMANDS =
 				],
 			}
 		: null;
+// Visual review can ask the smoke scenario to advertise safe settings and targets, so the composer's
+// route chip shows a reported model. The smoke itself leaves it off and asserts the missing controls.
+const ROUTE = process.env.CLIO_CODER_WEB_FIXTURE_ROUTE === "1";
 const queues = { steer: [], followUp: [] };
 /** runId -> resolve. A held worker settles when it is stopped or the turn is cancelled. */
 const liveRuns = new Map();
@@ -260,6 +263,12 @@ async function handle(frame) {
 							? {
 									_meta: {
 										"clio-coder/steering": STEERING,
+										...(ROUTE
+											? {
+													"clio-coder/settings": { get_safe: true, patch_safe: true },
+													"clio-coder/targets": { list: true, probe: true },
+												}
+											: {}),
 										...(COMMANDS
 											? {
 													"clio-coder/commands": {
@@ -280,6 +289,11 @@ async function handle(frame) {
 			case "session/new":
 				if (["session_limit", "session_cwd_mismatch"].includes(scenario)) throw Error(scenario);
 				result = { sessionId };
+				if (ROUTE)
+					setTimeout(
+						() => event("provider.health", { targetId: "fixture", status: "healthy", available: true, latencyMs: 5 }),
+						50,
+					);
 				break;
 			case "session/load":
 				sessionId = frame.params.sessionId;
