@@ -1,10 +1,16 @@
 import type { Component, ScrollViewScrollbar, TuiMode } from "../engine/tui.js";
 import { Container, ScrollView, VStack } from "../engine/tui.js";
+import type { ChatPanelRegions } from "./chat-panel.js";
 import { clioTheme, GLYPH } from "./theme/index.js";
+
+/** A transcript that can hand over its settled prefix and live tail separately. */
+export interface TranscriptComponent extends Component {
+	renderRegions?(width: number): ChatPanelRegions;
+}
 
 export interface LayoutParts {
 	banner: Component;
-	chat: Component;
+	chat: TranscriptComponent;
 	pending?: Component;
 	editor: Component;
 	footer: Component;
@@ -31,18 +37,28 @@ export interface FullscreenLayout {
  * wrapped array is reused while the transcript returns the same cached array,
  * so a cache-hit frame stays O(1).
  */
-function separatedTranscript(chat: Component): Component {
-	let source: string[] | undefined;
+function separatedTranscript(chat: TranscriptComponent): Component {
+	let source: unknown;
 	let separated: string[] = [];
 	return {
 		render(width: number): string[] {
+			const regions = chat.renderRegions?.(width);
+			if (regions !== undefined) {
+				// One exact-size copy of the frame, straight from the panel's two
+				// parts, instead of the panel joining them and this wrapper copying
+				// the result again row by row.
+				if (regions !== source) {
+					source = regions;
+					separated =
+						regions.prefix.length + regions.tail.length === 0 ? [] : [""].concat(regions.prefix, regions.tail, [""]);
+				}
+				return separated;
+			}
 			const lines = chat.render(width);
 			if (lines.length === 0) return lines;
 			if (lines !== source) {
 				source = lines;
-				separated = [""];
-				for (const line of lines) separated.push(line);
-				separated.push("");
+				separated = [""].concat(lines, [""]);
 			}
 			return separated;
 		},
@@ -86,34 +102,63 @@ function buildFullscreenLayout(parts: LayoutParts, options: LayoutOptions = {}):
  */
 class RegularRoot implements Component {
 	/**
-	 * Rebuilt in place every frame. The renderer copies the root's rows before
-	 * normalizing them, so nothing holds this array across frames, and reusing
-	 * it spares the collector one transcript-sized array per streamed token.
+	 * Rewritten in place every frame. The renderer copies the root's rows before
+	 * normalizing them, so nothing holds this array across frames. Rows are
+	 * written by index and the array is trimmed at the end, so its backing store
+	 * survives from frame to frame instead of regrowing from empty.
 	 */
 	private readonly out: string[] = [];
+	/**
+	 * The transcript prefix the buffer already holds and the row it starts at.
+	 * While the panel hands back the same prefix at the same row, those rows are
+	 * still in place and a frame writes only what follows them.
+	 */
+	private heldPrefix: readonly string[] | null = null;
+	private heldPrefixAt = -1;
 
 	constructor(private readonly parts: LayoutParts) {}
 
 	render(width: number): string[] {
 		const out = this.out;
-		out.length = 0;
-		const append = (lines: readonly string[]): void => {
-			for (const line of lines) out.push(line);
+		let row = 0;
+		const write = (lines: readonly string[]): void => {
+			for (const line of lines) out[row++] = line;
 		};
-		append(this.parts.banner.render(width));
-		const chat = this.parts.chat.render(width);
-		if (chat.length > 0) {
-			out.push("");
-			append(chat);
-			out.push("");
+		write(this.parts.banner.render(width));
+		const regions = this.parts.chat.renderRegions?.(width);
+		if (regions !== undefined) {
+			if (regions.prefix.length + regions.tail.length > 0) {
+				out[row++] = "";
+				if (regions.prefix === this.heldPrefix && row === this.heldPrefixAt) {
+					row += regions.prefix.length;
+				} else {
+					this.heldPrefix = regions.prefix;
+					this.heldPrefixAt = row;
+					write(regions.prefix);
+				}
+				write(regions.tail);
+				out[row++] = "";
+			} else {
+				this.heldPrefix = null;
+			}
+		} else {
+			this.heldPrefix = null;
+			const chat = this.parts.chat.render(width);
+			if (chat.length > 0) {
+				out[row++] = "";
+				write(chat);
+				out[row++] = "";
+			}
 		}
-		if (this.parts.pending) append(this.parts.pending.render(width));
-		append(this.parts.editor.render(width));
-		append(this.parts.footer.render(width));
+		if (this.parts.pending) write(this.parts.pending.render(width));
+		write(this.parts.editor.render(width));
+		write(this.parts.footer.render(width));
+		out.length = row;
 		return out;
 	}
 
 	invalidate(): void {
+		this.heldPrefix = null;
 		this.parts.banner.invalidate();
 		this.parts.chat.invalidate();
 		this.parts.pending?.invalidate();

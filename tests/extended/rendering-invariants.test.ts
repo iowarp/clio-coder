@@ -457,6 +457,59 @@ describe("streamed answers settle in place", () => {
 		deepStrictEqual(settled.slice(0, streamed.length), streamed);
 	});
 
+	it("streams against one settled prefix array and keeps the regular root equal to the frame", () => {
+		const panel = createChatPanel({ now: () => 0 });
+		for (let turn = 0; turn < 3; turn += 1) {
+			panel.appendUser(`Question ${turn}.`);
+			streamAnswer(panel, `Answer ${turn} with **bold** text.`);
+			settleAnswer(panel, `Answer ${turn} with **bold** text.`);
+		}
+		const banner = new Text("banner", 0, 0);
+		const editor = new Text("editor", 0, 0);
+		const footer = new Text("footer", 0, 0);
+		const root = buildLayout({ banner, chat: panel, editor, footer });
+		const expected = (): string[] => [
+			...banner.render(80),
+			"",
+			...panel.render(80),
+			"",
+			...editor.render(80),
+			...footer.render(80),
+		];
+		deepStrictEqual(root.render(80), expected());
+		panel.appendUser("Explain the retry design.");
+		streamAnswer(panel, STREAMED_ANSWER.slice(0, 40));
+		// This frame freezes the new prompt row; from here on only the answer streams.
+		deepStrictEqual(root.render(80), expected());
+		panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: " " } as never);
+		const first = panel.renderRegions(80);
+		ok(first.prefix.length > 0, "settled turns form the frozen prefix");
+		ok(first.tail.length > 0, "the streaming answer renders after the prefix");
+		deepStrictEqual(root.render(80), expected());
+		for (let at = 40; at < 200; at += 8) {
+			panel.applyEvent({ type: "text_delta", contentIndex: 0, delta: STREAMED_ANSWER.slice(at, at + 8) } as never);
+			const frame = panel.renderRegions(80);
+			// The settled rows are the same array every streamed frame; only the tail is new.
+			strictEqual(frame.prefix, first.prefix);
+			deepStrictEqual(root.render(80), expected());
+		}
+		// A taller banner moves the prefix down a row: the root rewrites it rather than trusting stale rows.
+		banner.setText("banner\nsecond banner row");
+		banner.invalidate();
+		deepStrictEqual(root.render(80), expected());
+		banner.setText("banner");
+		banner.invalidate();
+		deepStrictEqual(root.render(80), expected());
+		settleAnswer(panel, STREAMED_ANSWER.slice(0, 200));
+		deepStrictEqual(root.render(80), expected());
+		// The frame after a settle serves the grown freeze, which now covers the answer.
+		panel.appendUser("Next question.");
+		const settled = panel.renderRegions(80);
+		ok(settled.prefix.length > first.prefix.length, "a settled entry extends the freeze");
+		deepStrictEqual([...settled.prefix, ...settled.tail], panel.render(80));
+		deepStrictEqual(root.render(80), expected());
+	});
+
 	it("never full-redraws the regular screen when an answer taller than it finalizes", () => {
 		const terminal = new RenderingTerminal();
 		terminal.rows = 12;
