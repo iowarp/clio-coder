@@ -36,15 +36,19 @@ export interface RetryDecision {
 /**
  * Target failures worth another attempt. A bare 500 and a refused, reset, or
  * failed connection mean the endpoint could not answer this time, not that the
- * worker runtime is broken, so they fail over to another target.
+ * worker runtime is broken, so they fail over to another target. "Request timed
+ * out." and "Connection error." are the OpenAI SDK's own wording for the same.
  */
 const TRANSIENT_TARGET_TEXT =
-	/timeout|temporar|unavailable|\b50[0234]\b|internal server error|econnrefused|econnreset|fetch failed/;
+	/timeout|timed out|temporar|unavailable|\b50[0234]\b|internal server error|econnrefused|econnreset|fetch failed|connection error/;
 
 const WORKERSPEC_REJECTION = /\[worker\] fatal: workerspec/;
 
-function resultText(result: SpawnedWorkerResult | null): string {
-	return result?.stderrTail?.toLowerCase() ?? "";
+function resultText(result: SpawnedWorkerResult | null, providerError?: string | null): string {
+	return [result?.stderrTail, providerError]
+		.filter((part): part is string => typeof part === "string" && part.length > 0)
+		.join("\n")
+		.toLowerCase();
 }
 
 /**
@@ -57,9 +61,10 @@ export function isContextOverflowFailure(
 	failureClass: FailureClass,
 	result: SpawnedWorkerResult | null,
 	code: RunOutcomeCode | null | undefined,
+	providerError?: string | null,
 ): boolean {
 	if (failureClass !== "deterministic-task" || isDeterministicOutcomeCode(code)) return false;
-	const diagnostic = resultText(result);
+	const diagnostic = resultText(result, providerError);
 	if (diagnostic === "" || isResponseSchemaRejection(diagnostic) || WORKERSPEC_REJECTION.test(diagnostic)) return false;
 	return isEngineContextOverflow(diagnostic);
 }
@@ -67,8 +72,9 @@ export function isContextOverflowFailure(
 /**
  * Classify coordinator-owned termination evidence without mutating routing state.
  * `providerError` is the worker's last provider error message. A worker that
- * ends on a structured handoff writes nothing to stderr, so the diagnostic
- * text alone can miss what the provider said.
+ * ends on a structured handoff writes nothing to stderr, so without it a 429
+ * or a content filter on a scout classified as a worker runtime failure. The
+ * ACP path already passes the provider message in place of stderr.
  */
 export function classifyFailure(
 	evidence: RunTerminationEvidence,
@@ -89,15 +95,14 @@ export function classifyFailure(
 	if (evidence.stallKilled || outcome === "stalled" || outcome === "spawn_failed" || result?.exitCode === 255) {
 		return "node-channel";
 	}
-	const diagnostic = resultText(result);
+	const diagnostic = resultText(result, providerError);
 	// The provider's content filter answered, so the endpoint is up and the
 	// worker runtime did nothing wrong. Charging it to the target breaker let
 	// three filtered scouts in a row park a healthy Mercury endpoint for every
 	// other run. The filter is stochastic: over 28 scout attempts on this
 	// repository it stopped 13, and a same-route retry recovered half of the
 	// filtered assignments.
-	if (outcome === "failed" && (isProviderContentFilter(diagnostic) || isProviderContentFilter(providerError ?? "")))
-		return "provider-refusal";
+	if (outcome === "failed" && isProviderContentFilter(diagnostic)) return "provider-refusal";
 	// A response schema the server will not compile into a grammar is a verdict
 	// on the request Clio sent, not on the target. Retrying the identical bytes
 	// earns the identical 400, and letting it reach the target breaker parks a

@@ -183,3 +183,21 @@ describe("a filtered worker in dispatch", () => {
 		}
 	});
 });
+
+describe("a structured-handoff worker's provider error", () => {
+	it("classifies from the provider message when the worker wrote no stderr", () => {
+		const classify = (message: string) =>
+			classifyFailure(evidence, { exitCode: 1, signal: null }, "failed", null, message);
+		strictEqual(
+			classify('429: {"message":"Rate limit reached: input token limit exceeded","type":"rate_limit_error"}'),
+			"target-rate-limit",
+		);
+		strictEqual(classify("401 Unauthorized"), "target-auth");
+		strictEqual(classify("Request timed out."), "target-transient");
+		strictEqual(classify("Connection error."), "target-transient");
+		strictEqual(
+			classify("exceed_context_size_error: request (9000 tokens) exceeds the available context size (8192 tokens)"),
+			"deterministic-task",
+		);
+	});
+});
