@@ -1,6 +1,6 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { it } from "node:test";
-import { type ClioSettings, useTargetInSettings } from "../../src/core/config.js";
+import { type ClioSettings, TargetUseRefusal, useTargetInSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 
 function settings(): ClioSettings {
@@ -59,13 +59,41 @@ it("a fleet target flag selects only fleet, using that target's default model", 
 	deepStrictEqual(value.fleet.default, { ...before.fleet.default, target: "worker-node", model: "worker/default" });
 });
 
-it("multiple scoped flags and shared fallback leave unnamed roles untouched", () => {
+it("multiple scoped flags leave unnamed roles untouched and refuse a shared model no named role uses", () => {
 	const value = settings();
 	const before = structuredClone(value);
-	useTargetInSettings(value, "worker-node", { model: "shared", orchestratorModel: "main", backgroundModel: "memory" });
+	throws(
+		() =>
+			useTargetInSettings(value, "worker-node", { model: "shared", orchestratorModel: "main", backgroundModel: "memory" }),
+		(error: unknown) =>
+			error instanceof TargetUseRefusal &&
+			/--model 'shared' would not be used/u.test(error.message) &&
+			/--orchestrator-model 'shared'/u.test(error.message),
+	);
+	deepStrictEqual(value, before, "a refused call changes nothing");
+	useTargetInSettings(value, "worker-node", { orchestratorModel: "main", backgroundModel: "memory" });
 	strictEqual(value.chat.model, "main");
 	strictEqual(value.context.memory.model, "memory");
 	deepStrictEqual(value.fleet, before.fleet);
+});
+
+it("a fleet-scoped call refuses --model that neither fleet nor chat would use", () => {
+	const value = settings();
+	const before = structuredClone(value);
+	throws(
+		() =>
+			useTargetInSettings(value, "blade-gateway", {
+				model: "chat-wanted",
+				workerTargetId: "worker-node",
+				workerModel: "fleet-model",
+			}),
+		TargetUseRefusal,
+	);
+	deepStrictEqual(value, before);
+	// --fleet-target naming this same target with no --fleet-model does use --model.
+	useTargetInSettings(value, "worker-node", { model: "shared", workerTargetId: "worker-node" });
+	deepStrictEqual(value.fleet.default, { ...before.fleet.default, target: "worker-node", model: "shared" });
+	deepStrictEqual(value.chat, before.chat);
 });
 
 it("no role flags preserve legacy chat and fleet selection without rewriting memory or thinking levels", () => {

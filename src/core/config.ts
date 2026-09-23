@@ -2284,12 +2284,46 @@ export interface UseTargetOptions {
 
 export type TargetSelectionRole = "chat" | "fleet" | "memory";
 
+/**
+ * A role flag scopes `targets use` to the roles it names, and `--model` is only
+ * the fallback for a selected role that has no model flag of its own. When no
+ * selected role falls back to it, it would be dropped without a word, so the
+ * call is refused instead. `targets use blade --model X --fleet-target Y
+ * --fleet-model Z` changed fleet alone and left chat where it was.
+ */
+export function unusedSharedModelReason(targetId: string, options: UseTargetOptions): string | null {
+	if (options.model === undefined) return null;
+	const scoped =
+		options.orchestratorModel !== undefined ||
+		options.workerModel !== undefined ||
+		options.workerTargetId !== undefined ||
+		options.backgroundModel !== undefined;
+	if (!scoped) return null;
+	// Scoped, chat is selected only by --orchestrator-model, which it then uses.
+	// Fleet falls back to --model only on this target with no --fleet-model.
+	const fleetUsesShared =
+		options.workerModel === undefined && options.workerTargetId !== undefined && options.workerTargetId === targetId;
+	if (fleetUsesShared) return null;
+	const flags = [
+		options.orchestratorModel !== undefined ? "--orchestrator-model" : null,
+		options.backgroundModel !== undefined ? "--background-model" : null,
+		options.workerTargetId !== undefined ? "--fleet-target" : null,
+		options.workerModel !== undefined ? "--fleet-model" : null,
+	].filter((flag): flag is string => flag !== null);
+	return `--model '${options.model}' would not be used: ${flags.join(" and ")} select${flags.length === 1 ? "s" : ""} only the roles named, and none of them falls back to --model. To set the chat model, pass --orchestrator-model '${options.model}', or drop the role flags to set chat and fleet together.`;
+}
+
+/** Thrown by {@link useTargetInSettings} when an option would be silently ignored. */
+export class TargetUseRefusal extends Error {}
+
 /** Select only explicitly named roles; without role options retain chat/fleet selection. */
 export function useTargetInSettings(
 	settings: ClioSettings,
 	targetId: string,
 	options: UseTargetOptions = {},
 ): { workerTargetId: string; roles: TargetSelectionRole[]; changedRoles: TargetSelectionRole[] } | null {
+	const refusal = unusedSharedModelReason(targetId, options);
+	if (refusal !== null) throw new TargetUseRefusal(refusal);
 	const target = settings.targets.find((entry) => entry.id === targetId);
 	if (!target) return null;
 	// A worker target of its own is the split topology; its model defaults to that node's own default.
