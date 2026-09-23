@@ -2,7 +2,7 @@ import { performance } from "node:perf_hooks";
 import type { OutputStyle } from "../core/defaults.js";
 import { SKILL_SUGGESTION_PREFIX } from "../core/skill-activation.js";
 import { rawDurationMs } from "../core/timers.js";
-import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
+import { sanitizeCallTargetText, sanitizeMultilineDisplayText } from "../domains/safety/call-target.js";
 import { redactSecretString } from "../domains/safety/redaction.js";
 import { settledPrefixLength } from "../engine/apis/diffusion-frames.js";
 import {
@@ -2077,6 +2077,14 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		inspectionArtifacts(): ViewArtifact[] {
 			const artifacts: ViewArtifact[] = [];
+			// Secret patterns can consume the start of an ANSI SGR sequence when
+			// applied to an already styled row, leaving its `;2;...m` tail visible.
+			// Redact the plain row when it contains a secret; keep styling otherwise.
+			const redactInspectionRow = (row: string): string => {
+				const plain = stripTerminalSequences(row);
+				const redacted = redactSecretString(plain);
+				return redacted === plain ? row : redacted;
+			};
 			// Newest first by the time each act happened; acts stamped in the same
 			// millisecond keep their transcript order.
 			let previousAt = Number.NEGATIVE_INFINITY;
@@ -2090,18 +2098,18 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				const index = artifacts.length;
 				const timestamp = Math.max(at, previousAt + 1);
 				previousAt = timestamp;
-				const clean = sanitizeCallTargetText(title);
+				const clean = redactSecretString(sanitizeCallTargetText(title));
 				artifacts.push({
 					id: `transcript:${index + 1}`,
 					category: "transcript",
 					title: clean,
 					timestamp,
-					searchText: [clean, ...(extra.searchText ?? [])],
+					searchText: [clean, ...(extra.searchText ?? []).map((value) => redactSecretString(sanitizeCallTargetText(value)))],
 					...(extra.toolName !== undefined ? { toolName: extra.toolName } : {}),
 					load: async () => ({
 						format: "text",
-						lines: lines().map(redactSecretString),
-						...(render === undefined ? {} : { render: (width: number) => render(width).map(redactSecretString) }),
+						lines: lines().map(redactInspectionRow),
+						...(render === undefined ? {} : { render: (width: number) => render(width).map(redactInspectionRow) }),
 					}),
 				});
 			};
@@ -2116,7 +2124,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 							add("Provider or terminal error", seg.at, () => providerErrorEvidence(seg.text).split("\n"));
 						if (seg.kind === "thinking" && seg.text.trim().length > 0) {
 							const opening = seg.text.trim().split("\n", 1)[0] ?? "";
-							add(`Thinking · ${opening}`, seg.at, () => seg.text.split("\n"));
+							add(`Thinking · ${opening}`, seg.at, () => sanitizeMultilineDisplayText(seg.text).text.split("\n"));
 						}
 						if (seg.kind === "tool") {
 							// Titled by its row as the transcript states it; inspected in full,

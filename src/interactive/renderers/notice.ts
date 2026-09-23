@@ -9,6 +9,7 @@
  *
  * Pure: no I/O, no module-level mutable state beyond the shared theme handle.
  */
+import { sanitizeCallTargetText } from "../../domains/safety/call-target.js";
 import { visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { type ClioToken, clioTheme, GLYPH } from "../theme/index.js";
 
@@ -42,11 +43,7 @@ function styleTaggedNotice(line: string): string {
 
 /** The notice as the operator reads it: one line, without the product tag. */
 function noticeText(text: string): string {
-	return text
-		.replace(/\r/gu, "")
-		.replace(/\s*\n+\s*/gu, " ")
-		.replace(PRODUCT_TAG, "")
-		.trim();
+	return sanitizeCallTargetText(text).replace(PRODUCT_TAG, "").trim();
 }
 
 /**

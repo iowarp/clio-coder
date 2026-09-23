@@ -447,6 +447,7 @@ test("compact quota stays beside the selected model while workspace and rotating
 	}
 	snapshot.session.shutdownArmed = true;
 	match(plain(renderCompactDashboard(snapshot, 100)), /clio-coder.*v050 \*.*Ctrl\+C again/);
+	match(plain(renderCompactDashboard(snapshot, 40)), /Ctrl\+C again to quit/u);
 	snapshot.quotaRoute = { runtimeId: "litellm", wireModelId: "claude-opus" };
 	doesNotMatch(plain(renderCompactDashboard(snapshot, 160)), /weekly/);
 });

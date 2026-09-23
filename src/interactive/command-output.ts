@@ -1,3 +1,4 @@
+import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { wrapTextWithAnsi } from "../engine/tui.js";
 import { renderReferenceCard } from "./renderers/reference-card.js";
 import type { PromptReferenceCard, RunIo } from "./slash-commands.js";
@@ -48,7 +49,7 @@ export const OPERATOR_COMMAND_ENTRY = "operatorCommand";
 
 /** An operator command line as the transcript echoes it, live and on replay. */
 export function renderOperatorCommandRows(text: string, width: number): string[] {
-	const normalized = text.replace(/\r/g, "").replace(/\n+/gu, " ").trim();
+	const normalized = sanitizeCallTargetText(text);
 	if (normalized.length === 0) return [];
 	const theme = clioTheme();
 	// The operator's own input wears the prompt bar, dimmed: it is theirs, but

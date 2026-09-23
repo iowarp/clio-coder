@@ -7,6 +7,7 @@ import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
 import { ScrollView, stripTerminalSequences, visibleWidth } from "../../src/engine/tui.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
+import { renderOperatorCommandRows } from "../../src/interactive/command-output.js";
 import { preserveTranscriptScroll } from "../../src/interactive/layout.js";
 import { renderBashTranscriptExecution, renderToolPreview } from "../../src/interactive/renderers/tool-execution.js";
 import { parseSlashCommand } from "../../src/interactive/slash-commands.js";
@@ -314,6 +315,45 @@ test("/view titles each act with what its row states and ages it from when it ha
 	ok(bash?.searchText?.includes("qCIlqk4AJdRA8xNITNIgw"));
 });
 
+test("/view redacts secrets in transcript titles and previews", async () => {
+	const panel = createChatPanel();
+	const cursorControl = `${String.fromCharCode(27)}[2J`;
+	const reasoning = `API_KEY=fixture-secret: check the config\nalpha${cursorControl}omega`;
+	panel.applyEvent({
+		type: "thinking_delta",
+		contentIndex: 0,
+		delta: reasoning,
+		partialThinking: reasoning,
+	} as never);
+	panel.appendReplayBlock((width) => renderOperatorCommandRows(`/run --api-key fixture-secret${cursorControl}`, width));
+	// A rendered block can put an SGR boundary immediately after a secret.
+	// Redacting the ANSI string directly used to leave `;2;...m` on screen.
+	const color = `${String.fromCharCode(27)}[38;2;106;122;133m`;
+	panel.appendReplayBlock(() => [`${color}API_KEY=fixture-secret${color} done`]);
+	panel.applyEvent({
+		type: "notice",
+		level: "info",
+		surface: "transcript",
+		text: `queued ${cursorControl}for review`,
+	} as never);
+	for (const artifact of panel.inspectionArtifacts()) {
+		doesNotMatch(artifact.title, /fixture-secret/u);
+		doesNotMatch((artifact.searchText ?? []).join(" "), /fixture-secret/u);
+		const loaded = await artifact.load();
+		doesNotMatch(plain(loaded.lines), /fixture-secret/u);
+		doesNotMatch(plain(loaded.lines), /;2;106;122;133m/u, "redaction leaves no SGR fragment");
+		ok(!loaded.lines.join("\n").includes(cursorControl), "cursor controls stay out of inspection text");
+		if (artifact.title.startsWith("Thinking"))
+			ok(!loaded.lines.join("\n").includes(String.fromCharCode(27)), "control sequences stay out of supplied reasoning");
+		if (loaded.render) {
+			const preview = loaded.render(40);
+			doesNotMatch(plain(preview), /fixture-secret/u);
+			doesNotMatch(plain(preview), /;2;106;122;133m/u, "preview leaves no SGR fragment");
+			ok(!preview.join("\n").includes(cursorControl), "cursor controls stay out of width-specific previews");
+		}
+	}
+});
+
 test("/view renders a transcript block at the preview's width, rail and hanging indent intact", async () => {
 	const panel = createChatPanel();
 	const command = `node scripts/check.js --reporter spec ${"--verbose ".repeat(6)}`;
@@ -341,10 +381,14 @@ test("/view renders a transcript block at the preview's width, rail and hanging 
 	view.render(40);
 	await new Promise((resolve) => setImmediate(resolve));
 	const rows = view.render(40).map(stripTerminalSequences);
-	const body = rows.slice(rows.findIndex((row) => row.startsWith("$ ran")) + 1).filter((row) => row.trim().length > 0);
+	match(rows.join("\n"), /Preview · 1\/1[\s\S]*\$ ran `node scripts\/check\.js/u);
+	const body = rows
+		.slice(rows.findIndex((row) => row.startsWith("transcript ·")) + 1)
+		.filter((row) => row.trim().length > 0);
 	ok(body.length > 4, rows.join("\n"));
+	match(body[0] ?? "", /^\$ ran/u);
 	// Every wrapped row stays in the content column under its rail, as the transcript renders it.
-	for (const row of body) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
+	for (const row of body.slice(1)) ok(row.startsWith("  "), `a wrapped row restarted at column 0:\n${rows.join("\n")}`);
 	ok(
 		body.some((row) => row.startsWith("  │ ") && row.includes("narrow")),
 		rows.join("\n"),

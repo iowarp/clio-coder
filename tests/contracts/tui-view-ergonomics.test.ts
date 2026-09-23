@@ -79,6 +79,68 @@ test("filter persists across preview, back, refresh, and terminal widths", async
 	strictEqual(closed(), true);
 });
 
+test("view gives narrow lists the full width and lets a focused preview move between entries", async () => {
+	const first = { ...artifact("first", "transcript"), title: "Read the retry module before changing its tests" };
+	const second = { ...artifact("second", "transcript"), title: "Run the retry tests after the edit" };
+	const { view } = await open([first, second], "transcript:");
+	const narrow = plain(view, 60);
+	doesNotMatch(narrow, / │ /u);
+	match(narrow, /Read the retry module before changing its tests/u);
+	view.handleInput("\r");
+	view.render(60);
+	await settle();
+	match(plain(view, 60), /Preview · 1\/2[\s\S]*Read the retry module/u);
+	match(plain(view, 40), /Preview · 1\/2 · i info/u);
+	doesNotMatch(plain(view, 40), /i inf…/u);
+	view.handleInput("n");
+	match(plain(view, 60), /Preview · 2\/2[\s\S]*Run the retry tests/u);
+	view.handleInput("p");
+	match(plain(view, 60), /Preview · 1\/2[\s\S]*Read the retry module/u);
+	view.handleInput("\x1b");
+	match(plain(view, 200), /Read the retry module before changing its tests/u);
+});
+
+test("an unusually long title leaves room for the preview body", async () => {
+	const long = { ...artifact("long", "transcript"), title: "inspect the result ".repeat(100) };
+	const { view } = await open([long]);
+	view.handleInput("\r");
+	view.render(40);
+	await settle();
+	const rows = plain(view, 40).split("\n");
+	const metadata = rows.findIndex((row) => row.startsWith("transcript ·"));
+	ok(metadata > 0 && metadata <= 4, rows.join("\n"));
+	match(rows[metadata + 1] ?? "", /Body of long/u);
+});
+
+test("width-specific preview layout starts after paint and skips stale widths", async () => {
+	const rendered: number[] = [];
+	const rich = artifact("rich", "transcript");
+	rich.load = async () => ({
+		format: "text",
+		lines: ["full body"],
+		render: (width: number) => {
+			rendered.push(width);
+			return [`laid out at ${width} cells`];
+		},
+	});
+	const { view } = await open([rich]);
+	view.render(100);
+	strictEqual(rendered.length, 0);
+	await settle();
+	strictEqual(rendered.length, 1);
+	view.render(120);
+	strictEqual(rendered.length, 1, "resizing never runs the block renderer inside paint");
+	match(plain(view, 120), /laying out preview/u);
+	await settle();
+	strictEqual(rendered.length, 2);
+	match(plain(view, 120), /laid out at \d+ cells/u);
+	view.render(130);
+	view.render(140);
+	strictEqual(rendered.length, 2);
+	await settle();
+	strictEqual(rendered.length, 3, "only the latest requested width renders");
+});
+
 test("literal terms match full paths and provenance without matching scattered letters", async () => {
 	const report = artifact("測定👩‍🔬.md");
 	report.path = `/tmp/${"long-parent/".repeat(12)}測定👩‍🔬.md`;

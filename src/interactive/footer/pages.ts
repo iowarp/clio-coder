@@ -380,7 +380,10 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 			: state.demoHint
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
 				: theme.fg("dim", footerKeyHint(state.now, w < 120) ?? `${key} Dashboard`);
-	const hintWidth = Math.min(Math.floor(w * 0.48), visibleWidth(foot));
+	// An armed escape instruction must keep its whole action at narrow widths;
+	// the workspace label can yield room that an ordinary rotating hint cannot.
+	const hintBudget = urgent ? Math.max(1, w - 3 - 8) : Math.floor(w * 0.48);
+	const hintWidth = Math.min(hintBudget, visibleWidth(foot));
 	const workspaceWidth = Math.max(1, w - hintWidth - 3);
 	const git = `${clean(state.workspace.branch ?? "no Git branch")}${state.workspace.dirty ? " *" : ""}`;
 	const gitWidth = Math.min(visibleWidth(git), Math.max(4, Math.floor(workspaceWidth * 0.45)));
