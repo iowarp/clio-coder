@@ -65,6 +65,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### System One decision sites
 
+- Record per-turn speculative worker counts in the session journal after settlement. A `speculativeDispatch` entry now shows held, adopted and discarded processes, including unused holds; turns without a hold write no entry.
 - Carry turn cancellation into the awaited pre-turn brief. Escape during a pending decision now aborts the model request and ends before chat admission, instead of waiting for the brief and then sending the cancelled turn to the main model.
 - Preserve valid decisions in a batch when one sibling answer is missing or malformed. The runtime previously rejected the entire response, making unrelated sites abstain even though TypeSafe evaluates each question independently. A wholly unusable response still fails closed.
 - Start a forecast's speculative hold before the main turn resumes, and cancel any queued hold when the turn settles. The previous next-tick callback could miss an immediate dispatch or start an orphaned hold after settlement had already released the pool.

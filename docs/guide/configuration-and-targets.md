@@ -1202,6 +1202,10 @@ so a speculative process never takes a slot from a real dispatch. Held
 processes are killed when the turn settles or is cancelled, when the session
 ends and when Clio exits, and one whose parent is killed reads end-of-file on
 its stdin and exits on its own.
+At turn settlement, a session journal entry of type `speculativeDispatch`
+records that turn's `held`, `adopted` and `discarded` counts when any changed.
+An unused hold is counted as discarded after it is killed. With no hold, no
+entry is written.
 
 What it saves is process start: booting Node and loading the worker's modules,
 before the worker's first model request. Measured live on a request that names

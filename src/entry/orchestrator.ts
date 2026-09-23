@@ -2354,6 +2354,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		}),
 	);
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
+	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
 	const chat = createChatLoop({
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
@@ -2396,6 +2397,28 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			cancelQueuedSpeculativeHold?.();
 			cancelQueuedSpeculativeHold = null;
 			dispatch?.releaseSpeculative?.("turn settled");
+			const current = dispatch?.speculativeStats?.();
+			if (current === undefined) return;
+			const counts = {
+				held: Math.max(0, current.held - previousSpeculativeStats.held),
+				adopted: Math.max(0, current.adopted - previousSpeculativeStats.adopted),
+				discarded: Math.max(0, current.discarded - previousSpeculativeStats.discarded),
+			};
+			previousSpeculativeStats = current;
+			if (counts.held === 0 && counts.adopted === 0 && counts.discarded === 0) return;
+			try {
+				const meta = session?.current();
+				if (!meta) return;
+				session?.appendEntry({
+					kind: "custom",
+					customType: "speculativeDispatch",
+					parentTurnId: session?.tree(meta.id).leafId ?? null,
+					display: false,
+					data: counts,
+				});
+			} catch {
+				// Accounting is best effort and cannot change turn settlement.
+			}
 		},
 		getMemoryRelevance: () => turnRelevance.memory(),
 		getTurnBriefRecord: () => preTurnRecord(turnRelevance.sites, turnRelevance.current()),
