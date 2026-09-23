@@ -1188,10 +1188,13 @@ ends and when Clio exits, and one whose parent is killed reads end-of-file on
 its stdin and exits on its own.
 
 What it saves is process start: booting Node and loading the worker's modules,
-before the worker's first model request. Prefix prewarm for a local model is
-not built, because on the fleet it was measured on every recipe ran on a cloud
-target. With the leaf off, the forecast asks its two original questions and
-nothing is held.
+before the worker's first model request. Measured live on a request that names
+the scout, five turns with the leaf on and five with it off, every site bound
+in both: the held process was adopted in all five, and a scout reached its first
+model token 177ms after admission at the median against 432ms cold, about 250ms
+on turns of 13 to 50s. Prefix prewarm for a local model is not built, because
+on the fleet it was measured on every recipe ran on a cloud target. With the
+leaf off, the forecast asks its two original questions and nothing is held.
 
 #### Asking a site from harness code
 
@@ -1275,6 +1278,10 @@ validation, and the binding that names it then fails with `profile 'system-one'
 is not defined in fleet.profiles`. If you see that message and the profile is
 clearly in the file, the target id is the thing to check.
 
+The profile's `model` is the model every site bound to it asks, and the one the
+turn record names as the source. A profile without a `model` asks the target's
+`defaultModel`.
+
 **4. Bind the site.**
 
 ```yaml
@@ -1341,11 +1348,70 @@ figure unless you set `targets[].pricing` on the `jev` target yourself.
 #### A second decision provider needs no new verb
 
 `decide()` is provider-shaped rather than Jev-shaped. The three primitives are a
-contract about answer shapes, not about one vendor: Laya, for instance, is a
-local Apache-2.0 encoder model that exposes the same three, so adding a second
-decision provider would need a runtime descriptor and no new contract verb.
-Nothing in this repository implements Laya and it is not a supported runtime;
-the point is only that the seam is drawn at the primitive, not at TypeSafe.
+contract about answer shapes, not about one vendor, and a server that speaks the
+same wire works through the `typesafe-jev` runtime with no new runtime or verb.
+
+#### Laya on this machine: verified, not recommended yet
+
+[Laya](https://github.com/NandhaKishorM/laya) is an Apache-2.0 encoder decision
+model with the same three primitives. Since 0.3.7 it ships `laya-serve`, which
+answers `POST /v1/systemone`, so a `typesafe-jev` target pointed at it runs every
+site locally:
+
+```bash
+pip install "laya[serve]"
+LAYA_HOST=127.0.0.1 LAYA_PORT=8000 LAYA_MODELS=english laya-serve
+```
+
+```yaml
+targets:
+  - id: laya
+    runtime: typesafe-jev
+    url: http://127.0.0.1:8000/v1
+    wireModels: [laya, laya-multilingual]
+    defaultModel: laya
+fleet:
+  profiles:
+    system-one-local:
+      target: laya
+      model: laya
+```
+
+Three things differ from Jev on the same wire. `laya-serve` has no `/models`
+route, so a model probe of the target fails; decisions do not use it. It needs no
+key unless `LAYA_API_KEY` is set on the server. It reports a noul's `confidence`
+as `max(p, 1 - p)`, which never falls below 0.5, so the runtime ignores a noul's
+reported confidence and reads certainty from the probability, as it does for
+Jev, which sends none. For `choice` and `score` Laya reports normalized entropy
+where Jev reports how peaked the winning option is, so a split between two of
+many options reads as more certain from Laya than it is.
+
+Measured on 2026-09-23 against this repository's labeled fixtures in
+`tests/fixtures/decision-cases/`, one run each, since Laya's answers are
+deterministic:
+
+| Fixture | jev-latest | Laya English (512 tokens) | Laya multilingual (1024 tokens) |
+| --- | --- | --- | --- |
+| `turnScope`, 26 turns | 26 agree | 11 agree, 13 abstain, 2 wrong | 6 agree, 3 abstain, 17 wrong |
+| `dispatchForecast`, 26 turns | 24 agree, 2 abstain | 13 agree, 13 abstain | 15 agree, 2 abstain, 9 wrong |
+| recipe, 24 turns | 23 agree, 1 abstain | 6 agree, 13 abstain, 5 wrong | 5 agree, 3 abstain, 16 wrong |
+| `capabilities` recall at 5, 24 queries | 24 | 3 | 1 |
+
+On an AMD Ryzen AI MAX+ 395 under WSL2, Laya ran on the CPU and on the Radeon
+8060S through ROCm 7.13 PyTorch wheels. On four CPU threads three questions took
+1.2s p50. On the iGPU they took 54 to 78ms, but the full pre-turn brief with
+`skills` bound (about 28 questions) took 2.4s p50, over the brief's 1.5s budget,
+and a 57-entry capability ranking took about 5s. The English checkpoint's 512 tokens
+hold 7 of the 24 skill candidates a brief sends, and the recipe question's 32
+options share a 192-token option budget, about 5 tokens each. Raising the
+checkpoints to 2048 tokens did not help: the recipe question then abstained 23
+times in 24.
+
+So Laya is not recommended for any site today. The base checkpoints answer
+Clio's questions near chance, which matches Laya's own note that they are a base
+to fine-tune rather than a zero-shot decision engine. A checkpoint fine-tuned on
+these fixtures is the path to a useful local provider. The XDNA NPU is not
+visible inside WSL, so an NPU path would need a server on the Windows side.
 
 ---
 
