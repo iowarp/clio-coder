@@ -40,10 +40,12 @@ export const DIFF_SKIPPED_NOTE = "diff skipped because the previous or new file 
 /** write.ts:66 reports this on the result text, not in `details`. */
 export const NO_TRAILING_NEWLINE_NOTE = "no longer ends with a newline";
 /**
- * src/tools/registry.ts:1253 words a refused call as
+ * src/tools/registry.ts:1277 words a parked call that was answered as
  * `<tool> blocked: <actionClass> was not approved`. Matching the producer's own
- * sentence is what separates "you refused this" from "the tool broke", which a
- * bare `failed` status cannot say.
+ * sentence is what separates "not approved" from "the tool broke", which a bare
+ * `failed` status cannot say. The same sentence covers a denial at the prompt, a
+ * turn cancelled while the approval waited, and an abort, so it proves that the
+ * call was not approved and nothing about who declined it.
  */
 export const NOT_APPROVED_NOTE = "was not approved";
 
@@ -293,7 +295,7 @@ export interface DiffPanel {
 const PROVENANCE_LABEL: Readonly<Record<DiffProvenance, string>> = {
 	applied: "Applied",
 	proposed: "Proposed · not yet applied",
-	rejected: "Not applied · you rejected this",
+	rejected: "Not applied · not approved",
 	unverified: "Application unverified · the call did not complete",
 	skipped: "No diff available",
 	unchanged: "No textual change",
@@ -394,7 +396,7 @@ export function diffPanel(inputs: DiffInputs): DiffPanel {
 	const completed = inputs.status === "completed";
 	// A bare `failed` or `cancelled` status proves neither an operator rejection
 	// nor zero bytes written. Only the producer's own refusal sentence earns
-	// "you rejected this"; everything else stays neutral about what reached disk.
+	// "not approved"; everything else stays neutral about what reached disk.
 	const refused = inputs.resultText?.includes(NOT_APPROVED_NOTE) ?? false;
 	const settled = inputs.status === "failed" || inputs.status === "cancelled";
 

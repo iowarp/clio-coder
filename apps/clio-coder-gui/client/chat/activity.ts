@@ -4,6 +4,7 @@
 // happening. No server field is added for any of it.
 
 import type { TimelineItem } from "../../contracts/sessions.js";
+import { notApproved, readWire } from "./tool-presentation.js";
 
 export type ActivityTone = "neutral" | "info" | "action" | "success" | "warning" | "error";
 
@@ -145,9 +146,6 @@ const counted =
 const DIGEST_PHRASES: Readonly<Record<string, Phrase>> = {
 	read: counted("read", "file"),
 	ls: counted("listed", "folder"),
-	edit: counted("changed", "file"),
-	write: counted("changed", "file"),
-	artifact: counted("changed", "file"),
 	bash: counted("ran", "command"),
 	run_script: counted("ran", "command"),
 	safe_exec: counted("ran", "command"),
@@ -158,9 +156,36 @@ const DIGEST_PHRASES: Readonly<Record<string, Phrase>> = {
 	code_nav: counted("ran", "search", "searches"),
 	web_fetch: counted("fetched", "page"),
 	dispatch: counted("delegated", "task"),
+	"change:done": counted("changed", "file"),
+	"change:not-approved": (count) => `${plural(count, "change")} not approved`,
+	"change:failed": (count) => `${plural(count, "change")} failed`,
+	"change:stopped": (count) => `${plural(count, "change")} stopped`,
+	"change:open": (count) => `${plural(count, "change")} in progress`,
 };
+const CHANGES = new Set(["edit", "write", "artifact"]);
 /** Kinds whose phrase counts distinct paths rather than calls, so rereading one file reads as one file. */
-const BY_PATH = new Set(["read", "edit", "write", "artifact"]);
+const BY_PATH = new Set([
+	"read",
+	"change:done",
+	"change:not-approved",
+	"change:failed",
+	"change:stopped",
+	"change:open",
+]);
+
+/**
+ * "changed 1 file" is a claim about the disk, so only a change call that completed without an error
+ * earns it. Anything else says what became of the change, in the runtime's own terms. Edits and writes
+ * share one phrase, so a turn that edits one file and writes another reads "changed 2 files".
+ */
+function changeKey(item: TimelineItem): string {
+	const wire = readWire(item);
+	if (item.status === "completed" && !wire.isError) return "change:done";
+	if (notApproved(item, wire)) return "change:not-approved";
+	if (item.status === "failed" || wire.isError) return "change:failed";
+	if (item.status === "cancelled") return "change:stopped";
+	return "change:open";
+}
 
 /**
  * What a group did, in words: "read 2 files, ran 1 command". Phrases follow first appearance, reads and
@@ -171,8 +196,15 @@ export function activityDigest(items: readonly TimelineItem[]): string {
 	const tallies = new Map<string, { calls: number; paths: Set<string> }>();
 	for (const item of items) {
 		if (item.kind === "thought") continue;
+		const title = item.title ?? "";
 		const key =
-			item.kind === "notice" ? "notice" : DIGEST_PHRASES[item.title ?? ""] === undefined ? "other" : (item.title ?? "");
+			item.kind === "notice"
+				? "notice"
+				: CHANGES.has(title)
+					? changeKey(item)
+					: DIGEST_PHRASES[title] === undefined
+						? "other"
+						: title;
 		let tally = tallies.get(key);
 		if (tally === undefined) {
 			tally = { calls: 0, paths: new Set() };
