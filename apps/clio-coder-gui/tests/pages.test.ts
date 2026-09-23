@@ -8,7 +8,8 @@ import { harness } from "./harness/app.js";
 
 test("the server's page list is exactly the routes the client router declares", async () => {
 	const source = await readFile(new URL("../client/main.tsx", import.meta.url), "utf8");
-	const routed = [...source.matchAll(/\{ path: "([^"]+)", element:/g)].map((match) => match[1] as string);
+	// A route is either eager (`{ path, element }`) or code-split (`{ path, lazy }`); both declare a page.
+	const routed = [...source.matchAll(/\{\s*path: "([^"]+)",\s*(?:element|lazy):/g)].map((match) => match[1] as string);
 	assert.ok(routed.length > 20, `expected the router's routes, read ${routed.length}`);
 	// `/docs` is the index of `/docs/*`, which the router serves from the one wildcard route.
 	assert.deepEqual([...new Set([...routed, "/docs"])].sort(), [...PAGE_PATHS].sort());
