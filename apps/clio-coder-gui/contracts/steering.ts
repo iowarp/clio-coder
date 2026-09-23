@@ -135,6 +135,7 @@ export const CommandRequest = Type.Object(
 	},
 	closed,
 );
+export type CommandRequest = Static<typeof CommandRequest>;
 export const CommandResult = Type.Object(
 	{
 		level: Type.Union([Type.Literal("info"), Type.Literal("success"), Type.Literal("warn"), Type.Literal("error")]),

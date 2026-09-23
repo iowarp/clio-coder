@@ -51,7 +51,12 @@ conversation, or load a saved session. Up to four sessions can be open at once.
 Permission cards offer one-time allow or reject. Unanswered cards escalate after
 45 seconds and cancel the turn after 10 minutes. Session controls include cancel,
 labels, safe settings, autonomy, target probes, and confirmed deletion of closed
-sessions. Fleet activity and evidence-ready facts stream alongside the conversation. The conversation
+sessions. The conversation's **Clio Coder commands** disclosure reads the commands
+advertised by that ACP session, collects their typed arguments, requires a review
+before invocation, and displays the bounded result. Older agents without the
+command capability show an unavailable explanation. Commands may change project
+state or add a user turn; dispatch progress appears in the fleet activity strip.
+Fleet activity and evidence-ready facts stream alongside the conversation. The conversation
 uses one primary transcript scroller with a docked composer; session tools and live worker
 controls open from the top bar rather than stacking permanent cards over the reading area.
 Trace history includes server-side filters and pagination, run details,

@@ -8,6 +8,7 @@ import { clock, formatTime } from "../api/clock.js";
 import { sessionBuffer } from "../api/sessions.js";
 import { ApprovalBanner, pendingPermission } from "../chat/Approval.js";
 import { ChatTurnView } from "../chat/ChatTurn.js";
+import { CommandPanel } from "../chat/CommandPanel.js";
 import { Composer, fillComposer } from "../chat/Composer.js";
 import {
 	CONTEXT_WARNING_LABEL,
@@ -114,6 +115,10 @@ export function Sessions({ client }: { client: Client }) {
 				? client.call(routes.loadSession, { params: { id }, query: {}, body: { workspaceId } })
 				: client.call(routes.newSession, input),
 		onSuccess: (session) => {
+			// A loaded ledger may bind a new ACP child with a different command catalog.
+			queries.removeQueries({ queryKey: ["session-capabilities", session.id] });
+			queries.removeQueries({ queryKey: ["session-commands", session.id] });
+			queries.removeQueries({ queryKey: ["session-queue", session.id] });
 			sessionBuffer(session.id).snapshot(session);
 			queries.setQueryData(["session", session.id], session);
 			void queries.invalidateQueries({ queryKey: ["sessions"] });
@@ -259,6 +264,7 @@ function SessionTools({
 			</summary>
 			<div className="conversation__tools-body">
 				<SessionControls client={client} session={session} />
+				<CommandPanel client={client} sessionId={session.id} sessionOpen={session.state === "open"} />
 				<FleetStrip client={client} session={session} />
 			</div>
 		</details>

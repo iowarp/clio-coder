@@ -1,0 +1,84 @@
+/* A small instrument at the conversation edge, not a second command-line shell. */
+.command-panel {
+	margin-block: var(--space-3) var(--space-6);
+	padding: var(--space-3) var(--space-4);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--surface);
+}
+.command-panel > summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+.command-panel__note {
+	color: var(--ink-muted);
+	font-size: var(--text-meta);
+	margin: var(--space-2) 0;
+}
+.command-panel__form {
+	display: grid;
+	gap: var(--space-3);
+	max-width: 52rem;
+	margin-block: var(--space-4);
+}
+.command-panel__field {
+	display: grid;
+	gap: var(--space-1);
+	min-width: 0;
+	color: var(--ink);
+	font-size: var(--text-meta);
+}
+.command-panel__field :is(select, input, textarea) {
+	width: 100%;
+	min-width: 0;
+	padding: var(--space-2);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-sm);
+	background: var(--paper);
+	color: var(--ink);
+	font: inherit;
+}
+.command-panel__check {
+	display: flex;
+	align-items: center;
+	gap: var(--space-2);
+	font-size: var(--text-meta);
+}
+.command-panel__check input {
+	width: auto;
+}
+.command-panel__review,
+.command-panel__result {
+	display: grid;
+	justify-items: start;
+	gap: var(--space-2);
+	min-width: 0;
+	padding: var(--space-3);
+	border: 1px solid var(--line-strong);
+	border-radius: var(--radius-md);
+	background: var(--surface-sunken);
+}
+.command-panel__review code,
+.command-panel__result pre {
+	font-family: var(--font-mono);
+	font-size: var(--text-exact);
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+.command-panel__review p {
+	margin: 0;
+}
+.command-panel__actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: var(--space-2);
+}
+.command-panel__result {
+	margin-top: var(--space-3);
+}
+.command-panel__result pre {
+	margin: 0;
+	max-width: 100%;
+	max-height: 20rem;
+	overflow: auto;
+}
