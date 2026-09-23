@@ -203,6 +203,24 @@ describe("dispatch admission boundary", () => {
 		}
 	});
 
+	it("admits verification work and read-only inspection of test files", () => {
+		const specs = [agent("verifier", "verification"), agent("scout", "read-only"), agent("coder", "workspace-edit")];
+		const assess = (agentId: string, capabilityClass: "verification" | "read-only", task: string) =>
+			assessCapabilityMismatch({
+				agentId,
+				capabilityClass,
+				task,
+				autoSelected: false,
+				resultContractKind: agentId === "verifier" ? "verifier-report" : "scout-report",
+				specs,
+			});
+		strictEqual(assess("verifier", "verification", "Check whether the retry tests pass"), null);
+		strictEqual(assess("verifier", "verification", "Verify that npm test succeeds"), null);
+		strictEqual(assess("scout", "read-only", "Inspect tests/retry.test.ts and report what it covers"), null);
+		strictEqual(assess("scout", "read-only", "Read src/retry.test.ts and summarize it"), null);
+		strictEqual(assess("verifier", "verification", "Write new retry tests")?.verdict, "refuse");
+	});
+
 	it("lets a typed intent that declares no writes outrank the prose classifier for a read-only recipe", () => {
 		const specs = [agent("scout", "read-only"), agent("coder", "workspace-edit")];
 		const task =

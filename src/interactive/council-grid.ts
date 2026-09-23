@@ -48,7 +48,7 @@ export interface CouncilMemberView {
 	round: number;
 	/** Route as the card names it, such as `local/example-model`. */
 	route: string;
-	status: { glyph: string; label: string; token: ClioToken };
+	status: { glyph: string; label: string; token: ClioToken; glyphToken?: ClioToken };
 	/** Bounded answer tail the board already keeps for this run. */
 	tailText: string;
 	droppedLines: number;
@@ -61,7 +61,7 @@ export interface CouncilGroupView {
 	/** The council's own answer, or null while the members are still running. */
 	synthesis: CouncilMemberView | null;
 	/** Aggregate status of the group, used by the compact card. */
-	status: { glyph: string; label: string; token: ClioToken };
+	status: { glyph: string; label: string; token: ClioToken; glyphToken?: ClioToken };
 	/** Highest round any member has reached. */
 	round: number;
 	/** Elapsed time of the longest-running member, formatted by the caller. */
@@ -132,7 +132,7 @@ function councilMemberLines(
 ): string[] {
 	const dot = dotSep(theme);
 	const cursor = options.selected === true ? `${theme.fg("accent", GLYPH.cursor)} ` : "";
-	const status = theme.fg(member.status.token, `${member.status.glyph} ${member.status.label}`);
+	const status = `${theme.fg(member.status.glyphToken ?? member.status.token, member.status.glyph)} ${theme.fg(member.status.token, member.status.label)}`;
 	const head = `${cursor}${councilLabelText(theme, member.label, member.color)}`;
 	const lines = [
 		truncateToWidth(head, width, "…", false),
@@ -197,7 +197,7 @@ export function councilGroupBody(theme: ClioTheme, group: CouncilGroupView, cont
  */
 export function councilIslandLines(theme: ClioTheme, group: CouncilGroupView, width: number): string[] {
 	const dot = dotSep(theme);
-	const glyph = theme.fg(group.status.token, group.status.glyph);
+	const glyph = theme.fg(group.status.glyphToken ?? group.status.token, group.status.glyph);
 	const status = theme.fg(group.status.token, group.status.label);
 	const title = theme.paint(`council ${group.group}`, { bold: true });
 	const head = `${glyph} ${title}${dot}${status}${dot}${theme.fg("muted", group.elapsed)}`;

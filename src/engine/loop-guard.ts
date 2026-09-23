@@ -346,7 +346,7 @@ const DEAD_TOOL_CALL_MARKUP_PATTERNS: ReadonlyArray<RegExp> = [
 ];
 
 /** Strip dead tool-call markup from locked-turn text; trims only when something was stripped. */
-function stripDeadToolCallMarkup(text: string): string {
+export function stripDeadToolCallMarkup(text: string): string {
 	let out = text;
 	for (const pattern of DEAD_TOOL_CALL_MARKUP_PATTERNS) {
 		out = out.replace(pattern, "");

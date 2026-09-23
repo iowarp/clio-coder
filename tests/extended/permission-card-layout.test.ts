@@ -157,10 +157,11 @@ test("a target the safety layer cut at its cap ends in an ellipsis on the card a
 	const command = `cd /tmp/work/demo-repo && npm test -- ${"--reporter spec ".repeat(12)}`;
 	const cut = describeCallTarget("bash", { command });
 	strictEqual(cut.length, CALL_TARGET_MAX_CHARS, "the safety layer cuts at its cap");
+	ok(cut.endsWith("…"), "the source marks a cut for every consumer");
 	const view: ApprovalRequestView = { ...WRITE_VIEW, tool: "bash", actionClass: "execute", target: cut };
 	delete view.mutation;
 	const card = plain(createPermissionOverlayBody(view).render(76)).join(" ").replace(/\s+/g, " ");
-	match(card, /Target: cd \/tmp\/work\/demo-repo && npm test -- .*--… Requested by/u, card);
+	match(card, /Target: cd \/tmp\/work\/demo-repo && npm test -- .*… Requested by/u, card);
 	const row = plain(
 		renderToolAwaitingApproval({ toolCallId: "b", toolName: "bash", args: { command } }, 100, view),
 	).join(" ");
@@ -170,4 +171,6 @@ test("a target the safety layer cut at its cap ends in an ellipsis on the card a
 	const short = plain(createPermissionOverlayBody({ ...view, target: whole }).render(76)).join(" ");
 	match(short, /Target: npm test/u);
 	doesNotMatch(short, /npm test…/u);
+	const exact = "x".repeat(CALL_TARGET_MAX_CHARS);
+	strictEqual(describeCallTarget("bash", { command: exact }), exact, "an exactly sized target remains whole");
 });

@@ -10,7 +10,7 @@ import { formatFooterTokens } from "../footer-panel.js";
 import { renderQuotaAccounts, routeWeeklyQuota } from "../quota-view.js";
 import { previewRows } from "../renderers/preview.js";
 import { clioTheme, formatCompactMs, formatContextPercent, GLYPH, rule } from "../theme/index.js";
-import { fitIdentityLabel } from "../theme/labels.js";
+import { fitIdentityLabel, formatTargetLabel } from "../theme/labels.js";
 import type { FooterDashboardRenderState } from "./dashboard.js";
 import { footerKeyHint } from "./key-hints.js";
 import {
@@ -358,7 +358,14 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 		? baseRoom - visibleWidth(thinking) - 3 >= identityMin
 		: baseRoom + 5 >= visibleWidth(thinking) + 3;
 	const identityRoom = Math.max(1, baseRoom - (showThinking ? visibleWidth(thinking) + 3 : 0));
-	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fitIdentityLabel(identity, identityRoom))}` : "";
+	const fittedIdentity =
+		state.session.targetId || state.session.modelId
+			? formatTargetLabel(state.session.targetId, state.session.modelId, {
+					width: identityRoom,
+					abbreviate: false,
+				})
+			: fitIdentityLabel(identity, identityRoom);
+	const shownIdentity = readable ? `  ·  ${theme.fg("muted", fittedIdentity)}` : "";
 	const left = `${activity}${skill ? ` · ${skill}` : ""}${shownIdentity}${badge ? ` · ${badge}` : ""}${showThinking ? ` · ${thinking}` : ""}`;
 	const pair = (l: string, r: string, rw: number) => `${fit(l, w - rw - 3)}   ${fit(r, rw)}`;
 	const notice = [...state.notices]

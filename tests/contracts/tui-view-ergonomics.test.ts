@@ -100,6 +100,19 @@ test("view gives narrow lists the full width and lets a focused preview move bet
 	match(plain(view, 200), /Read the retry module before changing its tests/u);
 });
 
+test("bare /view starts on the first visible transcript detail instead of a newer global artifact", async () => {
+	const transcript = { ...artifact("read src/net/retry.js", "transcript"), timestamp: 100 };
+	const accountability = { ...artifact("Session accountability", "accountability"), timestamp: 200 };
+	const { view } = await open([accountability, transcript]);
+	const list = plain(view, 60);
+	match(list, /❯ read src\/net\/retry\.js/u);
+	doesNotMatch(list, /❯ Session accountability/u);
+	view.handleInput("\r");
+	view.render(60);
+	await settle();
+	match(plain(view, 60), /Body of read src\/net\/retry\.js/u);
+});
+
 test("an unusually long title leaves room for the preview body", async () => {
 	const long = { ...artifact("long", "transcript"), title: "inspect the result ".repeat(100) };
 	const { view } = await open([long]);
@@ -204,6 +217,7 @@ test("refresh retains selected identity after list ordering changes and category
 	await settle();
 	match(plain(view), /Body of chosen/u);
 	view.handleInput("\x15");
+	match(plain(view), /❯ chosen/u);
 	view.handleInput("\x1b[C");
 	view.render(92);
 	await settle();

@@ -50,19 +50,18 @@ const MUTATING_TASK_TYPES: ReadonlySet<AgentTaskType> = new Set([
 ]);
 
 /**
- * The read-shaped rules from `classifyAgentTask`, re-tested as corroboration.
- * A text that matches one of these was plausibly a read task that lost the
- * ordered scan to an earlier mutating rule, which is exactly the case that must
- * not be refused. Kept byte-identical to the patterns in `agent-candidates.ts`;
- * they are duplicated rather than exported because the classifier's list is
- * ordered and first-match-wins, and this check needs "did any of these match at
- * all", which the ordered scan cannot answer.
+ * Read-shaped corroboration independent of the classifier's ordered scan.
+ * A test filename or subject can win that scan even though the leading verb
+ * asks for inspection. This check asks whether any read verb appeared, not
+ * which task type won the routing heuristic.
  */
 const READ_SHAPED_PATTERNS: ReadonlyArray<RegExp> = [
 	/\b(review|audit|critique|inspect for)\b/i,
 	/\b(research|investigate|explore|survey|compare|find out)\b/i,
-	/\b(read|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i,
+	/\b(read|inspect|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i,
 ];
+const VERIFICATION_REQUEST = /\b(?:check whether|verify|validate|confirm|run (?:the )?tests?)\b/i;
+const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
 
 /**
  * Contracts whose postcondition is a report. A recipe that declares one has
@@ -142,6 +141,13 @@ export function assessCapabilityMismatch(input: CapabilityMismatchInput): Capabi
 	if (!READ_ONLY_CAPABILITY_CLASSES.has(input.capabilityClass)) return null;
 	if (input.intent && input.intent.writeRoots.length === 0 && input.intent.expectedOutputs.length === 0) return null;
 	const features = classifyAgentTask(input.task);
+	if (
+		input.capabilityClass === "verification" &&
+		VERIFICATION_REQUEST.test(input.task) &&
+		!MUTATION_REQUEST.test(input.task)
+	) {
+		return null;
+	}
 	if (!MUTATING_TASK_TYPES.has(features.taskType)) return null;
 	const readShaped = READ_SHAPED_PATTERNS.some((pattern) => pattern.test(input.task));
 	const reportingContract = input.resultContractKind !== null && REPORTING_CONTRACT_KINDS.has(input.resultContractKind);

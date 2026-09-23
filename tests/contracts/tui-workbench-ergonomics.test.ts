@@ -77,6 +77,19 @@ test("abbreviated identities retain variant suffixes and complete graphemes", ()
 	}
 });
 
+test("target identities drop placement and cut only at model token boundaries", () => {
+	const model = "dynamo/qwopus3.8-27b-flash@q4_k_m";
+	for (const width of [12, 18, 24, 35, 40]) {
+		const label = formatTargetLabel("blade", model, { width });
+		assert.ok(visibleWidth(label) <= width, `${width}: ${label}`);
+		assert.ok(label.endsWith("@q4_k_m"), `${width}: ${label}`);
+		if (label.includes("…")) assert.match(label, /…[/.@_-]/u, `${width}: ${label}`);
+		assert.doesNotMatch(label, /dynamo\//u, `${width}: placement should yield first`);
+	}
+	assert.equal(formatTargetLabel("blade", model, { width: 40 }), "blade · qwopus3.8-27b-flash@q4_k_m");
+	assert.equal(formatTargetLabel("blade", model, { width: 42 }), `blade · ${model}`);
+});
+
 for (const width of widths) {
 	test(`composer keeps normal rails clean and preserves exceptional modes and draft at ${width} columns`, () => {
 		let streaming = false;

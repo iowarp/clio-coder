@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { BusChannels } from "../core/bus-events.js";
 import type { ClioSettings } from "../core/config.js";
 import type { SafeEventBus } from "../core/event-bus.js";
@@ -699,7 +699,12 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				} else {
 					writeFileSync(target, renderSessionHtml({ sessionId, exportedAt: exportedAt.toISOString(), ansiLines }), "utf8");
 				}
-				appendCommandNotice("success", `[/export] wrote ${ansiLines.length} lines to ${target}`);
+				const fromWorkspace = relative(resolve(cwd()), target);
+				const shownPath =
+					fromWorkspace !== ".." && !fromWorkspace.startsWith(`..${sep}`) && !isAbsolute(fromWorkspace)
+						? fromWorkspace || "."
+						: target;
+				appendCommandNotice("success", `[/export] wrote ${ansiLines.length} lines to ${shownPath}`);
 			} catch (err) {
 				appendCommandNotice("error", `[/export] ${err instanceof Error ? err.message : String(err)}`);
 			}

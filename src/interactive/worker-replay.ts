@@ -45,6 +45,7 @@ export const WORKER_SETTLED_ENTRY = "workerSettled";
 /** One finished call as a settled card's trail states it: the tool and the safety layer's descriptor. */
 export interface WorkerSettledCall {
 	tool: string;
+	outcome?: "ok" | "error" | "blocked";
 	verb?: string;
 	object?: string;
 	truncated?: true;
@@ -62,6 +63,7 @@ function settledCall(action: WorkerAction): WorkerSettledCall {
 	const descriptor = action.descriptor;
 	return {
 		tool: action.tool,
+		...(action.outcome !== undefined ? { outcome: action.outcome } : {}),
 		...(descriptor !== undefined ? { verb: descriptor.verb } : {}),
 		...(descriptor?.object !== undefined ? { object: descriptor.object } : {}),
 		...(descriptor?.truncated === true ? { truncated: true as const } : {}),
@@ -83,11 +85,12 @@ export function workerSettledFields(state: WorkerEntryState): WorkerSettledField
 
 function settledCallFromData(value: unknown): WorkerSettledCall[] {
 	if (value === null || typeof value !== "object") return [];
-	const { tool, verb, object, truncated } = value as Record<string, unknown>;
+	const { tool, verb, object, truncated, outcome } = value as Record<string, unknown>;
 	if (typeof tool !== "string" || tool.length === 0) return [];
 	return [
 		{
 			tool,
+			...(outcome === "ok" || outcome === "error" || outcome === "blocked" ? { outcome } : {}),
 			...(typeof verb === "string" && verb.length > 0 ? { verb } : {}),
 			...(typeof object === "string" && object.length > 0 ? { object } : {}),
 			...(truncated === true ? { truncated: true as const } : {}),
@@ -112,9 +115,10 @@ export function workerSettledFromData(data: unknown): WorkerSettledFields | null
 
 /** A recorded call as the trail action the card renders. */
 function settledCallAction(call: WorkerSettledCall): WorkerAction {
-	if (call.verb === undefined) return { tool: call.tool };
+	if (call.verb === undefined) return { tool: call.tool, ...(call.outcome ? { outcome: call.outcome } : {}) };
 	return {
 		tool: call.tool,
+		...(call.outcome ? { outcome: call.outcome } : {}),
 		descriptor: {
 			verb: call.verb,
 			...(call.object !== undefined ? { object: call.object } : {}),

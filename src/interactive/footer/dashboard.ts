@@ -473,6 +473,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				throughputDetail,
 				cost: costSegment(deps.getSessionCost?.()),
 				target,
+				targetId: settings?.chat?.target ?? null,
+				modelId: settings?.chat?.model ?? null,
 				thinking,
 				capabilities,
 				safety,

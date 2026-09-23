@@ -66,6 +66,11 @@ const TASK_TYPE_RULES: ReadonlyArray<readonly [AgentTaskType, RegExp]> = [
 	["code_read", /\b(read|explain|understand|summarize|describe|walk through|map|locate|trace|find where|look at)\b/i],
 	["code_write", /\b(write|implement|add|create|build|develop|introduce)\b/i],
 ];
+// A test filename is an object of inspection, not an instruction to write or
+// run tests. The ordered generic `test` rule below would otherwise consume it.
+const LEADING_READ_TASK =
+	/^(?:please\s+)?(?:read|inspect|explain|summarize|describe|map|locate|trace|look at|find where)\b/i;
+const MUTATION_REQUEST = /\b(?:write|implement|add|create|build|develop|fix|edit|change|modify|refactor|update)\b/i;
 const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 	["security", /\b(security|vulnerabilit|auth|credential|secret|cve)\b/i],
 	["frontend", /\b(ui|css|react|component|frontend|tui|overlay)\b/i],
@@ -76,7 +81,10 @@ const DOMAIN_RULES: ReadonlyArray<readonly [AgentTaskDomain, RegExp]> = [
 
 export function classifyAgentTask(task: string): AgentTaskFeatures {
 	const text = task.trim();
-	const taskType = TASK_TYPE_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown";
+	const taskType =
+		LEADING_READ_TASK.test(text) && !MUTATION_REQUEST.test(text)
+			? "code_read"
+			: (TASK_TYPE_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "unknown");
 	const domain = DOMAIN_RULES.find(([, pattern]) => pattern.test(text))?.[0] ?? "general";
 	const words = text.split(/\s+/u).filter(Boolean).length;
 	const complexity: AgentTaskComplexity =

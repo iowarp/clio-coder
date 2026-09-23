@@ -767,6 +767,31 @@ for (const width of [40, 44, 60, 92, 120]) {
 	});
 }
 
+test("compact footer keeps the quantization token whole when placement does not fit", () => {
+	const model = "dynamo/qwopus3.8-27b-flash@q4_k_m";
+	const settings = structuredClone(DEFAULT_SETTINGS);
+	const { presentation: built } = presentation(
+		{
+			terminal: { columns: 60 },
+			getSettings: () => ({
+				...settings,
+				chat: { ...settings.chat, target: "blade", model, thinkingLevel: "low" },
+				interface: { ...settings.interface, mode: "regular", outputDetail: "standard" },
+			}),
+		},
+		true,
+		true,
+	);
+	try {
+		built.footer.refresh();
+		const footer = built.footer.view.render(60).map(stripTerminalSequences).join("\n");
+		ok(footer.includes("@q4_k_m"), footer);
+		if (footer.includes("…")) match(footer, /…[/.@_-]/u, footer);
+	} finally {
+		built.dispose();
+	}
+});
+
 test("the welcome keeps a full model name when space permits and shows the logo, tagline, and permissions", () => {
 	const model = "dynamo/qwopus3.5-flash@q4_k_m";
 	const component = banner({ model });

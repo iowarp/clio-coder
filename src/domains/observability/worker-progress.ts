@@ -76,6 +76,8 @@ export type WorkerProgressPhase = "starting" | "thinking" | "writing" | "tool" |
 /** One tool call as an operator surface may show it: the name plus its redacted descriptor. */
 export interface WorkerAction {
 	tool: string;
+	/** The finish event's authoritative result; absent on running and legacy calls. */
+	outcome?: "ok" | "error" | "blocked";
 	/** Correlation identity carried by new streams. Absent on legacy events. */
 	toolCallId?: string;
 	/** Absent when the runtime emitted no descriptor, so the name stands alone. */
@@ -178,13 +180,17 @@ function toolEventAction(event: Record<string, unknown>): WorkerAction | null {
 	const tool = nonEmptyString(payload?.tool);
 	if (tool === undefined) return null;
 	const toolCallId = nonEmptyString(payload?.toolCallId);
+	const rawOutcome = payload?.outcome;
+	const outcome = rawOutcome === "ok" || rawOutcome === "error" || rawOutcome === "blocked" ? rawOutcome : undefined;
 	const raw = isRecord(payload?.action) ? (payload.action as Partial<CallActionDescriptor>) : undefined;
 	const verb = nonEmptyString(raw?.verb);
-	if (verb === undefined) return { tool, ...(toolCallId !== undefined ? { toolCallId } : {}) };
+	if (verb === undefined)
+		return { tool, ...(toolCallId !== undefined ? { toolCallId } : {}), ...(outcome ? { outcome } : {}) };
 	const object = nonEmptyString(raw?.object);
 	return {
 		tool,
 		...(toolCallId !== undefined ? { toolCallId } : {}),
+		...(outcome ? { outcome } : {}),
 		descriptor: {
 			verb,
 			...(object !== undefined ? { object } : {}),
@@ -422,7 +428,7 @@ export function createWorkerProgressFold(): WorkerProgressFold {
 					action;
 				removePendingAction(finished);
 				currentAction = pendingActions[pendingActions.length - 1] ?? null;
-				recentActions.unshift(finished);
+				recentActions.unshift({ ...finished, ...(action.outcome ? { outcome: action.outcome } : {}) });
 				if (recentActions.length > WORKER_ACTION_TRAIL_LIMIT) recentActions.length = WORKER_ACTION_TRAIL_LIMIT;
 				noteToolName(finished.tool);
 				touch();

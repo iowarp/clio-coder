@@ -79,6 +79,19 @@ function fitIdentityPrefix(value: string, width: number): string {
 	return stripTerminalSequences(truncateToWidth(value, Math.max(0, width), "…", false));
 }
 
+/** Preserve a complete model suffix by eliding only at a wire-id separator. */
+function fitModelTokenSuffix(value: string, width: number): string {
+	if (visibleWidth(value) <= width) return value;
+	if (width <= 0) return "";
+	let best = "…";
+	for (let index = 0; index < value.length; index += 1) {
+		if (!"/@-._".includes(value[index] ?? "")) continue;
+		const candidate = `…${value.slice(index)}`;
+		if (visibleWidth(candidate) <= width && candidate.length > best.length) best = candidate;
+	}
+	return best;
+}
+
 export interface TargetLabelOptions {
 	/** Separator between the target id and the model. The narrow rail omits the spaces. */
 	separator?: string;
@@ -118,11 +131,11 @@ export function formatTargetLabel(
 		const full = `${target}${separator}${model}`;
 		if (visibleWidth(full) <= width) return full;
 		const leaf = model.slice(model.lastIndexOf("/") + 1);
-		const available = width - visibleWidth(separator);
-		if (available < 9) return fitIdentityLabel(leaf, width);
-		const modelBudget = Math.min(visibleWidth(leaf), Math.max(8, Math.ceil(available * 0.7)));
-		const targetBudget = Math.min(visibleWidth(target), available - modelBudget);
-		return `${fitIdentityPrefix(target, targetBudget)}${separator}${fitIdentityLabel(leaf, available - targetBudget)}`;
+		const withoutPlacement = `${target}${separator}${leaf}`;
+		if (visibleWidth(withoutPlacement) <= width) return withoutPlacement;
+		const leafRoom = width - visibleWidth(target) - visibleWidth(separator);
+		if (leafRoom >= 8) return `${target}${separator}${fitModelTokenSuffix(leaf, leafRoom)}`;
+		return fitModelTokenSuffix(leaf, width);
 	}
 	const shown = options.abbreviate === false ? model : abbreviateModelId(model);
 	if (target.length === 0) return fit(`no target · ${shown}`);

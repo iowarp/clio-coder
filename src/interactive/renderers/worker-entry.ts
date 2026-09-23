@@ -14,7 +14,8 @@ import {
 
 import { trustStateWord } from "../../domains/evidence/trust-projection.js";
 import { retiredIntegrityVersionOf } from "../../domains/evidence/trust-status.js";
-import type { WorkerAction } from "../../domains/observability/worker-progress.js";
+import { WORKER_ACTION_TRAIL_LIMIT, type WorkerAction } from "../../domains/observability/worker-progress.js";
+import { stripDeadToolCallMarkup } from "../../engine/loop-guard.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../../engine/tui.js";
 import { councilLabelText } from "../council-grid.js";
 import { formatFooterTokens } from "../footer-panel.js";
@@ -221,7 +222,7 @@ function bodySourceLines(entry: WorkerEntryState): string[] {
 		entry.droppedLines !== 0 ||
 		(entry.progress?.droppedBytes ?? 0) !== 0
 	)
-		return safeWorkerAnswerText(entry.text).split("\n");
+		return safeWorkerAnswerText(entry.pending ? stripDeadToolCallMarkup(entry.text) : entry.text).split("\n");
 	const structured = entry.droppedLines === 0 ? exactWorkerAnswerObject(entry.text) : null;
 	if (structured === null) return safeWorkerAnswerText(entry.text).split("\n");
 	const presented = presentedContractAnswer(entry);
@@ -350,8 +351,12 @@ function descriptorObject(descriptor: NonNullable<WorkerAction["descriptor"]>): 
 /** A finished call as `verb object` in the past tense, or its tool name when the runtime sent no descriptor. */
 function finishedAction(action: WorkerAction): string {
 	const descriptor = action.descriptor;
-	if (descriptor === undefined) return action.tool;
-	return `${FINISHED_VERBS[descriptor.verb] ?? descriptor.verb}${descriptorObject(descriptor)}`;
+	const actionText =
+		descriptor === undefined
+			? action.tool
+			: `${FINISHED_VERBS[descriptor.verb] ?? descriptor.verb}${descriptorObject(descriptor)}`;
+	const failure = action.outcome === "blocked" ? "blocked" : action.outcome === "error" ? "failed" : null;
+	return failure === null ? actionText : `${actionText} ${GLYPH.error} ${failure}`;
 }
 
 /**
@@ -506,11 +511,18 @@ export function renderWorkerEntryLines(
 	// are finished work, not activity.
 	const pending = isPending(entry);
 	const recent = entry.progress?.recentActions ?? entry.recentActions ?? [];
+	const totalCalls = entry.receipt?.toolCalls ?? entry.progress?.toolCalls ?? 0;
+	const earlierCalls = pending ? 0 : Math.max(0, totalCalls - recent.length);
 	const trail = pending
 		? recent
 				.slice(0, 1)
 				.flatMap((action) => railLines(`${GLYPH.phaseTool} last: ${finishedAction(action)}`, "muted", safeWidth))
-		: trailCalls(recent).flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "muted", safeWidth));
+		: [
+				...(earlierCalls > 0
+					? [`… ${earlierCalls} earlier call${earlierCalls === 1 ? "" : "s"} · /view dispatch:${entry.runId}`]
+					: []),
+				...trailCalls(recent),
+			].flatMap((call) => railLines(`${GLYPH.phaseTool} ${call}`, "muted", safeWidth));
 	const tools = detail.workerActivity && !pending && trail.length === 0 ? toolLine(entry, safeWidth) : null;
 	const failure = previewRows(
 		failureLines(entry, safeWidth),
@@ -543,7 +555,9 @@ export function renderWorkerEntryLines(
 			: []),
 		...previewRows(attemptLines(entry, safeWidth), budget(detail.errorRows), safeWidth, true, dim(RAIL), RAIL_WIDTH),
 		...(tools ? [tools] : []),
-		...(detail.workerActivity ? previewRows(trail, budget(4), safeWidth, true, dim(RAIL), RAIL_WIDTH) : []),
+		...(detail.workerActivity
+			? previewRows(trail, budget(WORKER_ACTION_TRAIL_LIMIT + 1), safeWidth, true, dim(RAIL), RAIL_WIDTH)
+			: []),
 		...failure,
 		...(presented ? railLines(presented, "muted", safeWidth) : []),
 		...(entry.receipt?.abandonedDetail ? railLines(entry.receipt.abandonedDetail, "warning", safeWidth) : []),

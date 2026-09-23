@@ -219,6 +219,12 @@ export type ToolApprovalStateEvent =
 			state: "resumed";
 	  };
 
+export interface SpeculativeDispatchCounts {
+	held: number;
+	adopted: number;
+	discarded: number;
+}
+
 export type ChatLoopEvent =
 	| AgentEvent
 	| AssistantDeltaEvent
@@ -227,7 +233,8 @@ export type ChatLoopEvent =
 	| QueuedUserTurnEvent
 	| ChatNoticeEvent
 	| AgentStatusEvent
-	| ToolApprovalStateEvent;
+	| ToolApprovalStateEvent
+	| { type: "speculative_dispatch"; counts: SpeculativeDispatchCounts };
 
 export interface ChatSubmitOptions {
 	/** Explicit host-owned task scope; never parsed from the prompt text. */
@@ -611,7 +618,7 @@ export interface CreateChatLoopDeps {
 	 */
 	refreshTurnRelevance?: (taskText: string, previous: string, signal: AbortSignal) => Promise<void>;
 	/** Called once when a submitted turn settles, whether it completed, failed or was cancelled. */
-	onTurnSettled?: () => void;
+	onTurnSettled?: () => SpeculativeDispatchCounts | undefined;
 	getMemoryRelevance?: () => PrecomputedRanking | undefined;
 	/**
 	 * This turn's pre-turn decisions as ledger rows, recorded once after the user
@@ -2119,7 +2126,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		const run = submitInner(text, options).finally(() => {
 			turnActive = false;
 			try {
-				deps.onTurnSettled?.();
+				const counts = deps.onTurnSettled?.();
+				if (counts !== undefined) emit({ type: "speculative_dispatch", counts });
 			} catch {
 				// Settle hooks are housekeeping and never cost the turn.
 			}

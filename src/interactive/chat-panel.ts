@@ -15,7 +15,7 @@ import {
 	wrapTextWithAnsi,
 } from "../engine/tui.js";
 import type { AgentMessage } from "../engine/types.js";
-import type { ChatLoopEvent, RetryStatusPayload } from "./chat-loop.js";
+import type { ChatLoopEvent, RetryStatusPayload, SpeculativeDispatchCounts } from "./chat-loop.js";
 import { extractText, isSelfExplainingAbort } from "./chat-loop-messages.js";
 import { coldReasonText } from "./cold-reasons.js";
 import type { ApprovalRequestView } from "./permission-overlay.js";
@@ -123,6 +123,8 @@ export interface ChatPanelTurnUsage {
 	modelCalls?: number;
 	/** Why the run's prompt cache was expected to be cold (`prompt_recompiled`, …). */
 	coldReasons?: ReadonlyArray<string>;
+	/** Settled speculative workers, shown only on the Detailed receipt. */
+	prewarm?: SpeculativeDispatchCounts;
 }
 
 /**
@@ -1047,6 +1049,14 @@ function renderTurnUsageLine(
 	if (usage.cacheReadTokens === 0 && usage.coldReasons !== undefined && usage.coldReasons.length > 0) {
 		facts.push(`cold: ${usage.coldReasons.map(coldReasonText).join(", ")}`);
 	}
+	if (usage.prewarm !== undefined) {
+		const prewarm = [
+			...(usage.prewarm.adopted > 0 ? [`${usage.prewarm.adopted} adopted`] : []),
+			...(usage.prewarm.discarded > 0 ? [`${usage.prewarm.discarded} unused`] : []),
+		];
+		if (prewarm.length === 0 && usage.prewarm.held > 0) prewarm.push(`${usage.prewarm.held} held`);
+		if (prewarm.length > 0) facts.push(`prewarm ${prewarm.join(", ")}`);
+	}
 	return hangProseLines(
 		wrapTextWithAnsi(`${DIM}${joinFacts(facts)}${RESET}`, Math.max(1, width - PROSE_GUTTER_WIDTH)).map(releaseSpaces),
 		glyph,
@@ -1460,6 +1470,8 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 	 * total, so a receipt never lands in the middle of a turn.
 	 */
 	let runStartIndex: number | undefined;
+	/** The latest settled receipt eligible for the turn's post-settlement prewarm record. */
+	let lastSettledReceipt: Extract<TranscriptEntry, { role: "assistant" }> | null = null;
 	let cachedWidth: number | undefined;
 	let cachedRegions: { prefix: readonly string[]; tail: string[] } = { prefix: NO_ROWS, tail: [] };
 	/** The last frame concatenated, built on first request; null until someone asks for it. */
@@ -2051,6 +2063,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 
 	return {
 		appendUser(text: string, status?: () => UserTurnStatus): void {
+			lastSettledReceipt = null;
 			transcript.push({ role: "user", text, at: stamp(), ...(status ? { status } : {}) });
 			markDirty();
 		},
@@ -2206,6 +2219,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		reset(): void {
 			transcript.length = 0;
+			lastSettledReceipt = null;
 			runStartedAt = undefined;
 			runStartIndex = undefined;
 			runColdReasons = [];
@@ -2226,6 +2240,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 		},
 		applyEvent(event: ChatLoopEvent): void {
 			if (event.type === "agent_start") {
+				lastSettledReceipt = null;
 				// The run's cold-cache reasons arrive just before it starts, as the
 				// chat loop consumes them ahead of the prompt, so they are kept here
 				// and cleared once the run's receipt has stated them.
@@ -2559,7 +2574,16 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 				markDirty();
 				return;
 			}
+			if (event.type === "speculative_dispatch") {
+				if (lastSettledReceipt?.turnUsage !== undefined) {
+					invalidateEntryCache(lastSettledReceipt);
+					lastSettledReceipt.turnUsage = { ...lastSettledReceipt.turnUsage, prewarm: event.counts };
+					markDirty();
+				}
+				return;
+			}
 			if (event.type === "agent_end") {
+				lastSettledReceipt = null;
 				// agent_end can touch many entries, but it names every one it touches:
 				// the usage caption's target, the later entries whose caption it
 				// removes, and any entry it settles or un-pends below. Each is
@@ -2578,6 +2602,7 @@ export function createChatPanel(options: ChatPanelOptions = {}): ChatPanel {
 					const target = index === null ? undefined : transcript[index];
 					if (target?.role === "assistant") {
 						invalidateEntryCache(target);
+						lastSettledReceipt = target;
 						const stop = event.messages.filter((message) => message.role === "assistant").at(-1) as
 							| { stopReason?: string }
 							| undefined;

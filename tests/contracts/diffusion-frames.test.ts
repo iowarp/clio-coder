@@ -13,6 +13,7 @@ import { hasAssistantGenerationDelta } from "../../src/interactive/assistant-gen
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { reduceStatus } from "../../src/interactive/status/state-machine.js";
 import { INITIAL_STATUS } from "../../src/interactive/status/types.js";
+import { resolveFooterVerb } from "../../src/interactive/status/verbs.js";
 import { SGR_DIM } from "../../src/interactive/theme/index.js";
 
 afterEach(() => setDiffusionFramesEnabled(false));
@@ -281,5 +282,9 @@ describe("diffusion frames in the footer and timing", () => {
 		state = reduceStatus(state, { type: "turn_start" } as never, ctx);
 		state = reduceStatus(state, { type: "text_frame", contentIndex: 0, text: "x", progress: 0 }, ctx);
 		strictEqual(state.phase, "writing");
+		state = reduceStatus(state, { type: "text_frame", contentIndex: 0, text: "xy", progress: 0.5 }, ctx);
+		const footer = resolveFooterVerb(state, 1000, 100)?.text ?? "";
+		ok(/Writing/i.test(footer), footer);
+		ok(!/\d+%/.test(footer), "the provider's completion flag is not a denoising gauge");
 	});
 });
