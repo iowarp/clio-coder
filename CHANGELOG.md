@@ -11,6 +11,21 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Claude Code retains its pinned ACP bridge; Codex retains its pinned bridge and OpenCode uses its native ACP mode. The outbound ACP client now resolves explicitly named environment references and records task worktree edits. ACP receipts state that peer-owned tools may write without sending a permission request. Antigravity CLI and Pi have no built-in ACP recipe.
 - Added `/run --worktree` for a preserved task branch. Managed receipts record the branch and changed paths, or the Git-visible delta observed in the current checkout. OpenCode headless forwards only credential variables referenced by its local provider configuration and refuses authority levels its CLI cannot enforce.
 
+### Project handbooks
+
+- A project handbook written to the 200-line guideline now preloads in full. The session cap rose from 8000 to 24000 UTF-16 units, so the 220-line cap binds first, and `context init` now sees all of an existing handbook it is asked to preserve.
+- Handbook discovery stops at the repository root, the nearest directory holding a `.git` directory or file. A `CLIO-CODER.md` in a folder above several repositories no longer instructs each of them. Handbooks nested inside a repository still layer.
+- Fleet workers receive the handbook rules that apply to them instead of the first 1500 characters. Each H2 section compiles into rule units whose audience comes from the section title and whose scope comes from the paths it cites. A worker gets the hard invariants, the rules scoped to its dispatch paths and its role's rules within 6000 UTF-16 units, plus a line naming the sections it did not get. A `<!-- clio: audience=... paths=... -->` comment after a heading overrides both.
+- A worker dispatched into a task worktree now receives the source checkout's handbook when the worktree has none, the usual case for a repository that keeps `CLIO-CODER.md` out of git.
+- `clio-coder context init` now writes the rules an agent would get wrong after reading the code: hard invariants, conventions that differ from defaults, change recipes, and verification. The model receives an inventory of what the repository enforces, built without a model: the commands CI runs, the package scripts they reach, and each custom check with its coded failure messages and their remedies. It is asked for one rule per check an ordinary change can fail and for one rule on where a regression test must live so CI runs it. Clio writes the verification section itself from CI and the declared test runners.
+- `context init` now uses the handbook the bootstrap worker submits through its result tool. Before, frontier models' output was dropped and the 11-line heuristic handbook was written. Citations are grounded against every visible repository path and file, so rules citing `CONTRIBUTING.md`, a CI job name or a glob are no longer deleted as invented. An overlong rule now ends at its last whole sentence instead of mid-word.
+- When `context init` finds no route, its error now names the current `fleet.agentProfiles` and `fleet.default` keys.
+
+### Verification and permissions
+
+- `verify` now runs a repository's own checks outside Node. It derives Python runners (pytest or unittest, through `uv run` when `uv.lock` exists), Cargo, Go and CMake test presets, Makefile and justfile verification targets, and repository scripts that CI runs directly, such as `scripts/gate.sh`. A check it cannot resolve runs nothing, and the error names what was searched and points at `bash`. A resolved `verify` call is admitted exactly as `bash` admits the same command.
+- At full-auto (`--autonomy yolo`), `npm run build|lint|typecheck|ci`, a test runner behind a pipe or redirect, and an `&&` chain holding a repository script now run without asking. They still ask at suggest and auto-edit. Headless runs, which deny every ask, had been refused their repository's own gate.
+
 ### Build
 
 - Building from source now works on case-insensitive filesystems such as the macOS default. Four GUI logic modules were renamed so no module stem differs from its component's only by case, and a hygiene check rejects case-only path collisions (#397).
