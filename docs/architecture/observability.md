@@ -171,7 +171,7 @@ Clio resolves directories under platform-specific XDG defaults (on Linux, these 
 
 | Category | Description | Backing Path |
 | --- | --- | --- |
-| **Accountability** | Rolling first-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram. | `<stateDir>/evidence-index.json` |
+| **Accountability** | Current session's first-pass-success rate, unverified successes, ungrounded claims, and failure-cause histogram. Runs from sibling sessions and legacy runs without a session owner are excluded. | `<stateDir>/evidence-index.json` |
 | **Evidence bundles** | Deterministic run or session overviews, findings, totals, and linked files. | `<dataDir>/evidence/<evidenceId>/` |
 | **Receipts** | Durable run receipts verified by SHA-256 integrity digests. | `<stateDir>/receipts/<runId>.json` |
 | **Dispatch outputs** | Logs and ledger records detailing worker execution. | `<stateDir>/runs.json` and `<stateDir>/receipts/<runId>.json` |

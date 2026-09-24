@@ -10,6 +10,7 @@ import { BusChannels, type DispatchCompletedPayload } from "../../core/bus-event
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { clioDataDir, clioStateDir } from "../../core/xdg.js";
 import { buildEvidence, type EvidenceBuildResult } from "../evidence/index.js";
+import type { SessionContract } from "../session/contract.js";
 import { readAccountabilitySummary } from "./accountability.js";
 import type { ObservabilityContract, ObservabilityRunEvidence, TokenThroughputSnapshot } from "./contract.js";
 import { createCostTracker } from "./cost.js";
@@ -158,6 +159,11 @@ export function createObservabilityBundle(
 			: createDispatchTraceMirror(traceDatabasePath(clioStateDir()));
 	const unsubscribes: Array<() => void> = [];
 	let latestThroughput: TokenThroughputSnapshot | null = null;
+	const readSessionAccountability = () =>
+		readAccountabilitySummary(clioStateDir(), {
+			sessionId: context.getContract<SessionContract>("session")?.current()?.id ?? null,
+			cwd: process.cwd(),
+		});
 
 	// The product-facing projection folds the bus channels plus the session
 	// cost/telemetry trackers into a single bounded snapshot. It reads these
@@ -169,7 +175,7 @@ export function createObservabilityBundle(
 		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		latestThroughput: () => latestThroughput,
-		readAccountability: () => readAccountabilitySummary(clioStateDir()),
+		readAccountability: readSessionAccountability,
 	});
 
 	// In-flight forensic builds. The terminal event is emitted after the receipt
@@ -196,6 +202,7 @@ export function createObservabilityBundle(
 
 	const extension: DomainExtension = {
 		async start() {
+			unsubscribes.push(context.bus.on(BusChannels.SessionResumed, () => projection.refreshAccountability()));
 			for (const channel of [
 				BusChannels.DispatchEnqueued,
 				BusChannels.DispatchStarted,
@@ -268,12 +275,12 @@ export function createObservabilityBundle(
 		sessionCostSummary: () => cost.sessionCost(),
 		sessionTokens: () => cost.sessionTokens(),
 		costEntries: () => cost.entries(),
-		accountability: () => readAccountabilitySummary(clioStateDir()),
+		accountability: readSessionAccountability,
 		latestTokenThroughput: () => latestThroughput,
 		resetSession() {
 			cost.reset();
 			latestThroughput = null;
-			projection.refresh();
+			projection.refreshAccountability();
 		},
 		recordTokens(providerId, attributedModelId, tokens, costUsd, breakdown, costProvenance, modelIdFacts, label) {
 			telemetry.record("counter", "tokens.total", tokens);
