@@ -22,12 +22,14 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 
 | ID | Priority | Scope and acceptance | Status | Owner |
 | --- | --- | --- | --- | --- |
-| H1 | P0 | Task `done` notes remain claims, not `passed` validation. A note saying `14/16 failed; rerun pending` cannot project as passed; existing ledgers still refold; verified checks remain distinguishable. | in progress | implementer + tester |
-| H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | queued | implementer + tester |
+| H1 | P0 | Task `done` notes remain claims, not `passed` validation. A note saying `14/16 failed; rerun pending` cannot project as passed; existing ledgers still refold; verified checks remain distinguishable. | done; 7/7 focused tests, source typecheck | panes + orchestrator |
+| H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | in progress | implementer + tester |
 | H3 | P1 | `monitor collect` can poll again after observed batch progress (for example pending 2 to 1); unchanged rapid polling remains bounded. | queued | implementer + tester |
 | H4 | P2 | Unknown `node` that matches a configured profile returns an actionable profile/node remedy, while invalid placement stays denied. | done; 9/9 fleet lifecycle tests pass | orchestrator |
 | H5 | P2 | A provenance worker can retrieve a bounded, redacted summary for its own session ID; foreign sessions are denied distinctly from absent sessions. | queued | implementer + tester |
 | H6 | P3 | Align prompt manifest version documentation with source version 3. | done; diff checked | orchestrator |
+| A1 | P1 | Admit repository validation scripts and typed verifiers at `yolo` after hard safety checks. Preserve `capable`/`suggest` asks, `read-only` denial, and explicit destructive/system/operator rails. Reproduce both bash and verify forms, including headless admission. | reproduced; implementation queued | orchestrator + panes |
+| A2 | P2 | Find a separate, narrow set of routine safe actions that `capable` can perform with fewer prompts. Require a concrete before/after admission matrix before changing its policy. | evaluating | orchestrator |
 
 ## Deferred leads
 
@@ -70,4 +72,29 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 - 2026-09-24: Implemented H4 in placement admission and preview. A node pin
   matching a configured profile now names the distinction and valid route;
   unknown names still deny. `pnpm run test:file -- tests/extended/fleet-lifecycle.test.ts`
-  passed 9/9.
+  passed 9/9. Committed H4, H6, and this log as `3c60a31b`.
+- 2026-09-24: H1 implementer and tester finished assigned source and regression
+  files. Focused task-board, finish-contract, and handoff tests passed 14/14;
+  source-only TypeScript passed. Independent review is checking raw ledger
+  consumers before integration. The orchestrator corrected the task overlay
+  label and guide text in separate files. H2 source work started in the
+  implementer pane; its file ownership is `src/engine/loop-guard.ts` and
+  `src/tools/dispatch-runner.ts`.
+- 2026-09-24: Operator added a direction to make `yolo` less interruptive and
+  `capable` more useful for safe work. Source inspection found that
+  `project-script-confirm` and `project-verifier-confirm` currently remain
+  net confirmation rails even at full-auto. A1 is a separate, test-gated
+  policy change; inspect the exact command path before editing it.
+- 2026-09-24: Operator supplied a Claude-pane A/B result: 39/100 runs were
+  denied `verify(typecheck|lint|build)` or `npm run lint|build|typecheck|ci`
+  under `--autonomy yolo`, and chose “Admit at full-auto.” Reproduced policy
+  decisions: `npm run typecheck`, lint, and build produce net `ask` at yolo,
+  while `pnpm run lint` produces `allow`. The full-auto admission fix is
+  separate from the broader `capable` preference.
+- 2026-09-24: Switched the two existing Herdr panes to Codex `gpt-6-sol`
+  xhigh (`wT:p25`) and medium (`wT:p26`) at operator request. Both now own
+  code and focused tests on separate files: H2 and A1 respectively.
+- 2026-09-24: Closed H1 review findings: legacy synthetic rows are recognized
+  by their original passed-note shape; observed failed rows survive refolding;
+  task list and evidence transcript label claims and checks separately.
+  `task-board-done.test.ts` passed 7/7, Biome passed, and source typecheck passed.

@@ -104,9 +104,9 @@ function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
 function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
 	if (task.status === "completed" && task.evidence) {
-		// The evidence prose already carries any run id it mentions, so no derived
+		// The completion claim already carries any run id it mentions, so no derived
 		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
-		return wrapTaskProse(`       ${dim("evidence")} `, muted(task.evidence), width);
+		return wrapTaskProse(`       ${dim("completion claim")} `, muted(task.evidence), width);
 	}
 	if (task.status === "blocked" && task.reason) {
 		return wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width);

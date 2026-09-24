@@ -14,7 +14,7 @@ import type {
 import { type ExecutionRole, isExecutionRole, readGateDecisionArtifactsForRunIds } from "../dispatch/index.js";
 import { detectValidationCommand } from "../safety/protected-artifacts.js";
 import { foldDecisionBoard } from "../session/decision-board.js";
-import { type DecisionLedgerEntry, decisionRef } from "../session/entries.js";
+import { type DecisionLedgerEntry, decisionRef, type TaskLedgerValidationEvidence } from "../session/entries.js";
 import {
 	type AuditJsonRow,
 	type BashExecutionEntry,
@@ -26,6 +26,7 @@ import {
 	readSessionEntriesForId,
 	type SessionEntry,
 } from "../session/index.js";
+import { legacyTaskCompletionRow, TASK_BOARD_COMPLETION_CLAIM_PREFIX } from "../session/task-board.js";
 import { filterEntriesToActivePath } from "../session/tree/active-path.js";
 import { attributeEvidenceFailure } from "./failure-attribution.js";
 import { renderEvidenceFindingsMarkdown } from "./findings-markdown.js";
@@ -1471,23 +1472,34 @@ function renderSessionTranscriptEntry(linked: LinkedSessionEntry, calls: Readonl
 			.join(",");
 		const boardId = entry.boardId ?? "legacy";
 		const provenance = userLinks ? ` userLinks=${userLinks}` : "";
-		const evidenceByTaskId = new Map(
-			entry.requiredValidationEvidence.map((item) => [
-				item.id.endsWith(".evidence") ? item.id.slice(0, -".evidence".length) : item.id,
-				item.description,
-			]),
-		);
+		const legacyClaims = new Map<string, TaskLedgerValidationEvidence>();
+		for (const goal of entry.subgoals) {
+			const legacy = legacyTaskCompletionRow(goal, entry.requiredValidationEvidence);
+			if (legacy !== undefined) legacyClaims.set(goal.id, legacy);
+		}
+		const legacyRows = new Set(legacyClaims.values());
+		const validationRows = entry.requiredValidationEvidence.filter((item) => !legacyRows.has(item));
 		const rows = entry.subgoals.slice(0, TASK_LEDGER_ROW_LIMIT).map((goal) => {
 			const userTaskId = goal.userTaskId ?? "none";
-			const reason = goal.description === undefined ? "none" : previewUnknown(goal.description);
-			const evidence = evidenceByTaskId.has(goal.id) ? previewUnknown(evidenceByTaskId.get(goal.id)) : "none";
-			return `  task board=${boardId} id=${goal.id} title=${previewUnknown(goal.title)} status=${goal.status} origin=${goal.origin ?? "agent"} userTaskId=${userTaskId} reason=${reason} evidence=${evidence}`;
+			const markedClaim = goal.status === "completed" && goal.description?.startsWith(TASK_BOARD_COMPLETION_CLAIM_PREFIX);
+			const reason = goal.description === undefined || markedClaim ? "none" : previewUnknown(goal.description);
+			const completionClaim = markedClaim
+				? previewUnknown(goal.description?.slice(TASK_BOARD_COMPLETION_CLAIM_PREFIX.length))
+				: legacyClaims.has(goal.id)
+					? previewUnknown(legacyClaims.get(goal.id)?.description)
+					: "none";
+			const taskValidations = validationRows.filter((item) => item.id === goal.id || item.id.startsWith(`${goal.id}.`));
+			const validation =
+				taskValidations.length === 0
+					? "none"
+					: `${taskValidations.length}:${previewUnknown(taskValidations.slice(0, 3).map((item) => ({ status: item.status, command: item.command, description: item.description })))}`;
+			return `  task board=${boardId} id=${goal.id} title=${previewUnknown(goal.title)} status=${goal.status} origin=${goal.origin ?? "agent"} userTaskId=${userTaskId} reason=${reason} completionClaim=${completionClaim} validation=${validation}`;
 		});
 		if (entry.subgoals.length > TASK_LEDGER_ROW_LIMIT) {
 			rows.push(`  task rows omitted=${entry.subgoals.length - TASK_LEDGER_ROW_LIMIT}`);
 		}
 		return [
-			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} evidence=${entry.requiredValidationEvidence.length} board=${boardId}${provenance}`,
+			`${prefix} taskLedger goals=${entry.goals.length} subgoals=${entry.subgoals.length} activeRuns=${entry.activeRunIds.length} validationEvidence=${validationRows.length} legacyClaimRows=${legacyClaims.size} board=${boardId}${provenance}`,
 			...rows,
 		];
 	}
