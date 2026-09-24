@@ -54,6 +54,7 @@ export function compactHelperResultLines(
 			: []),
 		`  ${truncateUtf8(JSON.stringify(result.data), maxBytes, "\n[helper result preview truncated; inspect the receipt for the full result]")}`,
 		`  Receipt available on demand: monitor(mode="receipt", run_id=${JSON.stringify(receipt.runId)}).`,
+		...receiptSkillLoadLabels(receipt).map((label) => `  ${label}`),
 	];
 }
 
@@ -163,6 +164,26 @@ function receiptActivityLabels(receipt: RunReceipt, status: CanonicalTrustStatus
 	return labels;
 }
 
+/** Receipt-sealed load provenance, bounded by count and name without exposing skill paths or bodies. */
+function receiptSkillLoadLabels(receipt: RunReceipt): string[] {
+	const activations = receipt.skillActivations ?? [];
+	if (activations.length === 0) return [];
+	const shown = activations.slice(0, 6).map((activation) => {
+		const name = activation.name.length > 64 ? `${activation.name.slice(0, 63)}…` : activation.name;
+		const origin =
+			activation.requestSource === "recipe"
+				? "recipe-bound"
+				: activation.requestSource === undefined
+					? "binding unrecorded"
+					: activation.requestSource;
+		return `${JSON.stringify(name)} (${origin})`;
+	});
+	const omitted = activations.length - shown.length;
+	return [
+		`skill loads (${activations.length}): ${shown.join(", ")}${omitted > 0 ? `, and ${omitted} more` : ""}. Activation records a load, not execution of the skill workflow or a commit.`,
+	];
+}
+
 /**
  * Model-facing receipt facts. The positive integrity label is reachable only
  * when the caller supplies the result of a successful integrity verification;
@@ -226,6 +247,7 @@ export function receiptEvidenceLabels(
 		...budget,
 		...receiptAdmissionLabels(receipt),
 		...receiptActivityLabels(receipt, status),
+		...receiptSkillLoadLabels(receipt),
 		briefing,
 		...(receipt.workerContext
 			? [
