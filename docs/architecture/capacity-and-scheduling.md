@@ -4,7 +4,7 @@ This document specifies the multi-process capacity leasing protocols, node
 scheduling models, cross-process transaction locks, and failure recovery
 mechanics in the current source tree.
 
-Source implementations: `src/domains/scheduling/` and `src/domains/dispatch/capacity-lease.ts`.
+Source implementations: `src/domains/scheduling/` and [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts).
 
 ---
 
@@ -76,7 +76,7 @@ export interface CapacityStateFile {
 
 ## 2. Capacity Lease Schema & TTLs
 
-Each in-flight worker holds one `CapacityLease` (`src/domains/dispatch/capacity-lease.ts:30-44`):
+Each in-flight worker holds one `CapacityLease` ([capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts)):
 
 ```typescript
 export interface CapacityLease {
@@ -103,7 +103,7 @@ Execution-plan waves also honor the endpoint bound. A plan with four available w
 dispatch: admission denied: endpoint '127.0.0.1:8080' capacity reached (1/1 slots): 1 foreground stream holds the slot; reduce the same-wave worker count, set this target's maxConcurrentRequests to the slot count the server was started with, collect in-flight runs, or point workers at a second server
 ```
 
-Direct lease acquisition in `src/domains/dispatch/capacity-lease.ts` reports saturation as `capacity reached`. The normal admission controller in `src/domains/dispatch/admission.ts` treats that signal as transient and leaves the assignment in its bounded shared queue, retrying until capacity opens or the request's deadline or 60-second queue ceiling wins. Capacity marked `unavailable`, drain mode, corrupt state, and other errors still fail immediately. Reservation preflight in `src/domains/dispatch/reservation-store.ts` refuses an over-capacity plan instead of queuing a partial reservation. The `1/1` example represents a generic llama.cpp server started with `--parallel 1`: a singular dispatch raised while the orchestrator is streaming waits for that slot, and a council reservation is refused before any worker starts.
+Direct lease acquisition in `src/domains/dispatch/capacity-lease.ts` reports saturation as `capacity reached`. The normal admission controller in [admission.ts](../../src/domains/dispatch/admission.ts) treats that signal as transient and leaves the assignment in its bounded shared queue, retrying until capacity opens or the request's deadline or 60-second queue ceiling wins. Capacity marked `unavailable`, drain mode, corrupt state, and other errors still fail immediately. Reservation preflight in [reservation-store.ts](../../src/domains/dispatch/reservation-store.ts) refuses an over-capacity plan instead of queuing a partial reservation. The `1/1` example represents a generic llama.cpp server started with `--parallel 1`: a singular dispatch raised while the orchestrator is streaming waits for that slot, and a council reservation is refused before any worker starts.
 
 A four-slot llama.cpp endpoint leaves three admission slots while one foreground
 stream is active. This says nothing about four independent full context windows:
@@ -130,10 +130,10 @@ A server genuinely started with one slot cannot run a council, and admitting one
 
 | Constant | Value | Description | Source Reference |
 | :--- | :--- | :--- | :--- |
-| `MAX_CAPACITY_LEASES` | `1000` | Hard cap on simultaneous active capacity leases across all nodes. | `src/domains/dispatch/capacity-lease.ts:13` |
-| `DEFAULT_CAPACITY_LEASE_TTL_MS` | `30000` ms (30s) | Renewal and fallback expiry horizon when exact process identity is unavailable. A matching live process birth token keeps its lease valid beyond this timestamp. | `src/domains/dispatch/capacity-lease.ts:14` |
-| `DEFAULT_CAPACITY_DRAIN_TTL_MS` | `3600000` ms (1h) | Automatic expiration window for operator drain mode. | `src/domains/dispatch/capacity-lease.ts:28` |
-| `NODE_DEATH_FAILURE_THRESHOLD` | `2` consecutive failures | Channel failure count before a remote node is classified offline. | `src/domains/scheduling/cluster.ts:64` |
+| `MAX_CAPACITY_LEASES` | `1000` | Hard cap on simultaneous active capacity leases across all nodes. | [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) |
+| `DEFAULT_CAPACITY_LEASE_TTL_MS` | `30000` ms (30s) | Renewal and fallback expiry horizon when exact process identity is unavailable. A matching live process birth token keeps its lease valid beyond this timestamp. | [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) |
+| `DEFAULT_CAPACITY_DRAIN_TTL_MS` | `3600000` ms (1h) | Automatic expiration window for operator drain mode. | [capacity-lease.ts](../../src/domains/dispatch/capacity-lease.ts) |
+| `NODE_DEATH_FAILURE_THRESHOLD` | `2` consecutive failures | Channel failure count before a remote node is classified offline. | [cluster.ts](../../src/domains/scheduling/cluster.ts) |
 
 ---
 
@@ -141,7 +141,7 @@ A server genuinely started with one slot cannot run a council, and admitting one
 
 To prevent leaked leases when workers or orchestrators crash:
 
-1. **Worker Heartbeat Protocol**: Active native workers emit control-channel heartbeats every 1,000 ms (`src/worker/heartbeat.ts`) for run liveness and stall detection.
+1. **Worker Heartbeat Protocol**: Active native workers emit control-channel heartbeats every 1,000 ms ([heartbeat.ts](../../src/worker/heartbeat.ts)) for run liveness and stall detection.
 2. **Capacity-Lease Renewal**: Independently of worker control frames, the process-local admission controller renews every held durable lease every 10,000 ms. A renewal updates `heartbeatAt` and extends `expiresAt` by `DEFAULT_CAPACITY_LEASE_TTL_MS`.
 3. **PID Liveness & Birth Tokens**: The lease reconciler inspects `ownerPid` and validates `processBirthToken` against operating system process tables for records owned by this host. If the PID has terminated or been recycled by the OS, the lease is immediately reclaimed. A record naming another host is not adjudicated with the local process table.
 4. **Lazy Reaping**: Every admission attempt purges reclaimable leases and dead process records inside the cross-process transaction lock before calculating available capacity.

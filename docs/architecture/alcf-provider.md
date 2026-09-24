@@ -17,6 +17,12 @@ Authenticate first:
 clio-coder auth login alcf
 ```
 
+The interactive `configure` wizard asks for the gateway URL. `offeredUrlFor`
+in [configure-target.ts](../../src/cli/configure-target.ts) leaves it blank
+for ALCF, and `gatewayUrlGuidance` shows a Sophia example plus a note that
+the correct URL and model depend on the cluster or resource. Supply the
+cluster URL explicitly.
+
 Then register one or both cluster targets:
 
 ```bash
@@ -52,10 +58,10 @@ clio-coder models --target alcf-sophia
 The implementation is intentionally inside Clio Coder rather than downstream
 scientific apps:
 
-- `src/engine/alcf-oauth.ts` implements the Globus PKCE paste-code OAuth flow.
-- `src/engine/oauth.ts` registers the Clio-owned OAuth provider through the
+- [alcf-oauth.ts](../../src/engine/alcf-oauth.ts) implements the Globus PKCE paste-code OAuth flow.
+- [oauth.ts](../../src/engine/oauth.ts) registers the Clio-owned OAuth provider through the
   engine boundary.
-- `src/domains/providers/runtimes/cloud/alcf.ts` implements Sophia/Metis
+- [alcf.ts](../../src/domains/providers/runtimes/cloud/alcf.ts) implements Sophia/Metis
   discovery and reuses the generic OpenAI-compatible chat synthesis.
 - `ProbeContext.authToken` carries a resolved stored/API/OAuth bearer into live
   probes so authenticated model discovery does not reach into auth storage.

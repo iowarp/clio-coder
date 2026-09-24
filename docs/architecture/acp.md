@@ -2,13 +2,13 @@
 
 This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in the current source tree.
 
-Source implementations: `src/engine/acp/` and `src/cli/acp.ts`.
+Source implementations: `src/engine/acp/` and [acp.ts](../../src/cli/acp.ts).
 
 ---
 
 ## 1. Overview & Protocol Specification
 
-Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport (`src/engine/acp/transport.ts`).
+Clio Coder provides a native ACP server via the `clio-coder acp` command. The server implements the open Agent Client Protocol specification (ACP v1 / schema 0.4.5) over standard I/O JSON-RPC 2.0 transport ([transport.ts](../../src/engine/acp/transport.ts)).
 
 The ACP server allows external IDEs, editors (such as Zed), and automated orchestration engines to drive Clio Coder sessions over a structured protocol.
 The source tree includes the `apps/clio-coder-gui` application, which supervises
@@ -38,7 +38,7 @@ both spellings reach the same command dispatcher, option parser, stdout guard,
 and server boot path.
 
 - `--cwd PATH`: Workspace root the server boots in. The path is resolved and then canonicalized with `fs.realpath`, so a symlinked launch root, a trailing slash, and a `/.` suffix all name the same workspace. Clio changes into that canonical path before it reads settings, builds project context, or opens a session ledger, so a session opens at that root. A path that does not exist or that the process cannot enter exits 2 without starting the server. The canonical path is the server's workspace identity for its whole life: `session/new` must carry a `cwd` that canonicalizes to the same path, and nothing after boot ever changes the process directory.
-- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` (`src/core/defaults.ts:290`). The graphical application treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto its own clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
+- `--permission-timeout MS`: The server-side fail-safe ceiling for one mediated permission request, as a whole number from 1 through Node's maximum schedulable timer delay (`2147483647`) milliseconds. Values outside that range are refused before the protocol server starts. If the timer wins, the approval expires, the active turn is aborted, every parked call for that turn is settled only so execution can unwind, and `session/prompt` fails with `permission_expired`. Expiry is audited as `expired`, never as a human denial, and no denial result is fed into a continuing model loop. The flag overrides `integrations.externalAgents.defaults.permissionTimeoutMs` for this server only, which itself defaults to `DEFAULT_DELEGATION_PERMISSION_TIMEOUT_MS = 120000` ([defaults.ts](../../src/core/defaults.ts)). The graphical application treats the remaining ACP request window as a hard ceiling on its own approval budget, projects that duration onto its own clock, escalates immediately when the remaining window is shorter than its escalation delay, and cancels without publishing a card if the window has already elapsed. Other clients may enforce a shorter operator-facing policy by sending ordinary `session/cancel`.
 
 Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All logging and diagnostic output is strictly routed to `stderr` to preserve standard I/O framing integrity.
 
@@ -46,7 +46,7 @@ Transport frames are JSON-RPC 2.0 messages serialized over `stdin`/`stdout`. All
 
 ## 3. Supported ACP Methods
 
-These are every method the server answers (`src/engine/acp/server.ts`). Anything else returns `-32601`.
+These are every method the server answers ([server.ts](../../src/engine/acp/server.ts)). Anything else returns `-32601`.
 
 | Method | Direction | Description |
 | :--- | :--- | :--- |
@@ -235,7 +235,7 @@ Prompt text is read only from `params.prompt`, the ACP v1 array of content block
 
 ### Bounds
 
-Every frame the server writes is bounded (`src/engine/acp/types.ts`). Every cap counts UTF-8 bytes, which is what the peer's read buffer spends, not UTF-16 code units:
+Every frame the server writes is bounded ([types.ts](../../src/engine/acp/types.ts)). Every cap counts UTF-8 bytes, which is what the peer's read buffer spends, not UTF-16 code units:
 
 - `agent_message_chunk` and `agent_thought_chunk` text is at most 16 KiB per chunk. A longer delta is split across consecutive chunks and nothing is dropped, so concatenating chunks in order reproduces the model's text exactly. No split falls inside a code point, so a surrogate pair never arrives as two replacement characters.
 - Tool `content` text is truncated at 16 KiB with a trailing `…[truncated]`.
@@ -391,7 +391,7 @@ peer's permission requests before they can affect the workspace.
 ### Canonical Tool Mapping
 
 The hosted server maps Clio tool names to the closed ACP `ToolKind`
-enumeration in `src/engine/acp/server.ts`:
+enumeration in [server.ts](../../src/engine/acp/server.ts):
 
 | Clio Tool Name | ACP `ToolKind` | Primary Action Category |
 | :--- | :--- | :--- |
@@ -406,7 +406,7 @@ enumeration in `src/engine/acp/server.ts`:
 
 ### Outbound Non-Stall Permission Mediation
 
-`src/engine/acp/adapter.ts` constructs `AcpToolMediator` when Clio acts as an
+[adapter.ts](../../src/engine/acp/adapter.ts) constructs `AcpToolMediator` when Clio acts as an
 ACP client for an outbound delegation. Under `clio-coder-policy` governance:
 1. Tool calls evaluate through the 10-step safety net policy engine.
 2. If the safety net or autonomy level yields an `ask` verdict (such as mutating actions at `suggest` level or unrecognized bash at `auto-edit` level), the mediator resolves the ask as a **non-stall denial** (`autonomyDenyRejection`).
@@ -424,7 +424,7 @@ selects `allow-once`, subject to the timeout and binding rules above.
 The ACP boundary enforces strict isolation rules:
 
 1. **Autonomy Snapshotting**: The autonomy level is snapshotted at `session/new` or `session/load`. A subsequent global configuration change does not alter the bound remote session's security policy; only an explicit idle `clio-coder/session/autonomy` set changes its next prompt.
-2. **Metadata Namespacing**: Clio-specific extensions travel exclusively within namespaced metadata fields (`ACP_USAGE_META_KEY = "clio-coder/usage"`, `ACP_SESSION_META_KEY = "clio-coder/session"` in `src/engine/acp/types.ts:8-9`). Strict clients (e.g. Zed Serde deserializers) never encounter unmapped top-level keys.
+2. **Metadata Namespacing**: Clio-specific extensions travel exclusively within namespaced metadata fields (`ACP_USAGE_META_KEY = "clio-coder/usage"`, `ACP_SESSION_META_KEY = "clio-coder/session"` in [types.ts](../../src/engine/acp/types.ts)). Strict clients (e.g. Zed Serde deserializers) never encounter unmapped top-level keys.
 3. **No External Outcome Overrides**: External ACP processes cannot self-assert terminal outcome codes (e.g. `worker_final_output_missing` is enforced at Clio's trusted finalization seam).
 
 ---
@@ -467,7 +467,7 @@ reason codes are the same as for any other producer; see
 
 ## 8. Error Taxonomy
 
-The ACP subsystem defines four typed error classes (`src/engine/acp/errors.ts`):
+The ACP subsystem defines four typed error classes ([errors.ts](../../src/engine/acp/errors.ts)):
 
 ```typescript
 export class AcpError extends Error {

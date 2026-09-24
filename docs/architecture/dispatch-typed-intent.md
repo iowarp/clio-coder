@@ -33,7 +33,7 @@ Related pages: [tool-usage.md](../guide/tool-usage.md) for the `dispatch` tool a
 ```
 
 The three scope fields, `read_roots`, `write_roots`, and `relevant_paths`, use
-the repository-relative POSIX boundary grammar in `src/core/path-boundary.ts`.
+the repository-relative POSIX boundary grammar in [path-boundary.ts](../../src/core/path-boundary.ts).
 A trailing `/` means the subtree; no trailing `/` means that exact file.
 Absolute paths, `..` segments, interior `.` segments, backslashes, and globs
 are refused in those fields. An entry that is exactly `.` or `./` is accepted
@@ -50,11 +50,11 @@ code point, holds at most 32 entries, and each entry is at most 512 UTF-8 bytes.
 normalizes to an empty list instead of costing a refused round unless the
 workspace actually declares a verifier whose id is `none`.
 
-Normalization is in `src/domains/dispatch/intent.ts`. The normalized object
+Normalization is in [intent.ts](../../src/domains/dispatch/intent.ts). The normalized object
 carries `version: 2` and a `pathProvenance` array binding every policy-bearing
 path to the field that declared it, its provenance kind, and its confidence.
-`src/domains/dispatch/path-scope.ts` resolves the request's path scope from it.
-`src/domains/dispatch/intent-compatibility.ts` owns every rule on this page.
+[path-scope.ts](../../src/domains/dispatch/path-scope.ts) resolves the request's path scope from it.
+[intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts) owns every rule on this page.
 
 ---
 
@@ -160,16 +160,16 @@ entries for the transcript. Declared always outranks inferred.
 ## 3. Producer Compatibility Table
 
 Every producer that can reach a worker passes through `validateJobSpec()` in
-`src/domains/dispatch/validation.ts`. When an `intent` property is present, that
+[validation.ts](../../src/domains/dispatch/validation.ts). When an `intent` property is present, that
 validator runs the classifier and retains its terminal refusals. Requests with
 no intent skip compatibility classification and resolve scope through the legacy
 inference path, whose malformed-path errors remain terminal.
 
 | Dispatch producer | Source | Typed intent | Behavior without declaration | Refuses on |
 | :--- | :--- | :--- | :--- | :--- |
-| **`dispatch` tool, singular `task`** | `src/tools/dispatch-arguments.ts` | Declared, top-level `intent` | Legacy inference from `writeRoots` + task/briefing tokens | All codes |
+| **`dispatch` tool, singular `task`** | [dispatch-arguments.ts](../../src/tools/dispatch-arguments.ts) | Declared, top-level `intent` | Legacy inference from `writeRoots` + task/briefing tokens | All codes |
 | **`dispatch` tool, batch `tasks[]`** | `src/tools/dispatch-arguments.ts` | Declared per task, shallow-merged over the top-level default | Same as singular, per task | All codes, plus `intent_scope_widening` against the top-level ceiling |
-| **`dispatch` modes parallel / sequential / pipeline / detached** | `src/tools/dispatch-admission.ts` | Inherited unchanged from the task that declared it | Legacy inference | All codes |
+| **`dispatch` modes parallel / sequential / pipeline / detached** | [dispatch-admission.ts](../../src/tools/dispatch-admission.ts) | Inherited unchanged from the task that declared it | Legacy inference | All codes |
 | **`dispatch` mode compete, candidates** | `src/tools/dispatch-admission.ts` | Inherited unchanged from the single base task | Legacy inference | All codes. `verification` is refused for the mode (`verification_unsupported_for_mode`) |
 | **`dispatch` mode compete, judge** | `src/tools/dispatch-admission.ts` | None. The judge is a fresh read-only request | Legacy inference over the judge's own task | Legacy inference errors only |
 | **`dispatch` mode council, members** | `src/tools/dispatch-admission.ts` | Inherited, narrowed to read-only: declared write roots arrive as read roots | Legacy inference | All codes. `verification` is refused for the mode (`council_verification_unsupported`) |
@@ -177,17 +177,17 @@ inference path, whose malformed-path errors remain terminal.
 | **`dispatch` review gate, builder** | `src/tools/dispatch-admission.ts` | Inherited unchanged | Legacy inference | All codes |
 | **`dispatch` review gate, reviewer** | `src/tools/dispatch-admission.ts` | None on the request. `expected_outputs` and `verification` reach the reviewer as rendered *requirements*, never as evidence | Legacy inference over the reviewer's own task | Legacy inference errors only |
 | **`dispatch` `apply_winner`** | `src/tools/dispatch-admission.ts` | Not applicable. Branch application runs no worker | Not applicable | Branch-shape refusals only |
-| **`from_scout` continuation** | `src/tools/dispatch-scout-admission.ts` | **None today.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
-| **Fleet contract agent step (v4+ `writes:`)** | `src/domains/dispatch/fleet-run.ts` | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
+| **`from_scout` continuation** | [dispatch-scout-admission.ts](../../src/tools/dispatch-scout-admission.ts) | **None today.** The compiled continuation plan carries no intent | Legacy inference per step | Legacy inference errors only |
+| **Fleet contract agent step (v4+ `writes:`)** | [fleet-run.ts](../../src/domains/dispatch/fleet-run.ts) | Declared. The contract's `writes:` compiles to `relevant_paths` | Legacy inference for pre-v4 contracts and readonly steps | All codes |
 | **Fleet contract gate / plan step** | `src/domains/dispatch/fleet-run.ts` | Declared, same path (`writes` is the gate path or the plan step's boundary) | Legacy inference when undeclared | All codes |
 | **Fleet delegation-plan spliced step** | `src/domains/dispatch/fleet-run.ts` | Declared from the validated plan task's `writes` | Legacy inference when the task declares none | All codes |
-| **Fleet code step** | `src/domains/dispatch/code-step.ts` | Not applicable. Runs a declared command, not a worker | Not applicable | Not applicable |
-| **ACP delegation target** | `src/domains/dispatch/extension.ts` | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
+| **Fleet code step** | [code-step.ts](../../src/domains/dispatch/code-step.ts) | Not applicable. Runs a declared command, not a worker | Not applicable | Not applicable |
+| **ACP delegation target** | [extension.ts](../../src/domains/dispatch/extension.ts) | Accepted and carried into the plan, but the external agent runs its own tool surface | Legacy inference | All codes, plus a hard refusal of any resolved `writeRoots` on this transport |
 | **Custom agent recipe** | `src/domains/agents/` | Not a producer. A recipe narrows the tool surface and capability class; it never declares dispatch scope | Not applicable | Not applicable |
 | **Extension-authored `DispatchRequest`** | Any `DispatchContract` consumer | Declared, if the extension builds one through `declaredScopeIntent()` or the normalizer | Legacy inference | All codes |
-| **`clio-coder run --agent`** | `src/cli/run.ts` | **None today** | Legacy inference | Legacy inference errors only |
-| **`clio-coder wiki generate`** | `src/cli/wiki-generate.ts` | **None today.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
-| **`clio-coder bootstrap generate`** | `src/cli/bootstrap-generate.ts` | **None today** | Legacy inference | Legacy inference errors only |
+| **`clio-coder run --agent`** | [run.ts](../../src/cli/run.ts) | **None today** | Legacy inference | Legacy inference errors only |
+| **`clio-coder wiki generate`** | [wiki-generate.ts](../../src/cli/wiki-generate.ts) | **None today.** Sets legacy `writeRoots` | Legacy inference plus a derived write boundary | Legacy inference errors only |
+| **`clio-coder bootstrap generate`** | [bootstrap-generate.ts](../../src/cli/bootstrap-generate.ts) | **None today** | Legacy inference | Legacy inference errors only |
 | **Interactive slash commands, overlays, watchdog** | `src/interactive/` | **None today** | Legacy inference | Legacy inference errors only |
 
 "All codes" means every terminal code in section 5 that can apply to the row's
@@ -224,7 +224,7 @@ filesystem, no clock, no environment, and no package layout. The supported
 version set is a compiled-in constant, not a lookup. A source checkout, a global
 npm install, and a bundled `dist/` therefore classify identical input
 identically, which is what makes the version policy verifiable rather than
-environmental. `tests/contracts/dispatch-admission.test.ts` covers the current
+environmental. [dispatch-admission.test.ts](../../tests/contracts/dispatch-admission.test.ts) covers the current
 normalization and compatibility boundary.
 
 The one input that is legitimately environmental is the *verification catalog*:
@@ -386,7 +386,7 @@ gate that issue has to clear, and it is measured rather than argued.
 
 `pathScope.mode` is sealed on every receipt, so the share of dispatches still
 resolving policy-bearing scope from prose is a fact in the evidence store.
-`dispatchIntentAdoption()` in `src/domains/dispatch/intent-compatibility.ts`
+`dispatchIntentAdoption()` in [intent-compatibility.ts](../../src/domains/dispatch/intent-compatibility.ts)
 computes it, reading nothing but that mode field so the aggregate is safe to
 report from receipts whose prose must not be quoted.
 

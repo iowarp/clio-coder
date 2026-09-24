@@ -6,7 +6,7 @@ Anything Clio produced on its own initiative lands in the project-local
 `.clio-coder/` directory or under the XDG directories, never beside your source.
 `context init` can add the recommended blanket ignore for `.clio-coder/`.
 
-This page is the contract. `src/core/artifact-paths.ts` is the code that
+This page is the contract. [artifact-paths.ts](../../src/core/artifact-paths.ts) is the code that
 implements the part of it the `artifact` tool owns.
 
 ## Three audiences
@@ -64,7 +64,7 @@ first. Keep several by naming explicit paths.
 
 ## Script run records and retention
 
-`run_script` creates `.clio-coder/runs/<runId>/` with `stdout.log`, `stderr.log`, and an atomically written `run.json` manifest (version 1). The id is a UTC timestamp plus six random hexadecimal characters. Source: `src/core/run-records.ts` and `src/tools/run-script.ts`.
+`run_script` creates `.clio-coder/runs/<runId>/` with `stdout.log`, `stderr.log`, and an atomically written `run.json` manifest (version 1). The id is a UTC timestamp plus six random hexadecimal characters. Source: [run-records.ts](../../src/core/run-records.ts) and [run-script.ts](../../src/tools/run-script.ts).
 
 The manifest records script path, canonical path, byte size and SHA-256, interpreter name/resolved path/arguments, exact argv, workspace-relative cwd, timeout, start/end times and duration, environment key names, outcome, effective `exitCode`, observed `leaderExit`, signal, stream byte counts, log paths, input identities, output status, `cleanup`, and `pipeDrainIncomplete`. Environment values are never recorded there. Regular-file hashes cover at most 64 MiB; omitted hashes carry `too-large`, `cancelled`, or `unreadable`. These are observed identities, not immutable snapshots. Logs stream to disk and have no total byte ceiling; bounded terminal tails are not the full log.
 
@@ -108,4 +108,4 @@ Hiding transient output from the working tree must not mean losing it.
 
 Related: [evidence-and-memory.md](evidence-and-memory.md),
 [trace-store.md](trace-store.md), [observability.md](observability.md),
-[development-pipeline.md](../process/development-pipeline.md) for where RCAs are committed.
+[development-pipeline.md](../../CONTRIBUTING.md) for where RCAs are committed.

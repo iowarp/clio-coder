@@ -2,7 +2,7 @@
 
 Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 
-Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, `src/cli/evidence.ts`, and `src/cli/memory.ts`.
+Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, [evidence.ts](../../src/cli/evidence.ts), and [memory.ts](../../src/cli/memory.ts).
 
 ---
 
@@ -149,7 +149,7 @@ Each run receipt (persisted under `<stateDir>/receipts/<runId>.json`) carries an
 ```
 
 ### Computation and Lifecycle
-- **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in `src/domains/dispatch/receipt-findings.ts`). It never reads from disk or calls `buildEvidence`.
+- **Circular Dependency Prevention**: To prevent circular dependencies, `findingsSummary` is calculated **cheaply in-memory** at receipt-record time using the draft envelope and tool statistics (in [receipt-findings.ts](../../src/domains/dispatch/receipt-findings.ts)). It never reads from disk or calls `buildEvidence`.
 - **First-Pass Success**: Calculated as `true` only if the terminal outcome was `"succeeded"`, the lineage attempt was `0` (no dispatch retries), the tool stats confirm at least one successful validation tool was executed, and no failure-cause tags were detected.
 - **Cryptographic Coverage**: Current receipts use strict v20 and authenticate every current receipt field, including dispatch intent path provenance, resolved path scope, briefing and steering provenance, routing intent and decision, route quality, worker identity, execution role, result-contract conformance, council provenance, and fleet gate provenance, against the reconstructed ledger. Only v20 is authenticated as current evidence. Lower versions are reported as retired and are neither migrated nor read as evidence.
 
@@ -167,7 +167,7 @@ present independently, and neither hash is evidence for the other.
 
 ### Canonical trust status
 
-`src/domains/evidence/trust-status.ts` defines the version 1 canonical trust
+[trust-status.ts](../../src/domains/evidence/trust-status.ts) defines the version 1 canonical trust
 status. It is a six-axis algebra, not an overall trust verdict, confidence
 percentage, or pass/fail score. Consumers project only the axes needed for a
 decision and preserve every other axis unchanged.
@@ -241,7 +241,7 @@ intent path provenance and resolved path scope while retaining SHA-256 sealing.
 
 ### Trust projection
 
-`src/domains/evidence/trust-projection.ts` is the one place the canonical
+[trust-projection.ts](../../src/domains/evidence/trust-projection.ts) is the one place the canonical
 status is turned into words. Every operator surface prints from it, so the
 same canonical input renders the same verdict on the dispatch run line, in a
 monitor block, under `clio-coder evidence inspect`, in `findings.md`, on the
