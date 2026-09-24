@@ -41,6 +41,8 @@ export interface ResourcesLoader {
 		options?: SkillExpansionOptions,
 	): { text: string; pendingSkillRequests: PendingSkillRequest[] };
 	prompts(cwd?: string): ResourceList<PromptTemplate>;
+	/** Prompt templates for display only; see {@link ResourcesContract.promptsForDisplay}. */
+	promptsForDisplay(cwd?: string): ResourceList<PromptTemplate>;
 	expandPromptTemplate(text: string, cwd?: string): PromptTemplateExpansion;
 	resolvePath(value: string, cwd?: string): string;
 	reload(): Promise<void>;
@@ -76,6 +78,9 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 		},
 		prompts(cwd = defaultCwd) {
 			return loadPromptTemplates(promptOptions(cwd));
+		},
+		promptsForDisplay(cwd = defaultCwd) {
+			return loadPromptTemplates({ ...promptOptions(cwd), verifyPluginTrees: false });
 		},
 		expandPromptTemplate(text, cwd = defaultCwd) {
 			// Only `/name` can expand, and no caller reads an unexpanded result's

@@ -2,7 +2,7 @@ import { type Dirent, existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
 import { clioConfigDir } from "../../core/xdg.js";
-import { enabledPluginResourceRoots, type PluginResourceKind } from "../plugins/index.js";
+import { committedPluginResourceRoots, enabledPluginResourceRoots, type PluginResourceKind } from "../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "./collision.js";
 
 export interface ResourceRoot {
@@ -43,9 +43,19 @@ export type FrontmatterSplitResult =
 			body: string;
 	  };
 
-export function defaultScopedResourceRoots(kind: PluginResourceKind, cwd: string): ResourceRoot[] {
+/**
+ * `verifyPluginTrees: false` takes package roots from the committed plugin
+ * snapshot without re-verifying each tree. Only display listings may pass it.
+ */
+export function defaultScopedResourceRoots(
+	kind: PluginResourceKind,
+	cwd: string,
+	options: { verifyPluginTrees?: boolean } = {},
+): ResourceRoot[] {
+	const pluginRoots =
+		options.verifyPluginTrees === false ? committedPluginResourceRoots(kind, cwd) : enabledPluginResourceRoots(kind, cwd);
 	return [
-		...enabledPluginResourceRoots(kind, cwd).map((root) => ({
+		...pluginRoots.map((root) => ({
 			path: root.path,
 			rootPath: root.rootPath,
 			plugin: true,

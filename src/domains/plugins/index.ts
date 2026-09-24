@@ -24,6 +24,7 @@ export { pluginContentDigest, pluginContentDigestWithCapture } from "./integrity
 export {
 	buildPluginSnapshot,
 	clearPluginSnapshots,
+	committedPluginResourceRoots,
 	committedPluginSnapshot,
 	enabledPluginResourceRoots,
 	pluginSnapshotFor,

@@ -103,6 +103,15 @@ interface Operation {
 
 const signal = new AbortController().signal;
 
+/** The completion menu for `line`, wired the way the interactive editor wires it. */
+function complete(cwd: string, line: string) {
+	return createSlashCommandAutocompleteProvider({
+		fdPath: null,
+		basePath: cwd,
+		promptTemplates: () => createResourcesLoader({ cwd }).promptsForDisplay(cwd).items,
+	}).getSuggestions([line], 0, line.length, { signal });
+}
+
 /**
  * A fresh session's first substantive turn_start, with the skills reminder and
  * the marketplace offer wired to the same listings the orchestrator gives them.
@@ -165,14 +174,10 @@ const OPERATIONS: ReadonlyArray<Operation> = [
 		run: (cwd) => createContextTool({ getCwd: () => cwd }).run({ scope: "skills" }),
 	},
 	{
+		// Completion names templates from the committed snapshot; submit verifies.
 		name: "completing a slash command",
-		walks: 1,
-		run: (cwd) =>
-			createSlashCommandAutocompleteProvider({
-				fdPath: null,
-				basePath: cwd,
-				promptTemplates: () => createResourcesLoader({ cwd }).prompts(cwd).items,
-			}).getSuggestions(["/walk"], 0, 5, { signal }),
+		walks: 0,
+		run: (cwd) => complete(cwd, "/walk"),
 	},
 	{
 		name: "a session's first turn_start",
@@ -209,5 +214,28 @@ describe("plugin walks per repeated operation", () => {
 			if (walks > operation.walks) over.push(`${operation.name} (${walks.toFixed(2)} > ${operation.walks})`);
 		}
 		ok(over.length === 0, `walks above ceiling: ${over.join("; ")}. Measured ${measured.join("; ")}`);
+	});
+
+	it("lists a drifted template for completion but never expands it on submit", async () => {
+		const cwd = project(1);
+		const previous = process.cwd();
+		process.chdir(cwd);
+		try {
+			plugins.clearPluginSnapshots();
+			plugins.reloadPluginResources(cwd);
+			const [plugin] = plugins.listInstalledPlugins(cwd, { all: true });
+			ok(plugin?.rootPath, "the fixture plugin is installed");
+			const loader = createResourcesLoader({ cwd });
+			ok(loader.expandPromptTemplate("/walk-kit-0-run", cwd).expanded, "the verified template expands");
+			writeFileSync(join(plugin.rootPath, "prompts", "walk-kit-0-run.md"), "Run something else.\n");
+			const menu = await complete(cwd, "/walk-kit");
+			ok(
+				menu?.items.some((item) => item.value === "walk-kit-0-run"),
+				"completion lists from the committed snapshot",
+			);
+			ok(!loader.expandPromptTemplate("/walk-kit-0-run", cwd).expanded, "a drifted template must not expand");
+		} finally {
+			process.chdir(previous);
+		}
 	});
 });
