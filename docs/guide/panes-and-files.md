@@ -29,6 +29,11 @@ when it quits:
   event journal with `tail -F`.
 - **The shell pane.** `/panes open shell` opens a login shell in the
   workspace.
+- **Coding peer handoff.** `/peer [--cwd <workspace>] <peer> [brief]` opens
+  Claude Code, Codex, OpenCode, Antigravity CLI, or Pi in a Clio-owned pane.
+  This is an interactive handoff; Clio can close the owned pane but does not
+  capture a managed run or receipt from its contents. See [Coding Agent
+  Interoperability](interop.md#delegate-work-to-an-installed-coding-agent).
 - **The workers watch pane.** Enter on a live run in the `Alt+W` board renders
   that run's stream in a pane to the right. It is documented with the fleet
   in [Fleet Dispatch](fleet-dispatch.md); this page covers the utility panes.

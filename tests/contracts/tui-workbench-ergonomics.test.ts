@@ -10,7 +10,12 @@ import {
 	type OverlayGeneralOpenersDeps,
 } from "../../src/interactive/overlay-general-openers.js";
 import { renderWorkerEntryLines } from "../../src/interactive/renderers/worker-entry.js";
-import { abbreviateModelId, fitIdentityLabel, formatTargetLabel } from "../../src/interactive/theme/labels.js";
+import {
+	abbreviateModelId,
+	fitIdentityLabel,
+	formatTargetLabel,
+	MODEL_ID_LABEL_WIDTH,
+} from "../../src/interactive/theme/labels.js";
 import { transcriptDetail } from "../../src/interactive/transcript-detail.js";
 import type { WorkerEntryState } from "../../src/interactive/worker-stream.js";
 
@@ -64,8 +69,9 @@ function boardRow(id: string): DispatchBoardRow {
 }
 
 test("abbreviated identities retain variant suffixes and complete graphemes", () => {
-	const a = abbreviateModelId("mini/very-long-model-family-q6");
-	const b = abbreviateModelId("mini/very-long-model-family-q8");
+	const a = abbreviateModelId("mini/very-long-model-family-name-variant-q6");
+	const b = abbreviateModelId("mini/very-long-model-family-name-variant-q8");
+	assert.ok(a.includes("…"));
 	assert.notEqual(a, b);
 	assert.ok(a.endsWith("q6"));
 	assert.ok(b.endsWith("q8"));
@@ -336,7 +342,22 @@ test("shared model labels let long placement yield before distinct families", ()
 	assert.notEqual(first, second);
 	assert.match(first, /qwopus.*q6/u);
 	assert.match(second, /llamus.*q6/u);
-	bounded([first, second], 24);
+	bounded([first, second], MODEL_ID_LABEL_WIDTH);
+});
+
+test("quant-suffixed gateway routes that differ only in version keep distinct labels", () => {
+	// At 24 cells both mini routes rendered as mini/qwopus3.…ense-q4km, and the second is mini's default.
+	for (const route of [
+		"mini/qwopus3.6-27b-dense-q4km",
+		"mini/qwopus3.8-27b-dense-q4km",
+		"mini/nemotron3-30b-moe-omni-udq4km",
+	]) {
+		assert.equal(abbreviateModelId(route), route);
+	}
+	assert.notEqual(
+		abbreviateModelId("dynamo/qwopus3.6-27b-coder-mtp"),
+		abbreviateModelId("dynamo/qwopus3.6-35b-a3b-coder-mtp"),
+	);
 });
 
 for (const width of widths) {

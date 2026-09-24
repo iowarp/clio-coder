@@ -8,7 +8,7 @@ it("uses an operator context limit instead of gateway training metadata", () => 
 	const details = resolveContextWindowDetails(
 		{ id: "mini", runtime: "litellm", capabilities: { contextWindow: 32_768 } },
 		litellmRuntime,
-		"mini/qwen3.8-27b-dense",
+		"mini/qwen3.8-27b-dense-iq4nl",
 		null,
 		262_144,
 		null,

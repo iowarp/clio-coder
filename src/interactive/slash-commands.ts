@@ -23,10 +23,13 @@ import { isExtensionCommandToken } from "../domains/extensions/operator-commands
 import type { OperatorExtensionRuntime } from "../domains/extensions/operator-runtime.js";
 import type { ExtensionOutput } from "../domains/extensions/public-api.js";
 import type { InteropAgentId, InteropProposal, InteropReport } from "../domains/interop/index.js";
+import { isInteropHeadlessRuntime } from "../domains/interop/peer-modes.js";
 import type { DoctorFinding } from "../domains/lifecycle/doctor.js";
 import {
+	PANE_PEER_IDS,
 	PANES_PRESET_IDS,
 	PANES_PRESETS,
+	type PanePeerId,
 	type PanesOperations,
 	type PanesPresetId,
 	type PanesStatus,
@@ -205,6 +208,8 @@ type SlashCommandVariant =
 	| { kind: "panes-show"; target: string }
 	/** A preset the model may also ask for, or operator-only argv. Never both. */
 	| { kind: "panes-open"; preset?: PanesPresetId; argv?: ReadonlyArray<string>; once?: boolean }
+	| { kind: "peer-pane"; peer: PanePeerId; brief?: string; cwd?: string }
+	| { kind: "peer-pane-usage"; reason?: string }
 	/** Toggle zoom on a Clio-owned pane; the bare form targets the watch pane. */
 	| { kind: "panes-zoom"; target: string }
 	| { kind: "panes-close"; target: string }
@@ -277,6 +282,8 @@ export interface RunCommandOptions {
 	workerProfile?: string;
 	workerRuntime?: string;
 	target?: string;
+	/** Place this run in a Clio-created task worktree and retain it for review. */
+	worktree?: boolean;
 	model?: string;
 	thinkingLevel?: JobThinkingLevel;
 	toolProfile?: ToolProfileName;
@@ -287,6 +294,8 @@ export interface RunCommandOptions {
 
 export interface HandleRunDeps {
 	dispatch: DispatchContract;
+	/** Resolve a named target before the external workspace warning is shown. */
+	runtimeForTarget?: (targetId: string) => string | null;
 	/** Live session board, snapshotted before operator run admission. */
 	getDecisionBoard?: () => ReadonlyArray<DecisionLedgerEntry>;
 	/** Strict recipe facts the run's execution role is derived from. */
@@ -323,6 +332,26 @@ function shareReceipt(agentId: string, receipt: RunReceipt, deps: HandleRunDeps)
 		runId: receipt.runId,
 		outcome: receipt.outcome,
 		text: receipt.output?.text ?? "",
+		...(receipt.runtimeKind === "subprocess" || receipt.delegation
+			? receipt.worktree
+				? {
+						placement: {
+							mode: "worktree" as const,
+							cwd: receipt.worktree.path,
+							branch: receipt.worktree.branch,
+							...(receipt.worktree.changedPaths ? { changedPaths: receipt.worktree.changedPaths } : {}),
+						},
+					}
+				: receipt.reproducibility?.cwd
+					? {
+							placement: {
+								mode: "current" as const,
+								cwd: receipt.reproducibility.cwd,
+								...(receipt.checkoutChanges ? { changedPaths: receipt.checkoutChanges.changedPaths } : {}),
+							},
+						}
+					: {}
+			: {}),
 	});
 	if (note === null) {
 		deps.notice("warn", `--share: run ${receipt.runId} produced no text to share`);
@@ -385,6 +414,15 @@ export async function handleRun(
 	options: RunCommandOptions = {},
 ): Promise<void> {
 	const decisionRefs = activeDecisionRefs(deps.getDecisionBoard?.() ?? []);
+	const selectedRuntime = options.target ? deps.runtimeForTarget?.(options.target) : options.workerRuntime;
+	if (selectedRuntime && isInteropHeadlessRuntime(selectedRuntime)) {
+		deps.notice(
+			"warn",
+			options.worktree
+				? `External CLI ${selectedRuntime} will run in a Clio-created Git worktree. The worktree separates Git changes but does not confine the peer's filesystem, shell, or network tools.`
+				: `External CLI ${selectedRuntime} will run in the current checkout; edits may appear immediately. The peer's own tools may access paths outside this checkout.`,
+		);
+	}
 	if (options.target && options.workerProfile) {
 		deps.notice(
 			"warn",
@@ -411,6 +449,7 @@ export async function handleRun(
 			...(options.workerProfile ? { workerProfile: options.workerProfile } : {}),
 			...(options.workerRuntime ? { workerRuntime: options.workerRuntime } : {}),
 			...(options.target ? { target: options.target } : {}),
+			...(options.worktree ? { worktree: true as const, apply: "preserve" as const } : {}),
 			...(options.model ? { model: options.model } : {}),
 			...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
 			...(options.toolProfile ? { toolProfile: options.toolProfile } : {}),
@@ -1440,6 +1479,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				{ name: "--agent-profile", takesValue: true, valueName: "profile" },
 				{ name: "--runtime", takesValue: true, valueName: "runtimeId" },
 				{ name: "--target", takesValue: true, valueName: "id" },
+				{ name: "--worktree" },
 				{ name: "--model", takesValue: true, valueName: "id" },
 				{ name: "--thinking", takesValue: true, values: RUN_THINKING_LEVELS, valueName: "level" },
 				{ name: "--tool-profile", takesValue: true, values: TOOL_PROFILE_NAMES },
@@ -1463,6 +1503,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 
 			const target = parsed.flags.get("--target");
 			if (typeof target === "string") options.target = target;
+			if (parsed.flags.has("--worktree")) options.worktree = true;
 
 			const model = parsed.flags.get("--model");
 			if (typeof model === "string") options.model = model;
@@ -1512,6 +1553,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 						...(ctx.getAgentRoleFacts ? { getAgentRoleFacts: ctx.getAgentRoleFacts } : {}),
 						io: ctx.io,
 						notice: ctx.notice,
+						runtimeForTarget: (id) => ctx.providers.getTarget(id)?.runtime ?? null,
 						bus: ctx.bus,
 						...(ctx.submitOperatorNote ? { submitOperatorNote: ctx.submitOperatorNote } : {}),
 					},
@@ -2071,6 +2113,65 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 			} else {
 				ctx.notice("error", block);
 			}
+		},
+	},
+	{
+		name: "peer",
+		description: "Open a coding peer in a Clio-owned interactive pane",
+		group: "Work",
+		kinds: ["peer-pane", "peer-pane-usage"],
+		args: {
+			parseFlagsBeforeRest: true,
+			flags: [{ name: "--cwd", takesValue: true, valueName: "path" }],
+			positionals: [
+				{ name: "peer", required: true },
+				{ name: "brief", required: false, rest: true },
+			],
+		},
+		fromArgs(parsed) {
+			if (parsed.error) return { kind: "peer-pane-usage", reason: parsed.error };
+			const peer = parsed.positionals[0] ?? "";
+			if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
+				return { kind: "peer-pane-usage", reason: `peer must be one of ${PANE_PEER_IDS.join(", ")}` };
+			}
+			const cwd = parsed.flags.get("--cwd");
+			return {
+				kind: "peer-pane",
+				peer: peer as PanePeerId,
+				...(parsed.rest?.trim() ? { brief: parsed.rest.trim() } : {}),
+				...(typeof cwd === "string" ? { cwd } : {}),
+			};
+		},
+		handle(command, ctx) {
+			if (command.kind === "peer-pane-usage") {
+				const entry = BUILTIN_SLASH_COMMANDS.find((candidate) => candidate.name === "peer");
+				if (entry) ctx.notice("info", command.reason ? `${command.reason}\n${usageNotice(entry)}` : usageNotice(entry));
+				return;
+			}
+			if (command.kind !== "peer-pane") return;
+			if (!ctx.panes) {
+				ctx.notice("warn", "pane layer unavailable; start Clio in Herdr with clio-coder --with-panes");
+				return;
+			}
+			const runLocal = ctx.runLocalOperation ?? ((operation: () => Promise<void>) => void operation());
+			runLocal(async () => {
+				const result = await ctx.panes?.handoff({
+					peer: command.peer,
+					...(command.brief ? { brief: command.brief } : {}),
+					...(command.cwd ? { cwd: command.cwd } : {}),
+				});
+				if (!result) return;
+				if (result.status === "opened") {
+					ctx.notice(
+						"success",
+						`opened ${command.peer} in pane ${result.paneId} at ${result.cwd}; interactive handoff, no managed receipt`,
+					);
+				} else if (result.status === "missing-binary") {
+					ctx.notice("warn", result.detail);
+				} else {
+					ctx.notice("warn", result.reason);
+				}
+			});
 		},
 	},
 	{

@@ -7,7 +7,8 @@ import type { CapabilityFlags } from "./types/capability-flags.js";
  * an operator wrote down about a specific model. The written entry wins for
  * descriptive capabilities because a hand-authored `model-catalog.d` file is
  * the per-model escape hatch for incorrect server metadata. Context and output
- * limits are deployment facts, so a live probe overrides the model's maximums.
+ * limits are deployment facts, so a live probe overrides the model's maximums,
+ * and so is a probe that reports no image or audio input.
  * A target-level override still outranks every source.
  */
 export function mergeCapabilities(
@@ -28,6 +29,12 @@ function applyDeploymentLimits(target: Record<string, unknown>, probe: Partial<C
 	if (!probe) return;
 	if (probe.contextWindow !== undefined) target.contextWindow = probe.contextWindow;
 	if (probe.maxTokens !== undefined) target.maxTokens = probe.maxTokens;
+	// Image and audio input need a projector loaded with the model, so a server that says it
+	// has none is stating a deployment fact. A family that can see does not make this
+	// deployment see, and an image sent to it fails. Only the negative wins: a probe that
+	// over-claims is still corrected by the knowledge base.
+	if (probe.vision === false) target.vision = false;
+	if (probe.audio === false) target.audio = false;
 }
 
 /**

@@ -81,10 +81,9 @@ import {
 } from "../worker/spec-contract.js";
 import { createEngineAgent, type EngineAgentOptions } from "./agent.js";
 import { registerFauxFromEnv } from "./ai.js";
-import { startAntigravityWorkerRun } from "./antigravity/subprocess-runtime.js";
 import { registerClioApiProviders, setGlobalDefaultMaxOutputTokens } from "./apis/index.js";
 import { startClaudeSdkWorkerRun } from "./claude/sdk-runtime.js";
-import { startClaudeCodeWorkerRun } from "./claude/subprocess-runtime.js";
+import { startExternalCliWorkerRun } from "./external-cli/connectors.js";
 import {
 	createLoopGuardRegistration,
 	isLockedSynthesisFallbackOnly,
@@ -415,12 +414,7 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 	if (input.runtime.id === "claude-sdk") {
 		return startClaudeSdkWorkerRun(input, emit);
 	}
-	if (input.runtime.id === "claude-code") {
-		return startClaudeCodeWorkerRun(input, emit);
-	}
-	if (input.runtime.id === "antigravity-code") {
-		return startAntigravityWorkerRun(input, emit);
-	}
+	if (input.runtime.kind === "subprocess") return startExternalCliWorkerRun(input, emit);
 
 	// pi-ai is process-local. The orchestrator registers Clio API providers in
 	// providers/extension.ts, but the worker subprocess starts a fresh process,
