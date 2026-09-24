@@ -13,10 +13,11 @@ capabilities.
 
 ## Delegate work to an installed coding agent
 
-Clio can run a named peer through its Agent Client Protocol (ACP) connection or
-its headless CLI, or open the peer in a Herdr pane. Clio remains the main
-conversation and records a run and receipt for ACP and headless dispatch. A pane
-is an interactive handoff and has no managed result or receipt. External peers
+Depending on the peer, Clio can run a named task through an Agent Client
+Protocol (ACP) connection or a managed headless CLI target, or open an
+interactive Herdr pane. Clio remains the main conversation and records a run
+and receipt for ACP and headless dispatch. A pane is an interactive handoff
+and has no managed result or receipt. External peers
 are selected explicitly; Clio does not silently switch agents or modes.
 
 | Peer | ACP connection | Headless target runtime | Pane ID |
@@ -26,6 +27,13 @@ are selected explicitly; Clio does not silently switch agents or modes.
 | OpenCode | Native `opencode acp` | `opencode-cli` | `opencode` |
 | Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
 | Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
+
+The Claude Code and Antigravity headless runners existed before 0.5.5; this
+release routes them through the shared connector registry alongside the new
+Codex, OpenCode, and Pi runners. Claude Code's pinned ACP bridge also predates
+this release. Clio's ACP client improvements in 0.5.5 apply to that bridge, but
+Antigravity CLI and Pi have no built-in ACP connection. Clio can still use an
+operator-configured ACP peer entry when a compatible adapter is available.
 
 Install and authenticate the peer's own CLI first. Run
 `clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured

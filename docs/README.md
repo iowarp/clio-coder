@@ -113,7 +113,7 @@ validation, reference data, or human scientific judgment.
 | Prompt-envelope reuse, provider tool delivery, and bounded results | [Prompt Envelope and Tools](architecture/prompt-envelope-and-tools.md) |
 | Built-in tool contracts, operating boundaries, and core workflows | [Tool Usage](guide/tool-usage.md) |
 | Implementing a runtime or inference-server adapter | [Provider Adapter Cookbook](architecture/provider-adapter-cookbook.md) |
-| Delegate to installed coding agents through ACP, headless CLI, or panes; inspect and adopt their resources | [Coding Agent Interoperability](guide/interop.md) |
+| Delegate to installed coding agents through their supported ACP, headless CLI, or pane modes; inspect and adopt their resources | [Coding Agent Interoperability](guide/interop.md) |
 | Middleware hooks, effects, budgets, and component snapshots | [Middleware and Components](architecture/middleware-and-components.md) |
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |
