@@ -30,7 +30,7 @@ pnpm run ci
 | `pnpm run test` | Standard test suite (contracts + fast smoke tests). |
 | `pnpm run ci` | Routine gate: types, lint, build, test, maintenance, and GUI checks. |
 | `pnpm run test:full` | Full root test investigation, including extended regressions. |
-| `pnpm run ci:release` | Qualify a candidate and its exact installed tarball (see [release checklist](docs/process/release-cut-checklist.md)). |
+| `pnpm run ci:release` | Qualify a candidate and its exact installed tarball (see [release checklist](CONTRIBUTING.md#validation-reference)). |
 
 Use `pnpm test:file` (which preloads `tests/harness/tmp-root.ts`) and `tests/harness/scratch-env.ts` for state isolation. Never mutate `process.stdout.write` across async test boundaries.
 

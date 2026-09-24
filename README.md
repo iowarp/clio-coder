@@ -215,7 +215,7 @@ clio-coder docs safety
 ```
 
 The pages are rendered locally from the bundled Markdown, with navigation and page
-outlines. See the [GUI reference](docs/gui/README.md) for how that local server
+outlines. See the [GUI reference](docs/guide/commands-and-modes.md) for how that local server
 starts and stops.
 
 | Looking for… | Start here |
@@ -225,7 +225,7 @@ starts and stops.
 | Default settings keys and source pointers for CLI flags, environment variables, and project schemas | [Configuration reference](docs/guide/configuration-reference.md) |
 | Commands and keyboard controls | [Commands and modes](docs/guide/commands-and-modes.md) |
 | Connection or installation trouble | [Troubleshooting](docs/guide/troubleshooting.md) and `clio-coder doctor` |
-| Scientific checks and measurements | [Scientific validation](docs/process/scientific-validation.md) |
+| Scientific checks and measurements | [Scientific validation](docs/guide/tool-usage.md#verify-run-declared-verification-checks) |
 | How to extend the harness | [Extensions](docs/guide/harness-extensions.md) and [plugins](docs/guide/authoring-plugins.md) |
 
 ## Choose authority, keep the evidence
@@ -256,7 +256,7 @@ bootstrap installer, upgrades, selective resets, and removal.
 
 From source, pin the release you intend to run. The following selects v0.5.3
 once its release tag is published; for development before the tag, use the
-[contributor checkout instructions](CONTRIBUTING.md#set-up-a-checkout).
+[contributor checkout instructions](CONTRIBUTING.md#quickstart).
 
 ```bash
 git clone --branch v0.5.3 https://github.com/iowarp/clio-coder.git
