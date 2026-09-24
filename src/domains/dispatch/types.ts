@@ -897,6 +897,20 @@ export interface RunReceipt {
 	costUsd: number;
 	/** Pricing-source truth. Sealed on every receipt; unknown pricing says so. */
 	costProvenance: CostProvenance;
+	/** External CLI observation, distinct from Clio's target-pricing estimate. */
+	externalTelemetry?: {
+		tokenUsage: "provider-reported" | "missing" | "unverified";
+		cost: "provider-reported" | "missing" | "unverified";
+		sessionId: string | null;
+		exitReason: "stop" | "error" | "aborted" | "unknown";
+		toolObservability: "unavailable";
+	};
+	/** Git-visible checkout delta observed during an external subprocess run; concurrent edits are not attributable. */
+	checkoutChanges?: {
+		cwd: string;
+		changedPaths: string[];
+		attribution: "observed-delta";
+	};
 	compiledPromptHash: string | null;
 	staticCompositionHash: string | null;
 	staticShellHash?: string | null;
@@ -919,7 +933,9 @@ export interface RunReceipt {
 	worktree?: {
 		path: string;
 		branch: string;
-		diffHash: string;
+		diffHash: string | null;
+		changedPaths?: string[];
+		snapshot?: "working-tree" | "unavailable";
 		apply: "merge" | "preserve";
 		applied: boolean;
 		reason?: string;

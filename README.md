@@ -72,6 +72,7 @@ run, or source builds, see [Install](#install). Already using Clio? See
 | **Find your way through unfamiliar code** | Navigate files, symbols, and dependencies with a structural index, bounded search, and a project handbook. [Context engine](docs/architecture/context-engine.md) |
 | **Make a change and check it** | Edit files, inspect diffs, run declared tests and builds, compare numerical results, and check performance budgets. [Tools and verification](docs/guide/tool-usage.md) |
 | **Get an independent review or share the work** | Dispatch coding, verification, and research workers; use different models and compose workflows across local or SSH nodes. [Workers and fleets](docs/guide/fleet-dispatch.md) |
+| **Work with another coding agent** | Give an installed Claude Code, Codex, OpenCode, Antigravity CLI, or Pi a named task through a managed headless run, ACP connection, or interactive pane. [Coding agent interoperability](docs/guide/interop.md#delegate-work-to-an-installed-coding-agent) |
 | **Continue a long task** | Manage the model's context, compact conversations, retain task memory, and fork, resume, or hand off a session. [Context continuity](docs/guide/context-continuity.md) |
 | **Connect scientific tools** | Reach Model Context Protocol (MCP) servers through a common gateway, including Slurm job workflows through clio-kit. [MCP tools](docs/guide/tool-usage.md#gateway-discover-and-call-secondary-capabilities) · [Slurm](docs/guide/slurm.md) |
 | **Reuse domain knowledge** | Install skills, prompts, agents, plugins, and fleets from the library. Review and import supported text resources from other coding agents. [Library](library/README.md) · [Interoperability](docs/guide/interop.md) |
@@ -169,6 +170,13 @@ repeatable workflow. Start locally, then add [fleet workflows and SSH placement]
 when needed. The [built-in agent guide](docs/guide/built-in-agents.md) explains
 each recipe's tools and responsibilities. Worker controls act on the current
 session's runs, and fleet inspection starts with the current project.
+
+If another coding CLI is installed, `/interop` shows its available modes.
+Use `/run --target <peer-target> --worktree <agent> <task>` for a managed edit
+on a preserved branch, `/delegate <peer> <task>` for a configured ACP
+connection, or `/peer <peer> [brief]` for an interactive pane handoff. See the
+[peer setup guide](docs/guide/interop.md#delegate-work-to-an-installed-coding-agent)
+for supported agents and permission limits.
 
 For alternatives that need no tools, `/draft [N] <request>` generates two to
 four candidate answers. A configured decision model can judge the candidates;

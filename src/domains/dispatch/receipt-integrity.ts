@@ -120,6 +120,8 @@ export const RECEIPT_INTEGRITY_FIELD_COVERAGE = {
 	output: true,
 	costUsd: true,
 	costProvenance: true,
+	externalTelemetry: true,
+	checkoutChanges: true,
 	compiledPromptHash: true,
 	staticCompositionHash: true,
 	staticShellHash: true,

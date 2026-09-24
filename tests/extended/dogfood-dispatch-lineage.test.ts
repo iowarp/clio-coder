@@ -549,6 +549,8 @@ it("ACP delegation publishes the same trusted host ancestry on its receipt, enve
 		const receipt = journal.receipts[0];
 		ok(receipt);
 		strictEqual(receipt.runtimeKind, "acp-delegation");
+		strictEqual(receipt.autonomyEnforcement?.grade, "approximated");
+		strictEqual(receipt.safety?.toolTelemetry?.workspaceMutationPossible, true);
 		deepStrictEqual(receipt.lineage, childLineage);
 		deepStrictEqual(journal.envelopes.get(receipt.runId)?.lineage, childLineage);
 		deepStrictEqual(completed, childLineage);
