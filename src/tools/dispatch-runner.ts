@@ -50,6 +50,7 @@ import type { RunGateProvenance, RunGateSubjectRef, RunPlanProvenance, RunReceip
 import { extractRunProvenance, provenanceCompactSuffix } from "../domains/evidence/provenance.js";
 import { summarizeTrustStatus } from "../domains/evidence/trust-projection.js";
 import { adaptRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
+import { aggregateCostAmounts, renderCostAggregate } from "../domains/observability/cost.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import { activeDecisionRefs } from "../domains/session/decision-board.js";
 import { renderCompeteJudgeTask } from "./compete-judge-task.js";
@@ -467,6 +468,25 @@ export function nextHostValidationAction(receipt: RunReceipt, integrity: Receipt
 	return `next host validation for ${receipt.runId}: ${action}; inspect the actual exit code and output, and record that result before reporting verified completion. The worker claimed validation but executed no check.`;
 }
 
+/** Totals from integrity-checked receipts, with opaque external tool use kept separate. */
+export function dispatchBatchSummary(runs: ReadonlyArray<CompletedRun>): {
+	observedToolCalls: number;
+	unobservableToolRuns: number;
+	excludedUntrustedRuns: number;
+	cost: string;
+} {
+	const trusted = runs.filter((run) => run.integrity.ok).map((run) => run.receipt);
+	const observable = trusted.filter((receipt) => receipt.externalTelemetry?.toolObservability !== "unavailable");
+	return {
+		observedToolCalls: observable.reduce((total, receipt) => total + receipt.toolCalls, 0),
+		unobservableToolRuns: trusted.length - observable.length,
+		excludedUntrustedRuns: runs.length - trusted.length,
+		cost: renderCostAggregate(
+			aggregateCostAmounts(trusted.map((receipt) => ({ usd: receipt.costUsd, provenance: receipt.costProvenance }))),
+		),
+	};
+}
+
 /**
  * The settled board, appended after the per-run lines. Its budget is reserved
  * out of the output ceiling rather than taken from it, so the board a topology
@@ -495,6 +515,7 @@ export function formatDispatchOutput(
 	const hostActions = runs
 		.map((run) => nextHostValidationAction(run.receipt, run.integrity))
 		.filter((action): action is string => action !== null);
+	const batch = dispatchBatchSummary(runs);
 	const needsSpotCheck = runs.some((run) => {
 		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
 		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
@@ -503,6 +524,7 @@ export function formatDispatchOutput(
 	const lines = [
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
+		`batch observed_tool_calls=${batch.observedToolCalls} cost=${batch.cost}${batch.unobservableToolRuns > 0 ? ` unobservable_tool_runs=${batch.unobservableToolRuns}` : ""}${batch.excludedUntrustedRuns > 0 ? ` excluded_untrusted_runs=${batch.excludedUntrustedRuns}` : ""}`,
 		...integrityBanners,
 		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
@@ -583,6 +605,7 @@ function dispatchDetails(
 	board: string | null = null,
 ): ToolResultDetails {
 	const failed = runs.filter((run) => run.receipt.exitCode !== 0);
+	const batch = dispatchBatchSummary(runs);
 	let transition: ReturnType<typeof scoutTransitionDetail> = null;
 	for (const run of runs) {
 		const envelope = deps.dispatch.getRun(run.receipt.runId);
@@ -608,6 +631,7 @@ function dispatchDetails(
 		terminalRunIds: runs.map((run) => run.receipt.runId),
 		receiptCount: runs.length,
 		failedCount: failed.length,
+		batchSummary: batch,
 		// Same text the output carries, under a stable key, so a surface that
 		// renders details can show the board without re-reading the store.
 		...(board !== null ? { agentLedgerBoard: board } : {}),
