@@ -2,9 +2,9 @@ name: ci
 
 on:
   push:
-    branches: [main, "ci-scratch-**"]
+    branches: [main, "v[0-9][0-9][0-9]", "ci-scratch-**"]
   pull_request:
-    branches: [main]
+    branches: [main, "v[0-9][0-9][0-9]"]
   workflow_dispatch:
 
 permissions:
