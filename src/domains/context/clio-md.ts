@@ -61,6 +61,21 @@ export interface SerializeClioMdInput {
 }
 
 const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
+/**
+ * Size targets for a generated handbook. The parser warns past them, the
+ * bootstrap clamps model output to them, and the merge caps to them. Eight
+ * invariants and eight conventions leave room for the rules a small model
+ * breaks without being told, while the whole file still preloads in full.
+ */
+export const HANDBOOK_TARGETS = {
+	conventions: 8,
+	conventionChars: 280,
+	invariants: 8,
+	invariantChars: 360,
+	sections: 8,
+	sectionChars: 2500,
+} as const;
+
 const H1_RE = /^#\s+(.+?)\s*$/gm;
 const H2_RE = /^##\s+(.+?)\s*$/gm;
 
@@ -294,19 +309,27 @@ export function parseClioMd(source: string): ClioMdParseResult {
 	const invariants = parseNumbered(sectionBody(sections, "hard invariants"));
 	const customSections = extraSections(sections);
 	const importedAgentContext = sectionBody(sections, "imported agent context") || null;
-	if (conventions.length > 6) warnings.push("conventions exceed the generator target of six bullets");
-	if (invariants.length > 3) warnings.push("hard invariants exceed the generator target of three numbered rules");
-	if (customSections.length > 8) warnings.push("custom sections exceed the generator target of eight H2 sections");
+	if (conventions.length > HANDBOOK_TARGETS.conventions) {
+		warnings.push(`conventions exceed the generator target of ${HANDBOOK_TARGETS.conventions} bullets`);
+	}
+	if (invariants.length > HANDBOOK_TARGETS.invariants) {
+		warnings.push(`hard invariants exceed the generator target of ${HANDBOOK_TARGETS.invariants} numbered rules`);
+	}
+	if (customSections.length > HANDBOOK_TARGETS.sections) {
+		warnings.push(`custom sections exceed the generator target of ${HANDBOOK_TARGETS.sections} H2 sections`);
+	}
 	for (const [index, item] of conventions.entries()) {
-		if (charLen(item) > 200) warnings.push(`convention ${index + 1} is longer than the generator target`);
+		if (charLen(item) > HANDBOOK_TARGETS.conventionChars)
+			warnings.push(`convention ${index + 1} is longer than the generator target`);
 	}
 	for (const [index, item] of invariants.entries()) {
-		if (charLen(item) > 280) warnings.push(`hard invariant ${index + 1} is longer than the generator target`);
+		if (charLen(item) > HANDBOOK_TARGETS.invariantChars)
+			warnings.push(`hard invariant ${index + 1} is longer than the generator target`);
 	}
 	for (const [index, section] of customSections.entries()) {
 		if (charLen(section.title) > 80)
 			warnings.push(`custom section ${index + 1} title is longer than the generator target`);
-		if (charLen(section.body) > 2500)
+		if (charLen(section.body) > HANDBOOK_TARGETS.sectionChars)
 			warnings.push(`custom section ${index + 1} body is longer than the generator target`);
 	}
 	if (errors.length > 0) return { ok: false, errors, warnings };
