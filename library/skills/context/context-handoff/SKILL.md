@@ -7,7 +7,7 @@ triggers:
   - handoff to another agent
   - context is about to be lost
   - write a continuation brief
-version: 0.5.1
+version: 0.5.2
 license: Apache-2.0
 allowed-tools:
   - read
@@ -70,18 +70,18 @@ Choose the artifact that matches the continuation:
   actionable one as the focus; state that reading in the draft's "Next
   session focus" line rather than leaving it blank.
 
-There is no operator in a headless run: `ask_user` is not registered, so
-any call is refused as an unregistered tool rather than answered. If the focus, slug, or a
-redaction call is ambiguous, state your best reading in the draft and in your
-final reply, and proceed — never stall a step waiting on `ask_user`.
+In a headless run, `ask_user` is unavailable. State your best reading of an
+ambiguous focus, slug, or redaction choice in the draft and final reply, then
+proceed. In an interactive run, ask the operator when that choice would
+materially change the handoff; otherwise state your assumption and proceed.
 
 The ten steps below are the plan; do not open a task list for them. `tasks`
 sits outside this skill's tool surface and any call to it is refused.
 
 Shell rules for every `bash` call in this workflow: one command per call,
 plain and direct (`date +%F`, `git status -sb`, the helper script below).
-Never use `$(...)` or backticks; they trigger an approval gate that ends a
-headless run.
+Avoid `$(...)` and backticks; they trigger an approval gate and cannot be
+approved in a headless run.
 
 ## Procedure
 

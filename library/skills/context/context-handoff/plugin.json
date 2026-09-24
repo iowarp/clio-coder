@@ -1,7 +1,7 @@
 {
 	"$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
 	"name": "context-handoff",
-	"version": "0.5.1",
+	"version": "0.5.2",
 	"description": "Writes a durable, redacted, reference-not-copy handoff document when a session winds down or context is about to be compacted or lost, so the next session or agent can continue. Not for orienting at the start of a session; use context-prime.",
 	"license": "Apache-2.0",
 	"extensions": {
