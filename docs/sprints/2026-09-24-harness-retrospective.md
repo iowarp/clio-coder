@@ -2,11 +2,11 @@
 
 Durable fix index for the report at `/home/akougkas/projects/obsidian-processor/REPORT.md`.
 The report is a source of leads; session `1vs919hzsf9j`, receipts, source, and focused
-tests were checked before changes. Clio work is isolated on branch
-`codex/harness-sprint-20260924` at
-`/home/akougkas/iowarp/clio-coder/.clio-coder/worktrees/harness-sprint-20260924`
-(base `1cebdaf7`). The shared `v055` checkout and other agents' worktrees are untouched.
-Herdr tab `wT:t2`: orchestrator `p1W`, Codex Sol xhigh `p28`, Codex Sol medium `p29`.
+tests were checked before changes. Clio work was developed on branch
+`codex/harness-sprint-20260924` from `1cebdaf7`, then merged into canonical
+`v055` after integration checks. The two implementation panes (`wT:p28` Sol xhigh
+and `wT:p29` Sol medium) and the temporary sprint worktree were retired; other
+agents' panes and worktrees were left alone.
 The first two Clio instances selected a homelab route and were stopped before
 edits; all implementation and tests used Codex Sol panes. No pane spawned an agent.
 
@@ -27,6 +27,7 @@ edits; all implementation and tests used Codex Sol panes. No pane spawned an age
 | Autonomy yolo | Full-auto admits scanned npm validation scripts and typed verify checks; capable/suggest still ask and hard safety rails remain. Operator explicitly chose admission. | `aa3b4dc6` |
 | Autonomy capable | Admits exact `git diff --check` and `git diff --cached --check` after safety scan. | `bf3b41a7` |
 | Prompt manifest docs | Documented source version 3. | `3c60a31b` |
+| Final integration | Resolved verifier argv and execution cwd are scanned by safety; updated stale fixture ownership, scout budget, vision runtime, schema cap, and capable/yolo terminal expectations. | `d2973673`, `43057e89`, `c4070d01` |
 
 The five-worker public API rework was an agent integration error, not a reproducible
 admission defect. Clio now exposes host validation next actions, unverified task
@@ -35,7 +36,8 @@ choices for the parent when splitting coupled work. The report's inference hang 
 not traced to one provider. After explicit operator approval, isolated test changes
 in `obsidian-processor` branch `codex/offline-tests-20260924` (commit `32e5633`)
 made default pytest offline and gated live inference behind an opt-in and local
-endpoints; the dirty main checkout was not edited.
+endpoints. Its temporary worktree was removed; the branch remains because that
+repository's main checkout has other agents' uncommitted work.
 
 Verification: Clio's full contract/smoke run passed **2029/2030** (one platform
 skip, no failures). Full tests TypeScript, build, repository lint/hygiene, GUI
@@ -44,3 +46,12 @@ passed. Obsidian's isolated default pytest run passed 11 tests in 12 seconds wit
 43 integration tests deselected; targeted opt-in skipped without authorization and
 rejected nonlocal endpoints before a request. Deterministic autonomy contract tests
 cover the changed admission branches.
+
+Final integration on `v055`: 89 focused safety/dispatch/image tests passed; a
+disk-backed full run passed 4,247 tests with one platform skip and found one old
+`auto-edit`/`full-auto` menu-label assertion. After correcting it to the displayed
+`capable`/`yolo` labels, the entire real-terminal file passed 9/9. The later vision
+merge passed 28/28 affected tests and the GUI suite passed 194/194. TypeScript,
+lint/hygiene, GUI checks and build passed. The numeric verifier's 26/26 tests passed
+from the orchestrator shell; its eight failures inside a pane were caused by that
+pane's `EPERM` process sandbox, which also refused `spawnSync(node -v)`.

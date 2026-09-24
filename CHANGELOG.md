@@ -25,6 +25,13 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 - `verify` now runs a repository's own checks outside Node. It derives Python runners (pytest or unittest, through `uv run` when `uv.lock` exists), Cargo, Go and CMake test presets, Makefile and justfile verification targets, and repository scripts that CI runs directly, such as `scripts/gate.sh`. A check it cannot resolve runs nothing, and the error names what was searched and points at `bash`. A resolved `verify` call is admitted exactly as `bash` admits the same command.
 - At full-auto (`--autonomy yolo`), `npm run build|lint|typecheck|ci`, a test runner behind a pipe or redirect, and an `&&` chain holding a repository script now run without asking. They still ask at suggest and auto-edit. Headless runs, which deny every ask, had been refused their repository's own gate.
+- Exact `git diff --check` commands run at capable. Typed `verify` scans the resolved command, model-supplied arguments, and execution directory before admission; shell substitution and protected paths retain their safety rails.
+
+### Harness reliability
+
+- Task views distinguish a completion claim from verified checks and name the next host validation action. Sealed delegated edits and batch collect progress now advance the loop guard without admitting unchanged retries.
+- Native read-only scouts enter final synthesis after 36 observed tool calls. Dispatch summaries expose sealed batch call counts and cost with provenance for opaque external runs.
+- Evidence pages through visible session bundles and explains trust axes and event attribution. Memory reminders suppress stale paths and resolved failures; skill load warnings show drift hashes and receipt provenance.
 
 ### Build
 
