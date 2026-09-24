@@ -74,6 +74,8 @@ export interface PendingSkillToolPolicy {
 	 * installed) skills stay operator-gated at every level.
 	 */
 	modelActivation?: boolean;
+	/** Full-auto treats a skill's positive tool list as guidance; explicit denials still apply. */
+	allowListAdvisory?: boolean;
 }
 
 /**
@@ -99,6 +101,7 @@ export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): P
 		loadedSkillNames: new Set(policy.loadedSkillNames),
 		loadedSkillPolicies: new Map(declared),
 		carriedSurface: true,
+		...(policy.allowListAdvisory === undefined ? {} : { allowListAdvisory: policy.allowListAdvisory }),
 	};
 }
 
@@ -289,6 +292,7 @@ export function evaluateSkillToolSurface(
 	// A finish receipt records a limitation without performing another action.
 	// Keep it available under allow-narrowing, while honoring explicit denials.
 	if (tool === "limitation") return null;
+	if (policy.allowListAdvisory === true) return null;
 	const allowLists = entries.map(([, declared]) => declared.allowedTools);
 	if (allowLists.some((list) => list === undefined || list.length === 0)) return null;
 	const merged = [...new Set(allowLists.flatMap((list) => [...(list ?? [])]))];

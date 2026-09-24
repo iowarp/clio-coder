@@ -598,6 +598,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const reserveThreshold = cap !== undefined && reserve > 0 && cap > reserve ? cap - reserve : null;
 	let reserveDirectiveEmitted = false;
 	const blocksByTurn = new Map<string, number>();
+	const lastBlockedCallByTurn = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
 	/**
 	 * Per-turn count of successful write or edit calls. The identical-call key
@@ -919,6 +920,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		baseReason: string,
 		now: number,
 	): ReadonlyArray<MiddlewareEffect> => {
+		lastBlockedCallByTurn.set(turnKey, hashToolCall(tool, input.toolArgs ?? {}));
 		const blocksThisTurn = bumpTurnBlocks(turnKey);
 		const reachedBudget = blocksThisTurn >= budget;
 		// Budget reached with the synthesis lockout wired: enter the lockout
@@ -1123,6 +1125,21 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			// outer one does not already show.
 			if (input.metadata?.nested === true) return [];
 			if (input.hook === "after_tool") {
+				const turnKey = input.turnId ?? NO_TURN_BUCKET;
+				const blocked = lastBlockedCallByTurn.get(turnKey);
+				if (
+					blocked !== undefined &&
+					input.metadata?.resultKind === "ok" &&
+					resultCarriesEvidence(input.toolResultDetails) &&
+					input.toolName !== undefined &&
+					input.toolName !== ToolNames.Read &&
+					hashToolCall(input.toolName, input.toolArgs ?? {}) !== blocked
+				) {
+					// A different productive call is evidence of recovery; give the
+					// model another chance before a turn-wide synthesis lockout.
+					blocksByTurn.delete(turnKey);
+					lastBlockedCallByTurn.delete(turnKey);
+				}
 				recordSuccessfulResult(input);
 				recordResultForStagnation(input);
 				const effects = [...crossArgumentResultEffects(input), ...readCoverageEffects(input), ...readEofEffects(input)];

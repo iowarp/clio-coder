@@ -1278,9 +1278,17 @@ export function buildSettingItems(
 	const keybindingCount = Object.keys(settings.interface.keybindings ?? {}).length;
 	const items: SettingsCenterItem[] = [
 		...maintenanceRows(),
-		settingItem("autonomy", settings.safety.autonomy, {
-			values: ["read-only", "suggest", "auto-edit", "full-auto"],
-		}),
+		settingItem(
+			"autonomy",
+			settings.safety.autonomy === "auto-edit"
+				? "capable"
+				: settings.safety.autonomy === "full-auto"
+					? "yolo"
+					: settings.safety.autonomy,
+			{
+				values: ["capable", "yolo"],
+			},
+		),
 		settingItem("workers.onPermission", settings.fleet.permissions.mode ?? "deny", {
 			values: ["deny", "fail", "escalate"],
 		}),
@@ -2076,6 +2084,8 @@ function applySettingChange(settings: ClioSettings, id: string, value: string): 
 	if (applyEntrySettingChange(settings, id, value)) return;
 	switch (id) {
 		case "autonomy":
+			if (value === "capable") settings.safety.autonomy = "auto-edit";
+			else if (value === "yolo") settings.safety.autonomy = "full-auto";
 			if (value === "read-only" || value === "suggest" || value === "auto-edit" || value === "full-auto")
 				settings.safety.autonomy = value;
 			return;

@@ -164,7 +164,7 @@ function writeTrustState(records: ReadonlyArray<McpTrustRecord>, configDir?: str
 }
 
 function trustStatusFor(server: McpServerDeclaration, projectRoot: string, state: McpTrustState): McpTrustStatus {
-	if (server.scope === "user") return { status: "trusted", actionClass: "unknown" };
+	if (server.scope === "user") return { status: "trusted", actionClass: server.actionClass };
 	const record = state.records.find((entry) => entry.projectRoot === projectRoot && entry.id === server.id);
 	if (record === undefined) {
 		return {

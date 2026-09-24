@@ -1492,6 +1492,7 @@ const TOOL_CONTRACT_TESTS: Readonly<Record<BuiltinToolName, readonly string[]>> 
 	[ToolNames.WebRead]: ["tests/contracts/tool-boundaries.test.ts", "tests/contracts/gateway-web-context.test.ts"],
 	[ToolNames.WebFetch]: ["tests/contracts/egress-remediation.test.ts", "tests/contracts/tool-boundaries.test.ts"],
 	[ToolNames.AskUser]: ["tests/contracts/ask-user-tool.test.ts"],
+	[ToolNames.ConfigureClio]: ["tests/contracts/configure-clio-tool.test.ts"],
 	[ToolNames.Artifact]: ["tests/contracts/artifact-tool.test.ts", "tests/contracts/gateway-authority.test.ts"],
 	[ToolNames.Gateway]: [
 		"tests/contracts/gateway-surface.test.ts",

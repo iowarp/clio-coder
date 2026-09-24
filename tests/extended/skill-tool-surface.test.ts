@@ -50,6 +50,21 @@ import { isolateClioEnv } from "../harness/scratch-env.js";
 
 const roots: string[] = [];
 
+it("keeps full-auto skill allow lists advisory while honoring explicit denials", () => {
+	const policy: PendingSkillToolPolicy = {
+		allowedSkillNames: ["research"],
+		requests: [],
+		loadedSkillNames: new Set(["research"]),
+		loadedSkillPolicies: new Map([["research", { allowedTools: [ToolNames.Read], disallowedTools: [ToolNames.Bash] }]]),
+		allowListAdvisory: true,
+	};
+	strictEqual(evaluateSkillToolSurface(policy, ToolNames.Write), null);
+	ok(evaluateSkillToolSurface(policy, ToolNames.Bash));
+	const carried = armedSkillSurface(policy);
+	strictEqual(carried?.allowListAdvisory, true);
+	strictEqual(evaluateSkillToolSurface(carried, ToolNames.Write), null);
+});
+
 function scratchRoot(): string {
 	const root = mkdtempSync(join(tmpdir(), "clio-coder-skill-surface-"));
 	roots.push(root);

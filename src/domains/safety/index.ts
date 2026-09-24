@@ -15,6 +15,7 @@ export {
 	type AutonomyLevel,
 	autonomyAskRejection,
 	autonomyDenyRejection,
+	autonomyFromUserInput,
 	DEFAULT_AUTONOMY_EXPOSURE,
 	DEFAULT_AUTONOMY_LEVEL,
 	isAutonomyLevel,

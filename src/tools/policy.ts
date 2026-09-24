@@ -89,6 +89,7 @@ export const TOOL_PLANES: Readonly<Record<BuiltinToolName, PlaneExpectation>> = 
 	[ToolNames.WebRead]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.WebFetch]: { plane: "retrieve", actionClass: "read", executionMode: "parallel" },
 	[ToolNames.AskUser]: { plane: "interact", actionClass: "read", executionMode: "sequential" },
+	[ToolNames.ConfigureClio]: { plane: "interact", actionClass: "write", executionMode: "sequential" },
 	[ToolNames.Artifact]: { plane: "artifact", actionClass: "write", executionMode: "sequential" },
 	// gateway lists, describes, and calls secondary capabilities. Its own class
 	// is read; a call carries the capability's class through the same admission.
@@ -119,7 +120,7 @@ const OBSERVE_ENVELOPE_SELF_CAPS: ReadonlyArray<[BuiltinToolName, () => number]>
 
 const SESSION_BOUND_TOOLS = new Set<ToolName>([]);
 const DISPATCH_BOUND_TOOLS = new Set<ToolName>([ToolNames.Dispatch, ToolNames.Monitor, ToolNames.Steer]);
-const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser]);
+const INTERACTIVE_BOUND_TOOLS = new Set<ToolName>([ToolNames.AskUser, ToolNames.ConfigureClio]);
 /** Registered only when a pane host answered detection and the mux is live. */
 const PANES_BOUND_TOOLS = new Set<ToolName>([ToolNames.Panes]);
 /**

@@ -10,6 +10,10 @@ import { createWorkerSafety } from "../../src/engine/worker-tools.js";
  * canonical setting or flag remains the only accepted policy surface.
  */
 describe("removed knob spellings", () => {
+	it("accepts capable and yolo as concise autonomy names", () => {
+		assert.equal(parseRunCliArgs(["--autonomy", "capable", "task"]).autonomy, "auto-edit");
+		assert.equal(parseRunCliArgs(["--autonomy", "yolo", "task"]).autonomy, "full-auto");
+	});
 	it("parses explicit task bounds without interpreting task prose", () => {
 		const parsed = parseRunCliArgs([
 			"--turn-mode",

@@ -379,6 +379,15 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		promptHint:
 			'Use ask_user only when blocked on a decision the request does not answer, never about something the operator already stated: one question per round in interviews, up to four related questions otherwise, recommended option first, then action="complete" with the decisions before final prose.',
 	},
+	[ToolNames.ConfigureClio]: {
+		objective: "Preview one Clio settings change and apply it only after direct operator approval.",
+		uiLabel: "Configure",
+		retrySafety: "not_retry_safe",
+		resultSizePolicy: { kind: "exact", maxBytes: 8_192 },
+		costLatency: "local_slow",
+		promptHint:
+			"When asked to change Clio settings in full-auto, discover configure_clio through gateway. Preview first, then apply the returned proposal id; apply asks the operator directly and refuses stale proposals.",
+	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {
 		objective: "Write terminal plan/review/report documents that complete the turn.",

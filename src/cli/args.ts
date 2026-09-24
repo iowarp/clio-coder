@@ -2,7 +2,7 @@ import { THINKING_LEVELS } from "../core/defaults.js";
 import { MAX_TIMER_DELAY_MS } from "../core/timers.js";
 import type { TurnConstraints } from "../core/turn-constraints.js";
 import type { JobThinkingLevel } from "../domains/dispatch/validation.js";
-import { AUTONOMY_LEVELS, type AutonomyLevel } from "../domains/safety/autonomy.js";
+import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { globalFlagPositionHint } from "./argv.js";
 
 export interface CliArgDiagnostic {
@@ -126,11 +126,12 @@ export function parseRunCliArgs(argv: ReadonlyArray<string>): RunCliArgs {
 		if (arg === "--autonomy") {
 			const value = need(arg);
 			if (value !== null) {
-				if (AUTONOMY_LEVELS.includes(value as AutonomyLevel)) parsed.autonomy = value as AutonomyLevel;
+				const autonomy = autonomyFromUserInput(value);
+				if (autonomy) parsed.autonomy = autonomy;
 				else
 					parsed.diagnostics.push({
 						type: "error",
-						message: "--autonomy must be one of: read-only|suggest|auto-edit|full-auto",
+						message: "--autonomy must be capable|yolo (legacy: read-only|suggest|auto-edit|full-auto)",
 					});
 			}
 			continue;

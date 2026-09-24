@@ -1499,6 +1499,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				state.currentTurnConstraints?.skills !== "disabled" &&
 					modelMayActivateSkills(deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy),
 			);
+			if (pendingSkillPolicy) {
+				pendingSkillPolicy.allowListAdvisory = (deps.getAutonomy?.() ?? deps.getSettings().safety.autonomy) === "full-auto";
+			}
 			// What was already loaded when this turn started, so the settle-time
 			// notice names the skills this turn activated and not the ones a
 			// carried surface has been holding since an earlier message.

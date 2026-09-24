@@ -67,6 +67,18 @@ afterEach(() => {
 });
 
 describe("mcp server configuration", () => {
+	it("uses an explicit user effect class and refuses project self-classification", () => {
+		const { project, configDir } = scratch();
+		writeUserConfig(configDir, "version: 1\nservers:\n  - id: papers\n    command: node\n    actionClass: read\n");
+		const resolved = resolveMcpServers({ cwd: project, configDir });
+		strictEqual(resolved.servers.find((server) => server.id === "papers")?.trust.actionClass, "read");
+		const projectClaim = parseMcpConfigText(
+			"version: 1\nservers:\n  - id: papers\n    command: node\n    actionClass: read\n",
+			{ scope: "project", path: "p.yaml", root: project },
+		);
+		match(projectClaim.diagnostics[0]?.message ?? "", /only allowed in user config/);
+	});
+
 	it("parses a strict project declaration and derives a stable digest", () => {
 		const { project } = scratch();
 		const result = parseMcpConfigText(PROJECT_CONFIG, { scope: "project", path: "p.yaml", root: project });

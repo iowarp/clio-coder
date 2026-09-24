@@ -59,7 +59,7 @@ Flags:
   --target <id>             one-run main-agent or dispatch target override
   --model <wireId>          one-run model override
   --thinking <level>        one-run thinking level: off|minimal|low|medium|high|xhigh|max
-  --autonomy <level>        one-run autonomy: read-only|suggest|auto-edit|full-auto
+  --autonomy <level>        one-run autonomy: capable|yolo (legacy levels accepted)
   --turn-mode <mode>        main-agent workflow: answer|proposal|change; not an authorization grant
   --allow-tools <names>     main-agent capability allowlist, comma-separated; none disables all tools
   --no-delegate            forbid main-agent dispatch for this task and its continuations

@@ -158,13 +158,21 @@ User MCP declarations are stored at `<config>/mcp.yaml`; project declarations ar
 
 | Declaration | Launch rule |
 | --- | --- |
-| User scope | Trusted by file ownership; actions still pass through tool policy. |
+| User scope | Trusted by file ownership; actions still pass through tool policy. Set `actionClass: read` for an operator-reviewed read-only server, or `actionClass: execute` for an executing server. Omitted classes remain `unknown` and require approval. |
 | Project scope | Does not launch until an operator trusts the declaration with `clio-coder mcp trust <id>` or `/mcp trust <id>`. |
 | Trust record | User-owned `<config>/mcp-trust.json`, bound to project root, server id, and declaration digest. |
 | Changed declaration | Editing command, args, cwd, environment, or timeout makes trust stale; review and trust it again. |
 | Trust boundary | Trust enables launch; it is not operating-system isolation. Server annotations do not grant authority. |
 
+Only user declarations may set `actionClass`; project declarations receive their class from the explicit trust record. Classify the entire server by its most powerful tool, since the declaration applies to every tool it exposes. For example, a locally installed literature-search server whose tools only query or transform citation metadata can use `actionClass: read` to work in full-auto without a headless approval dead end.
+
 Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust.ts`](../../src/domains/gateway/mcp/trust.ts). The model-facing discovery and call contract is in [gateway tool usage](tool-usage.md#gateway-discover-and-call-secondary-capabilities).
+
+## Let Clio propose settings changes
+
+In an interactive `yolo` (`full-auto`) session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. Clio can discover `configure_clio` through the gateway, preview one saved setting change, and then request an **Apply** or **Cancel** decision from the host UI. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
+
+The settings UI presents two everyday choices: **capable** maps to the persisted `auto-edit` level, and **yolo** maps to `full-auto`. Older `read-only` and `suggest` values remain readable for existing sessions and configuration files.
 
 ## Exact CLI and tool contracts
 
@@ -205,4 +213,3 @@ Tool schemas are registered in [`src/tools/`](../../src/tools/registry.ts). Use 
 | `context.ref` | task | scope=recall: ref of the evicted item, as named in its marker. |
 | `context.scope` | policy | workspace, settings, skills, or recall. |
 | `context.offset` | policy | Zero-based settings or recall discovery offset; follow nextOffset. |
-

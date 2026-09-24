@@ -10,7 +10,6 @@ import {
 	updateSettings,
 } from "../core/config.js";
 import {
-	type AutonomyLevel,
 	type OutputStyle,
 	type PanesSettings,
 	type SmoothStreaming,
@@ -43,7 +42,7 @@ import { registerBuiltinRuntimes } from "../domains/providers/runtimes/builtins.
 import { greetLmStudio } from "../domains/providers/runtimes/common/lmstudio-http.js";
 import type { ProbeResult, RuntimeDescriptor } from "../domains/providers/types/runtime-descriptor.js";
 import type { TargetDescriptor } from "../domains/providers/types/target-descriptor.js";
-import { AUTONOMY_LEVELS } from "../domains/safety/index.js";
+import { autonomyFromUserInput } from "../domains/safety/index.js";
 import {
 	describeLocalCapacity,
 	observeHostCapacityFacts,
@@ -1668,16 +1667,23 @@ const SECTION_CONTENT: Record<SettingsSectionId, Pick<SectionSpec, "fields" | "a
 		actions: [
 			{
 				label: "Autonomy level",
-				hint: AUTONOMY_LEVELS.join(" | "),
+				hint: "capable | yolo",
 				run: async (io) => {
 					io.out.write(
-						"  read-only inspects; suggest asks before edits, execution, and delegation.\n  auto-edit allows workspace edits, recognized checks, and routine delegation;\n  unfamiliar commands and larger dispatch plans ask. Declared outward actions ask.\n  full-auto skips autonomy prompts. Safety rules still apply at every level.\n",
+						"  capable edits the workspace and runs recognized checks; unfamiliar commands ask.\n  yolo skips autonomy prompts while safety rules still apply.\n",
 					);
-					await askChoice(io, "Autonomy level", AUTONOMY_LEVELS, readSettings().safety.autonomy, (value) => {
-						updateSettings((draft) => {
-							draft.safety.autonomy = value as AutonomyLevel;
-						});
-					});
+					const current = readSettings().safety.autonomy;
+					await askChoice(
+						io,
+						"Autonomy level",
+						["capable", "yolo"],
+						current === "auto-edit" ? "capable" : current === "full-auto" ? "yolo" : current,
+						(value) => {
+							updateSettings((draft) => {
+								draft.safety.autonomy = autonomyFromUserInput(value) ?? draft.safety.autonomy;
+							});
+						},
+					);
 				},
 			},
 			{

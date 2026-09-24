@@ -24,6 +24,28 @@ function afterOk(turnId: string, toolName: string): MiddlewareHookInput {
 }
 
 describe("loop guard identical-call epoch", () => {
+	it("permits recovery through a different successful call before locking the turn", () => {
+		const guard = createLoopGuardRegistration({
+			safety: createWorkerSafety(),
+			turnBlockBudget: 2,
+			turnSynthesisLockout: true,
+		});
+		const turn = "recovery";
+		guard.evaluate(before(turn, ToolNames.Bash, "stuck"));
+		guard.evaluate(before(turn, ToolNames.Bash, "stuck"));
+		ok(guard.evaluate(before(turn, ToolNames.Bash, "stuck")).some((effect) => effect.kind === "block_tool"));
+		guard.evaluate({
+			hook: "after_tool",
+			turnId: turn,
+			toolName: ToolNames.Bash,
+			toolArgs: { q: "new-evidence" },
+			metadata: { resultKind: "ok" },
+			toolResultDetails: {},
+		});
+		const retry = guard.evaluate(before(turn, ToolNames.Bash, "stuck"));
+		ok(!retry.some((effect) => effect.kind === "block_tool" && effect.reason.includes("Tools are disabled")));
+	});
+
 	it("blocks the third verbatim repeat when nothing changed in between", () => {
 		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
 		const turn = "t1";
