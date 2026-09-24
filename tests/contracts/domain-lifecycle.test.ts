@@ -117,3 +117,50 @@ test("duplicate domain names reject the composition before either implementation
 	await rejects(loadDomains([module, module]), /Duplicate domain: duplicate/);
 	strictEqual(created, false);
 });
+
+test("a cancelled load stops the started domains and propagates the cancellation unchanged", async () => {
+	const bus = getSharedBus();
+	const failedEvents: unknown[] = [];
+	const unsubscribe = bus.on(BusChannels.DomainFailed, (payload) => failedEvents.push(payload));
+	const created: string[] = [];
+	const stopped: string[] = [];
+	const diagnostics: string[] = [];
+	const cancellation = new DOMException("boot cancelled", "AbortError");
+	const modules = ["first", "second", "third"].map(
+		(name, index): DomainModule => ({
+			manifest: { name, dependsOn: index === 0 ? [] : [["first", "second", "third"][index - 1] as string] },
+			createExtension() {
+				created.push(name);
+				return {
+					contract: {},
+					extension: {
+						start() {},
+						stop() {
+							stopped.push(name);
+						},
+					},
+				};
+			},
+		}),
+	);
+	let boundaries = 0;
+	try {
+		const load = loadDomains(modules, {
+			diagnostic: (text) => diagnostics.push(text),
+			async beforeEach() {
+				boundaries += 1;
+				// Interactive boot turns the loop here; Ctrl+C at Stage 0 closes the
+				// lease during the second turn.
+				await new Promise((settle) => setImmediate(settle));
+				if (boundaries === 3) throw cancellation;
+			},
+		});
+		await rejects(load, (error) => error === cancellation);
+	} finally {
+		unsubscribe();
+	}
+	deepStrictEqual(created, ["first", "second"], "no domain is created after the cancelled boundary");
+	deepStrictEqual(stopped, ["second", "first"], "started domains stop in reverse order");
+	deepStrictEqual(failedEvents, [], "a cancellation is not a domain failure");
+	deepStrictEqual(diagnostics, []);
+});

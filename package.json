@@ -83,7 +83,7 @@
 		"pi:surface-snapshot": "node --import tsx scripts/pi-surface-diff.ts --write",
 		"test:file": "node --import tsx --import ./tests/harness/tmp-root.ts --test",
 		"pretest": "test -f dist/cli/index.js && test -f dist/metafile-esm.json || pnpm run build",
-		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/contracts/*.test.ts tests/smoke/acp-boundary.test.ts tests/smoke/real-binary-boot.test.ts tests/smoke/process-lifecycle.test.ts",
+		"test": "node --import tsx --import ./tests/harness/tmp-root.ts --test --test-concurrency=2 tests/contracts/*.test.ts tests/smoke/acp-boundary.test.ts tests/smoke/real-binary-boot.test.ts tests/smoke/process-lifecycle.test.ts tests/smoke/boot-handoff.test.ts",
 		"test:gui": "pnpm --filter @iowarp/clio-coder-gui test",
 		"check:gui": "pnpm --filter @iowarp/clio-coder-gui typecheck && pnpm --filter @iowarp/clio-coder-gui lint",
 		"ci": "pnpm run typecheck && pnpm run lint && pnpm run build && pnpm run test && pnpm run test:maintenance && pnpm run check:gui && pnpm run test:gui",

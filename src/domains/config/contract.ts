@@ -19,4 +19,9 @@ export interface ConfigContract {
 		kind: ChangeKind,
 		listener: (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void,
 	): () => void;
+	/**
+	 * End a boot-time hold on watcher reloads and run the one reload a held
+	 * settings write left pending. A bundle created without a hold ignores it.
+	 */
+	releaseReloads?(): void;
 }

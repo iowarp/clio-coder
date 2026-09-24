@@ -60,9 +60,20 @@ export interface LoadResult {
 	stop(): Promise<void>;
 }
 
+export interface LoadDomainsOptions {
+	diagnostic?: (text: string) => void;
+	/**
+	 * Awaited before each domain is created. Interactive boot turns the event
+	 * loop here so the Stage 0 shell answers input between domain starts. A
+	 * rejection is a cancellation, not a domain failure: every domain already
+	 * started is stopped and the rejection propagates unchanged.
+	 */
+	beforeEach?: () => Promise<void>;
+}
+
 export async function loadDomains(
 	modules: ReadonlyArray<DomainModule>,
-	options: { diagnostic?: (text: string) => void } = {},
+	options: LoadDomainsOptions = {},
 ): Promise<LoadResult> {
 	const order = topoSort(modules);
 	const contracts = new Map<string, DomainContract>();
@@ -109,6 +120,14 @@ export async function loadDomains(
 	for (const name of order) {
 		const mod = modules.find((m) => m.manifest.name === name);
 		if (!mod) continue;
+		if (options.beforeEach) {
+			try {
+				await options.beforeEach();
+			} catch (cancellation) {
+				await stop();
+				throw cancellation;
+			}
+		}
 		try {
 			const bundle = await mod.createExtension(context);
 			// A rejected start may already own listeners or other resources.

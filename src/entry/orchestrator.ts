@@ -41,6 +41,7 @@ import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
 import { getTerminationCoordinator, resolveShutdownHookBudgetMs } from "../core/termination.js";
+import { yieldToEventLoop } from "../core/timers.js";
 import { captureProjectSurface, projectSurfaceTrustNotice } from "../core/workspace-trust.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { renderAgentCatalogSectionsFromSpecs } from "../domains/agents/catalog.js";
@@ -1200,12 +1201,24 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	};
 	const timer = new StartupTimer(
 		options.terminalLease
-			? (phase) => {
-					const line = formatBootTrace(phase);
+			? (phase, detail) => {
+					const line = formatBootTrace(phase, detail);
 					if (line) options.terminalLease?.deferDiagnostic("stderr", line);
 				}
 			: undefined,
 	);
+	// The Stage 0 shell answers the terminal only when the event loop turns.
+	// Boot yields at each phase boundary, so typing, submits, Ctrl+C, resize and
+	// signals are handled while Stage 1 hydrates. Once Ctrl+C or a signal closes
+	// the lease, hydration stops at the next boundary and the shutdown that
+	// closed the lease owns the exit.
+	const lease = options.terminalLease;
+	const bootPhaseBoundary = lease
+		? async (): Promise<void> => {
+				await yieldToEventLoop();
+				lease.abortSignal.throwIfAborted();
+			}
+		: undefined;
 	const bus = getSharedBus();
 	const termination = getTerminationCoordinator();
 	installBusTracer();
@@ -1285,6 +1298,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bootStderr(`[dispatch] task worktree recovery failed closed: ${err instanceof Error ? err.message : String(err)}\n`);
 		}
 	}
+	// The first turn since the orchestrator graph loaded.
+	await bootPhaseBoundary?.();
 
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
@@ -1305,7 +1320,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	const result = await loadDomains(
 		[
-			options.startupSettings ? createConfigDomainModule(options.startupSettings) : ConfigDomainModule,
+			options.startupSettings
+				? createConfigDomainModule(options.startupSettings, { holdReloads: bootPhaseBoundary !== undefined })
+				: ConfigDomainModule,
 			ExtensionsDomainModule,
 			PluginsDomainModule,
 			InteropDomainModule,
@@ -1364,7 +1381,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 			LifecycleDomainModule,
 		],
-		{ diagnostic: bootStderr },
+		{ diagnostic: bootStderr, ...(bootPhaseBoundary ? { beforeEach: bootPhaseBoundary } : {}) },
 	);
 	timer.mark(`domains loaded (${result.loaded.length})`);
 
@@ -1718,9 +1735,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bus.emit(BusChannels.ExtensionsReloaded, event);
 		},
 	});
+	await bootPhaseBoundary?.();
 	extensionReload.applyBoot();
 	middleware.registerHook(protectedArtifactsGuard);
 	bootHookNotices = false;
+	await bootPhaseBoundary?.();
 	termination.onDrain(() => hookReceiptLog.flush());
 	// Autonomy is hot-reloaded for interactive and headless admissions. ACP
 	// server prompts use the snapshot captured at session/new.
@@ -2494,6 +2513,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			getTurnConstraints: () => chat.currentTurnConstraints?.(),
 		}),
 	);
+	// No boundary from here to `lease.adopt`. The chat loop starts a target probe
+	// and a prewarm timer whose notices, like the lease diagnostics taken below,
+	// reach only subscribers the interactive application registers; a loop turn
+	// in between would deliver them to nobody.
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
 	const chat = createChatLoop({
@@ -2962,10 +2985,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(options.terminalLease
 			? {
 					terminalLease: options.terminalLease,
-					onHydratedFrameCommit: (_frameId: number | null, interactivity: BootInteractivity) => {
-						timer.mark("Stage 1 hydration");
+					onHydratedFrameCommit: (frameId: number | null, interactivity: BootInteractivity) => {
+						timer.mark("Stage 1 hydration", frameId === null ? undefined : `frameId=${frameId}`);
 						const line = formatBootTrace("Stage 0 input blocked", `max=${interactivity.inputBlockedMaxMs.toFixed(1)}ms`);
 						if (line) options.terminalLease?.deferDiagnostic("stderr", line);
+						// Every reload subscriber exists now; a settings write held
+						// during hydration reloads here.
+						config?.releaseReloads?.();
 					},
 				}
 			: { onFirstFrameCommit: () => timer.mark("first TUI paint") }),

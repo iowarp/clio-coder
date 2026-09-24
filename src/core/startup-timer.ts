@@ -15,13 +15,14 @@ export class StartupTimer {
 	private readonly start = performance.now();
 	private readonly marks: Mark[] = [];
 
-	constructor(private readonly trace: (phase: string) => void = traceBoot) {
+	constructor(private readonly trace: (phase: string, detail?: string) => void = traceBoot) {
 		this.trace("boot start");
 	}
 
-	mark(name: string): void {
+	/** `detail` reaches the trace line only; the report keeps phase names. */
+	mark(name: string, detail?: string): void {
 		this.marks.push({ name, at: performance.now() - this.start });
-		this.trace(name);
+		this.trace(name, detail);
 	}
 
 	snapshot(): { totalMs: number; marks: ReadonlyArray<Mark> } {
