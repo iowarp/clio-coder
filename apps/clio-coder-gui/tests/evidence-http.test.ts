@@ -29,7 +29,19 @@ test("evidence REST preserves all 40 artifacts, historical unknown, provenance a
 		assert.equal(new Set(visited).size, 40);
 		assert.equal(visited[0], "evidence-039");
 		assert.deepEqual(unknown, ["evidence-000"]);
+		await writeFile(
+			join(h.home.path, "data/evidence/evidence-039/tool-events.jsonl"),
+			[
+				{ source: "session-entry", confidence: "exact", resultPreview: "private event text" },
+				{ source: "audit-row", confidence: "best-effort" },
+				{ source: "receipt-aggregate" },
+			]
+				.map((row) => JSON.stringify(row))
+				.join("\n"),
+		);
 		const detail = await json(await h.request("/api/evidence/evidence-039"), EvidenceDetail);
+		assert.deepEqual(detail.attribution, { exact: 1, bestEffort: 1, unclassified: 1 });
+		assert.equal(JSON.stringify(detail).includes("private event text"), false);
 		assert.equal(detail.runs[0]?.summary.axes.artifactIntegrity, "verified");
 		assert.equal(detail.runs[0]?.summary.verdict, detail.verdict);
 		assert.equal(detail.gateDecisions.length, 1);

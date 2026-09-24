@@ -105,6 +105,7 @@ export const EvidenceDetail = Type.Object(
 		runs: Type.Array(Type.Object({ runId: Type.String(), status: record, summary: TrustSummary }, closed)),
 		provenance: Type.Array(Type.Object({ runId: Type.String(), view: record, lines: strings }, closed)),
 		gateDecisions: Type.Array(record),
+		attribution: Type.Object({ exact: Type.Number(), bestEffort: Type.Number(), unclassified: Type.Number() }, closed),
 	},
 	closed,
 );

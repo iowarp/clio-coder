@@ -15,8 +15,34 @@ const verdictText = {
 	grounded: "The receipt is intact and validation was observed.",
 	reviewed: "The receipt is intact and an independent review passed.",
 	compromised:
-		"A recorded integrity, validation, review, context or safety check did not hold. Read the findings before relying on this result.",
+		"At least one trust check failed or a validation claim lacked an observed command. The receipt seal may still be intact; read the six checks below.",
 };
+
+const trustChecks = [
+	{ key: "artifactIntegrity", label: "Receipt integrity", meaning: "Was the saved receipt verified against its seal?" },
+	{ key: "validationGrounding", label: "Validation", meaning: "Did an observed command support the claimed check?" },
+	{ key: "independentReview", label: "Independent review", meaning: "Did an independent reviewer check this result?" },
+	{ key: "contextProvenance", label: "Context", meaning: "Was the worker context recorded and valid?" },
+	{ key: "autonomyEnforcement", label: "Safety", meaning: "Did Clio enforce the worker safety boundary?" },
+	{ key: "completionEvidence", label: "Completion", meaning: "Is the completed work supported by evidence?" },
+] as const;
+
+function TrustGuide({ axes }: { axes?: Record<(typeof trustChecks)[number]["key"], string> }) {
+	return (
+		<details className="trace-panel">
+			<summary>How to read the six trust checks</summary>
+			<p>The verdict summarizes these checks; it is not a correctness score.</p>
+			<dl className="settings-list">
+				{trustChecks.map((check) => (
+					<div key={check.key}>
+						<dt>{check.label}</dt>
+						<dd>{axes ? `${axes[check.key]} · ${check.meaning}` : check.meaning}</dd>
+					</div>
+				))}
+			</dl>
+		</details>
+	);
+}
 function EvidenceActions({ client, initialRun = "" }: { client: Client; initialRun?: string }) {
 	const selection = useWorkspaceSelection(client);
 	const [runId, setRunId] = useState(initialRun);
@@ -116,6 +142,7 @@ export function EvidencePage({ client }: { client: Client }) {
 				See what supports a result, what was checked, and what remains uncertain. Reports reflect the records available when
 				they were collected.
 			</p>
+			<TrustGuide />
 			<EvidenceActions client={client} />
 			<div className="actions">
 				<button type="button" disabled={inventory.isFetching} onClick={() => void inventory.refetch()}>
@@ -179,6 +206,19 @@ export function EvidenceDetail({ client }: { client: Client }) {
 						<strong>{data.verdict}</strong> · Collected {data.overview.generatedAt}
 					</p>
 					<p>{verdictText[data.verdict]}</p>
+					<h2>Tool-event attribution</h2>
+					<p>Counts describe event rows in this collected bundle. Time-window links can overlap during concurrent runs.</p>
+					<div className="actions">
+						<span className="count" title="The source record carried an exact run link.">
+							Exact links {data.attribution.exact}
+						</span>
+						<span className="count" title="Clio linked these rows by time window; concurrent runs may overlap.">
+							Best effort links {data.attribution.bestEffort}
+						</span>
+						<span className="count" title="These tool-event rows contain no usable link confidence.">
+							Unclassified {data.attribution.unclassified}
+						</span>
+					</div>
 					{data.projection === "historical_format" && (
 						<PanelEmpty>
 							{emptyState.predatesSchema("bundle", "trust projection", "axes")} Recheck its original receipt to learn its
@@ -193,6 +233,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 							<h3>
 								{finding.tag} · {finding.severity}
 							</h3>
+							{finding.tag === "best-effort-link" && <span className="count">Best effort attribution</span>}
 							<p>{finding.message}</p>
 							{finding.runId && <Link to={`/fleet/dispatches/${finding.runId}`}>{finding.runId}</Link>}
 						</article>
@@ -205,6 +246,7 @@ export function EvidenceDetail({ client }: { client: Client }) {
 								<Link to={`/fleet/dispatches/${run.runId}`}>{run.runId}</Link> · {run.summary.verdict}
 							</h3>
 							<p>{run.summary.text}</p>
+							<TrustGuide axes={run.summary.axes} />
 							<details>
 								<summary>Authorities and artifact references</summary>
 								<Facts
