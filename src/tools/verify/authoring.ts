@@ -1,19 +1,9 @@
 import { randomUUID } from "node:crypto";
-import {
-	existsSync,
-	mkdirSync,
-	readFileSync,
-	realpathSync,
-	renameSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isMap, isSeq, parseDocument, stringify, type YAMLMap } from "yaml";
 import { resolveSafeCwd, SAFE_EXEC_DEFAULT_TIMEOUT_MS } from "../../core/safe-exec.js";
 import { parseTomlDocument, tomlTableAt } from "../../core/toml.js";
-import { isVerificationScriptName } from "../../core/verification-scripts.js";
 import { compareCodepoints } from "../../domains/evidence/ordering.js";
 import { loadValidationContract, VALIDATION_CONTRACT_MARKDOWN_PATH } from "../../domains/safety/validation-contract.js";
 import type { ToolResult } from "../registry.js";
@@ -28,29 +18,23 @@ import {
 	parseProjectVerifierCatalogText,
 } from "./catalog.js";
 import { verifyTool } from "./index.js";
+import {
+	cargoProposals,
+	cmakeProposals,
+	goProposals,
+	pythonProposals,
+	type RawProposal,
+	regularFileText,
+	shellLikeArgv,
+	slug,
+	type VerifierProvenance,
+	type VerifierSignalKind,
+} from "./toolchain.js";
+
+export type { VerifierProposalAuthority, VerifierProvenance, VerifierSignalKind } from "./toolchain.js";
+
 import { type NumericTolerance, normalizeNumericTolerance } from "./numeric.js";
 import { discoverDeclaredChecksAtRoot, discoverDeclaredProjectEntriesAtRoot } from "./scripts.js";
-
-export type VerifierProposalAuthority = "project-declared" | "toolchain-defined";
-
-export type VerifierSignalKind =
-	| "package-script"
-	| "project-catalog"
-	| "cargo"
-	| "cmake-preset"
-	| "python-runner"
-	| "just-recipe"
-	| "make-target"
-	| "go-module"
-	| "validation-contract"
-	| "manual-entry";
-
-export interface VerifierProvenance {
-	kind: VerifierSignalKind;
-	path: string;
-	detail: string;
-	authority: VerifierProposalAuthority;
-}
 
 export interface AuthoringCheck {
 	id: string;
@@ -187,18 +171,6 @@ export interface DeclaredProjectCommand {
 	provenance: VerifierProvenance;
 }
 
-interface RawProposal {
-	preferredId: string;
-	description: string;
-	command: string[];
-	cwd: string;
-	timeoutMs: number;
-	tags: string[];
-	provenance: VerifierProvenance;
-}
-
-const DECLARED_FILE_CAP_BYTES = 1024 * 1024;
-
 function manualEntryInstruction(): string {
 	return (
 		"No unambiguous declared command was found. Add one explicitly with " +
@@ -233,32 +205,6 @@ function kindFields(
 function relativePath(workspaceRoot: string, filePath: string): string {
 	const relative = path.relative(workspaceRoot, filePath);
 	return relative.length === 0 ? "." : relative.split(path.sep).join("/");
-}
-
-function regularFileText(filePath: string, workspaceRoot: string): string | null | Error {
-	if (!existsSync(filePath)) return null;
-	try {
-		const realRoot = realpathSync(workspaceRoot);
-		const realFilePath = realpathSync(filePath);
-		resolveSafeCwd(realFilePath, realRoot);
-		const stats = statSync(realFilePath);
-		if (!stats.isFile()) return new Error("path is not a regular file");
-		if (stats.size > DECLARED_FILE_CAP_BYTES) {
-			return new Error(`file exceeds the ${DECLARED_FILE_CAP_BYTES}-byte discovery cap`);
-		}
-		return readFileSync(realFilePath, "utf8");
-	} catch (error) {
-		return error instanceof Error ? error : new Error(String(error));
-	}
-}
-
-function slug(value: string, fallback: string): string {
-	const normalized = value
-		.toLowerCase()
-		.replace(/[^a-z0-9._:-]+/gu, "-")
-		.replace(/^[^a-z0-9]+/u, "")
-		.replace(/[-.:]+$/u, "");
-	return normalized.length > 0 ? normalized : fallback;
 }
 
 function boundedId(base: string, suffix = ""): string {
@@ -329,191 +275,6 @@ function projectedCheck(workspaceRoot: string, check: DeclaredCheck): AuthoringC
 	};
 }
 
-function cargoProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
-	const relative = "Cargo.toml";
-	const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
-	if (text === null) return [];
-	if (text instanceof Error) {
-		diagnostics.push(`${relative}: ${text.message}; Cargo discovery skipped.`);
-		return [];
-	}
-	const document = parseTomlDocument(text);
-	if (document === null) {
-		diagnostics.push(`${relative}: invalid TOML; Cargo discovery skipped.`);
-		return [];
-	}
-	const workspace = tomlTableAt(document, ["workspace"]) !== null;
-	const packageManifest = tomlTableAt(document, ["package"]) !== null;
-	if (!workspace && !packageManifest) {
-		diagnostics.push(`${relative}: no [package] or [workspace] declaration was found; Cargo discovery skipped.`);
-		return [];
-	}
-	return [
-		{
-			preferredId: "cargo-test",
-			description: workspace ? "Run the Cargo workspace tests" : "Run the Cargo package tests",
-			command: workspace ? ["cargo", "test", "--workspace"] : ["cargo", "test"],
-			cwd: ".",
-			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-			tags: ["rust", "test"],
-			provenance: {
-				kind: "cargo",
-				path: relative,
-				detail: workspace ? "Cargo [workspace] manifest" : "Cargo package manifest",
-				authority: "toolchain-defined",
-			},
-		},
-	];
-}
-
-function cmakeProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
-	const relative = "CMakePresets.json";
-	const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
-	if (text === null) return [];
-	if (text instanceof Error) {
-		diagnostics.push(`${relative}: ${text.message}; CMake preset discovery skipped.`);
-		return [];
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(text) as unknown;
-	} catch (error) {
-		diagnostics.push(`${relative}: invalid JSON (${error instanceof Error ? error.message : String(error)}).`);
-		return [];
-	}
-	if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-		diagnostics.push(`${relative}: root is not an object; CMake preset discovery skipped.`);
-		return [];
-	}
-	const record = parsed as Record<string, unknown>;
-	const proposals: RawProposal[] = [];
-	for (const [field, executable, args, label, tag] of [
-		["testPresets", "ctest", ["--preset"], "test", "test"],
-		["buildPresets", "cmake", ["--build", "--preset"], "build", "build"],
-	] as const) {
-		const presets = record[field];
-		if (!Array.isArray(presets)) continue;
-		for (const preset of presets) {
-			if (preset === null || typeof preset !== "object" || Array.isArray(preset)) continue;
-			const value = preset as Record<string, unknown>;
-			if (value.hidden === true || typeof value.name !== "string" || value.name.length === 0) continue;
-			const name = value.name;
-			proposals.push({
-				preferredId: `cmake-${label}-${slug(name, "preset")}`,
-				description: `Run CMake ${label} preset '${name}'`,
-				command: [executable, ...args, name],
-				cwd: ".",
-				timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-				tags: ["cmake", tag],
-				provenance: {
-					kind: "cmake-preset",
-					path: relative,
-					detail: `${field} entry '${name}'`,
-					authority: "toolchain-defined",
-				},
-			});
-		}
-	}
-	if (proposals.length === 0) diagnostics.push(`${relative}: no visible buildPresets or testPresets were declared.`);
-	return proposals;
-}
-
-function pythonProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
-	const proposals: RawProposal[] = [];
-	const pyprojectPath = "pyproject.toml";
-	const pyproject = regularFileText(path.join(workspaceRoot, pyprojectPath), workspaceRoot);
-	if (pyproject instanceof Error) diagnostics.push(`${pyprojectPath}: ${pyproject.message}; Python discovery skipped.`);
-	if (typeof pyproject === "string") {
-		const document = parseTomlDocument(pyproject);
-		if (document === null) {
-			diagnostics.push(`${pyprojectPath}: invalid TOML; Python discovery skipped.`);
-		} else {
-			for (const [path, section, module, id, description, tags] of [
-				[
-					["tool", "pytest", "ini_options"],
-					"tool.pytest.ini_options",
-					"pytest",
-					"python-pytest",
-					"Run the declared pytest suite",
-					["python", "test"],
-				],
-				[["tool", "tox"], "tool.tox", "tox", "python-tox", "Run the declared tox environments", ["python", "test"]],
-				[["tool", "nox"], "tool.nox", "nox", "python-nox", "Run the declared nox sessions", ["python", "test"]],
-			] as const) {
-				if (tomlTableAt(document, path) === null) continue;
-				proposals.push({
-					preferredId: id,
-					description,
-					command: ["python", "-m", module],
-					cwd: ".",
-					timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-					tags: [...tags],
-					provenance: {
-						kind: "python-runner",
-						path: pyprojectPath,
-						detail: `[${section}]`,
-						authority: "toolchain-defined",
-					},
-				});
-			}
-			for (const [path, section] of [
-				[["project", "scripts"], "project.scripts"],
-				[["tool", "poetry", "scripts"], "tool.poetry.scripts"],
-			] as const) {
-				const scripts = tomlTableAt(document, path);
-				if (scripts === null) continue;
-				for (const [name, target] of Object.entries(scripts)) {
-					if (typeof target !== "string" || !isVerificationScriptName(name)) continue;
-					proposals.push({
-						preferredId: `python-${slug(name, "check")}`,
-						description: `Run declared Python entry point '${name}'`,
-						command: [name],
-						cwd: ".",
-						timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-						tags: [slug(name.split(/[:.-]/u)[0] ?? "python", "python"), "python"],
-						provenance: {
-							kind: "python-runner",
-							path: pyprojectPath,
-							detail: `[${section}] entry '${name}'`,
-							authority: "project-declared",
-						},
-					});
-				}
-			}
-		}
-	}
-
-	for (const [relative, marker, module, id, description] of [
-		["pytest.ini", null, "pytest", "python-pytest", "Run the declared pytest suite"],
-		["tox.ini", null, "tox", "python-tox", "Run the declared tox environments"],
-		["noxfile.py", null, "nox", "python-nox", "Run the declared nox sessions"],
-		["setup.cfg", /^\s*\[tool:pytest\]/mu, "pytest", "python-pytest", "Run the declared pytest suite"],
-	] as const) {
-		const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
-		if (text === null) continue;
-		if (text instanceof Error) {
-			diagnostics.push(`${relative}: ${text.message}; Python discovery skipped.`);
-			continue;
-		}
-		if (marker !== null && !marker.test(text)) continue;
-		proposals.push({
-			preferredId: id,
-			description,
-			command: ["python", "-m", module],
-			cwd: ".",
-			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-			tags: ["python", "test"],
-			provenance: {
-				kind: "python-runner",
-				path: relative,
-				detail: `${module} configuration file`,
-				authority: "toolchain-defined",
-			},
-		});
-	}
-	return proposals;
-}
-
 /**
  * Discover exact invocation vectors from project declarations for fleet command
  * authoring. This shares the verifier authoring readers and provenance model,
@@ -564,106 +325,6 @@ export function discoverDeclaredProjectCommands(workspaceRoot = process.cwd()): 
 		entry.id = id;
 		return true;
 	});
-}
-
-function goProposals(workspaceRoot: string, diagnostics: string[]): RawProposal[] {
-	const relative = "go.mod";
-	const text = regularFileText(path.join(workspaceRoot, relative), workspaceRoot);
-	if (text === null) return [];
-	if (text instanceof Error) {
-		diagnostics.push(`${relative}: ${text.message}; Go discovery skipped.`);
-		return [];
-	}
-	if (!/^\s*module\s+\S+/mu.test(text)) {
-		diagnostics.push(`${relative}: no module directive was found; Go discovery skipped.`);
-		return [];
-	}
-	return [
-		{
-			preferredId: "go-test",
-			description: "Run all Go module tests",
-			command: ["go", "test", "./..."],
-			cwd: ".",
-			timeoutMs: SAFE_EXEC_DEFAULT_TIMEOUT_MS,
-			tags: ["go", "test"],
-			provenance: {
-				kind: "go-module",
-				path: relative,
-				detail: "Go module directive",
-				authority: "toolchain-defined",
-			},
-		},
-	];
-}
-
-function shellLikeArgv(command: string): string[] | Error {
-	const argv: string[] = [];
-	let token = "";
-	let quote: "single" | "double" | null = null;
-	let tokenStarted = false;
-	for (let index = 0; index < command.length; index += 1) {
-		const character = command[index] ?? "";
-		if (quote === "single") {
-			if (character === "'") quote = null;
-			else token += character;
-			tokenStarted = true;
-			continue;
-		}
-		if (quote === "double") {
-			if (character === '"') {
-				quote = null;
-				continue;
-			}
-			if (character === "\\") {
-				const next = command[index + 1];
-				if (next === undefined) return new Error("trailing escape");
-				token += next;
-				index += 1;
-			} else if (character === "$" || character === "`") {
-				return new Error(`shell expansion '${character}' is ambiguous`);
-			} else {
-				token += character;
-			}
-			tokenStarted = true;
-			continue;
-		}
-		if (/\s/u.test(character)) {
-			if (tokenStarted) {
-				argv.push(token);
-				token = "";
-				tokenStarted = false;
-			}
-			continue;
-		}
-		if (character === "'") {
-			quote = "single";
-			tokenStarted = true;
-			continue;
-		}
-		if (character === '"') {
-			quote = "double";
-			tokenStarted = true;
-			continue;
-		}
-		if (character === "\\") {
-			const next = command[index + 1];
-			if (next === undefined) return new Error("trailing escape");
-			token += next;
-			tokenStarted = true;
-			index += 1;
-			continue;
-		}
-		if ("|&;<>()`$\n\r".includes(character)) {
-			return new Error(`shell operator or expansion '${character}' is ambiguous`);
-		}
-		token += character;
-		tokenStarted = true;
-	}
-	if (quote !== null) return new Error(`unterminated ${quote}-quoted argument`);
-	if (tokenStarted) argv.push(token);
-	if (argv.length === 0) return new Error("empty command");
-	if ((argv[0] ?? "").includes("=")) return new Error("environment assignments are not argv executables");
-	return argv;
 }
 
 function validationPreferredId(argv: ReadonlyArray<string>): string {

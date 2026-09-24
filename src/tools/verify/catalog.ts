@@ -57,7 +57,8 @@ export interface DeclaredPerfBudget {
 	tolerance?: { relative?: number };
 }
 
-export type DeclaredCheckSourceKind = "package.json" | "project-catalog";
+/** `toolchain` checks are derived from build and CI files at call time and never written to a catalog. */
+export type DeclaredCheckSourceKind = "package.json" | "project-catalog" | "toolchain";
 
 export interface DeclaredCheckSourceRef {
 	kind: DeclaredCheckSourceKind;

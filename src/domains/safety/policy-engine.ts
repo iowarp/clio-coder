@@ -12,7 +12,7 @@ import {
 } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { type DeclaredCheck, loadProjectVerifierCatalog } from "../../tools/verify/catalog.js";
+import { resolveVerifyCall, type VerifyResolution } from "../../tools/verify/resolve.js";
 import {
 	type ActionClass,
 	type Classification,
@@ -301,8 +301,11 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 			const rawClassification = classify(call);
 			const command = commandArg(call.args);
 			const callCwd = cwdArg(call.args, cwd);
-			const catalogCheck = resolveVerifyCatalogCheck(call, cwd);
-			const catalogCommand = catalogCheck === null ? null : catalogCheck.command.join(" ");
+			const verifyCommand = resolveVerifyCommand(call, cwd, callCwd);
+			// Catalog and derived argv are scanned like a bash command string; a
+			// package script keeps the serialized-argument scan it always had.
+			const catalogCommand =
+				verifyCommand !== null && typeof verifyCommand.argv !== "string" ? verifyCommand.argv.join(" ") : null;
 			const scan = catalogCommand ?? damageControlScan(call);
 			const hit = scan ? matchSourcedRule(scan, sourcedRules) : null;
 			const classification = effectiveClassification(rawClassification, hit?.match);
@@ -533,39 +536,20 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 				return posture === "confirmed" ? allowDecision(base, input) : askDecision(base, input);
 			}
 
-			const packageCommand =
-				call.tool === ToolNames.Verify &&
-				catalogCheck === null &&
-				typeof call.args?.check === "string" &&
-				call.args.check !== "frontend"
-					? `npm run ${call.args.check}`
-					: null;
-			if (
-				(call.tool === ToolNames.Bash || catalogCheck !== null || packageCommand !== null) &&
-				classification.actionClass === "execute"
-			) {
+			// A verify call that resolves to a declared or derived check is admitted
+			// exactly as bash would admit its command: the autonomy mapping asks for an
+			// unrecognized command below full-auto and runs it at full-auto. A net-level
+			// confirm on every unrecognized verifier made verify strictly weaker than
+			// bash under yolo, so headless agents in non-Node repositories stopped
+			// testing instead of running the same command through bash.
+			if ((call.tool === ToolNames.Bash || verifyCommand !== null) && classification.actionClass === "execute") {
 				const bash = evaluateBashPolicy(
-					catalogCheck?.command ?? packageCommand ?? command ?? "",
-					catalogCheck === null ? callCwd : path.resolve(cwd, catalogCheck.cwd),
+					verifyCommand?.argv ?? command ?? "",
+					verifyCommand?.cwd ?? callCwd,
 					cwd,
 					posture,
 					projectPolicy,
 				);
-				if (
-					(catalogCheck !== null || packageCommand !== null) &&
-					bash.kind === "allow" &&
-					bash.execRecognition !== "recognized" &&
-					posture !== "confirmed"
-				) {
-					return askDecision(base, {
-						...bash,
-						reasonCode: "project-verifier-confirm",
-						reasons: [
-							...bash.reasons,
-							`Repository verifier requires confirmation or an approved safety declaration: ${catalogCommand ?? packageCommand}`,
-						],
-					});
-				}
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -1272,27 +1256,37 @@ function damageControlScan(call: ClassifierCall): string {
 }
 
 /**
- * The project-catalog check a verify call resolves to, or null for a listing,
- * the frontend validator, a package script, or an id the catalog does not
- * declare. The catalog is an argv vector the operator authored, but the file
- * sits in the workspace, so the engine reads it fresh on every verify call and
- * treats the declared argv exactly like a bash command string: it is what the
- * damage-control rules and the zero-access read guard scan. Recognition uses
- * canonical command policy with argv boundaries preserved. An unreadable or
- * invalid catalog resolves to null here and fails closed in the tool itself.
+ * The command a verify call runs, or null for a listing, the frontend
+ * validator, or a check string that resolves to nothing (the tool refuses
+ * those without running anything). Resolution is the tool's own
+ * resolveVerifyCall, read fresh on every call because the catalog and the
+ * build files sit in the workspace. Catalog and derived checks are argv
+ * vectors and keep their argument boundaries through recognition; a package
+ * script is judged as the `npm run <id>` string it runs. An unreadable or
+ * invalid catalog resolves to nothing here and fails closed in the tool.
  */
-function resolveVerifyCatalogCheck(call: ClassifierCall, workspaceRoot: string): DeclaredCheck | null {
+function resolveVerifyCommand(
+	call: ClassifierCall,
+	workspaceRoot: string,
+	callCwd: string,
+): { argv: string | ReadonlyArray<string>; cwd: string } | null {
 	if (call.tool !== ToolNames.Verify) return null;
-	const check = call.args?.check;
-	if (typeof check !== "string") return null;
-	const id = check.trim();
-	if (id.length === 0 || id === "frontend") return null;
+	let resolution: VerifyResolution;
 	try {
-		const catalog = loadProjectVerifierCatalog(workspaceRoot);
-		if (!catalog.ok || catalog.source === null) return null;
-		return catalog.source.checks.find((candidate) => candidate.id === id) ?? null;
+		resolution = resolveVerifyCall(workspaceRoot, call.args ?? {});
 	} catch {
+		// A resolver fault leaves the call to the tool, which reports it without running anything.
 		return null;
+	}
+	switch (resolution.kind) {
+		case "catalog":
+			return { argv: resolution.check.command, cwd: path.resolve(workspaceRoot, resolution.check.cwd) };
+		case "toolchain":
+			return { argv: resolution.argv, cwd: path.resolve(workspaceRoot, resolution.check.cwd) };
+		case "package":
+			return { argv: `npm run ${resolution.check.id}`, cwd: callCwd };
+		default:
+			return null;
 	}
 }
 
