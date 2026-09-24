@@ -684,6 +684,13 @@ export interface SlashCommandContext {
 	statesSkillSurface?: boolean;
 	listPrompts: () => ResourceList<PromptTemplate>;
 	/**
+	 * Prompt templates from the committed plugin snapshot, without re-verifying
+	 * plugin trees. For views that only name templates, such as /help and the
+	 * /extensions detail. Absent means {@link listPrompts}. Nothing that runs a
+	 * template or an extension command may read from it.
+	 */
+	listPromptsForDisplay?: () => ResourceList<PromptTemplate>;
+	/**
 	 * Resolve a `/name` against the loaded prompt templates. Absent when the host
 	 * wired no resources, in which case a command-shaped token that names no
 	 * builtin is simply not a command.

@@ -84,7 +84,7 @@ export interface InteractiveSlashSubmitExpansion {
 type SlashChat = Pick<ChatLoop, "clearSkillSurface" | "getSessionId" | "isStreaming" | "submit">;
 type SlashChatPanel = Pick<ChatPanel, "appendReplayBlock" | "appendUser">;
 type UserTurnStatus = import("./chat-panel.js").UserTurnStatus;
-type SlashResources = Pick<ResourcesContract, "prompts" | "expandPromptTemplate" | "reload">;
+type SlashResources = Pick<ResourcesContract, "prompts" | "promptsForDisplay" | "expandPromptTemplate" | "reload">;
 type SlashExtensions = Pick<ExtensionsContract, "list">;
 type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
@@ -470,6 +470,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			return doctorNotice(findings);
 		},
 		listPrompts: () => deps.resources?.prompts(cwd()) ?? { items: [], diagnostics: [] },
+		listPromptsForDisplay: () => deps.resources?.promptsForDisplay(cwd()) ?? { items: [], diagnostics: [] },
 		...(resources ? { expandPromptTemplate: (text: string) => resources.expandPromptTemplate(text, cwd()) } : {}),
 		openSkillsHub: deps.openSkillsHub,
 		clearSkillSurface: () => deps.chat.clearSkillSurface(),
