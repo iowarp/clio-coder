@@ -11,6 +11,20 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - Claude Code retains its pinned ACP bridge; Codex retains its pinned bridge and OpenCode uses its native ACP mode. The outbound ACP client now resolves explicitly named environment references and records task worktree edits. ACP receipts state that peer-owned tools may write without sending a permission request. Antigravity CLI and Pi have no built-in ACP recipe.
 - Added `/run --worktree` for a preserved task branch. Managed receipts record the branch and changed paths, or the Git-visible delta observed in the current checkout. OpenCode headless forwards only credential variables referenced by its local provider configuration and refuses authority levels its CLI cannot enforce.
 
+### Image input and vision
+
+- Image admission now uses the resolved route's live capability decision. An explicit deployment probe reporting no image input takes precedence over family defaults, while a target override remains authoritative. Later model hints preserve the probed result, and the optional vision sidecar probes its target before its first headless use.
+- A text-only route refuses new image turns before saving the turn or contacting the provider, with the selected route and available vision choices in the interactive notice and `IMAGE_INPUT_UNSUPPORTED` in headless runs. Managed Codex, Pi, and OpenCode CLI peers remain text-only because their bridges do not carry image blocks, even with a vision override.
+- When a text-only route follows an image-bearing session, Clio sends omission notes in place of historical image blocks and warns once; the saved session keeps the original images. The dashboard, model selector, and `/model` notices show the resolved image-input state.
+- An optional `fleet.profiles.vision` target can inspect attached images before a text-only chat turn or answer a `vision` tool question about a recent attachment or image file. The main model receives a bounded, attributed text observation; image bytes stay with the sidecar. Image input documentation now lists supported formats and fixed resize and size bounds.
+
+### Local models and routing
+
+- LM Studio targets can set context, parallelism, flash attention, and speculative draft load options globally or per model. A LiteLLM route with one declared LM Studio deployment can use the same profile while requests continue through its alias; Clio does not forward the gateway key upstream. A resident instance with reported settings that differ from the profile is reloaded, which can interrupt another client's use of that instance.
+- Clio records its LM Studio loads across processes and releases its earlier models before a profiled load on the same server. Live streams hold leases so another Clio process does not unload their model mid-request. Switching between models can now incur reload time.
+- Qwopus routes send their Qwen-family sampler settings for thinking on and off instead of relying on server presets. Mini's quant-suffixed gateway routes are reflected in the catalog and tests, and model labels are wide enough to distinguish them in the TUI.
+- An unknown dispatch node that matches a fleet profile now explains that node pins take `local` or a `fleet.nodes` id and points to profile selection.
+
 ### Project handbooks
 
 - A project handbook written to the 200-line guideline now preloads in full. The session cap rose from 8000 to 24000 UTF-16 units, so the 220-line cap binds first, and `context init` now sees all of an existing handbook it is asked to preserve.
@@ -36,6 +50,7 @@ All notable changes to Clio Coder are documented in this file. The format follow
 ### Build
 
 - Building from source now works on case-insensitive filesystems such as the macOS default. Four GUI logic modules were renamed so no module stem differs from its component's only by case, and a hygiene check rejects case-only path collisions (#397).
+- Biome's exclusions are anchored at the repository root, so a checkout inside `.clio-coder/worktrees` or `.claude/worktrees` can lint its own files while the parent checkout skips nested worktrees.
 
 ## 0.5.4 - 2026-09-23
 
