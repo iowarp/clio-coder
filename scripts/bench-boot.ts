@@ -5,9 +5,11 @@
  * home and a local stub target, starts typing the moment the Stage 0 editor
  * paints, and times each keystroke's echo. Stage 0 paints before hydration, but
  * a key echoes only when the event loop turns, so echo latency is what an
- * operator typing into a fresh session waits. The deferred boot trace supplies
- * the Stage 0 commit, the Stage 1 hydrated frame, and the longest loop block
- * between them.
+ * operator typing into a fresh session waits. Typing continues until the
+ * hydrated footer has been on screen for the settle window, so work deferred
+ * past the first hydrated frame still shows up in the echo numbers. The
+ * deferred boot trace supplies the Stage 0 commit, the Stage 1 hydrated frame,
+ * and the longest loop block between them.
  *
  * Timings are observations for a measurement campaign, never CI thresholds.
  * The deterministic fs-call gate lives in
@@ -25,8 +27,11 @@ import { parseArgs, stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 
 const ROOT = resolve(import.meta.dirname, "..");
-const CLI = join(ROOT, "dist", "cli", "index.js");
 const MARKER = "Z";
+/** The hydrated footer's idle status. Stage 0 paints no footer. */
+const HYDRATED = /\bReady\b/u;
+/** Wide enough that the whole marker run stays on one editor line. */
+const COLUMNS = 180;
 
 const argv = process.argv.slice(2);
 const { values } = parseArgs({
@@ -34,17 +39,23 @@ const { values } = parseArgs({
 	args: argv[0] === "--" ? argv.slice(1) : argv,
 	options: {
 		runs: { type: "string", default: "5" },
-		keys: { type: "string", default: "40" },
+		keys: { type: "string", default: "160" },
 		interval: { type: "string", default: "20" },
+		settle: { type: "string", default: "500" },
 		cwd: { type: "string", default: process.cwd() },
+		// Another build's entry, to compare two builds in one sitting.
+		cli: { type: "string", default: join(ROOT, "dist", "cli", "index.js") },
 		"user-plugins": { type: "string" },
 		"no-compile-cache": { type: "boolean", default: false },
 	},
 });
 const RUNS = Number(values.runs);
+/** A cap. Typing normally stops `SETTLE_MS` after the hydrated footer appears. */
 const KEYS = Number(values.keys);
 const INTERVAL_MS = Number(values.interval);
+const SETTLE_MS = Number(values.settle);
 const CWD = resolve(values.cwd);
+const CLI = resolve(values.cli);
 
 interface Run {
 	stage0Ms: number | undefined;
@@ -54,6 +65,7 @@ interface Run {
 	firstEchoMs: number | undefined;
 	maxEchoMs: number | undefined;
 	echoed: number;
+	typed: number;
 }
 
 function median(values: ReadonlyArray<number | undefined>): string {
@@ -105,7 +117,7 @@ function runOnce(home: string): Promise<Run> {
 	return new Promise((settle) => {
 		const started = performance.now();
 		const child = spawn(process.execPath, [CLI], {
-			cols: 100,
+			cols: COLUMNS,
 			rows: 30,
 			cwd: CWD,
 			name: "xterm-256color",
@@ -115,27 +127,38 @@ function runOnce(home: string): Promise<Run> {
 		const typedAt: number[] = [];
 		const echoedAt: number[] = [];
 		let typing: NodeJS.Timeout | undefined;
+		let typingDone = false;
+		let hydratedSeenAt: number | undefined;
 		let stopping = false;
+		const stopWhenEchoed = (): void => {
+			if (!typingDone || stopping || echoedAt.length < typedAt.length) return;
+			stopping = true;
+			setTimeout(() => child.kill("SIGTERM"), 300);
+		};
 		child.onData((data) => {
 			const now = performance.now() - started;
 			output += data;
+			const visible = stripVTControlCharacters(output.slice(-8000));
+			if (hydratedSeenAt === undefined && HYDRATED.test(visible)) hydratedSeenAt = now;
 			if (!typing && /Ask Clio/u.test(output)) {
 				typing = setInterval(() => {
-					if (typedAt.length >= KEYS) return clearInterval(typing);
-					typedAt.push(performance.now() - started);
+					const at = performance.now() - started;
+					if (typedAt.length >= KEYS || (hydratedSeenAt !== undefined && at - hydratedSeenAt >= SETTLE_MS)) {
+						clearInterval(typing);
+						typingDone = true;
+						stopWhenEchoed();
+						return;
+					}
+					typedAt.push(at);
 					child.write(MARKER);
 				}, INTERVAL_MS);
 			}
 			if (!typing) return;
 			// The editor redraws its whole line, so the longest marker run is the
 			// number of keys echoed so far.
-			const visible = stripVTControlCharacters(output.slice(-4000));
 			const longest = Math.max(0, ...(visible.match(new RegExp(`${MARKER}+`, "gu")) ?? []).map((run) => run.length));
 			while (echoedAt.length < Math.min(longest, typedAt.length)) echoedAt.push(now);
-			if (echoedAt.length >= KEYS && !stopping) {
-				stopping = true;
-				setTimeout(() => child.kill("SIGTERM"), 300);
-			}
+			stopWhenEchoed();
 		});
 		const watchdog = setTimeout(() => child.kill("SIGKILL"), 60_000);
 		child.onExit(() => {
@@ -154,12 +177,13 @@ function runOnce(home: string): Promise<Run> {
 				firstEchoMs: latencies[0],
 				maxEchoMs: latencies.length > 0 ? Math.max(...latencies) : undefined,
 				echoed: echoedAt.length,
+				typed: typedAt.length,
 			});
 		});
 	});
 }
 
-if (!existsSync(CLI)) throw new Error("dist/cli/index.js is missing; run pnpm build first");
+if (!existsSync(CLI)) throw new Error(`${CLI} is missing; run pnpm build first`);
 const server = createServer((request, response) => {
 	response.setHeader("content-type", "application/json");
 	if (request.url === "/v1/models") response.end(JSON.stringify({ data: [{ id: "bench-model" }] }));
@@ -173,8 +197,8 @@ await new Promise<void>((listening) => server.listen(0, "127.0.0.1", listening))
 const home = prepareHome(`http://127.0.0.1:${(server.address() as AddressInfo).port}`);
 try {
 	console.log(
-		`node ${process.version} ${process.platform}-${process.arch} cwd=${CWD} runs=${RUNS} keys=${KEYS}@${INTERVAL_MS}ms` +
-			` compile-cache=${values["no-compile-cache"] ? "disabled" : "default"}`,
+		`node ${process.version} ${process.platform}-${process.arch} cwd=${CWD} runs=${RUNS}` +
+			` keys<=${KEYS}@${INTERVAL_MS}ms settle=${SETTLE_MS}ms compile-cache=${values["no-compile-cache"] ? "disabled" : "default"}`,
 	);
 	// The first boot fills the compile cache and migrates settings; it is not reported.
 	await runOnce(home);
@@ -185,7 +209,7 @@ try {
 		console.log(
 			`run ${index + 1}: stage0=${run.stage0Ms ?? "-"}ms hydrated=${run.hydratedMs ?? "-"}ms` +
 				` input-blocked-max=${run.inputBlockedMaxMs ?? "-"}ms first-echo=${run.firstEchoMs?.toFixed(0) ?? "-"}ms` +
-				` max-echo=${run.maxEchoMs?.toFixed(0) ?? "-"}ms echoed=${run.echoed}/${KEYS}`,
+				` max-echo=${run.maxEchoMs?.toFixed(0) ?? "-"}ms echoed=${run.echoed}/${run.typed}`,
 		);
 	}
 	console.log(
