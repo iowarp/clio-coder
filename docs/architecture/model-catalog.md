@@ -40,6 +40,19 @@ dispatch canonicalizes requested model ids against the live catalog when one is
 available, so a short alias can resolve to the canonical live id before the
 worker spec and receipt are written.
 
+## Live provider lists and labeled fallbacks
+
+`resolveSupportedWireModels` in [configure-target.ts](../../src/cli/configure-target.ts)
+uses a successful live provider list in place of the static catalog. If the
+provider does not return models, the picker can use a cached snapshot or a
+catalog, and `inventoryNote` labels the fallback with its reason. Catalog
+rows say `provider catalog, not verified live: ...`; cached rows say `cache`.
+For providers that cannot list models live, including anthropic-max,
+openai-codex, and deepseek, the catalog is labeled as a catalog. Gemini's
+catalog is ordered by key; `preferredModelFor` does not treat the first
+catalog row as the provider's preferred model. Operators can still enter the
+wire ID documented by the provider when no list is available.
+
 ## Measuring models
 
 Each sealed receipt records the target, runtime, wire model, thinking level,
@@ -203,7 +216,7 @@ override the applicable setting.
 
 ### Output token limit interruption during reasoning and thinking replay
 
-When an LLM response is interrupted because it hits an output token limit during reasoning (`stopReason: "length"` / `finish_reason: "length"`), Clio applies a bounded request repair rather than universal across-the-board replay (`src/engine/apis/openai-completions.ts` `preserveInterruptedReasoning`):
+When an LLM response is interrupted because it hits an output token limit during reasoning (`stopReason: "length"` / `finish_reason: "length"`), Clio applies a bounded request repair rather than universal across-the-board replay ([openai-completions.ts](../../src/engine/apis/openai-completions.ts) `preserveInterruptedReasoning`):
 
 1. **Activation conditions**:
    - Thinking is active and `requiresThinkingAsText` is not configured.
@@ -219,7 +232,7 @@ When an LLM response is interrupted because it hits an output token limit during
    - Replay repair does not mutate saved session transcripts, original stop reasons, usage metrics, or thinking signatures.
    - If target model, provider, or API switches, or reasoning is turned off, this narrow request repair is skipped and existing conversion policy applies; opaque signatures and cross-model conversions retain their original provider semantics.
    - A per-response output-token cap does not cap total task tokens or guarantee completed task execution; existing repair and deadline limits continue to apply.
-   - Verified by contract suite `tests/extended/reasoning-length-replay.test.ts`.
+   - Verified by contract suite [reasoning-length-replay.test.ts](../../tests/extended/reasoning-length-replay.test.ts).
 
 ---
 

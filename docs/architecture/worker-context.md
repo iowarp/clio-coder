@@ -65,7 +65,7 @@ No extra LLM request is needed for capture or selection. Optional splice budgeti
 
 A worker is a separate process. It does not inherit the parent session's live
 settings; it reads layered settings from disk for its own working directory
-(`startWorkerRun`, `src/engine/worker-runtime.ts`). An unsaved `/settings` or
+(`startWorkerRun`, [worker-runtime.ts](../../src/engine/worker-runtime.ts)). An unsaved `/settings` or
 `/model` override in the parent session therefore does not reach it. Those
 resolved settings also govern the worker's observation caps and working-set
 eviction, not just its output cap. External vendor runtimes, such as Claude CLI
@@ -74,27 +74,27 @@ the native request adapter at all.
 
 Precedence for `chat.maxOutputTokens`, highest first: `.clio-coder/settings.local.yaml`,
 `.clio-coder/settings.yaml`, the user `settings.yaml`, then the compiled default.
-**The compiled default is `0`** (`src/core/defaults.ts`), which is not a token
+**The compiled default is `0`** ([defaults.ts](../../src/core/defaults.ts)), which is not a token
 count. `0` means "use the resolved model's advertised output limit", falling back
 to the product floor when the model does not advertise one.
 
-Both project layers are gated on workspace trust (`src/core/workspace-trust.ts`).
+Both project layers are gated on workspace trust ([workspace-trust.ts](../../src/core/workspace-trust.ts)).
 An untrusted project, a project whose configuration changed after trust was
 recorded, or a malformed settings file all drop the project layers and fall back
 to user settings or the compiled default. This is why a worker can legitimately
 run with a different cap than the project file appears to ask for.
 
 Whatever the resolved number is, it is a request, not a promise. `remainingContextMaxTokens`
-(`src/engine/apis/output-budget.ts`) clamps it to the model's advertised output
+([output-budget.ts](../../src/engine/apis/output-budget.ts)) clamps it to the model's advertised output
 limit and to the remaining context window, and each provider then maps the budget
 onto its own wire contract. On the OpenAI-compatible LiteLLM path,
 `reasoning_effort` is forwarded under `allowed_openai_params` when thinking
-effort is enabled (`src/engine/apis/openai-completions.ts`); that is a LiteLLM
+effort is enabled ([openai-completions.ts](../../src/engine/apis/openai-completions.ts)); that is a LiteLLM
 compatibility allowance and not a universal provider contract. A per-response cap
 also caps one response, not a task: it does not bound total task tokens or
 guarantee the task finishes.
 
-`tests/extended/worker-output-settings.test.ts` covers the eight combinations of
+[worker-output-settings.test.ts](../../tests/extended/worker-output-settings.test.ts) covers the eight combinations of
 trust state and layer (trusted project at low/medium/xhigh effort, trusted local
 override, untrusted, changed-after-trust, malformed, and user settings only).
 

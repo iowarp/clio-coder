@@ -2,7 +2,7 @@
 
 This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
 
-Source implementations: `src/engine/session.ts` and `src/domains/session/`.
+Source implementations: [session.ts](../../src/engine/session.ts) and `src/domains/session/`.
 
 ---
 
@@ -43,7 +43,7 @@ export interface ClioSessionMeta {
 }
 ```
 
-Format version `CURRENT_SESSION_FORMAT_VERSION = 4` (`src/engine/session.ts`) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.
+Format version `CURRENT_SESSION_FORMAT_VERSION = 4` ([session.ts](../../src/engine/session.ts)) is stamped on all sessions created since the working-set layer landed. Version 4 adds the `contextEviction` and `contextRecall` ledger kinds. `runMigrations` in `src/domains/session/migrations/` performs the one supported additive migration from version 3 to version 4. A missing version or a version below 3 names the remedy (remove the session directory), while a version above 4 says the session was written by a newer Clio and must not be read by this build.
 
 Session admission checks metadata format before any recovering ledger read. It
 validates replay entries before parking the current session. Required headerless
@@ -66,7 +66,7 @@ The first line of `current.jsonl` is the canonical session header:
 
 ### Entry Taxonomy
 
-Subsequent lines represent typed `SessionEntry` objects (`src/domains/session/entries.ts`):
+Subsequent lines represent typed `SessionEntry` objects ([entries.ts](../../src/domains/session/entries.ts)):
 
 1. **`message`**: User inputs, assistant responses, and tool calls/results. User turn payloads carry the prompt `text` sent to the model, and may carry `operatorText` (the raw input before scaffold expansion) and `displayText` (the literal editor input when a prompt template or command expansion replaced it, rendered by the session picker and transcript replay).
    ```typescript
@@ -118,7 +118,7 @@ export interface SessionTreeNode {
 
 When an operator branches or switches turns using `/tree`, the next append point changes without mutating or deleting historical entries in `current.jsonl`.
 
-The active path filter (`src/domains/session/tree/active-path.ts`) traces ancestry back from the active leaf:
+The active path filter ([active-path.ts](../../src/domains/session/tree/active-path.ts)) traces ancestry back from the active leaf:
 1. Resolves all `turnId` identifiers tracing back to the root `null` parent.
 2. Selects all ledger entries explicitly matching these `turnId`s.
 3. Both `/tree` (in-session switch) and `/fork` (new session branch) reconstruct the exact same state, strictly excluding any unanchored sidecar entries (`taskLedger`, routing notices, leafless `workerRun`) that appear after the chosen leaf's position.
@@ -151,7 +151,7 @@ still an invention, so it is dropped and listed in the review document under
 `dropped (not in this session's read ledger)`.
 
 Extracted decisions merge with the session's settled decision board
-(`src/domains/session/decision-board.ts`); board entries win on conflict and are
+([decision-board.ts](../../src/domains/session/decision-board.ts)); board entries win on conflict and are
 marked as settled. Superseded board decisions are history and do not travel.
 
 On accept, the new session opens with one `custom` entry of type `handoffSeed`
@@ -188,7 +188,7 @@ When resuming a session via `/resume` or a headless `clio-coder run --session <i
 
 ### Model-Facing Custom Entry Replay
 
-When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through `src/engine/messages.ts`. Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
+When resumed or forked session history is replayed to the model, compaction summaries, branch summaries, and operator bash executions use standardized user-role text through [messages.ts](../../src/engine/messages.ts). Working-set projection runs before compaction counting and summary serialization, while raw ledger entries remain intact. Tool results hidden by summaries are discoverable with `context(scope="recall")` and recoverable by exact ref through the normal observation envelope; older destructive logs cannot recover removed bytes.
 
 ## How new sessions, resume and fork differ in history and workspace
 
@@ -213,7 +213,7 @@ An explicit path ending in `.md` keeps the plain Markdown form: a heading, UTC e
 
 ## 7. Directory Handbooks and Project Overrides
 
-During session context loading, `loadProjectContextFiles` (`src/domains/context/clio-md.ts`) captures readable authored Markdown from root `CLIO-CODER.md` handbooks and directory-scoped `CLIO-CODER.override.md` files. Optional structured projections do not determine source acceptance. Init, refresh, and reset invalidate captured session inputs; refresh preserves handbook bytes. Preload is bounded to 8,000 UTF-16 units and 220 rendered lines, with exact safe prefixes and capability-aware omission notices naming source paths and line ranges. Captured-source hashes are retained separately in accounting/manifest metadata. Tools-disabled targets cannot retrieve omitted suffixes through session tools; ordinary reads retrieve current content through bounded text windows, with per-call byte limits, a 32 MiB exact line-count budget, and a separate 20 MB (20000000 bytes) image ceiling:
+During session context loading, `loadProjectContextFiles` ([clio-md.ts](../../src/domains/context/clio-md.ts)) captures readable authored Markdown from root `CLIO-CODER.md` handbooks and directory-scoped `CLIO-CODER.override.md` files. Optional structured projections do not determine source acceptance. Init, refresh, and reset invalidate captured session inputs; refresh preserves handbook bytes. Preload is bounded to 8,000 UTF-16 units and 220 rendered lines, with exact safe prefixes and capability-aware omission notices naming source paths and line ranges. Captured-source hashes are retained separately in accounting/manifest metadata. Tools-disabled targets cannot retrieve omitted suffixes through session tools; ordinary reads retrieve current content through bounded text windows, with per-call byte limits, a 32 MiB exact line-count budget, and a separate 20 MB (20000000 bytes) image ceiling:
 - An override handbook replaces inherited project instructions for its directory and all subdirectories, establishing an explicit subtree boundary.
 - Sibling directories remain unaffected.
 - Subdirectories within the subtree may supply narrower instructions with additional override files.
@@ -234,7 +234,7 @@ The interactive editor provides process-local prompt history via `Ctrl+P` (previ
 
 ## 9. Protected-Artifact Write-Ahead Journal
 
-To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal (`src/domains/session/protected-artifact-journal.ts`):
+To guarantee that protected artifacts and validation locks survive unexpected crashes between tool execution and ledger commitment, Clio Coder maintains a write-ahead journal ([protected-artifact-journal.ts](../../src/domains/session/protected-artifact-journal.ts)):
 
 - Location: `<stateDir>/protected-artifact-pending/<sessionKey>/<recordId>.json`
 - Lifecycle:
@@ -246,7 +246,7 @@ To guarantee that protected artifacts and validation locks survive unexpected cr
 
 ## 10. In-Session Task Board & Usage Accounting
 
-- **Task Board** (`src/domains/session/task-board.ts`): Maintains session task items as full `taskLedger` snapshots with `pending`, `active`, `completed`, `blocked`, and `cancelled` states. Stable board ids retain terminal board history; rows picked from the project operator inbox retain `origin: "user"` and `userTaskId` across `/resume`, `/fork`, `/view`, and evidence export. The project-scoped inbox itself lives at `.clio-coder/user-tasks.json`, outside the session directory.
-- **Decision Board** (`src/domains/session/decision-board.ts`): Appends one branch-anchored `decisionLedger` snapshot when an `ask_user` interview completes or is cancelled. Superseding or correcting a value appends a new snapshot, preserving the earlier value and the operator-authored revision trail.
-- **Usage Accounting** (`src/domains/session/usage.ts`): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.
+- **Task Board** ([task-board.ts](../../src/domains/session/task-board.ts)): Maintains session task items as full `taskLedger` snapshots with `pending`, `active`, `completed`, `blocked`, and `cancelled` states. Stable board ids retain terminal board history; rows picked from the project operator inbox retain `origin: "user"` and `userTaskId` across `/resume`, `/fork`, `/view`, and evidence export. The project-scoped inbox itself lives at `.clio-coder/user-tasks.json`, outside the session directory.
+- **Decision Board** ([decision-board.ts](../../src/domains/session/decision-board.ts)): Appends one branch-anchored `decisionLedger` snapshot when an `ask_user` interview completes or is cancelled. Superseding or correcting a value appends a new snapshot, preserving the earlier value and the operator-authored revision trail.
+- **Usage Accounting** ([usage.ts](../../src/domains/session/usage.ts)): Aggregates session token counts across input, output, cache read, cache write, and reasoning tokens. Anchors against provider-reported totals on settled turns.
 - **Aborted Turn Persistence**: When a turn is interrupted by `Ctrl+C` or a SIGINT signal, partial assistant output and completed tool executions are committed to `current.jsonl` with `interrupted: true` before yielding the prompt.

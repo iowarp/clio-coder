@@ -10,10 +10,10 @@ durable instants, but it does not impose one clock primitive on every module.
 
 | Fact | Current practice | Representative sources |
 | --- | --- | --- |
-| Process-local elapsed span | Use a monotonic source such as `performance.now()` or `process.hrtime.bigint()` when the start and finish occur in one process. | `src/domains/dispatch/heartbeat.ts`, `src/domains/dispatch/code-step.ts`, `src/core/startup-timer.ts` |
+| Process-local elapsed span | Use a monotonic source such as `performance.now()` or `process.hrtime.bigint()` when the start and finish occur in one process. | [heartbeat.ts](../../src/domains/dispatch/heartbeat.ts), [code-step.ts](../../src/domains/dispatch/code-step.ts), [startup-timer.ts](../../src/core/startup-timer.ts) |
 | Durable or cross-process instant | Store epoch milliseconds or canonical UTC from `new Date(...).toISOString()`. | Session entries, receipts, dispatch rows, audit rows |
-| Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | `src/core/state-file-lock.ts`, dispatch admission and recovery |
-| Concurrent ordering | Prefer an explicit sequence or store order when the protocol supplies one; do not invent ordering from close timestamps. | `src/domains/dispatch/agent-ledger-store.ts`, `src/domains/dispatch/execution-scheduler.ts` |
+| Persisted expiry, lock age, or restart-visible deadline | Some owners intentionally compare `Date.now()` values because the fact must survive a process boundary or is derived from filesystem metadata. | [state-file-lock.ts](../../src/core/state-file-lock.ts), dispatch admission and recovery |
+| Concurrent ordering | Prefer an explicit sequence or store order when the protocol supplies one; do not invent ordering from close timestamps. | [agent-ledger-store.ts](../../src/domains/dispatch/agent-ledger-store.ts), [execution-scheduler.ts](../../src/domains/dispatch/execution-scheduler.ts) |
 
 This means neither `performance.now()` nor `Date.now()` is universally correct.
 A monotonic value has meaning only within its clock origin and is the right
@@ -24,7 +24,7 @@ mtime age, or a record another process must read after restart.
 ### Combined anchor and span pattern
 
 When a record needs both a human-readable anchor and an accurate in-process
-duration, `src/domains/dispatch/code-step.ts` uses one wall anchor and one
+duration, [code-step.ts](../../src/domains/dispatch/code-step.ts) uses one wall anchor and one
 monotonic span:
 
 ```ts
@@ -43,7 +43,7 @@ the wall clock changes during the operation.
 
 Never subtract process-local monotonic values from different processes or
 hosts. A restart has no shared monotonic origin with the worker it recovers;
-`src/domains/dispatch/orphan-recovery.ts` first adjudicates the host-scoped
+[orphan-recovery.ts](../../src/domains/dispatch/orphan-recovery.ts) first adjudicates the host-scoped
 process identity and then uses the persisted heartbeat only as a display and
 evidence bound. Transport protocols that need a durable anchor and live
 liveness carry both. `HeartbeatStamp.current` is the wall-clock instant, while
@@ -72,7 +72,7 @@ Durable and wire timestamps use canonical ISO-8601 UTC strings produced by
 display strings do not belong in persisted models.
 
 Operator-facing conversion is centralized in
-`src/interactive/format-time.ts` for the surfaces that display session and
+[format-time.ts](../../src/interactive/format-time.ts) for the surfaces that display session and
 message instants:
 
 | Function | Output | Purpose |
@@ -90,7 +90,7 @@ structured logs, session records, and receipts bypass these formatters.
 ## 3. Receipt and audit integrity
 
 Persisted receipt fields such as `startedAt` and `endedAt` participate in the
-integrity digest owned by `src/domains/dispatch/receipt-integrity.ts`. Timestamp
+integrity digest owned by [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts). Timestamp
 normalization and duration derivation must finish before sealing. A sealed
 receipt must not be rewritten merely to make its clocks look tidier.
 

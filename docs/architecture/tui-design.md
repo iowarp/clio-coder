@@ -1,6 +1,8 @@
 # Clio TUI Design System
 
-This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior across [src/interactive/](../../src/interactive/).
+`ClioEditor` in [clio-editor.ts](../../src/interactive/clio-editor.ts) owns composer editing. The [commands and modes guide](../guide/commands-and-modes.md) lists operator controls.
+
+This document is the reference specification for the Clio Coder TUI visual layout, styling, and behavior across [src/interactive/](../../src/interactive/interactive-shell.ts).
 
 The governing architectural principle: **the user reads state from color, structure from frames, and identity from brand marks.** Everything that is not state or structure remains visually quiet.
 
@@ -187,6 +189,6 @@ Every transcript row follows a rigid 2-column gutter format:
 | Theme & Tokens | [tokens.ts](../../src/interactive/theme/tokens.ts) | `tokens`, `ColorToken`, `themeTokenHex` |
 | Glyph Constants | [glyphs.ts](../../src/interactive/theme/glyphs.ts) | `glyphs`, `GlyphName` |
 | Welcome Dashboard | [welcome-dashboard.ts](../../src/interactive/welcome-dashboard.ts) | `buildWelcomeDashboardLines` |
-| Composer Rail | [composer.ts](../../src/interactive/composer.ts) | `ClioEditor`, `EditorRail` |
-| Transcript Presenter | [transcript.ts](../../src/interactive/transcript.ts) | `renderTranscript`, `GutterMark` |
-| Overlays & Boards | [overlays/](../../src/interactive/overlays/) | `SettingsOverlay`, `ViewOverlay`, `TasksOverlay` |
+| Composer | [clio-editor.ts](../../src/interactive/clio-editor.ts) | `ClioEditor` |
+| Session transcript | [session-transcript.ts](../../src/interactive/session-transcript.ts) | `createSessionTranscript` |
+| Permission overlay | [permission-overlay.ts](../../src/interactive/permission-overlay.ts) | Permission presentation |

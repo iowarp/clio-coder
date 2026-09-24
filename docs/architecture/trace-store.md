@@ -100,7 +100,7 @@ clio-coder trace sql <SELECT query> [--db PATH]
 
 `clio-coder trace --help` and every subcommand `--help` print usage and exit with code 0.
 
-`trace code-steps` is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so `src/domains/dispatch/code-step-store.ts` writes its `CodeStepRecord` to `<stateDir>/code-steps/<rootId>/<runId>.json` instead of fabricating route rows in the ledger. The command reads those files back oldest first, prints the record verbatim under `--json`, and treats an absent root directory as the empty state with exit 0. `--db` is ignored.
+`trace code-steps` is the one subcommand that does not read the mirror. A deterministic fleet code step is a subprocess, not a model run, so [code-step-store.ts](../../src/domains/dispatch/code-step-store.ts) writes its `CodeStepRecord` to `<stateDir>/code-steps/<rootId>/<runId>.json` instead of fabricating route rows in the ledger. The command reads those files back oldest first, prints the record verbatim under `--json`, and treats an absent root directory as the empty state with exit 0. `--db` is ignored.
 
 ### Database Resolution and Error Handling
 

@@ -5,7 +5,7 @@ barrel-only import convention. No code moved as a result of this document. It ex
 later split is argued from invariants rather than from file counts.
 
 Counts verified against the current tree: 85 TypeScript files in
-`src/domains/dispatch/` and a 199-line barrel at `src/domains/dispatch/index.ts`.
+`src/domains/dispatch/` and a 199-line barrel at [index.ts](../../src/domains/dispatch/index.ts).
 
 ---
 
@@ -84,11 +84,11 @@ The evidence that decides it:
   barrel imports. Direct subpath import is the majority pattern by roughly six
   to one, not an exception to a rule.
 - All six enforced boundary rules
-  (`tests/boundaries/check-boundaries.ts`) constrain dependency **direction**:
+  ([check-boundaries.ts](../../tests/boundaries/check-boundaries.ts)) constrain dependency **direction**:
   who may depend on whom. Not one constrains import **form**. There is no rule
   to be half-consistent with.
-- `src/domains/dispatch/execution-plan.ts` imports `AgentAutomationAuthority`
-  from `../agents/spec.js`, and `src/domains/agents/index.ts` does not export
+- [execution-plan.ts](../../src/domains/dispatch/execution-plan.ts) imports `AgentAutomationAuthority`
+  from `../agents/spec.js`, and [index.ts](../../src/domains/agents/index.ts) does not export
   it. A barrel-only rule would have to widen the agents barrel for no reason but
   import style.
 

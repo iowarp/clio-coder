@@ -2,7 +2,7 @@
 
 The working set is the part of the session ledger the model actually receives on the next request. When context pressure crosses `context.compaction.threshold`, Clio narrows that view before it considers summarizing anything: selected tool-result bodies and closed-turn thinking blocks stop being replayed, and a one-line marker takes each body's place. Nothing is deleted. The ledger keeps every byte the tools produced, the transcript keeps showing them, and the model can ask for any evicted body back by ref.
 
-Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in `src/domains/session/entries.ts`, and the compaction stage in `src/interactive/turn-context.ts` (`runAutoCompact`).
+Source of truth is `src/domains/context/working-set/` (`contract.ts`, `fold.ts`, `project.ts`, `marker.ts`, `protect.ts`, `engine.ts`, `recall.ts`, `policies/`), the ledger records in [entries.ts](../../src/domains/session/entries.ts), and the compaction stage in [turn-context.ts](../../src/interactive/turn-context.ts) (`runAutoCompact`).
 
 > [!WARNING]
 > This is an experimental community alpha surface. The default policy is `structural-v1`; `age-horizon` preserves the old age-based selection except for the current low-yield token floor and stays available.
@@ -35,7 +35,7 @@ Usage anchors recorded before an eviction described a longer prompt than the mod
 
 ## Ledger records and format v4
 
-Two entry kinds carry the layer, both defined in `src/domains/session/entries.ts`:
+Two entry kinds carry the layer, both defined in [entries.ts](../../src/domains/session/entries.ts):
 
 | Kind | Fields | Meaning |
 | --- | --- | --- |
@@ -44,13 +44,13 @@ Two entry kinds carry the layer, both defined in `src/domains/session/entries.ts
 
 `reason` is one of `superseded_read`, `stale_after_mutation`, `listing_consumed`, `failure_resolved`, `thinking_turn_closed`, `age_horizon`, `operator`. A `ref` is the `turnId` of the ledger entry that holds the unit: for a `tool_result` message the unit is the result body, and for an `assistant` message it is every thinking block the message carries. Per-block eviction is deliberately not modelled.
 
-Adding those kinds bumps the session format to version 4 (`CURRENT_SESSION_FORMAT_VERSION = 4` in `src/engine/session.ts`). The bump is additive: no existing entry kind changes shape, so a version 3 session migrates to 4 in place when Clio opens it and no entry is rewritten. `runMigrations` refuses only what it cannot read, a session written by a newer build, with "upgrade clio-coder to resume this session". The bump is still one-way for the operator: Clio 0.3.3 does not know these kinds and cannot open a session this release wrote.
+Adding those kinds bumps the session format to version 4 (`CURRENT_SESSION_FORMAT_VERSION = 4` in [session.ts](../../src/engine/session.ts)). The bump is additive: no existing entry kind changes shape, so a version 3 session migrates to 4 in place when Clio opens it and no entry is rewritten. `runMigrations` refuses only what it cannot read, a session written by a newer build, with "upgrade clio-coder to resume this session". The bump is still one-way for the operator: Clio 0.3.3 does not know these kinds and cannot open a session this release wrote.
 
 ## The marker contract
 
 A marker is one line, its fields are in fixed order, and it carries no timestamp and no counter. That is not cosmetic. The marker is persisted inside the `contextEviction` entry and replayed on every subsequent request, so a marker whose bytes drifted between renders would cold-start the provider prefix cache on a turn that evicted nothing new. It would also make two replays of the same recorded ledger disagree.
 
-Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. `path` is the one file the result was about: `details.paths` when the tool recorded exactly one (`edit`, `write`, `artifact`), otherwise the `path` argument of the call as the model wrote it, which is how a `read` marker names its file. Real output from `renderMarker` in `src/domains/context/working-set/marker.ts`:
+Field order is `ref`, `reason`, `by`, `tool`, `path`, `size`, `offload`, `recall`, then the body tail. Undefined fields are omitted rather than rendered empty. `path` is the one file the result was about: `details.paths` when the tool recorded exactly one (`edit`, `write`, `artifact`), otherwise the `path` argument of the call as the model wrote it, which is how a `read` marker names its file. Real output from `renderMarker` in [marker.ts](../../src/domains/context/working-set/marker.ts):
 
 ```text
 [evicted ref=0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3 reason=stale_after_mutation by=0198f3c2-9b02-7f55-8e10-6d21ac9e4471 tool=read path=src/domains/context/working-set/engine.ts size=41 lines/3.8KB recall=context(scope="recall", ref="0198f3c2-7a10-7c31-9d44-2b0c5f1e88a3") preview="export function planEviction(policy: WorkingSetPolicy, input: PolicyInput): EvictionPlan | null { export function planEv"]

@@ -2,7 +2,7 @@
 
 Clio Coder keeps the model-facing envelope stable and moves enforcement into the runtime registry and safety policy.
 
-Source of truth: `src/core/tool-names.ts`, `src/tools/agent-tools.ts`, `src/tools/bootstrap.ts`, `src/tools/policy.ts`, `src/tools/observation.ts`, `src/tools/ignore-policy.ts`, and the per-tool modules under `src/tools/**`.
+Source of truth: [tool-names.ts](../../src/core/tool-names.ts), [agent-tools.ts](../../src/tools/agent-tools.ts), [bootstrap.ts](../../src/tools/bootstrap.ts), [policy.ts](../../src/tools/policy.ts), [observation.ts](../../src/tools/observation.ts), [ignore-policy.ts](../../src/tools/ignore-policy.ts), and the per-tool modules under `src/tools/**`.
 
 ## Typed composition and cache identity
 
@@ -11,7 +11,7 @@ version-2 compile identity hashes the target id, runtime id, wire model id,
 autonomy, session id, working directory, sorted working-context paths, context
 window source, prompt-input epoch, resolved session inputs, and the exact
 attached tool-schema bytes. `mainPromptCacheIdentity` in
-`src/interactive/prompt-cache-identity.ts` owns that list.
+[prompt-cache-identity.ts](../../src/interactive/prompt-cache-identity.ts) owns that list.
 
 The compiled prompt is reused byte-for-byte when the complete identity is unchanged. Host-supplied turn constraints and ready-skill counts are part of the resolved session inputs, so changing them recompiles the appropriate conditional sections. Handbook source bytes and prompt inputs are captured per session, so ordinary recompilation does not silently reload edited files. Init, refresh, and reset invalidate the session snapshot and prompt cache, including partial-write failure paths; config hot-reload also invalidates inputs. Path-scoped rules can recompile when a matching file enters working context. When recompilation changes the text, the ledger records `promptRecompiled` with previous hash, new hash, and token estimate. The bounded handbook preload retains exact safe prefixes; captured-source hashes belong to its accounting/manifest metadata. Model-facing omission notices identify source paths and line ranges, and later filesystem retrieval reads current bytes.
 
@@ -21,7 +21,7 @@ The immutable prefix contains identity and the constitutional operating contract
 
 The remaining layers contain conditional role guidance, safety, the factual tool inventory and admitted hints, fleet information, retrieval hints, captured project context, harness-awareness, memory, runtime, and customization fragments. Current task scope renders last. Memory and effective-context-window changes preserve the preceding bytes. A changed tool surface or conditional role layer invalidates from its first changed byte; a stable-prefix hash is a reuse candidate, not a claim that the backend actually reused KV state.
 
-`TurnConstraints` comes from `src/core/turn-constraints.ts`; the compiler shares `turnAllowsTool` with admission. `mode` is an explicit host workflow switch (`answer`, `proposal`, or `change`), never inferred from English and never an authorization grant. Answers omit delegation/fleet workflows and validation pressure. Proposals omit implementation validation and task-board hints and state that implementation remains blocked. Tool allowlists suppress forbidden capability guidance, including secondary gateway calls; the Direct tools line still describes the actual attached schemas. No-delegation and disabled skills remove their associated instructions. Unknown inputs retain the ordinary policy. This is a typed compiler, with a few fragment substitutions, not a general template language.
+`TurnConstraints` comes from [turn-constraints.ts](../../src/core/turn-constraints.ts); the compiler shares `turnAllowsTool` with admission. `mode` is an explicit host workflow switch (`answer`, `proposal`, or `change`), never inferred from English and never an authorization grant. Answers omit delegation/fleet workflows and validation pressure. Proposals omit implementation validation and task-board hints and state that implementation remains blocked. Tool allowlists suppress forbidden capability guidance, including secondary gateway calls; the Direct tools line still describes the actual attached schemas. No-delegation and disabled skills remove their associated instructions. Unknown inputs retain the ordinary policy. This is a typed compiler, with a few fragment substitutions, not a general template language.
 
 The composition root snapshots the ready-skill count by workspace, prompt-source epoch, trust/discovery settings, and explicit skill paths, sharing it with the reminder rather than rescanning files on each compile check. Ready-skill count zero omits activation instructions. The once-per-session skills reminder requires a ready model-visible skill; marketplace entries alone do not arm it. Answer/proposal modes, disabled skills, and tool restrictions suppress both the reminder and its suggestion-wait continuation. When enabled, discovery is conditional on a useful workflow rather than a mandatory first step. Explicit skill requests continue through the existing activation/admission channel.
 
@@ -29,7 +29,7 @@ Native Pi 0.87.1 transcript semantics remain unchanged. Warming and actual reque
 
 `Context window: N` is the window Clio budgets this turn against. It is a
 resolved figure, not proof of backend capacity: `contextWindowSource`
-(`src/domains/providers/runtime-resolution.ts`) records which layer answered, and
+([runtime-resolution.ts](../../src/domains/providers/runtime-resolution.ts)) records which layer answered, and
 the answer may be `loaded`, `probe`, `target-override`, `catalog`, `model-hint`,
 `descriptor-default`, or `unknown`. Only the first two rest on anything observed.
 
@@ -43,7 +43,7 @@ Each prompt-manifest record carries that window and the layer that answered it
 layout itself, so a recompile whose only cause was the window moving is explained
 by the record rather than inferred.
 
-`PROMPT_MANIFEST_VERSION` (`src/domains/session/prompt-manifest.ts`) is `3` for the typed layer layout and separate harness-awareness section. Version 2 recorded the earlier stable-prefix ordering. The field is additive: a record written by 0.3.8 carries no `version` and reads back as version 1, so a `prompt-manifest.jsonl` from an older session still parses. The rule for the field is that it tracks the layout rather than the inputs. Bump it when the compiled text moves for a reason other than a changed fragment, a changed tool surface, or a changed setting, so that a resumed session has the version in hand to explain the single `promptRecompiled` entry its first compile writes.
+`PROMPT_MANIFEST_VERSION` ([prompt-manifest.ts](../../src/domains/session/prompt-manifest.ts)) is `3` for the typed layer layout and separate harness-awareness section. Version 2 recorded the earlier stable-prefix ordering. The field is additive: a record written by 0.3.8 carries no `version` and reads back as version 1, so a `prompt-manifest.jsonl` from an older session still parses. The rule for the field is that it tracks the layout rather than the inputs. Bump it when the compiled text moves for a reason other than a changed fragment, a changed tool surface, or a changed setting, so that a resumed session has the version in hand to explain the single `promptRecompiled` entry its first compile writes.
 
 ### What not to add to the prefix
 
@@ -111,8 +111,8 @@ In addition to project root `CLIO-CODER.md` handbooks, Clio supports directory-s
 
 The Tool Contract section of the prompt renders a fixed set of base lines plus
 one optional guidance sentence per tool, sourced from the tool registry
-(`ToolMetadata.promptHint` in `src/tools/registry.ts`, assigned in
-`src/tools/bootstrap.ts`).
+(`ToolMetadata.promptHint` in [registry.ts](../../src/tools/registry.ts), assigned in
+[bootstrap.ts](../../src/tools/bootstrap.ts)).
 
 The base lines cover the complete-surface rule, the harness model (direct tools,
 fleet workers, skills as distinct capability sets), the capability-inventory
@@ -164,9 +164,9 @@ prompt contract tests and a CHANGELOG note.
 
 ## One tool surface per session
 
-For tool-capable providers, Clio attaches only the admitted direct registry projection as the session tool surface. Gateway capabilities remain registered but carry schemas only in discovery results. The list is deterministic and sorted through the worker-tool resolver (`resolveAgentTools` in `src/tools/agent-tools.ts`), so the serialized schemas stay byte-identical on every submit. The schema handed to the agent loop is `wireParameterSchema(spec.parameters)`: a copy with every `~`-prefixed key removed, because TypeBox 1.x stamps string-keyed markers such as `~unsafe` and `~optional` on the schemas it builds and, unlike the older symbol keys, those survive JSON serialization and reach the model as properties. Validation is unaffected (`Value.Check` answers identically with and without them) and the registry keeps the original object. `src/tools/agent-tools.ts` is the single agent-tool adapter across the codebase. Both the orchestrator session and worker subprocesses resolve their tool set through the same `effectiveToolNames` narrowing function, ensuring that the attested signature and runtime surface cannot diverge.
+For tool-capable providers, Clio attaches only the admitted direct registry projection as the session tool surface. Gateway capabilities remain registered but carry schemas only in discovery results. The list is deterministic and sorted through the worker-tool resolver (`resolveAgentTools` in [agent-tools.ts](../../src/tools/agent-tools.ts)), so the serialized schemas stay byte-identical on every submit. The schema handed to the agent loop is `wireParameterSchema(spec.parameters)`: a copy with every `~`-prefixed key removed, because TypeBox 1.x stamps string-keyed markers such as `~unsafe` and `~optional` on the schemas it builds and, unlike the older symbol keys, those survive JSON serialization and reach the model as properties. Validation is unaffected (`Value.Check` answers identically with and without them) and the registry keeps the original object. `src/tools/agent-tools.ts` is the single agent-tool adapter across the codebase. Both the orchestrator session and worker subprocesses resolve their tool set through the same `effectiveToolNames` narrowing function, ensuring that the attested signature and runtime surface cannot diverge.
 
-Tools are keyed strictly by the canonical `ToolName` union defined in `src/core/tool-names.ts` with no alias table. Pure and idempotent `prepareArguments` normalizers defined on `ToolSpec` serve as the sole leniency layer for coercing legacy or weak-model parameter formats.
+Tools are keyed strictly by the canonical `ToolName` union defined in [tool-names.ts](../../src/core/tool-names.ts) with no alias table. Pure and idempotent `prepareArguments` normalizers defined on `ToolSpec` serve as the sole leniency layer for coercing legacy or weak-model parameter formats.
 
 Tool visibility is not a per-turn hinting system. Pending-skill policy, ask-user policy, Bash policy, path policy, protected artifacts, dispatch admission, middleware, and the autonomy mapping are enforced when a tool is invoked. The `autonomy` level is applied at registry admission after the safety net passes a call; the safety prompt fragment mirrors that enforced matrix as guidance to the model. Prompt text and provider schemas do not bypass the registry.
 
@@ -187,13 +187,13 @@ Project context, memory, bounded dispatch briefing, pipeline input, the assigned
 The canonical builtin catalog contains 32 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
-`src/tools/policy.ts` asserts these invariants at bootstrap, so drift between
+[policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
 the plane design, the safety classifier, and the registered specs fails loudly
 instead of shipping a surface that behaves differently from what the policy
 engine assumes.
 
 Every builtin also names the contract tests that exercise it, in the
-`TOOL_CONTRACT_TESTS` map in `scripts/check-hygiene.ts`. The map is keyed by
+`TOOL_CONTRACT_TESTS` map in [check-hygiene.ts](../../scripts/check-hygiene.ts). The map is keyed by
 the builtin name type, so a new tool fails typecheck until its test is named.
 `pnpm run lint` then fails when a named file is missing, lives outside
 `tests/contracts` (the only test directory CI runs besides three smoke files),
@@ -268,11 +268,11 @@ Several tools absorb what used to be separate tools:
 
 ### One ignore policy for path walkers
 
-`grep`, `find`, and their pure-Node fallbacks answer "which parts of the tree are visible" from one shared policy in `src/tools/ignore-policy.ts`. Three layers apply: `.clio-coder`, `.fallow`, and `.git` are always excluded; `.gitignore` is honored natively by rg/fd; and one generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `.venv`, and similar) is force-excluded even when a project forgot to gitignore it. `include_ignored: true` lifts the gitignore and generated-dirs layers together. Fallbacks do not parse `.gitignore`; they disclose their generated-directory-only ignore behavior. The clio-internal layer always stands, except that pointing a tool directly at one of those directories means the caller wants those paths.
+`grep`, `find`, and their pure-Node fallbacks answer "which parts of the tree are visible" from one shared policy in [ignore-policy.ts](../../src/tools/ignore-policy.ts). Three layers apply: `.clio-coder`, `.fallow`, and `.git` are always excluded; `.gitignore` is honored natively by rg/fd; and one generated-dirs list (`node_modules`, `dist`, `build`, `coverage`, `.venv`, and similar) is force-excluded even when a project forgot to gitignore it. `include_ignored: true` lifts the gitignore and generated-dirs layers together. Fallbacks do not parse `.gitignore`; they disclose their generated-directory-only ignore behavior. The clio-internal layer always stands, except that pointing a tool directly at one of those directories means the caller wants those paths.
 
 ## The observation envelope
 
-The content-returning OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`, `context`, `clio_docs`, `clio_library`, `data`) and gateway find listings close every result through one shared envelope in `src/tools/observation.ts`. `credential_present` sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap, and `evidence` returns bounded JSON under its own 16KB summary policy. The envelope owns four guarantees.
+The content-returning OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`, `context`, `clio_docs`, `clio_library`, `data`) and gateway find listings close every result through one shared envelope in [observation.ts](../../src/tools/observation.ts). `credential_present` sits in the OBSERVE plane but returns a typed boolean and carries no envelope cap, and `evidence` returns bounded JSON under its own 16KB summary policy. The envelope owns four guarantees.
 
 **One notice line, one format.** A truncated text result appends exactly one notice:
 
@@ -302,7 +302,7 @@ Tool descriptions are tiered by how much a wrong call costs. The hot tools the m
 
 ## Direct placement and the capability gateway
 
-`src/tools/surface.ts` owns placement independently of policy planes. Direct tools are `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `context`, `code_nav`, `verify`, `run_script`, and `gateway`, plus all ORCHESTRATE and INTERACT members when their dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, extension commands, and trusted local MCP tools. The permanent context schema retains workspace, settings, skills, and recall.
+[surface.ts](../../src/tools/surface.ts) owns placement independently of policy planes. Direct tools are `read`, `write`, `edit`, `bash`, `grep`, `find`, `ls`, `context`, `code_nav`, `verify`, `run_script`, and `gateway`, plus all ORCHESTRATE and INTERACT members when their dependencies are bound. Gateway capabilities are `artifact`, `web_read`, `web_fetch`, `git`, `evidence`, `credential_present`, `clio_docs`, `clio_library`, `data`, extension commands, and trusted local MCP tools. The permanent context schema retains workspace, settings, skills, and recall.
 
 `gateway(op="find"|"describe"|"call", capability?, query?, args?)` is read class and sequential. Its inner call runs through canonical registry admission with the capability's own class, skill restrictions, approvals, and cancellation. Nested accounting counts the model call once. `effectiveToolCall` restores capability identity for artifact folding, mutation observers, path indexing, exported evidence, and transcripts. Terminal artifact results, images, and details survive routing. Gateway placement changes schema attachment, not authority or evidence.
 

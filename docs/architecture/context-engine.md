@@ -1,5 +1,7 @@
 # Context Engine
 
+`contextUsageSnapshot` in [context-accounting.ts](../../src/domains/session/context-accounting.ts) computes the active budget. The [context continuity guide](../guide/context-continuity.md) explains operator recovery.
+
 Clio manages two complementary layers of context: the active working set compiled for the language model on every turn, and the persistent project knowledge used to navigate and ground repository work.
 
 The core thesis of Clio's context architecture is that **context management must be deterministic, reversible, and source-grounded**. Rather than treating conversation history as an unbounded append-only log that periodically collapses into lossy prose summaries, Clio employs an active working-set model with deterministic token accounting, reversible observation eviction, prefix-stabilized prompt caching, and dual-layer repository indexing.
@@ -204,8 +206,8 @@ Repository Source Code
 
 | Subsystem | Source Location | Key Contracts & Exports |
 | :--- | :--- | :--- |
-| Token Accounting & Budgets | [context-accounting.ts](../../src/domains/session/context-accounting.ts) | `computeContextBudget`, `reconcileAccounting` |
-| Context Ledger | [context-ledger.ts](../../src/domains/session/context-ledger.ts) | `ContextLedger`, `ContextSnapshot` |
-| Compaction & Eviction | [compaction/](../../src/domains/session/compaction/) | `admitCompaction`, `executeCompaction`, `WorkingSet` |
-| Codewiki Engine | [codewiki/](../../src/domains/context/codewiki/) | `buildCodewiki`, `loadCodewikiIndex` |
+| Token Accounting & Budgets | [context-accounting.ts](../../src/domains/session/context-accounting.ts) | `contextUsageSnapshot`, `reconcileSnapshot` |
+| Context Ledger | [context-ledger.ts](../../src/domains/session/context-ledger.ts) | `ContextLedger`, `buildContextLedger` |
+| Compaction summary | [compact.ts](../../src/domains/session/compaction/compact.ts) | `compact`, `captureSkillContext` |
+| Codewiki artifact | [artifact.ts](../../src/domains/context/codewiki/artifact.ts) | `writeCodewiki`, `readCodewiki` |
 | Docs & Guidance Engine | [docs-engine.ts](../../src/tools/context/docs-engine.ts) | `listDocsCorpus`, `searchDocs` |

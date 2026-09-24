@@ -1,6 +1,8 @@
 # Clio Coder Safety Model
 
-This document specifies the security, admission control, and execution safety architecture of Clio Coder across [src/domains/safety/](../../src/domains/safety/) and [src/tools/](../../src/tools/).
+`createSafetyPolicyEngine` in [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates tool admission. The [tool usage guide](../guide/tool-usage.md) shows the operator surface.
+
+This document specifies the security, admission control, and execution safety architecture of Clio Coder across [src/domains/safety/](../../src/domains/safety/index.ts) and [src/tools/](../../src/tools/registry.ts).
 
 The core thesis of Clio's safety model is that **agent safety must be code-enforced, not prompt-dependent**. Language models cannot reliably self-govern through system instructions alone. Clio interposes deterministic code gates between the language model's intent and actual system execution, enforcing containment, privilege minimization, path canonicalization, and explicit operator consent.
 
@@ -149,8 +151,8 @@ Safety in Clio extends beyond preventing destructive actions to ensuring **compu
 
 | Security Component | Source Location | Key Contracts |
 | :--- | :--- | :--- |
-| Policy Engine & Gating | [policy-engine.ts](../../src/domains/safety/policy-engine.ts) | `admitToolCall`, `evaluateSafetyPolicy` |
-| Damage-Control Rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `checkDamageControl`, `damage-control-rules.yaml` |
-| Path & Symlink Resolution | [path-containment.ts](../../src/domains/safety/path-containment.ts) | `resolveContainedPath`, `assertWriteRoot` |
-| Audit & Receipts Ledger | [audit.ts](../../src/domains/safety/audit.ts) | `appendAuditEntry`, `sealReceipt` |
-| Finish Contract & Rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract`, `validateEvidence` |
+| Policy engine and gating | [policy-engine.ts](../../src/domains/safety/policy-engine.ts) | `createSafetyPolicyEngine` |
+| Damage control rules | [damage-control.ts](../../src/domains/safety/damage-control.ts) | `match` |
+| Read scope checks | [read-scope.ts](../../src/domains/safety/read-scope.ts) | `readScopeEscape`, `readScopeSpellings` |
+| Audit records | [audit.ts](../../src/domains/safety/audit.ts) | `buildAuditRecord`, `openAuditWriter` |
+| Finish contract and rigor | [finish-contract.ts](../../src/domains/safety/finish-contract.ts) | `assessFinishContract` |

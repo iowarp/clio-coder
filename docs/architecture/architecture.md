@@ -32,7 +32,7 @@ or CLI-owned feature areas.
 | --- | --- | --- |
 | agents | `src/domains/agents/**` | Built-in, plugin, user, and project agent recipes. |
 | components | `src/domains/components/**` | Component snapshots, diffs, and classification. |
-| config | `src/domains/config/**`, `src/core/config.ts` | `settings.yaml`, keybindings, hot reload. |
+| config | `src/domains/config/**`, [config.ts](../../src/core/config.ts) | `settings.yaml`, keybindings, hot reload. |
 | context | `src/domains/context/**` | Layered `CLIO-CODER.md` and subtree `CLIO-CODER.override.md` guidance, codewiki indexer, repository context. |
 | dispatch | `src/domains/dispatch/**` | Fleet-agent jobs, receipts, worker spawning, route policies. |
 | evidence | `src/domains/evidence/**` | Forensic evidence bundles, failure attribution. |
@@ -57,7 +57,7 @@ or CLI-owned feature areas.
 | mux | `src/domains/mux/**` | Optional interactive pane-host integration. |
 
 The `interop` domain owns one question: which other coding agents are on this
-machine and in this project. `src/domains/interop/registry.ts` is pure data, one
+machine and in this project. [registry.ts](../../src/domains/interop/registry.ts) is pure data, one
 entry per known agent carrying its binaries, the directories it owns, its skill
 and prompt roots, its instruction filenames, and the ACP launch recipe when it
 has one. Every other module that used to keep its own copy of that list now
@@ -80,7 +80,7 @@ decision.
 
 ## Session Routing vs. Persisted Settings
 
-Clio maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state (`src/core/session-routing.ts`).
+Clio maintains an explicit distinction between persisted user settings (`settings.yaml`) and session-local routing state ([session-routing.ts](../../src/core/session-routing.ts)).
 
 1. **Decoupled Overlays**: Turn-level selections (such as active target, model override, thinking level, and scoped models cycled via explicit model-cycle keys) apply dynamically through `applySessionRouting` without mutating `settings.yaml`.
 2. **Lifecycle Flow**:
@@ -94,7 +94,7 @@ Clio maintains an explicit distinction between persisted user settings (`setting
 
 ## Workspace Enumeration and Language Classification
 
-Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
+Source: [workspace-files.ts](../../src/core/workspace-files.ts), [c-header-language.ts](../../src/core/c-header-language.ts).
 
 1. **Filesystem Walker Invariants**:
    Fallback workspace file enumeration enforces strict safety caps to prevent runaway memory usage or hangs on massive trees:
@@ -112,7 +112,7 @@ Source: `src/core/workspace-files.ts`, `src/core/c-header-language.ts`.
 
 Codewiki keeps its boot-time read surface separate from its build graph:
 
-- `src/domains/context/codewiki/schema.ts`, `artifact.ts`, and `paths.ts` own the
+- [schema.ts](../../src/domains/context/codewiki/schema.ts), `artifact.ts`, and `paths.ts` own the
   stable data shapes, normalized artifact compatibility, synchronous and
   asynchronous reads, serialization, and cheap path classification. Reading a
   cached artifact does not load tree-sitter.
@@ -168,7 +168,7 @@ middleware guard block, ordinary return, or thrown body releases a provisional
 reservation exactly once.
 
 For ordinary lazy tools, only the admitted `run` step crosses
-`src/tools/lazy-tool.ts`. One cached promise owns the implementation import,
+[lazy-tool.ts](../../src/tools/lazy-tool.ts). One cached promise owns the implementation import,
 including a deterministic failure, so concurrent first calls cannot initialize
 competing implementations. The loaded spec must match the advertised surface
 before its body can run. Ordinary body exceptions, result shaping, `after_tool`
@@ -176,13 +176,13 @@ middleware, abort signals, and telemetry continue through the registry's
 existing path. This mechanism is built-in-only; it does not turn extension
 manifests or provider plugins into an executable tool loader. Dispatch is
 different: `registerAllTools` creates its lightweight admission surface eagerly,
-and `src/tools/dispatch.ts` owns a separate cached dynamic import of
+and [dispatch.ts](../../src/tools/dispatch.ts) owns a separate cached dynamic import of
 `dispatch-runner.ts` after admission succeeds. It does not pass through
 `lazy-tool.ts`.
 
 ## Boundary invariants
 
-`pnpm run lint` executes the boundary checker (`tests/boundaries/check-boundaries.ts`, imported by `scripts/check-hygiene.ts`). Treat these checks as executable specifications.
+`pnpm run lint` executes the boundary checker ([check-boundaries.ts](../../tests/boundaries/check-boundaries.ts), imported by [check-hygiene.ts](../../scripts/check-hygiene.ts)). Treat these checks as executable specifications.
 
 The enforced import rules below are complemented by the maintained
 [Pi SDK boundary table](pi-boundary.md), which records the semantic owner of
@@ -192,17 +192,17 @@ These six enforced boundary rules constrain dependency **direction**, never impo
 
 ### Rule 1: `@earendil-works/pi-*` imports stay in `src/engine/**`
 
-Only files under `src/engine/**` may import `@earendil-works/pi-*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from `src/engine/types.ts`.
+Only files under `src/engine/**` may import `@earendil-works/pi-*` packages. Since the 0.83.0 engine-boundary rework, no file outside `src/engine/**` may import those packages at all, value or type-only. Domain modules import erased engine shapes (`EngineModel`, `Api`, `Model`) directly from [types.ts](../../src/engine/types.ts).
 
-Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. `src/engine/api-registry.ts` composes Pi's public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio's local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only `pi-ai/compat` edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi's process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` (`src/engine/ai.ts`), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes (`src/engine/messages.ts`), and Anthropic thinking payloads are assembled by Pi's narrow lazy stream implementation with no Clio rewrite.
+Why: provider SDKs and pi-ai engine values must remain swappable behind one engine boundary. Domains and presentation layers operate against Clio contracts rather than vendor or runtime implementations. [api-registry.ts](../../src/engine/api-registry.ts) composes Pi's public lazy API factories in their canonical order, retains provider-owned authentication/header dispatch, and lets Clio's local-runtime adapters override API families without importing the deprecated compatibility aggregate. The only `pi-ai/compat` edge is dynamic: before a configured out-of-tree runtime evaluates, Clio joins Pi's process-global registry and mirrors its overrides so external provider plugins retain the same registry identity and last-writer-wins order. No configured plugin means no compatibility aggregate. OpenAI-compatible sampler fields and vLLM thinking budgets flow through Pi's `samplingParams` and `supportsThinkingTokenBudget` contracts; Clio's adapter retains only catalog selection and runtime-specific payload deltas. Tool head/tail truncation, byte formatting, and grep-line clipping likewise flow through pi-agent-core's `truncateHead`, `truncateTail`, `formatSize`, and `truncateLine`; Clio retains only its 16 KiB per-observation default and its exported line-count helper. Tool string enums come from pi-ai's `StringEnum` ([ai.ts](../../src/engine/ai.ts)), the model-facing text for replayed bash executions and branch or compaction summaries comes from pi-agent-core's `bashExecutionToText` and summary prefixes ([messages.ts](../../src/engine/messages.ts)), and Anthropic thinking payloads are assembled by Pi's narrow lazy stream implementation with no Clio rewrite.
 
 ### Rule 2: Workers do not value-import domains except runtime rehydration
 
 Files under `src/worker/**` may not value-import `src/domains/**`, with the sole exception of worker-safe provider runtime rehydration modules:
 
-- `src/domains/providers/plugins.ts`
-- `src/domains/providers/registry.ts`
-- `src/domains/providers/runtimes/builtins.ts`
+- [plugins.ts](../../src/domains/providers/plugins.ts)
+- [registry.ts](../../src/domains/providers/registry.ts)
+- [builtins.ts](../../src/domains/providers/runtimes/builtins.ts)
 
 Type-only imports erase at compile time and are permitted. Workers receive a serializable `WorkerSpec` envelope, rehydrate only necessary target/runtime descriptors, and avoid pulling interactive state or domain stores into worker subprocesses.
 
@@ -249,11 +249,11 @@ graph TD
 
 Core data paths:
 
-1. CLI or TUI boot initializes config, data, state, and cache directories through `src/core/init.ts`.
+1. CLI or TUI boot initializes config, data, state, and cache directories through [init.ts](../../src/core/init.ts).
 2. The domain loader starts domains according to each `manifest.ts` dependency list.
 3. The chat loop resolves model/runtime state and visible tools for the selected target and request intent.
 4. The prompt compiler builds a hashed prompt envelope and dynamic turn fragments.
-5. Tool calls enter `src/tools/registry.ts`, which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
+5. Tool calls enter [registry.ts](../../src/tools/registry.ts), which enforces visibility, safety, middleware hooks, protected artifacts, and result shaping before returning output.
 6. Fleet dispatch writes run ledger entries and receipts; evidence and memory domains consume those artifacts later.
 
 ---
@@ -263,9 +263,9 @@ Core data paths:
 Clio uses in-process event buses for status and audit surfaces, but safety is not delegated to events. The hard gate lives in code:
 
 - Provider capability resolution decides whether tool schemas are sent at all; tool-capable sessions receive the full registry as one deterministic session tool surface.
-- `src/domains/safety/policy-engine.ts` evaluates damage-control rules, project policy, Bash default-deny, and path policy. Write boundaries are detect-and-rollback mechanisms (such as change tracking and rollbacks), never OS-level sandboxing.
-- `src/tools/registry.ts` is the admission point for every tool invocation.
-- `src/domains/dispatch/receipt-integrity.ts` and related dispatch files persist receipts used by evidence and cost surfaces.
+- [policy-engine.ts](../../src/domains/safety/policy-engine.ts) evaluates damage-control rules, project policy, Bash default-deny, and path policy. Write boundaries are detect-and-rollback mechanisms (such as change tracking and rollbacks), never OS-level sandboxing.
+- [registry.ts](../../src/tools/registry.ts) is the admission point for every tool invocation.
+- [receipt-integrity.ts](../../src/domains/dispatch/receipt-integrity.ts) and related dispatch files persist receipts used by evidence and cost surfaces.
 
 ## Interactive render transactions
 
@@ -320,7 +320,7 @@ subcommands never construct a lease; the established explicit
 
 Tracing is opt-in and content-free. Its bounded asynchronous writer never does
 filesystem append I/O on the render stack, and shutdown awaits a bounded flush.
-See [performance-methodology.md](../process/performance-methodology.md) for vocabulary,
+See [performance-methodology.md](observability.md) for vocabulary,
 commands, PTY limitations, and baseline evidence.
 
 ## Command spec

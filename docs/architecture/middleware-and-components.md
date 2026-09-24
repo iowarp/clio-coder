@@ -11,7 +11,7 @@ The components surface is active and user-facing through `clio-coder components`
 
 ## Component scanner
 
-Source: `src/domains/components/scan.ts` and `src/domains/components/types.ts`.
+Source: [scan.ts](../../src/domains/components/scan.ts) and [types.ts](../../src/domains/components/types.ts).
 
 The scanner reads files, computes SHA-256 hashes, and emits a stable `ComponentSnapshot`:
 
@@ -35,10 +35,10 @@ It does not execute scanned files.
 | `prompt-fragment` | `src/domains/prompts/fragments/**/*.md` | advisory |
 | `agent-recipe` | `src/domains/agents/builtins/*.md` | advisory |
 | `tool-implementation` | `src/tools/*.ts` | enforcing |
-| `tool-helper` | selected helper files such as `src/tools/registry.ts` | enforcing |
+| `tool-helper` | selected helper files such as [registry.ts](../../src/tools/registry.ts) | enforcing |
 | `runtime-descriptor` | `src/domains/providers/runtimes/**/*.ts` | runtime-critical |
 | `safety-rule-pack` | `damage-control-rules.yaml` | enforcing |
-| `config-schema` | `src/core/defaults.ts`, `src/core/config.ts` (scanner list in `src/domains/components/scan.ts`) | runtime-critical |
+| `config-schema` | [defaults.ts](../../src/core/defaults.ts), [config.ts](../../src/core/config.ts) (scanner list in [scan.ts](../../src/domains/components/scan.ts)) | runtime-critical |
 | `session-schema` | session entry/contract files | runtime-critical |
 | `receipt-schema` | dispatch receipt/integrity files | runtime-critical |
 | `context-file` | `CLIO-CODER.md`, `CONTRIBUTING.md`, `SECURITY.md` | advisory |
@@ -78,7 +78,7 @@ Snapshots are useful in reviews because they show behavior-affecting changes eve
 
 ## Middleware contract
 
-Source: `src/domains/middleware/types.ts`, `validate.ts`, `budget.ts`, and `runtime.ts`.
+Source: [types.ts](../../src/domains/middleware/types.ts), `validate.ts`, `budget.ts`, and `runtime.ts`.
 
 Supported hooks:
 
@@ -121,7 +121,7 @@ These ship in every interactive session. Each is one bounded behavior with a vis
 
 | Id | Hooks | What it does |
 | --- | --- | --- |
-| `nudge.stalled-turn` | `turn_end` | The one declarative rule. A turn that called no tools and ended on an announced action ("Next I will inspect `src/cli/index.ts`") is continued once with a reminder to perform it or say plainly that it is finished. Questions, "let me know", conditional offers ("if you want me to"), and completion statements are not announcements. |
+| `nudge.stalled-turn` | `turn_end` | The one declarative rule. A turn that called no tools and ended on an announced action ("Next I will inspect [index.ts](../../src/cli/index.ts)") is continued once with a reminder to perform it or say plainly that it is finished. Questions, "let me know", conditional offers ("if you want me to"), and completion statements are not announcements. |
 | `observer.skills-reminder` | `turn_start`, `turn_end` | Once per session, on the first substantive turn, when installed or installable skills exist, injects one line teaching the suggestion protocol: list with `context(scope="skills")`, open the reply with `Suggested skill: /skill <name>` when one matches, then continue the task in the same turn. Only the operator loads a skill. At `turn_end`, a reply that made the suggestion and stopped with only listing calls behind it is continued once (#184): the suggestion is not the task. Greetings do not spend the session's one reminder; a resumed or forked session never gets one. |
 | `observer.marketplace-offer` | `turn_start`, `after_tool` | On coordinator sessions, locally matches a substantive request against undeclined, uninstalled skills in Clio's marketplace and offers each matching skill at most once per session. Every autonomy level, including `full-auto`, asks the operator through a tag-bound `ask_user` choice; `Not now` lasts for the session and `Never offer this skill` persists for that skill version. Only an explicit answer to the bound offer can install a skill. Consented installs pass the Clio-marketplace source gate; installation does not itself load the skill. |
 | `observer.task-board-reminder` | `turn_start` | Once per session, when the operator's text literally enumerates three or more steps (`1)`, `2.`, `step 3:`, or three bulleted lines), injects one line asking for `tasks action="plan"` before the first edit. Prose that merely mentions numbers never counts. |
