@@ -129,7 +129,9 @@ test("agent adapter emits visual content blocks and nonvision shaping explains o
 	});
 	for (const supportsImages of [true, false]) {
 		const sessionTool = resolveSessionTools(
-			{ runtimeResolution: { capabilityDecisions: { tools: true, vision: supportsImages } } } as unknown as Parameters<
+			{
+				runtimeResolution: { runtime: { id: "openai-completions" }, capabilityDecisions: { tools: true, vision: supportsImages } },
+			} as unknown as Parameters<
 				typeof resolveSessionTools
 			>[0],
 			registry,

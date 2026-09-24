@@ -94,8 +94,9 @@ for (const agent of ["scout", "coder"] as const) {
 		strictEqual(specs.find((spec) => spec.id === "coder")?.capabilityClass, "workspace-edit");
 		const bundle = makeDispatchBundle(context, {
 			spawnWorker: (spec, options) => {
-				strictEqual(spec.budget.mode, "advisory");
-				strictEqual(spec.budget.toolCalls, 1000);
+				const scout = spec.agentId === "scout";
+				strictEqual(spec.budget.mode, scout ? "enforced" : "advisory");
+				strictEqual(spec.budget.toolCalls, scout ? 36 : 1000);
 				const cwd = options?.cwd;
 				ok(cwd);
 				const judge = spec.agentId === "verifier";

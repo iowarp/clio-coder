@@ -1,4 +1,4 @@
-import { deepStrictEqual, doesNotMatch, match, notStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -163,12 +163,71 @@ describe("verify admission under headless autonomy", () => {
 
 	it("scans model-supplied arguments with the resolved command", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
-		notStrictEqual(admission(root, { check: "python-unittest", args: ["$(touch x)"] }, "full-auto"), "allow");
+		const engine = createSafetyPolicyEngine({ cwd: root });
+		const hidden = engine.evaluate({ tool: "verify", args: { check: "python-unittest", args: ["$(touch x)"] } });
+		strictEqual(hidden.kind, "ask");
+		strictEqual(hidden.reasonCode, "verify-unrecognized-argv");
+		strictEqual(
+			engine.evaluate({ tool: "verify", args: { check: "python-unittest", args: '["$(touch x)"]' } }).kind,
+			"ask",
+			"the JSON-string argument shape accepted by verify has the same safety decision",
+		);
 		strictEqual(admission(root, { check: "python-unittest", args: ["tests.test_a"] }, "full-auto"), "allow");
-		const destructive = createSafetyPolicyEngine({ cwd: root }).evaluate({
+		const destructive = engine.evaluate({
 			tool: "verify",
 			args: { check: "python-unittest", args: ["&&", "rm", "-rf", "/"] },
 		});
 		strictEqual(destructive.kind, "block");
+	});
+
+	it("scans package-script arguments after the declared script name", () => {
+		const root = workspace({ "package.json": JSON.stringify({ scripts: { test: "node --test" } }) });
+		strictEqual(admission(root, { check: "test", args: ["safe.test.js"] }, "full-auto"), "allow");
+		const hidden = createSafetyPolicyEngine({ cwd: root }).evaluate({
+			tool: "verify",
+			args: { check: "test", args: ["$(touch x)"] },
+		});
+		strictEqual(hidden.kind, "ask");
+		strictEqual(hidden.reasonCode, "verify-unrecognized-argv");
+	});
+
+	it("uses a catalog check's execution cwd for relative secret reads", () => {
+		const root = workspace({
+			".env": "SECRET=value\n",
+			"nested/keep": "",
+			".clio-coder/verifiers.yaml": JSON.stringify({
+				version: 1,
+				checks: [
+					{
+						id: "read-env",
+						description: "Read env",
+						command: ["cat", "../.env"],
+						cwd: "nested",
+						timeoutMs: 30000,
+						tags: [],
+					},
+				],
+			}),
+		});
+		const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: "verify", args: { check: "read-env" } });
+		strictEqual(decision.cwd, join(root, "nested"));
+		strictEqual(decision.kind, "block");
+		strictEqual(decision.reasonCode, "secret_path_bash");
+	});
+
+	it("ignores a model cwd that the derived runner does not execute in", () => {
+		const root = workspace({
+			"pyproject.toml": PYPROJECT,
+			"tests/test_a.py": "",
+			".env": "SECRET=value\n",
+			"other/keep": "",
+		});
+		const decision = createSafetyPolicyEngine({ cwd: root }).evaluate({
+			tool: "verify",
+			args: { check: "python-unittest", args: [".env"], cwd: "other" },
+		});
+		strictEqual(decision.cwd, root);
+		strictEqual(decision.kind, "block");
+		strictEqual(decision.reasonCode, "secret_path_bash");
 	});
 });

@@ -699,6 +699,9 @@ describe("dispatch quality presentation", () => {
 			const env = await isolateClioEnv("dispatch-quality-");
 			try {
 				const envelope = fixtureEnvelope(IDENTITY.runId);
+				// Monitor reads only runs from this project; the shared receipt fixture
+				// defaults to /workspace, which is unrelated to this isolated test.
+				envelope.cwd = process.cwd();
 				envelope.receiptPath = join(clioStateDir(), "receipts", `${envelope.id}.json`);
 				const draft = fixtureReceiptDraft(envelope);
 				// Exact failed-quality fact from retained S3 receipt 26ekyn85239m:
@@ -779,12 +782,14 @@ describe("dispatch quality presentation", () => {
 						snapshot: () => ({ running: [], retrying: [] }),
 					} as unknown as DispatchContract,
 				});
-				const status = await monitor.run({ mode: "status", run_id: envelope.id });
-				strictEqual(status.kind, "ok");
+				const sessionId = envelope.sessionId;
+				ok(sessionId);
+				const status = await monitor.run({ mode: "status", run_id: envelope.id }, { sessionId });
+				strictEqual(status.kind, "ok", JSON.stringify(status));
 				ok(status.output.includes(wording), status.output);
 				match(status.output, /outcome=succeeded/u);
 				deepStrictEqual(status.details?.trust, trust);
-				const collected = await monitor.run({ mode: "collect", run_ids: [envelope.id] });
+				const collected = await monitor.run({ mode: "collect", run_ids: [envelope.id] }, { sessionId });
 				strictEqual(collected.kind, "ok");
 				ok(collected.output.includes(wording), collected.output);
 				match(collected.output, /state=succeeded/u);
