@@ -20,9 +20,9 @@ Interactive capability guidance is enabled by default. `--demo` and `--no-demo` 
 | `clio-coder --no-context-files` / `clio-coder -nc` | Skip `CLIO-CODER.md` project-context injection for one invocation. |
 | `clio-coder --with-panes` | Activate guest pane integration for this invocation when Clio is inside a reachable herdr session. |
 | `clio-coder --no-panes` | Keep panes off even when settings turn them on. |
-| `clio-coder --autonomy <level>` | Start this interactive session at `read-only`, `suggest`, `auto-edit`, or `full-auto` without modifying `settings.yaml`. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
+| `clio-coder --autonomy <level>` | Start this interactive session at `capable` or `yolo` without modifying `settings.yaml`. Legacy `read-only`, `suggest`, `auto-edit`, and `full-auto` values remain accepted. Passing `--autonomy` before a subcommand is refused with exit 2 (`clio-coder run --autonomy` remains the headless form). |
 | `clio-coder --no-skills` | Disable skill discovery for one invocation and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
-| `clio-coder --skill <path>` | Load one explicit skill file or directory for one invocation (repeatable). |
+| `clio-coder --skill <path>` | Make one explicit skill file or directory available for one invocation (repeatable). Clio loads its instructions when the skill is activated through `context(scope="skills", name=...)`. |
 | `clio-coder configure` | Run the configuration wizard. Ctrl+C reports `configuration cancelled`, writes no target, and exits 130; when first-run onboarding is cancelled, startup stops instead of opening the TUI with no usable target. |
 | `clio-coder configure --interop` | Review other coding agents detected on this machine and connect one as a delegation peer. Without a TTY it prints the proposals and writes nothing. |
 | `clio-coder configure --list` | List user-facing runtime ids. |
@@ -100,7 +100,7 @@ Interactive capability guidance is enabled by default. `--demo` and `--no-demo` 
 | `--target <id>` | One-run main-agent or dispatch target override. |
 | `--model <wireId>` | One-run model override. |
 | `--thinking <level>` | One-run thinking level: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. |
-| `--autonomy <level>` | One-run autonomy override: `read-only`, `suggest`, `auto-edit`, or `full-auto`; it does not change saved settings. |
+| `--autonomy <level>` | One-run autonomy override: `capable` (`auto-edit`) or `yolo` (`full-auto`); legacy values remain accepted. It does not change saved settings. |
 | `--temperature <n>` / `--top-p <n>` / `--top-k <n>` / `--min-p <n>` | One-run sampler overrides when the selected runtime supports them. |
 | `--presence-penalty <n>` / `--frequency-penalty <n>` / `--repeat-penalty <n>` | One-run penalty overrides when the selected runtime supports them. |
 | `--max-context-tokens <n>` | One-run context-window override for supported local runtimes. |
@@ -111,7 +111,7 @@ Interactive capability guidance is enabled by default. `--demo` and `--no-demo` 
 | `--fail-on-noop` | Exit 1 when the main-agent run was a no-op, and seal its receipt as `failed` with `outcomeDetail: "noop"`. Main agent only; with `--agent` it is a usage error. See [Headless No-op Runs](#headless-no-op-runs). |
 | `--timeout <seconds>` | Wall-clock limit for the whole main-agent run, boot included. On expiry the run starts the coordinated shutdown a SIGTERM starts, seals its receipt with outcome `timed_out`, and exits 124. A positive number of seconds; anything else is a usage error. Main agent only; with `--agent` it is a usage error. |
 | `--agent <recipe-id>` | Dispatch a fleet agent instead of the main agent. Unknown ids fail fast. |
-| `--skill <path>` | Load one explicit skill file or skill directory for this run. Repeatable. |
+| `--skill <path>` | Make one explicit skill file or skill directory available for this run. Repeatable; the model loads its instructions with `context(scope="skills", name=...)`. |
 | `--no-skills` | Disable skill discovery for this run and automatic skill/marketplace prompt guidance while still honoring explicit `--skill` paths. |
 | `--turn-mode <mode>` | Main-agent workflow guidance (`answer`, `proposal`, `change`). Guides prompt and turn continuation (`answer` and `proposal` disable autonomous continuation turns; `proposal` renders `tasks` `plan`/`add` as blocked proposals). Not an authorization grant: mutating tools (`write`, `edit`) are not denied by `mode` alone; enforcement requires `--allow-tools` or `--autonomy read-only`. See [Turn Constraints](#turn-constraints). |
 | `--no-delegate` | Forbid worker delegation (`dispatch`) for this run; the agent must work directly. |
@@ -538,7 +538,7 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-The autonomy setting controls whether a policy-approved action runs, asks, or is denied. Safety rules remain active at every level. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or `--autonomy read-only` when execution must be restricted. See the [safety model](../architecture/safety-model.md) and [Bash policy](tool-usage.md#bash-run-a-shell-command).
+The settings UI offers **capable** (`auto-edit`) for supervised edits and **yolo** (`full-auto`) for work that should proceed without autonomy prompts. Safety rules remain active at both levels. Existing `read-only` and `suggest` values still load for older sessions and scripts. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or the legacy `--autonomy read-only` when execution must be restricted. An interactive yolo session can preview a Clio settings change with `configure_clio`; only the host's Apply choice commits it. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
 
 ## Dispatch and Built-In Agents
 
