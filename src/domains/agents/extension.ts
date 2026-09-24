@@ -3,6 +3,7 @@ import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { assertAgentIdNamespace } from "../config/agent-namespace.js";
 import type { ConfigContract } from "../config/contract.js";
+import { pluginSnapshotFor, withPluginDiscoveryPass } from "../plugins/index.js";
 import type { AgentsContract } from "./contract.js";
 import type { AgentRecipe } from "./recipe.js";
 import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "./registry.js";
@@ -15,11 +16,19 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 	let revision = 0;
 	let rediscoveryPending = false;
 	let attemptedRecipes: ReadonlyArray<AgentRecipe> | null = null;
+	/** Digest of the plugin projection the cached recipes were discovered from. */
+	let discoveredPluginDigest: string | null = null;
 
 	function discover(): void {
 		attemptedRecipes = null;
+		discoveredPluginDigest = null;
 		const nextDiagnostics: AgentRecipeDiagnostic[] = [];
-		const merged = discoverAgentRecipes(process.cwd(), nextDiagnostics);
+		// Read the digest in the discovery's own pass, so it names exactly the
+		// verified projection the recipes came from without a second walk.
+		const { merged, pluginDigest } = withPluginDiscoveryPass(() => ({
+			merged: discoverAgentRecipes(process.cwd(), nextDiagnostics),
+			pluginDigest: pluginSnapshotFor(process.cwd()).digest,
+		}));
 		attemptedRecipes = merged;
 		const config = _context.getContract<ConfigContract>("config");
 		assertAgentIdNamespace(merged, config?.get()?.integrations.externalAgents?.entries ?? []);
@@ -28,6 +37,7 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 		diagnostics = nextDiagnostics;
 		revision += 1;
 		rediscoveryPending = false;
+		discoveredPluginDigest = pluginDigest;
 	}
 
 	let unsubscribePluginsReload: (() => void) | null = null;
@@ -48,8 +58,12 @@ export function createAgentsBundle(_context: DomainContext): DomainBundle<Agents
 				}) ?? null;
 			// Recipes are cached at start; plugin agent roots come from the
 			// committed plugin generation, so a changed generation rediscovers.
+			// The first reload after boot always reports a change, because no
+			// generation was committed before it. When it commits the projection
+			// start() already discovered from, the cached recipes are current.
 			const onResourceReload = (payload: unknown) => {
-				if (!rediscoveryPending && (payload as { changed?: unknown } | undefined)?.changed !== true) return;
+				const event = payload as { changed?: unknown; digest?: unknown } | undefined;
+				if (!rediscoveryPending && (event?.changed !== true || event.digest === discoveredPluginDigest)) return;
 				try {
 					discover();
 				} catch (error) {

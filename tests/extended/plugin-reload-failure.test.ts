@@ -9,7 +9,7 @@ import type { DomainContext } from "../../src/core/domain-loader.js";
 import { createSafeEventBus } from "../../src/core/event-bus.js";
 import { createAgentsBundle } from "../../src/domains/agents/extension.js";
 import type { ConfigContract } from "../../src/domains/config/index.js";
-import { disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
+import { clearPluginSnapshots, disablePlugin, installPlugin, removePlugin } from "../../src/domains/plugins/index.js";
 import { createPromptsBundle } from "../../src/domains/prompts/extension.js";
 import { reloadPluginResourcesAndNotify } from "../../src/entry/plugin-reload.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
@@ -149,3 +149,53 @@ for (const mutation of ["disable", "remove"] as const) {
 		}
 	});
 }
+
+it("keeps boot recipes across the first reload only when it commits the projection start verified", async () => {
+	const env = await isolateClioEnv("clio-coder-reload-boot-digest-");
+	const originalCwd = process.cwd();
+	const bus = createSafeEventBus();
+	const config: ConfigContract = { get: () => structuredClone(DEFAULT_SETTINGS), onChange: () => () => {} };
+	const context: DomainContext = { bus, getContract: (() => config) as DomainContext["getContract"] };
+	const events: PluginsReloadedPayload[] = [];
+	const bundles: ReturnType<typeof createAgentsBundle>[] = [];
+	const boot = async () => {
+		const agents = createAgentsBundle(context);
+		bundles.push(agents);
+		await agents.extension.start();
+		return agents;
+	};
+	const reload = (cwd: string) =>
+		reloadPluginResourcesAndNotify(cwd, (event) => {
+			events.push(event);
+			bus.emit(BusChannels.PluginsReloaded, event);
+		});
+	try {
+		const cwd = join(env.dir, "workspace");
+		mkdirSync(cwd);
+		process.chdir(cwd);
+		const source = join(env.dir, "boot-kit");
+		packageFixture(source, "boot-kit", "boot-agent");
+		const installed = installPlugin(source, { cwd, scope: "user" }).plugin;
+		ok(installed?.loadable);
+
+		const unchanged = await boot();
+		const revision = unchanged.contract.revision();
+		reload(cwd);
+		strictEqual(events.at(-1)?.changed, true, "no generation was committed before the first reload");
+		strictEqual(unchanged.contract.revision(), revision, "an unchanged projection must not rediscover");
+		ok(unchanged.contract.get("boot-agent"));
+		await unchanged.extension.stop?.();
+		clearPluginSnapshots();
+
+		const drifted = await boot();
+		ok(drifted.contract.get("boot-agent"));
+		writeFileSync(join(installed.rootPath, "agents", "boot-agent.md"), `${recipe}\nTampered after install.\n`);
+		reload(cwd);
+		strictEqual(drifted.contract.get("boot-agent"), null, "a tree that no longer verifies must go inactive");
+	} finally {
+		for (const agents of bundles) await agents.extension.stop?.();
+		clearPluginSnapshots();
+		process.chdir(originalCwd);
+		env.restore();
+	}
+});
