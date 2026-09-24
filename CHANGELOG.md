@@ -2,6 +2,12 @@
 
 All notable changes to Clio Coder are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## 0.5.5 - Unreleased
+
+### Build
+
+- Building from source now works on case-insensitive filesystems such as the macOS default. Four GUI logic modules were renamed so no module stem differs from its component's only by case, and a hygiene check rejects case-only path collisions (#397).
+
 ## 0.5.4 - 2026-09-23
 
 ### Installation and upgrades
