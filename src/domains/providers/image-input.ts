@@ -6,7 +6,14 @@ export function acceptsImageInput(input: {
 }): boolean {
 	// These runtimes receive a text work order through a CLI/SDK bridge. Their
 	// underlying model may have vision, but the bridge has no image-block path.
-	if (input.runtimeId === "claude-code" || input.runtimeId === "claude-sdk" || input.runtimeId === "antigravity-code") {
+	if (
+		input.runtimeId === "claude-code" ||
+		input.runtimeId === "claude-sdk" ||
+		input.runtimeId === "antigravity-code" ||
+		input.runtimeId === "codex-cli" ||
+		input.runtimeId === "pi-cli" ||
+		input.runtimeId === "opencode-cli"
+	) {
 		return false;
 	}
 	if (input.vision !== undefined) return input.vision === true;
