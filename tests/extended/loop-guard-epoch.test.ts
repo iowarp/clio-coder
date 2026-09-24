@@ -252,7 +252,7 @@ describe("loop guard identical-call epoch", () => {
 				toolName: ToolNames.Dispatch,
 				toolArgs: { task: "fix validation" },
 				metadata: { resultKind: "error" },
-				toolResultDetails: scenario.details,
+				...(scenario.details === undefined ? {} : { toolResultDetails: scenario.details }),
 			});
 			const third = guard.evaluate(before(turn, ToolNames.Bash, "same-validation"));
 			strictEqual(
