@@ -174,7 +174,7 @@ Filesystem targets resolving outside the workspace escalate to `system_modify` a
 
 Operator display is independently folded and tail-biased. If display/context omits captured bytes, terminal output is retained in a per-session scratch artifact; live updates follow the selected policy but create no artifacts. Results record requested/applied context modes, captured/display/context bytes, truncation/downgrade, retrieval path, and exit/signal/timeout/abort/cap facts. Scratch retrieval may contain raw output; summary is the redacted projection. More than 16 MiB combined stdout/stderr stops with error; use `run_script` for larger output.
 
-Commands writing outside the workspace ask regardless of autonomy; zero-access paths remain denied. Repository test runners are allowed without confirmation at `auto-edit`/`full-auto`: `npm test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words; shell operators, redirects, substitutions, and quoted args require confirmation. An `&&` chain is admitted only if each command qualifies. At `suggest`, test runners still ask; `read-only` denies them. Build/lint/typecheck scripts also ask.
+Commands writing outside the workspace ask regardless of autonomy; zero-access paths remain denied. Repository test runners are allowed without confirmation at `auto-edit`/`full-auto`: `npm test`, `pytest`, `python -m pytest`, `python -m unittest` (python/python3/python3.N), `cargo test`, `go test`, `ctest`, `make test`, `make check`, `ninja test`, `meson test`, `mvn test`, `gradle test`, `./gradlew test`. Arguments must be bare words; a runner with shell operators, redirects, or quoted args is unrecognized, and command substitution asks at every level. An `&&` chain is admitted only if each command qualifies. At `suggest`, test runners still ask; `read-only` denies them. Repository build, lint, typecheck and ci scripts (`npm run lint`, `npm run build`, `npm run typecheck`, `npm run ci`) are never recognized: like any unrecognized command, including a test runner behind a pipe, they ask at `suggest` and `auto-edit`, where a headless run denies them, and run at `full-auto` (`--autonomy yolo`). A project safety policy entry can recognize one, and one with `requireConfirmation` asks at every level.
 
 Prefer dedicated read/search tools for envelope continuation and ignore rules, and `verify` for declared checks.
 
@@ -366,15 +366,30 @@ One entry point for listing/running declared checks and validating frontend arti
 
 | Argument | Contract |
 | --- | --- |
-| `check` | Omit or pass an empty string to list; otherwise a catalog ID, verification-family package script, or `frontend`. |
+| `check` | Omit or pass an empty string to list; otherwise a catalog ID, verification-family package script, derived check ID, or `frontend`. A bare family word (`test`, `lint`, `check`, `typecheck`, `format`, `build`, `ci`) that no package script declares resolves to the one derived check tagged with it. |
 | `path` | `frontend` only: required HTML/CSS/JavaScript file inside the workspace. |
-| `args` | Package scripts only; string array appended after `--`. JSON-encoded arrays are also parsed. Catalog argv cannot be overridden. |
+| `args` | Package scripts: string array appended after `--`. Derived test runners: appended to the runner argv (`python -m unittest <args>` replaces discovery). Make targets and CI scripts refuse arguments. JSON-encoded arrays are also parsed. Catalog argv cannot be overridden. |
 | `browser` | `frontend` only: `auto` (default), `required`, or `off`. |
 | `cwd` | Package scripts only. Sets package discovery/working directory; the catalog is always loaded at the session workspace root and uses its declared `cwd`. |
-| `timeout_ms` | Package scripts and frontend; default 120000 ms. Catalog checks use `timeoutMs`. |
+| `timeout_ms` | Package scripts, derived checks and frontend; default 120000 ms. Catalog checks use `timeoutMs`. |
 | `max_output_bytes` | Package scripts and frontend; default 600000 bytes. Catalog checks retain the safe-exec cap. |
 
-Listing groups package and catalog providers under `{id, description, command, cwd, timeoutMs, tags, source}`. Package scripts must match `test`, `lint`, `build`, `typecheck`, `check`, `format`, or `ci`, optionally followed by `:`, `.`, or `-` plus a suffix. They run as `npm run <script>` without a shell; other scripts are directed to `bash`. Script execution follows the [bash safety policy](#bash-run-a-shell-command).
+Listing groups package and catalog providers under `{id, description, command, cwd, timeoutMs, tags, source}`. Package scripts must match `test`, `lint`, `build`, `typecheck`, `check`, `format`, or `ci`, optionally followed by `:`, `.`, or `-` plus a suffix. They run as `npm run <script>` without a shell. Script execution follows the [bash safety policy](#bash-run-a-shell-command).
+
+### Derived checks
+
+When a repository declares its checks outside `package.json`, `verify` derives them at call time from the files it already has, without writing a catalog. Sources: [`toolchain-checks.ts`](../../src/tools/verify/toolchain-checks.ts), [`resolve.ts`](../../src/tools/verify/resolve.ts).
+
+| ID | Derived from | Runs |
+| --- | --- | --- |
+| `python-pytest` | `[tool.pytest.ini_options]`, `pytest.ini`, `setup.cfg [tool:pytest]`, a `conftest.py`, or pytest in a dependency list | `python -m pytest` |
+| `python-unittest` | `tests/` or `test/` holding `test*.py` modules when pytest is not configured | `python -m unittest discover -s tests` |
+| `python-tox`, `python-nox`, `python-<entry>` | tox/nox configuration, verification-family `[project.scripts]` entries | the runner or entry point |
+| `cargo-test`, `go-test`, `cmake-test-<preset>` | `Cargo.toml`, `go.mod`, `CMakePresets.json` test presets | `cargo test`, `go test ./...`, `ctest --preset <name>` |
+| `make-<target>`, `just-<recipe>` | Makefile and justfile targets named `test`, `lint`, `check`, `typecheck`, `format`, `build` or `ci` (with suffixes) | `make <target>`, `just <recipe>` |
+| `ci-<script>` | a CI step that runs a repository script directly, such as `run: scripts/gate.sh` or `run: sh scripts/gate.sh` | the step's argv |
+
+A `uv.lock` at the root prefixes every Python runner with `uv run`, because a bare `python` does not see the uv project environment. A package script or catalog entry with the same ID wins, and identical argv is listed once. The listing prints each derived argv. When nothing is declared or derivable, the error names every source it read and directs the agent to run the documented command through `bash`. A check string that names no declared or derived check runs nothing.
 
 ### Project verifier catalog
 
@@ -849,4 +864,4 @@ gateway(op="call", capability="artifact", args={kind: "review", content: "# Revi
 
 ## Headless declared verifier commands
 
-Declared checks still pass through the conservative action classifier and autonomy policy. A recognized `python` or `python3` command resolved through PATH can use an operator-prepared virtual environment, for example `python -m pytest` with the intended environment already on PATH. An absolute interpreter path requires confirmation; a headless run cannot answer it. Declaring a check does not bypass that gate. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.
+Declared and derived checks pass through the conservative action classifier and autonomy policy, and are admitted exactly as `bash` admits the same command. The policy engine resolves the call with the tool's own resolver, so the argv it scans, including any model `args`, is the argv that runs. A recognized test runner such as `python -m pytest` resolved through PATH runs at `auto-edit`. An unrecognized argv, such as `uv run python -m unittest discover -s tests` or an absolute interpreter path, asks at `suggest` and `auto-edit`, where a headless run denies it, and runs at `full-auto` (`--autonomy yolo`). Argv that is not bare words, a project policy entry with `requireConfirmation`, and damage-control rules still ask or block at every level. Declaring a check does not bypass those gates. Prepare the environment before the run and inspect actual verifier receipts before claiming edit-and-verify success.

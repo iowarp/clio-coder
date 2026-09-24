@@ -6,6 +6,7 @@ import type { BootstrapStructuredOutput } from "./bootstrap.js";
 import { HANDBOOK_TARGETS } from "./clio-md.js";
 import { renderCodewikiDigest } from "./codewiki/digest.js";
 import type { Codewiki } from "./codewiki/schema.js";
+import type { EnforcementInventory } from "./enforcement-inventory.js";
 import type { SiblingContextFile } from "./sibling-files.js";
 
 export const BOOTSTRAP_PROMPT = `You are the clio-coder bootstrap agent. Your job is to write the rules of CLIO-CODER.md for the project at <cwd>. CLIO-CODER.md is a lean, project-specific handbook that the clio-coder coding agent loads on every session, so write for an experienced engineer who has never seen this repository and is about to change it.
@@ -28,18 +29,18 @@ Clio owns the project name, the verification-command section and agent-context p
 
 WHAT BELONGS. The reader is a coding agent that can already read this code, and it may be a small local model. Write only what it would get wrong without being told: rules the tooling enforces only when something fails, files that must change together, commands and flags it cannot guess, conventions that differ from the language defaults, and actions that are irreversible or leave the machine. Test each line by asking whether an agent that read the relevant files would still make this mistake; if not, drop the line. Leave out repository tours, entry-point lists, file trees, dependency or stack inventories, the plain build and test commands visible in the manifest, generic engineering advice, and anything a linter reports together with its fix.
 
-WHERE THE RULES ARE. Read the files that encode them before writing: CI workflows, lint and format configs, custom check or hygiene scripts and the package scripts that run them, test harness setup and preload files, contributor guides, and the sibling agent files you were given. Each check a custom check script runs is usually a rule an agent breaks without noticing.
+WHERE THE RULES ARE. The input's enforcement inventory lists the commands CI runs, the package scripts they reach, and the repository's custom check files with the check functions they define. Read every check file it lists and the configs those commands load. Each check that an ordinary change can fail is a rule the agent breaks without noticing, so write one rule for it: a change recipe when the check demands that files change together ("adding X requires Y and Z"), an invariant when it forbids something. Skip checks that a formatter or linter reports together with its fix. The inventory also quotes each check's coded failure messages ("rule6: ..."): cover every coded failure an ordinary change can trigger with its own rule stating what the check demands and the remedy it names, even when a sibling code already has one. Find which test directories CI actually runs by following each test command to its file list, glob or discovery root, and write one rule saying where a new regression test must live so CI runs it; name any test directory CI skips, because a test placed there guards nothing. Then read the test harness setup, contributor guides and the sibling agent files you were given. A contributor guide the agent can read itself earns a line only when it states a rule no check enforces.
 
 FIELDS.
 - invariants: up to ${HANDBOOK_TARGETS.invariants} rules whose violation breaks the build, corrupts data, or crosses a trust boundary, most damaging first, because small models keep early rules best. Each is the rule and its reason in one or two sentences.
 - conventions: up to ${HANDBOOK_TARGETS.conventions} code conventions that differ from the defaults, each naming a file that shows it.
-- sections: up to six H2 sections. Prefer these titles, because Clio routes each section to the fleet workers that need it: "Verification that is not obvious", "Change recipes", "Tests", "Docs and prose", "Git and release", "Gotchas". Rules about operating the agent harness itself go under a title containing "Operating"; they stay with the main session.
+- sections: up to ${HANDBOOK_TARGETS.sections} H2 sections, "Change recipes" first when there are any. Prefer these titles, because Clio routes each section to the fleet workers that need it: "Verification that is not obvious", "Change recipes", "Tests", "Docs and prose", "Git and release", "Gotchas". Rules about operating the agent harness itself go under a title containing "Operating"; they stay with the main session.
 
 LINE FORMAT. One rule per bullet, phrased as what to do, with the reason when it is not self-evident. Keep "never" for real boundaries and say what breaks. Name the files a rule is about in backticks: those paths decide which workers receive it, so a rule about one package cites that package's paths. A change recipe names every file that must change in the same commit. For a boundary claim, read the enforcing code and state what it enforces, not what you infer.
 
 Copy commands, file paths, symbols, and version constraints exactly. Never repair, combine, or paraphrase a shell command. Never invent an API endpoint, an example, an ownership team, a review requirement, a release process, or a file count. If you did not read it or it was not supplied, do not write it.
 
-Do not include secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Keep the whole JSON under 9000 bytes: the handbook shares the prompt with everything else, and fewer grounded rules are followed better than many speculative ones.
+Do not include secrets, credentials, auth tokens, caches, histories, generated state, fingerprint metadata, or imported-context provenance. Keep the whole JSON under 14000 bytes: the handbook shares the prompt with everything else, and fewer grounded rules are followed better than many speculative ones.
 
 Return one assistant message containing only compact JSON with this exact shape. Begin with { and end with }. Do not announce that exploration is complete or add markdown fences, prose, explanation, or commentary:
 {
@@ -91,6 +92,7 @@ export interface BootstrapPromptInput {
 	adoption: AdoptionScanResult;
 	existingClioMdText?: string;
 	codewiki?: Codewiki;
+	enforcement?: EnforcementInventory;
 }
 
 function truncate(value: string, max: number): string {
@@ -179,6 +181,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 			? { existingClioMd: truncate(input.existingClioMdText, FULL_PROJECT_CONTEXT_MAX_CHARS) }
 			: {}),
 		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
+		...(input.enforcement ? { enforcement: input.enforcement } : {}),
 		siblingFiles,
 		adoption,
 	};
@@ -199,6 +202,7 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 			projectType: input.projectType,
 			...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 2000) } : {}),
 			...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
+			...(input.enforcement ? { enforcement: input.enforcement } : {}),
 			siblingFiles: [],
 			adoption: {
 				includeGlobal: input.adoption.includeGlobal,
@@ -235,7 +239,21 @@ function stringArray(value: unknown, key: string, maxItems: number, maxChars: nu
 		})
 		.filter((item) => item.length > 0)
 		.slice(0, maxItems)
-		.map((item) => item.slice(0, maxChars));
+		.map((item) => clampAtSentence(item, maxChars));
+}
+
+/**
+ * Cut an overlong rule after its last complete sentence that fits. A plain
+ * slice ended generated invariants mid-word ("move the value into a leaf se"),
+ * which reads as a broken rule and drops the remedy anyway.
+ */
+function clampAtSentence(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const head = text.slice(0, maxChars);
+	const end = Math.max(head.lastIndexOf(". "), head.endsWith(".") ? head.length - 1 : -1);
+	if (end >= maxChars / 2) return head.slice(0, end + 1);
+	const space = head.lastIndexOf(" ");
+	return `${head.slice(0, space > 0 ? space : maxChars - 1)}…`.slice(0, maxChars);
 }
 
 function stringField(record: Record<string, unknown>, key: string, maxChars: number): string {

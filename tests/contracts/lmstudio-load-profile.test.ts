@@ -1,8 +1,11 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { type ChildProcess, spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { describe, it } from "node:test";
 import { validateSettings } from "../../src/core/config.js";
+import { residencyTargetKey } from "../../src/core/residency-target-key.js";
+import { lmStudioRootUrl } from "../../src/domains/providers/runtimes/common/lmstudio-http.js";
 import lmstudio from "../../src/domains/providers/runtimes/local-native/lmstudio.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
 import type { TargetDescriptor } from "../../src/domains/providers/types/target-descriptor.js";
@@ -11,6 +14,7 @@ import {
 	lmStudioDeploymentFromModelInfo,
 	lmStudioLoadDrift,
 } from "../../src/engine/apis/lmstudio.js";
+import { clioOwnership, leaseClioModel, recordClioLoad } from "../../src/engine/apis/lmstudio-ownership.js";
 import { openAICompletionsApiProvider } from "../../src/engine/apis/openai-completions.js";
 import type { Model } from "../../src/engine/types.js";
 
@@ -42,7 +46,10 @@ async function listen(server: Server): Promise<string> {
 }
 
 /** A fake LM Studio 0.4 server: REST catalog, load, unload, and OpenAI-compatible chat. */
-async function startLmStudio(models: Record<string, Array<{ id: string; config: Record<string, unknown> }>>) {
+async function startLmStudio(
+	models: Record<string, Array<{ id: string; config: Record<string, unknown> }>>,
+	onChat?: () => Promise<void>,
+) {
 	const loads: Array<Record<string, unknown>> = [];
 	const unloads: string[] = [];
 	const chats: Array<{ body: Record<string, unknown>; authorization: string | undefined }> = [];
@@ -79,6 +86,7 @@ async function startLmStudio(models: Record<string, Array<{ id: string; config: 
 		if (req.method === "POST" && req.url === "/v1/chat/completions") {
 			const body = await readJson(req);
 			chats.push({ body, authorization: req.headers.authorization });
+			await onChat?.();
 			return sse(res, String(body.model));
 		}
 		res.writeHead(404);
@@ -304,6 +312,144 @@ describe("LM Studio load profile", () => {
 		} finally {
 			lm.close();
 			gateway.close();
+		}
+	});
+});
+
+function serverKey(url: string): string {
+	const key = residencyTargetKey("lmstudio", lmStudioRootUrl(url));
+	ok(key);
+	return key;
+}
+
+/** Another Clio process holding a lease on `modelKey`, alive until killed. */
+async function leaseInChild(key: string, modelKey: string): Promise<ChildProcess> {
+	const module = new URL("../../src/engine/apis/lmstudio-ownership.ts", import.meta.url).href;
+	const child = spawn(
+		process.execPath,
+		[
+			"--import",
+			"tsx",
+			"--input-type=module",
+			"-e",
+			`const m = await import(${JSON.stringify(module)}); await m.leaseClioModel(${JSON.stringify(key)}, ${JSON.stringify(modelKey)}); process.stdout.write("leased\\n"); setInterval(() => {}, 1000);`,
+		],
+		{ env: process.env, stdio: ["ignore", "pipe", "inherit"] },
+	);
+	await new Promise<void>((resolve, reject) => {
+		child.once("exit", (code) => reject(new Error(`lease child exited with ${code}`)));
+		child.stdout?.on("data", (chunk: Buffer) => {
+			if (chunk.toString().includes("leased")) resolve();
+		});
+	});
+	return child;
+}
+
+async function killed(child: ChildProcess): Promise<void> {
+	const exited = new Promise((resolve) => child.once("exit", resolve));
+	child.kill("SIGKILL");
+	await exited;
+}
+
+describe("LM Studio load ownership across Clio processes", () => {
+	const directTarget = (url: string): TargetDescriptor => ({
+		id: "dynamo",
+		runtime: "lmstudio",
+		url,
+		lmstudio: { load: PROFILE },
+	});
+	const synth = (url: string, id: string) =>
+		lmstudio.synthesizeModel(directTarget(url), id, null) as Model<"openai-completions">;
+
+	it("a load releases a model an earlier Clio process loaded on the same server", async () => {
+		const server = await startLmStudio({ a: [{ id: "a", config: PROFILE_WIRE }], b: [] });
+		try {
+			// A record is all another process leaves behind; which process wrote it does not matter.
+			await recordClioLoad(serverKey(server.url), "a", "a");
+			await turn(synth(server.url, "b"));
+			deepStrictEqual(server.unloads, ["a"]);
+			deepStrictEqual(
+				server.loads.map((body) => body.model),
+				["b"],
+			);
+			const { loads } = await clioOwnership(serverKey(server.url));
+			deepStrictEqual(
+				loads.map((record) => record.instanceId),
+				["b"],
+			);
+		} finally {
+			server.close();
+		}
+	});
+
+	it("back-to-back turns on one model stay warm", async () => {
+		const server = await startLmStudio({ a: [] });
+		try {
+			await turn(synth(server.url, "a"));
+			await turn(synth(server.url, "a"));
+			strictEqual(server.loads.length, 1);
+			deepStrictEqual(server.unloads, []);
+		} finally {
+			server.close();
+		}
+	});
+
+	it("a model another client loaded is never released", async () => {
+		const server = await startLmStudio({ foreign: [{ id: "foreign", config: PROFILE_WIRE }], b: [] });
+		try {
+			await turn(synth(server.url, "b"));
+			deepStrictEqual(server.unloads, []);
+		} finally {
+			server.close();
+		}
+	});
+
+	it("a model a live Clio process is streaming on stays, and is released once that process is gone", async () => {
+		const server = await startLmStudio({ a: [{ id: "a", config: PROFILE_WIRE }], b: [], c: [] });
+		const key = serverKey(server.url);
+		await recordClioLoad(key, "a", "a");
+		const child = await leaseInChild(key, "a");
+		try {
+			await turn(synth(server.url, "b"));
+			deepStrictEqual(server.unloads, [], "the other process's model stays while it holds a lease");
+			await killed(child);
+			await turn(synth(server.url, "c"));
+			deepStrictEqual(server.unloads.sort(), ["a", "b"], "a dead process's lease protects nothing");
+		} finally {
+			if (child.exitCode === null && child.signalCode === null) await killed(child);
+			server.close();
+		}
+	});
+
+	it("an instance that drifted from the profile is not reloaded under a live Clio request", async () => {
+		const server = await startLmStudio({ a: [{ id: "a", config: GUI_DEFAULTS }] });
+		const release = await leaseClioModel(serverKey(server.url), "a");
+		try {
+			await turn(synth(server.url, "a"));
+			deepStrictEqual(server.unloads, []);
+			deepStrictEqual(server.loads, []);
+		} finally {
+			await release();
+			server.close();
+		}
+	});
+
+	it("a stream holds its lease while the request runs and drops it after", async () => {
+		const seen: Array<Set<string>> = [];
+		let key = "";
+		const server = await startLmStudio({ a: [] }, async () => {
+			seen.push((await clioOwnership(key)).leased);
+		});
+		key = serverKey(server.url);
+		try {
+			await turn(synth(server.url, "a"));
+			deepStrictEqual(
+				seen.map((leased) => [...leased]),
+				[["a"]],
+			);
+			deepStrictEqual([...(await clioOwnership(key)).leased], []);
+		} finally {
+			server.close();
 		}
 	});
 });

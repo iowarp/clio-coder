@@ -1072,26 +1072,33 @@ async function ensureResidencyForModel(
 	});
 }
 
+interface LocalResidency {
+	model: Model<"openai-completions">;
+	/** Ends this stream's claim on the resident model; see lmstudio-ownership.ts. */
+	release(): Promise<void>;
+}
+
+const NO_RELEASE = (): Promise<void> => Promise.resolve();
+
 async function ensureLocalResidency(
 	model: Model<"openai-completions">,
 	options: LocalRequestOptions,
-): Promise<Model<"openai-completions">> {
+): Promise<LocalResidency> {
 	if (isLmStudioModel(model)) {
 		const requestModel = { ...model, headers: localRequestHeaders(model, options) };
-		const wireModelId = await ensureLmStudioResidency(requestModel, options);
+		const { wireModelId, release } = await ensureLmStudioResidency(requestModel, options);
 		// Residency may discover a smaller loaded window after turn preflight.
 		if (model.contextWindow <= 0 || requestModel.contextWindow < model.contextWindow) {
 			model.contextWindow = requestModel.contextWindow;
 		}
-		return wireModelId === model.id ? model : { ...model, id: wireModelId };
+		return { model: wireModelId === model.id ? model : { ...model, id: wireModelId }, release };
 	}
 	if (gatewayLmStudioProfile(model)) {
 		// The gateway keeps the route; Clio only fixes the load behind it.
-		await ensureGatewayLmStudioResidency(model, options);
-		return model;
+		return { model, release: await ensureGatewayLmStudioResidency(model, options) };
 	}
 	await ensureResidencyForModel(model, options);
-	return model;
+	return { model, release: NO_RELEASE };
 }
 
 function degradedWatchOptions(
@@ -1132,11 +1139,13 @@ export function withLocalResidency(
 	}
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	(async () => {
+		let release = NO_RELEASE;
 		try {
 			options.signal?.throwIfAborted();
-			const requestModel = await ensureLocalResidency(model, options);
+			const residency = await ensureLocalResidency(model, options);
+			release = residency.release;
 			options.signal?.throwIfAborted();
-			for await (const event of sourceFactory(requestModel)) {
+			for await (const event of sourceFactory(residency.model)) {
 				if (event.type === "error" && isLmStudioModel(model)) {
 					invalidateLmStudioCatalog({
 						id: runtimeMetadata(model)?.targetId ?? model.provider,
@@ -1153,6 +1162,8 @@ export function withLocalResidency(
 			error.stopReason = options.signal?.aborted ? "aborted" : "error";
 			stream.push({ type: "error", reason: error.stopReason, error });
 			stream.end(error);
+		} finally {
+			await release();
 		}
 	})();
 	return stream;

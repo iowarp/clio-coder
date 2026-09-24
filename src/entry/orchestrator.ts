@@ -152,6 +152,7 @@ import { askSite } from "../domains/providers/site-ask.js";
 import { rankCapabilities } from "../domains/providers/sites/capabilities.js";
 import { type DispatchForecast, dispatchForecastConfident, turnSites } from "../domains/providers/sites/index.js";
 import { createTurnRelevanceStore } from "../domains/providers/turn-relevance.js";
+import { createVisionSidecar } from "../domains/providers/vision-sidecar.js";
 import {
 	createResourcesDomainModule,
 	discoverMarketplaceSkills,
@@ -198,6 +199,7 @@ import {
 import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { latestUserImages } from "../domains/session/vision-images.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
 import { ToolchainDomainModule } from "../domains/toolchain/index.js";
 import type { UserTaskAcceptance } from "../domains/user-tasks/acceptance.js";
@@ -1977,7 +1979,19 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					: null,
 		}),
 	});
+	const visionSidecar = createVisionSidecar({ getSettings: () => getCurrentSettings(), providers });
 	const toolBootstrap = registerAllTools(toolRegistry, {
+		...(resolvedSettings.fleet.profiles.vision?.target
+			? {
+					visionSidecar,
+					getRecentVisionImages: () => {
+						const meta = session?.current();
+						if (!meta) return [];
+						const leaf = session?.tree(meta.id).leafId ?? undefined;
+						return latestUserImages(readSessionEntriesForCompact(meta.id), leaf);
+					},
+				}
+			: {}),
 		getSkillRelevance: () => turnRelevance.skills(),
 		// Gateway find asks the `capabilities` site mid-turn, bounded like the
 		// pre-turn brief because the model is waiting on the listing.
@@ -2550,6 +2564,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	let cancelQueuedSpeculativeHold: (() => void) | null = null;
 	let previousSpeculativeStats = dispatch?.speculativeStats?.() ?? { held: 0, adopted: 0, discarded: 0, live: 0 };
 	const chat = createChatLoop({
+		visionSidecar,
 		getReadySkillCount,
 		interactiveGuidance: !options.headless && !options.acp,
 		// The pre-warm holds one slot on its endpoint while it runs, so dispatch

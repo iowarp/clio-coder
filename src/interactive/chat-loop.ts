@@ -65,6 +65,7 @@ import {
 	runtimeTargetSnapshot,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
@@ -494,6 +495,8 @@ export interface CreateChatLoopDeps {
 	 */
 	getAutonomy?: () => AutonomyLevel;
 	providers: ProvidersContract;
+	/** Optional independent image model, bound to fleet.profiles.vision. */
+	visionSidecar?: VisionSidecar;
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
@@ -1331,6 +1334,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// behind.
 	let turnActive = false;
 	let pendingDecisionBrief: AbortController | null = null;
+	let pendingVisionSidecar: AbortController | null = null;
 
 	const prewarm = createTurnPrewarm({
 		state,
@@ -1461,24 +1465,51 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
 				return;
 			}
+			const operatorText = text;
+			let sidecarObservation: string | null = null;
 			const routeAcceptsImages = acceptsImageInput({
 				runtimeId: agentRuntime.runtimeResolution.runtime.id,
 				vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
 			});
 			if (options.images?.length && !routeAcceptsImages) {
-				const route = agentRuntime.runtimeResolution;
-				const choices = visionModelOptions();
-				const alternatives = choices.length
-					? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
-					: " No vision-capable models are known in the configured catalog.";
-				emit({
-					type: "notice",
-					level: "warning",
-					surface: "transcript",
-					text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
-					admission: { reason: "image-input-unsupported" },
-				});
-				return;
+				if (deps.visionSidecar?.configured()) {
+					const sidecar = deps.visionSidecar;
+					const controller = new AbortController();
+					pendingVisionSidecar = controller;
+					emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
+					try {
+						const question = operatorText.trim() || "Describe the attached image and any visible text.";
+						const analysis = await sidecar.analyze(options.images, question, controller.signal);
+						if (controller.signal.aborted) return;
+						sidecarObservation = visionObservationText(analysis);
+						text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
+						emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
+					} catch (err) {
+						if (controller.signal.aborted) {
+							emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled");
+						} else {
+							const reason = err instanceof Error ? err.message : String(err);
+							emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed");
+						}
+						return;
+					} finally {
+						if (pendingVisionSidecar === controller) pendingVisionSidecar = null;
+					}
+				} else {
+					const route = agentRuntime.runtimeResolution;
+					const choices = visionModelOptions();
+					const alternatives = choices.length
+						? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
+						: " No vision-capable models are known in the configured catalog.";
+					emit({
+						type: "notice",
+						level: "warning",
+						surface: "transcript",
+						text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
+						admission: { reason: "image-input-unsupported" },
+					});
+					return;
+				}
 			}
 			const historicalImages = countImageBlocks(agentRuntime.agent.state.messages);
 			if (!routeAcceptsImages && historicalImages > 0) {
@@ -1502,7 +1533,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.turnSharedWorkerNote = isWorkerShareNote(text);
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
-			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
+			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
 			const pendingSkillRequests =
 				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
@@ -1653,9 +1684,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const userTurnId = persistence.appendSubmittedUserTurn(
 				agentRuntime,
 				submittedText,
-				images,
+				options.images?.length ? options.images : undefined,
 				options.requestContinuation === true,
-				text,
+				operatorText,
 				options.display?.text,
 			);
 			context.installMemoryRestoration(agentRuntime, submittedText);
@@ -1666,7 +1697,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (interrupted)
 				emit({
 					type: "queued_user_turn",
-					text,
+					text: operatorText,
 					kind: "interrupt",
 					...(options.display ? { display: options.display } : {}),
 				});
@@ -1865,6 +1896,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		cancel(options?: ChatCancelOptions): void {
 			continuity.cancel();
 			pendingDecisionBrief?.abort();
+			pendingVisionSidecar?.abort();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
@@ -1945,6 +1977,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
 			lastHistoricalImageNoticeKey = null;
+			pendingVisionSidecar?.abort();
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = undefined;
@@ -1983,6 +2016,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			pendingVisionSidecar?.abort();
 			unsubscribeConfigReload?.();
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();

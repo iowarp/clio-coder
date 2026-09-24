@@ -63,17 +63,18 @@ export interface SerializeClioMdInput {
 const FOOTER_RE = /<!--\s*clio:fingerprint v1\s*\n([\s\S]*?)\n\s*-->/;
 /**
  * Size targets for a generated handbook. The parser warns past them, the
- * bootstrap clamps model output to them, and the merge caps to them. Eight
- * invariants and eight conventions leave room for the rules a small model
- * breaks without being told, while the whole file still preloads in full.
+ * bootstrap clamps model output to them, and the merge caps to them. Ten
+ * invariants, eight conventions and 4000-character sections hold a change
+ * recipe section as large as the one that decided real tasks, while the whole
+ * file still preloads in full.
  */
 export const HANDBOOK_TARGETS = {
 	conventions: 8,
 	conventionChars: 280,
-	invariants: 8,
-	invariantChars: 360,
+	invariants: 10,
+	invariantChars: 400,
 	sections: 8,
-	sectionChars: 2500,
+	sectionChars: 4000,
 } as const;
 
 const H1_RE = /^#\s+(.+?)\s*$/gm;
@@ -359,13 +360,15 @@ function validateForSerialization(input: SerializeClioMdInput): void {
 
 function renderWithoutParse(input: SerializeClioMdInput): string {
 	const lines: string[] = [`# ${normalizeInline(input.projectName)}`, "", normalizeInline(input.identity)];
-	const conventions = input.conventions.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
-	if (conventions.length > 0) {
-		lines.push("", "## Conventions", "", ...conventions.map((item) => `- ${item}`));
-	}
+	// Invariants lead: small models keep early instructions best (IFScale), and
+	// these are the rules whose violation breaks the build or crosses a boundary.
 	const invariants = input.invariants.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
 	if (invariants.length > 0) {
 		lines.push("", "## Hard invariants", "", ...invariants.map((item, index) => `${index + 1}. ${item}`));
+	}
+	const conventions = input.conventions.map((item) => normalizeInline(item)).filter((item) => item.length > 0);
+	if (conventions.length > 0) {
+		lines.push("", "## Conventions", "", ...conventions.map((item) => `- ${item}`));
 	}
 	for (const section of input.sections ?? []) {
 		const title = normalizeInline(section.title);

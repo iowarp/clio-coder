@@ -973,6 +973,28 @@ function workerPersonaBody(req: DispatchRequest, recipe: AgentRecipe | null, con
 /** Total budget for the worker project-context message body. */
 const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
 /**
+ * The project context for a worker running at `cwd`. A `worktree: true` task
+ * runs in a checkout of the committed tree, so a handbook the repository keeps
+ * out of git (CLIO-CODER.md is often gitignored) is absent there, and the
+ * handbook walk stops at the worktree's own `.git` file: such a worker got no
+ * project rules at all. When the worktree yields no handbook, read the one at
+ * the same relative directory of the source checkout. A handbook committed to
+ * the worktree still wins, because it matches the tree the worker edits.
+ */
+function workerProjectPrompt(
+	context: Pick<ContextContract, "renderPromptContext">,
+	cwd: string,
+	remap: DispatchRequest["protectedArtifactRemap"],
+): ProjectPromptContext {
+	const own = context.renderPromptContext(cwd);
+	if (remap === undefined || own.handbookSources.length > 0) return own;
+	const inside = relative(remap.workerRoot, cwd);
+	if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return own;
+	const source = context.renderPromptContext(resolvePath(remap.sourceRoot, inside));
+	return source.handbookSources.length > 0 ? source : own;
+}
+
+/**
  * A compiled handbook selection is routed to the worker's audience and path
  * scope, so it earns a larger budget than a blind prefix of the file does.
  */
@@ -4149,7 +4171,8 @@ export function createDispatchBundle(
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
 		// (capability-class default, recipe frontmatter override).
 		const tier = spec.projectContextTier;
-		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
+		const projectPrompt =
+			projectContext && tier === "bounded" ? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
 			agentId: recipe.id,
@@ -4277,7 +4300,8 @@ export function createDispatchBundle(
 		// stays intact within the opted-in source budget. The safety posture
 		// line still rides along for every worker run.
 		const tier: AgentProjectContextTier = configured.projectContext ?? "none";
-		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
+		const projectPrompt =
+			projectContext && tier === "bounded" ? workerProjectPrompt(projectContext, cwd, req.protectedArtifactRemap) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			agentId,
 			workingContextPaths: pathScope.workingContextPaths,
