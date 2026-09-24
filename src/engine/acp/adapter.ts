@@ -244,7 +244,22 @@ export function startAcpDelegationRun(input: AcpDelegationRunInput): AcpDelegati
 	const usage = emptyUsage();
 	const mapper = new AcpEventMapper();
 	const transportOptions: StdioTransportOptions = { cwd: input.agent.cwd ?? input.cwd };
-	if (input.agent.env !== undefined) transportOptions.env = input.agent.env;
+	if (input.agent.env !== undefined) {
+		// The safe child environment omits provider credentials. An explicitly
+		// configured reference passes only the named value to this ACP peer,
+		// while settings and receipts retain the reference rather than the key.
+		transportOptions.env = Object.fromEntries(
+			Object.entries(input.agent.env).map(([name, value]) => {
+				const reference = /^\{env:([A-Z_][A-Z0-9_]*)\}$/u.exec(value);
+				if (reference === null) return [name, value];
+				const sourceName = reference[1];
+				const resolved = sourceName === undefined ? undefined : process.env[sourceName];
+				if (resolved === undefined || resolved.length === 0)
+					throw new Error(`ACP agent environment reference '${sourceName}' is unavailable`);
+				return [name, resolved];
+			}),
+		);
+	}
 	if (input.terminationGraceMs !== undefined) transportOptions.terminationGraceMs = input.terminationGraceMs;
 	if (input.terminationWaitMs !== undefined) transportOptions.terminationWaitMs = input.terminationWaitMs;
 	const transport = createStdioTransport(input.agent.command, input.agent.args ?? [], transportOptions);

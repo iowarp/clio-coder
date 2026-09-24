@@ -134,7 +134,7 @@ describe("panes tool", () => {
 			[{ action: "open" }, /action=open requires preset/],
 			[{ action: "show" }, /action=show requires target/],
 			[{ action: "close", target: "  " }, /action=close requires target/],
-			[{ action: "zoom", target: "p1" }, /action must be show, open, close, or list; got 'zoom'/],
+			[{ action: "zoom", target: "p1" }, /action must be show, open, handoff, close, or list; got 'zoom'/],
 		];
 		for (const [args, expected] of cases) match(errorMessage(await f.call(args)), expected, JSON.stringify(args));
 		deepStrictEqual(f.calls, []);

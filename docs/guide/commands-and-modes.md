@@ -239,11 +239,12 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/prompts` | `/prompts` | Open the Library on Prompts. |
 | `/mcp` | `/mcp [list] \| /mcp trust <id> [class] \| /mcp untrust <id>` | List MCP servers or manage explicit trust for project MCP servers with optional action class |
 | `/extensions` | `/extensions [reload]` | Inspect harness extensions or reload their commands, hooks and operator UI |
-| `/interop` | `/interop` | Inspect another local coding agent and review adoption of supported resources. |
+| `/interop` | `/interop` | Inspect local coding agents, their ACP/headless/pane modes, and supported resource adoption. |
 | `/share` | `/share [runId]` | Share a worker result with the main agent |
 | `/archive` | `/archive export <path> \| /archive import [--dry-run] [--force] <path>` | Export or import a full Clio archive |
-| `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--share] <agent> <task>` | Run a fleet agent |
-| `/delegate` | `/delegate [--share] <agent-id> <task>` | Run an ACP delegation agent |
+| `/run` | `/run [--agent-profile <profile>] [--runtime <runtimeId>] [--target <id>] [--model <id>] [--thinking <level>] [--tool-profile <minimal-local\|science-local\|full-agent>] [--require <cap>] [--worktree] [--share] <agent> <task>` | Run a worker or configured headless peer; `--worktree` preserves an isolated task branch. |
+| `/delegate` | `/delegate [--share] <agent-id> <task>` | Run a configured ACP peer with a managed receipt. |
+| `/peer` | `/peer [--cwd <workspace>] <claude-code\|codex\|opencode\|antigravity\|pi> [brief]` | Open an installed coding agent in an owned Herdr pane; no managed receipt. |
 | `/btw` | `/btw <question>` | Ask a side question that never enters the session transcript |
 | `/draft` | `/draft [N] <request>` | Draft N answers in parallel (2-4, default 3) and let a decision model pick the strongest |
 | `/oracle` | `/oracle <question>` | Ask a read-only advisor to challenge a question against this session's settled decisions |
@@ -364,7 +365,7 @@ show equal percentages are never merged.
 | `/model` and `/thinking` | Choose a route for this session or save it as a default. Cancel leaves the active route unchanged. See [routing defaults](configuration-and-targets.md#live-routing-vs-saved-defaults). |
 | `/btw` and `/draft` | Run side questions or candidate answers without tools or transcript changes. Calls still count in `/usage`. Use a model-bound draft judge for a scored pick. |
 | `/council` | Runs a configured roster of two to five read-only members. Approval is shown before work starts; share the synthesis or an individual member explicitly with `/share <runId>`. |
-| `/run` and `/delegate` | Start a fleet worker or ACP peer. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
+| `/run` and `/delegate` | Start a worker or ACP peer with a managed receipt. Its answer is separate from main-agent context until shared with `--share` or `/share`. |
 | `/handoff <goal>` | Review a bounded handoff document, then accept it to create a fresh session. The goal must describe a concrete continuation. |
 | `/context` | Bare command opens the context ledger. Subcommands compact or recall session content and manage project context; see [Project context](#project-context). |
 | `/tasks` | Inspect session tasks and the durable project task inbox. Acceptance checks travel with handed tasks; receipts show whether they passed. |
@@ -553,7 +554,7 @@ The settings UI offers **capable** (`auto-edit`) for supervised edits and **yolo
 
 ## Dispatch and Built-In Agents
 
-Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker and `/delegate` starts a configured ACP peer. Fleet profiles determine target, model, and limits; worker execution and receipts are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md).
+Use `clio-coder agents` to inspect the installed agent catalog and `clio-coder run --agent <id> "<task>"` for a non-interactive dispatch. In the TUI, `/run` starts a fleet worker or a configured headless coding peer, `/delegate` starts a configured ACP peer, and `/peer` opens an interactive handoff pane. Fleet profiles determine target, model, and limits; worker execution and receipts are covered by [Fleet dispatch](fleet-dispatch.md). Agent ids and recipe contracts are maintained in [Built-in agents](built-in-agents.md). See [Coding Agent Interoperability](interop.md#delegate-work-to-an-installed-coding-agent) for peer setup and workspace choices.
 
 ## Environment Variables
 

@@ -16,6 +16,8 @@
  * `pane-policy.ts`. There is no per-run pane inventory to search any more.
  */
 
+import { realpathSync, statSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
 import type { ClioSettings } from "../core/config.js";
 import type { DispatchSnapshot } from "../domains/dispatch/contract.js";
 import {
@@ -25,6 +27,7 @@ import {
 } from "../domains/dispatch/run-event-journal.js";
 import type { MuxContract, MuxPaneRecord } from "../domains/mux/index.js";
 import {
+	PANE_PEER_IDS,
 	PANES_PRESETS,
 	type PanesCloseResult,
 	type PanesFilesResult,
@@ -344,6 +347,54 @@ export function createPanesRuntime(deps: PanesRuntimeDeps): PanesOperations {
 				const ref = await deps.mux.openUtilityPane({ argv, cwd, label });
 				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
 				return { status: "opened", label, paneId: ref.paneId };
+			} finally {
+				pendingOpens.delete(pendingId);
+			}
+		},
+
+		async handoff(request): Promise<PanesOpenResult> {
+			if (!PANE_PEER_IDS.includes(request.peer))
+				return { status: "refused", reason: `unknown coding peer: ${request.peer}` };
+			if (!deps.mux.available()) return { status: "unavailable", reason: unavailableReason(deps.mux) };
+			const brief = request.brief?.trim() ?? "";
+			if (Buffer.byteLength(brief, "utf8") > 8_192) {
+				return { status: "refused", reason: "peer handoff brief exceeds 8192 UTF-8 bytes" };
+			}
+			let cwd: string;
+			try {
+				const selected = request.cwd ?? deps.getCwd();
+				cwd = realpathSync(isAbsolute(selected) ? selected : resolve(deps.getCwd(), selected));
+				if (!statSync(cwd).isDirectory()) throw new Error("not a directory");
+			} catch {
+				return {
+					status: "refused",
+					reason: `peer handoff workspace is not an existing directory: ${request.cwd ?? deps.getCwd()}`,
+				};
+			}
+			const binary = request.peer === "claude-code" ? "claude" : request.peer === "antigravity" ? "agy" : request.peer;
+			const binaryPath = probe(binary);
+			if (binaryPath === null) {
+				return {
+					status: "missing-binary",
+					preset: request.peer,
+					binary,
+					installHint: `install ${binary}`,
+					detail: `${binary} was not found`,
+				};
+			}
+			const argv = [binaryPath];
+			if (brief) {
+				if (request.peer === "antigravity") argv.push("--prompt-interactive", brief);
+				else if (request.peer === "opencode") argv.push("--prompt", brief);
+				else if (request.peer === "pi") argv.push("--", brief);
+				else argv.push(brief);
+			}
+			const label = `${request.peer} handoff`;
+			const pendingId = beginPendingOpen(label);
+			try {
+				const ref = await deps.mux.openUtilityPane({ argv, cwd, label, title: label });
+				if (ref === null) return { status: "unavailable", reason: `pane host refused to open ${label}` };
+				return { status: "opened", label, paneId: ref.paneId, cwd };
 			} finally {
 				pendingOpens.delete(pendingId);
 			}
