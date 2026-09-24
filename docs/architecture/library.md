@@ -1,5 +1,7 @@
 # Library architecture
 
+The [library guide](../guide/resource-library.md) explains package installation and operator controls.
+
 Clio uses **library** for the collection and **package** for a distributable item. This name covers both local authoring and indexed distribution without suggesting a remote store or a purchase. CLI `library`, slash `/library`, the Library overlay and the bundled `library/registry.yaml` describe the same collection. The Pi API snapshot does not contain the retired command names, so top-level `plugins`, top-level `skills`, and `/resources` are removed rather than retained as aliases. Retired slash commands `/plugins` and `/resources` return an explicit usage error pointing to `/library` (for recipe packages) and `/extensions` (for harness extensions). Bare `/skill` returns usage guidance pointing to `/skills`, while `/skill <name>` activates a skill and `/skill off` clears the active skill's armed tool surface (without erasing instructions already loaded in transcript or context).
 
 ## Invariants

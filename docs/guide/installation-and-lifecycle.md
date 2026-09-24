@@ -1,5 +1,7 @@
 # Installation and Lifecycle Operations
 
+The [architecture overview](../architecture/architecture.md) explains the installed runtime and its entry points.
+
 Clio Coder installs from the npm registry as `@iowarp/clio-coder` using npm,
 pnpm, or Bun, or from a source checkout using the pinned pnpm workflow. The
 [README quick start](../../README.md#get-started) covers installing and first

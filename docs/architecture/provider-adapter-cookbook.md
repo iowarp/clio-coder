@@ -1,5 +1,7 @@
 # Provider Adapter Cookbook
 
+The [configuration guide](../guide/configuration-and-targets.md) explains how operators use registered runtimes.
+
 This cookbook guides developers through implementing custom model runtimes and inference server integrations within Clio Coder. It explains the runtime descriptor interfaces, probing protocols, model synthesis, and how to configure reasoning and thinking behaviors.
 
 Source of truth:

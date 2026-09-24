@@ -1,5 +1,7 @@
 # Agent Client Protocol (ACP) Server
 
+The [coding agent interoperability guide](../guide/interop.md) covers the operator workflow for external agents.
+
 This document defines the architecture, transport protocols, tool mediation layers, permission handling, and error taxonomy for Clio Coder's Agent Client Protocol (ACP) server implementation in the current source tree.
 
 Source implementations: `src/engine/acp/` and [acp.ts](../../src/cli/acp.ts).

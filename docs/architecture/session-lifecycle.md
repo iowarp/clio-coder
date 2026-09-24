@@ -1,5 +1,7 @@
 # Session Lifecycle
 
+The [context continuity guide](../guide/context-continuity.md) explains operator recovery after a paused handoff.
+
 This document is the authoritative specification for Clio Coder interactive and headless session lifecycles, on-disk ledger structures, tree-based conversation branching, checkpoints, and recovery protocols in the current source tree.
 
 Source implementations: [session.ts](../../src/engine/session.ts) and `src/domains/session/`.

@@ -1,5 +1,7 @@
 # Configuration reference
 
+The [model catalog contract](../architecture/model-catalog.md) explains how live discovery and catalog settings interact.
+
 This page is a map to the implemented configuration surface. Source defines the complete key, flag, and argument contracts; use the linked files when exact schemas or defaults matter. For setup choices, see [Configuration and targets](configuration-and-targets.md). For `CLIO_*` variables, see the [environment variable reference](environment-variables.md).
 
 ## Settings keys

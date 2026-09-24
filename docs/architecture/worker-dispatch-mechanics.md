@@ -1,5 +1,7 @@
 # Worker Dispatch Mechanics
 
+The [fleet dispatch guide](../guide/fleet-dispatch.md) explains how operators start and monitor these workers.
+
 This document describes the design and lifecycle of Clio Coder dispatched workers, focusing on the spawning sequence, execution isolation, the standard input/output NDJSON communication loop, and permission escalation routing.
 
 Source of truth:

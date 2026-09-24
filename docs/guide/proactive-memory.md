@@ -1,5 +1,7 @@
 # Proactive task memory
 
+The [evidence and memory contract](../architecture/evidence-and-memory.md) explains durable memory records and their provenance.
+
 
 After a durable context reduction, restoration uses a commit-scoped offer: stale content jobs and buffered reminders lose authority, known usage remains attributed, and restoration is consumed only after an admitted installation. See [Context continuity and recovery](context-continuity.md) for the lifecycle and its limits.
 

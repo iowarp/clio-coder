@@ -1,5 +1,7 @@
 # Model Catalog, Runtime Refresh, and Field Notes
 
+The [configuration guide](../guide/configuration-and-targets.md) explains model and target selection.
+
 Clio Coder treats a selectable model as the intersection of three sources:
 
 1. **Configured targets** in `settings.yaml` (`targets[]`, `defaultModel`, and optional `wireModels`).
