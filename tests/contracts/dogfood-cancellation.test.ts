@@ -13,6 +13,7 @@ import {
 	type RuntimeDescriptor,
 } from "../../src/domains/providers/index.js";
 import litellm from "../../src/domains/providers/runtimes/protocol/litellm.js";
+import type { VisionSidecar } from "../../src/domains/providers/vision-sidecar.js";
 import type { SafetyContract } from "../../src/domains/safety/contract.js";
 import { createSessionBundle } from "../../src/domains/session/extension.js";
 import { isSessionEntry, isSessionHeader, type SessionEntry } from "../../src/domains/session/index.js";
@@ -197,6 +198,8 @@ function readFixtureEntries(path: string): SessionEntry[] {
 function fixture(
 	initialMode: WireMode,
 	refreshTurnRelevance?: (taskText: string, previous: string, signal?: AbortSignal) => Promise<void>,
+	visionSidecar?: VisionSidecar,
+	visionCapable = false,
 ) {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.chat.prewarm = false;
@@ -204,11 +207,17 @@ function fixture(
 	settings.chat.model = model.id;
 	settings.chat.thinkingLevel = "off";
 	settings.targets = [{ ...target, defaultModel: model.id }];
+	if (visionCapable && settings.targets[0]) settings.targets[0].capabilities = { vision: true };
 	const runtime: RuntimeDescriptor = {
 		...litellm,
 		auth: "none",
-		defaultCapabilities: { ...capabilities, tools: initialMode === "tool" },
-		synthesizeModel: () => ({ ...model, contextWindow: 131072, maxTokens: 4096 }),
+		defaultCapabilities: { ...capabilities, tools: initialMode === "tool", vision: visionCapable },
+		synthesizeModel: () => ({
+			...model,
+			input: visionCapable ? ["text", "image"] : ["text"],
+			contextWindow: 131072,
+			maxTokens: 4096,
+		}),
 	};
 	const context = dispatchStubContext({ settings, runtime });
 	const session = createSessionBundle(context).contract;
@@ -242,6 +251,7 @@ function fixture(
 	const panel = createChatPanel({ getOutputStyle: () => "detailed" });
 	const loop = createChatLoop({
 		getSettings: () => settings,
+		...(visionSidecar ? { visionSidecar } : {}),
 		...(refreshTurnRelevance ? { refreshTurnRelevance } : {}),
 		providers: context.getContract<ProvidersContract>("providers") as ProvidersContract,
 		knownTargets: () => new Set([target.id]),
@@ -485,6 +495,147 @@ it("a text-only route refuses an image before the provider receives bytes", { ti
 		strictEqual(notices.length, 1);
 		match(notices[0] ?? "", /IMAGE_INPUT_UNSUPPORTED.*cancellation-fixture\/unknown-cancellation-model/u);
 		strictEqual(f.session.current(), null);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a text-only route uses the vision sidecar while keeping the original image in session history", {
+	timeout: 15_000,
+}, async () => {
+	const asked: string[] = [];
+	const sidecar: VisionSidecar = {
+		configured: () => true,
+		label: () => "MiniCPM-V-4.6",
+		analyze: async (_images, question) => {
+			asked.push(question);
+			return {
+				target: "mini-vision",
+				model: "MiniCPM-V-4.6",
+				images: [{ index: 1, description: "A white pixel" }],
+				answer: "white",
+			};
+		},
+	};
+	const f = fixture("success", undefined, sidecar);
+	try {
+		const image = { type: "image" as const, mimeType: "image/png", data: "SIDECAR_IMAGE_SENTINEL" };
+		await f.loop.submit("What color is this?", { images: [image] });
+		strictEqual(f.wire().calls(), 1);
+		strictEqual(asked.length, 1);
+		strictEqual(asked[0], "What color is this?");
+		const body = f.wire().requestBodies()[0] ?? "";
+		doesNotMatch(body, /SIDECAR_IMAGE_SENTINEL|image_url/u);
+		match(body, /A white pixel/u);
+		match(body, /untrusted image observation/u);
+		ok(f.events.some((event) => event.type === "notice" && /Processing image with MiniCPM-V-4\.6/u.test(event.text)));
+		const user = f.entries().find((entry) => entry.kind === "message" && entry.role === "user");
+		ok(user && user.kind === "message");
+		match(JSON.stringify(user.payload), /SIDECAR_IMAGE_SENTINEL/u);
+		match(JSON.stringify(user.payload), /A white pixel/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("an image-only submission asks the sidecar for a description", { timeout: 15_000 }, async () => {
+	let question = "";
+	const f = fixture("success", undefined, {
+		configured: () => true,
+		label: () => "MiniCPM-V-4.6",
+		analyze: async (_images, prompt) => {
+			question = prompt;
+			return {
+				target: "mini-vision",
+				model: "MiniCPM-V-4.6",
+				images: [{ index: 1, description: "a pixel" }],
+				answer: "a pixel",
+			};
+		},
+	});
+	try {
+		await f.loop.submit("", { images: [{ type: "image", mimeType: "image/png", data: "IMAGE_ONLY" }] });
+		match(question, /Describe the attached image/u);
+		strictEqual(f.wire().calls(), 1);
+	} finally {
+		await f.close();
+	}
+});
+
+it("sidecar failure refuses admission without sending the image to the main model", { timeout: 15_000 }, async () => {
+	const f = fixture("success", undefined, {
+		configured: () => true,
+		label: () => "MiniCPM-V-4.6",
+		analyze: async () => {
+			throw new Error("HTTP 503");
+		},
+	});
+	try {
+		await f.loop.submit("Inspect this", { images: [{ type: "image", mimeType: "image/png", data: "SENTINEL" }] });
+		strictEqual(f.wire().calls(), 0);
+		strictEqual(f.session.current(), null);
+		ok(f.events.some((event) => event.type === "notice" && event.admission?.reason === "vision-sidecar-failed"));
+	} finally {
+		await f.close();
+	}
+});
+
+it("a vision-capable Qwopus-style route receives images directly without invoking the sidecar", {
+	timeout: 15_000,
+}, async () => {
+	let calls = 0;
+	const f = fixture(
+		"success",
+		undefined,
+		{
+			configured: () => true,
+			label: () => "MiniCPM-V-4.6",
+			analyze: async () => {
+				calls += 1;
+				throw new Error("sidecar should not run");
+			},
+		},
+		true,
+	);
+	try {
+		await f.loop.submit("Describe", {
+			images: [{ type: "image", mimeType: "image/png", data: "DIRECT_IMAGE_SENTINEL" }],
+		});
+		strictEqual(calls, 0);
+		strictEqual(f.wire().calls(), 1);
+		match(f.wire().requestBodies()[0] ?? "", /DIRECT_IMAGE_SENTINEL/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("cancelling image processing stops admission and leaves the next turn usable", { timeout: 15_000 }, async () => {
+	let started!: () => void;
+	const entered = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	const f = fixture("success", undefined, {
+		configured: () => true,
+		label: () => "MiniCPM-V-4.6",
+		analyze: async (_images, _question, signal) => {
+			started();
+			await new Promise<void>((_resolve, reject) =>
+				signal?.addEventListener("abort", () => reject(new Error("cancelled")), { once: true }),
+			);
+			throw new Error("unreachable");
+		},
+	});
+	try {
+		const pending = f.loop.submit("Inspect", {
+			images: [{ type: "image", mimeType: "image/png", data: "CANCEL_IMAGE_SENTINEL" }],
+		});
+		await entered;
+		f.loop.cancel();
+		await pending;
+		strictEqual(f.wire().calls(), 0);
+		strictEqual(f.session.current(), null);
+		await f.loop.submit("Continue with text");
+		strictEqual(f.wire().calls(), 1);
 	} finally {
 		await f.close();
 	}

@@ -4,6 +4,7 @@ import type { PrecomputedRanking } from "../core/precomputed-rank.js";
 import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
+import type { VisionSidecar } from "../domains/providers/vision-sidecar.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
@@ -11,6 +12,7 @@ import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
 import { createTaskBoardStore, type TaskBoardStore } from "../domains/session/task-board.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
+import type { ImageContent } from "../engine/types.js";
 import type { AgentLedgerPort } from "../worker/protocol.js";
 import { createArtifactTool } from "./artifact.js";
 import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
@@ -41,6 +43,7 @@ import { runScriptToolSurface } from "./run-script.js";
 import { gitTool } from "./safe-exec.js";
 import { createTasksTool } from "./tasks.js";
 import { verifyToolSurface } from "./verify/surface.js";
+import { createVisionTool } from "./vision.js";
 import { webFetchToolSurface, webReadToolSurface } from "./web-fetch-surface.js";
 import { writeTool } from "./write.js";
 
@@ -99,6 +102,8 @@ export interface CoreToolBootstrapDeps {
 	 * the tool signature and the prompt are unchanged.
 	 */
 	consult?: ConsultDeps;
+	visionSidecar?: VisionSidecar;
+	getRecentVisionImages?: () => ReadonlyArray<ImageContent>;
 }
 
 export interface CoreToolRegistration {
@@ -290,6 +295,17 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 	if (deps.consult) {
 		registry.register(builtin(createConsultTool(deps.consult), { path: "src/tools/consult.ts", scope: "core" }));
 	}
+	if (deps.visionSidecar) {
+		registry.register(
+			builtin(
+				createVisionTool(
+					deps.visionSidecar,
+					deps.getRecentVisionImages ? { getRecentImages: deps.getRecentVisionImages } : {},
+				),
+				{ path: "src/tools/vision.ts", scope: "core" },
+			),
+		);
+	}
 	// The gateway itself: direct, one fixed schema, reaching every
 	// gateway-placed spec above through the registry's own admission.
 	const gateway = builtin(
@@ -304,8 +320,14 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 		},
 	);
 	registry.register(
-		deps.consult && gateway.metadata
-			? { ...gateway, metadata: { ...gateway.metadata, promptHint: gatewayPromptHint(true) } }
+		(deps.consult || deps.visionSidecar) && gateway.metadata
+			? {
+					...gateway,
+					metadata: {
+						...gateway.metadata,
+						promptHint: gatewayPromptHint(Boolean(deps.consult), Boolean(deps.visionSidecar)),
+					},
+				}
 			: gateway,
 	);
 	// The coordination board exists only inside a dispatch: a worker process
