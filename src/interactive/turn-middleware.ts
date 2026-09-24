@@ -15,6 +15,7 @@ import {
 	type MiddlewareReminderSeverity,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
+import { withPluginDiscoveryPass } from "../domains/plugins/index.js";
 import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
@@ -262,7 +263,10 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 					pendingSkillRequests: pendingSkillRequestCount,
 				},
 			};
-			const effects = runMiddlewareTurnHook(input);
+			// The skills reminder and the marketplace offer each list installed
+			// skills on a session's first substantive turn. One discovery pass
+			// verifies every plugin tree once for all turn_start registrations.
+			const effects = withPluginDiscoveryPass(() => runMiddlewareTurnHook(input));
 			middlewareToolChoice.apply(effects);
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {

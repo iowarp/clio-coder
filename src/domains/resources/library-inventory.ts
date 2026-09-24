@@ -10,6 +10,7 @@ import { type AgentRecipeDiagnostic, discoverAgentRecipes } from "../agents/regi
 import type { AgentAudience } from "../agents/spec.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import { bundledLibraryIndexPath, parsePluginGithubSource } from "../plugins/catalog.js";
+import { withPluginDiscoveryPass } from "../plugins/index.js";
 import { listInstalledPlugins, readPluginInstallRecord } from "../plugins/state.js";
 import type { InstalledPlugin, PluginInstallRecord, PluginScope } from "../plugins/types.js";
 import type { ResourceDiagnostic } from "./collision.js";
@@ -814,6 +815,12 @@ function sortResources(items: LibraryResource[]): LibraryResource[] {
 }
 
 export function readLibraryInventory(options: LibraryInventoryOptions = {}): LibraryInventory {
+	// Copies, catalog discovery, and resource rows each list installed plugins;
+	// one discovery pass verifies every tree once for the whole inventory.
+	return withPluginDiscoveryPass(() => readLibraryInventoryInPass(options));
+}
+
+function readLibraryInventoryInPass(options: LibraryInventoryOptions): LibraryInventory {
 	const cwd = path.resolve(options.cwd ?? process.cwd());
 	const include = { packages: true, copies: true, resources: true, ...(options.include ?? {}) };
 	const selection = parseSelection(options.ref);

@@ -334,6 +334,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 	 * plugin prompts (`wtfp:help`, `materio:status`) sort with their package.
 	 */
 	private promptCommandItems(
+		templates: ReadonlyArray<PromptCommandTemplate>,
 		prefix: string,
 		builtinNames: ReadonlySet<string>,
 		range: { start: number; end: number },
@@ -341,8 +342,7 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 		const lowered = prefix.toLowerCase();
 		const seen = new Set<string>();
 		const items: SlashCompletionItem[] = [];
-		const templates = [...this.promptTemplates()].sort((a, b) => a.name.localeCompare(b.name));
-		for (const template of templates) {
+		for (const template of [...templates].sort((a, b) => a.name.localeCompare(b.name))) {
 			const name = template.name;
 			if (!name || builtinNames.has(name.toLowerCase()) || seen.has(name)) continue;
 			if (!name.toLowerCase().startsWith(lowered) || name === prefix) continue;
@@ -472,13 +472,16 @@ class ClioAutocompleteProvider implements AutocompleteProvider {
 					if (remainingGrammar) item.remainingGrammar = remainingGrammar;
 					return item;
 				});
+			// One listing serves both the template rows and the extension-command
+			// shadowing check; each listing of plugin prompts costs a plugin walk.
+			const templates = this.promptTemplates();
 			items.push(
-				...this.promptCommandItems(prefix, new Set(refs.map((ref) => ref.name.toLowerCase())), {
+				...this.promptCommandItems(templates, prefix, new Set(refs.map((ref) => ref.name.toLowerCase())), {
 					start: context.commandStart,
 					end: context.commandEnd,
 				}),
 			);
-			const promptNames = this.promptTemplates().map((prompt) => prompt.name);
+			const promptNames = templates.map((prompt) => prompt.name);
 			for (const row of resolveExtensionCommands(this.extensionCommands(), promptNames)) {
 				if (
 					!row.invocation.toLowerCase().startsWith(prefix.toLowerCase()) ||

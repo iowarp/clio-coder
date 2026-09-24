@@ -16,6 +16,7 @@ import {
 	recallParentTurnId,
 	resolveRecall,
 } from "../../domains/context/working-set/recall.js";
+import { withPluginDiscoveryPass } from "../../domains/plugins/index.js";
 import {
 	buildSkillCatalogView,
 	checkSkillDrift,
@@ -934,9 +935,11 @@ export function createContextTool(deps: ContextToolDeps = {}): ToolSpec {
 				});
 			}
 			if (scope === "budget") return runBudgetScope(deps, reservation, options);
-			if (scope === "workspace") return runWorkspaceScope(deps, reservation, options);
+			// Both scopes read the skill catalog and installed packages several
+			// times; one discovery pass verifies each plugin tree once for all of it.
+			if (scope === "workspace") return withPluginDiscoveryPass(() => runWorkspaceScope(deps, reservation, options));
 			if (scope === "recall") return runRecallScope(deps, args, reservation, options);
-			return runSkillsScope(deps, args, reservation, options);
+			return withPluginDiscoveryPass(() => runSkillsScope(deps, args, reservation, options));
 		},
 	};
 }

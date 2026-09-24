@@ -7,12 +7,14 @@ import {
 	loadPromptTemplates,
 	type PromptTemplate,
 	type PromptTemplateExpansion,
+	parsePromptCommand,
 } from "./prompts/loader.js";
 import {
 	expandSkillInvocationInput,
 	type LoadSkillsInput,
 	loadSkills,
 	parsePendingSkillRequests,
+	parseSkillCommand,
 	type Skill,
 	type SkillExpansion,
 	type SkillExpansionOptions,
@@ -67,12 +69,18 @@ export function createResourcesLoader(options: ResourceLoaderOptions = {}): Reso
 			return expandSkillInvocationInput(text, loadSkills({ cwd, ...skillOptions() }), expansionOptions);
 		},
 		parsePendingSkillRequests(text, cwd = defaultCwd, expansionOptions = {}) {
+			// Plain text names no skill. Checking the prefix first keeps an ordinary
+			// submit from paying a full plugin walk for a catalog it never reads.
+			if (parseSkillCommand(text) === null) return { text, pendingSkillRequests: [] };
 			return parsePendingSkillRequests(text, loadSkills({ cwd, ...skillOptions() }), { cwd, ...expansionOptions });
 		},
 		prompts(cwd = defaultCwd) {
 			return loadPromptTemplates(promptOptions(cwd));
 		},
 		expandPromptTemplate(text, cwd = defaultCwd) {
+			// Only `/name` can expand, and no caller reads an unexpanded result's
+			// diagnostics, so text without the prefix skips the template listing.
+			if (parsePromptCommand(text) === null) return { expanded: false, text, args: [], diagnostics: [] };
 			return expandPromptTemplateInput(text, loadPromptTemplates(promptOptions(cwd)));
 		},
 		resolvePath(value, cwd = defaultCwd) {
