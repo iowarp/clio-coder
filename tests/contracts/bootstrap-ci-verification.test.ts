@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { runBootstrap } from "../../src/domains/context/bootstrap.js";
-import { BOOTSTRAP_PROMPT } from "../../src/domains/context/bootstrap-prompt.js";
+import { BOOTSTRAP_PROMPT, parseBootstrapModelOutput } from "../../src/domains/context/bootstrap-prompt.js";
+import { HANDBOOK_TARGETS } from "../../src/domains/context/clio-md.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
 // A generated handbook for a uv/unittest repository had no verification section:
@@ -63,4 +64,15 @@ it("writes the commands CI runs, the derived test runner and the bash fallback i
 it("asks the bootstrap model where a regression test must live so CI runs it", () => {
 	ok(/regression test/i.test(BOOTSTRAP_PROMPT));
 	ok(/test directories? CI (?:actually )?runs/i.test(BOOTSTRAP_PROMPT), "prompt must ask which test paths CI executes");
+});
+
+it("clamps an overlong model rule at a sentence end instead of mid-word", () => {
+	const sentence = "Rule6 in `tests/boundaries/check-boundaries.ts` routes every entry through `STAGE0_SEAMS`. ";
+	const long = sentence.repeat(Math.ceil((HANDBOOK_TARGETS.invariantChars * 1.5) / sentence.length));
+	const output = parseBootstrapModelOutput(
+		JSON.stringify({ projectName: "harbor", identity: "A harbor.", conventions: [], invariants: [long], sections: [] }),
+	);
+	const clamped = output.invariants?.[0] ?? "";
+	ok(clamped.length <= HANDBOOK_TARGETS.invariantChars, `${clamped.length}`);
+	ok(clamped.endsWith("`STAGE0_SEAMS`."), clamped.slice(-40));
 });
