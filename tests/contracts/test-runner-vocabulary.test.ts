@@ -122,6 +122,8 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(disposition(policy, spelling, "suggest"), "ask", spelling);
 			strictEqual(disposition(policy, spelling, "auto-edit"), "ask", spelling);
 			strictEqual(disposition(policy, spelling, "full-auto"), "allow", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "auto-edit"), "ask", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "full-auto"), "allow", spelling);
 		}
 	});
 

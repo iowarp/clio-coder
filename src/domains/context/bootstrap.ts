@@ -1,9 +1,12 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
+import { readCiRunCommands } from "../../core/ci-commands.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
+import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { pythonProposals } from "../../tools/verify/toolchain.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import {
 	FULL_PROJECT_CONTEXT_MAX_CHARS,
@@ -29,6 +32,7 @@ import {
 } from "./clio-md.js";
 import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
+import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
@@ -72,6 +76,8 @@ export interface BootstrapGenerateInput {
 	codewiki: Codewiki;
 	existingClioMd?: ParsedClioMd;
 	existingClioMdText?: string;
+	/** What CI runs and which custom checks exist; the model explains each as a rule. */
+	enforcement?: EnforcementInventory;
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
 }
@@ -533,24 +539,47 @@ function cmakeVerificationLines(cwd: string): string[] {
 
 /**
  * Python has no single scripts manifest, so this names a runner only where the
- * project declares one: a tox configuration declares `tox`, and a declared
- * pytest configuration declares `pytest`. An undeclared layout stays silent
- * rather than guessing `python -m unittest` at a repository that tests some
- * other way. Tox wins when both are declared because it typically wraps the
- * pytest run.
+ * project declares one: a tox configuration declares `tox`, a pytest
+ * configuration or dependency declares `pytest`, and test modules under
+ * `tests/` with neither declare the standard-library unittest runner. A uv
+ * project runs each through `uv run`, because a bare interpreter does not see
+ * the project environment. Tox wins when both are declared because it
+ * typically wraps the pytest run. Detection is shared with the verify tool's
+ * derived checks, so the handbook names the command verify would run.
  */
 function pythonVerificationLines(cwd: string, tomlFiles: TomlFileReader): string[] {
+	const launcher = existsSync(join(cwd, "uv.lock")) ? "uv run " : "";
 	const pyproject = tomlFiles.read("pyproject.toml");
 	if (existsSync(join(cwd, "tox.ini")) || (pyproject !== null && tomlTableAt(pyproject, ["tool", "tox"]))) {
-		return ["Run `tox` before handoff."];
+		return [`Run \`${launcher}tox\` before handoff.`];
 	}
 	if (
 		existsSync(join(cwd, "pytest.ini")) ||
 		(pyproject !== null && tomlTableAt(pyproject, ["tool", "pytest", "ini_options"]))
 	) {
-		return ["Run `pytest` before handoff."];
+		return [`Run \`${launcher}pytest\` before handoff.`];
 	}
-	return [];
+	const derived = pythonProposals(cwd, []).find((proposal) => proposal.tags.includes("test"));
+	return derived ? [`Run the Python tests with \`${derived.command.join(" ")}\` before handoff.`] : [];
+}
+
+/** CI steps that prepare the machine rather than judge the change. */
+const CI_SETUP_RE =
+	/^(?:uv\s+(?:sync|venv|pip|python\s+install)|pip3?\s+install|python3?\s+-m\s+pip\b|(?:npm|pnpm|yarn|bun)\s+(?:ci|install)\b|yarn$|corepack\b|sudo\b|apt(?:-get)?\b|brew\b|curl\b|wget\b|git\s+(?:config|fetch|clone|submodule)\b|cd\b|echo\b|export\b|mkdir\b|cp\b|mv\b|rm\b|ls\b|cat\b)/;
+const MAX_CI_GATE_COMMANDS = 8;
+
+/**
+ * The commands CI runs to judge a change, named exactly. A repository whose
+ * gate is a script (`scripts/gate.sh`) or a make target declares nothing a
+ * manifest reader sees, so without this line its handbook named no command
+ * and agents recorded that they could not run the tests.
+ */
+function ciGateLines(cwd: string): string[] {
+	const gates = readCiRunCommands(cwd)
+		.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("${{") && !command.includes("`"))
+		.slice(0, MAX_CI_GATE_COMMANDS);
+	if (gates.length === 0) return [];
+	return [`CI runs ${gates.map((command) => `\`${command}\``).join(", ")}; a change must pass the same commands.`];
 }
 
 function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSection | null {
@@ -601,7 +630,11 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
 	}
 	lines.push(...pythonVerificationLines(cwd, tomlFiles));
+	lines.unshift(...ciGateLines(cwd));
 	if (lines.length === 0) return null;
+	lines.push(
+		"`verify` runs declared and derived checks; when it cannot run one of these commands, run the same command through `bash` instead of skipping it.",
+	);
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
 
@@ -610,6 +643,34 @@ const VERIFICATION_SECTION_RE = /\bverification\b/i;
 interface ModelGroundingCorpus {
 	lower: string;
 	indexedPaths: ReadonlySet<string>;
+	/** Every visible repository path, including docs, configs and CI files the codewiki does not index. */
+	repositoryPaths: ReadonlySet<string>;
+	/** Lowercased text of the visible repository files, read once on first need. */
+	repositoryText: () => string;
+}
+
+/** Files larger than this are data, not rules; skip them when grounding citations. */
+const GROUNDING_FILE_MAX_BYTES = 1024 * 1024;
+/** Total text read for grounding; bounds memory on very large repositories. */
+const GROUNDING_TEXT_MAX_BYTES = 96 * 1024 * 1024;
+
+function repositoryGroundingText(cwd: string, paths: ReadonlyArray<string>): string {
+	const chunks: string[] = [];
+	let total = 0;
+	for (const path of paths) {
+		if (total >= GROUNDING_TEXT_MAX_BYTES) break;
+		try {
+			const full = join(cwd, path);
+			if (statSync(full).size > GROUNDING_FILE_MAX_BYTES) continue;
+			const bytes = readFileSync(full);
+			if (bytes.includes(0)) continue;
+			chunks.push(bytes.toString("utf8").toLowerCase());
+			total += bytes.length;
+		} catch {
+			// A file that vanished or cannot be read simply grounds nothing.
+		}
+	}
+	return chunks.join("\n");
 }
 
 /**
@@ -641,7 +702,22 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 			.join("\n")
 			.slice(0, 128_000),
 	].join("\n");
-	return { lower: evidence.toLowerCase(), indexedPaths };
+	let repositoryPaths: string[] = [];
+	try {
+		repositoryPaths = enumerateWorkspaceFiles(input.cwd);
+	} catch {
+		// An unreadable tree leaves the indexed evidence as the only grounding.
+	}
+	let text: string | null = null;
+	return {
+		lower: evidence.toLowerCase(),
+		indexedPaths,
+		repositoryPaths: new Set(repositoryPaths),
+		repositoryText: () => {
+			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
+			return text;
+		},
+	};
 }
 
 const CODE_TOKEN_RE = /`([^`\n]+)`/g;
@@ -657,8 +733,34 @@ const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
 /** A symbol written as a call: `priceCart()`. */
 const CITED_CALL_RE = /^(.+?)\(\s*\)$/;
 
+function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boolean {
+	const lower = literal.toLowerCase();
+	const path = literal.replace(/^\.\//, "").replace(/\/$/, "");
+	if (evidence.lower.includes(lower) || evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path))
+		return true;
+	// A directory is real when some visible file lives under it.
+	if (literal.includes("/")) {
+		for (const candidate of evidence.repositoryPaths) if (candidate.startsWith(`${path}/`)) return true;
+	}
+	return evidence.repositoryText().includes(lower);
+}
+
+/**
+ * A citation may be a pattern rather than a name: a glob (`src/engine/**`,
+ * `CLIO_*`), a placeholder (`tests/<name>.test.ts`), or a command chain joined
+ * with `&&`. Each literal piece of at least three characters must ground on
+ * its own, so a pattern can never smuggle in a name the repository lacks.
+ */
 function groundedName(token: string, evidence: ModelGroundingCorpus): boolean {
-	return evidence.lower.includes(token.toLowerCase()) || evidence.indexedPaths.has(token.replace(/^\.\//, ""));
+	const parts = token.split(/\s*&&\s*/).filter((part) => part.length > 0);
+	if (parts.length > 1) return parts.every((part) => groundedName(part, evidence));
+	const literals = token
+		.split(/<[^<>]*>|\*+|\?|\{[^{}]*\}/)
+		.map((piece) => piece.trim())
+		.filter((piece) => piece.length > 0);
+	if (literals.length === 1 && literals[0] === token) return groundedLiteral(token, evidence);
+	const meaningful = literals.filter((piece) => piece.replace(/[^A-Za-z0-9]/g, "").length >= 3);
+	return meaningful.length > 0 && meaningful.every((piece) => groundedLiteral(piece, evidence));
 }
 
 /**
@@ -718,7 +820,10 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// A fenced command block is the single highest-value thing Scout can return,
 		// and dropping the fence used to drop the commands with it. Inline the line
 		// instead, so it faces the same citation rule as any other line.
-		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : trimmed;
+		// Keep a nested bullet's indentation; flattening it turned a recipe's
+		// sub-steps into unrelated top-level rules.
+		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
+		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);
@@ -1367,6 +1472,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			siblingFiles,
 			adoption,
 			codewiki,
+			enforcement: collectEnforcementInventory(cwd),
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),

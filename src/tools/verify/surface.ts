@@ -24,7 +24,7 @@ export function prepareVerifyArguments(args: Record<string, unknown>): Record<st
 export const verifyToolSurface = {
 	name: ToolNames.Verify,
 	description:
-		'Run a declared verification check: no arguments lists package scripts and .clio-coder/verifiers.yaml entries, check=<id> runs one, and check="frontend" with path validates an HTML/CSS/JS artifact.',
+		'Run a declared verification check: no arguments lists package scripts, .clio-coder/verifiers.yaml entries and checks derived from build/CI files; check=<id> runs one; check="frontend" with path validates an HTML/CSS/JS artifact.',
 	parameters: Type.Object({
 		check: Type.Optional(
 			Type.String({
@@ -32,7 +32,11 @@ export const verifyToolSurface = {
 			}),
 		),
 		path: Type.Optional(Type.String({ description: "frontend: artifact file under the workspace root." })),
-		args: Type.Optional(Type.Array(Type.String(), { description: "Package scripts only: arguments after --." })),
+		args: Type.Optional(
+			Type.Array(Type.String(), {
+				description: "Package scripts: after --. Derived runners: appended.",
+			}),
+		),
 		browser: Type.Optional(StringEnum(BROWSER_MODES, { description: "frontend: headless browser mode (default auto)." })),
 		cwd: Type.Optional(Type.String({ description: "Package scripts only: working directory." })),
 		timeout_ms: Type.Optional(Type.Number({ description: "Package and frontend checks only: timeout in ms." })),
