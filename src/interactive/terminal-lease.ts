@@ -52,11 +52,23 @@ export interface TerminalLeaseSignalCoordinator {
 	off(signal: "SIGINT", listener: () => void): void;
 }
 
+/**
+ * How long the Stage 0 editor could not answer input. Stage 0 paints before
+ * hydration, but keystrokes echo only when the event loop turns, so the longest
+ * loop block between the two frames is what an operator typing at Stage 0 waits.
+ * Times are milliseconds since process start.
+ */
+export interface BootInteractivity {
+	readonly stage0Ms: number;
+	readonly hydratedMs: number;
+	readonly inputBlockedMaxMs: number;
+}
+
 export interface TerminalLeaseAdoption {
 	root: Component;
 	editorChrome: EditorChrome;
 	admitSubmission: (submission: BootSubmission) => Promise<void>;
-	onHydratedFrame?: (frameId: number | null) => void;
+	onHydratedFrame?: (frameId: number | null, interactivity: BootInteractivity) => void;
 }
 
 export interface TerminalLease {
@@ -275,6 +287,19 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 	let inputDisposed = false;
 	let signalDisposed = false;
 	let removeDiagnosticSink = () => {};
+	let stage0Ms = 0;
+	// A delay histogram records a sample only when its timer fires, so one block
+	// spanning the whole window reads as zero. Track loop turns directly and
+	// count the gap still open when hydration commits.
+	let turnProbe: NodeJS.Timeout | null = null;
+	let lastTurnAt = 0;
+	let longestTurnGap = 0;
+	const finishInputBlock = (): number => {
+		if (!turnProbe) return 0;
+		clearInterval(turnProbe);
+		turnProbe = null;
+		return Math.max(longestTurnGap, performance.now() - lastTurnAt);
+	};
 
 	const termination = options.testing?.termination ?? getTerminationCoordinator();
 	const signals = options.testing?.signals ?? process;
@@ -469,7 +494,12 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 			const hydratedFrame = shell.nextCommittedFrame();
 			tui.requestRender();
 			void hydratedFrame.then((frameId) => {
-				if (epoch === adoptedEpoch && state === "adopted") adoption.onHydratedFrame?.(frameId);
+				const interactivity = {
+					stage0Ms,
+					hydratedMs: performance.now(),
+					inputBlockedMaxMs: finishInputBlock(),
+				};
+				if (epoch === adoptedEpoch && state === "adopted") adoption.onHydratedFrame?.(frameId, interactivity);
 			});
 			void (async () => {
 				for (const record of [...submissions]) {
@@ -504,6 +534,7 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 					}
 				};
 				try {
+					attempt(() => finishInputBlock());
 					attempt(() => bootAbort.abort());
 					attempt(() => disposeStableOwners());
 					attempt(() => shell.releaseAnchor());
@@ -543,6 +574,14 @@ export function createProcessTerminalLease(options: CreateProcessTerminalLeaseOp
 		// turning Stage 0 into a label on the eventual Stage 1 paint. Commit the
 		// shell now so the terminal write actually precedes heavyweight hydration.
 		tui.renderNow(false);
+		stage0Ms = performance.now();
+		lastTurnAt = stage0Ms;
+		turnProbe = setInterval(() => {
+			const now = performance.now();
+			longestTurnGap = Math.max(longestTurnGap, now - lastTurnAt);
+			lastTurnAt = now;
+		}, 10);
+		turnProbe.unref();
 	} catch (error) {
 		void lease.close({ recoverInput: true }).catch(() => {});
 		throw error;

@@ -4,6 +4,7 @@ import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { readClioVersion } from "../core/package-root.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { getTerminationCoordinator } from "../core/termination.js";
 import { clioStateDir } from "../core/xdg.js";
@@ -65,8 +66,9 @@ import type {
 	SlashCommandContext,
 	TaskMemorySeedCommandResult,
 } from "./slash-commands.js";
+import { recordStartupDiagnostic } from "./startup-diagnostics.js";
 import { processAutoPacingAllowed } from "./stream-pacing-policy.js";
-import type { TerminalLease } from "./terminal-lease.js";
+import type { BootInteractivity, TerminalLease } from "./terminal-lease.js";
 import type { createWatchPaneController } from "./watch-pane.js";
 import { WORKER_SETTLED_ENTRY } from "./worker-replay.js";
 import { createWorkspaceFacts } from "./workspace-facts.js";
@@ -126,7 +128,7 @@ export interface InteractiveDeps {
 	/** Existing Stage 0 owner to hydrate in place. */
 	terminalLease?: TerminalLease;
 	/** Fired after the first committed frame containing the hydrated Stage 1 root. */
-	onHydratedFrameCommit?: (frameId: number | null) => void;
+	onHydratedFrameCommit?: (frameId: number | null, interactivity: BootInteractivity) => void;
 	/** Startup notices collected before the TUI is ready; rendered in the transcript. */
 	initialNotices?: ReadonlyArray<string>;
 	resources?: ResourcesContract;
@@ -1421,7 +1423,20 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			root: presentation.root,
 			editorChrome: presentation.editorChrome,
 			admitSubmission: (submission) => editorSubmit.admitCapturedText(submission.rawText, lease.abortSignal),
-			...(deps.onHydratedFrameCommit ? { onHydratedFrame: deps.onHydratedFrameCommit } : {}),
+			onHydratedFrame: (frameId, interactivity) => {
+				// One record per interactive boot, so real sessions report how long
+				// the Stage 0 editor could not answer input, by build and platform.
+				recordStartupDiagnostic({
+					kind: "boot-interactivity",
+					version: readClioVersion(),
+					node: process.version,
+					platform: `${process.platform}-${process.arch}`,
+					stage0Ms: Math.round(interactivity.stage0Ms),
+					hydratedMs: Math.round(interactivity.hydratedMs),
+					inputBlockedMaxMs: Math.round(interactivity.inputBlockedMaxMs),
+				});
+				deps.onHydratedFrameCommit?.(frameId, interactivity);
+			},
 		});
 		if (!adopted) void applicationController.shutdown();
 	}
