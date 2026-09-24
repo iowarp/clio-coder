@@ -63,6 +63,22 @@ export interface TaskBoardCounts {
 	open: number;
 }
 
+/** A completed row can describe delivered work while its required checks remain open. */
+export function unverifiedTaskChecks(task: TaskBoardTask): { failed: string[]; noRecordedPass: string[] } | null {
+	if (task.status !== "completed") return null;
+	const checks = task.requiredValidationEvidence ?? [];
+	if (checks.length === 0) return null;
+	const failed: string[] = [];
+	const noRecordedPass: string[] = [];
+	for (const check of checks) {
+		const name = check.command ?? check.description;
+		if (check.status === "passed" && check.observedAt) continue;
+		if (check.status === "failed" && check.observedAt) failed.push(name);
+		else noRecordedPass.push(name);
+	}
+	return failed.length > 0 || noRecordedPass.length > 0 ? { failed, noRecordedPass } : null;
+}
+
 interface TaskBoardInitialState {
 	/** A proposal can be recorded without briefly creating runnable work. */
 	initialStatus?: "pending" | "blocked";

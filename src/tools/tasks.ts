@@ -6,6 +6,7 @@ import {
 	type TaskBoardStore,
 	type TaskBoardTask,
 	taskBoardCounts,
+	unverifiedTaskChecks,
 } from "../domains/session/task-board.js";
 import type { UserTask, UserTasksStore } from "../domains/user-tasks/store.js";
 import { StringEnum } from "../engine/ai.js";
@@ -58,6 +59,14 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 	for (const task of board.tasks) {
 		let line = `${STATUS_MARK[task.status]} ${task.id} ${task.title}`;
 		if (task.status === "completed" && task.evidence) line += ` — completion claim: ${task.evidence}`;
+		const unverified = unverifiedTaskChecks(task);
+		if (unverified) {
+			const reasons = [
+				...(unverified.failed.length > 0 ? [`failed: ${unverified.failed.join(", ")}`] : []),
+				...(unverified.noRecordedPass.length > 0 ? [`no recorded pass: ${unverified.noRecordedPass.join(", ")}`] : []),
+			];
+			line += ` — completion unverified (required checks ${reasons.join("; ")})`;
+		}
 		if (task.status === "blocked" && task.reason) line += ` — blocked: ${task.reason}`;
 		if (task.status === "cancelled" && task.reason) line += ` — dropped: ${task.reason}`;
 		lines.push(line);
