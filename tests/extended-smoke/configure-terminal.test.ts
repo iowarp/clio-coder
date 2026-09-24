@@ -349,9 +349,9 @@ describe("smoke/configure on a real terminal", { skip: process.platform === "win
 			tty.send(DOWN.repeat(3) + ENTER);
 			await tty.expect("Worker permission mode");
 			tty.send(ENTER);
-			await tty.expect("❯ auto-edit");
+			await tty.expect("❯ capable");
 			tty.send(DOWN + ENTER);
-			await tty.expect("Autonomy level set to full-auto");
+			await tty.expect("Autonomy level set to yolo");
 			await tty.quit();
 			const saved = parse(readFileSync(file, "utf8")) as ClioSettings;
 			strictEqual(saved.chat.thinkingLevel, "high");
