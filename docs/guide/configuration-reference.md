@@ -170,7 +170,7 @@ Trust and declaration loading are implemented in [`src/domains/gateway/mcp/trust
 
 ## Let Clio propose settings changes
 
-In an interactive `yolo` (`full-auto`) session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. Clio can discover `configure_clio` through the gateway, preview one saved setting change, and then request an **Apply** or **Cancel** decision from the host UI. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
+In an interactive `capable` (`auto-edit`) or `yolo` (`full-auto`) session, ask Clio to change a chat model, fleet route, profile, or autonomy setting. At `capable`, Clio can lower autonomy but never propose raising it. Clio can discover `configure_clio` through the gateway, preview one saved setting change, and then request an **Apply** or **Cancel** decision from the host UI. Applying checks that the saved value still matches the preview; expired or stale proposals need a fresh preview. The tool excludes credentials and connection definitions. The running session keeps its current routing, so reload Clio to use a newly saved route in that session. Other settings reload where the live settings loader supports it.
 
 The settings UI presents two everyday choices: **capable** maps to the persisted `auto-edit` level, and **yolo** maps to `full-auto`. Older `read-only` and `suggest` values remain readable for existing sessions and configuration files.
 

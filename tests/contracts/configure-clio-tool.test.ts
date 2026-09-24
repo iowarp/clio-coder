@@ -1,4 +1,4 @@
-import { match, strictEqual } from "node:assert/strict";
+import { match, ok, strictEqual } from "node:assert/strict";
 import { test } from "node:test";
 import { readSettings, updateSettings } from "../../src/core/config.js";
 import { ToolNames } from "../../src/core/tool-names.js";
@@ -59,6 +59,23 @@ test("configure_clio rejects stale proposals, cancellation, sensitive paths and 
 	const canceled = await tool.run({ action: "apply", proposalId: nextId });
 	strictEqual(canceled.kind, "ok");
 	strictEqual(readSettings().safety.autonomy, "read-only");
-	const supervised = createConfigureClioTool({ getAutonomy: () => "auto-edit", askUser: async () => ({ answers: [] }) });
-	strictEqual((await supervised.run({ action: "preview", path: "safety.autonomy", value: "full-auto" })).kind, "error");
+	for (const level of ["suggest", "read-only"] as const) {
+		const supervised = createConfigureClioTool({ getAutonomy: () => level, askUser: async () => ({ answers: [] }) });
+		strictEqual((await supervised.run({ action: "preview", path: "chat.thinkingLevel", value: "high" })).kind, "error");
+	}
+});
+
+test("configure_clio previews at capable autonomy but never raises autonomy from there", async (t) => {
+	const env = await isolateClioEnv("clio-configure-capable-");
+	t.after(() => env.restore());
+	updateSettings((settings) => {
+		settings.safety.autonomy = "auto-edit";
+		return settings;
+	});
+	const capable = createConfigureClioTool({ getAutonomy: () => "auto-edit", askUser: async () => ({ answers: [] }) });
+	strictEqual((await capable.run({ action: "preview", path: "chat.thinkingLevel", value: "high" })).kind, "ok");
+	strictEqual((await capable.run({ action: "preview", path: "safety.autonomy", value: "suggest" })).kind, "ok");
+	const raised = await capable.run({ action: "preview", path: "safety.autonomy", value: "full-auto" });
+	strictEqual(raised.kind, "error");
+	ok(raised.kind === "error" && /raise/.test(raised.message), JSON.stringify(raised));
 });

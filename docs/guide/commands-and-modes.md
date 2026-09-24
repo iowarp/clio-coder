@@ -539,7 +539,7 @@ and are labeled accordingly.
 
 ## Operating Posture and Autonomy
 
-The settings UI offers **capable** (`auto-edit`) for supervised edits and **yolo** (`full-auto`) for work that should proceed without autonomy prompts. Safety rules remain active at both levels. Existing `read-only` and `suggest` values still load for older sessions and scripts. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or the legacy `--autonomy read-only` when execution must be restricted. An interactive yolo session can preview a Clio settings change with `configure_clio`; only the host's Apply choice commits it. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
+The settings UI offers **capable** (`auto-edit`) for supervised edits and **yolo** (`full-auto`) for work that should proceed without autonomy prompts. Safety rules remain active at both levels. Existing `read-only` and `suggest` values still load for older sessions and scripts. `--turn-mode proposal` is workflow guidance, not a read-only permission boundary; use `--allow-tools` or the legacy `--autonomy read-only` when execution must be restricted. An interactive capable or yolo session can preview a Clio settings change with `configure_clio`; only the host's Apply choice commits it, and at capable it cannot raise autonomy. See the [settings reference](configuration-reference.md#let-clio-propose-settings-changes), [safety model](../architecture/safety-model.md), and [Bash policy](tool-usage.md#bash-run-a-shell-command).
 
 ## Dispatch and Built-In Agents
 

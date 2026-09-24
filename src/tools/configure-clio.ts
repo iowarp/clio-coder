@@ -4,7 +4,12 @@ import { readSettings, updateSettings } from "../core/config.js";
 import { getAtPath } from "../core/session-routing.js";
 import { applyControlValue, formatControlValue, settingControl } from "../core/settings-controls.js";
 import { ToolNames } from "../core/tool-names.js";
-import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
+import {
+	AUTONOMY_LEVELS,
+	type AutonomyLevel,
+	autonomyFromUserInput,
+	isAutonomyLevel,
+} from "../domains/safety/autonomy.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
 import type { ToolSpec } from "./registry.js";
@@ -37,7 +42,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 	return {
 		name: ToolNames.ConfigureClio,
 		description:
-			"Preview a Clio routing or fleet setting, then ask the operator to apply the exact proposal. Available in interactive full-auto only. Use action=preview with a settings path and text value; action=apply with proposalId.",
+			"Preview a Clio routing or fleet setting, then ask the operator to apply the exact proposal. Available in interactive capable (auto-edit) and yolo (full-auto) sessions; at capable it cannot raise autonomy. Use action=preview with a settings path and text value; action=apply with proposalId.",
 		placement: "gateway",
 		parameters: Type.Object({
 			action: StringEnum(["preview", "apply"]),
@@ -48,8 +53,12 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 		baseActionClass: "write",
 		executionMode: "sequential",
 		async run(args) {
-			if (deps.getAutonomy?.() !== "full-auto") {
-				return { kind: "error", message: "configure_clio is available only in interactive full-auto" };
+			const autonomy = deps.getAutonomy?.();
+			if (autonomy !== "auto-edit" && autonomy !== "full-auto") {
+				return {
+					kind: "error",
+					message: "configure_clio is available only at capable (auto-edit) or yolo (full-auto) autonomy",
+				};
 			}
 			if (args.action === "preview") {
 				if (typeof args.path !== "string" || typeof args.value !== "string") {
@@ -66,6 +75,19 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 				}
 				try {
 					const value = args.path === "safety.autonomy" ? (autonomyFromUserInput(args.value) ?? args.value) : args.value;
+					// Below yolo the model may lower its own autonomy but never propose
+					// raising it: one hurried Apply would hand it the authority it asked for.
+					if (
+						autonomy !== "full-auto" &&
+						args.path === "safety.autonomy" &&
+						isAutonomyLevel(value) &&
+						AUTONOMY_LEVELS.indexOf(value) > AUTONOMY_LEVELS.indexOf(autonomy)
+					) {
+						return {
+							kind: "error",
+							message: `configure_clio cannot raise autonomy above ${autonomy}; the operator changes that in /settings`,
+						};
+					}
 					const saved = readSettings();
 					const candidate = structuredClone(saved);
 					applyControlValue(candidate, args.path, value);
