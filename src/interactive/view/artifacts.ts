@@ -2,6 +2,7 @@ import { createReadStream, readFileSync, statSync } from "node:fs";
 import { readFile, realpath, stat } from "node:fs/promises";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { DispatchContract } from "../../domains/dispatch/contract.js";
+import { type DispatchOwnership, dispatchOwnership } from "../../domains/dispatch/ownership.js";
 import { isReceiptIntegrity, verifyReceiptIntegrity } from "../../domains/dispatch/receipt-integrity.js";
 import type { RunEnvelope, RunReceipt } from "../../domains/dispatch/types.js";
 import { evidenceDirectory, inspectEvidence, listEvidenceOverviews } from "../../domains/evidence/store.js";
@@ -15,7 +16,11 @@ import {
 	type TrustStatusAxis,
 } from "../../domains/evidence/trust-status.js";
 import type { EvidenceFinding, EvidenceOverview, EvidenceSource } from "../../domains/evidence/types.js";
-import { type AccountabilitySummary, readAccountabilitySummary } from "../../domains/observability/index.js";
+import {
+	type AccountabilitySummary,
+	readEvidenceIndex,
+	summarizeEvidenceIndex,
+} from "../../domains/observability/index.js";
 import type {
 	BashExecutionEntry,
 	MessageEntry,
@@ -279,6 +284,15 @@ function readRunLedger(stateDir: string): RunEnvelope[] {
 	}
 }
 
+/**
+ * The session the overlay was opened in, as ownership.ts reads it. The run
+ * ledger, receipts, and evidence bundles are machine-wide, so every category
+ * built from them keeps only what this session or this project produced.
+ */
+function viewOwnership(deps: ArtifactProviderDeps): DispatchOwnership {
+	return dispatchOwnership({ sessionId: deps.sessionMeta?.id ?? null, cwd: deps.sessionMeta?.cwd ?? process.cwd() });
+}
+
 function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	// The in-process dispatch ledger only sees runs created by this process.
 	// A headless `clio-coder run` in another process writes runs.json and receipts/
@@ -292,7 +306,8 @@ function listRunEnvelopes(deps: ArtifactProviderDeps): RunEnvelope[] {
 	}
 	const seen = new Set(fromMemory.map((env) => env.id));
 	const fromDisk = readRunLedger(deps.stateDir).filter((env) => !seen.has(env.id));
-	return [...fromMemory, ...fromDisk];
+	const ownership = viewOwnership(deps);
+	return [...fromMemory, ...fromDisk].filter((env) => ownership.seesRun(env));
 }
 
 function validateToolStats(value: unknown): ReceiptVerifyResult {
@@ -742,6 +757,8 @@ export class EvidenceArtifactProvider implements ArtifactProvider {
 		} catch {
 			return [];
 		}
+		const ownership = viewOwnership(this.deps);
+		overviews = overviews.filter((overview) => ownership.seesBundle(overview));
 		return overviews.map((overview) => {
 			const path = evidenceBundlePath(dataDir, overview.evidenceId);
 			const artifact: ViewArtifact = {
@@ -1418,10 +1435,12 @@ export class AccountabilityArtifactProvider implements ArtifactProvider {
 				category: this.category,
 				title: "Session accountability",
 				timestamp: Date.now(),
-				load: async () => ({
-					format: "markdown" as const,
-					lines: renderAccountabilitySummary(readAccountabilitySummary(stateDir)),
-				}),
+				load: async () => {
+					// The index is machine-wide; fold only the runs this view lists.
+					const visible = new Set(listRunEnvelopes(this.deps).map((env) => env.id));
+					const rows = readEvidenceIndex(stateDir).filter((row) => visible.has(row.runId));
+					return { format: "markdown" as const, lines: renderAccountabilitySummary(summarizeEvidenceIndex(rows)) };
+				},
 			},
 		];
 	}
@@ -1442,8 +1461,10 @@ function currentSessionAuditRows(
 	sessionId: string | null | undefined,
 ): ReadonlyArray<AuditJsonRow> {
 	if (!sessionId) return rows;
-	const matching = rows.filter((row) => readStringField(row.row, "sessionId") === sessionId);
-	return matching.length > 0 ? matching : rows;
+	// No fallback to every session's rows when this one has none yet: the audit
+	// log is machine-wide, and the fallback put other projects' tool calls in
+	// a fresh session's view.
+	return rows.filter((row) => readStringField(row.row, "sessionId") === sessionId);
 }
 
 function auditRowSubject(row: AuditJsonRow): string {

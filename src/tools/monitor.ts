@@ -9,6 +9,7 @@ import {
 	formatEffectiveBudget,
 } from "../domains/dispatch/budget-envelope.js";
 import type { DispatchContract } from "../domains/dispatch/contract.js";
+import { type DispatchOwnership, dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import type { ReceiptIntegrityResult } from "../domains/dispatch/receipt-integrity.js";
 import {
@@ -41,8 +42,7 @@ import {
  * dispatched runs. The interactive operator/TUI can inspect an active sync
  * run through the dispatch contract; parent-model mid-run observation requires
  * detach because a sequential synchronous dispatch call auto-waits. mode=list
- * enumerates known runs (this
- * session first), status reports one run's state and progress counters, peek
+ * enumerates this session's runs, status reports one run's state and progress counters, peek
  * returns the bounded tail of a run's recent events buffered in this process,
  * tools answers what a run executed (its tool calls with outcomes, plus the
  * receipt's per-tool totals),
@@ -53,6 +53,12 @@ import {
  * Built strictly on the dispatch domain's ledger, live snapshot, durable
  * batch records, and integrity-verified receipts, so wait and collect work
  * across session resume.
+ *
+ * Those stores are machine-wide, so every mode checks the row against this
+ * session first (ownership.ts): list and collect see only what this session
+ * dispatched, and the single-run modes read runs of this session or this
+ * project. A run another project dispatched is refused by name rather than
+ * reported unknown, so the model stops asking about it.
  */
 
 const LIST_LIMIT = 20;
@@ -75,6 +81,25 @@ function runLine(run: RunEnvelope): string {
 	return `- ${run.id} agent=${run.agentId} state=${state} node=${run.node?.id ?? "local"} started=${run.startedAt} tokens=${run.tokenCount} receipt=${receipt}`;
 }
 
+function ownershipFor(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined): DispatchOwnership {
+	return dispatchOwnership(dispatchOwnerOf(deps.dispatch, options?.sessionId));
+}
+
+/** The refusal for a run this session may not read, or null when it may. */
+function unseenRunError(ownership: DispatchOwnership, requestedId: string, run: RunEnvelope | null): ToolResult | null {
+	if (run === null || ownership.seesRun(run)) return null;
+	return {
+		kind: "error",
+		message: `monitor: run '${requestedId}' belongs to another project; only sessions in that project can inspect it`,
+	};
+}
+
+/**
+ * This session's runs only. It used to fall back to every session's runs when
+ * this one had none, and because worker runs never recorded their session it
+ * always did: a fresh session was handed another project's run ids and
+ * receipt paths as if they were its own.
+ */
 function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined): ToolResult {
 	let runs: ReadonlyArray<RunEnvelope>;
 	try {
@@ -82,15 +107,17 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 	} catch (err) {
 		return { kind: "error", message: `monitor: ${err instanceof Error ? err.message : String(err)}` };
 	}
-	const sessionId = options?.sessionId ?? null;
-	const sessionRuns = sessionId !== null ? runs.filter((run) => run.sessionId === sessionId) : [];
-	const scoped = sessionRuns.length > 0 ? sessionRuns : runs;
-	const scopeNote = sessionRuns.length > 0 ? "this session" : "all sessions";
+	const ownership = ownershipFor(deps, options);
+	const scoped = runs.filter((run) => ownership.ownsRun(run));
 	const shown = scoped.slice(0, LIST_LIMIT);
 	if (shown.length === 0) {
-		return { kind: "ok", output: "No dispatched runs recorded.", details: { mode: "list", runCount: 0 } };
+		return {
+			kind: "ok",
+			output: "No dispatched runs recorded for this session.",
+			details: { mode: "list", runCount: 0 },
+		};
 	}
-	const lines = [`dispatched runs (${scopeNote}, newest first, ${shown.length} of ${scoped.length}):`];
+	const lines = [`dispatched runs (this session, newest first, ${shown.length} of ${scoped.length}):`];
 	for (const run of shown) lines.push(runLine(run));
 	lines.push("", 'Use monitor(run_id=<id>) for state, mode="peek" for recent output, mode="receipt" for the receipt.');
 	return {
@@ -104,7 +131,7 @@ function listRuns(deps: MonitorToolDeps, options: ToolInvokeOptions | undefined)
 	};
 }
 
-function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
+function runStatus(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const requestedRun = deps.dispatch.getRun(runId);
 	const assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
 	const rootRunId = assignment?.assignmentId ?? requestedRun?.lineage?.rootRunId ?? runId;
@@ -112,6 +139,8 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun;
 	if (!run && !assignment) return { kind: "error", message: `monitor: unknown run or assignment '${runId}'` };
 	if (!run) return { kind: "error", message: `monitor: assignment '${runId}' has no available attempt` };
+	const unseen = unseenRunError(ownership, runId, run);
+	if (unseen !== null) return unseen;
 	const live =
 		deps.dispatch
 			.snapshot()
@@ -198,8 +227,10 @@ function runStatus(deps: MonitorToolDeps, runId: string): ToolResult {
 	};
 }
 
-function runPeek(deps: MonitorToolDeps, runId: string): ToolResult {
+function runPeek(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const run = deps.dispatch.getRun(runId);
+	const unseen = unseenRunError(ownership, runId, run);
+	if (unseen !== null) return unseen;
 	const tail = deps.runEvents?.eventTail(runId) ?? null;
 	if (!tail || tail.entries.length === 0) {
 		if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
@@ -306,12 +337,14 @@ function receiptToolLines(receipt: RunReceipt): string[] {
  * is the ACP delegation log. Loading the trace mirror to get argv would be a
  * new sqlite path and is deliberately not done here.
  */
-function runTools(deps: MonitorToolDeps, runId: string): ToolResult {
+function runTools(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const requestedRun = deps.dispatch.getRun(runId);
 	const assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
 	const resolvedRunId = assignment?.terminalRunId ?? runId;
 	const run = deps.dispatch.getRun(resolvedRunId) ?? requestedRun ?? null;
 	if (run === null && assignment === null) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+	const unseen = unseenRunError(ownership, runId, run);
+	if (unseen !== null) return unseen;
 	const tail = deps.runEvents?.eventTail(resolvedRunId) ?? null;
 	const callLines = tail ? toolCallLines(tail.entries) : [];
 	const evidence = durableRunEvidence(run);
@@ -365,9 +398,11 @@ function runTools(deps: MonitorToolDeps, runId: string): ToolResult {
 	};
 }
 
-function runReceipt(deps: MonitorToolDeps, runId: string): ToolResult {
+function runReceipt(deps: MonitorToolDeps, runId: string, ownership: DispatchOwnership): ToolResult {
 	const run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+	const unseen = unseenRunError(ownership, runId, run);
+	if (unseen !== null) return unseen;
 	if (!run.receiptPath) {
 		return {
 			kind: "error",
@@ -518,10 +553,13 @@ async function runWait(
 	runId: string,
 	timeoutMs: number,
 	signal: AbortSignal | undefined,
+	ownership: DispatchOwnership,
 ): Promise<ToolResult> {
 	const startedAt = performance.now();
 	let run = deps.dispatch.getRun(runId);
 	if (!run) return { kind: "error", message: `monitor: unknown run '${runId}'` };
+	const unseen = unseenRunError(ownership, runId, run);
+	if (unseen !== null) return unseen;
 	let assignment = deps.dispatch.assignments?.getStored(runId) ?? null;
 	const rootRunId = assignment?.assignmentId ?? runId;
 	while (assignment?.status === "running" || (assignment === null && !isTerminalRunEnvelope(run))) {
@@ -546,7 +584,7 @@ async function runWait(
 		run = deps.dispatch.getRun(resolvedRunId) ?? run;
 		if (!run) return { kind: "error", message: `monitor: run '${runId}' disappeared from the ledger while waiting` };
 	}
-	const status = runStatus(deps, runId);
+	const status = runStatus(deps, runId, ownership);
 	if (status.kind !== "ok") return status;
 	const waitedMs = Math.round(performance.now() - startedAt);
 	return {
@@ -660,6 +698,7 @@ async function runCollect(
 	batchId: string,
 	runIds: ReadonlyArray<string>,
 	timeoutWasPassed: boolean,
+	ownership: DispatchOwnership,
 ): Promise<ToolResult> {
 	let rows: CollectRow[];
 	let scope: string;
@@ -669,11 +708,27 @@ async function runCollect(
 		if (!detached) return { kind: "error", message: "monitor: no detached batch records are available in this context" };
 		const record = detached.get(batchId);
 		if (!record) return { kind: "error", message: `monitor: unknown batch '${batchId}'` };
+		// Collecting marks the batch collected and closes its agent ledger, which
+		// silences the owner's nudge and ends its peers' board. Only the session
+		// that dispatched the batch may do that.
+		if (!ownership.ownsBatch(record)) {
+			return {
+				kind: "error",
+				message: `monitor: batch '${batchId}' belongs to another session; only the session that dispatched it can collect it`,
+			};
+		}
 		ledgerId = record.ledgerId ?? null;
 		rows = record.runs.map((entry) => resolveCollectRow(deps, entry.assignmentId, entry.agentId));
 		scope = `batch ${batchId}${record.collectedAt !== null ? " (already collected)" : ""}`;
 	} else {
 		rows = runIds.map((runId) => resolveCollectRow(deps, runId, "unknown"));
+		const foreign = rows.find((row) => row.run !== null && !ownership.ownsRun(row.run));
+		if (foreign !== undefined) {
+			return {
+				kind: "error",
+				message: `monitor: run '${foreign.assignmentId ?? foreign.runId}' belongs to another session; collect only runs this session dispatched`,
+			};
+		}
 		scope = `${rows.length} run(s)`;
 	}
 	// A durably-running assignment is never collectable: a genuinely in-flight
@@ -815,7 +870,7 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 				if (batchId.length === 0 && runIds.length === 0) {
 					return { kind: "error", message: "monitor: mode=collect requires batch_id or a non-empty run_ids array" };
 				}
-				return runCollect(deps, batchId, runIds, Object.hasOwn(args, "timeout_ms"));
+				return runCollect(deps, batchId, runIds, Object.hasOwn(args, "timeout_ms"), ownershipFor(deps, options));
 			}
 			if (runId.length === 0) {
 				if (rawRunIds !== null) {
@@ -836,12 +891,13 @@ export function createMonitorTool(deps: MonitorToolDeps): ToolSpec {
 					Number.isFinite(rawTimeout) && rawTimeout > 0
 						? Math.min(Math.floor(rawTimeout), WAIT_MAX_TIMEOUT_MS)
 						: WAIT_DEFAULT_TIMEOUT_MS;
-				return runWait(deps, runId, timeoutMs, options?.signal);
+				return runWait(deps, runId, timeoutMs, options?.signal, ownershipFor(deps, options));
 			}
-			if (mode === "status") return runStatus(deps, runId);
-			if (mode === "peek") return runPeek(deps, runId);
-			if (mode === "tools") return runTools(deps, runId);
-			return runReceipt(deps, runId);
+			const ownership = ownershipFor(deps, options);
+			if (mode === "status") return runStatus(deps, runId, ownership);
+			if (mode === "peek") return runPeek(deps, runId, ownership);
+			if (mode === "tools") return runTools(deps, runId, ownership);
+			return runReceipt(deps, runId, ownership);
 		},
 	};
 }

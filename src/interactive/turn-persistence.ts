@@ -97,6 +97,7 @@ export interface TurnPersistence {
 	): string | null;
 	appendRetryStatus(status: RetryStatusPayload): void;
 	appendModelChangeEntry(target: ChatLoopTarget): void;
+	appendThinkingLevelChangeEntry(thinkingLevel: string): void;
 }
 
 /**
@@ -490,6 +491,26 @@ export function createTurnPersistence(deps: TurnPersistenceDeps): TurnPersistenc
 			} catch {
 				// Persistence failures must not break chat. The marker is a
 				// best-effort breadcrumb; absence falls back to current behavior.
+			}
+		},
+
+		/**
+		 * Append a `thinkingLevelChange` entry for the requested level, the
+		 * thinking half of the route /resume restores (see
+		 * domains/session/resumed-route.ts). Same best-effort contract as
+		 * appendModelChangeEntry.
+		 */
+		appendThinkingLevelChangeEntry(thinkingLevel): void {
+			if (!deps.session?.current()) return;
+			try {
+				deps.session.appendEntry({
+					kind: "thinkingLevelChange",
+					parentTurnId: state.lastTurnId,
+					thinkingLevel,
+				});
+			} catch {
+				// Same as appendModelChangeEntry: a lost marker only means resume
+				// falls back to the current thinking level.
 			}
 		},
 	};

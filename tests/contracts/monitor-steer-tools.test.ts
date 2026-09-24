@@ -51,9 +51,13 @@ function controlledWorker() {
 	return { worker, messages, aborts: () => aborts, finish: () => resolve({ exitCode: 0, signal: null }) };
 }
 
+/** Runs belong to the session that dispatched them, and monitor and steer act as that session. */
+const SESSION_ID = "session-monitor";
+
 async function fixture(scratch: IsolatedClioEnv) {
 	const workers: ReturnType<typeof controlledWorker>[] = [];
 	const bundle = makeDispatchBundle(dispatchStubContext(), {
+		getSessionId: () => SESSION_ID,
 		spawnWorker: () => {
 			const worker = controlledWorker();
 			workers.push(worker);
@@ -76,7 +80,7 @@ async function fixture(scratch: IsolatedClioEnv) {
 		workers,
 		request,
 		async call(tool: string, args: Record<string, unknown>): Promise<ToolResult> {
-			const verdict = await registry.invoke({ tool, args });
+			const verdict = await registry.invoke({ tool, args }, { sessionId: SESSION_ID });
 			if (verdict.kind !== "ok") throw new Error(`${tool} was not admitted: ${JSON.stringify(verdict)}`);
 			return verdict.result;
 		},
@@ -174,7 +178,7 @@ describe("monitor tool", () => {
 		const f = await fixture(scratch);
 		try {
 			const empty = okResult(await f.call(ToolNames.Monitor, {}));
-			strictEqual(empty.output, "No dispatched runs recorded.");
+			strictEqual(empty.output, "No dispatched runs recorded for this session.");
 
 			const handle = await f.contract.dispatch(f.request);
 			const listed = okResult(await f.call(ToolNames.Monitor, { mode: "list" }));

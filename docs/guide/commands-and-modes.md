@@ -174,6 +174,7 @@ still available; a normal provider stop alone does not prove task completion.
 A headless turn (`clio-coder run`) starts a fresh session unless `--session <id>` or `--continue` specifies a session to append to.
 - `--session <id>` appends the turn to the session with id `<id>`.
 - `--continue` appends the turn to the most recent session recorded for the current working directory.
+- A resumed session continues on the target, model, and thinking level it last recorded, not on the default another session saved to `settings.yaml`. `--target`, `--model`, and `--thinking` override it, and the session records the override. Resuming never writes `settings.yaml`; a recorded target that is no longer configured keeps the current route and prints a notice.
 - `--session` and `--continue` are mutually exclusive. Specifying both causes the invocation to fail with exit code 2 before execution.
 - Session continuity options apply strictly to main-agent execution. They are non-applicable to `--agent` fleet dispatches because dispatched agents execute in isolated worker processes with independent transcripts; specifying session flags alongside `--agent` exits with code 2.
 - A named session that cannot be resumed (such as an unknown session ID or unreadable history) fails the run with exit code 2 before any model call is initiated.
@@ -252,7 +253,7 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/thinking` | `/thinking [level]` | Set the chat thinking level; bare `/thinking` opens a picker of the levels this route supports |
 | `/model` | `/model [pattern]` | Open model selector or set a model |
 | `/settings` | `/settings [chat\|fleet\|targets\|context\|safety\|interface\|integrations] [group]` | Open interactive settings, optionally at a durable area and UI group |
-| `/resume` | `/resume` | Resume a past session |
+| `/resume` | `/resume` | Resume a past session on the route it last ran on |
 | `/new` | `/new` | Start a fresh session |
 | `/handoff` | `/handoff <goal>` | Hand this session's working state to a fresh session for a stated goal |
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd and `s` to cycle tree order or most recent first. |
@@ -377,7 +378,7 @@ cancels the underlying owner. The menu does not search as you type.
 | `Alt+U` | Cycle dashboard: Activity → Context → Status → closed | `u` |
 | `Alt+W` | Toggle Workers | `w` |
 | `Alt+E` | Toggle files from Clio focus | `e` |
-| `Shift+Tab` | Cycle supported thinking effort | `t` |
+| `Shift+Tab` | Cycle supported thinking effort for this session only | `t` |
 | `Ctrl+Q` | Queue draft after the whole active run; ordinary send while idle | `f` |
 | `Alt+Q` | Restore both queue kinds before the current draft, once | `q` |
 | `Ctrl+D` | Delete forward with text; exit only empty and idle with no queued messages | — |

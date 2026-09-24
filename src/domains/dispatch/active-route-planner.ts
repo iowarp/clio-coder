@@ -46,6 +46,9 @@ export function routeValidationProjection(
 		// Sealed from the parent decision board by the dispatch tool; a model
 		// must not be able to author which decisions a receipt claims.
 		decisionRefs,
+		// Stamped by the dispatch domain from the process owner; a model must
+		// not be able to file a run under another session.
+		ownerSessionId,
 		resolvedVerification,
 		resultContractOverride,
 		resultSummary,
@@ -74,6 +77,7 @@ export function routeValidationProjection(
 			...(ledger !== undefined ? { ledger } : {}),
 			...(parentToolCallId !== undefined ? { parentToolCallId } : {}),
 			...(decisionRefs !== undefined ? { decisionRefs } : {}),
+			...(ownerSessionId !== undefined ? { ownerSessionId } : {}),
 			...(resolvedVerification !== undefined
 				? { resolvedVerification: resolvedVerification.map((check) => ({ ...check, argv: [...check.argv] })) }
 				: {}),

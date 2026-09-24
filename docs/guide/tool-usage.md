@@ -624,13 +624,15 @@ Read-only view of known synchronous and detached runs from the dispatch ledger, 
 
 | Mode | Result |
 | --- | --- |
-| `list` | Up to 20 newest runs; this session's runs if present, otherwise all sessions. Includes state, agent, timing, tokens, receipt path. |
+| `list` | Up to 20 newest runs this session dispatched. Includes state, agent, timing, tokens, receipt path. |
 | `status` | State/outcome, target/model/runtime, timing, exit, tokens, cost, receipt; live runs include phase/heartbeat/elapsed/tokens. |
 | `peek` | Recent process-local event tail (100 events/run, 64 runs, 8 KiB; oldest trimmed). Other-process/prior-process runs have no tail. |
 | `receipt` | Receipt JSON, capped at 14 KiB with path to full receipt. |
 | `wait` | Bounded wait for one run; timeout observes only and never cancels. |
-| `collect` | Non-blocking barrier snapshot for detached `batch_id` or explicit `run_ids`; returns full results when terminal. |
+| `collect` | Non-blocking barrier snapshot for a detached `batch_id` or explicit `run_ids` this session dispatched; returns full results when terminal. |
 | `tools` | Executed tool names/outcomes from event buffer plus integrity-verified receipt totals; command arguments are not recorded. |
+
+The ledger and batch store are machine-wide, so single-run modes refuse runs another project dispatched, and `collect` and steer refuse runs another session dispatched.
 
 Use monitor to observe detached workers; pair with steer when a native worker needs correction.
 

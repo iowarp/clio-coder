@@ -13,6 +13,7 @@ import type {
 } from "../domains/dispatch/contract.js";
 import { type ExecutionPlan, requireAgentSteps } from "../domains/dispatch/execution-plan.js";
 import { executePlan } from "../domains/dispatch/execution-scheduler.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { sameRouteIdentity } from "../domains/dispatch/route-decision.js";
 import type { RoutingIntent } from "../domains/dispatch/routing-intent.js";
@@ -102,11 +103,17 @@ function validateScoutSource(
 
 export function loadVerifiedScoutSource(input: {
 	ref: ScoutContinuationRef;
-	dispatch: Pick<DispatchContract, "getRun">;
+	dispatch: Pick<DispatchContract, "getRun" | "owner">;
 	agentSpecs: ReadonlyArray<AgentSpec>;
 }): VerifiedScoutSource {
 	const envelope = input.dispatch.getRun(input.ref.runId);
 	if (envelope === null) throw new Error(`dispatch: Scout source run '${input.ref.runId}' is unavailable`);
+	// A continuation dispatches workers into the source run's cwd, so a Scout
+	// run another session made would send this session's workers into that
+	// session's project.
+	if (!dispatchOwnership(dispatchOwnerOf(input.dispatch)).ownsRun(envelope)) {
+		throw new Error(`dispatch: Scout source run '${input.ref.runId}' belongs to another session`);
+	}
 	const receiptPath = envelope.receiptPath ?? join(clioStateDir(), "receipts", `${input.ref.runId}.json`);
 	if (!existsSync(receiptPath)) throw new Error(`dispatch: Scout source receipt '${input.ref.runId}' is unavailable`);
 	let receipt: RunReceipt;

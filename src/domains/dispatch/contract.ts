@@ -15,6 +15,7 @@ import type { DetachedBatchRecord, RegisterDetachedBatchInput } from "./batch-st
 import type { RunToolBudgetEnvelope } from "./budget-envelope.js";
 import type { DispatchResultSummaryAllowance, ExecutionRole } from "./execution-role.js";
 import type { HeldWorkerStats } from "./held-workers.js";
+import type { DispatchOwner } from "./ownership.js";
 import type { DispatchReservationRecord, ReservationTopology } from "./reservation-store.js";
 import type { ApprovedAssignmentRoute } from "./route-approval.js";
 import type { RouteDecisionV1 } from "./route-decision.js";
@@ -126,6 +127,14 @@ export interface DispatchRequest extends JobSpec {
 	 * envelope and receipt so a receipt names the decisions it worked under.
 	 */
 	decisionRefs?: ReadonlyArray<string>;
+	/**
+	 * Clio session the run belongs to. Stamped by the dispatch domain when the
+	 * request first enters `dispatch()`, from the owner of the process, and
+	 * carried unchanged by retries so an attempt that runs after a session
+	 * switch still belongs to the session that asked for it. Never
+	 * model-authored: the argument parser builds requests field by field.
+	 */
+	ownerSessionId?: string | null;
 }
 
 /** Internal, non-serializable admission hook for transactional resource owners. */
@@ -336,7 +345,15 @@ export interface DispatchContract {
 		template: RunReceipt;
 	}): Promise<RunReceipt>;
 
-	/** List runs from the ledger. */
+	/**
+	 * The session and workspace this process dispatches for. Every row the
+	 * ledger, batch store, and gate journal hold is machine-wide, so readers
+	 * compare against this owner (see ownership.ts) before they surface or act
+	 * on a row. Optional so lightweight contract fakes need not implement it.
+	 */
+	owner?(): DispatchOwner;
+
+	/** List runs from the ledger. Machine-wide: filter through ownership before surfacing rows. */
 	listRuns(status?: RunStatus): ReadonlyArray<RunEnvelope>;
 
 	/** Get a specific immutable attempt envelope. */
