@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import path from "node:path";
+import { resolvePackageRoot } from "../../core/package-root.js";
 import { canonicalizePath, canonicalizeRawPath, type PathWalkMemo } from "../../core/path-canonical.js";
 import { ToolNames } from "../../core/tool-names.js";
 import { clioConfigDir, clioStateDir } from "../../core/xdg.js";
@@ -27,7 +28,9 @@ export interface ReadScopeExemptRoot {
  * Trees outside the workspace that Clio itself points the model at: installed
  * skills, plugins, and extensions (a loaded SKILL.md names sibling files), the
  * user skill roots of the agents Clio interoperates with, the offload scratch
- * a truncation stub names, and dispatch receipts. They are operator-owned or
+ * a truncation stub names, dispatch receipts, and the installed package's own
+ * documentation and source, which the system prompt names for questions about
+ * Clio herself. They are operator-owned, shipped with the package, or
  * Clio-written, the model cannot author them, and zero-access entries still
  * apply inside them. Lexical on purpose: they are resolved again at every
  * admission, because an operator may replace a link after the session starts.
@@ -44,6 +47,16 @@ export function readScopeExemptRoots(): ReadScopeExemptRoot[] {
 		roots.push({ path: path.join(state, "receipts"), operatorOwned: false });
 	} catch {
 		// An unresolvable Clio home exempts nothing.
+	}
+	try {
+		// Only what the docs corpus and the source path name. package.json,
+		// dist and node_modules stay outside: nothing points the model there.
+		const pkg = resolvePackageRoot();
+		for (const entry of ["docs", "src", "README.md", "CHANGELOG.md"]) {
+			roots.push({ path: path.join(pkg, entry), operatorOwned: false });
+		}
+	} catch {
+		// A package root that cannot be found exempts nothing.
 	}
 	const home = homedir();
 	for (const kind of INTEROP_AGENT_KINDS) {
