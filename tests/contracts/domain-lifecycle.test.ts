@@ -121,7 +121,9 @@ test("duplicate domain names reject the composition before either implementation
 test("a cancelled load stops the started domains and propagates the cancellation unchanged", async () => {
 	const bus = getSharedBus();
 	const failedEvents: unknown[] = [];
-	const unsubscribe = bus.on(BusChannels.DomainFailed, (payload) => failedEvents.push(payload));
+	const unsubscribe = bus.on(BusChannels.DomainFailed, (payload) => {
+		failedEvents.push(payload);
+	});
 	const created: string[] = [];
 	const stopped: string[] = [];
 	const diagnostics: string[] = [];

@@ -83,7 +83,9 @@ test("a boot-time hold keeps a watched settings write until the agents namespace
 	const originalCwd = process.cwd();
 	const bus = getSharedBus();
 	const failures: unknown[] = [];
-	const unsubscribe = bus.on(BusChannels.ConfigReloadFailed, (payload) => failures.push(payload));
+	const unsubscribe = bus.on(BusChannels.ConfigReloadFailed, (payload) => {
+		failures.push(payload);
+	});
 	try {
 		const cwd = join(scratch.dir, "workspace");
 		mkdirSync(cwd);
