@@ -1618,6 +1618,18 @@ async function readRunLedger(stateDir: string): Promise<RunLedgerRows> {
 	return { rows: parsed, path: target };
 }
 
+/** Existence check for tool authorization; never returns another session's run data. */
+export async function hasSessionRunEvidence(stateDir: string, sessionId: string): Promise<boolean> {
+	let ledger: RunLedgerRows;
+	try {
+		ledger = await readRunLedger(stateDir);
+	} catch (error) {
+		if (error instanceof Error && error.message === "run ledger not found") return false;
+		throw error;
+	}
+	return ledger.rows.some((row) => isRecord(row) && row.sessionId === sessionId);
+}
+
 function selectRunEnvelopes(ledger: RunLedgerRows, source: EvidenceSource): RunEnvelope[] {
 	// Strictly validate the selected evidence source, not every retained row:
 	// older rows may use a retired envelope shape. Keep the original index so

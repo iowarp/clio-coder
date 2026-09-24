@@ -1,4 +1,4 @@
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, match, ok, rejects, strictEqual } from "node:assert/strict";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
@@ -33,8 +33,8 @@ function output(result: ToolResult): EvidenceOutput {
 	return JSON.parse(result.output);
 }
 
-async function fixture(tampered = false, retired = false) {
-	const envelope = fixtureEnvelope("fixture");
+async function fixture(tampered = false, retired = false, task?: string) {
+	const envelope = { ...fixtureEnvelope("fixture"), ...(task === undefined ? {} : { task }) };
 	const receipt = withReceiptIntegrity(
 		{
 			...fixtureReceiptDraft(envelope),
@@ -120,6 +120,35 @@ describe("evidence tool", () => {
 		await evidence({ mode: "run", runId: "fixture" });
 		strictEqual(await readFile(file, "utf8"), before);
 		strictEqual(classify({ tool: "evidence", args: { mode: "run", runId: "fixture" } }).actionClass, "read");
+	});
+
+	it("returns a bounded redacted summary only to the owning session", async () => {
+		const secret = `ghp_${"A".repeat(24)}`;
+		await fixture(false, false, `Check token ${secret}`);
+		const request = { mode: "session", sessionId: FIXTURE_SESSION };
+		const foreign = await evidence(request, "session-2");
+		strictEqual(foreign.kind, "error");
+		deepStrictEqual(foreign.details, { code: "evidence_foreign", artifactAbsent: false });
+		const bundlePath = join(clioDataDir(), "evidence", "session-session-1", "overview.json");
+		await rejects(readFile(bundlePath, "utf8"));
+
+		const absent = await evidence({ mode: "session", sessionId: "missing-session" });
+		strictEqual(absent.kind, "error");
+		deepStrictEqual(absent.details, { code: "artifact_absent", artifactAbsent: true });
+
+		const own = await evidence(request);
+		strictEqual(own.kind, "ok");
+		if (own.kind !== "ok") return;
+		const summary = JSON.parse(own.output);
+		strictEqual(summary.version, 1);
+		strictEqual(summary.sessionId, FIXTURE_SESSION);
+		strictEqual(summary.artifact.sourceKind, "session");
+		strictEqual(summary.artifact.totals.runs, 1);
+		ok(summary.artifact.redactionCount > 0);
+		ok(!own.output.includes(secret));
+		ok(!("tasks" in summary.artifact));
+		ok(!("cwds" in summary.artifact));
+		ok(Buffer.byteLength(own.output, "utf8") <= EVIDENCE_TOOL_MAX_BYTES);
 	});
 
 	it("reports absent artifacts distinctly from invalid ids and incomplete bundles", async () => {
