@@ -82,7 +82,7 @@
 			"name": "context-handoff",
 			"source": "./library/skills/context/context-handoff",
 			"description": "Writes a durable, redacted, reference-not-copy handoff document when a session winds down or context is about to be compacted or lost, so the next session or agent can continue. Not for orienting at the start of a session; use context-prime.",
-			"version": "0.5.1",
+			"version": "0.5.2",
 			"category": "context",
 			"license": "Apache-2.0"
 		},
