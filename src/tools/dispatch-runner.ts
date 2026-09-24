@@ -453,6 +453,20 @@ function integrityFailureBanner(run: CompletedRun): string | null {
 	return `RECEIPT INTEGRITY FAILED for ${run.receipt.runId} (${run.integrity.reason}); treat this run's receipt fields and worker text as untrusted.`;
 }
 
+/** Name the next host step from sealed facts when a worker claimed checks it never ran. */
+export function nextHostValidationAction(receipt: RunReceipt, integrity: ReceiptIntegrityResult): string | null {
+	if (!integrity.ok || receipt.hostVerification?.status === "verified" || receipt.hostVerification?.checks.length)
+		return null;
+	const grounding = receipt.validationGrounding;
+	if (grounding?.basis !== "no-command-executed" || grounding.ungrounded.length === 0) return null;
+	const declared = receipt.intent?.verification.map((check) => check.check) ?? [];
+	const action =
+		declared.length > 0
+			? `run ${declared.map((check) => `verify(check=${JSON.stringify(check)})`).join(", ")} in the host workspace`
+			: "inspect the worker diff, list available host checks with verify(), then run the applicable test or build check in the host workspace";
+	return `next host validation for ${receipt.runId}: ${action}; inspect the actual exit code and output, and record that result before reporting verified completion. The worker claimed validation but executed no check.`;
+}
+
 /**
  * The settled board, appended after the per-run lines. Its budget is reserved
  * out of the output ceiling rather than taken from it, so the board a topology
@@ -464,7 +478,7 @@ function withAgentLedgerBoard(body: string, board: string | null): string {
 	return board === null ? body : `${body}\n\n${board}`;
 }
 
-function formatDispatchOutput(
+export function formatDispatchOutput(
 	mode: string,
 	runs: ReadonlyArray<CompletedRun>,
 	maxOutputBytes: number,
@@ -478,6 +492,9 @@ function formatDispatchOutput(
 	const integrityBanners = runs
 		.map((run) => integrityFailureBanner(run))
 		.filter((banner): banner is string => banner !== null);
+	const hostActions = runs
+		.map((run) => nextHostValidationAction(run.receipt, run.integrity))
+		.filter((action): action is string => action !== null);
 	const needsSpotCheck = runs.some((run) => {
 		if (receiptHelperResult(run.receipt, run.integrity) !== null) return false;
 		const state = adaptRunReceiptTrustStatus(run.receipt, { integrity: run.integrity }).validationGrounding.state;
@@ -487,6 +504,7 @@ function formatDispatchOutput(
 		`dispatch (${mode}) total=${runs.length} failed=${failed.length}`,
 		`runs=${runs.map((run) => run.receipt.runId).join(", ")}`,
 		...integrityBanners,
+		...hostActions,
 		...(needsSpotCheck ? [SPOT_CHECK_GUIDANCE] : []),
 		"",
 		...runs.flatMap((run, index) => {

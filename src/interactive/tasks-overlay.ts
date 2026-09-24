@@ -5,6 +5,7 @@ import {
 	type TaskBoardSnapshot,
 	type TaskBoardTask,
 	taskBoardCounts,
+	unverifiedTaskChecks,
 } from "../domains/session/task-board.js";
 import type { UserTask } from "../domains/user-tasks/store.js";
 import {
@@ -83,12 +84,15 @@ function formatTaskProofLine(board: TaskBoardSnapshot, width: number): string {
 
 function taskRow(task: TaskBoardTask, width: number, selected?: boolean): string {
 	const theme = clioTheme();
-	const presentation = STATUS_PRESENTATION[task.status];
+	const unverified = unverifiedTaskChecks(task);
+	const presentation = unverified
+		? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
+		: STATUS_PRESENTATION[task.status];
 	const glyph = theme.fg(presentation.token, presentation.glyph);
 	const title = task.status === "completed" || task.status === "cancelled" ? dim(task.title) : muted(task.title);
 	const cursor = selected === undefined ? "" : `${selected ? theme.fg("accent", GLYPH.cursor) : " "} `;
 	return fitContentLine(
-		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${taskOriginLabel(task)}`)}`,
+		`${cursor}${glyph} ${dim(task.id.padEnd(4))} ${title} ${dim(`· ${taskOriginLabel(task)}${unverified ? " · unverified" : ""}`)}`,
 		width,
 	);
 }
@@ -103,10 +107,22 @@ function wrapTaskProse(prefix: string, prose: string, width: number): string[] {
 
 function taskReceiptRows(task: TaskBoardTask, width: number): string[] {
 	const theme = clioTheme();
-	if (task.status === "completed" && task.evidence) {
+	if (task.status === "completed") {
+		const rows: string[] = [];
 		// The completion claim already carries any run id it mentions, so no derived
 		// `evidence:<runId>` suffix is appended; it would repeat that id on one line.
-		return wrapTaskProse(`       ${dim("completion claim")} `, muted(task.evidence), width);
+		if (task.evidence) rows.push(...wrapTaskProse(`       ${dim("completion claim")} `, muted(task.evidence), width));
+		const unverified = unverifiedTaskChecks(task);
+		if (unverified) {
+			const checks = [
+				...unverified.failed.map((check) => `${check} failed`),
+				...unverified.noRecordedPass.map((check) => `${check} has no recorded pass`),
+			];
+			rows.push(
+				...wrapTaskProse(`       ${theme.fg("warning", "unverified")} `, theme.fg("warning", checks.join("; ")), width),
+			);
+		}
+		return rows;
 	}
 	if (task.status === "blocked" && task.reason) {
 		return wrapTaskProse(`       ${dim("blocked")} `, theme.fg("warning", task.reason), width);
@@ -140,8 +156,10 @@ function formatTasksOverlayBodyLines(
 		];
 	}
 	const counts = taskBoardCounts(board);
+	const unverifiedCount = board.tasks.filter((task) => unverifiedTaskChecks(task) !== null).length;
 	const chips = [
-		theme.fg(counts.open > 0 ? "muted" : "success", `${counts.completed}/${counts.total} done`),
+		theme.fg(counts.open > 0 || unverifiedCount > 0 ? "muted" : "success", `${counts.completed}/${counts.total} done`),
+		unverifiedCount > 0 ? theme.fg("warning", `${unverifiedCount} unverified`) : null,
 		counts.active > 0 ? theme.fg("accent", `${counts.active} active`) : null,
 		counts.blocked > 0 ? theme.fg("warning", `${counts.blocked} blocked`) : null,
 		counts.cancelled > 0 ? dim(`${counts.cancelled} dropped`) : null,
@@ -243,7 +261,7 @@ const USER_TASK_PRESENTATION: Record<UserTask["status"], { glyph: string; token:
 };
 
 /** Pure composite renderer; callers provide already-captured history/artifact/user snapshots. */
-function formatCompositeTasksOverlayBodyLines(
+export function formatCompositeTasksOverlayBodyLines(
 	state: CompositeTasksOverlayState,
 	contentWidth = DEFAULT_CONTENT_WIDTH,
 ): string[] {
@@ -260,7 +278,9 @@ function formatCompositeTasksOverlayBodyLines(
 	if (historyRows.length === 0) lines.push(fitContentLine(dim("No terminal tasks from prior boards."), width));
 	for (const row of historyRows) {
 		const rowSelection: TasksOverlaySelection = { kind: "history", board: row.board, task: row.task };
-		const presentation = STATUS_PRESENTATION[row.task.status];
+		const presentation = unverifiedTaskChecks(row.task)
+			? { glyph: GLYPH.phaseBlocked, token: "warning" as const }
+			: STATUS_PRESENTATION[row.task.status];
 		lines.push(
 			fitContentLine(
 				`${selectionCursor(isSameSelection(selected, rowSelection))} ${theme.fg(presentation.token, presentation.glyph)} ${dim(`${row.board.boardId}:${row.task.id}`)} ${muted(row.task.title)} ${dim(`· ${taskOriginLabel(row.task)} · ${row.board.title}`)}`,
