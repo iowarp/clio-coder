@@ -1,12 +1,20 @@
 import type { DomainModule } from "../../core/domain-loader.js";
 import type { ProvidersContract } from "./contract.js";
-import { createProvidersBundle } from "./extension.js";
+import { createProvidersBundle, type ProvidersBundleOptions } from "./extension.js";
 import { ProvidersManifest } from "./manifest.js";
 
 export const ProvidersDomainModule: DomainModule<ProvidersContract> = {
 	manifest: ProvidersManifest,
-	createExtension: createProvidersBundle,
+	createExtension: (context) => createProvidersBundle(context),
 };
+
+/** A providers module bound to a composition root's session view; see ProvidersBundleOptions. */
+export function createProvidersDomainModule(options: ProvidersBundleOptions): DomainModule<ProvidersContract> {
+	return {
+		manifest: ProvidersManifest,
+		createExtension: (context) => createProvidersBundle(context, options),
+	};
+}
 
 export type {
 	ApiKeyCredential,
@@ -62,6 +70,7 @@ export {
 	readDiscoveredEndpointSlots,
 	recordDiscoveredEndpointSlots,
 } from "./endpoint-slots-store.js";
+export type { ProvidersBundleOptions } from "./extension.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export {

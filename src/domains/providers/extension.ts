@@ -292,7 +292,21 @@ function unservedDefaultModelReason(
 	return `default model '${model}' is not advertised by the target`;
 }
 
-export function createProvidersBundle(context: DomainContext): DomainBundle<ProvidersContract> {
+export interface ProvidersBundleOptions {
+	/**
+	 * The composition root's effective settings view, where a session's own
+	 * route overlays the shared snapshot. Only the live inference probe reads
+	 * it: probing the model settings.yaml names would load a model another
+	 * session saved rather than the one this session talks to. Absent, or
+	 * returning undefined before the session exists, the shared snapshot answers.
+	 */
+	getSettings?: () => Readonly<ClioSettings> | undefined;
+}
+
+export function createProvidersBundle(
+	context: DomainContext,
+	options: ProvidersBundleOptions = {},
+): DomainBundle<ProvidersContract> {
 	const registry = getRuntimeRegistry();
 	const authStore = openAuthStorage();
 	const kb = loadKnowledgeBase();
@@ -575,7 +589,7 @@ export function createProvidersBundle(context: DomainContext): DomainBundle<Prov
 
 	/** The only models an inference probe may touch: the chat model on this target, else its default. */
 	function probeCandidateModelId(target: TargetDescriptor): string | null {
-		const settings = readConfig();
+		const settings = options.getSettings?.() ?? readConfig();
 		const orchestratorModel = settings.chat.target === target.id ? settings.chat.model : null;
 		return orchestratorModel ?? target.defaultModel ?? null;
 	}

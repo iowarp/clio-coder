@@ -101,9 +101,26 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			ref,
 			onChoose: (scope) => {
 				deps.closeOverlay();
-				deps.onSelectModel?.({ target: ref.target, model: ref.model }, scope);
-				if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, scope);
 				const swap = formatPendingModelScope(ref);
+				// A refused save (a project setting that outranks the user file, an
+				// ineligible runtime) leaves the route where it was; say so here
+				// rather than let the throw escape the key handler after the success
+				// line was never shown.
+				const failure = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+				try {
+					deps.onSelectModel?.({ target: ref.target, model: ref.model }, scope);
+				} catch (error) {
+					deps.notify("error", `model unchanged: ${swap} was not applied: ${failure(error)}`);
+					deps.refreshFooter();
+					return;
+				}
+				try {
+					if (ref.thinkingLevel) deps.onSetThinkingLevel?.(ref.thinkingLevel, scope);
+				} catch (error) {
+					deps.notify("warning", `model applied, thinking unchanged: ${failure(error)}`);
+					deps.refreshFooter();
+					return;
+				}
 				deps.notify("success", scope === "global" ? `active and saved globally: ${swap}` : `active this session: ${swap}`);
 				deps.refreshFooter();
 			},
