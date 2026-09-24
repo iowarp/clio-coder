@@ -30,6 +30,12 @@ import { createRegistry } from "../../src/tools/registry.js";
 import { writeTool } from "../../src/tools/write.js";
 import { type IsolatedClioEnv, isolateClioEnv } from "../harness/scratch-env.js";
 
+/** The net decision, then the autonomy mapping a run at `level` applies to it. */
+function atLevel(decision: ReturnType<SafetyPolicyEngine["evaluate"]>, level: "auto-edit" | "full-auto"): string {
+	if (decision.kind !== "allow") return decision.kind;
+	return mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" });
+}
+
 describe("safety gate boundary", () => {
 	let originalCwd: string;
 	let scratch: string;
@@ -71,17 +77,16 @@ describe("safety gate boundary", () => {
 
 	it("recognizes only safe complete command chains inside the workspace", () => {
 		const policy = engine();
+		// A repository script in a recognized chain leaves admission to the
+		// autonomy level: it asks where an operator supervises and runs at full-auto.
 		const admitted = policy.evaluate({
 			tool: ToolNames.Bash,
 			args: { command: "cd pkg && npm run build && git status" },
 		});
-		strictEqual(admitted.kind, "ask");
-		strictEqual(
-			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build && git status" } }, "confirmed")
-				.kind,
-			"allow",
-		);
-		strictEqual(admitted.execRecognition, "recognized");
+		strictEqual(admitted.kind, "allow");
+		strictEqual(admitted.execRecognition, "unrecognized");
+		strictEqual(atLevel(admitted, "auto-edit"), "ask");
+		strictEqual(atLevel(admitted, "full-auto"), "allow");
 		// A test runner is recognized without confirmation (#377), so the same chain runs.
 		const testChain = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } });
 		strictEqual(testChain.kind, "allow");
@@ -100,7 +105,9 @@ describe("safety gate boundary", () => {
 			"system_modify",
 		);
 		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt", "npm test 2>&1 | tail -30"]) {
-			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(atLevel(decision, "auto-edit"), "ask", command);
+			strictEqual(atLevel(decision, "full-auto"), "allow", command);
 			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "confirmed").kind, "allow", command);
 		}
 	});
@@ -129,7 +136,7 @@ describe("safety gate boundary", () => {
 			);
 		}
 		const preview = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build" } });
-		strictEqual(preview.kind, "ask");
+		strictEqual(atLevel(preview, "auto-edit"), "ask");
 		strictEqual(
 			preview.reasons.some((reason) => reason.includes("build: pkg-build")),
 			true,

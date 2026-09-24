@@ -5,6 +5,7 @@ import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { clioConfigDir } from "../../src/core/xdg.js";
+import { mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
 import { loadProjectSafetyPolicy } from "../../src/domains/safety/project-policy.js";
 
@@ -40,9 +41,25 @@ test("S1-02 hidden paths require confirmation", () => {
 		assert.notEqual(engine().evaluate({ tool: "bash", args: { command } }).kind, "allow", command);
 	}
 });
+/**
+ * The disposition a run at `level` gives a bash command. Repository scripts
+ * need approval wherever an operator supervises; at full-auto they run like
+ * any other unrecognized command.
+ */
+function admitted(
+	policy: ReturnType<typeof createSafetyPolicyEngine>,
+	command: string,
+	level = "auto-edit" as const,
+): string {
+	const decision = policy.evaluate({ tool: "bash", args: { command } });
+	if (decision.kind !== "allow") return decision.kind;
+	return mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" });
+}
+
 test("S1-03 repository scripts require approval; inert commands stay recognized", () => {
 	const policy = createSafetyPolicyEngine({ cwd: root });
-	assert.equal(policy.evaluate({ tool: "bash", args: { command: "npm run build" } }).kind, "ask");
+	assert.equal(admitted(policy, "npm run build"), "ask");
+	assert.equal(policy.evaluate({ tool: "bash", args: { command: "npm run build" } }).execRecognition, "unrecognized");
 	for (const command of ["pwd", "git status", "npm test"])
 		assert.equal(policy.evaluate({ tool: "bash", args: { command } }).execRecognition, "recognized");
 });
@@ -54,10 +71,7 @@ test("S1-03 trusted declarations recognize scripts but untrusted declarations ca
 	);
 	const approved = engine();
 	assert.equal(approved.evaluate({ tool: "bash", args: { command: "npm run build" } }).execRecognition, "recognized");
-	assert.equal(
-		createSafetyPolicyEngine({ cwd: root }).evaluate({ tool: "bash", args: { command: "npm run build" } }).kind,
-		"ask",
-	);
+	assert.equal(admitted(createSafetyPolicyEngine({ cwd: root }), "npm run build"), "ask");
 });
 test("S1-03 chain and shell wrappers cannot bypass script approval", () => {
 	const policy = createSafetyPolicyEngine({ cwd: root });
@@ -69,7 +83,7 @@ test("S1-03 chain and shell wrappers cannot bypass script approval", () => {
 		"npm test | tee output.txt",
 		"npm test && echo done",
 	])
-		assert.equal(policy.evaluate({ tool: "bash", args: { command } }).kind, "ask");
+		assert.equal(admitted(policy, command), "ask", command);
 });
 test("S1 trust records and grant CLI remain operator authority", async () => {
 	const { workspaceTrustDirectory } = await import("../../src/domains/safety/workspace-trust.js");

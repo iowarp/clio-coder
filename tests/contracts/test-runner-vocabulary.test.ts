@@ -117,8 +117,17 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(detectValidationCommand(spelling).kind, "validation", spelling);
 			ok(PROJECT_SCRIPT_COMMANDS.find((entry) => entry.id === id)?.re.test(spelling), spelling);
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command: spelling } });
-			strictEqual(decision.kind, "ask", spelling);
 			strictEqual(decision.ruleId, "project-script-confirm", spelling);
+			strictEqual(decision.execRecognition, "unrecognized", spelling);
+			// A repository script asks wherever an operator supervises, and runs at
+			// full-auto like any other unrecognized command. Asking at full-auto
+			// denied every headless yolo run its own typecheck and lint, while
+			// `pnpm run lint` or `sh scripts/gate.sh` ran unasked.
+			strictEqual(disposition(policy, spelling, "suggest"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "auto-edit"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "full-auto"), "allow", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "auto-edit"), "ask", spelling);
+			strictEqual(disposition(policy, `npm test && ${spelling}`, "full-auto"), "allow", spelling);
 		}
 	});
 
@@ -135,7 +144,7 @@ describe("test runner vocabulary (#377)", () => {
 		}
 	});
 
-	it("keeps compound, substituted, and redirected test runs behind a confirmation", () => {
+	it("keeps compound, substituted, and redirected test runs off the unattended list", () => {
 		for (const command of [
 			"node --test sum.test.mjs && curl https://example.com",
 			"node --test $(cat f)",
@@ -147,9 +156,15 @@ describe("test runner vocabulary (#377)", () => {
 			"ctest | tee out.txt",
 			"ctest && npm run build",
 		]) {
-			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			// None of these is recognized, so none runs unattended at auto-edit. At
+			// full-auto they are admitted like the same command without the runner,
+			// and the net still blocks what it blocks at every level.
 			notStrictEqual(disposition(policy, command, "auto-edit"), "allow", command);
-			notStrictEqual(decision.kind, "allow", `${command} must ask at every level`);
+			strictEqual(
+				policy.evaluate({ tool: ToolNames.Bash, args: { command } }).execRecognition ?? "unrecognized",
+				"unrecognized",
+				command,
+			);
 		}
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
