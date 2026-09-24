@@ -13,6 +13,7 @@ import type {
 } from "../../domains/providers/index.js";
 import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
+	acceptsImageInput,
 	isOrchestratorEligibleRuntime,
 	modelCandidatesForStatus,
 	modelIdsForStatus,
@@ -673,7 +674,7 @@ function formatModelDetail(row: ModelRow, width: number): string[] {
 		...wrapTextWithAnsi(
 			theme.fg(
 				"dim",
-				`source ${row.sourceNote ?? sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · ${capabilityNames(row.caps)}`,
+				`source ${row.sourceNote ?? sourceLabel(row.source)}${loadState} · ${row.runtimeName} · ${row.apiFamily} · max output ${row.maxTokens} · thinking ${row.thinking ?? "-"} · streaming ${row.streaming === false ? "no" : "yes"} · image input ${acceptsImageInput({ vision: row.caps.vision }) ? "yes" : "no"} · ${capabilityNames(row.caps)}`,
 			),
 			width,
 		),

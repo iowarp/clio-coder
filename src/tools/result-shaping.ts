@@ -3,6 +3,7 @@ import { mkdirSync, readdirSync, rmdirSync, rmSync, statSync, writeFileSync } fr
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { INSTRUCTION_SHAPED_WARNING } from "../core/untrusted-content.js";
 import { clioStateDir } from "../core/xdg.js";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type { ToolInvokeOptions, ToolResult, ToolResultDetails, ToolSpec } from "./registry.js";
 import {
 	deterministicToolResultDigest,
@@ -599,7 +600,7 @@ export function shapeToolResult(
 	for (const image of result.images) {
 		const bytes = byteLength(image.data);
 		if (
-			context?.supportsImages === true &&
+			acceptsImageInput({ vision: context?.supportsImages }) &&
 			disposition?.context.mode !== "metadata-only" &&
 			bytes + imageBytes < maxBytes - 512
 		) {

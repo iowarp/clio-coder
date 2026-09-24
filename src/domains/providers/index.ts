@@ -71,6 +71,7 @@ export {
 	recordDiscoveredEndpointSlots,
 } from "./endpoint-slots-store.js";
 export type { ProvidersBundleOptions } from "./extension.js";
+export { acceptsImageInput } from "./image-input.js";
 export { ProvidersManifest } from "./manifest.js";
 export type { ModelCapabilityPatchTarget } from "./model-capabilities.js";
 export {

@@ -153,6 +153,7 @@ function baseClassify(tool: string): ActionClass | null {
 		// operator bound, the same endpoint the pre-turn brief already sends the
 		// task to, and changes nothing anywhere.
 		case ToolNames.Consult:
+		case ToolNames.Vision:
 			return "read";
 		case ToolNames.Write:
 		case ToolNames.Edit:

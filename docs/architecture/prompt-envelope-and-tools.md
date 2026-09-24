@@ -184,7 +184,7 @@ Project context, memory, bounded dispatch briefing, pipeline input, the assigned
 
 ## Eight planes, thirty-two builtin tools
 
-The canonical builtin catalog contains 33 tools organized in eight planes. A
+The canonical builtin catalog contains 34 tools organized in eight planes. A
 particular session or worker receives the subset whose dependencies and policy
 allow it to register. The policy table records each tool's plane, action class, size posture, and concurrency rule; tools within a plane can differ.
 [policy.ts](../../src/tools/policy.ts) asserts these invariants at bootstrap, so drift between
@@ -212,7 +212,7 @@ it on a registry the test builds.
 | ORCHESTRATE | `tasks` | read | sequential |
 | ORCHESTRATE | `ledger` | read | sequential |
 | ORCHESTRATE | `panes` | read | sequential |
-| ORCHESTRATE | `limitation`, `consult` | read | parallel |
+| ORCHESTRATE | `limitation`, `consult`, `vision` | read | parallel |
 | ORCHESTRATE | `decide` | read | sequential |
 | ORCHESTRATE | `self_compact` | read | sequential |
 | RETRIEVE | `web_read`, `web_fetch` | read | parallel |

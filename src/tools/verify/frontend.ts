@@ -5,6 +5,7 @@ import { pathToFileURL } from "node:url";
 import { Script } from "node:vm";
 import { prepareBoundedImage } from "../../core/file-references.js";
 import { combineSafeOutput, runCommandVector } from "../../core/safe-exec.js";
+import { acceptsImageInput } from "../../domains/providers/image-input.js";
 import type { ImageContent } from "../../engine/types.js";
 import { escapeRegExp } from "../ignore-policy.js";
 import { resolveReadPath } from "../path-utils.js";
@@ -591,7 +592,7 @@ async function validateBrowserLoad(
 		} else if (!existsSync(screenshot) || !statSync(screenshot).isFile() || statSync(screenshot).size === 0) {
 			failure = "headless browser exited without a rendered screenshot";
 		} else {
-			if (options.supportsImages) {
+			if (acceptsImageInput({ vision: options.supportsImages })) {
 				const image = await prepareBoundedImage(readFileSync(screenshot), options.imageMaxBytes ?? 0);
 				if (image) options.images?.push(image);
 				else

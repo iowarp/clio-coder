@@ -56,12 +56,16 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import {
+	acceptsImageInput,
 	canonicalEndpointKey,
+	modelCandidatesForStatus,
 	normalizeCostProvenance,
 	registerForegroundStream,
+	resolveModelCapabilities,
 	runtimeTargetSnapshot,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
+import { type VisionSidecar, visionObservationText } from "../domains/providers/vision-sidecar.js";
 import { type AutonomyLevel, modelMayActivateSkills } from "../domains/safety/autonomy.js";
 import type { ProtectedArtifactState } from "../domains/safety/protected-artifacts.js";
 import type { CompactInput, CompactResult } from "../domains/session/compaction/compact.js";
@@ -79,6 +83,7 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { countImageBlocks } from "../engine/image-context.js";
 import { cwdHash } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
@@ -490,6 +495,8 @@ export interface CreateChatLoopDeps {
 	 */
 	getAutonomy?: () => AutonomyLevel;
 	providers: ProvidersContract;
+	/** Optional independent image model, bound to fleet.profiles.vision. */
+	visionSidecar?: VisionSidecar;
 	/**
 	 * Whitelist of target ids that the chat-loop is allowed to drive. The
 	 * orchestrator composes this from `providers.list()` so an unknown
@@ -707,6 +714,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().chat.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
+	let lastHistoricalImageNoticeKey: string | null = null;
 
 	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
 	/**
@@ -881,6 +889,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	 */
 	const emitAdmissionNotice = (text: string, reason: string): void => {
 		emit({ type: "notice", level: "info", surface: "transcript", text, admission: { reason } });
+	};
+	const visionModelOptions = (): string[] => {
+		const options: string[] = [];
+		for (const status of deps.providers.list()) {
+			for (const candidate of modelCandidatesForStatus(status)) {
+				const caps = resolveModelCapabilities(status, candidate.id, deps.providers.knowledgeBase);
+				if (!acceptsImageInput({ runtimeId: status.runtime?.id ?? status.target.runtime, vision: caps.vision })) continue;
+				options.push(`${status.target.id}/${candidate.id}`);
+				if (options.length === 5) return options;
+			}
+		}
+		return options;
 	};
 
 	/**
@@ -1314,6 +1334,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	// behind.
 	let turnActive = false;
 	let pendingDecisionBrief: AbortController | null = null;
+	let pendingVisionSidecar: AbortController | null = null;
 
 	const prewarm = createTurnPrewarm({
 		state,
@@ -1444,6 +1465,66 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
 				return;
 			}
+			const operatorText = text;
+			let sidecarObservation: string | null = null;
+			const routeAcceptsImages = acceptsImageInput({
+				runtimeId: agentRuntime.runtimeResolution.runtime.id,
+				vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
+			});
+			if (options.images?.length && !routeAcceptsImages) {
+				if (deps.visionSidecar?.configured()) {
+					const sidecar = deps.visionSidecar;
+					const controller = new AbortController();
+					pendingVisionSidecar = controller;
+					emitNotice(`[Clio Coder] Processing image with ${sidecar.label() ?? "vision sidecar"}...`);
+					try {
+						const question = operatorText.trim() || "Describe the attached image and any visible text.";
+						const analysis = await sidecar.analyze(options.images, question, controller.signal);
+						if (controller.signal.aborted) return;
+						sidecarObservation = visionObservationText(analysis);
+						text = [operatorText, sidecarObservation].filter(Boolean).join("\n\n");
+						emitNotice(`[Clio Coder] Image processed with ${analysis.model}.`);
+					} catch (err) {
+						if (controller.signal.aborted) {
+							emitAdmissionNotice("[Clio Coder] Image processing cancelled.", "vision-sidecar-cancelled");
+						} else {
+							const reason = err instanceof Error ? err.message : String(err);
+							emitAdmissionNotice(`[Clio Coder] Image processing failed: ${reason}`, "vision-sidecar-failed");
+						}
+						return;
+					} finally {
+						if (pendingVisionSidecar === controller) pendingVisionSidecar = null;
+					}
+				} else {
+					const route = agentRuntime.runtimeResolution;
+					const choices = visionModelOptions();
+					const alternatives = choices.length
+						? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
+						: " No vision-capable models are known in the configured catalog.";
+					emit({
+						type: "notice",
+						level: "warning",
+						surface: "transcript",
+						text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
+						admission: { reason: "image-input-unsupported" },
+					});
+					return;
+				}
+			}
+			const historicalImages = countImageBlocks(agentRuntime.agent.state.messages);
+			if (!routeAcceptsImages && historicalImages > 0) {
+				const route = agentRuntime.runtimeResolution;
+				const key = `${route.targetId}/${route.wireModelId}:${historicalImages}`;
+				if (key !== lastHistoricalImageNoticeKey) {
+					lastHistoricalImageNoticeKey = key;
+					emitNotice(
+						`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
+						"warning",
+					);
+				}
+			} else {
+				lastHistoricalImageNoticeKey = null;
+			}
 
 			// 1. Accept the prompt: reset per-turn accounting, freeze the tool
 			// surface, fire turn_start, and assemble the submitted text.
@@ -1452,7 +1533,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			state.turnSharedWorkerNote = isWorkerShareNote(text);
 			middlewareToolChoice.reset();
 			if (options.requestContinuation !== true) state.stalledTurnNudgeSpent = false;
-			const images = options.images && options.images.length > 0 ? [...options.images] : undefined;
+			const images = sidecarObservation === null && options.images?.length ? [...options.images] : undefined;
 			const pendingSkillRequests =
 				state.currentTurnConstraints?.skills === "disabled" ? [] : (options.pendingSkillRequests ?? []);
 			context.addWorkingContextPaths(options.workingContextPaths ?? []);
@@ -1603,9 +1684,9 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			const userTurnId = persistence.appendSubmittedUserTurn(
 				agentRuntime,
 				submittedText,
-				images,
+				options.images?.length ? options.images : undefined,
 				options.requestContinuation === true,
-				text,
+				operatorText,
 				options.display?.text,
 			);
 			context.installMemoryRestoration(agentRuntime, submittedText);
@@ -1616,7 +1697,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			if (interrupted)
 				emit({
 					type: "queued_user_turn",
-					text,
+					text: operatorText,
 					kind: "interrupt",
 					...(options.display ? { display: options.display } : {}),
 				});
@@ -1815,6 +1896,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		cancel(options?: ChatCancelOptions): void {
 			continuity.cancel();
 			pendingDecisionBrief?.abort();
+			pendingVisionSidecar?.abort();
 			const wasStreaming = state.streaming;
 			context.cancelCompaction();
 			recovery.cancelRetryCountdown();
@@ -1894,6 +1976,8 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			lastHistoricalImageNoticeKey = null;
+			pendingVisionSidecar?.abort();
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = undefined;
@@ -1932,6 +2016,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		},
 
 		dispose(): void {
+			pendingVisionSidecar?.abort();
 			unsubscribeConfigReload?.();
 			unsubscribePluginsReload?.();
 			unsubscribeSynthesisLock?.();

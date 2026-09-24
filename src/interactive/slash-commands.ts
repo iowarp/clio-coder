@@ -36,7 +36,7 @@ import {
 	resolvePanesPresetId,
 } from "../domains/mux/operations.js";
 import type { ProvidersContract, ResolvedModelRef } from "../domains/providers/index.js";
-import { resolveModelReference } from "../domains/providers/index.js";
+import { acceptsImageInput, resolveModelCapabilities, resolveModelReference } from "../domains/providers/index.js";
 import type {
 	LibraryEntryKind,
 	PromptTemplate,
@@ -2449,7 +2449,13 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 				// operator has not made yet.
 				if (ctx.applyModelRef(result.ref) === "applied") {
 					const suffix = result.ref.thinkingLevel ? ` thinking=${result.ref.thinkingLevel}` : "";
-					ctx.notice("success", `active this session: ${result.ref.target}/${result.ref.model}${suffix}`);
+					const status = ctx.providers.list().find((candidate) => candidate.target.id === result.ref?.target);
+					const caps = status ? resolveModelCapabilities(status, result.ref.model, ctx.providers.knowledgeBase) : null;
+					const imageInput = caps === null ? "unknown" : acceptsImageInput({ vision: caps.vision }) ? "yes" : "no";
+					ctx.notice(
+						"success",
+						`active this session: ${result.ref.target}/${result.ref.model}${suffix} · image input ${imageInput}`,
+					);
 				}
 				ctx.render();
 			})();

@@ -10,7 +10,9 @@
  * llama.cpp router's `max_instances`) and a slot is free, Clio loads without
  * evicting anything; when the runtime loads just-in-time (LM Studio), Clio
  * attempts the co-resident load first and considers swapping only after an
- * explicit capacity rejection; when the server schedules fits itself
+ * explicit capacity rejection, except that a load under an LM Studio load
+ * profile first releases Clio's earlier loads on that server
+ * (lmstudio-ownership.ts); when the server schedules fits itself
  * (Ollama), Clio releases only its own unprotected stragglers. Eviction is the
  * exception, using only Clio-attributed loads. It never selects a protected
  * resident while an unprotected owned one is available.
