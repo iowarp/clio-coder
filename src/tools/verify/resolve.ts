@@ -3,6 +3,7 @@ import { resolveSafeCwd } from "../../core/safe-exec.js";
 import { isVerificationScriptName, VERIFICATION_SCRIPT_FAMILY_HINT } from "../../core/verification-scripts.js";
 import { type DeclaredCheck, PROJECT_VERIFIER_CATALOG_RELATIVE_PATH } from "./catalog.js";
 import { discoverDeclaredChecksAtRoot } from "./discovery.js";
+import { prepareVerifyArguments } from "./surface.js";
 import {
 	discoverToolchainChecks,
 	TOOLCHAIN_DISCOVERY_SOURCES,
@@ -47,6 +48,7 @@ function nothingDeclared(root: string): string {
 }
 
 export function resolveVerifyCall(workspaceRoot: string, args: Record<string, unknown>): VerifyResolution {
+	args = prepareVerifyArguments(args);
 	const check = typeof args.check === "string" ? args.check.trim() : "";
 	if (check.length === 0) return { kind: "list" };
 	if (check === "frontend") return { kind: "frontend" };

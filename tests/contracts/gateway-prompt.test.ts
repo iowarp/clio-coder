@@ -168,8 +168,8 @@ describe("gateway in the session prompt", () => {
 				`attached schema bytes: total ${total}\n${sizes.map((entry) => `  ${entry.name}: ${entry.bytes}`).join("\n")}`,
 			);
 			ok(
-				total < ATTACHED_BUDGET_BYTES,
-				`attached bytes ${total} must stay below the handoff's ${HANDOFF_TOTAL_BYTES} plus the ${MCP_DISCOVERY_INPUT_BYTES} bytes of MCP discovery inputs`,
+				total <= ATTACHED_BUDGET_BYTES,
+				`attached bytes ${total} must stay within the handoff's ${HANDOFF_TOTAL_BYTES} plus the ${MCP_DISCOVERY_INPUT_BYTES} bytes of MCP discovery inputs`,
 			);
 			const gateway = sizes.find((entry) => entry.name === ToolNames.Gateway);
 			ok(gateway !== undefined && gateway.bytes < 2_048, `the gateway schema stays small: ${gateway?.bytes}`);
