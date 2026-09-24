@@ -338,6 +338,14 @@ async function attemptBootstrapDispatch(
 		// produces no assistant text by construction, and reporting the silence
 		// instead of the rejection described a healthy target as a mute model.
 		if (receipt.exitCode !== 0) throw new Error(receiptFailure(receipt));
+		// The context-handbook result contract seals the handbook from a submit
+		// tool call, so the transcript may carry no text or only narration. The
+		// sealed output is the result the contract validated; prefer it.
+		if (receipt.output?.state === "final" && receipt.output.text.trim().length > 0) {
+			const sealedBytes = Buffer.byteLength(receipt.output.text, "utf8");
+			if (sealedBytes > BOOTSTRAP_MAX_OUTPUT_BYTES) throw new BootstrapOutputLimitError(sealedBytes);
+			text = receipt.output.text.trim();
+		}
 		if (text.length === 0) throw new Error("bootstrap agent did not return an assistant response");
 		parserAttempted = true;
 		const output = parseBootstrapModelOutput(text);
