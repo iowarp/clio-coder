@@ -239,7 +239,21 @@ function stringArray(value: unknown, key: string, maxItems: number, maxChars: nu
 		})
 		.filter((item) => item.length > 0)
 		.slice(0, maxItems)
-		.map((item) => item.slice(0, maxChars));
+		.map((item) => clampAtSentence(item, maxChars));
+}
+
+/**
+ * Cut an overlong rule after its last complete sentence that fits. A plain
+ * slice ended generated invariants mid-word ("move the value into a leaf se"),
+ * which reads as a broken rule and drops the remedy anyway.
+ */
+function clampAtSentence(text: string, maxChars: number): string {
+	if (text.length <= maxChars) return text;
+	const head = text.slice(0, maxChars);
+	const end = Math.max(head.lastIndexOf(". "), head.endsWith(".") ? head.length - 1 : -1);
+	if (end >= maxChars / 2) return head.slice(0, end + 1);
+	const space = head.lastIndexOf(" ");
+	return `${head.slice(0, space > 0 ? space : maxChars - 1)}…`.slice(0, maxChars);
 }
 
 function stringField(record: Record<string, unknown>, key: string, maxChars: number): string {
