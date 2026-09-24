@@ -230,9 +230,9 @@ entries:
       - handoff to another agent
       - context is about to be lost
       - write a continuation brief
-    version: 0.5.1
+    version: 0.5.2
     sourceUrl: skills/context/context-handoff
-    sha256: 6e98870efb2c885026a52aa91d981943e6bd705c780acaa51fe196e9e2e76191
+    sha256: 41769da8f52493690657250a68752f8a579b0da17490e5a46c3738953d511a09
     provides:
       - kind: skill
         name: context-handoff
