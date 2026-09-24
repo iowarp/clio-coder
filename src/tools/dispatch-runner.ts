@@ -613,6 +613,7 @@ function dispatchDetails(
 				verification: integrity.ok ? receipt.verification : UNVERIFIABLE_RECEIPT_VERIFICATION,
 				hostVerification: integrity.ok ? (receipt.hostVerification ?? null) : null,
 				receiptIntegrity: integrity,
+				...(integrity.ok && receipt.toolActivity !== undefined ? { toolActivity: receipt.toolActivity } : {}),
 				trustStatus,
 				// The bounded projection sits shallow and flat on purpose: a
 				// depth-capped wire (ACP rawOutput) keeps it whole while the
@@ -621,7 +622,11 @@ function dispatchDetails(
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
 					: {}),
-				...(integrity.ok && (receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined)
+				...(integrity.ok &&
+				(receipt.worktree !== undefined ||
+					receipt.checkoutChanges !== undefined ||
+					receipt.runtimeKind === "subprocess" ||
+					receipt.delegation !== undefined)
 					? {
 							placement: receipt.worktree
 								? { mode: "worktree" as const, ...receipt.worktree }

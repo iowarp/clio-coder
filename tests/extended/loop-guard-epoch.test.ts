@@ -72,6 +72,119 @@ describe("loop guard identical-call epoch", () => {
 			JSON.stringify(third),
 		);
 	});
+
+	it("restarts only after sealed delegated work changed the parent workspace", () => {
+		const cases: Array<{
+			name: string;
+			details: MiddlewareHookInput["toolResultDetails"];
+			restarts: boolean;
+		}> = [
+			{
+				name: "failed dispatch with one applied worktree change",
+				details: {
+					runs: [
+						{ receiptIntegrity: { ok: true }, placement: { mode: "worktree", applied: true, changedPaths: ["fix.ts"] } },
+						{ receiptIntegrity: { ok: true }, placement: { mode: "current", changedPaths: [] } },
+					],
+				},
+				restarts: true,
+			},
+			{
+				name: "failed subprocess with an observed current-workspace change",
+				details: {
+					runs: [{ receiptIntegrity: { ok: true }, placement: { mode: "current", changedPaths: ["fix.ts"] } }],
+				},
+				restarts: true,
+			},
+			{
+				name: "failed in-process worker with a successful mutating call",
+				details: { runs: [{ receiptIntegrity: { ok: true }, toolActivity: { mutatingSucceeded: true } }] },
+				restarts: true,
+			},
+			{
+				name: "read-only worker",
+				details: {
+					runs: [
+						{
+							receiptIntegrity: { ok: true },
+							autonomyEnforcement: { autonomy: "read-only" },
+							placement: { mode: "current", changedPaths: ["fix.ts"] },
+							toolActivity: { mutatingSucceeded: true },
+						},
+					],
+				},
+				restarts: false,
+			},
+			{
+				name: "integrity-invalid receipt",
+				details: {
+					runs: [{ receiptIntegrity: { ok: false }, placement: { mode: "current", changedPaths: ["fix.ts"] } }],
+				},
+				restarts: false,
+			},
+			{
+				name: "unapplied worktree",
+				details: {
+					runs: [
+						{
+							receiptIntegrity: { ok: true },
+							placement: { mode: "worktree", applied: false, changedPaths: ["fix.ts"] },
+							toolActivity: { mutatingSucceeded: true },
+						},
+					],
+				},
+				restarts: false,
+			},
+			{
+				name: "applied worktree without changed paths",
+				details: {
+					runs: [{ receiptIntegrity: { ok: true }, placement: { mode: "worktree", applied: true, changedPaths: [] } }],
+				},
+				restarts: false,
+			},
+			{
+				name: "unchanged current workspace",
+				details: {
+					runs: [
+						{
+							receiptIntegrity: { ok: true },
+							placement: { mode: "current", changedPaths: [] },
+							toolActivity: { mutatingSucceeded: true },
+						},
+					],
+				},
+				restarts: false,
+			},
+		];
+
+		for (const scenario of cases) {
+			const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+			const turn = scenario.name;
+			strictEqual(guard.evaluate(before(turn, ToolNames.Bash, "same-validation")).length, 0, scenario.name);
+			strictEqual(guard.evaluate(before(turn, ToolNames.Bash, "same-validation")).length, 0, scenario.name);
+			guard.evaluate({
+				hook: "after_tool",
+				turnId: turn,
+				toolName: ToolNames.Dispatch,
+				toolArgs: { task: "fix validation" },
+				metadata: { resultKind: "error" },
+				toolResultDetails: scenario.details,
+			});
+			const third = guard.evaluate(before(turn, ToolNames.Bash, "same-validation"));
+			strictEqual(
+				third.some((effect) => effect.kind === "block_tool"),
+				!scenario.restarts,
+				scenario.name,
+			);
+			if (scenario.restarts) {
+				strictEqual(guard.evaluate(before(turn, ToolNames.Bash, "same-validation")).length, 0, scenario.name);
+				ok(
+					guard.evaluate(before(turn, ToolNames.Bash, "same-validation")).some((effect) => effect.kind === "block_tool"),
+					scenario.name,
+				);
+			}
+		}
+	});
 });
 
 function coverageGuard() {

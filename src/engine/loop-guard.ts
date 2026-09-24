@@ -166,6 +166,34 @@ function crossArgumentResultMessage(tool: string, distinctArguments: number): st
 	);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasChangedPaths(value: unknown): boolean {
+	return Array.isArray(value) && value.some((path) => typeof path === "string" && path.length > 0);
+}
+
+/** A sealed dispatch result can move the parent's files even when the worker failed. */
+function dispatchMutatedParentWorkspace(details: MiddlewareHookInput["toolResultDetails"]): boolean {
+	if (!Array.isArray(details?.runs)) return false;
+	return details.runs.some((value: unknown) => {
+		if (!isRecord(value) || !isRecord(value.receiptIntegrity) || value.receiptIntegrity.ok !== true) return false;
+		if (isRecord(value.autonomyEnforcement) && value.autonomyEnforcement.autonomy === "read-only") return false;
+		const mutatingSucceeded = isRecord(value.toolActivity) && value.toolActivity.mutatingSucceeded === true;
+		const placement = value.placement;
+		if (placement === undefined) return mutatingSucceeded;
+		if (!isRecord(placement)) return false;
+		if (placement.mode === "worktree") return placement.applied === true && hasChangedPaths(placement.changedPaths);
+		if (placement.mode === "current") {
+			// A checkout delta is stronger evidence than a mutating-capable call.
+			// When observed, an empty delta means the parent files did not change.
+			return Array.isArray(placement.changedPaths) ? hasChangedPaths(placement.changedPaths) : mutatingSucceeded;
+		}
+		return false;
+	});
+}
+
 /**
  * Base block reason: names the loop and asks for a strategy change (block #1).
  * When the same call already returned a successful result earlier this run, the
@@ -601,9 +629,9 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	const lastBlockedCallByTurn = new Map<string, string>();
 	const callsByTurn = new Map<string, number>();
 	/**
-	 * Per-turn count of successful write or edit calls. The identical-call key
-	 * carries it, so a check rerun after a change (fix-verify) is a fresh call
-	 * while a verbatim repeat with nothing changed in between still counts.
+	 * Per-turn count of parent-workspace mutations, including sealed delegated
+	 * work. The identical-call key carries it, so a check rerun after a change
+	 * is fresh while a verbatim repeat with nothing changed still counts.
 	 */
 	const mutationEpochByTurn = new Map<string, number>();
 	/**
@@ -684,16 +712,24 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		return !(record.truncated === true && record.shownCount === 0);
 	};
 
-	// after_tool touchpoint: a successful call (result kind "ok") records a
-	// success for its canonical fingerprint. Blocked calls never reach here
-	// (admission returns before execution), so only real results anchor.
+	// after_tool touchpoint: the parent workspace changed. A failed dispatch can
+	// still carry a verified receipt for work already applied to that workspace.
+	const recordWorkspaceMutation = (input: MiddlewareHookInput): boolean => {
+		const directWrite =
+			input.metadata?.resultKind === "ok" && (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit);
+		const delegatedWrite =
+			input.toolName === ToolNames.Dispatch && dispatchMutatedParentWorkspace(input.toolResultDetails);
+		if (!directWrite && !delegatedWrite) return false;
+		bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
+		readCoverage.clear();
+		redundantReadsByTurn.clear();
+		return true;
+	};
+
+	// A successful call records a success for its canonical fingerprint.
+	// Blocked calls never reach here, so only real results anchor.
 	const recordSuccessfulResult = (input: MiddlewareHookInput): void => {
 		if (input.metadata?.resultKind !== "ok") return;
-		if (input.toolName === ToolNames.Write || input.toolName === ToolNames.Edit) {
-			bumpBoundedCounter(mutationEpochByTurn, input.turnId ?? NO_TURN_BUCKET);
-			readCoverage.clear();
-			redundantReadsByTurn.clear();
-		}
 		if (!resultCarriesEvidence(input.toolResultDetails)) return;
 		const tool = input.toolName;
 		if (typeof tool !== "string" || tool.length === 0) return;
@@ -1127,10 +1163,10 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 			if (input.hook === "after_tool") {
 				const turnKey = input.turnId ?? NO_TURN_BUCKET;
 				const blocked = lastBlockedCallByTurn.get(turnKey);
+				const workspaceMutated = recordWorkspaceMutation(input);
 				if (
 					blocked !== undefined &&
-					input.metadata?.resultKind === "ok" &&
-					resultCarriesEvidence(input.toolResultDetails) &&
+					(workspaceMutated || (input.metadata?.resultKind === "ok" && resultCarriesEvidence(input.toolResultDetails))) &&
 					input.toolName !== undefined &&
 					input.toolName !== ToolNames.Read &&
 					hashToolCall(input.toolName, input.toolArgs ?? {}) !== blocked
@@ -1365,8 +1401,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// regardless of age, so an unscoped key would let one identical call
 				// per user turn (rerunning a build across turns) accumulate into a
 				// false loop.
-				// The epoch scopes repeats to "since the last successful write or
-				// edit": a live session repeated a batch of eleven read-only bash
+				// The epoch scopes repeats to "since the last parent-workspace
+				// mutation": a live session repeated a batch of eleven read-only bash
 				// calls five times, every one admitted, because the detector kept
 				// only a 30 s window or the last four attempts and no batch ever
 				// showed a third repeat inside either.
