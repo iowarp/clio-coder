@@ -53,7 +53,7 @@ export function openExtensionsOverlay(tui: TUI, ctx: SlashCommandContext, onClos
 					if (runtime?.reason) lines.push(runtime.reason);
 					if (runtime?.status) lines.push(`**Status:** ${runtime.status.text}`);
 					for (const command of ctx.operatorExtensions
-						?.commands(ctx.listPrompts().items.map((prompt) => prompt.name))
+						?.commands((ctx.listPromptsForDisplay ?? ctx.listPrompts)().items.map((prompt) => prompt.name))
 						.filter((row) => row.extensionId === ext.id) ?? [])
 						lines.push(`/${command.invocation}: ${command.description} (${command.available ? "ready" : command.reason})`);
 				}

@@ -57,7 +57,9 @@ export function createOverlayResourceOpeners(deps: OverlayResourceOpenersDeps): 
 			deps.keybindings,
 			deps.closeOverlay,
 			query,
-			ctx.operatorExtensions?.commands(ctx.listPrompts().items.map((prompt) => prompt.name)),
+			ctx.operatorExtensions?.commands(
+				(ctx.listPromptsForDisplay ?? ctx.listPrompts)().items.map((prompt) => prompt.name),
+			),
 		);
 		deps.tui.requestRender();
 	};
