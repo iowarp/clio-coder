@@ -188,8 +188,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 		description:
 			"Session task board. plan declares a titled board (replaces any prior board); add appends tasks; " +
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
-			"done completes a task (started or still pending) and requires a note describing the work and any validation outcome; " +
-			"the note is a claim, while verification receipts record observed checks. " +
+			"done requires a completion claim with failed or unrun checks; only verification receipts prove observed checks. " +
 			"block parks it with a required reason; drop cancels it; list shows the board. " +
 			"For operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. Never pick unrelated tasks. " +
 			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
@@ -208,8 +207,7 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			id: Type.Optional(Type.String({ description: 'Task id like "t2", or operator id "u2" for pick.' })),
 			note: Type.Optional(
 				Type.String({
-					description:
-						"Completion claim and check outcomes, including checks not run (required for done), or reason (block, drop).",
+					description: "Completion claim with failed/unrun checks (done), or reason (block, drop).",
 				}),
 			),
 		}),
