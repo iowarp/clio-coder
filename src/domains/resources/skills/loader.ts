@@ -8,7 +8,7 @@ import type { PendingSkillRequest } from "../../../core/skill-activation.js";
 import { type ToolName, ToolNames } from "../../../core/tool-names.js";
 import { clioConfigDir } from "../../../core/xdg.js";
 import { INTEROP_AGENT_KINDS, interopSourceRank } from "../../interop/registry.js";
-import { enabledPluginResourceRoots, pluginBaseDir } from "../../plugins/index.js";
+import { enabledPluginResourceRoots, pluginBaseDir, withPluginDiscoveryPass } from "../../plugins/index.js";
 import type { ResourceDiagnostic, ResourceScope, ResourceSourceInfo } from "../collision.js";
 import { readRootEntries, splitYamlFrontmatter, stringField } from "../common-loader.js";
 import { resolvePackageReferences } from "../package-references.js";
@@ -987,7 +987,12 @@ function requiresDiagnostics(winners: ReadonlyArray<Skill>): ResourceDiagnostic[
 	return out;
 }
 
+/** One catalog load verifies each installed plugin tree once, however many roots consult it. */
 export function loadSkills(input: LoadSkillsInput = {}): SkillList {
+	return withPluginDiscoveryPass(() => loadSkillsInPass(input));
+}
+
+function loadSkillsInPass(input: LoadSkillsInput): SkillList {
 	const roots = input.roots ?? (input.disableDiscovery === true ? [] : defaultSkillRoots(input));
 	const diagnostics: ResourceDiagnostic[] = [];
 	const packageRoots =

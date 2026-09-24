@@ -4,9 +4,9 @@ import { readSettings } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import { resolvePackageRoot } from "../../core/package-root.js";
 import { clioConfigDir } from "../../core/xdg.js";
-import { enabledPluginResourceRoots } from "../plugins/index.js";
+import { enabledPluginResourceRoots, withPluginDiscoveryPass } from "../plugins/index.js";
 import { resolvePackageReferences } from "../resources/package-references.js";
-import { loadSkills } from "../resources/skills/loader.js";
+import { type LoadSkillsInput, loadSkills, type SkillList } from "../resources/skills/loader.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import { type AgentRecipe, type RecipeSource, recipeIdFromPath } from "./recipe.js";
 import { parseAgentRecipeSchema } from "./recipe-schema.js";
@@ -39,6 +39,24 @@ function recordDiagnostic(diagnostics: AgentRecipeDiagnostic[], diagnostic: Agen
 	if (diagnostics.length < MAX_AGENT_RECIPE_DIAGNOSTICS) diagnostics.push(diagnostic);
 }
 
+/**
+ * Skill catalogs loaded by the current discovery, keyed by their inputs. Every
+ * builtin recipe binds against the same catalog, so one discovery loads it
+ * once instead of once per skill-binding recipe.
+ */
+let discoveryCatalogs: Map<string, SkillList> | null = null;
+
+function boundSkillCatalog(input: LoadSkillsInput): SkillList {
+	if (!discoveryCatalogs) return loadSkills(input);
+	const key = JSON.stringify(input);
+	let catalog = discoveryCatalogs.get(key);
+	if (!catalog) {
+		catalog = loadSkills(input);
+		discoveryCatalogs.set(key, catalog);
+	}
+	return catalog;
+}
+
 function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRecipe {
 	if (recipe.skills.length === 0) return { ...recipe, boundSkillPaths: [] };
 	// Builtins may bind a package-owned skill. Custom recipes deliberately use
@@ -52,13 +70,13 @@ function resolveBoundSkills(recipe: AgentRecipe, source: RecipeSource): AgentRec
 	}
 	const skills =
 		source.source === "plugin"
-			? loadSkills({
+			? boundSkillCatalog({
 					cwd: source.cwd ?? process.cwd(),
 					trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
 					disableDiscovery: true,
 					explicitSkillPaths: source.skillRoot === undefined ? [] : [source.skillRoot],
 				})
-			: loadSkills({
+			: boundSkillCatalog({
 					cwd: source.cwd ?? process.cwd(),
 					trustProjectCompatRoots: readSettings().integrations.projectResources.trustProjectImports,
 					...(source.source === "builtin" && existsSync(packageSkills) ? { explicitSkillPaths: [packageSkills] } : {}),
@@ -202,6 +220,16 @@ export function discoverAgentRecipes(
 	cwd = process.cwd(),
 	diagnostics: AgentRecipeDiagnostic[] = [],
 ): ReadonlyArray<AgentRecipe> {
+	if (discoveryCatalogs) return discoverAgentRecipesInPass(cwd, diagnostics);
+	discoveryCatalogs = new Map();
+	try {
+		return withPluginDiscoveryPass(() => discoverAgentRecipesInPass(cwd, diagnostics));
+	} finally {
+		discoveryCatalogs = null;
+	}
+}
+
+function discoverAgentRecipesInPass(cwd: string, diagnostics: AgentRecipeDiagnostic[]): ReadonlyArray<AgentRecipe> {
 	const builtin = loadRecipesFromDir(
 		{
 			dir: path.join(resolvePackageRoot(), "src", "domains", "agents", "builtins"),
