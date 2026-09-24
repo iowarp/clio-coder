@@ -2,6 +2,7 @@ import { Type } from "typebox";
 import { assertSafeId } from "../core/safe-id.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -37,16 +38,22 @@ export const evidenceTool: ToolSpec = {
 	baseActionClass: "read",
 	// Run mode may materialize a derived bundle in Clio's data directory.
 	executionMode: "sequential",
-	async run(args): Promise<ToolResult> {
+	async run(args, options): Promise<ToolResult> {
 		const mode = args.mode;
 		if (mode !== "list" && mode !== "inspect" && mode !== "run") {
 			return { kind: "error", message: "evidence: mode must be list, inspect, or run" };
 		}
 		try {
 			const dataDir = clioDataDir();
+			// Bundles live in the machine-wide data dir. One is readable from the
+			// session it belongs to or from a session in the project its runs
+			// executed in; any other bundle stays out of the model's context.
+			const ownership = dispatchOwnership(dispatchOwnerOf({}, options?.sessionId));
 			if (mode === "list") {
 				const { evidenceInventorySnapshot } = await import("../domains/evidence/inventory.js");
-				return boundedResult(await evidenceInventorySnapshot(Date.now, dataDir));
+				return boundedResult(
+					await evidenceInventorySnapshot(Date.now, dataDir, (overview) => ownership.seesBundle(overview)),
+				);
 			}
 			const id = mode === "inspect" ? args.id : args.runId;
 			if (typeof id !== "string" || id.length === 0) {
@@ -74,6 +81,13 @@ export const evidenceTool: ToolSpec = {
 					throw buildError;
 				}
 				inspected = await inspectEvidence(dataDir, evidenceId);
+			}
+			if (!ownership.seesBundle(inspected.overview)) {
+				return {
+					kind: "error",
+					message: `evidence: ${evidenceId} belongs to another project; only sessions in that project can read it`,
+					details: { code: "evidence_foreign", artifactAbsent: false },
+				};
 			}
 			return boundedResult({
 				...inspected,
