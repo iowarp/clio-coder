@@ -58,6 +58,10 @@ function wrap(owner: Record<string, unknown>, name: string, label: string): void
 	}
 	Object.defineProperty(wrapped, "name", { value: (original as AnyFunction).name });
 	owner[name] = wrapped;
+	// realpathSync.native and realpath.native are separate functions that the
+	// copy above carries over unwrapped. Wrap them under their own label.
+	if (typeof (original as { native?: unknown }).native === "function")
+		wrap(wrapped as unknown as Record<string, unknown>, "native", `${label}.native`);
 }
 
 /** Idempotent. Wraps every listed function once for the life of the process. */

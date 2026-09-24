@@ -27,10 +27,13 @@ const PLUGINS = 6;
  * Counted fs calls per installed plugin file, above a project holding only the
  * agent plugin. One integrity walk costs about 12 calls per file (lstat, open,
  * the stable-read fstats, read, close, realpath) and boot discovery runs two
- * passes, one per domain, for 25.0. Re-listing plugins per skill-binding recipe
- * measured 118.4. Lower the ceiling when the count drops.
+ * passes, one per domain, for 25.0. The skill loader's symlink containment
+ * checks add realpathSync.native calls, which the counter has counted since it
+ * learned to wrap them, for 26.4. Re-listing plugins per skill-binding recipe
+ * measured 118.4 before the native calls were counted. Lower the ceiling when
+ * the count drops.
  */
-const PER_FILE_CEILING = 26;
+const PER_FILE_CEILING = 27;
 
 const scratch: string[] = [home];
 after(() => {

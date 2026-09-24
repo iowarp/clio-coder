@@ -1,24 +1,19 @@
 import { ok } from "node:assert/strict";
-import fs, { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
+import { countFsCalls, installFsCounters } from "../harness/fs-counter.js";
 import { scratchClioEnvVars } from "../harness/scratch-env.js";
 
 // An explicit skill path is matched against every package root to find its
 // owning plugin. The skill loader canonicalizes those roots once per load, so
 // each further explicit path costs its own realpath and no more. The loader
-// calls realpathSync.native, which tests/harness/fs-counter.ts leaves
-// unwrapped, so this contract counts it directly. The wrapper is installed
-// before the loader imports node:fs.
+// canonicalizes with realpathSync.native. Counters are installed before any
+// product module loads so their fs imports see the wrappers.
 const home = mkdtempSync(join(tmpdir(), "clio-coder-explicit-skill-"));
 Object.assign(process.env, scratchClioEnvVars(home), { HOME: home });
-let realpaths = 0;
-const native = fs.realpathSync.native;
-fs.realpathSync.native = ((...args: Parameters<typeof native>) => {
-	realpaths++;
-	return native(...args);
-}) as typeof native;
+await installFsCounters();
 const plugins = await import("../../src/domains/plugins/index.js");
 const { loadSkills } = await import("../../src/domains/resources/skills/loader.js");
 
@@ -26,7 +21,6 @@ const PACKAGES = 12;
 const EXPLICIT = 8;
 const scratch: string[] = [home];
 after(() => {
-	fs.realpathSync.native = native;
 	for (const dir of scratch) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -44,7 +38,7 @@ function skillDir(prefix: string, name: string): string {
 }
 
 describe("explicit skill path scaling", () => {
-	it("canonicalizes package roots once per load, not once per explicit path", () => {
+	it("canonicalizes package roots once per load, not once per explicit path", async () => {
 		const cwd = realpathSync(mkdtempSync(join(tmpdir(), "clio-coder-explicit-skill-project-")));
 		scratch.push(cwd);
 		for (let index = 0; index < PACKAGES; index++) {
@@ -71,18 +65,19 @@ describe("explicit skill path scaling", () => {
 		process.chdir(cwd);
 		try {
 			plugins.reloadPluginResources(cwd);
-			const count = (paths: number): number => {
+			const count = async (paths: number): Promise<number> => {
 				// The first load fills settings and snapshot caches; count the second.
 				loadSkills({ cwd, explicitSkillPaths: explicit.slice(0, paths) });
-				realpaths = 0;
-				const loaded = loadSkills({ cwd, explicitSkillPaths: explicit.slice(0, paths) });
+				const { value, byName } = await countFsCalls(async () =>
+					loadSkills({ cwd, explicitSkillPaths: explicit.slice(0, paths) }),
+				);
 				ok(
-					loaded.items.some((skill) => skill.name === "explicit-0"),
+					value.items.some((skill) => skill.name === "explicit-0"),
 					"the explicit skill loads",
 				);
-				return realpaths;
+				return byName["fs.realpathSync.native"] ?? 0;
 			};
-			const perPath = (count(EXPLICIT) - count(1)) / (EXPLICIT - 1);
+			const perPath = ((await count(EXPLICIT)) - (await count(1))) / (EXPLICIT - 1);
 			// Canonicalizing every package root per path cost 16 here.
 			ok(perPath <= 3, `each explicit path cost ${perPath.toFixed(1)} realpaths with ${PACKAGES} packages`);
 		} finally {
