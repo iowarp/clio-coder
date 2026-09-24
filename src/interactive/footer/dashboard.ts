@@ -11,6 +11,7 @@ import {
 	type UsageBreakdown,
 } from "../../domains/observability/index.js";
 import {
+	acceptsImageInput,
 	type CapabilityFlags,
 	type ProvidersContract,
 	resolveModelCapabilities,
@@ -55,9 +56,9 @@ import {
 import { DASHBOARD_PAGES, type DashboardPage, renderCompactDashboard, renderDashboardPage } from "./pages.js";
 import { createLocalMachineSampler, type LocalMachineMetrics } from "./system-metrics.js";
 
-function capabilityLabels(caps: CapabilityFlags | null): string[] {
+export function capabilityLabels(caps: CapabilityFlags | null): string[] {
 	if (!caps) return [];
-	const out: string[] = [];
+	const out: string[] = [acceptsImageInput({ vision: caps.vision }) ? "images yes" : "images no"];
 	if (caps.tools) out.push("tools");
 	if (caps.reasoning) out.push("reason");
 	if (caps.vision) out.push("vision");
