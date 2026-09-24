@@ -55,13 +55,13 @@ Settings use one strict version-2 schema. Unknown keys and invalid values stop s
 
 ## Live routing vs saved defaults
 
-Saved `chat.*`, `fleet.default.*`, and `context.memory.*` values seed routing at session start. The active interactive session owns its current route. `/model`, `/thinking`, and `/settings` can change that route; choose apply-this-session or save globally where offered. A write from another process updates saved defaults but does not redirect a running session.
+Saved `chat.*`, `fleet.default.*`, and `context.memory.*` values seed routing at session start. The active interactive session owns its current route. `/model`, `/thinking`, and `/settings` can change that route; choose apply-this-session, save for this project, or save globally where offered. Project saves write `.clio-coder/settings.local.yaml` and require existing project settings to be trusted; Clio approves the exact bytes it writes. A write from another process updates saved defaults but does not redirect a running session.
 
 Other settings apply at the boundary shown in the inventory. The routing classifier is in [`src/core/settings-layers.ts`](../../src/core/settings-layers.ts) and [`src/core/settings-controls.ts`](../../src/core/settings-controls.ts).
 
 ## Settings Center
 
-Open `/settings` in the TUI or `clio-coder configure --settings`. Edits offer apply-this-session, save globally, or cancel when the control supports a session override. Restart-required controls say so before saving. Target and profile removal shows affected routes before confirmation.
+Open `/settings` in the TUI or `clio-coder configure --settings`. Edits offer apply-this-session, save for this project, save globally, or cancel when the control supports a session override. Restart-required controls say so before saving. Target and profile removal shows affected routes before confirmation.
 
 ## Settings inventory
 

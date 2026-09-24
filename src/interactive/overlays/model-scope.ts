@@ -18,7 +18,7 @@ import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from 
 
 export const MODEL_SCOPE_OVERLAY_WIDTH = 72;
 
-export type ModelScopeChoice = "session" | "global";
+export type ModelScopeChoice = "session" | "project" | "global";
 
 /** The swap awaiting a destination. `thinkingLevel` is set only when the operator named one. */
 export interface PendingModelScope {
@@ -29,7 +29,7 @@ export interface PendingModelScope {
 
 export interface OpenModelScopeOverlayDeps {
 	ref: PendingModelScope;
-	/** Called only for one of the two applying choices. */
+	/** Called only for an applying choice. */
 	onChoose: (scope: ModelScopeChoice) => void;
 	/** Called for the explicit Cancel row and for Esc. Nothing has changed yet. */
 	onCancel: () => void;
@@ -50,6 +50,11 @@ function buildModelScopeItems(): SelectItem[] {
 			description: "route this session only; settings.yaml is untouched",
 		},
 		{
+			value: "project",
+			label: "Apply and save for this project",
+			description: "save in .clio-coder/settings.local.yaml",
+		},
+		{
 			value: "global",
 			label: "Apply and save globally",
 			description: "also the orchestrator route the next launch starts on",
@@ -66,7 +71,7 @@ export function openModelScopeOverlay(tui: TUI, deps: OpenModelScopeOverlayDeps)
 	const items = buildModelScopeItems();
 	const list = new SelectList(items, items.length, DEFAULT_SELECT_THEME);
 	list.onSelect = (item: SelectItem): void => {
-		if (item.value === "session" || item.value === "global") {
+		if (item.value === "session" || item.value === "project" || item.value === "global") {
 			deps.onChoose(item.value);
 			return;
 		}
