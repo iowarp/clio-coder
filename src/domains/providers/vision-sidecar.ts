@@ -200,6 +200,20 @@ export function createVisionSidecar(input: {
 		async analyze(images, question, signal) {
 			const selected = profile();
 			if (!selected?.target) throw new Error("fleet.profiles.vision is not configured");
+			// Only the interactive app warms worker targets, after its first paint. A headless run
+			// would otherwise resolve the sidecar from runtime defaults, which carry no image input.
+			const status = input.providers.list().find((entry) => entry.target.id === selected.target);
+			if (status && status.health.lastCheckAt === null) {
+				try {
+					await input.providers.probeTarget(selected.target, {
+						reasoning: false,
+						tools: false,
+						...(signal ? { signal } : {}),
+					});
+				} catch {
+					// An unreachable sidecar surfaces through the resolution error below.
+				}
+			}
 			const resolved = resolveRuntimeTarget(input.providers, {
 				targetId: selected.target,
 				wireModelId: selected.model,
