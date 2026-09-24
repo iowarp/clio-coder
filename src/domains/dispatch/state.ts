@@ -34,6 +34,8 @@ import type { RunEnvelope, RunReceipt, RunReceiptDraft, RunStatus } from "./type
 export interface FleetRunRecord {
 	version: 1;
 	id: string;
+	/** Workspace that launched this root; older records infer it from their runs. */
+	cwd?: string;
 	fleet: string;
 	planHash: string;
 	stepIds: string[];

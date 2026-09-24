@@ -23,6 +23,7 @@ import { listFleetRuns, openLedger } from "../domains/dispatch/state.js";
 import type { RunOutcome, RunStatus } from "../domains/dispatch/types.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth } from "../engine/tui-primitives.js";
+import { fleetInspectionScope } from "./fleet-project-scope.js";
 import { loadFleetRunViewModel, loadRunViewModel } from "./fleet-view.js";
 
 export const FLEET_INSPECT_MAX_RUNS = 8;
@@ -204,8 +205,10 @@ function evidenceProjection(text: string): FleetInspectRun["evidence"] {
 }
 
 /** Pure command payload builder, exported so the fixed CLI contract is testable without subprocess output capture. */
-function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapshot {
-	const ledgerRows = openLedger().list();
+function fleetInspectSnapshot(now: () => number = Date.now, all = false): FleetInspectSnapshot {
+	const ledger = openLedger();
+	const scope = fleetInspectionScope(all);
+	const ledgerRows = ledger.list().filter(scope.seesRun);
 	const selected = ledgerRows.slice(0, FLEET_INSPECT_MAX_RUNS);
 	// The council window is deliberately wider than the run window. A single
 	// council is up to five members over three rounds plus a judge and its sealed
@@ -241,7 +244,7 @@ function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapsho
 			terminal: model.terminal,
 		});
 	}
-	const rootRecords = listFleetRuns();
+	const rootRecords = listFleetRuns().filter((record) => scope.seesRoot(record, (id) => ledger.get(id)));
 	const selectedRoots = rootRecords.slice(0, FLEET_INSPECT_MAX_ROOTS);
 	const roots: FleetInspectRoot[] = [];
 	for (const record of selectedRoots) {
@@ -325,10 +328,10 @@ function fleetInspectSnapshot(now: () => number = Date.now): FleetInspectSnapsho
 }
 
 export function runFleetInspect(args: ReadonlyArray<string>): number {
-	if (args.length !== 1 || args[0] !== "--json") {
-		process.stderr.write("clio-coder fleet inspect: usage: clio-coder fleet inspect --json\n");
+	if (!args.includes("--json") || args.some((arg) => arg !== "--json" && arg !== "--all")) {
+		process.stderr.write("clio-coder fleet inspect: usage: clio-coder fleet inspect --json [--all]\n");
 		return 2;
 	}
-	process.stdout.write(`${JSON.stringify(fleetInspectSnapshot(), null, 2)}\n`);
+	process.stdout.write(`${JSON.stringify(fleetInspectSnapshot(Date.now, args.includes("--all")), null, 2)}\n`);
 	return 0;
 }

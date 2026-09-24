@@ -48,9 +48,10 @@ import { formatTrustSummaryLine } from "../domains/evidence/trust-projection.js"
 import { inspectRunReceiptTrustStatus } from "../domains/evidence/trust-status.js";
 import { sanitizeCallTargetText } from "../domains/safety/call-target.js";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "../engine/tui-primitives.js";
+import { fleetInspectionScope } from "./fleet-project-scope.js";
 
-const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow]
-clio-coder fleet view --watch <selection-file>
+const HELP = `clio-coder fleet view <runId|fleetRootId> [--follow] [--all]
+clio-coder fleet view --watch <selection-file> [--all]
 
 Follow one dispatched run from its durable state: the run ledger entry, the
 run event journal, and the sealed receipt once it exists.
@@ -59,6 +60,7 @@ run event journal, and the sealed receipt once it exists.
   --watch     follow whichever run id the selection file names, retargeting
               live as the file changes (q exits). This is the process the
               interactive workers view (Alt+W) runs inside its watch pane.
+  --all       allow inspection across every project (default: this project)
 
 Without --follow the current snapshot is printed and the command exits.
 The transcript comes from <state>/runs/<runId>/events.ndjson, which the
@@ -197,6 +199,7 @@ export interface LoadRunViewOptions {
 	/** Journal root override; defaults to `<state>/runs`. */
 	journalRoot?: string;
 	now?: () => number;
+	scope?: ReturnType<typeof fleetInspectionScope>;
 }
 
 /**
@@ -204,12 +207,16 @@ export interface LoadRunViewOptions {
  * first, then a unique prefix. An ambiguous prefix resolves to nothing so the
  * caller can say which ids it matched.
  */
-function resolveRunId(runId: string): { runId: string } | { candidates: string[] } {
+function resolveRunId(
+	runId: string,
+	scope: ReturnType<typeof fleetInspectionScope>,
+): { runId: string } | { candidates: string[] } {
 	const ledger = openLedger();
-	if (ledger.get(runId) !== null) return { runId };
+	const exact = ledger.get(runId);
+	if (exact !== null && scope.seesRun(exact)) return { runId };
 	const candidates = ledger
 		.list()
-		.filter((run) => run.id.startsWith(runId))
+		.filter((run) => run.id.startsWith(runId) && scope.seesRun(run))
 		.map((run) => run.id);
 	if (candidates.length === 1 && candidates[0] !== undefined) return { runId: candidates[0] };
 	return { candidates };
@@ -217,7 +224,7 @@ function resolveRunId(runId: string): { runId: string } | { candidates: string[]
 
 export function loadRunViewModel(runId: string, options: LoadRunViewOptions = {}): RunViewModel | null {
 	const run = openLedger().get(runId);
-	if (run === null) return null;
+	if (run === null || (options.scope !== undefined && !options.scope.seesRun(run))) return null;
 	const now = options.now ?? (() => Date.now());
 	const journal = readRunEventJournal(runId, {
 		maxLines: TRANSCRIPT_LIMIT,
@@ -434,8 +441,13 @@ function fleetRunsDir(): string {
  * first, then a unique prefix over the durable fleet-run records. An ambiguous
  * prefix resolves to nothing so the caller can name what it matched.
  */
-function resolveFleetRootId(token: string): { rootId: string } | { candidates: string[] } {
-	if (readFleetRun(token) !== null) return { rootId: token };
+function resolveFleetRootId(
+	token: string,
+	scope: ReturnType<typeof fleetInspectionScope>,
+): { rootId: string } | { candidates: string[] } {
+	const ledger = openLedger();
+	const exact = readFleetRun(token);
+	if (exact !== null && scope.seesRoot(exact, (id) => ledger.get(id))) return { rootId: token };
 	let entries: string[];
 	try {
 		entries = readdirSync(fleetRunsDir());
@@ -445,7 +457,11 @@ function resolveFleetRootId(token: string): { rootId: string } | { candidates: s
 	const candidates = entries
 		.filter((name) => name.endsWith(".json"))
 		.map((name) => name.slice(0, -".json".length))
-		.filter((id) => id.startsWith(token));
+		.filter((id) => id.startsWith(token))
+		.filter((id) => {
+			const record = readFleetRun(id);
+			return record !== null && scope.seesRoot(record, (runId) => ledger.get(runId));
+		});
 	if (candidates.length === 1 && candidates[0] !== undefined) return { rootId: candidates[0] };
 	return { candidates };
 }
@@ -459,10 +475,14 @@ function stepResultOf(value: unknown): Partial<ExecutionStepResult> {
 	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as ExecutionStepResult) : {};
 }
 
-export function loadFleetRunViewModel(rootId: string, options: { now?: () => number } = {}): FleetRunViewModel | null {
+export function loadFleetRunViewModel(
+	rootId: string,
+	options: { now?: () => number; scope?: ReturnType<typeof fleetInspectionScope> } = {},
+): FleetRunViewModel | null {
 	const record = readFleetRun(rootId);
 	if (record === null) return null;
 	const ledger = openLedger();
+	if (options.scope !== undefined && !options.scope.seesRoot(record, (id) => ledger.get(id))) return null;
 	const now = options.now ?? (() => Date.now());
 	const settled = new Map<string, Partial<ExecutionStepResult>>();
 	for (const entry of record.steps ?? []) {
@@ -562,16 +582,21 @@ interface ParsedViewArgs {
 		cache?: string;
 	};
 	follow: boolean;
+	all: boolean;
 	help: boolean;
 }
 
 function parseViewArgs(args: ReadonlyArray<string>): ParsedViewArgs | string {
-	const parsed: ParsedViewArgs = { follow: false, help: false };
+	const parsed: ParsedViewArgs = { follow: false, all: false, help: false };
 	for (let i = 0; i < args.length; i += 1) {
 		const arg = args[i];
 		if (arg === undefined) continue;
 		if (arg === "--follow" || arg === "-f") {
 			parsed.follow = true;
+			continue;
+		}
+		if (arg === "--all") {
+			parsed.all = true;
 			continue;
 		}
 		if (arg === "--watch") {
@@ -665,16 +690,17 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		return 0;
 	}
 	applyViewDirs(parsed.dirs);
+	const scope = fleetInspectionScope(parsed.all);
 	if (parsed.watchPath !== undefined) {
 		// The watch loop needs an interactive terminal for the same reason
 		// --follow does; without one, print the selected run's snapshot and exit.
 		if (process.stdout.isTTY !== true || process.stdin.isTTY !== true) {
 			const selected = readWatchSelection(parsed.watchPath);
-			const model = selected === null ? null : loadRunViewModel(selected);
+			const model = selected === null ? null : loadRunViewModel(selected, { scope });
 			process.stdout.write(`${renderWatchView(selected, model, terminalWidth()).join("\n")}\n`);
 			return 0;
 		}
-		return watchSelection(parsed.watchPath);
+		return watchSelection(parsed.watchPath, scope);
 	}
 	if (parsed.runId === undefined) {
 		process.stderr.write(HELP);
@@ -684,13 +710,13 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 	// step index rather than as a run. --follow has nothing to tail on a root:
 	// the index changes only when a step settles.
 	if (parsed.runId.startsWith(FLEET_ROOT_PREFIX)) {
-		const root = resolveFleetRootId(parsed.runId);
+		const root = resolveFleetRootId(parsed.runId, scope);
 		if (!("rootId" in root)) {
 			return root.candidates.length === 0
 				? fail(`unknown fleet run '${parsed.runId}' (no record under ${fleetRunsDir()})`)
 				: fail(`fleet root id '${parsed.runId}' is ambiguous: ${root.candidates.slice(0, 8).join(", ")}`);
 		}
-		const fleetModel = loadFleetRunViewModel(root.rootId);
+		const fleetModel = loadFleetRunViewModel(root.rootId, { scope });
 		if (fleetModel === null) return fail(`unknown fleet run '${root.rootId}'`);
 		if (parsed.follow) {
 			process.stderr.write("clio-coder fleet view: --follow applies to a run id, not a fleet root; printing the index\n");
@@ -698,14 +724,14 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		process.stdout.write(`${renderFleetRunView(fleetModel, terminalWidth()).join("\n")}\n`);
 		return 0;
 	}
-	const resolved = resolveRunId(parsed.runId);
+	const resolved = resolveRunId(parsed.runId, scope);
 	if (!("runId" in resolved)) {
 		return resolved.candidates.length === 0
 			? fail(`unknown run '${parsed.runId}' (not in the run ledger under ${clioStateDir()})`)
 			: fail(`run id '${parsed.runId}' is ambiguous: ${resolved.candidates.slice(0, 8).join(", ")}`);
 	}
 	const runId = resolved.runId;
-	const snapshot = loadRunViewModel(runId);
+	const snapshot = loadRunViewModel(runId, { scope });
 	if (snapshot === null) return fail(`unknown run '${runId}'`);
 
 	// A non-TTY stdout has no alternate screen and no keypresses, so --follow
@@ -718,7 +744,7 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
 		process.stdout.write(`${renderRunView(snapshot, terminalWidth()).join("\n")}\n`);
 		return 0;
 	}
-	return followRun(runId);
+	return followRun(runId, scope);
 }
 
 /**
@@ -728,12 +754,12 @@ export async function runFleetView(args: ReadonlyArray<string>): Promise<number>
  * and no socket traffic. It never stops on a terminal run; the selection is
  * the operator's cursor, and the cursor outlives any one run.
  */
-async function watchSelection(selectionPath: string): Promise<number> {
+async function watchSelection(selectionPath: string, scope: ReturnType<typeof fleetInspectionScope>): Promise<number> {
 	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
 	const terminal = new ProcessTerminal();
 	const tui = new TuiAltScreen(terminal);
 	let selected = readWatchSelection(selectionPath);
-	let model = selected === null ? null : loadRunViewModel(selected);
+	let model = selected === null ? null : loadRunViewModel(selected, { scope });
 
 	const view = {
 		render(width: number): string[] {
@@ -750,7 +776,7 @@ async function watchSelection(selectionPath: string): Promise<number> {
 		let settled = false;
 		const timer = setInterval(() => {
 			selected = readWatchSelection(selectionPath);
-			model = selected === null ? null : loadRunViewModel(selected);
+			model = selected === null ? null : loadRunViewModel(selected, { scope });
 			tui.requestRender();
 		}, POLL_MS);
 		const finish = (): void => {
@@ -778,11 +804,11 @@ async function watchSelection(selectionPath: string): Promise<number> {
  * component is a plain line source over the same pure renderer the snapshot
  * path uses, so the two surfaces cannot drift.
  */
-async function followRun(runId: string): Promise<number> {
+async function followRun(runId: string, scope: ReturnType<typeof fleetInspectionScope>): Promise<number> {
 	const { ProcessTerminal, TuiAltScreen } = await import("../engine/tui-primitives.js");
 	const terminal = new ProcessTerminal();
 	const tui = new TuiAltScreen(terminal);
-	let model = loadRunViewModel(runId);
+	let model = loadRunViewModel(runId, { scope });
 	let following = true;
 
 	const view = {
@@ -800,7 +826,7 @@ async function followRun(runId: string): Promise<number> {
 	return await new Promise<number>((resolve) => {
 		let settled = false;
 		const timer = setInterval(() => {
-			model = loadRunViewModel(runId);
+			model = loadRunViewModel(runId, { scope });
 			if (model?.terminal === true) following = false;
 			tui.requestRender();
 		}, POLL_MS);

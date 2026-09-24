@@ -278,6 +278,7 @@ export async function executeFleetRun(input: ExecuteFleetRunInput): Promise<Flee
 	const fleetRunRecord: FleetRunRecord = {
 		version: 1,
 		id: fleetRootId,
+		cwd: workspaceRoot,
 		fleet: input.contractName,
 		planHash: livePlan.hash,
 		stepIds: livePlan.steps.map((step) => step.id),
