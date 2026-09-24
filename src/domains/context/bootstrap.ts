@@ -30,6 +30,7 @@ import {
 } from "./clio-md.js";
 import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
+import { collectEnforcementInventory, type EnforcementInventory } from "./enforcement-inventory.js";
 import type { Fingerprint } from "./fingerprint.js";
 import { type ProjectMetadata, readProjectMetadata } from "./project-metadata.js";
 import { renderPromptContext } from "./prompt-context.js";
@@ -73,6 +74,8 @@ export interface BootstrapGenerateInput {
 	codewiki: Codewiki;
 	existingClioMd?: ParsedClioMd;
 	existingClioMdText?: string;
+	/** What CI runs and which custom checks exist; the model explains each as a rule. */
+	enforcement?: EnforcementInventory;
 	progress?: BootstrapProgressSink;
 	reportGeneration?: BootstrapGenerationSink;
 }
@@ -1437,6 +1440,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 			siblingFiles,
 			adoption,
 			codewiki,
+			enforcement: collectEnforcementInventory(cwd),
 			...(existingParsed ? { existingClioMd: existingParsed } : {}),
 			...(existingClioMdText ? { existingClioMdText } : {}),
 			...(input.onProgress ? { progress: input.onProgress } : {}),
