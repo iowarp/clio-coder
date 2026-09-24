@@ -476,10 +476,15 @@ function mergeClioMdFiles(files: ReadonlyArray<LoadedClioMdFile>): ParsedClioMd 
  * contract. Handbooks below the override may add new layers.
  */
 export function loadProjectClioMd(cwd: string): LoadedProjectClioMd {
+	// The walk ends at the enclosing repository root (a `.git` directory, or a
+	// `.git` file in a worktree or submodule). A handbook written for a folder
+	// that holds many repositories would otherwise tell every one of them how
+	// to behave. Outside any repository the walk still reaches the filesystem root.
 	const directories: string[] = [];
 	let directory = resolve(cwd);
 	while (true) {
 		directories.unshift(directory);
+		if (existsSync(join(directory, ".git"))) break;
 		const parent = dirname(directory);
 		if (parent === directory) break;
 		directory = parent;
