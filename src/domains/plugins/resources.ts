@@ -3,6 +3,7 @@ import { realpathSync } from "node:fs";
 import path from "node:path";
 import { clioConfigDir } from "../../core/xdg.js";
 import { PLUGIN_RESOURCE_KINDS, pluginResourcePath } from "./discovery.js";
+import { outsidePluginDiscoveryPass, passPluginSnapshot } from "./discovery-pass.js";
 import { listInstalledPlugins } from "./state.js";
 import type { PluginResourceKind, PluginResourceRoot, PluginSnapshot } from "./types.js";
 
@@ -67,13 +68,19 @@ export function buildPluginSnapshot(cwd = process.cwd(), snapshotGeneration = 0)
 }
 
 export function pluginSnapshotFor(cwd = process.cwd()): PluginSnapshot {
-	return snapshots.get(keyFor(cwd)) ?? buildPluginSnapshot(cwd);
+	const key = keyFor(cwd);
+	return snapshots.get(key) ?? passPluginSnapshot(key, () => buildPluginSnapshot(cwd));
+}
+
+/** The committed projection, without building one when none exists yet. */
+export function committedPluginSnapshot(cwd = process.cwd()): PluginSnapshot | undefined {
+	return snapshots.get(keyFor(cwd));
 }
 
 /** Build completely before replacing the committed projection. */
 export function reloadPluginResources(cwd = process.cwd()): PluginSnapshot {
 	const key = keyFor(cwd);
-	const next = buildPluginSnapshot(cwd, ++generation);
+	const next = outsidePluginDiscoveryPass(() => buildPluginSnapshot(cwd, ++generation));
 	snapshots.set(key, next);
 	return next;
 }

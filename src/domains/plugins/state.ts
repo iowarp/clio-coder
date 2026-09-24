@@ -19,6 +19,7 @@ import { clioConfigDir } from "../../core/xdg.js";
 import { evaluateClioCompatibility } from "../extensions/compatibility.js";
 import { isLibraryKind, type LibraryRequirementRef } from "../resources/library-types.js";
 import { isPluginId, pluginPathContained, readPluginManifest } from "./discovery.js";
+import { passPluginCandidate } from "./discovery-pass.js";
 import { pluginContentDigest } from "./integrity.js";
 import type {
 	InstalledPlugin,
@@ -411,7 +412,7 @@ function scopeEntries(scope: PluginScope, cwd: string): InstalledPlugin[] {
 	const entries: InstalledPlugin[] = [];
 	for (const id of names) {
 		const rootPath = path.join(base, id);
-		const candidate = readPluginManifest(rootPath);
+		const candidate = passPluginCandidate(rootPath, readPluginManifest);
 		const manifest = candidate.manifest;
 		const diagnostics = [...candidate.diagnostics];
 		const saved = state.installed[id];

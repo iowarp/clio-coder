@@ -19,10 +19,12 @@ export {
 	pluginResourcePath,
 	readPluginManifest,
 } from "./discovery.js";
+export { withPluginDiscoveryPass } from "./discovery-pass.js";
 export { pluginContentDigest, pluginContentDigestWithCapture } from "./integrity.js";
 export {
 	buildPluginSnapshot,
 	clearPluginSnapshots,
+	committedPluginSnapshot,
 	enabledPluginResourceRoots,
 	pluginSnapshotFor,
 	reloadPluginResources,
