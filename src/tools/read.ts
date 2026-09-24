@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import { detectSupportedImageMimeType, prepareBoundedImage } from "../core/file-references.js";
 import { GUARDRAIL_DEFAULTS, resolveGuardrail } from "../core/guardrails.js";
 import { ToolNames } from "../core/tool-names.js";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import {
 	commitObservationReservation,
 	finalizeObservation,
@@ -583,7 +584,7 @@ async function readImage(
 			details: { file },
 		};
 	}
-	if (options?.supportsImages !== true) {
+	if (!acceptsImageInput({ vision: options?.supportsImages })) {
 		return {
 			kind: "error",
 			message:
@@ -596,7 +597,7 @@ async function readImage(
 	commitObservationReservation(reservation);
 	const image = await prepareBoundedImage(
 		bytes,
-		Math.min(reservation.callCapBytes, options.toolResultMaxBytes ?? readMaxBytes()) - Buffer.byteLength(output) - 512,
+		Math.min(reservation.callCapBytes, options?.toolResultMaxBytes ?? readMaxBytes()) - Buffer.byteLength(output) - 512,
 	);
 	if (image === null) {
 		return {

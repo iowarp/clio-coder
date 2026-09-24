@@ -1,6 +1,7 @@
 import { mergeCapabilities } from "./capabilities.js";
 import { capabilitiesFromCatalogModel, getCatalogModelForRuntime } from "./catalog.js";
 import type { TargetStatus } from "./contract.js";
+import { acceptsImageInput } from "./image-input.js";
 import { type CapabilityFlags, EMPTY_CAPABILITIES } from "./types/capability-flags.js";
 import type { KnowledgeBase } from "./types/knowledge-base.js";
 import { extractLocalModelQuirks } from "./types/local-model-quirks.js";
@@ -14,6 +15,7 @@ export interface ModelCapabilityPatchTarget {
 	contextWindow?: number;
 	maxTokens?: number;
 	reasoning?: boolean;
+	input?: Array<"text" | "image">;
 	clioCoder?: Record<string, unknown>;
 }
 
@@ -31,6 +33,9 @@ export function applyModelCapabilityPatch<T extends ModelCapabilityPatchTarget>(
 	if (typeof caps.contextWindow === "number") model.contextWindow = caps.contextWindow;
 	if (typeof caps.maxTokens === "number") model.maxTokens = caps.maxTokens;
 	if (typeof caps.reasoning === "boolean") model.reasoning = caps.reasoning;
+	if (typeof caps.vision === "boolean" && model.input) {
+		model.input = caps.vision ? ["text", "image"] : ["text"];
+	}
 	// Refresh the probe-only control hint together with the capability snapshot.
 	// Missing metadata after a later probe must not retain an earlier route claim.
 	if (model.clioCoder || caps.thinkingControlRuntime !== undefined) {
@@ -61,6 +66,10 @@ function applyReasoningResolution(
 	if (mechanism === "none") return { ...caps, reasoning: false };
 	if (mechanism === "always-on") return { ...caps, reasoning: true };
 	return detectedReasoning === null ? caps : { ...caps, reasoning: detectedReasoning };
+}
+
+function applyImageTransportResolution(caps: CapabilityFlags, runtimeId: string): CapabilityFlags {
+	return acceptsImageInput({ runtimeId, vision: caps.vision }) ? caps : { ...caps, vision: false };
 }
 
 /**
@@ -113,7 +122,10 @@ export function resolveModelCapabilities(
 	if (!status.runtime) {
 		const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 		const kbHit = modelId ? (knowledgeBase?.lookup(modelId) ?? null) : null;
-		return applyReasoningResolution(status.capabilities, kbHit, detectedReasoning);
+		return applyImageTransportResolution(
+			applyReasoningResolution(status.capabilities, kbHit, detectedReasoning),
+			status.target.runtime,
+		);
 	}
 	const modelId = normalizedModelId(wireModelId) ?? normalizedModelId(status.target.defaultModel);
 	const baseCapabilities = capabilitiesFromCatalogModel(
@@ -124,22 +136,31 @@ export function resolveModelCapabilities(
 	const hasModernProbeFields = status.probeCapabilities !== undefined || status.probeModelCapabilities !== undefined;
 	if (!hasModernProbeFields) {
 		if (!modelId || modelId === normalizedModelId(status.target.defaultModel)) {
-			return applyReasoningResolution(status.capabilities, kbHit, detectedReasoning);
+			return applyImageTransportResolution(
+				applyReasoningResolution(status.capabilities, kbHit, detectedReasoning),
+				status.runtime.id,
+			);
 		}
-		return applyReasoningResolution(
-			mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.target.capabilities ?? null),
-			kbHit,
-			detectedReasoning,
+		return applyImageTransportResolution(
+			applyReasoningResolution(
+				mergeCapabilities(baseCapabilities, kbHit?.entry.capabilities ?? null, null, status.target.capabilities ?? null),
+				kbHit,
+				detectedReasoning,
+			),
+			status.runtime.id,
 		);
 	}
-	return applyReasoningResolution(
-		mergeCapabilities(
-			baseCapabilities,
-			kbHit?.entry.capabilities ?? null,
-			probeCapabilitiesForModel(status, modelId),
-			status.target.capabilities ?? null,
+	return applyImageTransportResolution(
+		applyReasoningResolution(
+			mergeCapabilities(
+				baseCapabilities,
+				kbHit?.entry.capabilities ?? null,
+				probeCapabilitiesForModel(status, modelId),
+				status.target.capabilities ?? null,
+			),
+			kbHit,
+			detectedReasoning,
 		),
-		kbHit,
-		detectedReasoning,
+		status.runtime.id,
 	);
 }
