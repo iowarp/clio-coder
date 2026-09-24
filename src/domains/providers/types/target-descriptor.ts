@@ -35,12 +35,22 @@ export interface TargetCacheSettings {
 // released `clio-managed` spelling at the settings boundary.
 export type TargetLifecycle = "user-managed" | "clio-coder-managed";
 
+/**
+ * Load-time settings Clio sends to LM Studio's `POST /api/v1/models/load`. Each maps
+ * one-to-one onto the load body key of the same name in snake case. `parallel` and
+ * `speculativeDraftMaxTokens` are absent from LM Studio's published load reference, but
+ * the server validates keys strictly and applies both (measured on dynamo, 2026-09-24).
+ */
 export interface LmStudioLoadSettings {
 	contextLength?: number;
 	flashAttention?: boolean;
 	evalBatchSize?: number;
 	numExperts?: number;
 	offloadKvCacheToGpu?: boolean;
+	/** Max concurrent predictions (continuous-batching slots). */
+	parallel?: number;
+	/** Most tokens a speculative draft, MTP heads included, proposes per step. */
+	speculativeDraftMaxTokens?: number;
 }
 
 export type LmStudioReasoningSetting = "auto" | "off" | "on" | "low" | "medium" | "high";
@@ -52,7 +62,10 @@ export interface LmStudioRequestSettings {
 }
 
 export interface LmStudioTargetSettings {
+	/** Load profile for every model Clio loads through this target. */
 	load?: LmStudioLoadSettings;
+	/** Per-model load overrides, keyed by the model id Clio selects on this target. */
+	models?: Record<string, { load?: LmStudioLoadSettings }>;
 	request?: LmStudioRequestSettings;
 }
 

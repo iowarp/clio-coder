@@ -459,6 +459,38 @@ function validatePricing(
 	return out;
 }
 
+type LmStudioLoadSetting = NonNullable<NonNullable<ClioSettings["targets"][number]["lmstudio"]>["load"]>;
+
+function validateLmStudioLoad(issues: Issues, path: string, value: unknown): LmStudioLoadSetting | undefined {
+	if (!isPlainObject(value)) {
+		issues.add(path, `expected a map, got ${describe(value)}`);
+		return undefined;
+	}
+	issues.unknownKeys(path, value, [
+		"contextLength",
+		"flashAttention",
+		"evalBatchSize",
+		"numExperts",
+		"offloadKvCacheToGpu",
+		"parallel",
+		"speculativeDraftMaxTokens",
+	]);
+	const load: LmStudioLoadSetting = {};
+	for (const key of ["contextLength", "evalBatchSize", "numExperts", "parallel", "speculativeDraftMaxTokens"] as const) {
+		if (key in value) {
+			const parsed = expectInteger(issues, `${path}.${key}`, value[key], { min: 1 });
+			if (parsed !== undefined) load[key] = parsed;
+		}
+	}
+	for (const key of ["flashAttention", "offloadKvCacheToGpu"] as const) {
+		if (key in value) {
+			const parsed = expectBoolean(issues, `${path}.${key}`, value[key]);
+			if (parsed !== undefined) load[key] = parsed;
+		}
+	}
+	return Object.keys(load).length > 0 ? load : undefined;
+}
+
 function validateLmStudioSettings(
 	issues: Issues,
 	path: string,
@@ -468,33 +500,28 @@ function validateLmStudioSettings(
 		issues.add(path, `expected a map, got ${describe(value)}`);
 		return undefined;
 	}
-	issues.unknownKeys(path, value, ["load", "request"]);
+	issues.unknownKeys(path, value, ["load", "models", "request"]);
 	const out: NonNullable<ClioSettings["targets"][number]["lmstudio"]> = {};
 	if ("load" in value) {
-		if (!isPlainObject(value.load)) {
-			issues.add(`${path}.load`, `expected a map, got ${describe(value.load)}`);
+		const load = validateLmStudioLoad(issues, `${path}.load`, value.load);
+		if (load !== undefined) out.load = load;
+	}
+	if ("models" in value) {
+		if (!isPlainObject(value.models)) {
+			issues.add(`${path}.models`, `expected a map, got ${describe(value.models)}`);
 		} else {
-			issues.unknownKeys(`${path}.load`, value.load, [
-				"contextLength",
-				"flashAttention",
-				"evalBatchSize",
-				"numExperts",
-				"offloadKvCacheToGpu",
-			]);
-			const load: NonNullable<typeof out.load> = {};
-			for (const key of ["contextLength", "evalBatchSize", "numExperts"] as const) {
-				if (key in value.load) {
-					const parsed = expectInteger(issues, `${path}.load.${key}`, value.load[key], { min: 1 });
-					if (parsed !== undefined) load[key] = parsed;
+			const models: NonNullable<typeof out.models> = {};
+			for (const [modelId, entry] of Object.entries(value.models)) {
+				const entryPath = `${path}.models.${modelId}`;
+				if (!isPlainObject(entry)) {
+					issues.add(entryPath, `expected a map, got ${describe(entry)}`);
+					continue;
 				}
+				issues.unknownKeys(entryPath, entry, ["load"]);
+				const load = "load" in entry ? validateLmStudioLoad(issues, `${entryPath}.load`, entry.load) : undefined;
+				if (load !== undefined) models[modelId] = { load };
 			}
-			for (const key of ["flashAttention", "offloadKvCacheToGpu"] as const) {
-				if (key in value.load) {
-					const parsed = expectBoolean(issues, `${path}.load.${key}`, value.load[key]);
-					if (parsed !== undefined) load[key] = parsed;
-				}
-			}
-			if (Object.keys(load).length > 0) out.load = load;
+			if (Object.keys(models).length > 0) out.models = models;
 		}
 	}
 	if ("request" in value) {

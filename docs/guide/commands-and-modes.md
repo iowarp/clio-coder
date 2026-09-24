@@ -144,6 +144,10 @@ when Clio is already inside a reachable herdr session.
 
 `clio-coder run --cwd <dir> "<task>"` behaves the same as `cd <dir> && clio-coder run "<task>"`. The process enters `<dir>` before it reads layered project settings, context files, skills, `@file` references, or the session ledger, and every tool path resolves against it. Relative paths in other arguments, such as `--skill`, `--steer-channel`, and `@file`, resolve against `<dir>` as well. The path is canonicalized first, so the run ledger records the physical directory as the run's `cwd`.
 
+Image `@file` references in a headless prompt or stdin require the routed model's image-input capability. Clio refuses the turn before sending the image when the route is text-only. The run exits nonzero and prints `IMAGE_INPUT_UNSUPPORTED` with the target and model. A turn refused before admission has no run receipt. This behavior is shipped and tested.
+
+Inline image references accept PNG, JPEG, GIF, or WebP bytes detected by file signature. Clio attempts to resize them to at most 2,000 by 2,000 pixels and below 4.5 MiB of base64 before submission; an image that cannot fit is omitted with a note. There is currently no settings key to disable images or change this inline cap. The image gate and these fixed bounds cover the present need, so a new setting is not planned. The limits are shipped and tested; the setting decision is planned.
+
 - A missing path, a file, or a directory the process cannot enter fails with exit code 2 and a message naming the resolved path. No model is called.
 - `--cwd` with no value is a usage error with exit code 2.
 - An orchestrator that runs Clio inside a git worktree can pass the worktree path here instead of changing its own working directory before the spawn.
@@ -265,6 +269,10 @@ The registry table below lists the available interactive slash commands. On a ba
 | `/tree` | `/tree` | Open session tree navigator. Press `p` to filter by current cwd and `s` to cycle tree order or most recent first. |
 | `/fork` | `/fork` | Fork from an assistant turn |
 | `/export` | `/export [path]` | Export a self-contained HTML transcript by default; a `.md` path writes Markdown |
+
+The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability and are shipped and tested.
+
+When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again. This behavior is shipped and tested.
 
 ### Subscription quota and session usage
 

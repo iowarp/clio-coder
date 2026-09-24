@@ -47,6 +47,7 @@ import type { AgentProduct } from "../domains/agents/spec.js";
 import type { MiddlewareSnapshot } from "../domains/middleware/index.js";
 import { createMiddlewareToolChoiceControl } from "../domains/middleware/index.js";
 import { shouldRequestStalledTurnContinuation } from "../domains/middleware/stalled-turn.js";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type {
 	CapabilityFlags,
 	RuntimeDescriptor,
@@ -686,7 +687,11 @@ export function startWorkerRun(input: WorkerRunInput, emit: WorkerEventEmit): Wo
 			...(input.turnConstraints ? { turnConstraints: input.turnConstraints } : {}),
 			correlationId: `worker-model-round-${workerModelRound}`,
 			toolResultMaxBytes: workerSettings.context.toolResultMaxBytes,
-			supportsImages: model.input.includes("image"),
+			supportsImages: acceptsImageInput({
+				runtimeId: input.runtime.id,
+				vision: input.modelCapabilities?.vision,
+				modelInput: model.input,
+			}),
 			// The admitted capability list, so the gateway calls only what the
 			// recipe declared: the same bound the attached schemas already honor.
 			allowedTools: input.allowedTools,

@@ -103,7 +103,7 @@ Reads one UTF-8 text file. Source: [read.ts](../../src/tools/read.ts).
 | `tail` | Last N lines; overrides offset/limit. |
 | `line_numbers` | Prefix source line numbers; default false. |
 
-Each call stops at 2000 lines or the 50 KiB read cap; the turn budget may lower it. Files are read in bounded windows; exact line counts stop after 32 MiB, then total is unknown (`N+`). Images are limited to 20 MB and need vision support. NUL and invalid UTF-8 in inspected bytes error with zero-based byte offsets. A bounded read says nothing about unread regions.
+Each call stops at 2000 lines or the 50 KiB read cap; the turn budget may lower it. Files are read in bounded windows; exact line counts stop after 32 MiB, then total is unknown (`N+`). Images are limited to 20 MB and need the routed model's resolved vision capability. An explicit text-only deployment probe blocks image forwarding even when the model family normally accepts images. Managed Codex, Pi, OpenCode, Claude Code, and Antigravity CLI bridges take text work orders, so they do not accept direct image blocks even if the underlying model supports vision. NUL and invalid UTF-8 in inspected bytes error with zero-based byte offsets. A bounded read says nothing about unread regions. This behavior is shipped and tested.
 
 Truncation provides the first unshown line as `next: offset=...`; read uses the file itself for continuation, never offloads. Oversized single lines return a UTF-8 prefix and hint to narrow grep/edit. Tail continuation widens when total is unknown; numbered tail is refused if absolute line numbers cannot be established. `details.file` includes bytes/mtime and `details.fileChange` reports observed identity changes; neither locks against writers.
 

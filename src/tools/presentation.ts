@@ -78,6 +78,7 @@ export const TOOL_PRESENTATION: Readonly<Record<string, ToolPresentationPolicy>>
 	[ToolNames.Limitation]: FOLDED,
 	[ToolNames.Decide]: FOLDED,
 	[ToolNames.Consult]: FOLDED,
+	[ToolNames.Vision]: FOLDED,
 	[ToolNames.WebRead]: FOLDED,
 	[ToolNames.WebFetch]: FOLDED,
 	[ToolNames.AskUser]: FOLDED,
@@ -664,6 +665,12 @@ export const TOOL_ROWS: Readonly<Record<string, ToolRowSpec>> = {
 			return plain(count === 0 ? "an advisor" : `an advisor · ${count} question${count === 1 ? "" : "s"}`);
 		},
 		consumes: ["questions"],
+	},
+	[ToolNames.Vision]: {
+		class: "knowledge",
+		verbs: ["processing", "processed"],
+		object: (args) => plain(joinDefined("image", text(args, "path"))),
+		consumes: ["path", "question"],
 	},
 	[ToolNames.AskUser]: {
 		class: "interaction",
