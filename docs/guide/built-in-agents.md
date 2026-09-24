@@ -238,11 +238,11 @@ messages (user-role messages sent before the task), never through the stable
 system prompt, so the static prompt composition hash stays byte-identical run
 over run:
 
-- **Project context** (capability classes `workspace-edit`, `verification`,
-  and `artifact-write` only): the project name, conventions, and hard
-  invariants parsed from `CLIO-CODER.md`, capped at 1500 characters with conventions
-  truncated first. Read-only, shadow, and orchestration recipes get none, and
-  no message is sent when `CLIO-CODER.md` is absent or malformed.
+- **Project context** (recipes with `projectContextTier: bounded`): the
+  `CLIO-CODER.md` rules routed to this worker's role and dispatch paths, within
+  6,000 characters, with every unselected section named. Read-only and shadow
+  recipes get none. See
+  [worker routing](../architecture/context-engine.md#project-handbooks--preload-hierarchy).
 - **Safety posture** (every run, including ACP delegation): one line naming
   the run's effective autonomy level with the same directive text the session
   prompt's safety section uses.

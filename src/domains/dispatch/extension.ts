@@ -87,6 +87,7 @@ import {
 } from "../agents/spec.js";
 import type { ConfigContract } from "../config/contract.js";
 import type { ContextContract, ProjectPromptContext, ProjectStructuredContext } from "../context/contract.js";
+import { compileHandbook, selectWorkerHandbook, workerHandbookAudience } from "../context/handbook-units.js";
 import { enabledHarnessExtensionToolNames } from "../extensions/command-tools.js";
 import type { MiddlewareContract } from "../middleware/contract.js";
 import { workerSafetyOneLiner } from "../prompts/compiler.js";
@@ -964,6 +965,11 @@ function workerPersonaBody(req: DispatchRequest, recipe: AgentRecipe | null, con
 
 /** Total budget for the worker project-context message body. */
 const WORKER_PROJECT_CONTEXT_MAX_CHARS = 1500;
+/**
+ * A compiled handbook selection is routed to the worker's audience and path
+ * scope, so it earns a larger budget than a blind prefix of the file does.
+ */
+const WORKER_HANDBOOK_MAX_CHARS = 6000;
 
 /**
  * Cap on the projected "Verification expectations" section body, applied
@@ -1201,8 +1207,14 @@ function personaOverrideFor(req: DispatchRequest, staticCompositionHash: string 
  * deliberately in #96 to keep rules scoped rather than shipped wholesale.
  */
 export interface WorkerDynamicContext {
-	/** Used only for the verification-section inclusion rule, never for tier policy. */
+	/** Selects the handbook audience with the capability class; never tier policy. */
 	capabilityClass?: AgentCapabilityClass | null;
+	/** Recipe id, which names the handbook audience for built-in roles. */
+	agentId?: string | null;
+	/** The dispatch path scope; activates handbook rules scoped to those paths. */
+	workingContextPaths?: ReadonlyArray<string>;
+	/** Resolves absolute working paths against the run's directory. */
+	cwd?: string;
 	/** Effective project-context tier; the project message renders only when "bounded". */
 	projectContextTier?: AgentProjectContextTier | null;
 	/** Effective autonomy the worker spec will carry; renders the safety-posture line. */
@@ -1302,13 +1314,24 @@ export function buildDynamicPromptMessages(
 		const authored = dynamicContext.projectPrompt;
 		// Authored instructions remain verbatim, including test guidance. Never
 		// duplicate them with a second projection of conventions or verification.
+		const compiled = authored?.handbookSources.map(({ source, path }) => compileHandbook(source, path)) ?? [];
+		const handbooks = compiled.filter((handbook) => handbook !== null);
+		// A handbook with routable sections ships the rules this worker's role and
+		// paths need; prose with no sections keeps the verbatim bounded prefix.
 		const body = authored
-			? authored.handbookSources.length > 0
-				? selectProjectPreload(authored, dynamicContext.projectReadTools ?? null, {
-						maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
-						externalReadTools: dynamicContext.projectExternalReadTools === true,
+			? handbooks.length > 0 && handbooks.length === compiled.length
+				? selectWorkerHandbook(handbooks, {
+						audience: workerHandbookAudience(dynamicContext.agentId ?? req.agentId, dynamicContext.capabilityClass),
+						cwd: dynamicContext.cwd ?? req.cwd ?? process.cwd(),
+						workingPaths: dynamicContext.workingContextPaths ?? [],
+						maxChars: WORKER_HANDBOOK_MAX_CHARS,
 					}).text
-				: ""
+				: authored.handbookSources.length > 0
+					? selectProjectPreload(authored, dynamicContext.projectReadTools ?? null, {
+							maxChars: WORKER_PROJECT_CONTEXT_MAX_CHARS,
+							externalReadTools: dynamicContext.projectExternalReadTools === true,
+						}).text
+					: ""
 			: dynamicContext.project
 				? renderWorkerProjectContext(dynamicContext.project, {
 						includeVerification: dynamicContext.capabilityClass === "verification",
@@ -4053,6 +4076,9 @@ export function createDispatchBundle(
 		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
 			capabilityClass: spec.capabilityClass,
+			agentId: recipe.id,
+			workingContextPaths: pathScope.workingContextPaths,
+			cwd,
 			projectContextTier: tier,
 			autonomy: effectiveAutonomy,
 			onPermission: settings?.fleet.permissions.mode ?? "deny",
@@ -4177,6 +4203,9 @@ export function createDispatchBundle(
 		const tier: AgentProjectContextTier = configured.projectContext ?? "none";
 		const projectPrompt = projectContext && tier === "bounded" ? projectContext.renderPromptContext(cwd) : null;
 		const dynamicPromptMessages = buildDynamicPromptMessages(req, {
+			agentId,
+			workingContextPaths: pathScope.workingContextPaths,
+			cwd,
 			projectContextTier: tier,
 			autonomy,
 			projectPrompt,

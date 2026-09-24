@@ -142,7 +142,10 @@ test("derived verification remains gated while authored verification prose is un
 			const legacy = buildDynamicPromptMessages(request, context);
 			strictEqual(legacy[0]?.body.includes("DERIVED CHECK"), capabilityClass === "verification");
 			const raw = buildDynamicPromptMessages(request, { ...context, projectPrompt });
-			ok(raw[0]?.body.includes(authored));
+			// A sectioned handbook is compiled and routed, so its authored lines
+			// arrive intact even though the file is not forwarded byte for byte.
+			ok(raw[0]?.body.includes("Run focused tests."));
+			ok(raw[0]?.body.includes("Keep this authored line."));
 			strictEqual(raw[0]?.body.includes("Derived convention"), false);
 			strictEqual(raw[0]?.body.includes("DERIVED CHECK"), false);
 		}
