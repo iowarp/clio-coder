@@ -164,6 +164,46 @@ function checkProductNamespace(): void {
 	}
 }
 
+// macOS and Windows default to case-insensitive filesystems. Two tracked paths
+// that differ only by case clobber each other on checkout, and two modules whose
+// stems differ only by case make an extensionless import such as `./Approval.js`
+// resolve `approval.ts` before `Approval.tsx` (#397). Linux CI never sees either.
+const MODULE_EXTENSION = /\.(?:[cm]?[jt]sx?)$/u;
+
+function checkCasePortablePaths(): void {
+	const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "-z"], {
+		cwd: root,
+		encoding: "utf8",
+		maxBuffer: 10 * 1024 * 1024,
+	})
+		.split("\0")
+		.filter((file) => file.length > 0 && existsSync(join(root, file)));
+	const variants = new Map<string, Set<string>>();
+	const record = (kind: string, path: string): void => {
+		const key = `${kind}\0${path.toLowerCase()}`;
+		const seen = variants.get(key) ?? new Set<string>();
+		seen.add(path);
+		variants.set(key, seen);
+	};
+	for (const file of new Set(files)) {
+		const segments = file.split("/");
+		for (let depth = 1; depth <= segments.length; depth++) record("path", segments.slice(0, depth).join("/"));
+		if (MODULE_EXTENSION.test(file)) record("module", file.replace(MODULE_EXTENSION, ""));
+	}
+	for (const [key, paths] of variants) {
+		if (paths.size < 2) continue;
+		const listed = [...paths].sort().join(", ");
+		if (key.startsWith("path\0")) {
+			fail("case-portable-paths", `${listed}: paths differ only by case and collide on case-insensitive filesystems`);
+		} else {
+			fail(
+				"case-portable-paths",
+				`${listed}: module stems differ only by case, so imports resolve to the wrong file on case-insensitive filesystems`,
+			);
+		}
+	}
+}
+
 const IDENTIFIER = /[A-Za-z0-9_]+/g;
 const EXPORTED_FUNCTION = /^export (?:async )?function ([A-Za-z0-9_]+)/gm;
 
@@ -1651,6 +1691,7 @@ async function checkToolContractCoverage(): Promise<void> {
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
 	["documentation-links", checkDocumentationLinks],
 	["product-namespace", checkProductNamespace],
+	["case-portable-paths", checkCasePortablePaths],
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
 	["ci-scripts", checkCiScripts],

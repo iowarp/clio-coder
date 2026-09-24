@@ -15,7 +15,7 @@ import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import type { SafeSettingsPatch } from "../../contracts/settings-safe.js";
 import type { Client } from "../api/client.js";
-import { discardDraftStore } from "../chat/composer.js";
+import { discardDraftStore } from "../chat/composer-model.js";
 
 /**
  * Deleting a closed session removes its saved conversation for good, so it takes two presses: the

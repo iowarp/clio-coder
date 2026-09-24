@@ -21,7 +21,7 @@ import {
 	SAFETY_POSTURE,
 	safetyFacts,
 	waitedSentence,
-} from "../client/chat/approval.js";
+} from "../client/chat/approval-model.js";
 import {
 	FLEET_RUN_CAP,
 	FLEET_STATE_LABELS,

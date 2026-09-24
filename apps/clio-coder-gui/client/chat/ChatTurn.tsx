@@ -25,7 +25,7 @@ import { StatusMark } from "../design/status.js";
 import { MarkdownContent } from "../render/Markdown.js";
 import { countRender } from "../render/render-probe.js";
 import { ActivityGroup } from "./ActivityGroup.js";
-import { isAwaitingAnswer } from "./approval.js";
+import { isAwaitingAnswer } from "./approval-model.js";
 import {
 	REPLAY_CHIP,
 	requestView,
@@ -36,7 +36,7 @@ import {
 	turnAriaLabel,
 	turnStartedAt,
 } from "./chat-turn.js";
-import { turnOutcome } from "./composer.js";
+import { turnOutcome } from "./composer-model.js";
 import type { HealthRow } from "./health.js";
 import { isLive, LIVE_GLYPHS, LIVE_TONES, type LiveStatus, livePlaceholder, liveStatus } from "./live-status.js";
 import { MessageActions, TurnOutcome } from "./message-actions.js";

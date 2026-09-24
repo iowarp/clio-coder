@@ -1,4 +1,4 @@
-// The permission card, in its two surfaces. Every decision it makes lives in ./approval.ts; this
+// The permission card, in its two surfaces. Every decision it makes lives in ./approval-model.ts; this
 // file is the declarative half plus the four side effects that reach outside React: the tab title
 // marker, the screen-reader announcement, the escalation announcement and the desktop notification.
 //
@@ -39,7 +39,7 @@ import {
 	KEYBOARD_HINT,
 	NO_DECISION_FACTS,
 	safetyFacts,
-} from "./approval.js";
+} from "./approval-model.js";
 import "./approval.css";
 
 /**

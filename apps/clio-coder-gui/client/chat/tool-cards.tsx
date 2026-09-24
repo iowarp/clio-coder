@@ -1,5 +1,5 @@
 /**
- * Tool rows. Every decision lives in `tool-presentation.ts` and `diff.ts`;
+ * Tool rows. Every decision lives in `tool-presentation.ts` and `diff-model.ts`;
  * this file is the markup and nothing else.
  *
  * A call is one line by default: status glyph, a plain verb, what it touched,

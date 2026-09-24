@@ -24,7 +24,7 @@ import {
 	type MarkdownToken,
 	mermaidSourceProblem,
 	safeHref,
-} from "./markdown.js";
+} from "./markdown-model.js";
 import { type MermaidResult, renderMermaid } from "./mermaid.js";
 
 const ENTITY_PATTERN =

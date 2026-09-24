@@ -14,7 +14,7 @@ import { STEER_TEXT_MAX_BYTES } from "../../contracts/steering.js";
 import type { Client } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
 import { StatusMark } from "../design/status.js";
-import { capabilityRefusal, steeringAffordances } from "./composer.js";
+import { capabilityRefusal, steeringAffordances } from "./composer-model.js";
 import {
 	FLEET_EMPTY,
 	FLEET_EMPTY_FILTERED,

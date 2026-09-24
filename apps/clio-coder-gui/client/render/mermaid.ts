@@ -8,7 +8,7 @@
  * A diagram that fails to parse or render reports the failure as text.
  */
 
-import { mermaidSourceProblem } from "./markdown.js";
+import { mermaidSourceProblem } from "./markdown-model.js";
 
 export type MermaidResult = Readonly<{ ok: true; svg: string }> | Readonly<{ ok: false; error: string }>;
 

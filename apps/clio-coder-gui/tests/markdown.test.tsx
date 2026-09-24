@@ -13,7 +13,7 @@ import {
 	safeHref,
 	settledBoundary,
 	tokenText,
-} from "../client/render/markdown.js";
+} from "../client/render/markdown-model.js";
 
 function renderMarkdown(source: string, complete = true): string {
 	return renderToStaticMarkup(<MarkdownContent source={source} complete={complete} />);

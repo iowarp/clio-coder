@@ -1,4 +1,4 @@
-import { lexMarkdown, type MarkdownToken } from "./markdown.js";
+import { lexMarkdown, type MarkdownToken } from "./markdown-model.js";
 
 /**
  * A collapsible section from `<details><summary>…</summary>` source. Only this one construct is

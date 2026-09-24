@@ -2,7 +2,7 @@
  * Per-message affordances: copy the prompt, copy the response, try a failed
  * turn again, and the outcome footer that closes a settled turn.
  *
- * What is offered and why is decided in `composer.ts`. Nothing here reads the
+ * What is offered and why is decided in `composer-model.ts`. Nothing here reads the
  * timeline; each component takes the strings it renders, so the integrator can
  * mount these from whatever turn model Track A lands without this file learning
  * about it.
@@ -16,7 +16,7 @@ import type { Usage } from "../../contracts/sessions.js";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
 import { fillComposer } from "./Composer.js";
-import { type MessageActionContext, messageActionOffers, type TurnOutcomeView } from "./composer.js";
+import { type MessageActionContext, messageActionOffers, type TurnOutcomeView } from "./composer-model.js";
 import "./composer.css";
 
 export interface MessageActionsProps extends MessageActionContext {
