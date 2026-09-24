@@ -10,14 +10,9 @@
 import chalk from "chalk";
 import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 
-// A type-only import keeps this module out of the domain graph; `satisfies`
-// fails the build if the levels ever drift from the safety domain's list.
-const AUTONOMY_LEVELS = [
-	"read-only",
-	"suggest",
-	"auto-edit",
-	"full-auto",
-] as const satisfies ReadonlyArray<AutonomyLevel>;
+// Keep early CLI parsing out of the domain graph. Friendly names normalize to
+// the persisted values below; legacy names remain accepted for scripts.
+const AUTONOMY_LEVELS = ["capable", "yolo", "read-only", "suggest", "auto-edit", "full-auto"] as const;
 
 export function printError(message: string, detail?: string): void {
 	const head = chalk.red("error:");
@@ -195,7 +190,7 @@ export function extractGlobalFlags(
 		}
 		if (arg === "--autonomy") {
 			const value = argv[i + 1];
-			if (value === undefined || !AUTONOMY_LEVELS.includes(value as AutonomyLevel)) {
+			if (value === undefined || !(AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value)) {
 				return {
 					noContextFiles,
 					noSkills,
@@ -206,7 +201,7 @@ export function extractGlobalFlags(
 					...(panes === undefined ? {} : { panes }),
 				};
 			}
-			autonomy = value as AutonomyLevel;
+			autonomy = (value === "capable" ? "auto-edit" : value === "yolo" ? "full-auto" : value) as AutonomyLevel;
 			i += 1;
 			continue;
 		}

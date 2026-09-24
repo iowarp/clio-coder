@@ -264,7 +264,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 
 			const bogus = await run(["--autonomy", "yolo"], home.env);
 			strictEqual(bogus.code, 2, bogus.output);
-			match(bogus.output, /--autonomy must be one of: read-only\|suggest\|auto-edit\|full-auto/u);
+			match(bogus.output, /--autonomy must be one of: capable\|yolo\|read-only\|suggest\|auto-edit\|full-auto/u);
 			const dropped = await run(["--autonomy", "suggest", "doctor"], home.env);
 			strictEqual(dropped.code, 2, dropped.output);
 			match(dropped.output, /clio-coder run --autonomy suggest/u);

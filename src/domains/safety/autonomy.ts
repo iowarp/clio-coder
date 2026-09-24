@@ -29,6 +29,13 @@ export function isAutonomyLevel(value: unknown): value is AutonomyLevel {
 	return typeof value === "string" && (AUTONOMY_LEVELS as ReadonlyArray<string>).includes(value);
 }
 
+/** Friendly CLI labels; the persisted values stay stable for older sessions. */
+export function autonomyFromUserInput(value: string): AutonomyLevel | null {
+	if (value === "capable") return "auto-edit";
+	if (value === "yolo") return "full-auto";
+	return isAutonomyLevel(value) ? value : null;
+}
+
 export type AutonomyDisposition = "allow" | "ask" | "deny";
 
 /**

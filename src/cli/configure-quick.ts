@@ -223,7 +223,10 @@ export async function runQuickConnect(prompts: ConfigurePrompts): Promise<"conne
 					"full-auto": "skip autonomy approvals; safety rules still apply",
 				}[settings.safety.autonomy];
 				presenter.fields([
-					["Autonomy", `${settings.safety.autonomy} · ${autonomy}`],
+					[
+						"Autonomy",
+						`${settings.safety.autonomy === "auto-edit" ? "capable" : settings.safety.autonomy === "full-auto" ? "yolo" : settings.safety.autonomy} · ${autonomy}`,
+					],
 					[
 						"Worker approvals",
 						settings.fleet.permissions.mode === "deny"

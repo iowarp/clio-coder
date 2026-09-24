@@ -35,7 +35,7 @@ export const MCP_CONFIG_CAPS = Object.freeze({
 const ID_PATTERN = /^[a-z0-9][a-z0-9_-]*$/;
 const ENV_KEY_PATTERN = /^[A-Z_][A-Z0-9_]*$/;
 const ROOT_FIELDS = new Set(["version", "servers"]);
-const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs"]);
+const SERVER_FIELDS = new Set(["id", "command", "args", "cwd", "env", "timeoutMs", "actionClass"]);
 const SHELL_EXECUTABLES = new Set([
 	"bash",
 	"cmd",
@@ -65,6 +65,8 @@ export interface McpServerDeclaration {
 	cwdRoot: string;
 	env: Record<string, string>;
 	timeoutMs: number | null;
+	/** Operator-declared effect class; project servers use the separate trust record. */
+	actionClass: "read" | "execute" | "unknown";
 	/** sha256 of the canonical declaration; a trust record binds to it. */
 	digest: string;
 }
@@ -93,6 +95,7 @@ interface DeclaredServerFields {
 	cwd: string | null;
 	env: Record<string, string>;
 	timeoutMs: number | null;
+	actionClass: "read" | "execute" | "unknown";
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -278,6 +281,7 @@ function resolveCwd(raw: string | null, scope: McpServerScope, root: string, loc
 function validateServer(
 	value: unknown,
 	location: string,
+	scope: McpServerScope,
 ): { fields: DeclaredServerFields; declaredCwd: string | null } | Error {
 	if (!isRecord(value)) return new Error(`${location} must be an object`);
 	const unknown = unknownFields(value, SERVER_FIELDS);
@@ -295,12 +299,24 @@ function validateServer(
 	if (env instanceof Error) return env;
 	const timeoutMs = validateTimeout(value.timeoutMs, `${location}.timeoutMs`);
 	if (timeoutMs instanceof Error) return timeoutMs;
+	if (scope === "project" && value.actionClass !== undefined) {
+		return new Error(`${location}.actionClass is only allowed in user config; use the project trust record`);
+	}
+	if (
+		value.actionClass !== undefined &&
+		value.actionClass !== "read" &&
+		value.actionClass !== "execute" &&
+		value.actionClass !== "unknown"
+	) {
+		return new Error(`${location}.actionClass must be read, execute, or unknown`);
+	}
+	const actionClass = (value.actionClass ?? "unknown") as "read" | "execute" | "unknown";
 	let declaredCwd: string | null = null;
 	if (value.cwd !== undefined) {
 		if (typeof value.cwd !== "string") return new Error(`${location}.cwd must be a string`);
 		declaredCwd = value.cwd;
 	}
-	return { fields: { id, command, args, cwd: declaredCwd, env, timeoutMs }, declaredCwd };
+	return { fields: { id, command, args, cwd: declaredCwd, env, timeoutMs, actionClass }, declaredCwd };
 }
 
 export interface McpConfigTextInput {
@@ -348,7 +364,7 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 	const ids = new Map<string, number>();
 	for (const [index, value] of parsed.servers.entries()) {
 		const location = `servers[${index}]`;
-		const validated = validateServer(value, location);
+		const validated = validateServer(value, location, input.scope);
 		if (validated instanceof Error) return diagnostic(validated.message);
 		const { fields, declaredCwd } = validated;
 		const duplicateIndex = ids.get(fields.id);
@@ -368,6 +384,7 @@ export function parseMcpConfigText(text: string, input: McpConfigTextInput): Mcp
 			cwdRoot: resolved.cwdRoot,
 			env: fields.env,
 			timeoutMs: fields.timeoutMs,
+			actionClass: fields.actionClass,
 			digest: mcpServerDigest(fields),
 		});
 	}

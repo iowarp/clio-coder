@@ -5,6 +5,7 @@ import { ToolNames } from "../core/tool-names.js";
 import type { BudgetProvider } from "../domains/context/budget/inspection.js";
 import type { WorkerRecall } from "../domains/context/worker/recall.js";
 import type { LoadSkillsInput } from "../domains/resources/index.js";
+import type { AutonomyLevel } from "../domains/safety/autonomy.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { DecisionBoardStore } from "../domains/session/decision-board.js";
 import type { SessionEntry } from "../domains/session/entries.js";
@@ -16,6 +17,7 @@ import { type AskUserHandler, createAskUserTool } from "./ask-user.js";
 import { bashTool } from "./bash.js";
 import { builtin, gatewayPromptHint } from "./builtin-tool-catalog.js";
 import { codeNavToolSurface } from "./codewiki/code-nav-surface.js";
+import { createConfigureClioTool } from "./configure-clio.js";
 import { type ConsultDeps, createConsultTool } from "./consult.js";
 import { contextToolSurface } from "./context/surface.js";
 import { credentialPresentTool } from "./credential-present.js";
@@ -53,6 +55,7 @@ export interface CoreToolBootstrapDeps {
 	/** Publishes a successful context(scope=recall) on the bus; absent where no bus is wired. */
 	onContextRecalled?: (payload: ContextRecalledPayload) => void;
 	askUser?: AskUserHandler;
+	getAutonomy?: () => AutonomyLevel;
 	taskBoard?: TaskBoardStore;
 	/** The session decision board the `decide` tool appends to; absent in worker registries, where the tool refuses. */
 	decisionBoard?: DecisionBoardStore;
@@ -200,6 +203,15 @@ export function registerCoreTools(registry: ToolRegistry, deps: CoreToolBootstra
 				path: "src/tools/ask-user.ts",
 				scope: "core",
 			}),
+		});
+		registry.register({
+			...builtin(
+				createConfigureClioTool({ askUser: deps.askUser, ...(deps.getAutonomy ? { getAutonomy: deps.getAutonomy } : {}) }),
+				{
+					path: "src/tools/configure-clio.ts",
+					scope: "core",
+				},
+			),
 		});
 	}
 	registry.register({

@@ -54,6 +54,7 @@ export const ToolNames = {
 	WebFetch: "web_fetch",
 	// INTERACT
 	AskUser: "ask_user",
+	ConfigureClio: "configure_clio",
 	// ARTIFACT
 	Artifact: "artifact",
 	// GATEWAY: one fixed schema; secondary capabilities are surfaced through
