@@ -21,6 +21,8 @@ import {
 	type GateTopologyDecision,
 	gateTopology,
 } from "../domains/dispatch/gate-topology.js";
+import { openLedger } from "../domains/dispatch/state.js";
+import { fleetInspectionScope } from "./fleet-project-scope.js";
 
 export {
 	GATE_TOPOLOGY_MAX_DECISIONS as FLEET_DECISIONS_MAX,
@@ -47,8 +49,19 @@ export type { GateDecisionReason, GateTopologyDecision };
  * different operator states, so the flag is reported rather than inferred from
  * an empty list.
  */
-function fleetDecisionsSnapshot(now: () => number = Date.now): FleetDecisionsSnapshot {
-	const topology = gateTopology();
+function fleetDecisionsSnapshot(now: () => number = Date.now, all = false): FleetDecisionsSnapshot {
+	const scope = fleetInspectionScope(all);
+	const ledger = openLedger();
+	const topology = gateTopology(
+		undefined,
+		all
+			? undefined
+			: (artifact) => {
+					const ids = artifact.subjects.map((subject) => subject.runId);
+					if (artifact.decider !== undefined) ids.push(artifact.decider.runId);
+					return ids.length > 0 && ids.every((id) => scope.seesRunId(id, (runId) => ledger.get(runId)));
+				},
+	);
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),
@@ -60,10 +73,10 @@ function fleetDecisionsSnapshot(now: () => number = Date.now): FleetDecisionsSna
 }
 
 export function runFleetDecisions(args: ReadonlyArray<string>): number {
-	if (args.length !== 1 || args[0] !== "--json") {
-		process.stderr.write("clio-coder fleet decisions: usage: clio-coder fleet decisions --json\n");
+	if (!args.includes("--json") || args.some((arg) => arg !== "--json" && arg !== "--all")) {
+		process.stderr.write("clio-coder fleet decisions: usage: clio-coder fleet decisions --json [--all]\n");
 		return 2;
 	}
-	process.stdout.write(`${JSON.stringify(fleetDecisionsSnapshot(), null, 2)}\n`);
+	process.stdout.write(`${JSON.stringify(fleetDecisionsSnapshot(Date.now, args.includes("--all")), null, 2)}\n`);
 	return 0;
 }

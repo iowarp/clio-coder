@@ -6,9 +6,9 @@
  *   clio-coder fleet validate|graph <name>     inspect a contract without executing it
  *   clio-coder fleet commands init             draft a repository command registry
  *   clio-coder fleet run <name> --var k=v ...  preflight + execute a fleet contract
- *   clio-coder fleet status [--json]           runtime snapshot from the durable ledger
- *   clio-coder fleet inspect --json             bounded recent run and journal projection
- *   clio-coder fleet decisions --json           bounded sealed review and compete gate verdicts
+ *   clio-coder fleet status [--json] [--all]   runtime snapshot from the durable ledger
+ *   clio-coder fleet inspect --json [--all]    bounded recent run and journal projection
+ *   clio-coder fleet decisions --json [--all]  bounded sealed review and compete gate verdicts
  *   clio-coder fleet view <runId|fleetRootId>  one run's transcript, or a root's step index
  *   clio-coder fleet drain|resume [--json]      close or reopen durable dispatch admission
  *
@@ -89,6 +89,7 @@ import { SafetyDomainModule } from "../domains/safety/index.js";
 import type { SchedulingContract } from "../domains/scheduling/contract.js";
 import { SchedulingDomainModule } from "../domains/scheduling/index.js";
 import { SessionDomainModule } from "../domains/session/index.js";
+import { fleetInspectionScope } from "./fleet-project-scope.js";
 
 const HELP = `clio-coder fleet <subcommand>
 
@@ -103,15 +104,16 @@ Subcommands:
   run <name> [--var k=v ...]    preflight and execute a fleet contract
        [--resume <runId>]        replay a completed prefix from a prior run of the same plan
        [--json]                 emit step receipts as JSON
-  status [--json]               show running, retrying, and total dispatch state
-  inspect --json                emit a bounded recent-run and event-journal projection
-  decisions --json              emit a bounded window of sealed review and compete gate verdicts
-  view <runId> [--follow]       read one run's ledger entry, event journal, and receipt
-  view <fleetRootId>            list a fleet run's steps and the run id to view for each
+  status [--json] [--all]       show running, retrying, and total dispatch state
+  inspect --json [--all]        emit a bounded recent-run and event-journal projection
+  decisions --json [--all]      emit a bounded window of sealed review and compete gate verdicts
+  view <runId> [--follow] [--all]  read one run's ledger entry, event journal, and receipt
+  view <fleetRootId> [--all]    list a fleet run's steps and the run id to view for each
   drain [--json]                deny new execution starts for up to one hour
   resume [--json]               reopen dispatch admission immediately
 
 Notes:
+  Inspection defaults to this project. Pass --all to inspect machine-wide state.
   status reads the durable run ledger. Rows started by another process show
   heartbeat liveness from the recorded worker pid; per-token live meters are
   only available inside the process that owns the run.
@@ -677,7 +679,7 @@ function admissionStatus(drain: CapacityDrain | null): FleetAdmissionStatus {
 	return { state: "draining", ...drain };
 }
 
-function statusSnapshot(): {
+function statusSnapshot(all = false): {
 	generatedAt: string;
 	admission: FleetAdmissionStatus;
 	running: Array<Record<string, unknown>>;
@@ -695,7 +697,8 @@ function statusSnapshot(): {
 } {
 	const ledger = openLedger();
 	const nowMs = Date.now();
-	const rows = ledger.list();
+	const scope = fleetInspectionScope(all);
+	const rows = ledger.list().filter(scope.seesRun);
 	const running = rows
 		.filter((row) => row.endedAt === null && (row.status === "running" || row.status === "stale"))
 		.map((row) => {
@@ -748,9 +751,9 @@ function statusSnapshot(): {
 }
 
 function runStatus(args: ReadonlyArray<string>): number {
-	const unknown = args.find((arg) => arg !== "--json");
+	const unknown = args.find((arg) => arg !== "--json" && arg !== "--all");
 	if (unknown) return fail(`status: unknown flag: ${unknown}`);
-	const snapshot = statusSnapshot();
+	const snapshot = statusSnapshot(args.includes("--all"));
 	if (args.includes("--json")) {
 		process.stdout.write(`${JSON.stringify(snapshot, null, 2)}\n`);
 		return 0;

@@ -272,18 +272,22 @@ function projectDecision(artifact: GateDecisionArtifact): GateTopologyDecision |
  * invokes the command behind it knows the process cannot be steered into a
  * different window.
  */
-export function gateTopology(stateDir: string = clioStateDir()): GateTopologyResult {
+export function gateTopology(
+	stateDir: string = clioStateDir(),
+	include?: (artifact: GateDecisionArtifact) => boolean,
+): GateTopologyResult {
 	const { present, artifacts, unverifiable } = readDecisionWindow(stateDir);
-	const window = artifacts.slice(0, GATE_TOPOLOGY_MAX_DECISIONS);
+	const visible = include === undefined ? artifacts : artifacts.filter(include);
+	const window = visible.slice(0, GATE_TOPOLOGY_MAX_DECISIONS);
 	const decisions: GateTopologyDecision[] = [];
 	for (const artifact of window) {
 		const decision = projectDecision(artifact);
 		if (decision !== null) decisions.push(decision);
 	}
 	return {
-		present,
+		present: include === undefined ? present : visible.length > 0,
 		decisions,
-		truncated: artifacts.length > window.length || decisions.length !== window.length,
-		unverifiable,
+		truncated: visible.length > window.length || decisions.length !== window.length,
+		unverifiable: include === undefined ? unverifiable : 0,
 	};
 }
