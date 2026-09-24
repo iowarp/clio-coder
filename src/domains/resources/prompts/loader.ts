@@ -394,7 +394,7 @@ export function loadPromptTemplates(input: LoadPromptTemplatesInput = {}): Promp
 	};
 }
 
-function parsePromptCommand(input: string): { name: string; rest: string } | null {
+export function parsePromptCommand(input: string): { name: string; rest: string } | null {
 	const framed = input.trimStart();
 	if (!framed.startsWith("/")) return null;
 	const withoutSlash = framed.slice(1);
