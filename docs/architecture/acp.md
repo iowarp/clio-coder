@@ -436,7 +436,11 @@ The ACP boundary enforces strict isolation rules:
 The sections above describe Clio as an ACP server. In the other direction, Clio
 is an ACP client: `/delegate <agent-id> <task>` and any dispatch to an agent id
 configured under `integrations.externalAgents.entries` run the task on an external peer such as
-`codex` or `opencode`.
+`claude-code`, `codex`, or `opencode`. Clio provides pinned outbound ACP bridge
+recipes for Claude Code and Codex and uses OpenCode's native ACP mode. The
+Antigravity CLI and Pi integrations have no built-in ACP recipe; their managed
+headless runtimes and Herdr pane handoffs are described in the
+[interoperability guide](../guide/interop.md#delegate-work-to-an-installed-coding-agent).
 
 A delegated peer is a worker like any other on screen. The adapter maps the
 peer's `text_delta` and `message_end` notifications onto the same dispatch event
@@ -460,9 +464,12 @@ told to work on before it starts. The declaration grants nothing on this
 transport: the peer runs its own tool surface and Clio mediates no per-tool
 call, so a resolved write boundary would be a claim nothing enforces and is
 refused outright rather than accepted and left unenforced. Declare `read_roots`
-and `relevant_paths` to bound what the peer is asked to look at; run the writing
-half of the work on a native or `claude-sdk` worker. The compatibility rules and
-reason codes are the same as for any other producer; see
+and `relevant_paths` to bound what the peer is asked to look at. For an ACP edit,
+use a Clio task worktree when Git isolation helps, then inspect the recorded
+branch and diff. The worktree does not confine the peer's other filesystem
+tools, and Clio's ACP permission policy covers only requests the peer reports.
+The compatibility rules and reason codes are the same as for any other
+producer; see
 [dispatch-typed-intent.md](dispatch-typed-intent.md).
 
 ---

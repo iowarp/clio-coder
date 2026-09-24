@@ -78,7 +78,11 @@ A model family is "sanctioned" only when we can say what was tested and under wh
 - quirks needed by the engine (thinking mechanism and sampling), plus serving provenance such as KV cache;
 - failures and "do not use this route yet" notes.
 
-Engine-visible quirks belong in catalog YAML entries under `quirks.sampling` and `quirks.thinking`. Serving calibration such as KV cache recommendations remains free-form provenance. Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
+Engine-visible quirks belong in catalog YAML entries under `quirks.sampling` and `quirks.thinking`. Serving calibration such as KV cache recommendations remains free-form provenance.
+
+Clio sends `quirks.sampling.thinking` on every request whose turn reasons and `quirks.sampling.instruct` on every other one, on OpenAI-compatible, LiteLLM and native Ollama runtimes. A family with only `instruct` sends it in both modes. A server's sampler preset applies only to a request that carries no sampler, so it is the fallback for other clients and never the setting for a Clio turn. Through LiteLLM, `temperature`, `top_p` and `presence_penalty` travel as OpenAI fields and `top_k`, `min_p` and `repeat_penalty` travel in `extra_body`, which reaches llama.cpp and LM Studio as ordinary body fields. The one-run flags (`--temperature`, `--top-p`, `--top-k`, `--min-p`) override both profiles. A fine-tune whose vendor card states no sampler of its own takes its base model's per-mode sampler; the Qwopus3.6 and Qwopus3.8 entries follow Qwen3.6 and Qwen3.8 this way (`tests/contracts/qwopus-sampling.test.ts`).
+
+Bundled entries under `src/domains/providers/models/**/*.yaml` are for curated Clio-supported families. User/lab/project experiments should start as overlays before they are promoted into source. Free-form notes can live alongside catalog entries and in this docs area for later cookbooks/blog posts. Catalog entries for LM Studio (`lmstudio`) no longer promise native SDK behavior or track SDK versions; all routing and capability reporting now reflects the strict HTTP adapter.
 
 ## Local catalog overlays
 

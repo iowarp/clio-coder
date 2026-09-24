@@ -10,6 +10,7 @@ export type InteropAgentId =
 	| "copilot"
 	| "cursor"
 	| "antigravity"
+	| "pi"
 	| "agents";
 
 /** How a peer is launched over ACP stdio, for the kinds that speak it. */
@@ -47,6 +48,8 @@ export interface InteropAgentKind {
 	/** Project-relative instruction files the context domain mines for rules. */
 	instructionFiles: ReadonlyArray<string>;
 	acp?: InteropAcpRecipe;
+	/** Clio-managed worker runtime for this peer's headless CLI, when implemented. */
+	headlessRuntimeId?: string;
 	adoptionProvider?: AdoptionProvider;
 	skillSource?: SkillSource;
 }
@@ -61,7 +64,7 @@ export interface InteropAgentFacts {
 	binary?: string;
 	version?: string;
 	installDir?: string;
-	/** Whether the ACP adapter can launch without a network install. Absent for kinds with no recipe. */
+	/** Whether the exact ACP recipe is locally verified. Absent for kinds with no recipe. */
 	adapter?: InteropPresence;
 	skillCount: number;
 	projectArtifacts: number;
@@ -92,7 +95,7 @@ export interface InteropProposal {
 	fingerprint: string;
 	/** Exactly the entry `accept` appends to delegation.agents. */
 	entry: DelegationAgentConfig;
-	/** True when the adapter is not installed locally and npx would fetch it on first use. */
+	/** True when the pinned adapter is not locally verified and npx may fetch it on first use. */
 	needsNetworkInstall: boolean;
 }
 

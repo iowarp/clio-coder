@@ -125,7 +125,7 @@ test("unknown gateway routes do not invent an effort-only protocol or suppress o
 
 test("reported Qwopus route sends only its evidenced effort vocabulary through LiteLLM", async () => {
 	strictEqual(kb.lookup("mini/qwopus3.8-9b"), null);
-	for (const modelId of ["mini/qwopus3.8-27b-dense", "mini/qwopus3.8-27b-dense-q6"]) {
+	for (const modelId of ["mini/qwopus3.8-27b-dense-q4km", "mini/qwopus3.8-27b-dense-q6k"]) {
 		const fixture = await startGatewayThinkingFixture("llama.cpp", modelId);
 		try {
 			const target = { id: "blade-gateway", runtime: "litellm", url: fixture.url, defaultModel: modelId };

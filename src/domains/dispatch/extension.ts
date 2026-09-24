@@ -48,6 +48,7 @@ import { claudeSubprocessPermissionConfigForAutonomy } from "../../engine/claude
 import { isClaudeCanonicalTool } from "../../engine/claude/tool-safety.js";
 import { WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH } from "../../engine/worker-runtime-capabilities.js";
 import { toolPromptHintsForNames } from "../../tools/builtin-tool-catalog.js";
+import { changedCheckoutPaths, snapshotCheckout } from "../../tools/checkout-changes.js";
 import { networkToolsDisabled } from "../../tools/network-policy.js";
 import { applyToolProfile, assertToolProfileEnforceable, type ToolProfileName } from "../../tools/profiles.js";
 import { withGatewayForCapabilities } from "../../tools/surface.js";
@@ -57,6 +58,7 @@ import {
 	createTaskWorktree,
 	gitCheckoutRoot,
 	settleTaskWorktree,
+	snapshotTaskWorktree,
 } from "../../tools/task-worktree.js";
 import { truncateUtf8 } from "../../tools/truncate-utf8.js";
 import { diskWorktreeParent, prepareWorktreeParent, resolveWorktreeRoot } from "../../tools/worktree-root.js";
@@ -117,6 +119,11 @@ import {
 	type ThinkingLevel,
 	targetRequiresAuth,
 } from "../providers/index.js";
+import {
+	codexSubprocessPermissionConfigForAutonomy,
+	opencodeCliModeForAutonomy,
+	piCliModeForAutonomy,
+} from "../providers/runtimes/external-cli-policy.js";
 import { type ActionClass, classify as classifyAction } from "../safety/action-classifier.js";
 import type { AutonomyLevel } from "../safety/autonomy.js";
 import type { SafetyContract } from "../safety/contract.js";
@@ -1625,6 +1632,22 @@ function runtimeLimitations(runtimeKind: RunKind, runtimeId: string): string[] {
 			"Claude CLI subprocess executes Claude Code tools; Clio constrains permission mode and forbids dangerous bypass unless explicitly gated",
 		];
 	}
+	if (runtimeKind === "subprocess" && runtimeId === "codex-cli") {
+		return [
+			"Codex CLI executes its own tools; Clio selects a Codex sandbox mode but cannot mediate individual tool calls or observe a complete tool trace",
+			"Codex CLI login and model configuration belong to the installed codex command; Clio only observes its JSONL run stream",
+		];
+	}
+	if (runtimeKind === "subprocess" && runtimeId === "opencode-cli") {
+		return [
+			"OpenCode CLI owns its tools and permissions; Clio observes JSON run events but cannot enforce read-only or per-tool write boundaries on this headless path",
+		];
+	}
+	if (runtimeKind === "subprocess" && runtimeId === "pi-cli") {
+		return [
+			"Pi CLI owns its tools; Clio can select a built-in read-only allowlist, but cannot mediate individual calls or confine edits to declared write roots",
+		];
+	}
 	if (runtimeKind === "subprocess" && runtimeId === "antigravity-code") {
 		return [
 			"Antigravity CLI owns its internal tools, network activity, prompts, and approvals; Clio observes only structured stream output and does not provide per-tool mediation or complete tool telemetry",
@@ -1830,6 +1853,13 @@ function assertPostRuntimeToolCompatibility(
 	target: ResolvedTarget,
 	writeConfined: boolean,
 ): void {
+	// The shipped coder may use a named subprocess peer. Its native Clio tool
+	// requirements cannot be matched to the peer's opaque tool loop. Keep custom
+	// recipes on the normal compatibility gate, since their declared required
+	// tools are hard promises we cannot silently waive. The receipt records the
+	// coder's external tool boundary as unavailable telemetry and approximated
+	// authority; write roots and protected artifacts keep their separate gates.
+	if (target.runtime.kind === "subprocess" && spec.source === "builtin" && spec.id === "coder") return;
 	const compatibility = resolveAgentToolCompatibility(spec, effectiveTools, {
 		mediatesDispatch: WORKER_RUNTIME_MEDIATES_CLIO_DISPATCH,
 	});
@@ -2262,6 +2292,46 @@ function autonomyEnforcementForWorkerSpec(
 			return { grade: "approximated", autonomy, ...authorityEvidence };
 		}
 	}
+	if (spec.runtimeId === "codex-cli") {
+		try {
+			const config = codexSubprocessPermissionConfigForAutonomy(autonomy);
+			return {
+				grade: config.dangerousBypass ? "bypassed" : "approximated",
+				autonomy,
+				...authorityEvidence,
+				externalMode: config.sandbox,
+				dangerousBypass: config.dangerousBypass,
+			};
+		} catch {
+			return { grade: "approximated", autonomy, ...authorityEvidence };
+		}
+	}
+	if (spec.runtimeId === "opencode-cli") {
+		try {
+			return {
+				grade: "approximated",
+				autonomy,
+				...authorityEvidence,
+				externalMode: opencodeCliModeForAutonomy(autonomy),
+				dangerousBypass: false,
+			};
+		} catch {
+			return { grade: "approximated", autonomy, ...authorityEvidence };
+		}
+	}
+	if (spec.runtimeId === "pi-cli") {
+		try {
+			return {
+				grade: "approximated",
+				autonomy,
+				...authorityEvidence,
+				externalMode: piCliModeForAutonomy(autonomy),
+				dangerousBypass: false,
+			};
+		} catch {
+			return { grade: "approximated", autonomy, ...authorityEvidence };
+		}
+	}
 	if (spec.runtimeId === "antigravity-code") {
 		try {
 			const config = antigravitySubprocessConfigForAutonomy(autonomy);
@@ -2295,10 +2365,9 @@ function autonomyEnforcementForAcpDelegation(
 			dangerousBypass: true,
 		};
 	}
-	// clio-coder-policy applies the exact autonomy mapping to every permission
-	// request. deny-all is stricter than every autonomy level, but is still a
-	// Clio-mediated upper bound rather than an external approximation.
-	return { grade: "mediated", autonomy, ...authorityEvidence, externalMode: toolGovernance };
+	// Both policies apply only to ACP permission requests the peer reports. A
+	// peer can still use its own tools without asking, including under deny-all.
+	return { grade: "approximated", autonomy, ...authorityEvidence, externalMode: toolGovernance };
 }
 
 function pickCapabilityMatchedWorker(
@@ -4021,6 +4090,9 @@ export function createDispatchBundle(
 		const cwd = req.cwd ?? process.cwd();
 		const sessionAutonomy = settings?.safety.autonomy ?? "auto-edit";
 		const effectiveAutonomy = effectiveWorkerAutonomy(sessionAutonomy, req.autonomy, spec.capabilityClass);
+		if (target.runtime.kind === "subprocess" && req.denyTools && req.denyTools.length > 0) {
+			throw new Error("dispatch: denyTools cannot be enforced on an external CLI target; use a native worker");
+		}
 		const effectiveTools = withLedgerToolNarrowing(
 			effectiveToolNames(
 				admission.allowedTools,
@@ -4696,7 +4768,6 @@ export function createDispatchBundle(
 			const finalFailureMessage = result.failureMessage ?? failureMessage;
 			const finalToolStats = snapshotToolStats(toolStats);
 			const unfinished = snapshotUnfinishedTools(inFlightTools);
-			const toolGovernance = lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy";
 			return {
 				runId: envelope.id,
 				agentId: req.agentId,
@@ -4780,7 +4851,7 @@ export function createDispatchBundle(
 						coverage: "unavailable",
 						ingestionErrors: toolTelemetryIngestionErrors,
 						unfinished,
-						workspaceMutationPossible: toolGovernance !== "deny-all",
+						workspaceMutationPossible: true,
 					},
 					runtimeLimitations: lifecycle.runtimeLimitations,
 				},
@@ -4930,6 +5001,34 @@ export function createDispatchBundle(
 					finalDetail = WORKER_FINAL_OUTPUT_MISSING_DETAIL;
 					failureMessage = finalDetail;
 				}
+				let worktreeReceipt: RunReceiptDraft["worktree"];
+				if (req.taskWorktree !== undefined && finalOutcome === "succeeded") {
+					worktreeReceipt = applyTaskWorktree({
+						worktree: req.taskWorktree,
+						apply: req.apply ?? "merge",
+						protectedPaths: getProtectedArtifactState().artifacts.map((artifact) => artifact.path),
+					});
+					if (worktreeReceipt.reason !== undefined) {
+						finalOutcome = "failed";
+						finalDetail = worktreeReceipt.reason;
+						failureMessage = finalDetail;
+					}
+				}
+				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
+					try {
+						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+					} catch (snapshotError) {
+						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
+						worktreeReceipt = {
+							path: req.taskWorktree.path,
+							branch: req.taskWorktree.branch,
+							diffHash: null,
+							snapshot: "unavailable",
+							apply: req.apply ?? "merge",
+							applied: false,
+						};
+					}
+				}
 				const status = runStatusForOutcome(finalOutcome);
 				const classifiedResult: SpawnedWorkerResult = {
 					exitCode: result.exitCode,
@@ -4939,6 +5038,7 @@ export function createDispatchBundle(
 				const failureClass = classifyFailure(evidence, classifiedResult, finalOutcome, outcomeCode);
 				const contextOverflow = isContextOverflowFailure(failureClass, classifiedResult, outcomeCode);
 				const receiptDraft = buildReceiptDraft(result, endedAt, status, finalOutcome, finalDetail, capturedOutput);
+				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {
 					status,
 					outcome: finalOutcome,
@@ -4966,6 +5066,19 @@ export function createDispatchBundle(
 				ledgerRef.update(envelope.id, ledgerPatch);
 				const receipt = ledgerRef.recordReceipt(envelope.id, sealRouteDecision(receiptDraft, routeDecision));
 				await ledgerRef.persist();
+				if (worktreeReceipt?.applied === true && req.taskWorktree !== undefined) {
+					try {
+						cleanupTaskWorktree(req.taskWorktree, true);
+					} catch (cleanupError) {
+						reportDispatchDiagnostic(`clean applied task worktree ${req.taskWorktree.runId}`, cleanupError);
+					}
+				} else if (req.taskWorktree !== undefined) {
+					try {
+						settleTaskWorktree(req.taskWorktree);
+					} catch (settleError) {
+						reportDispatchDiagnostic(`settle task worktree ${req.taskWorktree.runId}`, settleError);
+					}
+				}
 				active.delete(envelope.id);
 				recordTargetOutcome(envelope.id, targetId, runtimeId, wireModelId, status, receipt.exitCode, failureClass);
 				accumulateFinalizedTotals(receipt);
@@ -5359,6 +5472,8 @@ export function createDispatchBundle(
 				node: placed,
 			});
 		};
+		const checkoutBefore =
+			lifecycle.runtimeKind === "subprocess" && req.taskWorktree === undefined ? snapshotCheckout(lifecycle.cwd) : null;
 		let worker: SpawnedWorker;
 		let adoptedHeldWorker = false;
 		try {
@@ -5462,6 +5577,7 @@ export function createDispatchBundle(
 		let finishContractAssistantTurnId: string | null = null;
 		let failureMessage: string | undefined;
 		let providerErrorMessage: string | null = null;
+		let externalTelemetry: RunReceiptDraft["externalTelemetry"];
 		let outcomeCode: RunOutcomeCode | null = null;
 		const trustedOutcomeCodes = new Set<RunOutcomeCode>();
 		const trustedOutcomeDetails = new Map<RunOutcomeCode, string>();
@@ -5635,6 +5751,20 @@ export function createDispatchBundle(
 			}
 			if (event.type === "message_end" && event.message?.role === "assistant" && isRecord(event.message.usage)) {
 				const u = event.message.usage;
+				if (lifecycle.runtimeKind === "subprocess") {
+					const evidence = isRecord(u.clioExternal) ? u.clioExternal : null;
+					const stopReason = event.message.stopReason;
+					externalTelemetry = {
+						tokenUsage:
+							evidence?.tokenUsage === "provider-reported" || evidence?.tokenUsage === "missing"
+								? evidence.tokenUsage
+								: "unverified",
+						cost: evidence?.cost === "provider-reported" || evidence?.cost === "missing" ? evidence.cost : "unverified",
+						sessionId: readStringOrNull(evidence?.sessionId),
+						exitReason: stopReason === "stop" || stopReason === "error" || stopReason === "aborted" ? stopReason : "unknown",
+						toolObservability: "unavailable",
+					};
+				}
 				accumulateNativeUsage(tokenMeter, u, lifecycle.target.effectivePricing.rates);
 				const requestedModelId = readStringOrNull(event.message.model);
 				const responseModelIdObservation = responseModelIdObservationFromRecord(event.message, "not-observed");
@@ -6002,7 +6132,8 @@ export function createDispatchBundle(
 			const telemetryIngestionErrors = toolTelemetryIngestionErrors + malformedWorkerStdoutLineCount(result);
 			const workspaceMutationPossible =
 				lifecycle.runtimeKind === "subprocess"
-					? lifecycle.target.runtime.id !== "claude-code" || lifecycle.effectiveAutonomy !== "read-only"
+					? !["claude-code", "codex-cli", "pi-cli"].includes(lifecycle.target.runtime.id) ||
+						lifecycle.effectiveAutonomy !== "read-only"
 					: lifecycle.admission.allowedTools.some((tool) => classifyAction({ tool }).actionClass !== "read");
 			const toolTelemetryCoverage =
 				lifecycle.runtimeKind === "subprocess"
@@ -6074,9 +6205,12 @@ export function createDispatchBundle(
 				...(capturedOutput !== undefined ? { output: capturedOutput } : {}),
 				costUsd,
 				costProvenance:
-					lifecycle.target.effectivePricing.provenance === "unknown" && costUsd > 0
-						? "estimated"
-						: lifecycle.target.effectivePricing.provenance,
+					externalTelemetry?.cost === "provider-reported"
+						? "known"
+						: lifecycle.target.effectivePricing.provenance === "unknown" && costUsd > 0
+							? "estimated"
+							: lifecycle.target.effectivePricing.provenance,
+				...(externalTelemetry ? { externalTelemetry } : {}),
 				compiledPromptHash: lifecycle.compiledPromptHash,
 				staticCompositionHash: lifecycle.staticCompositionHash,
 				staticShellHash: lifecycle.staticCompositionHash,
@@ -6387,6 +6521,21 @@ export function createDispatchBundle(
 						failureMessage = finalDetail;
 					}
 				}
+				if (req.taskWorktree !== undefined && worktreeReceipt === undefined) {
+					try {
+						worktreeReceipt = snapshotTaskWorktree(req.taskWorktree, req.apply ?? "merge");
+					} catch (snapshotError) {
+						reportDispatchDiagnostic(`snapshot failed task worktree ${req.taskWorktree.runId}`, snapshotError);
+						worktreeReceipt = {
+							path: req.taskWorktree.path,
+							branch: req.taskWorktree.branch,
+							diffHash: null,
+							snapshot: "unavailable",
+							apply: req.apply ?? "merge",
+							applied: false,
+						};
+					}
+				}
 				const status = runStatusForOutcome(finalOutcome);
 				const failureClass = classifyFailure(evidence, result, finalOutcome, outcomeCode, providerErrorMessage);
 				const contextOverflow = isContextOverflowFailure(failureClass, result, outcomeCode, providerErrorMessage);
@@ -6401,6 +6550,16 @@ export function createDispatchBundle(
 					sealedResultContractFact,
 					validationGrounding === null ? null : { ...validationGrounding, ungrounded: [...validationGrounding.ungrounded] },
 				);
+				if (checkoutBefore !== null) {
+					const checkoutAfter = snapshotCheckout(lifecycle.cwd);
+					if (checkoutAfter !== null && checkoutAfter.root === checkoutBefore.root) {
+						receiptDraft.checkoutChanges = {
+							cwd: checkoutBefore.root,
+							changedPaths: changedCheckoutPaths(checkoutBefore, checkoutAfter),
+							attribution: "observed-delta",
+						};
+					}
+				}
 				if (hostVerification !== undefined) receiptDraft.hostVerification = hostVerification;
 				if (worktreeReceipt !== undefined) receiptDraft.worktree = worktreeReceipt;
 				const ledgerPatch: Partial<RunEnvelope> = {

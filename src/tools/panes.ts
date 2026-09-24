@@ -1,5 +1,5 @@
 import type { PanesOperations } from "../domains/mux/operations.js";
-import { PANES_PRESET_IDS } from "../domains/mux/operations.js";
+import { PANE_PEER_IDS, PANES_PRESET_IDS, type PanePeerId } from "../domains/mux/operations.js";
 import { panesToolSurface } from "./panes-surface.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 
@@ -93,6 +93,29 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				}
 				return { kind: "error", message: `panes: ${result.reason}` };
 			}
+			if (action === "handoff") {
+				const peer = typeof args.peer === "string" ? args.peer : "";
+				if (!(PANE_PEER_IDS as ReadonlyArray<string>).includes(peer)) {
+					return { kind: "error", message: `panes: handoff requires peer, one of ${PANE_PEER_IDS.join(", ")}` };
+				}
+				if (args.brief !== undefined && typeof args.brief !== "string")
+					return { kind: "error", message: "panes: brief must be text" };
+				if (args.cwd !== undefined && typeof args.cwd !== "string")
+					return { kind: "error", message: "panes: cwd must be text" };
+				const result = await deps.panes.handoff({
+					peer: peer as PanePeerId,
+					...(typeof args.brief === "string" ? { brief: args.brief } : {}),
+					...(typeof args.cwd === "string" ? { cwd: args.cwd } : {}),
+				});
+				if (result.status === "opened") {
+					return {
+						kind: "ok",
+						output: `opened ${peer} in Clio-owned pane ${result.paneId}; interactive handoff in ${result.cwd}; no managed run or receipt is produced.`,
+						details: { action: "handoff", peer, paneId: result.paneId, workspace: result.cwd, managed: false },
+					};
+				}
+				return { kind: "error", message: `panes: ${result.status === "missing-binary" ? result.detail : result.reason}` };
+			}
 			if (action === "close") {
 				if (target.length === 0) return { kind: "error", message: "panes: action=close requires target" };
 				const result = await deps.panes.close(target);
@@ -108,7 +131,7 @@ export function createPanesTool(deps: PanesToolDeps): ToolSpec {
 				}
 				return { kind: "error", message: `panes: ${result.reason}` };
 			}
-			return { kind: "error", message: `panes: action must be show, open, close, or list; got '${action}'` };
+			return { kind: "error", message: `panes: action must be show, open, handoff, close, or list; got '${action}'` };
 		},
 	};
 }

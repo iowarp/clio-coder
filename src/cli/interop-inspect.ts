@@ -5,6 +5,8 @@ import {
 	type InteropAgentId,
 	type InteropPresence,
 	interopAgentKind,
+	type PeerModeCapability,
+	peerModeCapabilities,
 } from "../domains/interop/index.js";
 
 export type InteropDecisionState = "accepted" | "declined";
@@ -33,8 +35,14 @@ export interface InteropInspectAgent {
 	readonly version: string | null;
 	/** Whether the agent owns a directory under the operator's home. The path stays host-side. */
 	readonly hasUserDirectory: boolean;
-	/** Whether this kind speaks ACP at all. */
+	/** Whether Clio has a built-in ACP recipe or an operator-configured ACP connection. */
 	readonly acp: boolean;
+	/** Clio-owned headless runtime and the two local facts required to launch it. */
+	readonly headless: { runtimeId: string; configured: boolean; binaryPresent: boolean } | null;
+	/** An installed CLI binary can be opened in an owned Herdr pane when that host is available. */
+	readonly paneEligible: boolean;
+	/** Launch choices with a status, precise limitation, and next setup action. */
+	readonly modes: ReadonlyArray<PeerModeCapability>;
 	/** Whether the ACP adapter can start without a network install; null for a kind with no recipe. */
 	readonly adapter: InteropPresence | null;
 	/** Whether a `delegation.agents` entry already names this agent. */
@@ -72,14 +80,15 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 	const report = await detectInteropAgents({ cwd: process.cwd(), probeVersion: true, inventory: true });
 	const settings = readSettings();
 	const configured = new Set(settings.integrations.externalAgents.entries.map((agent) => agent.id));
+	const configuredRuntimes = new Set(settings.targets.map((target) => target.runtime));
 	const agents: InteropInspectAgent[] = [];
 	for (const record of report.agents) {
 		const kind = interopAgentKind(record.kind);
 		if (kind === undefined) continue;
-		const acp = kind.acp !== undefined;
+		const isConfigured = configured.has(kind.id);
+		const acp = kind.acp !== undefined || isConfigured;
 		const decision = record.decision === "accepted" || record.decision === "declined" ? record.decision : null;
 		const decisionStale = decision !== null && record.decidedFingerprint !== record.fingerprint;
-		const isConfigured = configured.has(kind.id);
 		agents.push({
 			inventory: record.inventory
 				? {
@@ -108,15 +117,29 @@ async function interopInspectSnapshot(now: () => number = Date.now): Promise<Int
 			version: typeof record.version === "string" && record.version.length > 0 ? record.version : null,
 			hasUserDirectory: record.installDir !== undefined,
 			acp,
-			adapter: acp ? (record.adapter ?? "unknown") : null,
+			headless: kind.headlessRuntimeId
+				? {
+						runtimeId: kind.headlessRuntimeId,
+						configured: configuredRuntimes.has(kind.headlessRuntimeId),
+						binaryPresent: record.binary !== undefined,
+					}
+				: null,
+			paneEligible: record.binary !== undefined,
+			modes: peerModeCapabilities(kind, record, {
+				configuredAcp: isConfigured,
+				configuredTargets: settings.targets,
+				paneAvailable: null,
+			}),
+			adapter: kind.acp ? (record.adapter ?? "unknown") : isConfigured ? "unknown" : null,
 			configured: isConfigured,
 			decision,
 			decidedAt: decision === null ? null : (record.decidedAt ?? null),
 			decisionStale,
 			// The same rule `interopProposals` applies, restated over the projected
 			// fields so the flag cannot drift from what the review would offer.
-			proposed: acp && record.presence === "present" && !isConfigured && (decision === null || decisionStale),
-			needsNetworkInstall: acp && record.adapter !== "present",
+			proposed:
+				kind.acp !== undefined && record.presence === "present" && !isConfigured && (decision === null || decisionStale),
+			needsNetworkInstall: kind.acp !== undefined && record.adapter !== "present",
 		});
 	}
 	return {
@@ -138,8 +161,11 @@ export async function runInteropInspect(args: ReadonlyArray<string>): Promise<nu
 	else
 		for (const agent of snapshot.agents) {
 			process.stdout.write(
-				`${agent.label}: ${agent.presence}; version ${agent.version ?? "unknown"}; ${agent.configured ? "connected" : "not connected"}; adapter ${agent.adapter ?? "unsupported"}\n`,
+				`${agent.label}: ${agent.presence}; version ${agent.version ?? "unknown"}; ACP ${agent.acp ? (agent.configured ? "configured" : "not configured") : "unsupported"}; adapter ${agent.adapter ?? "unsupported"}; headless ${agent.headless ? `${agent.headless.runtimeId} (${agent.headless.binaryPresent ? "binary installed" : "install CLI"}, ${agent.headless.configured ? "target configured" : "target needed"})` : "unsupported"}; pane ${agent.paneEligible ? "CLI installed" : "unavailable"}\n`,
 			);
+			for (const mode of agent.modes) {
+				process.stdout.write(`  ${mode.mode}: ${mode.status}; ${mode.reason}. Next: ${mode.setupAction}\n`);
+			}
 			process.stdout.write(
 				`  Inventory ${agent.inventory?.status ?? "unknown"}: ${
 					Object.entries(agent.inventory?.counts ?? {})
