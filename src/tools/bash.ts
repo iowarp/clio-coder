@@ -216,6 +216,20 @@ const OBSERVE_COMMAND_PATTERN = /^\s*(?:cat|head|tail|ls|grep|rg|find)\b/;
 const OBSERVE_NUDGE_SESSION_LIMIT = 64;
 const observeNudgeSeenSessions = new Set<string>();
 
+/** A verbose pytest timeout should name the last test the process announced. */
+export function lastActivePytestTest(command: string, output: string): string | null {
+	if (!/\bpytest\b/u.test(command)) return null;
+	const lines = output.split(/\r?\n|\r/u);
+	for (let index = lines.length - 1; index >= 0; index -= 1) {
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: pytest can color its verbose test names.
+		const line = lines[index]?.replace(/\u001b\[[0-9;]*m/gu, "") ?? "";
+		// biome-ignore lint/suspicious/noControlCharactersInRegex: reject control characters from echoed process output.
+		const candidate = line.match(/(?:^|\s)([\w./-]+\.py(?:::[^\s\u0000-\u001f\u007f]+)+)/u)?.[1];
+		if (candidate) return truncateUtf8(candidate, 240, "...");
+	}
+	return null;
+}
+
 /**
  * One nudge per session, on the first successful observer-shaped bash call.
  * Point-of-failure conditioning like the edit-result validation nudge:
@@ -317,11 +331,18 @@ export const bashTool: ToolSpec = {
 				};
 			}
 			if (timedOut) {
-				const status = `bash: command timed out after ${timeout}ms`;
+				const lastActiveTest = lastActivePytestTest(args.command, rawOutput);
+				const status =
+					`bash: command timed out after ${timeout}ms; validation did not finish.` +
+					(lastActiveTest === null ? "" : ` Last active pytest test: ${lastActiveTest}.`) +
+					" Narrow the test selection or enable verbose test names before another bounded run.";
 				return {
 					kind: "error",
 					message: output.length > 0 ? `${output}\n\n${status}` : status,
-					details: bashResultDetails(result, rawOutput, "timeout"),
+					details: {
+						...bashResultDetails(result, rawOutput, "timeout"),
+						...(lastActiveTest === null ? {} : { lastActiveTest }),
+					},
 				};
 			}
 			if (outputCapped) return bashOutputCapResult(result, outputPolicy, options);
