@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { ToolNames } from "../../src/core/tool-names.js";
 import type { MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { hashToolCall } from "../../src/domains/safety/loop-detector.js";
 import { createLoopGuardRegistration } from "../../src/engine/loop-guard.js";
 import { createWorkerSafety } from "../../src/engine/worker-tools.js";
 import { readTool } from "../../src/tools/read.js";
@@ -23,7 +24,90 @@ function afterOk(turnId: string, toolName: string): MiddlewareHookInput {
 	return { hook: "after_tool", turnId, toolName, toolArgs: {}, metadata: { resultKind: "ok" }, toolResultDetails: {} };
 }
 
+const collectArgs = { mode: "collect", batch_id: "batch-1" };
+
+function beforeCollect(turnId: string): MiddlewareHookInput {
+	return {
+		hook: "before_tool",
+		turnId,
+		toolName: ToolNames.Monitor,
+		toolArgs: collectArgs,
+		metadata: { callFingerprint: hashToolCall(ToolNames.Monitor, collectArgs) },
+	};
+}
+
+function afterCollect(turnId: string, pendingCount: number, resultKind: "ok" | "error" = "ok"): MiddlewareHookInput {
+	return {
+		hook: "after_tool",
+		turnId,
+		toolName: ToolNames.Monitor,
+		toolArgs: collectArgs,
+		metadata: { resultKind },
+		toolResultDetails: {
+			mode: "collect",
+			complete: false,
+			runCount: 2,
+			pendingCount,
+			pendingRunIds: ["run-1", "run-2"].slice(0, pendingCount),
+		},
+	};
+}
+
+function afterCompleteCollect(turnId: string): MiddlewareHookInput {
+	return {
+		...afterCollect(turnId, 0),
+		toolResultDetails: { mode: "collect", complete: true, runCount: 2, runs: [{ runId: "run-1" }, { runId: "run-2" }] },
+	};
+}
+
 describe("loop guard identical-call epoch", () => {
+	it("admits the next identical collect after the observed batch advances from two pending runs to one", () => {
+		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+		const turn = "collect-progress";
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCollect(turn, 2));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCollect(turn, 1));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCollect(turn, 1));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		ok(guard.evaluate(beforeCollect(turn)).some((effect) => effect.kind === "block_tool"));
+	});
+
+	it("treats a completed batch as one final advance and then blocks unchanged polls", () => {
+		const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+		const turn = "collect-complete";
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCollect(turn, 1));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCompleteCollect(turn));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		guard.evaluate(afterCompleteCollect(turn));
+		deepStrictEqual(guard.evaluate(beforeCollect(turn)), []);
+		ok(guard.evaluate(beforeCollect(turn)).some((effect) => effect.kind === "block_tool"));
+	});
+
+	it("blocks an unchanged third collect and ignores unverified progress", () => {
+		for (const caseName of ["unchanged", "failed-result", "wrong-mode", "different-batch"] as const) {
+			const guard = createLoopGuardRegistration({ safety: createWorkerSafety() });
+			deepStrictEqual(guard.evaluate(beforeCollect(caseName)), []);
+			guard.evaluate(afterCollect(caseName, 2));
+			deepStrictEqual(guard.evaluate(beforeCollect(caseName)), []);
+			const second = afterCollect(
+				caseName,
+				caseName === "unchanged" ? 2 : 1,
+				caseName === "failed-result" ? "error" : "ok",
+			);
+			if (caseName === "wrong-mode") second.toolResultDetails = { ...second.toolResultDetails, mode: "status" };
+			if (caseName === "different-batch") second.toolArgs = { mode: "collect", batch_id: "batch-2" };
+			guard.evaluate(second);
+			ok(
+				guard.evaluate(beforeCollect(caseName)).some((effect) => effect.kind === "block_tool"),
+				caseName,
+			);
+		}
+	});
+
 	it("permits recovery through a different successful call before locking the turn", () => {
 		const guard = createLoopGuardRegistration({
 			safety: createWorkerSafety(),

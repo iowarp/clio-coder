@@ -634,6 +634,8 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 	 * is fresh while a verbatim repeat with nothing changed still counts.
 	 */
 	const mutationEpochByTurn = new Map<string, number>();
+	/** Successful collect snapshots only; a lower pending count advances this call's repeat epoch. */
+	const monitorCollectProgress = new Map<string, { pendingCount: number; epoch: number }>();
 	/**
 	 * Turns whose tool use is locked to synthesis after reaching the block
 	 * budget. Key present means locked; the value carries the block that tripped
@@ -698,6 +700,50 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 		const next = (store.get(key) ?? 0) + 1;
 		store.set(key, next);
 		return next;
+	};
+
+	const monitorCollectKey = (turnKey: string, args: MiddlewareHookInput["toolArgs"]): string =>
+		`${turnKey}|${hashToolCall(ToolNames.Monitor, args ?? {})}`;
+
+	const observedCollectPendingCount = (input: MiddlewareHookInput): number | null => {
+		if (input.toolName !== ToolNames.Monitor || input.toolArgs?.mode !== "collect" || input.metadata?.resultKind !== "ok")
+			return null;
+		const details = input.toolResultDetails;
+		const runCount = details?.runCount;
+		if (details?.mode !== "collect" || typeof runCount !== "number" || !Number.isSafeInteger(runCount) || runCount <= 0)
+			return null;
+		if (details.complete === true) return Array.isArray(details.runs) && details.runs.length === runCount ? 0 : null;
+		const pendingCount = details.pendingCount;
+		if (
+			details.complete !== false ||
+			typeof pendingCount !== "number" ||
+			!Number.isSafeInteger(pendingCount) ||
+			pendingCount <= 0 ||
+			pendingCount > runCount ||
+			!Array.isArray(details.pendingRunIds) ||
+			details.pendingRunIds.length !== pendingCount ||
+			!details.pendingRunIds.every((runId) => typeof runId === "string" && runId.length > 0)
+		)
+			return null;
+		return pendingCount;
+	};
+
+	const recordMonitorCollectProgress = (input: MiddlewareHookInput): void => {
+		const pendingCount = observedCollectPendingCount(input);
+		if (pendingCount === null) return;
+		const key = monitorCollectKey(input.turnId ?? NO_TURN_BUCKET, input.toolArgs);
+		const previous = monitorCollectProgress.get(key);
+		// Ignore unchanged or older snapshots. Only a strict decrease can grant
+		// another repeat epoch, so one batch permits at most runCount advances.
+		if (previous !== undefined && pendingCount >= previous.pendingCount) return;
+		if (previous === undefined) {
+			while (monitorCollectProgress.size >= SUCCEEDED_FINGERPRINT_LIMIT) {
+				const oldest = monitorCollectProgress.keys().next().value;
+				if (typeof oldest !== "string") break;
+				monitorCollectProgress.delete(oldest);
+			}
+		}
+		monitorCollectProgress.set(key, { pendingCount, epoch: previous === undefined ? 0 : previous.epoch + 1 });
 	};
 
 	// A result whose observation envelope shows a truncated body with zero
@@ -1164,6 +1210,7 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				const turnKey = input.turnId ?? NO_TURN_BUCKET;
 				const blocked = lastBlockedCallByTurn.get(turnKey);
 				const workspaceMutated = recordWorkspaceMutation(input);
+				recordMonitorCollectProgress(input);
 				if (
 					blocked !== undefined &&
 					(workspaceMutated || (input.metadata?.resultKind === "ok" && resultCarriesEvidence(input.toolResultDetails))) &&
@@ -1407,7 +1454,17 @@ export function createLoopGuardRegistration(options: CreateLoopGuardRegistration
 				// only a 30 s window or the last four attempts and no batch ever
 				// showed a third repeat inside either.
 				const epoch = mutationEpochByTurn.get(turnKey) ?? 0;
-				const verdict = options.safety.observeLoop(`${turnKey}|${epoch}|${fingerprint}`, now);
+				// A successful collect that observed fewer pending runs restarts only
+				// this collect call; other tools retain their normal repeat keys.
+				const collectEpoch =
+					input.toolName === ToolNames.Monitor && input.toolArgs?.mode === "collect"
+						? (monitorCollectProgress.get(monitorCollectKey(turnKey, input.toolArgs))?.epoch ?? 0)
+						: null;
+				const repeatKey =
+					collectEpoch === null
+						? `${turnKey}|${epoch}|${fingerprint}`
+						: `${turnKey}|${epoch}|collect:${collectEpoch}|${fingerprint}`;
+				const verdict = options.safety.observeLoop(repeatKey, now);
 				if (verdict.looping) {
 					const tool = input.toolName ?? "unknown";
 					const priorSuccesses = succeededFingerprints.get(fingerprint) ?? 0;
