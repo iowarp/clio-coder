@@ -25,7 +25,7 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 | H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | done; focused tests pass | xhigh pane |
 | H3 | P1 | `monitor collect` can poll again after observed batch progress (for example pending 2 to 1); unchanged rapid polling remains bounded. | done; focused tests pass | xhigh pane |
 | H4 | P2 | Unknown `node` that matches a configured profile returns an actionable profile/node remedy, while invalid placement stays denied. | done; 9/9 fleet lifecycle tests pass | orchestrator |
-| H5 | P2 | A provenance worker can retrieve a bounded, redacted summary for its own session ID; foreign sessions are denied distinctly from absent sessions. | done; 10/10 evidence-tool tests | orchestrator |
+| H5 | P2 | A provenance worker can retrieve bounded task-board status and tool-event counts for its own session ID; foreign sessions are denied distinctly from absent sessions, with no raw task text. | done; 10/10 evidence-tool tests | orchestrator + medium pane |
 | H6 | P3 | Align prompt manifest version documentation with source version 3. | done; diff checked | orchestrator |
 | A1 | P1 | Admit repository validation scripts and typed verifiers at `yolo` after hard safety checks. Preserve `capable`/`suggest` asks, `read-only` denial, and explicit destructive/system/operator rails. Reproduce both bash and verify forms, including headless admission. | done; focused tests pass | medium pane |
 | A2 | P2 | Admit only standalone `git diff --check` and `git diff --cached --check` at `capable`; keep shell operators, extra flags, substitutions, and project scripts on their existing rails. | done; focused tests pass | medium pane |
@@ -105,3 +105,7 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 - 2026-09-24: H3 and A2 integrated; 51/51 focused tests passed together.
   H3 advances on a falling pending count or completion; unchanged count alone
   does not prove progress. Both panes passed source typecheck and Biome.
+- 2026-09-24: H5 session summary now includes active-path task status counts
+  and canonical bundle tool-event counts. Secret task text and legacy synthetic
+  validation claims stay out. Evidence-tool tests passed 10/10; source typecheck,
+  Biome, and diff check passed.
