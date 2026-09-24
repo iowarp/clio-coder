@@ -19,11 +19,11 @@ Cross-cutting behavior that applies to every tool is in
 [Observation envelope](#observation-envelope-truncation-notices-offload-next-hints-and-the-turn-budget)
 and [Search scope](#search-scope-read-ls-grep-and-find-outside-the-workspace).
 
-Tool registration and argument normalization are owned by `src/tools/agent-tools.ts` and each tool's `ToolSpec`.
+Tool registration and argument normalization are owned by [agent-tools.ts](../../src/tools/agent-tools.ts) and each tool's `ToolSpec`.
 
 ## gateway: discover and call secondary capabilities
 
-One gateway provides `find`, `describe`, and `call`. Source: `src/tools/gateway/index.ts`.
+One gateway provides `find`, `describe`, and `call`. Source: [index.ts](../../src/tools/gateway/index.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -43,7 +43,7 @@ One gateway provides `find`, `describe`, and `call`. Source: `src/tools/gateway/
 | Gateway | artifact, web_read, web_fetch, git, evidence, credential_present, clio_docs, clio_library, data |
 | Gateway when trusted/installed | `extension_<id>__<name>`, `mcp_<id>__<tool>` |
 
-Gateway adds no authority: inner safety, skills, approvals, action class, cancellation, shaping, and evidence still apply. The outer call counts once; `details.capability` identifies the inner tool. See `src/tools/surface.ts` for placement. Workers need an admitted `gateway` tool and an allowed capability; this release does not give worker registries an MCP source.
+Gateway adds no authority: inner safety, skills, approvals, action class, cancellation, shaping, and evidence still apply. The outer call counts once; `details.capability` identifies the inner tool. See [surface.ts](../../src/tools/surface.ts) for placement. Workers need an admitted `gateway` tool and an allowed capability; this release does not give worker registries an MCP source.
 
 MCP metadata is read from a recorded catalog; `find`/`describe` do not launch a server. Only `call` or `find(server=..., refresh=true)` connects, and refresh requires one named server; refresh/server filters are refused on restricted tool surfaces. A normal named-server find filters cached metadata. Untrusted project servers are not launched; trust with `clio-coder mcp trust <id>` or `/mcp trust <id>`. Trust is re-read each session and is never inferred from a catalog.
 
@@ -67,7 +67,7 @@ gateway(op="find", server="analysis", refresh=true)
 ## Observation envelope: truncation notices, offload, next hints, and the turn budget
 
 The envelope-backed OBSERVE tools (`read`, `grep`, `find`, `ls`, `code_nav`,
-`context`, `clio_docs`, `clio_library`, and `data`) and `gateway` find listings share one result envelope, implemented in `src/tools/observation.ts`.
+`context`, `clio_docs`, `clio_library`, and `data`) and `gateway` find listings share one result envelope, implemented in [observation.ts](../../src/tools/observation.ts).
 The OBSERVE policy plane also contains `credential_present`, whose deliberately
 minimal result does not use that envelope.
 
@@ -89,11 +89,11 @@ Turn budget: all envelope-backed tools draw from one shared pool of 192KB per tu
 
 ## Search scope: read, ls, grep, and find outside the workspace
 
-`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace, at every autonomy level. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval at `suggest` and `auto-edit`, runs at `full-auto`, and is denied at `read-only`. Headless runs deny the ask, so give a headless run `--autonomy full-auto` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused at every level. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#autonomy-levels).
+`read`, `ls`, `grep`, and `find` run without asking on any path inside the session workspace, at every autonomy level. A path that resolves outside it, by an absolute path, a `..`, or a link at any component, asks for one-shot approval at `suggest` and `auto-edit`, runs at `full-auto`, and is denied at `read-only`. Headless runs deny the ask, so give a headless run `--autonomy full-auto` or a `--cwd` that contains what it must read. Zero-access paths (`.env`, `~/.ssh/`, the credential store) are refused at every level. Installed skill, plugin, and extension trees, the `full:` offload files a truncation notice names, and dispatch receipts stay readable without an ask. A search that starts inside the workspace never follows a linked directory out of it. See [the safety model](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial).
 
 ## read: page through a file with offset, limit, and tail
 
-Reads one UTF-8 text file. Source: `src/tools/read.ts`.
+Reads one UTF-8 text file. Source: [read.ts](../../src/tools/read.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -116,7 +116,7 @@ read(path="build.log", tail=100)
 
 ## edit: exact text replacements in one file
 
-Replaces disjoint exact text regions in an existing file. Sources: `src/tools/edit.ts`, `src/tools/edit-diff.ts`.
+Replaces disjoint exact text regions in an existing file. Sources: [edit.ts](../../src/tools/edit.ts), [edit-diff.ts](../../src/tools/edit-diff.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -137,7 +137,7 @@ edit(path="src/tools/ls.ts", edits=[{oldText: "const DEFAULT_LIMIT = 500;", newT
 
 ## write: create or overwrite a whole file
 
-Writes complete UTF-8 content, creating parent directories and replacing an existing file. Source: `src/tools/write.ts`.
+Writes complete UTF-8 content, creating parent directories and replacing an existing file. Source: [write.ts](../../src/tools/write.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -154,7 +154,7 @@ write(path="docs/session.md", content="# Session notes\n")
 
 ## bash: run a shell command
 
-Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment is captured once and reused when possible; fallback is per-call `bash -lc`. Sources: `src/tools/bash.ts`, `src/core/bash-exec.ts`.
+Runs a fresh `/bin/bash` per call and returns stdout/stderr. Login environment is captured once and reused when possible; fallback is per-call `bash -lc`. Sources: [bash.ts](../../src/tools/bash.ts), [bash-exec.ts](../../src/core/bash-exec.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -185,7 +185,7 @@ bash(command="make artifact", output_policy="metadata-only")
 
 ## run_script: stream a scientific processing step to disk
 
-Runs one workspace script through safe-exec, with stdout/stderr logs and a provenance manifest. Sources: `src/tools/run-script.ts`, `src/core/run-records.ts`, `src/core/safe-exec.ts`. It inherits Bash admission; an allowed interpreter is not a sandbox or policy bypass. Execute class; sequential.
+Runs one workspace script through safe-exec, with stdout/stderr logs and a provenance manifest. Sources: [run-script.ts](../../src/tools/run-script.ts), [run-records.ts](../../src/core/run-records.ts), [safe-exec.ts](../../src/core/safe-exec.ts). It inherits Bash admission; an allowed interpreter is not a sandbox or policy bypass. Execute class; sequential.
 
 | Argument | Contract |
 | --- | --- |
@@ -210,7 +210,7 @@ verify(check="compare-stats")
 
 ## data: inspect structured files through the gateway
 
-Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL. Sources: `src/tools/gateway/data-tool.ts`, `src/tools/data/`. No file is rewritten and no parser is installed.
+Read-only `inspect`, `select`, and `validate` for CSV, TSV, JSON, and JSONL. Sources: [data-tool.ts](../../src/tools/gateway/data-tool.ts), `src/tools/data/`. No file is rewritten and no parser is installed.
 
 | Argument | Contract |
 | --- | --- |
@@ -236,7 +236,7 @@ gateway(op="call", capability="data", args={op: "select", path: "results.json", 
 
 ## grep: search file contents with ripgrep
 
-Search a file or directory with ripgrep, or a bounded pure-Node fallback. Source: `src/tools/grep.ts`.
+Search a file or directory with ripgrep, or a bounded pure-Node fallback. Source: [grep.ts](../../src/tools/grep.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -262,7 +262,7 @@ grep(pattern="TODO|FIXME", path="src/tools", context=2, limit=50)
 
 ## find: locate files and directories by glob pattern
 
-Locate paths using fd or a bounded dirent fallback. Source: `src/tools/find.ts`.
+Locate paths using fd or a bounded dirent fallback. Source: [find.ts](../../src/tools/find.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -283,7 +283,7 @@ find(pattern="*", path="src/tools", order="mtime", limit=10)
 
 ## ls: list one directory
 
-Lists one directory without recursion. Source: `src/tools/ls.ts`.
+Lists one directory without recursion. Source: [ls.ts](../../src/tools/ls.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -300,7 +300,7 @@ ls(path="src/tools")
 
 ## credential_present: check environment or file for a credential key
 
-Checks whether a credential key is present in the process environment or an env-style file (like `.env`) without ever returning the value of the credential. Source: `src/tools/credential-present.ts`. Read class; parallel.
+Checks whether a credential key is present in the process environment or an env-style file (like `.env`) without ever returning the value of the credential. Source: [credential-present.ts](../../src/tools/credential-present.ts). Read class; parallel.
 
 Arguments:
 
@@ -362,7 +362,7 @@ dispatch(tasks=[{agent: "coder", task: "Fix the admission test", intent: {write_
 
 ## verify: run declared verification checks
 
-One entry point for listing/running declared checks and validating frontend artifacts. Sources: [`src/tools/verify/`](../../src/tools/verify/), [`src/cli/verifiers.ts`](../../src/cli/verifiers.ts).
+One entry point for listing/running declared checks and validating frontend artifacts. Sources: [`src/tools/verify/`](../../src/tools/verify/index.ts), [`src/cli/verifiers.ts`](../../src/cli/verifiers.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -450,7 +450,7 @@ clio-coder verifiers rename validate-grid validate-regional-grid --yes
 clio-coder verifiers remove validate-regional-grid --yes
 ```
 
-CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Mutations need `--yes`. `validate` parses only, `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
+CLI fields: `add` requires `--id`, `--description`, and `--command` as a JSON argv array; `edit` accepts these plus `--cwd`, `--timeout-ms`, `--tags`, and kind options. Numeric checks take `--reference` and JSON `--tolerance`; performance checks take `--budget-ms` with optional `--budget-relative`, or `--baseline` with optional relative `--tolerance`. Mutations need `--yes`. `validate` runs the production parser and declared-check discovery; an ID collision with a package script fails validation. `dry-run <id>` executes one admitted check, and `baseline <id>` runs one performance check and writes only on success.
 
 `verify(check="frontend", path=...)` checks an in-workspace `.html`, `.htm`, `.css`, `.js`, `.mjs`, or `.cjs` file without shell access: HTML tag balance, classic/module script syntax, CSS balance, and local script/stylesheet existence. External and root-relative references are skipped. Optional browser load: `auto` warns if Chromium/Chrome/Edge is unavailable, `required` fails, `off` skips. Checks report pass/warn/fail/skip; any fail errors the tool. Details include `{action, check, path, browserMode, status, checks}`.
 
@@ -466,7 +466,7 @@ verify(check="frontend", path="site/index.html", browser="off")
 
 ## git: read-only inspection of git repository state
 
-Executes read-only inspection commands against the local git repository. Source: `src/tools/safe-exec.ts`. Read class; parallel.
+Executes read-only inspection commands against the local git repository. Source: [safe-exec.ts](../../src/tools/safe-exec.ts). Read class; parallel.
 
 Arguments:
 
@@ -492,7 +492,7 @@ gateway(op="call", capability="git", args={op: "log", limit: 10})
 
 ## context: workspace, skill activation, and recall
 
-Direct OBSERVE retrieval of the working environment. Source: `src/tools/context/index.ts`.
+Direct OBSERVE retrieval of the working environment. Source: [index.ts](../../src/tools/context/index.ts).
 
 Arguments are `scope` (`workspace`, `settings`, `skills`, or `recall`), `name` and `include_tree` for skills, and `ref`, `offset`, and `limit` for recall. `query` can narrow recall. Workspace returns the cached session git/project snapshot and requires a bound session. Skills list or activate installed skills; read-only and suggest activation require an explicit operator request, and recipe-bound workers can load only their declared skills. Recall retrieves evicted observations without changing the eviction marker. Workspace, settings, and skills use a 50KB cap.
 
@@ -514,7 +514,7 @@ context(scope="recall", ref="<turnId>", offset=0)
 
 ## clio_docs: retrieve bundled documentation through the gateway
 
-Offline retrieval over bundled Markdown. Sources: `src/tools/gateway/clio-context-tools.ts`, `src/tools/context/docs-engine.ts`. Arguments: `query` (omit to list corpus), `limit` (default 5, max 12).
+Offline retrieval over bundled Markdown. Sources: [clio-context-tools.ts](../../src/tools/gateway/clio-context-tools.ts), [docs-engine.ts](../../src/tools/context/docs-engine.ts). Arguments: `query` (omit to list corpus), `limit` (default 5, max 12).
 
 Indexes recursively bundled `docs/`, `README.md`, `CHANGELOG.md`, and `CLIO-CODER.md` as heading sections with vocabulary expansion and ranked body matches. Results include corpus, terms, and ranked records with `file`, `heading`, `breadcrumb`, `anchor`, `lines`, `snippet`, `score`, `coverage`, `matchedTerms`, and `signals`, plus an omitted count. Follow the cited file and lines for full text. An omitted query lists files and section counts. Empty results remain JSON with a follow-up hint; output caps at 16 KiB and uses a parseable offload stub if oversize. The old `docs_search` file filter is gone.
 
@@ -524,7 +524,7 @@ gateway(op="call", capability="clio_docs", args={query: "dispatch receipts evide
 
 ## clio_library: inspect the recipe catalog through the gateway
 
-Read-only inventory also used by `clio-coder library recipes --json`. Sources: `src/tools/gateway/clio-context-tools.ts`, `src/tools/context/library.ts`.
+Read-only inventory also used by `clio-coder library recipes --json`. Sources: [clio-context-tools.ts](../../src/tools/gateway/clio-context-tools.ts), [library.ts](../../src/tools/context/library.ts).
 
 | Argument | Contract |
 | --- | --- |
@@ -548,7 +548,7 @@ gateway(op="call", capability="clio_library", args={ref: "plugin:materio"})
 Structural navigation over the persisted codewiki index (`.clio-coder/codewiki.json`)
 and the optional Markdown wiki metadata. The index is built by context init,
 refresh, or index commands and can be rebuilt/backfilled on tool demand. Source:
-`src/tools/codewiki/code-nav.ts`.
+[code-nav.ts](../../src/tools/codewiki/code-nav.ts).
 
 Arguments:
 
@@ -580,7 +580,7 @@ code_nav(mode="wiki")
 
 ## web_read and web_fetch: read web pages or make full HTTP requests
 
-Fetches content from an http(s) URL. HTML content is automatically cleaned and converted to readable Markdown. Source: `src/tools/web-fetch.ts`. Read class; parallel.
+Fetches content from an http(s) URL. HTML content is automatically cleaned and converted to readable Markdown. Source: [web-fetch.ts](../../src/tools/web-fetch.ts). Read class; parallel.
 
 Arguments:
 
@@ -613,7 +613,7 @@ gateway(op="call", capability="web_read", args={url: "https://example.com"})
 
 ## monitor: inspect dispatched runs
 
-Read-only view of known synchronous and detached runs from the dispatch ledger, live snapshot, and this process's event tails. Source: `src/tools/monitor.ts`; read class, parallel. A parent model cannot call monitor while synchronous dispatch is pending; detach first. Interactive operator/TUI can inspect live synchronous runs.
+Read-only view of known synchronous and detached runs from the dispatch ledger, live snapshot, and this process's event tails. Source: [monitor.ts](../../src/tools/monitor.ts); read class, parallel. A parent model cannot call monitor while synchronous dispatch is pending; detach first. Interactive operator/TUI can inspect live synchronous runs.
 
 | Argument | Contract |
 | --- | --- |
@@ -642,7 +642,7 @@ monitor(run_id="run-01H...", mode="receipt")
 
 ## steer: guide or cancel a running worker
 
-Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous HTTP or SDK worker through the dispatch contract. Source: `src/tools/steer.ts`. Dispatch class; sequential.
+Controls a running dispatched worker whose id is already available. Parent-model mid-run control requires detached dispatch because dispatch and steer are sequential; the interactive operator/TUI can steer an active synchronous HTTP or SDK worker through the dispatch contract. Source: [steer.ts](../../src/tools/steer.ts). Dispatch class; sequential.
 
 Arguments:
 
@@ -663,7 +663,7 @@ steer(run_id="run-01H...", action="cancel")
 
 ## tasks: the session task board
 
-Tracks the agent's own work plan. Source: `src/tools/tasks.ts`; read class, sequential.
+Tracks the agent's own work plan. Source: [tasks.ts](../../src/tools/tasks.ts); read class, sequential.
 
 | Argument | Contract |
 | --- | --- |
@@ -687,7 +687,7 @@ tasks(action="done", id="t1", note="reproduced and fixed; targeted test passes")
 ## ledger: coordinate peer workers through typed entries
 
 Reads or posts to the agent ledger shared by concurrent workers in one
-dispatch. Source: `src/tools/ledger.ts`. Read class; sequential. The tool
+dispatch. Source: [ledger.ts](../../src/tools/ledger.ts). Read class; sequential. The tool
 registers only when a worker has an agent-ledger port. An ordinary session or a
 worker with no peers does not receive a usable coordination board.
 
@@ -720,7 +720,7 @@ ledger(action="post", kind="review", target="e3", passed=true, evidence="confirm
 ## panes: manage Clio-owned terminal panes
 
 Controls the pane layer shared with the `/panes` operator command. Sources:
-`src/tools/panes-surface.ts`, `src/tools/panes.ts`. Read class; sequential. It
+[panes-surface.ts](../../src/tools/panes-surface.ts), [panes.ts](../../src/tools/panes.ts). Read class; sequential. It
 registers only after a pane host answers detection and the mux is live, so an
 absent tool means the current session has no model-facing pane layer.
 
@@ -745,7 +745,7 @@ panes(action="close", target="all")
 
 ## evidence: inspect canonical evidence and trust status
 
-Reads evidence bundles as JSON. Source: `src/tools/evidence.ts`. Read class; sequential, because `run` mode may materialize a bundle under Clio's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
+Reads evidence bundles as JSON. Source: [evidence.ts](../../src/tools/evidence.ts). Read class; sequential, because `run` mode may materialize a bundle under Clio's data directory. It shares the inventory and trust projections behind `clio-coder evidence inventory` and `clio-coder evidence inspect`, so the model and the operator read the same record.
 
 Arguments:
 
@@ -763,7 +763,7 @@ gateway(op="call", capability="evidence", args={mode: "run", runId: "r-42"})
 
 ## limitation: record what a turn could not verify
 
-Records a typed limitation receipt for the finish contract. Source: `src/tools/limitation.ts`. Read class; parallel. The tool is pure: it touches no filesystem and runs no shell, so the successful receipt in the session ledger is its whole effect.
+Records a typed limitation receipt for the finish contract. Source: [limitation.ts](../../src/tools/limitation.ts). Read class; parallel. The tool is pure: it touches no filesystem and runs no shell, so the successful receipt in the session ledger is its whole effect.
 
 Arguments:
 
@@ -771,7 +771,7 @@ Arguments:
 - `reason` (required). `no-runner`, `blocked`, `out-of-scope`, `environment`, or `other`.
 - `paths` (optional). Repository-relative paths left unverified.
 
-Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see [the finish gate](../architecture/safety-model.md#the-finish-gate-and-re-prompt-behavior).
+Call it once, before the final reply, when files changed and validation could not run. The finish contract accepts a successful `limitation` receipt inside the same window as the mutation scan in place of validation evidence. A rejected call (empty scope, unknown reason) leaves no receipt and does not count, and the assistant's prose never does. The six mutating recipes carry the tool and the operating contract tells the model to call it; see [the finish gate](../architecture/safety-model.md#7-rigor-gates--deterministic-finish-contracts).
 
 ```text
 limitation(scope="CUDA kernels changed but no GPU is available here", reason="environment", paths=["src/kernels/solve.cu"])
@@ -779,7 +779,7 @@ limitation(scope="CUDA kernels changed but no GPU is available here", reason="en
 
 ## decide: record a design decision
 
-Appends the model's own design choice to the session decision board beside operator `ask_user` answers. Source: `src/tools/decide.ts`. Read class; sequential, so two decisions in one batch cannot race the supersede lookup. The call succeeds only in a session with a decision board; a worker's call is refused.
+Appends the model's own design choice to the session decision board beside operator `ask_user` answers. Source: [decide.ts](../../src/tools/decide.ts). Read class; sequential, so two decisions in one batch cannot race the supersede lookup. The call succeeds only in a session with a decision board; a worker's call is refused.
 
 Arguments:
 
@@ -789,7 +789,7 @@ Arguments:
 - `rationale` (required). Why the choice won, at most 1024 bytes.
 - `label` (optional). Short title, at most 128 bytes.
 
-The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio-controlled commits carry one `Clio-Decision:` trailer per ref; see [commit provenance](../process/git-commit-provenance.md).
+The call appends one `decisionLedger` entry with `origin: "agent"` and returns the decision ref `<interviewId>/<key>`. A repeat key supersedes the earlier agent decision with the new rationale as its correction; an operator decision with the same key is never overwritten and the call fails. Dispatch seals every active ref onto the run request, envelope, and receipt, and Clio-controlled commits carry one `Clio-Decision:` trailer per ref; see [commit provenance](../architecture/safety-model.md).
 
 ```text
 decide(key="cache-key-shape", value="capability tuple", alternatives=["node id"], rationale="matches the existing buckets and survives fleet changes", label="Cache key")
@@ -797,7 +797,7 @@ decide(key="cache-key-shape", value="capability tuple", alternatives=["node id"]
 
 ## ask_user: host-owned operator interviews
 
-Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: `src/tools/ask-user.ts`. Read class; sequential.
+Runs a host-owned interactive interview or single-question prompt with the operator, recording decisions and/or free-form answers. Source: [ask-user.ts](../../src/tools/ask-user.ts). Read class; sequential.
 
 Arguments:
 
@@ -826,7 +826,7 @@ ask_user(action="complete", summary="Operator selected SQLite.", decisions=[{key
 
 ## artifact: plans, reviews, and reports
 
-Terminal document writers reached through `gateway(op="call", capability="artifact", args={...})`. Atomic publication uses the same publisher as write and reports any post-publication durability warning. Source: `src/tools/artifact.ts`.
+Terminal document writers reached through `gateway(op="call", capability="artifact", args={...})`. Atomic publication uses the same publisher as write and reports any post-publication durability warning. Source: [artifact.ts](../../src/tools/artifact.ts).
 
 Arguments:
 

@@ -5,8 +5,8 @@ workers run on remote machines over SSH while the orchestrator keeps every
 guarantee it makes locally: one admission path, one autonomy matrix, one
 receipt chain.
 
-Source of truth: `src/domains/dispatch/**`, `src/domains/scheduling/cluster.ts`,
-`src/tools/dispatch.ts`, `src/tools/monitor.ts`, and the contract tests under
+Source of truth: `src/domains/dispatch/**`, [cluster.ts](../../src/domains/scheduling/cluster.ts),
+[dispatch.ts](../../src/tools/dispatch.ts), [monitor.ts](../../src/tools/monitor.ts), and the contract tests under
 `tests/contracts/`.
 
 ### Start here
@@ -19,7 +19,7 @@ Source of truth: `src/domains/dispatch/**`, `src/domains/scheduling/cluster.ts`,
 | Know what happens when a route fails | [Failure semantics](#failure-semantics), [Assignments, attempts, and failover](#assignments-attempts-and-failover) |
 | Watch or steer running work | [Operator visibility](#operator-visibility) |
 | Read what a run proved | [Receipts](#receipts) |
-| Run the end-to-end demo | [fleet-demo-runbook.md](../process/fleet-demo-runbook.md) |
+
 
 ## Architecture
 
@@ -29,7 +29,7 @@ stdout. A remote worker is exactly the same protocol tunneled through
 `ssh -T`, so nothing about prompts, safety, receipts, or telemetry changes
 with distance. Transport is a ladder: `local` and `ssh` exist today; a future
 container or cloud tier implements the same `WorkerTransport` interface
-(`src/domains/dispatch/transport.ts`) without touching the protocol.
+([transport.ts](../../src/domains/dispatch/transport.ts)) without touching the protocol.
 
 Both local and SSH native workers must emit `worker_announce` as their first
 protocol event over the structured stderr control lane. The transport consumes it,
@@ -407,7 +407,7 @@ Claude Code subprocess routes refuse them with
 Every topology that runs more than one worker at once opens an agent ledger, the
 bounded coordination board those workers share while they run: the parallel
 fan-out in `runBatch`, a detached batch of two or more in `runDetached`, and
-`runCompete`, all in `src/tools/dispatch-runner.ts`. A worker reaches it through the `ledger` tool
+`runCompete`, all in [dispatch-runner.ts](../../src/tools/dispatch-runner.ts). A worker reaches it through the `ledger` tool
 and posts one of three typed entries. A `claim` stakes path prefixes so peers
 stop colliding, a `finding` reports one observation with the path and line that
 ground it, and a `review` judges another entry by its id. Nothing untyped is
@@ -491,7 +491,7 @@ prose:
 
 `revise` is not a verdict a model authors. The reviewer answers `pass` or
 `fail`, and `decideReviewGate` in
-`src/domains/dispatch/gate-decisions.ts` owns the continuation policy: a
+[gate-decisions.ts](../../src/domains/dispatch/gate-decisions.ts) owns the continuation policy: a
 non-passing verdict below the terminal cycle becomes `revise` and re-runs the
 builder with only the failed checks threaded as input data, bounded by
 `max_cycles` (default 2, max 4). On the terminal cycle the verdict settles as
@@ -1052,7 +1052,7 @@ hard block.
   stays compact, so a fan-out of scouts costs one card each until an operator
   opens one. Detail follows the cursor rather than pinning to a run.
 - The board and the transcript worker block read one projection
-  (`src/domains/observability/worker-progress.ts`), so they cannot disagree about what a
+  ([worker-progress.ts](../../src/domains/observability/worker-progress.ts)), so they cannot disagree about what a
   worker is saying or touching. It keeps 40 lines and 4096 bytes of tail, 8
   distinct tool names, 4 recent actions, and accepts 16 KB of delta bytes per
   250 ms; what the bounds refuse is counted and named on the card beside the
@@ -1138,9 +1138,8 @@ declines with a `will-not-fit` notice instead of stranding the configured model.
 Use `clio-coder fleet validate <name>` and `clio-coder fleet graph <name>` for
 model-free contract checks. An operator with configured targets can then run
 the contract explicitly with `clio-coder fleet run <name>` and retain its
-receipts. The [fleet demo runbook](../process/fleet-demo-runbook.md) provides a bounded
-end-to-end scenario, including reviewer gates and verification commands. Live
-fleet execution is not hidden inside deterministic CI.
+receipts. The [fleet dispatch workflow](#topologies) explains reviewer gates and
+verification commands. Live fleet execution requires an operator.
 
 ## Bounded result delivery
 

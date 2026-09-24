@@ -78,7 +78,7 @@ There is no hidden `transformContext` injection.
 <details>
 <summary>The two-line envelope grammar and what the parser tolerates</summary>
 
-Model output uses a strict two-line grammar parsed by `src/domains/memory/task-memory-policy.ts`:
+Model output uses a strict two-line grammar parsed by [task-memory-policy.ts](../../src/domains/memory/task-memory-policy.ts):
 
 ```text
 <operations>[{"op":"update_status","content":"Tracking the current requirement."}]</operations>
@@ -641,7 +641,7 @@ policy into the action agent.
 
 The existing transport already exposes the required seams:
 
-1. `src/domains/dispatch/worker-spawn.ts` receives worker NDJSON events and its
+1. [worker-spawn.ts](../../src/domains/dispatch/worker-spawn.ts) receives worker NDJSON events and its
    `SpawnedWorker.send` path can write bounded control messages while the worker
    is alive.
 2. Worker steering already drains between tool batches, which is the safe point

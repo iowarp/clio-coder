@@ -1,5 +1,7 @@
 # Coding agent interoperability
 
+`detectInteropAgents` in [detect.ts](../../src/domains/interop/detect.ts) discovers local agents. The [library architecture](../architecture/library.md) explains package trust.
+
 Interoperability runs both ways. Inbound, Clio can discover resources held by
 Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, then adopt
 safe text resources into the library after approval. Outbound, the same canonical

@@ -1,6 +1,6 @@
 # Configuration, Targets, Runtimes, and Auth
 
-Use this guide to connect a provider and choose where chat and workers run. Exact settings and runtime contracts live in source: [settings](../../src/core/defaults.ts), [validation](../../src/core/config.ts), [target descriptors](../../src/domains/providers/types/target-descriptor.ts), and the [runtime registry](../../src/domains/providers/runtimes/).
+Use this guide to connect a provider and choose where chat and workers run. Exact settings and runtime contracts live in source: [settings](../../src/core/defaults.ts), [validation](../../src/core/config.ts), [target descriptors](../../src/domains/providers/types/target-descriptor.ts), and the [runtime registry](../../src/domains/providers/runtimes/builtins.ts).
 
 ## Start here
 
@@ -94,6 +94,15 @@ This is the version-2 durable schema shipped in `DEFAULT_SETTINGS`. Validation i
 | `chat.retry.maxDelayMs` | `60000` | next turn |
 | `chat.retry.streamStallMs` | `180000` | next turn |
 | `chat.retry.firstTokenStallMs` | `600000` | next turn |
+
+### Configure a different model for workers
+
+To configure a different model for workers, open `/settings` and choose
+**Fleet**, then set `fleet.default.target` and `fleet.default.model`. For a
+saved route, use `clio-coder targets profile` to bind a worker or agent to a
+profile. These values affect dispatch as shown in the table below; they do not
+change the current chat model. The [fleet dispatch guide](fleet-dispatch.md)
+explains worker route selection.
 
 ### Fleet
 
@@ -255,11 +264,17 @@ Keep credentials in user settings or the credential store. Project settings deli
 
 A loaded model's serving window can be lower than its advertised maximum. Check target status and model state before planning against a catalog maximum. Provenance and target status are defined in [`src/domains/providers/contract.ts`](../../src/domains/providers/contract.ts) and the runtime descriptors.
 
+For ALCF, the `configure` wizard asks for a gateway URL and shows a
+Sophia example because the endpoint varies by cluster or resource.
+`gatewayUrlGuidance` in [configure-target.ts](../../src/cli/configure-target.ts)
+provides that prompt. See the [ALCF provider contract](../architecture/alcf-provider.md#configure)
+for the Sophia and Metis URLs and model IDs.
+
 ## Local model settings
 
-Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/providers/types/target-descriptor.ts). For example, `ollama.numCtx` is sent as the request context and is also the window Clio plans against; changing it can reload a model on a shared Ollama server. Runtime probing and loaded-model state are implemented in [`src/domains/providers/runtimes/local-native/`](../../src/domains/providers/runtimes/local-native/).
+Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/providers/types/target-descriptor.ts). For example, `ollama.numCtx` is sent as the request context and is also the window Clio plans against; changing it can reload a model on a shared Ollama server. Runtime probing and loaded-model state are implemented in [`src/domains/providers/runtimes/local-native/`](../../src/domains/providers/runtimes/local-native/ollama.ts).
 
-Model-family quirks belong to the local model catalog, not the target descriptor. See [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/) for current entries.
+Model-family quirks belong to the local model catalog, not the target descriptor. See [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) for current entries.
 
 ## Model listing and refresh
 
@@ -278,11 +293,11 @@ Runtime IDs and support groups vary by installed build. Use `clio-coder configur
 | `clio-coder auth login [target-or-runtime]` | Sign in or store an API key. |
 | `clio-coder auth logout [target-or-runtime]` | Remove stored credentials. |
 
-Prefer `--api-key-env <VAR>`: Clio reads it when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` with restrictive file permissions, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/).
+Prefer `--api-key-env <VAR>`: Clio reads it when making a request and stores no key. Stored API keys and OAuth credentials live in `credentials.yaml` with restrictive file permissions, but are plaintext and are not encrypted. The auth CLI and storage are in [`src/cli/auth.ts`](../../src/cli/auth.ts) and [`src/domains/providers/auth/`](../../src/domains/providers/auth/index.ts).
 
 ## Subscription-based Targets and Runtimes
 
-OAuth providers, sanctioned worker runtimes, and external-agent delegation have different runtime roles. Check the installed registry with `clio-coder configure --list` and use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/) define their auth method and whether they serve chat or dispatch.
+OAuth providers, sanctioned worker runtimes, and external-agent delegation have different runtime roles. Check the installed registry with `clio-coder configure --list` and use [Interop](interop.md) for detected coding-agent peers. Runtime descriptors in [`src/domains/providers/runtimes/`](../../src/domains/providers/runtimes/builtins.ts) define their auth method and whether they serve chat or dispatch.
 
 ## Troubleshooting checklist
 

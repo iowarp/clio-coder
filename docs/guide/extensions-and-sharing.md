@@ -4,7 +4,7 @@ Clio Coder has two package kinds. A plugin is a domain bundle: prompts, skills, 
 
 Share archives are portable JSON files for moving project and user Clio resources between machines or collaborators.
 
-Source of truth: `src/domains/extensions/**`, `src/domains/plugins/**`, `src/domains/resources/**`, `src/domains/share/**`, `src/cli/extensions.ts`, and `src/cli/share.ts`.
+Source of truth: `src/domains/extensions/**`, `src/domains/plugins/**`, `src/domains/resources/**`, `src/domains/share/**`, [extensions.ts](../../src/cli/extensions.ts), and [share.ts](../../src/cli/share.ts).
 
 ---
 
@@ -12,7 +12,7 @@ Source of truth: `src/domains/extensions/**`, `src/domains/plugins/**`, `src/dom
 
 Prompts and skills are loaded from package, user, and project roots. Higher-ranked roots override lower-ranked resources with the same name.
 
-Prompts and skills both add compatibility roots so that the command and skill files other agents already have on the machine are usable without copying. Both root lists come from the interop agent registry (`src/domains/interop/registry.ts`), so the two kinds cannot drift apart. The prompt precedence, lowest to highest, is:
+Prompts and skills both add compatibility roots so that the command and skill files other agents already have on the machine are usable without copying. Both root lists come from the interop agent registry ([registry.ts](../../src/domains/interop/registry.ts)), so the two kinds cannot drift apart. The prompt precedence, lowest to highest, is:
 
 | Precedence | Scope | Source | Root |
 | --- | --- | --- | --- |
@@ -37,7 +37,7 @@ Clio-native roots intentionally outrank shared compatibility roots at the same s
 
 ### Native skills, foreign compatibility roots, and collision resolution
 
-When inspecting skills discovered across native and foreign compatibility roots, candidate resolution follows strict, source-grounded precedence and trust rules implemented in `src/domains/resources/skills/loader.ts`:
+When inspecting skills discovered across native and foreign compatibility roots, candidate resolution follows strict, source-grounded precedence and trust rules implemented in [loader.ts](../../src/domains/resources/skills/loader.ts):
 
 1. **Trust-first collision resolution**: `compareSkillCandidates` compares **trusted status first** (`Number(a.trusted) - Number(b.trusted)`), then precedence level, then registry agent order (`interopSourceRank`), and finally file path. This ordering governs both canonical-file deduplication (`dedupeCanonicalSkillPaths`) and same-name collision resolution (`resolveSkillCollisions`). Crucially, trust-first ordering prevents an untrusted project compatibility copy (such as an unvetted `.claude/skills/my-skill` or `.agents/skills/my-skill`) from winning a collision against an admitted native library skill and then disappearing at model visibility time. The trusted native skill wins and remains active.
 2. **Canonical file deduplication**: If multiple scanned roots resolve to the exact same canonical `SKILL.md` path on disk (via symlinks), `dedupeCanonicalSkillPaths` sorts candidates with `compareSkillCandidates` and retains only the winning candidate, logging a diagnostic for the shadowed path.

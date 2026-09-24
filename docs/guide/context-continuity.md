@@ -1,5 +1,7 @@
 # Context continuity and recovery
 
+`compact` in [compact.ts](../../src/domains/session/compaction/compact.ts) implements summary handoff. The [context engine](../architecture/context-engine.md#single-threshold-compaction) explains the budget and trigger.
+
 Clio can reduce a long native session while preserving the assistant's exact handoff note and the original task. Open `/context` to inspect the next request's input, output reservation, headroom, and pending handoff. The model can read the same accounting with `context(scope="budget")`.
 
 ## Choosing a reduction
