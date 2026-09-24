@@ -2,12 +2,17 @@ import { ok, strictEqual } from "node:assert/strict";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import {
+	agentSkillToolPolicy,
+	skillActivationFromToolDetails,
+	withModelSkillActivation,
+} from "../../src/core/skill-activation.js";
 import { clioConfigDir as configDir } from "../../src/core/xdg.js";
 import { PLUGIN_SCHEMA } from "../../src/domains/plugins/discovery.js";
 import { clearPluginSnapshots, pluginContentDigest } from "../../src/domains/plugins/index.js";
 import { buildSkillCatalogView } from "../../src/domains/resources/skills/catalog-view.js";
 import { lexicalMatches } from "../../src/domains/resources/skills/lexical-match.js";
-import type { Skill } from "../../src/domains/resources/skills/loader.js";
+import { loadSkills, type Skill } from "../../src/domains/resources/skills/loader.js";
 import { checkSkillDrift, checkSkillDriftBatch } from "../../src/domains/resources/skills/provenance-pin.js";
 import { createContextTool } from "../../src/tools/context/index.js";
 import { OBSERVE_SELF_CAPS } from "../../src/tools/observation.js";
@@ -318,6 +323,42 @@ describe("contracts/skills catalog through the context tool", () => {
 	function installUserSkillPackage(id: string, description: string): void {
 		installIntoBase(path.join(configDir(), "plugins"), id, description);
 	}
+
+	it("shows exact drift hashes and a read-only review plus update preview path on load", async () => {
+		const name = "drift-demo";
+		const root = path.join(cwd, ".clio-coder", "skills", name);
+		mkdirSync(root, { recursive: true });
+		writeFileSync(path.join(root, "SKILL.md"), `---\nname: ${name}\ndescription: Test skill.\n---\n\n# Test\n`, "utf8");
+		const pinRoot = path.join(cwd, "library", "skills");
+		mkdirSync(pinRoot, { recursive: true });
+		const expected = "a".repeat(64);
+		writeFileSync(
+			path.join(pinRoot, "registry.yaml"),
+			`skills:\n  - name: ${name}\n    version: 1.0.0\n    sha256: ${expected}\n`,
+			"utf8",
+		);
+		const installed = loadSkills({ cwd }).items.find((item) => item.name === name);
+		ok(installed);
+		const policy = withModelSkillActivation(undefined, true);
+		ok(policy);
+		const tool = createContextTool({ getCwd: () => cwd });
+		const listed = await tool.run({ scope: "skills" });
+		ok(listed.kind === "ok");
+		ok(listed.output.includes("Load a named skill to compare recorded and installed hashes"));
+		const loaded = await tool.run({ scope: "skills", name }, { pendingSkillPolicy: policy });
+		ok(loaded.kind === "ok", JSON.stringify(loaded));
+		ok(loaded.output.includes(`catalog sha256=${expected}`));
+		ok(loaded.output.includes(`installed normalized sha256=${installed.normalizedHash}`));
+		ok(loaded.output.includes(`clio-coder library recipes ${name} --kind skill --json`));
+		ok(loaded.output.includes("clio-coder library update <owner-ref> --dry-run --json"));
+		strictEqual(loaded.details?.driftExpectedHash, expected);
+		strictEqual(loaded.details?.driftInstalledHash, installed.normalizedHash);
+		const bound = agentSkillToolPolicy([name]);
+		ok(bound);
+		const recipeLoad = await tool.run({ scope: "skills", name }, { pendingSkillPolicy: bound });
+		ok(recipeLoad.kind === "ok");
+		strictEqual(skillActivationFromToolDetails(recipeLoad.details)?.requestSource, "recipe");
+	});
 
 	async function listing(args: Record<string, unknown> = {}) {
 		const tool = createContextTool({ getCwd: () => cwd });

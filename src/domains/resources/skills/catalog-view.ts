@@ -192,7 +192,7 @@ function driftNotice(names: ReadonlyArray<string>): string {
 	const omitted = names.length - shown.length;
 	const list = omitted > 0 ? `${shown.join(", ")} and ${omitted} more` : shown.join(", ");
 	const subject = names.length === 1 ? `${list} no longer matches` : `${list} no longer match`;
-	return `Marked [drifted]: ${subject} the content hash recorded for it; the skill still loads unchanged, and /library shows the installed copy.`;
+	return `Marked [drifted]: ${subject} the content hash recorded for it. Load a named skill to compare recorded and installed hashes; review its body-free owner with clio-coder library recipes <name> --kind skill --json, then preview a managed replacement with clio-coder library update <owner-ref> --dry-run --json (select --user or --project for that copy). The skill still loads unchanged.`;
 }
 
 function readySkills(skills: ReadonlyArray<Skill>): Skill[] {

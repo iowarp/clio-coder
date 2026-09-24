@@ -328,6 +328,8 @@ export interface SkillActivation {
 	sourceOrigin?: string;
 	/** Pinned-manifest comparison verdict; "mismatch" records skill_drift. */
 	drift?: "match" | "mismatch";
+	/** Who requested the load; "recipe" is the worker's admitted bound skill policy. */
+	requestSource?: "recipe" | "model" | "operator";
 	triggeredBy: SkillActivationTrigger;
 	turnId?: string;
 	/**
@@ -383,6 +385,9 @@ export function skillActivationFromToolDetails(details: unknown, turnId?: string
 		turnId,
 	);
 	if (record.drift === "match" || record.drift === "mismatch") activation.drift = record.drift;
+	if (record.activation === "recipe" || record.activation === "model" || record.activation === "operator") {
+		activation.requestSource = record.activation;
+	}
 	return activation;
 }
 
@@ -395,6 +400,10 @@ export function isSkillActivation(value: unknown): value is SkillActivation {
 		typeof record.hash === "string" &&
 		typeof record.source === "string" &&
 		(record.sourceOrigin === undefined || typeof record.sourceOrigin === "string") &&
+		(record.requestSource === undefined ||
+			record.requestSource === "recipe" ||
+			record.requestSource === "model" ||
+			record.requestSource === "operator") &&
 		(record.triggeredBy === "slash-command" || record.triggeredBy === "tool") &&
 		(record.turnId === undefined || typeof record.turnId === "string") &&
 		(record.runId === undefined || typeof record.runId === "string")

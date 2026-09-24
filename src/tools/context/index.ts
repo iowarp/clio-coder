@@ -625,13 +625,12 @@ function runSkillsScope(
 	// gates still govern whatever the skill asks for.
 	const driftReport = checkSkillDrift(skill, cwdFromDeps(deps));
 	const drift = driftReport?.verdict ?? null;
+	// A normal skill id can be copied into a command; unusual frontmatter names
+	// remain a placeholder so model-facing guidance cannot become shell syntax.
+	const reviewName = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(skill.name) ? skill.name : "<name>";
 	const driftWarning =
 		driftReport?.verdict === "mismatch"
-			? `WARNING skill_drift: '${skill.name}' content (sha256 ${skill.hash.slice(0, 12)}…) no longer matches the hash recorded for it ${
-					driftReport.authority === "pinned-manifest"
-						? "in the audited skill catalog"
-						: "when it was installed on this machine"
-				} (expected ${driftReport.expected.slice(0, 12)}…); the installed skill drifted from the content it claims to be.`
+			? `WARNING skill_drift: ${driftReport.authority === "pinned-manifest" ? "catalog" : "install-record"} sha256=${driftReport.expected} installed normalized sha256=${skill.normalizedHash}. Review the body-free owner with clio-coder library recipes ${reviewName} --kind skill --json; if managed, preview clio-coder library update <owner-ref> --dry-run --json with --user or --project for that copy before replacing local changes. A loose skill has no Library update target.`
 			: null;
 	const body = [
 		...(driftWarning !== null ? [driftWarning] : []),
@@ -679,6 +678,9 @@ function runSkillsScope(
 			metadata: skill.metadata,
 			...(skill.provenance ? { provenance: skill.provenance } : {}),
 			...(drift !== null ? { drift } : {}),
+			...(driftReport?.verdict === "mismatch"
+				? { driftExpectedHash: driftReport.expected, driftInstalledHash: skill.normalizedHash }
+				: {}),
 			...(tree ? { tree } : {}),
 		},
 		reservation,
