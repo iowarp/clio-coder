@@ -1,4 +1,4 @@
-import { deepStrictEqual, strictEqual } from "node:assert/strict";
+import { deepStrictEqual, strictEqual, throws } from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -20,7 +20,10 @@ import {
 	stagePendingGateDecision,
 	verifyGateDecisionArtifact,
 } from "../../src/domains/dispatch/gate-decisions.js";
-import { createFleetPlacementResolver } from "../../src/domains/dispatch/placement.js";
+import {
+	createFleetPlacementPreviewResolver,
+	createFleetPlacementResolver,
+} from "../../src/domains/dispatch/placement.js";
 import type { FleetRunRecord } from "../../src/domains/dispatch/state.js";
 import { resolveSshTargetLifecycle, type WorkerTransport } from "../../src/domains/dispatch/transport.js";
 import { createFleetRegistry } from "../../src/domains/scheduling/cluster.js";
@@ -121,6 +124,24 @@ describe("fleet lifecycle boundary", () => {
 		deepStrictEqual(rerouted?.reroutes, [
 			{ attempt: 1, fromNode: "blade", toNode: "mini", reason: "node classified dead" },
 		]);
+	});
+
+	it("explains when a node pin names a profile in execution and preview", () => {
+		const settings = structuredClone(DEFAULT_SETTINGS);
+		settings.fleet.profiles["worker-luna"] = {
+			target: "openai-codex",
+			model: "gpt-6-luna",
+			thinkingLevel: "off",
+		};
+		const deps = { getSettings: () => settings, fleet: undefined };
+		const request = { agentId: "coder", executionRole: "builder", task: "build", node: "worker-luna" } as const;
+		for (const place of [createFleetPlacementResolver(deps), createFleetPlacementPreviewResolver(deps)]) {
+			throws(
+				() => place(request),
+				/unknown fleet node 'worker-luna'; 'worker-luna' is a fleet profile.*Select the profile target\/model/u,
+			);
+			throws(() => place({ ...request, node: "not-configured" }), /unknown fleet node 'not-configured'$/u);
+		}
 	});
 
 	it("persists an operator drain and clears it explicitly", async () => {

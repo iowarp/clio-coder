@@ -47,6 +47,16 @@ function admissionError(reason: string): Error {
 	return new Error(`dispatch: admission denied: ${reason}`);
 }
 
+function unknownNodeError(requested: string, settings: Readonly<ClioSettings> | undefined): Error {
+	if (Object.hasOwn(settings?.fleet?.profiles ?? {}, requested)) {
+		return admissionError(
+			`unknown fleet node '${requested}'; '${requested}' is a fleet profile. ` +
+				"The dispatch node field takes 'local' or a fleet.nodes id. Select the profile target/model in dispatch, or use --agent-profile in the CLI.",
+		);
+	}
+	return admissionError(`unknown fleet node '${requested}'`);
+}
+
 /**
  * Fill the placement target into reroute hops the retry path left open
  * (fromNode recorded at requeue time, toNode known only at placement).
@@ -113,7 +123,7 @@ export function createFleetPlacementResolver(
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return localPlacement();
 			const node = nodes.find((entry) => entry.id === requested);
-			if (!node) throw admissionError(`unknown fleet node '${requested}'`);
+			if (!node) throw unknownNodeError(requested, settings);
 			if (fleet === undefined) throw admissionError(`fleet registry unavailable; cannot place on node '${requested}'`);
 			const snapshot = fleet.get(node.id);
 			if (snapshot && snapshot.state !== "online") {
@@ -173,7 +183,7 @@ export function createFleetPlacementPreviewResolver(
 		if (requested !== null) {
 			if (requested === LOCAL_NODE_ID) return local();
 			const node = nodes.find((entry) => entry.id === requested);
-			if (!node) throw admissionError(`unknown fleet node '${requested}'`);
+			if (!node) throw unknownNodeError(requested, settings);
 			if (fleet === undefined) throw admissionError(`fleet registry unavailable; cannot place on node '${requested}'`);
 			const snapshot = fleet.get(node.id);
 			if (snapshot && snapshot.state !== "online") {
