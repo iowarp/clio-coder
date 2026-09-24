@@ -90,8 +90,8 @@ export const evidenceTool: ToolSpec = {
 						details: { code: "evidence_foreign", artifactAbsent: false },
 					};
 				}
-				const evidenceId =
-					existing?.evidenceId ?? (await buildEvidence({ dataDir, stateDir: clioStateDir(), sessionId })).evidenceId;
+				const overview = existing ?? (await buildEvidence({ dataDir, stateDir: clioStateDir(), sessionId })).overview;
+				const evidenceId = overview.evidenceId;
 				const { evidenceInventorySnapshot } = await import("../domains/evidence/inventory.js");
 				const inventory = await evidenceInventorySnapshot(
 					Date.now,
@@ -103,7 +103,23 @@ export const evidenceTool: ToolSpec = {
 				);
 				const artifact = inventory.artifacts[0];
 				if (artifact === undefined) throw new Error(`session summary unavailable: ${evidenceId}`);
-				return boundedResult({ version: 1, sessionId, artifact });
+				const { readSessionEntriesForId } = await import("../domains/session/index.js");
+				const { filterEntriesToActivePath } = await import("../domains/session/tree/active-path.js");
+				const { foldTaskBoard, taskBoardCounts } = await import("../domains/session/task-board.js");
+				const session = await readSessionEntriesForId(clioStateDir(), sessionId);
+				const board = session.missing
+					? null
+					: foldTaskBoard(filterEntriesToActivePath(session.entries, session.leafTurnId));
+				return boundedResult({
+					version: 1,
+					sessionId,
+					artifact,
+					taskBoard: board === null ? null : taskBoardCounts(board),
+					toolEvents: {
+						total: overview.totals.toolEvents,
+						linked: overview.totals.linkedToolEvents,
+					},
+				});
 			}
 			const id = mode === "inspect" ? args.id : args.runId;
 			if (typeof id !== "string" || id.length === 0) {

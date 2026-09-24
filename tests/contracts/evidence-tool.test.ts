@@ -19,6 +19,16 @@ type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 		artifacts: { evidenceId: string }[];
 		truncated: boolean;
 		gateDecisions: unknown[];
+		taskBoard: {
+			total: number;
+			completed: number;
+			active: number;
+			pending: number;
+			blocked: number;
+			cancelled: number;
+			open: number;
+		} | null;
+		toolEvents: { total: number; linked: number };
 	};
 
 /** The fixture run's own session: evidence reads are scoped to the session and project asking. */
@@ -125,6 +135,53 @@ describe("evidence tool", () => {
 	it("returns a bounded redacted summary only to the owning session", async () => {
 		const secret = `ghp_${"A".repeat(24)}`;
 		await fixture(false, false, `Check token ${secret}`);
+		const sessionDir = join(clioStateDir(), "sessions", "fixture-cwd", FIXTURE_SESSION);
+		await mkdir(sessionDir, { recursive: true });
+		await writeFile(
+			join(sessionDir, "current.jsonl"),
+			`${[
+				{
+					type: "session",
+					version: 5,
+					id: FIXTURE_SESSION,
+					timestamp: "2026-09-05T00:00:00.000Z",
+					cwd: "/workspace",
+				},
+				{
+					kind: "taskLedger",
+					turnId: "task-1",
+					parentTurnId: null,
+					timestamp: "2026-09-05T00:00:01.000Z",
+					goals: [{ id: "board", title: "Private board", status: "active" }],
+					subgoals: [
+						{ id: "t1", title: `Secret task ${secret}`, status: "completed" },
+						{ id: "t2", title: "Next task", status: "pending" },
+					],
+					activeRunIds: [],
+					requiredValidationEvidence: [
+						{
+							id: "t1.evidence",
+							description: `Completion note ${secret}`,
+							status: "passed",
+							observedAt: "2026-09-05T00:00:02.000Z",
+						},
+					],
+				},
+				{
+					kind: "bashExecution",
+					turnId: "bash-1",
+					parentTurnId: null,
+					timestamp: "2026-09-05T00:00:03.000Z",
+					command: `printf ${secret}`,
+					output: "done",
+					exitCode: 0,
+					cancelled: false,
+					truncated: false,
+				},
+			]
+				.map((row) => JSON.stringify(row))
+				.join("\n")}\n`,
+		);
 		const request = { mode: "session", sessionId: FIXTURE_SESSION };
 		const foreign = await evidence(request, "session-2");
 		strictEqual(foreign.kind, "error");
@@ -144,11 +201,33 @@ describe("evidence tool", () => {
 		strictEqual(summary.sessionId, FIXTURE_SESSION);
 		strictEqual(summary.artifact.sourceKind, "session");
 		strictEqual(summary.artifact.totals.runs, 1);
+		deepStrictEqual(summary.taskBoard, {
+			total: 2,
+			completed: 1,
+			active: 0,
+			pending: 1,
+			blocked: 0,
+			cancelled: 0,
+			open: 1,
+		});
+		const oldOverview = JSON.parse(await readFile(bundlePath, "utf8"));
+		deepStrictEqual(summary.toolEvents, {
+			total: oldOverview.totals.toolEvents,
+			linked: oldOverview.totals.linkedToolEvents,
+		});
+		ok(summary.toolEvents.linked >= 1);
 		ok(summary.artifact.redactionCount > 0);
 		ok(!own.output.includes(secret));
 		ok(!("tasks" in summary.artifact));
 		ok(!("cwds" in summary.artifact));
+		ok(!("validation" in summary));
 		ok(Buffer.byteLength(own.output, "utf8") <= EVIDENCE_TOOL_MAX_BYTES);
+		delete oldOverview.totals.toolEvents;
+		delete oldOverview.totals.linkedToolEvents;
+		await writeFile(bundlePath, JSON.stringify(oldOverview));
+		const oldBundle = output(await evidence(request));
+		deepStrictEqual(oldBundle.toolEvents, { total: 0, linked: 0 });
+		deepStrictEqual(oldBundle.taskBoard, summary.taskBoard);
 	});
 
 	it("reports absent artifacts distinctly from invalid ids and incomplete bundles", async () => {
