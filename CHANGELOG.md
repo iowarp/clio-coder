@@ -4,6 +4,14 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.5.4 - Unreleased
 
+### Session and project isolation
+
+- Dispatch runs, receipts, and batches now carry their owning Clio session. A sibling session in the same project can inspect a run, while collect, steer, nudge, and gate recovery act only on runs owned by the current session.
+- Resuming a session restores its own model and thinking level without changing global settings. Model changes in the picker and keyboard cycle stay in the current session until explicitly saved.
+- `/model` and `/settings` can save edits for the current project in `.clio-coder/settings.local.yaml`. Existing project settings must be trusted; an explicit save approves only the exact bytes Clio wrote.
+- `fleet status`, `inspect`, `decisions`, and `view` now show the current project by default. `--all` enables machine-wide inspection, including run and fleet root IDs from other projects.
+- The footer's first-pass success and accountability figures now count only runs owned by the current session.
+
 ### Transcript presentation
 
 - **Two-cell gutter grammar**: Unified gutter across all output styles (`✓ Done`, `✗ Failed`, `⊘ Cancelled`, `▸` observation, `⚙` worker, `§` skills, `ℹ`/`⚠`/`✗`/`↻` notices) with hanging indents for wrapped rows.
