@@ -22,6 +22,7 @@ import { type SkillActivation, skillActivationFromToolDetails } from "../core/sk
 import type { ToolName } from "../core/tool-names.js";
 import { ToolNames } from "../core/tool-names.js";
 import { type TurnConstraints, turnAllowsTool } from "../core/turn-constraints.js";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import type { ResolvedRuntimeTarget } from "../domains/providers/index.js";
 import { type CallActionDescriptor, describeCallAction } from "../domains/safety/call-target.js";
 import type { SafetyDecision } from "../domains/safety/contract.js";
@@ -501,7 +502,10 @@ export function resolveSessionTools(
 	if (constraints) input.turnConstraints = constraints;
 	input.invokeOptions = () => ({
 		...invokeOptions?.(),
-		supportsImages: runtime.runtimeResolution.capabilityDecisions.vision === true,
+		supportsImages: acceptsImageInput({
+			runtimeId: runtime.runtimeResolution.runtime.id,
+			vision: runtime.runtimeResolution.capabilityDecisions.vision,
+		}),
 	});
 	if (telemetry) input.telemetry = telemetry;
 	return resolveAgentTools(input).filter(
