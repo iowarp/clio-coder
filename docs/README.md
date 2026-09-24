@@ -18,10 +18,7 @@ The reference is organized by purpose:
 ```text
 docs/
 ├── guide/          Operator and user workflows
-├── architecture/   Runtime contracts and design
-├── process/        Development, validation, and release practice
-├── gui/            Opt-in alpha graphical application
-└── history/        Dated records that are not current guidance
+└── architecture/   Runtime contracts and design
 ```
 
 For the v0.5.0 launch, Clio Coder is first and foremost a terminal coding agent.
@@ -29,7 +26,7 @@ An opt-in alpha graphical application (`clio-coder gui`, and `clio-coder docs` f
 reading these pages in a browser) is available for power users; nothing starts it
 unless you run it, and it claims no parity with the terminal. Start with the [release notes](../CHANGELOG.md),
 [configuration and target guide](guide/configuration-and-targets.md), and
-[pre-release checks](process/release-cut-checklist.md#working-tree-pre-release-checks).
+[pre-release checks](../CONTRIBUTING.md#validation-reference).
 The current guides describe the working implementation, not a promise that the
 candidate has been published or that every server capability has been tested.
 
@@ -69,6 +66,7 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Runtime discovery, model capabilities, local overlays, and field notes | [Model Catalog](architecture/model-catalog.md) |
 | Argonne ALCF Sophia and Metis targets over Globus OAuth | [ALCF Provider](architecture/alcf-provider.md) |
 | Project handbooks, context windows, accounting, compaction, and indexing | [Context Engine](architecture/context-engine.md) |
+| Choose compaction and recover interrupted handoffs | [Context Continuity](guide/context-continuity.md) |
 | Non-destructive working-set eviction, markers, and recall | [Context Working Set](architecture/context-working-set.md) |
 | Session ledgers, branches, checkpoints, resume, and recovery | [Session Lifecycle](architecture/session-lifecycle.md) |
 | Proactive task memory, interventions, and handoffs | [Proactive Memory](guide/proactive-memory.md) |
@@ -80,7 +78,6 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Executable harness capabilities | [Harness Extensions](guide/harness-extensions.md) |
 | TUI layout, responsive behavior, colors, and interaction rules | [TUI Design](architecture/tui-design.md) |
 | Terminal panes beside a session and the files pane: install, keys, settings, doctor, troubleshooting | [Panes and the Files Pane](guide/panes-and-files.md) |
-| The opt-in alpha graphical application and browser docs | [GUI Reference](gui/README.md) |
 
 ## Safety, evidence, and reproducibility
 
@@ -91,8 +88,6 @@ interactive session. `clio-coder doctor` is a read-only installation check;
 | Durable evidence bundles, findings, and reviewed memory | [Evidence and Memory](architecture/evidence-and-memory.md) |
 | SQLite trace mirror, schemas, cursors, and rebuildability | [Trace Store](architecture/trace-store.md) |
 | Where generated files live and who should read them | [Artifact Placement](architecture/artifact-placement.md) |
-| Evidence-aware Git role trailers and managed-hook safety | [Git Commit Provenance](process/git-commit-provenance.md) |
-| Advisory scientific validation contracts and HPC assumptions | [Scientific Validation](process/scientific-validation.md) |
 | Versioned artifact schemas and migration policy | [Artifact Versions](architecture/artifact-versions.md) |
 
 Receipts establish what Clio observed and did. They do not replace domain
@@ -104,7 +99,6 @@ validation, reference data, or human scientific judgment.
 | --- | --- |
 | Built-in worker recipes, discovery, frontmatter, and admission | [Built-in Agents](guide/built-in-agents.md) |
 | Local and multi-node fleet execution, placement, gates, and receipts | [Fleet Dispatch](guide/fleet-dispatch.md) |
-| An executable multi-node walkthrough with a reviewer gate | [Fleet Demo Runbook](process/fleet-demo-runbook.md) |
 | Capacity leases, heartbeats, locks, and node drain control | [Capacity and Scheduling](architecture/capacity-and-scheduling.md) |
 | Worker process protocol, watchdogs, steering, and exit mapping | [Worker Dispatch Mechanics](architecture/worker-dispatch-mechanics.md) |
 | Worker context inheritance, fork, and splice modes | [Worker Context](architecture/worker-context.md) |
@@ -124,13 +118,6 @@ validation, reference data, or human scientific judgment.
 | Process exit codes, stdout/stderr rules, JSONL, and `--help` contracts | [Exit Codes and Output](guide/exit-codes-and-output.md) |
 | Environment overrides, directory controls, and debug toggles | [Environment Variables](guide/environment-variables.md) |
 
-## Measurement
-
-| Topic | Guide |
-| --- | --- |
-| Correct render, startup, import-graph, and streaming measurements | [Performance Methodology](process/performance-methodology.md) |
-| Falsifiable change manifests and `clio-coder evolve` | [Evolution](process/evolution.md) |
-
 ## Architecture and contributing
 
 | Topic | Guide |
@@ -138,17 +125,8 @@ validation, reference data, or human scientific judgment.
 | Source layout, compile-time boundaries, domain loading, and runtime flow | [Architecture](architecture/architecture.md) |
 | Package kinds, catalog resolution, integrity, and trust | [Library Architecture](architecture/library.md) |
 | Pi framework boundary and Clio-owned policy | [Pi Boundary](architecture/pi-boundary.md) |
-| Documentation style and source-alignment workflow | [Documentation Guide](process/documentation-guide.md) |
-| Source-to-guide ownership map | [Documentation Coverage](process/documentation-coverage.md) |
-| Issue-driven development and release workflow | [Development Pipeline](process/development-pipeline.md) |
 | Clock, duration, timestamp, and ordering conventions | [Time Conventions](architecture/time-conventions.md) |
 | Core terms mapped to source concepts | [Glossary](guide/glossary.md) |
-
-The [configuration-knob audit](history/config-knobs-audit.md) is a dated historical
-inventory, not the current settings reference. The
-[release-cut checklist](process/release-cut-checklist.md) is the current release
-procedure; the earlier [v0.4.1 release-cut checklist](history/release-cut-checklist.md)
-is retained as release engineering history.
 
 ## Developer quick start
 
@@ -187,13 +165,13 @@ the architecture guide and `CONTRIBUTING.md` are the public starting points.
 
 Clio's documentation ships with Clio, not with your workspace. Everything below
 resolves from the installed package root (`resolvePackageRoot()`,
-`src/core/package-root.ts`), never from the directory you launched in.
+[package-root.ts](../src/core/package-root.ts)), never from the directory you launched in.
 
 **What is indexed.** Every `.md` file under `<package-root>/docs/`, plus root
 `README.md`, `CHANGELOG.md` and `CLIO-CODER.md` when each exists. The npm package
 ships the Markdown reference used by both the application and agents. A root `CLIO-CODER.md` is indexed
 only when present, such as in a source checkout. The index is deterministic and needs no
-network or embedding service (`src/tools/context/docs-engine.ts`).
+network or embedding service ([docs-engine.ts](../src/tools/context/docs-engine.ts)).
 
 **Searching and then reading.** `gateway(op="call", capability="clio_docs", args={query: "…"})` returns
 section headings with citations such as `docs/architecture/safety-model.md`.
@@ -202,7 +180,7 @@ workspace is someone else's repository: reading `docs/architecture/safety-model.
 as a plain relative path reads *that project's* `docs/`, if it has one. Clio's
 own system prompt names the installed documentation directory as
 `{CLIO_DOCS_PATH}`, substituted as `join(packageRoot, "docs")`
-(`src/domains/prompts/compiler.ts`). Resolve the citation against the **package
+([compiler.ts](../src/domains/prompts/compiler.ts)). Resolve the citation against the **package
 root**, which is that directory's parent. So when the prompt names `/pkg/docs`:
 
 - `docs/guide/foo.md` → `/pkg/docs/guide/foo.md`
@@ -245,7 +223,7 @@ and repository readers. Opening documentation does not require a model connectio
 
 ## Writing documentation
 
-Follow [Documentation Guide](process/documentation-guide.md). In particular:
+Use the [contributor guidance](../CONTRIBUTING.md) when updating these pages. In particular:
 
 - Verify commands against the built binary rather than copying an old example.
 - Use current, canonical settings paths; describe legacy names only in a
