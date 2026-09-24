@@ -880,6 +880,19 @@ function evaluateBashPolicy(
 			execRecognition: "unrecognized",
 		};
 	}
+	// Whitespace checking inspects the diff. Recognize only these standalone
+	// spellings: keeping this outside
+	// BUILTIN_ALLOWLIST prevents a new no-prompt path through && chains.
+	if (/^git[ \t]+diff(?:[ \t]+--cached)?[ \t]+--check$/.test(recognitionCommand)) {
+		return {
+			kind: "allow",
+			ruleId: "builtin:git-diff-check",
+			reasonCode: "builtin:git-diff-check",
+			reasons: ["matched built-in whitespace inspection 'builtin:git-diff-check'"],
+			policySource: "builtin-command-allowlist",
+			execRecognition: "recognized",
+		};
+	}
 	const chain = recognizeCommandChain(recognitionCommand, callCwd, workspaceRoot, policy);
 	if (chain !== null) {
 		const chainReasons = [
