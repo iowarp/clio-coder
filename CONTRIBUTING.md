@@ -48,7 +48,7 @@ See [architecture invariants](docs/architecture/architecture.md#boundary-invaria
 
 ## Submitting Changes
 
-1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`).
+1. Work on a focused branch (`fix/session-resume` or `feat/cli-inspect`) cut from the current version branch, such as `v054` for 0.5.4. Open the pull request against that branch. `main` moves only when a release ships.
 2. Add focused contract tests exercising the changed behavior.
 3. Keep commit subjects concise conventional commits (max 72 characters):
    ```text
