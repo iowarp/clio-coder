@@ -111,7 +111,9 @@ it("keeps a coded failure's remedy, which long messages state after the violatio
 		"tests/boundaries/check-seams.ts",
 		`export function checkSeams(file: string) {\n\treturn [\`rule6: ${"$"}{file} value-imports a module that resolves into the protected render trees of the instant shell; importers outside the Stage 0 closure may enter those trees ${remedy} (tests/boundaries/check-seams.ts).\`];\n}\n`,
 	);
-	const seams = collectEnforcementInventory(root).checkFiles.find((file) => file.path === "tests/boundaries/check-seams.ts");
+	const seams = collectEnforcementInventory(root).checkFiles.find(
+		(file) => file.path === "tests/boundaries/check-seams.ts",
+	);
 	ok(seams?.failures[0]?.includes("STAGE0_SEAMS"), JSON.stringify(seams?.failures));
 });
 
