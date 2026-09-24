@@ -44,6 +44,12 @@ export {
 } from "./import.js";
 export { discoverInteropInventory } from "./inventory.js";
 export { InteropManifest } from "./manifest.js";
+export {
+	type PeerModeCapability,
+	type PeerModeContext,
+	type PeerModeStatus,
+	peerModeCapabilities,
+} from "./peer-modes.js";
 export { foreignAgentDirs, INTEROP_AGENT_KINDS, interopAgentKind, interopSourceRank } from "./registry.js";
 export { readInteropReport, writeInteropReport } from "./state.js";
 export type {

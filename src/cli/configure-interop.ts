@@ -27,10 +27,10 @@ function describe(proposal: InteropProposal): string {
 		renderProposalEntry(proposal),
 		"",
 		`projectContext stays ${INHERITED_PROJECT_CONTEXT}: this agent receives your task text, never the project projection.`,
-		`toolGovernance is clio-coder-policy: its tool calls are gated by Clio safety.`,
+		`toolGovernance is clio-coder-policy: Clio mediates permission requests the ACP peer reports; the peer's own tool surface is not fully observable.`,
 	];
 	if (proposal.needsNetworkInstall) {
-		lines.push(`The ACP adapter is not installed locally; npx fetches it the first time you delegate.`);
+		lines.push(`The pinned ACP adapter is not verified locally; npx may fetch it the first time you delegate.`);
 	}
 	return `${lines.join("\n")}\n`;
 }
@@ -38,7 +38,7 @@ function describe(proposal: InteropProposal): string {
 /** What one row of the picker says about an agent, beyond its name. */
 function proposalHint(proposal: InteropProposal): string {
 	const command = [proposal.entry.command, ...(proposal.entry.args ?? [])].join(" ");
-	return proposal.needsNetworkInstall ? `${command} (npx fetches the adapter on first use)` : command;
+	return proposal.needsNetworkInstall ? `${command} (npx may fetch the pinned adapter on first use)` : command;
 }
 
 export interface InteropReviewStreams {
@@ -103,7 +103,7 @@ export async function reviewInteropAgents(io: InteropReviewIo): Promise<InteropR
 		const presenter = io.presenter ?? createLifecyclePresenter({ stream: streams.out });
 		const rail = io.rail ?? railPrefix(presenter.isPlain());
 		presenter.note(
-			`Clio found ${proposals.length === 1 ? "one coding agent" : `${proposals.length} coding agents`} it can delegate to. A peer receives your task text and never the project projection, and its tool calls are gated by Clio safety.`,
+			`Clio found ${proposals.length === 1 ? "one coding agent" : `${proposals.length} coding agents`} it can delegate to. A peer receives your task text and never the project projection. Clio mediates permission requests the peer reports, but cannot observe every peer tool call.`,
 		);
 		const result = await promptMultiSelect<InteropAgentId>({
 			heading: ["", chalk.bold("Delegate to any of these?")],

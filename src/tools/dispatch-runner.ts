@@ -519,6 +519,18 @@ function formatDispatchOutput(
 				run.integrity.ok && receipt.routeDecision !== undefined && receipt.routingIntent !== undefined
 					? ` route_decision=${receipt.routeDecision.decisionHash} route_mode=${receipt.routeDecision.mode}`
 					: "";
+			const external = receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined;
+			const changedPaths = receipt.worktree?.changedPaths ?? receipt.checkoutChanges?.changedPaths ?? [];
+			const changedSuffix =
+				receipt.worktree || receipt.checkoutChanges
+					? ` changed=${JSON.stringify(changedPaths.slice(0, 20))}${changedPaths.length > 20 ? `(+${changedPaths.length - 20} more)` : ""}`
+					: "";
+			const placementSuffix =
+				!run.integrity.ok || !external
+					? ""
+					: receipt.worktree
+						? ` placement=worktree cwd=${JSON.stringify(receipt.worktree.path)} branch=${JSON.stringify(receipt.worktree.branch)} apply=${receipt.worktree.apply} diff=${receipt.worktree.diffHash}${changedSuffix}`
+						: ` placement=current cwd=${JSON.stringify(receipt.reproducibility?.cwd ?? "unknown")}${changedSuffix}${receipt.checkoutChanges ? " change_attribution=observed-delta" : ""}`;
 			// The sealed receipt is authoritative. Live summaries remain useful for
 			// monitoring but can contain transient tool-use prose and never override
 			// a missing, partial, or integrity-invalid durable answer.
@@ -534,7 +546,7 @@ function formatDispatchOutput(
 						? "(no receipt-sealed assistant text captured)"
 						: "(worker text withheld because receipt integrity failed)";
 			return [
-				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}`,
+				`- ${stepLabel}${receipt.runId} agent=${receipt.agentId} exit=${receipt.exitCode} target=${receipt.targetId} model=${receipt.wireModelId} tokens=${receipt.tokenCount} receipt=${receiptPath ?? "n/a"}${evidenceSuffix}${outcomeSuffix}${noteSuffix}${failure}${provenance}${routingSuffix}${placementSuffix}`,
 				`  ${workerTextLabel(trustStatus)}`,
 				...output.split("\n").map((line) => `  ${line}`),
 				...workerTextNonEvidenceNotices(receipt, trustStatus, answerText).map((notice) => `  ${notice}`),
@@ -608,6 +620,19 @@ function dispatchDetails(
 				trust: summarizeTrustStatus(trustStatus),
 				...(receipt.outcome !== undefined && receipt.outcome !== "succeeded"
 					? { outcome: receipt.outcome, outcomeDetail: receipt.outcomeDetail ?? null }
+					: {}),
+				...(integrity.ok && (receipt.runtimeKind === "subprocess" || receipt.delegation !== undefined)
+					? {
+							placement: receipt.worktree
+								? { mode: "worktree" as const, ...receipt.worktree }
+								: {
+										mode: "current" as const,
+										cwd: receipt.reproducibility?.cwd ?? null,
+										...(receipt.checkoutChanges
+											? { changedPaths: receipt.checkoutChanges.changedPaths, attribution: receipt.checkoutChanges.attribution }
+											: {}),
+									},
+						}
 					: {}),
 				...(provenance.pipeline !== undefined ? { pipeline: provenance.pipeline } : {}),
 				...(provenance.personaOverride !== undefined ? { personaOverride: provenance.personaOverride } : {}),

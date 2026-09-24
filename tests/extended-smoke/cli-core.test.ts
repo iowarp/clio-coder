@@ -118,7 +118,7 @@ describe("CLI targets use role selection", { concurrency: false }, () => {
 			version: 2,
 			targets: [{ id: "blade-gateway", runtime: "litellm", url: endpoint, defaultModel }],
 			chat: { target: "blade-gateway", model: defaultModel, thinkingLevel: "medium" },
-			fleet: { default: { target: "blade-gateway", model: "mini/ornith1.5-35b-moe", thinkingLevel: "low" } },
+			fleet: { default: { target: "blade-gateway", model: "mini/ornith1.5-35b-moe-q4km", thinkingLevel: "low" } },
 			context: { memory: { target: "blade-gateway", model: "zbook/ornith-1.5-35b-a3b" } },
 		};
 		writeFileSync(path, JSON.stringify(initial));

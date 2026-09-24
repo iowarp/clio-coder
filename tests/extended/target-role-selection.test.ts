@@ -11,7 +11,7 @@ function settings(): ClioSettings {
 	];
 	value.chat.target = "blade-gateway";
 	value.chat.model = "dynamo/qwen3.8-27b";
-	value.fleet.default = { target: "blade-gateway", model: "mini/ornith1.5-35b-moe", thinkingLevel: "low" };
+	value.fleet.default = { target: "blade-gateway", model: "mini/ornith1.5-35b-moe-q4km", thinkingLevel: "low" };
 	value.context.memory.target = "blade-gateway";
 	value.context.memory.model = "zbook/ornith-1.5-35b-a3b";
 	return value;

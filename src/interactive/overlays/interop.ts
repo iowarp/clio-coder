@@ -1,3 +1,4 @@
+import { readSettings } from "../../core/config.js";
 import type { InteropAgentId, InteropContract, InteropProposal, InteropReport } from "../../domains/interop/index.js";
 import {
 	type AdoptionKind,
@@ -5,6 +6,8 @@ import {
 	detectInteropAgents,
 	INHERITED_PROJECT_CONTEXT,
 	type InteropAdoptionPlan,
+	interopAgentKind,
+	peerModeCapabilities,
 	planInteropAdoption,
 	renderProposalEntry,
 } from "../../domains/interop/index.js";
@@ -26,6 +29,7 @@ export interface InteropOverlayDeps {
 	report: () => InteropReport | null;
 	proposals: () => ReadonlyArray<InteropProposal>;
 	configured: () => ReadonlyArray<{ id: string; command: string; args: ReadonlyArray<string> }>;
+	paneAvailable?: boolean | null;
 	accept: (kind: InteropAgentId) => void;
 	decline: (kind: InteropAgentId) => void;
 	onClose: () => void;
@@ -71,10 +75,10 @@ function planLines(proposal: InteropProposal): string[] {
 		...renderProposalEntry(proposal).split("\n"),
 		"```",
 		`**projectContext:** ${INHERITED_PROJECT_CONTEXT} (inherited; the peer receives your task text, never the project projection)`,
-		"**toolGovernance:** clio-coder-policy (its tool calls are gated by Clio safety)",
+		"**toolGovernance:** clio-coder-policy (Clio mediates permission requests the ACP peer reports; its own tools may not be fully visible)",
 	];
 	if (proposal.needsNetworkInstall) {
-		lines.push("**Adapter:** not installed locally; npx fetches it the first time you delegate");
+		lines.push("**Adapter:** pinned bridge not verified locally; npx may fetch it on first use");
 	}
 	lines.push("Press `a` to connect it, `d` to decline.");
 	return lines;
@@ -83,21 +87,49 @@ function planLines(proposal: InteropProposal): string[] {
 function buildItems(deps: InteropOverlayDeps): ListOverlayItem[] {
 	const theme = clioTheme();
 	const report = deps.report();
+	const configuredAgents = deps.configured();
+	const configuredTargets = readSettings().targets;
+	const modeLines = (id: InteropAgentId): string[] => {
+		const kind = interopAgentKind(id);
+		const record = report?.agents.find((agent) => agent.kind === id);
+		if (!kind || !record) return [];
+		return peerModeCapabilities(kind, record, {
+			configuredAcp: configuredAgents.some((agent) => agent.id === id),
+			configuredTargets,
+			paneAvailable: deps.paneAvailable ?? null,
+		}).flatMap((mode) => [`**${mode.mode}: ${mode.status}** — ${mode.reason}`, `Next: ${mode.setupAction}`]);
+	};
 	const items: ListOverlayItem[] = deps.proposals().map((proposal) => ({
 		id: proposal.kind,
 		label: `${proposal.entry.id.padEnd(16)}${[proposal.entry.command, ...proposal.entry.args].join(" ")}`,
 		meta: theme.fg("warning", "not configured"),
 		group: GROUP_DETECTED,
-		detail: () => planLines(proposal),
+		detail: () => [...planLines(proposal), ...modeLines(proposal.kind)],
 	}));
-	for (const agent of deps.configured()) {
+	for (const record of report?.agents ?? []) {
+		const kind = interopAgentKind(record.kind);
+		if (!kind || kind.binaryNames.length === 0) continue;
+		if (items.some((item) => item.id === record.kind)) continue;
+		items.push({
+			id: `peer:${record.kind}`,
+			label: `${kind.label.padEnd(16)}${record.version ?? record.binary ?? "version unknown"}`,
+			meta: theme.fg("dim", record.presence),
+			group: GROUP_DETECTED,
+			detail: () => [
+				`# ${kind.label}`,
+				`Presence: ${record.presence}; version: ${record.version ?? "unknown"}`,
+				...modeLines(record.kind),
+			],
+		});
+	}
+	for (const agent of configuredAgents) {
 		const command = [agent.command, ...agent.args].join(" ");
 		items.push({
 			id: `configured:${agent.id}`,
 			label: `${agent.id.padEnd(16)}${command}`,
 			meta: theme.fg("success", "connected"),
 			group: GROUP_CONFIGURED,
-			detail: () => [`# ${agent.id}`, `**Command:** \`${command}\``, `Delegate with \`/delegate ${agent.id} <task>\`.`],
+			detail: () => [`# ${agent.id}`, `**ACP command:** \`${command}\``, ...modeLines(agent.id as InteropAgentId)],
 		});
 	}
 	for (const agent of report?.agents ?? []) {
@@ -142,8 +174,16 @@ export function openInteropOverlay(tui: TUI, ctx: SlashCommandContext, onClose: 
 	let filter: AdoptionKind | undefined;
 	const surface = ctx.interop;
 	const deps: InteropOverlayDeps = surface
-		? { ...surface, onClose }
-		: { report: () => null, proposals: () => [], configured: () => [], accept: () => {}, decline: () => {}, onClose };
+		? { ...surface, paneAvailable: ctx.panes?.status().available ?? false, onClose }
+		: {
+				report: () => null,
+				proposals: () => [],
+				configured: () => [],
+				accept: () => {},
+				decline: () => {},
+				paneAvailable: false,
+				onClose,
+			};
 	const originalReport = deps.report;
 	deps.report = () => fresh ?? originalReport();
 	const close = (): void => {

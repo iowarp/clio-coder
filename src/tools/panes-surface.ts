@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 import { ToolNames } from "../core/tool-names.js";
-import { PANES_PRESET_IDS } from "../domains/mux/operations.js";
+import { PANE_PEER_IDS, PANES_PRESET_IDS } from "../domains/mux/operations.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolSurface } from "./lazy-tool.js";
 
@@ -15,9 +15,9 @@ import type { ToolSurface } from "./lazy-tool.js";
 export const panesToolSurface = {
 	name: ToolNames.Panes,
 	description:
-		"Manage the terminal panes Clio owns beside this session: show focuses a dispatched run's viewer pane, open starts a fixed utility preset (files, logs, or shell; never an arbitrary command) or focuses it when it is already open, close removes a Clio-created pane, list reports the inventory and the pane layer's health.",
+		"Manage Clio-owned panes: show a run, open a utility preset, handoff to a fixed coding CLI, close, or list. A handoff is interactive and has no managed receipt.",
 	parameters: Type.Object({
-		action: StringEnum(["show", "open", "close", "list"], { description: "Pane action." }),
+		action: StringEnum(["show", "open", "handoff", "close", "list"], { description: "Pane action." }),
 		target: Type.Optional(
 			Type.String({
 				description:
@@ -25,6 +25,9 @@ export const panesToolSurface = {
 			}),
 		),
 		preset: Type.Optional(StringEnum([...PANES_PRESET_IDS], { description: "open: which utility pane to start." })),
+		peer: Type.Optional(StringEnum([...PANE_PEER_IDS], { description: "handoff: coding peer." })),
+		brief: Type.Optional(Type.String({ description: "handoff: task brief, max 8192 bytes." })),
+		cwd: Type.Optional(Type.String({ description: "handoff: selected workspace path." })),
 	}),
 	baseActionClass: "read",
 	executionMode: "sequential",

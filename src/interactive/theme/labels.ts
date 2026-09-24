@@ -56,17 +56,25 @@ export function releaseSpaces(row: string): string {
 	return row.replaceAll(HELD_SPACE, " ");
 }
 
+/**
+ * Cells an abbreviated wire id may use. Gateway routes carry their quant as a
+ * suffix (`mini/nemotron3-30b-moe-omni-udq4km`, 34 cells), and at 24 cells
+ * `mini/qwopus3.6-27b-dense-q4km` and `mini/qwopus3.8-27b-dense-q4km` read as the
+ * same model. 34 keeps every mini route whole and no two blade routes alike.
+ */
+export const MODEL_ID_LABEL_WIDTH = 34;
+
 /** Compact wire identity with explicit omission and its version/quantization suffix. */
 export function abbreviateModelId(modelId: string | null | undefined): string {
 	const value = sanitizeCallTargetText(modelId ?? "");
 	if (value.length === 0) return "model";
-	if (visibleWidth(value) <= 24) return value;
+	if (visibleWidth(value) <= MODEL_ID_LABEL_WIDTH) return value;
 	const slash = value.lastIndexOf("/");
-	if (slash < 0) return fitIdentityLabel(value, 24);
+	if (slash < 0) return fitIdentityLabel(value, MODEL_ID_LABEL_WIDTH);
 	const placement = value.slice(0, slash);
 	const model = value.slice(slash + 1);
-	const modelBudget = Math.min(18, visibleWidth(model));
-	return `${fitIdentityPrefix(placement, 23 - modelBudget)}/${fitIdentityLabel(model, modelBudget)}`;
+	const modelBudget = Math.min(MODEL_ID_LABEL_WIDTH - 6, visibleWidth(model));
+	return `${fitIdentityPrefix(placement, MODEL_ID_LABEL_WIDTH - 1 - modelBudget)}/${fitIdentityLabel(model, modelBudget)}`;
 }
 
 /** Raw route fields stay separate until the surface knows its terminal-cell budget. */
