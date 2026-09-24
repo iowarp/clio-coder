@@ -49,6 +49,7 @@ export const ToolNames = {
 	Limitation: "limitation",
 	Decide: "decide",
 	Consult: "consult",
+	Vision: "vision",
 	// RETRIEVE
 	WebRead: "web_read",
 	WebFetch: "web_fetch",
