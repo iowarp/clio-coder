@@ -22,12 +22,12 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 
 | ID | Priority | Scope and acceptance | Status | Owner |
 | --- | --- | --- | --- | --- |
-| H1 | P0 | Task `done` notes remain claims, not `passed` validation. A note saying `14/16 failed; rerun pending` cannot project as passed; existing ledgers still refold; verified checks remain distinguishable. | queued | implementer + tester |
+| H1 | P0 | Task `done` notes remain claims, not `passed` validation. A note saying `14/16 failed; rerun pending` cannot project as passed; existing ledgers still refold; verified checks remain distinguishable. | in progress | implementer + tester |
 | H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | queued | implementer + tester |
 | H3 | P1 | `monitor collect` can poll again after observed batch progress (for example pending 2 to 1); unchanged rapid polling remains bounded. | queued | implementer + tester |
-| H4 | P2 | Unknown `node` that matches a configured profile returns an actionable profile/node remedy, while invalid placement stays denied. | queued | implementer + tester |
+| H4 | P2 | Unknown `node` that matches a configured profile returns an actionable profile/node remedy, while invalid placement stays denied. | done; 9/9 fleet lifecycle tests pass | orchestrator |
 | H5 | P2 | A provenance worker can retrieve a bounded, redacted summary for its own session ID; foreign sessions are denied distinctly from absent sessions. | queued | implementer + tester |
-| H6 | P3 | Align prompt manifest version documentation with source version 3. | queued | orchestrator |
+| H6 | P3 | Align prompt manifest version documentation with source version 3. | done; diff checked | orchestrator |
 
 ## Deferred leads
 
@@ -57,3 +57,17 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
   `v055` branch advanced from `4a98d59b` to `1cebdaf7` while isolation was
   being set up; the sprint branch starts at the latter commit. No work was
   applied to the shared checkout.
+- 2026-09-24: Started two Clio Coder agents in Herdr panes `wT:p25` and
+  `wT:p26`, but their current chat route selected the homelab `blade` target.
+  Interrupted both before edits and exited those instances. Reused the same
+  two panes for Codex agents pinned to `gpt-6-sol`, named
+  `harness_impl_cloud_0924` and `harness_review_cloud_0924`. H1 source ownership is
+  `src/domains/session/task-board.ts` and `src/tools/tasks.ts` for the
+  implementer; H1 test ownership is `tests/extended/task-board-done.test.ts`
+  for the tester. Both operate only in the sprint worktree.
+- 2026-09-24: Updated `docs/architecture/artifact-versions.md` from prompt
+  manifest version 2 to version 3 and checked the diff with `git diff --check`.
+- 2026-09-24: Implemented H4 in placement admission and preview. A node pin
+  matching a configured profile now names the distinction and valid route;
+  unknown names still deny. `pnpm run test:file -- tests/extended/fleet-lifecycle.test.ts`
+  passed 9/9.
