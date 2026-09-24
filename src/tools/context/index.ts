@@ -673,6 +673,7 @@ function runSkillsScope(
 			disableModelInvocation: skill.disableModelInvocation,
 			...(skill.allowedTools ? { allowedTools: skill.allowedTools } : {}),
 			...(skill.disallowedTools ? { disallowedTools: skill.disallowedTools } : {}),
+			...(pendingPolicy?.allowListAdvisory === true ? { allowListAdvisory: true } : {}),
 			diagnostics: skill.diagnostics.map((d) => d.message),
 			metadata: skill.metadata,
 			...(skill.provenance ? { provenance: skill.provenance } : {}),

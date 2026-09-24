@@ -10,12 +10,40 @@ import { runMiddlewareRegistrations } from "../../src/domains/middleware/runtime
 import { buildOpenTasksMessage, createTaskNudgeRegistration } from "../../src/domains/middleware/task-nudge.js";
 import { createMiddlewareToolChoiceControl } from "../../src/domains/middleware/tool-choice-control.js";
 import type { MiddlewareEffect, MiddlewareHookInput } from "../../src/domains/middleware/types.js";
+import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../../src/domains/safety/finish-contract.js";
 import type { SessionContract } from "../../src/domains/session/contract.js";
 import type { TaskBoardSnapshot } from "../../src/domains/session/task-board.js";
 import { createEngineAgent } from "../../src/engine/agent.js";
 import type { AgentMessage } from "../../src/engine/types.js";
 import { createTurnMiddleware } from "../../src/interactive/turn-middleware.js";
 import { type AgentRuntime, createTurnState } from "../../src/interactive/turn-state.js";
+
+test("normal finish advisory stays operator-facing without becoming a user reminder", async () => {
+	const footer: string[] = [];
+	const notices: string[] = [];
+	const runtime = {
+		wireModelId: "fixture",
+		runtimeId: "fixture",
+		runtimeResolution: {},
+		agent: { state: { tools: [], messages: [] } },
+	} as unknown as AgentRuntime;
+	const middleware = createTurnMiddleware({
+		state: createTurnState("off"),
+		middleware: {
+			runHook: () => ({
+				effects: [{ kind: "inject_reminder", message: FINISH_CONTRACT_ADVISORY_MESSAGE, severity: "warn" }],
+				ruleIds: [],
+			}),
+		} as unknown as MiddlewareContract,
+		middlewareToolChoice: createMiddlewareToolChoiceControl(),
+		emitNotice: (text) => notices.push(text),
+		emitFooterNotice: (_level, _text, key) => footer.push(key),
+	});
+	await middleware.fireTurnEnd(runtime, [], { toolCallId: "write-1", toolName: "write" });
+	strictEqual(middleware.flushPendingReminders(), "");
+	deepStrictEqual(notices, []);
+	deepStrictEqual(footer, ["finish.unverified"]);
+});
 
 test("empty failed and canceled turns reach memory observers without resuming foreground work", async () => {
 	for (const stopReason of ["error", "aborted"] as const) {

@@ -262,7 +262,7 @@ describe("smoke/real built binary boot", { concurrency: false }, () => {
 			writeFileSync(settingsPath, readFileSync(settingsPath, "utf8").replace("http://127.0.0.1:1234", endpoint));
 			const saved = readFileSync(settingsPath, "utf8");
 
-			const bogus = await run(["--autonomy", "yolo"], home.env);
+			const bogus = await run(["--autonomy", "unsupported"], home.env);
 			strictEqual(bogus.code, 2, bogus.output);
 			match(bogus.output, /--autonomy must be one of: capable\|yolo\|read-only\|suggest\|auto-edit\|full-auto/u);
 			const dropped = await run(["--autonomy", "suggest", "doctor"], home.env);

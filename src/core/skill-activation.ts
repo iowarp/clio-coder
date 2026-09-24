@@ -92,7 +92,9 @@ export interface PendingSkillToolPolicy {
 export function armedSkillSurface(policy: PendingSkillToolPolicy | undefined): PendingSkillToolPolicy | undefined {
 	if (!policy) return undefined;
 	const declared = [...policy.loadedSkillPolicies.entries()].filter(
-		([, declaration]) => (declaration.allowedTools?.length ?? 0) > 0 || (declaration.disallowedTools?.length ?? 0) > 0,
+		([, declaration]) =>
+			(policy.allowListAdvisory !== true && (declaration.allowedTools?.length ?? 0) > 0) ||
+			(declaration.disallowedTools?.length ?? 0) > 0,
 	);
 	if (declared.length === 0) return undefined;
 	return {
@@ -183,7 +185,8 @@ export function skillSurfaceChange(
 		state: names.length === 0 ? "cleared" : previous.length === 0 ? "armed" : "replaced",
 		names,
 		previous: [...previous],
-		allowedTools: unique(declarations.map((declaration) => declaration.allowedTools)),
+		allowedTools:
+			next?.allowListAdvisory === true ? [] : unique(declarations.map((declaration) => declaration.allowedTools)),
 		disallowedTools: unique(declarations.map((declaration) => declaration.disallowedTools)),
 	};
 }
