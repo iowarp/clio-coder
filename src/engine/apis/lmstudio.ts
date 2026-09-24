@@ -55,6 +55,8 @@ function metadata(model: Model<Api>): NonNullable<LmStudioModelMetadata["clioCod
 function targetForModel(model: Model<"openai-completions">): TargetDescriptor | null {
 	const info = metadata(model);
 	if (info?.runtimeId !== "lmstudio" || !model.baseUrl) return null;
+	const load = effectiveLmStudioLoad(info.lmstudio, model.id);
+	const lmstudio = info.lmstudio ? { ...info.lmstudio, ...(load ? { load } : {}) } : undefined;
 	return {
 		id: info.targetId,
 		runtime: "lmstudio",
@@ -62,21 +64,54 @@ function targetForModel(model: Model<"openai-completions">): TargetDescriptor | 
 		defaultModel: info.lmstudioDefaultModel ?? model.id,
 		...(model.headers ? { auth: { headers: model.headers } } : {}),
 		...(info.lifecycle ? { lifecycle: info.lifecycle } : {}),
-		...(info.lmstudio ? { lmstudio: info.lmstudio } : {}),
+		...(lmstudio ? { lmstudio } : {}),
 	};
 }
 
-function lmStudioLoadBody(
-	modelKey: string,
-	settings: NonNullable<NonNullable<TargetDescriptor["lmstudio"]>["load"]>,
-): Record<string, unknown> {
+type LmStudioLoad = NonNullable<NonNullable<TargetDescriptor["lmstudio"]>["load"]>;
+
+/** Each load profile field and the key LM Studio's load body and instance config use for it. */
+const LOAD_WIRE_KEYS = [
+	["contextLength", "context_length"],
+	["flashAttention", "flash_attention"],
+	["evalBatchSize", "eval_batch_size"],
+	["numExperts", "num_experts"],
+	["offloadKvCacheToGpu", "offload_kv_cache_to_gpu"],
+	["parallel", "parallel"],
+	["speculativeDraftMaxTokens", "speculative_draft_max_tokens"],
+] as const satisfies ReadonlyArray<readonly [keyof LmStudioLoad, string]>;
+
+/** The target's load profile with the selected model's override on top. */
+export function effectiveLmStudioLoad(
+	settings: TargetDescriptor["lmstudio"] | undefined,
+	modelId: string,
+): LmStudioLoad | undefined {
+	const merged = { ...(settings?.load ?? {}), ...(settings?.models?.[modelId]?.load ?? {}) };
+	return Object.keys(merged).length > 0 ? merged : undefined;
+}
+
+function lmStudioLoadBody(modelKey: string, settings: LmStudioLoad): Record<string, unknown> {
 	const body: Record<string, unknown> = { model: modelKey, echo_load_config: true };
-	if (settings.contextLength !== undefined) body.context_length = settings.contextLength;
-	if (settings.flashAttention !== undefined) body.flash_attention = settings.flashAttention;
-	if (settings.evalBatchSize !== undefined) body.eval_batch_size = settings.evalBatchSize;
-	if (settings.numExperts !== undefined) body.num_experts = settings.numExperts;
-	if (settings.offloadKvCacheToGpu !== undefined) body.offload_kv_cache_to_gpu = settings.offloadKvCacheToGpu;
+	for (const [field, wire] of LOAD_WIRE_KEYS) {
+		if (settings[field] !== undefined) body[wire] = settings[field];
+	}
 	return body;
+}
+
+/**
+ * Where a loaded instance's config differs from the load Clio would issue, as
+ * `key loaded to wanted` lines. A key the instance config does not report cannot be
+ * verified and counts as matching, so an unreported field never forces a reload loop.
+ */
+export function lmStudioLoadDrift(body: Record<string, unknown>, config: Readonly<Record<string, unknown>>): string[] {
+	const drift: string[] = [];
+	for (const [, wire] of LOAD_WIRE_KEYS) {
+		const wanted = body[wire];
+		const loaded = config[wire];
+		if (wanted === undefined || loaded === undefined || loaded === wanted) continue;
+		drift.push(`${wire} ${String(loaded)} to ${String(wanted)}`);
+	}
+	return drift;
 }
 
 async function post(
@@ -99,6 +134,18 @@ async function post(
 	if (!response.ok) throw new Error(response.error ?? `LM Studio ${path} returned HTTP ${response.status}`);
 	invalidateLmStudioCatalog(target);
 	return response.data;
+}
+
+/** Unload one instance whoever loaded it. Only a load-profile mismatch on a managed target reaches this. */
+async function unloadInstance(
+	target: TargetDescriptor,
+	targetKey: string,
+	instanceId: string,
+	apiKey: string | undefined,
+	signal: AbortSignal | undefined,
+): Promise<void> {
+	await post(target, "/api/v1/models/unload", { instance_id: instanceId }, apiKey, signal);
+	ownedInstances(targetKey).delete(instanceId);
 }
 
 async function unloadOwnedInstance(
@@ -148,7 +195,7 @@ function capToLoadedContext(model: Model<"openai-completions">, window: unknown)
  */
 const announcedResidencyFacts = new Set<string>();
 
-const emitResidencyNotice = declareRuntimeNoticeProducer("lmstudio-residency", ["co-resident", "stress"]);
+const emitResidencyNotice = declareRuntimeNoticeProducer("lmstudio-residency", ["co-resident", "stress", "swap"]);
 
 function emitResidencyNoticeOnce(key: string, notice: Parameters<typeof emitResidencyNotice>[0]): void {
 	if (announcedResidencyFacts.has(key)) return;
@@ -161,7 +208,7 @@ export async function ensureLmStudioResidency(
 	options: { apiKey?: string; signal?: AbortSignal } = {},
 ): Promise<string> {
 	const info = metadata(model);
-	const load = info?.lmstudio?.load;
+	const load = effectiveLmStudioLoad(info?.lmstudio, model.id);
 	if (
 		info?.runtimeId === "lmstudio" &&
 		model.baseUrl &&
@@ -234,15 +281,51 @@ async function ensureLmStudioResidencyUnlocked(
 			detail: { requestedModel: model.id, wireModel: resolution.wireModelId, peerTargets: peers },
 		});
 	}
-	capToLoadedContext(model, loadedContextLength(resolution.instance));
-	if (!explicitLoad || !load || resolution.instance) return resolution.wireModelId;
-	if (catalog.tier !== "0.4+") return resolution.wireModelId;
+	const keepLoaded = (): string => {
+		capToLoadedContext(model, loadedContextLength(resolution.instance));
+		return resolution.wireModelId;
+	};
+	if (!explicitLoad || !load || catalog.tier !== "0.4+") return keepLoaded();
 	const modelKey = resolution.model?.key ?? model.id;
 	let instances = catalog.models.flatMap((entry) =>
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
 	);
 	const targetKey = residencyTargetKey("lmstudio", target.url ?? model.baseUrl);
-	const contextLength = target.lmstudio?.load?.contextLength;
+	const contextLength = load.contextLength;
+	if (resolution.instance) {
+		// Another client's just-in-time load takes the server's GUI defaults. The operator's
+		// profile is the contract on a managed target, so a drifted instance is reloaded.
+		const wanted = lmStudioLoadBody(modelKey, load);
+		if (contextLength !== undefined) {
+			wanted.context_length = fitLoadContextLength({
+				requested: contextLength,
+				resident: instances,
+				keepModelId: modelKey,
+				ceiling: coResidentContextCeiling(),
+			}).contextLength;
+		}
+		const drift = lmStudioLoadDrift(wanted, resolution.instance.config);
+		if (drift.length === 0) return keepLoaded();
+		const stale = resolution.instance.id;
+		await unloadInstance(target, targetKey, stale, options.apiKey, options.signal);
+		instances = instances.filter((entry) => entry.identifier !== stale);
+		emitResidencyMutation({
+			targetKey,
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: modelKey,
+			operation: "evict",
+		});
+		emitResidencyNotice({
+			kind: "swap",
+			level: "info",
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: modelKey,
+			message: `reloading '${modelKey}' on target '${info.targetId}' to match its load profile: ${drift.join(", ")}`,
+			detail: { instance: stale, drift: drift.join("; ") },
+		});
+	}
 	const plan = await reconcileResidency({
 		targetKey,
 		targetId: info.targetId,
@@ -329,13 +412,7 @@ async function ensureLmStudioResidencyUnlocked(
 			// A rejected replacement must not leave an otherwise working server empty.
 			for (const entry of evicted) {
 				const restore: Record<string, unknown> = { model: entry.modelKey };
-				for (const key of [
-					"context_length",
-					"flash_attention",
-					"eval_batch_size",
-					"num_experts",
-					"offload_kv_cache_to_gpu",
-				]) {
+				for (const [, key] of LOAD_WIRE_KEYS) {
 					if (entry.instance.config[key] !== undefined) restore[key] = entry.instance.config[key];
 				}
 				try {
@@ -361,6 +438,131 @@ async function ensureLmStudioResidencyUnlocked(
 			throw retryError;
 		}
 	}
+}
+
+/** The LM Studio server and model key behind one LiteLLM route. */
+export interface GatewayLmStudioDeployment {
+	controlUrl: string;
+	modelKey: string;
+}
+
+/**
+ * Read the LM Studio deployment behind `alias` from a LiteLLM `/v1/model/info` body.
+ * Only a route with exactly one deployment that the gateway declares as
+ * `model_info.runtime: lm-studio` qualifies, the same deployment declaration the
+ * thinking controls rely on; a host name, port or alias is never taken as evidence.
+ */
+export function lmStudioDeploymentFromModelInfo(body: unknown, alias: string): GatewayLmStudioDeployment | null {
+	const data = (body as { data?: unknown } | null)?.data;
+	if (!Array.isArray(data)) return null;
+	const rows = data.filter(
+		(row): row is { litellm_params?: Record<string, unknown>; model_info?: Record<string, unknown> } =>
+			typeof row === "object" && row !== null && (row as { model_name?: unknown }).model_name === alias,
+	);
+	if (rows.length !== 1) return null;
+	const [row] = rows;
+	if (row?.model_info?.runtime !== "lm-studio") return null;
+	const apiBase = row.litellm_params?.api_base;
+	const upstream = row.litellm_params?.model;
+	if (typeof apiBase !== "string" || typeof upstream !== "string") return null;
+	// One LiteLLM provider prefix, never more: an LM Studio key may itself hold a slash (openai/gpt-oss-20b).
+	const modelKey = upstream.replace(/^(?:openai|lm_studio)\//u, "");
+	if (modelKey.length === 0) return null;
+	try {
+		const url = new URL(apiBase);
+		if (url.protocol !== "http:" && url.protocol !== "https:") return null;
+	} catch {
+		// An api_base that is not a URL names no server Clio could load on.
+		return null;
+	}
+	return { controlUrl: lmStudioRootUrl(apiBase), modelKey };
+}
+
+const GATEWAY_DEPLOYMENT_TTL_MS = 5 * 60_000;
+const gatewayDeployments = new Map<string, { at: number; deployment: GatewayLmStudioDeployment | null }>();
+
+async function gatewayLmStudioDeployment(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal },
+): Promise<GatewayLmStudioDeployment | null> {
+	if (!model.baseUrl) return null;
+	const root = lmStudioRootUrl(model.baseUrl);
+	const cacheKey = `${root}\u0000${model.id}`;
+	const cached = gatewayDeployments.get(cacheKey);
+	if (cached && Date.now() - cached.at < GATEWAY_DEPLOYMENT_TTL_MS) return cached.deployment;
+	const headers = new Headers(model.headers);
+	if (options.apiKey?.trim() && !headers.has("authorization"))
+		headers.set("authorization", `Bearer ${options.apiKey.trim()}`);
+	const response = await requestLmStudioJson(`${root}/v1/model/info`, { headers }, 5_000, options.signal);
+	// Detail metadata may be restricted to admin keys; without it the route stays gateway-owned.
+	const deployment = response.ok ? lmStudioDeploymentFromModelInfo(response.data, model.id) : null;
+	gatewayDeployments.set(cacheKey, { at: Date.now(), deployment });
+	return deployment;
+}
+
+/** The LM Studio control-plane model that residency runs against for a gateway route. */
+function gatewayControlModel(
+	model: Model<"openai-completions">,
+	deployment: GatewayLmStudioDeployment,
+	load: LmStudioLoad,
+): Model<"openai-completions"> {
+	const info = metadata(model);
+	const { headers: _gatewayHeaders, ...rest } = model;
+	// The gateway's credentials stay with the gateway; the LM Studio server gets none.
+	return {
+		...rest,
+		id: deployment.modelKey,
+		provider: "lmstudio",
+		baseUrl: `${deployment.controlUrl}/v1`,
+		clioCoder: {
+			targetId: info?.targetId ?? model.provider,
+			runtimeId: "lmstudio",
+			...(info?.lifecycle ? { lifecycle: info.lifecycle } : {}),
+			lmstudio: { load },
+		},
+	} as Model<"openai-completions">;
+}
+
+/** Whether a LiteLLM route carries an LM Studio load profile Clio may enforce. */
+export function gatewayLmStudioProfile(model: Model<Api>): LmStudioLoad | undefined {
+	const info = metadata(model);
+	if (info?.runtimeId !== "litellm" || !residencyManagedFor(info.lifecycle)) return undefined;
+	return effectiveLmStudioLoad(info.lmstudio, model.id);
+}
+
+/**
+ * Load a LiteLLM route's LM Studio model with the target's load profile before the
+ * request, on the LM Studio server the gateway names for that route. A route that is not
+ * a single declared LM Studio deployment, or a gateway that hides its detail metadata,
+ * stays gateway-owned and untouched. The request itself still goes to the gateway alias.
+ */
+export async function ensureGatewayLmStudioResidency(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal } = {},
+): Promise<void> {
+	const load = gatewayLmStudioProfile(model);
+	if (!load) return;
+	const deployment = await gatewayLmStudioDeployment(model, options);
+	if (!deployment) return;
+	const control = gatewayControlModel(model, deployment, load);
+	await ensureLmStudioResidency(control, options.signal ? { signal: options.signal } : {});
+	if (control.contextWindow > 0 && (model.contextWindow <= 0 || control.contextWindow < model.contextWindow)) {
+		model.contextWindow = control.contextWindow;
+	}
+}
+
+/** Resident model keys on the LM Studio server behind a gateway route, for the degraded-inference notice. */
+export async function listGatewayLmStudioResidentModels(
+	model: Model<"openai-completions">,
+	options: { apiKey?: string; signal?: AbortSignal } = {},
+): Promise<ResidentModelInfo[]> {
+	const load = gatewayLmStudioProfile(model);
+	const deployment = load ? await gatewayLmStudioDeployment(model, options) : null;
+	if (!load || !deployment) return [];
+	return listLmStudioResidentModels(
+		gatewayControlModel(model, deployment, load),
+		options.signal ? { signal: options.signal } : {},
+	);
 }
 
 /**

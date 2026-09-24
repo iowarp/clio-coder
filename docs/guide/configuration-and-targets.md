@@ -274,6 +274,31 @@ for the Sophia and Metis URLs and model IDs.
 
 Target-specific options are typed in [`target-descriptor.ts`](../../src/domains/providers/types/target-descriptor.ts). For example, `ollama.numCtx` is sent as the request context and is also the window Clio plans against; changing it can reload a model on a shared Ollama server. Runtime probing and loaded-model state are implemented in [`src/domains/providers/runtimes/local-native/`](../../src/domains/providers/runtimes/local-native/ollama.ts).
 
+### LM Studio load profile
+
+`lmstudio.load` states how Clio loads a model on an LM Studio server, so the server's GUI defaults stop deciding the context window, slot count or speculative draft. `lmstudio.models.<model id>.load` overrides fields for one model; the key is the model id selected on that target. Every field maps to the key LM Studio's `POST /api/v1/models/load` takes: `contextLength`, `parallel`, `flashAttention`, `speculativeDraftMaxTokens`, `evalBatchSize`, `numExperts` and `offloadKvCacheToGpu`. LM Studio's load reference does not list `parallel` or `speculative_draft_max_tokens`, but the server validates load keys strictly and applies both; this was measured on LM Studio serving Qwen3.8-27B and Qwopus3.8-27B-Flash with MTP heads.
+
+    targets:
+      - id: blade
+        runtime: litellm
+        url: http://gateway.example:4000
+        lmstudio:
+          load:
+            contextLength: 131072
+            parallel: 4
+            flashAttention: true
+            speculativeDraftMaxTokens: 2
+          models:
+            dynamo/qwen3.8-27b:
+              load:
+                contextLength: 65536
+
+Before a request, Clio loads the model with the profile when it is not resident. When it is resident with a different value for a field the profile sets, for example because another client's just-in-time load took the GUI defaults, Clio unloads that instance and loads it again, then prints one `reloading '<model>' ... to match its load profile` line. A field the loaded instance does not report is never treated as drifted. The profile is shipped and tested (`tests/contracts/lmstudio-load-profile.test.ts`) and applies on the next turn after the setting changes.
+
+It applies to a `lmstudio` target and to a `litellm` target. On a LiteLLM gateway, Clio reads `/v1/model/info` and acts only on a route with exactly one deployment that declares `model_info.runtime: lm-studio`; it loads on that deployment's `api_base` under the upstream model key and still sends the request to the gateway alias. Routes on other runtimes, gateways that hide detail metadata from the key, and targets without a profile stay observe-only, and `lifecycle: user-managed` disables every load and unload. The gateway credential is never sent to the LM Studio server. Loads and reloads are serialized across the orchestrator and its workers by the residency lock. Clio does not release an LM Studio model when it exits, so models loaded by separate runs stay resident together until LM Studio evicts them or they are unloaded.
+
+Sampling is per request and follows the model catalog; see [model-catalog.md](../architecture/model-catalog.md).
+
 Model-family quirks belong to the local model catalog, not the target descriptor. See [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) for current entries.
 
 ## Model listing and refresh

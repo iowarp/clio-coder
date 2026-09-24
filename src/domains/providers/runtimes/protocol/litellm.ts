@@ -372,7 +372,9 @@ const litellmRuntime: RuntimeDescriptor = {
 			// residency layer reads this to stay observe-only: the models behind an
 			// alias are the proxy's to load and evict, and a Clio stream that tried
 			// to manage them would be issuing load commands to a host that does not
-			// take them.
+			// take them. The one exception is an operator's `lmstudio.load` profile:
+			// Clio then loads on the LM Studio server the gateway declares for the
+			// route (engine/apis/lmstudio.ts), never on the gateway itself.
 			target: { ...target, gateway: true },
 			wireModelId,
 			kb,
