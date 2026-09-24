@@ -272,6 +272,8 @@ The registry table below lists the available interactive slash commands. On a ba
 
 The `/model` selector marks image-capable rows with `V` and spells out `image input yes` or `image input no` in the selected row's details. A completed `/model <pattern>` switch includes the same image-input state in its notice. The expanded dashboard's session capabilities always say `images yes` or `images no` for the active route. These states use the resolved deployment capability and are shipped and tested.
 
+When a session with earlier images moves to a text-only model, the next turn shows a warning. Clio replaces each historical image block with an explicit omission note in that model's request. The saved session keeps the original blocks, so switching back to a vision-capable model can use them again. This behavior is shipped and tested.
+
 ### Subscription quota and session usage
 
 `/usage` replaces `/cost`. There is no alias: `/cost` is no longer a command.

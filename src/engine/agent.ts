@@ -4,7 +4,9 @@ import {
 	createInitialSystemMessage,
 	toToolDeclaration,
 } from "@earendil-works/pi-ai";
+import { acceptsImageInput } from "../domains/providers/image-input.js";
 import { resolvedRequestContext } from "./context.js";
+import { omitImageBlocks } from "./image-context.js";
 /**
  * Thin wrapper over Clio's engine Agent class.
  *
@@ -177,8 +179,8 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 	// lifecycle fact and visible text as a host record instead, including on
 	// resume, without changing the durable stop reason or inventing tool results.
 	const convertToLlm = agent.convertToLlm.bind(agent);
-	agent.convertToLlm = async (messages) =>
-		(await convertToLlm(messages)).map((message) => {
+	agent.convertToLlm = async (messages) => {
+		const converted = (await convertToLlm(messages)).map((message) => {
 			if (message.role !== "assistant" || message.stopReason !== "aborted") return message;
 			const partial = message.content
 				.filter((block) => block.type === "text")
@@ -195,6 +197,8 @@ export function createEngineAgent(options: EngineAgentOptions = {}): EngineAgent
 						: "No visible assistant text was retained."),
 			};
 		});
+		return acceptsImageInput({ modelInput: agent.state.model.input }) ? converted : omitImageBlocks(converted);
+	};
 	return {
 		agent,
 		state: () => agent.state,

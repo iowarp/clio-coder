@@ -53,12 +53,14 @@ type WireMode = "partial" | "thinking" | "empty" | "success" | "failure" | "tool
 function transport(mode: WireMode) {
 	let calls = 0;
 	let aborted = 0;
+	const requestBodies: string[] = [];
 	let requestedResolve!: () => void;
 	const requested = new Promise<void>((resolve) => {
 		requestedResolve = resolve;
 	});
 	const fetch: typeof globalThis.fetch = async (_input, init) => {
 		calls += 1;
+		requestBodies.push(String(init?.body ?? ""));
 		requestedResolve();
 		if (mode === "failure")
 			return new Response(
@@ -106,7 +108,7 @@ function transport(mode: WireMode) {
 		});
 		return new Response(body, { headers: { "content-type": "text/event-stream" } });
 	};
-	return { fetch, requested, calls: () => calls, aborted: () => aborted };
+	return { fetch, requested, calls: () => calls, aborted: () => aborted, requestBodies: () => requestBodies };
 }
 
 for (const api of ["stream", "streamSimple"] as const) {
@@ -483,6 +485,35 @@ it("a text-only route refuses an image before the provider receives bytes", { ti
 		strictEqual(notices.length, 1);
 		match(notices[0] ?? "", /IMAGE_INPUT_UNSUPPORTED.*cancellation-fixture\/unknown-cancellation-model/u);
 		strictEqual(f.session.current(), null);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a text-only route omits historical images with a visible note before the next request", {
+	timeout: 15_000,
+}, async () => {
+	const f = fixture("success");
+	const image = { type: "image" as const, mimeType: "image/png", data: "HISTORICAL_IMAGE_SENTINEL" };
+	const priorTurn = {
+		role: "user" as const,
+		content: [{ type: "text" as const, text: "Earlier image" }, image],
+		timestamp: Date.now(),
+	};
+	try {
+		f.loop.resetForSession(null, [priorTurn]);
+		await f.loop.submit("Continue");
+		strictEqual(f.wire().calls(), 1);
+		const body = f.wire().requestBodies()[0] ?? "";
+		doesNotMatch(body, /HISTORICAL_IMAGE_SENTINEL/u);
+		match(body, /Image omitted/u);
+		ok(f.events.some((event) => event.type === "notice" && /1 earlier image.*omitted.*text-only/u.test(event.text)));
+		await f.loop.submit("Continue again");
+		strictEqual(
+			f.events.filter((event) => event.type === "notice" && /earlier image.*omitted.*text-only/u.test(event.text)).length,
+			1,
+		);
+		match(JSON.stringify(priorTurn), /HISTORICAL_IMAGE_SENTINEL/u);
 	} finally {
 		await f.close();
 	}

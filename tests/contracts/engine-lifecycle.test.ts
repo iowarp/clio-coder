@@ -326,6 +326,42 @@ describe("engine lifecycle: prepareNextTurn runs only before another assistant t
 });
 
 describe("engine lifecycle: transcript resets wait for the run to settle", () => {
+	it("keeps saved images but replaces them with a note after switching to a text-only model", async () => {
+		const provider = scriptedProvider([finalTurn("seen"), finalTurn("continued")], []);
+		const image = { type: "image" as const, mimeType: "image/png", data: "SENTINEL_IMAGE_BYTES" };
+		const { agent } = createEngineAgent({
+			streamFn: provider.streamFn,
+			initialState: { model: { ...MODEL, input: ["text", "image"] }, messages: [] },
+		});
+		await agent.prompt("Inspect this image", [image]);
+		ok(JSON.stringify(provider.calls[0]).includes(image.data));
+		const savedImageTurn = agent.state.messages.find((message) => message.role === "user");
+		ok(savedImageTurn);
+
+		agent.state.model = { ...agent.state.model, id: "text-only", input: ["text"] };
+		await agent.prompt("Continue without the image");
+		const textOnlyRequest = JSON.stringify(provider.calls[1]);
+		ok(!textOnlyRequest.includes(image.data));
+		ok(textOnlyRequest.includes("Image omitted"));
+		ok(
+			JSON.stringify(savedImageTurn).includes(image.data),
+			"the session retains the original image for a later vision model",
+		);
+
+		const toolReplay = await agent.convertToLlm([
+			{
+				role: "toolResult",
+				toolCallId: "image-tool",
+				toolName: "read",
+				content: [image],
+				isError: false,
+				timestamp: Date.now(),
+			},
+		]);
+		ok(!JSON.stringify(toolReplay).includes(image.data));
+		ok(JSON.stringify(toolReplay).includes("Image omitted"));
+	});
+
 	it("retains interruption evidence without replaying partial reasoning or tool calls", async () => {
 		const interrupted = assistant(
 			[
