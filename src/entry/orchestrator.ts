@@ -37,6 +37,7 @@ import {
 	seedSessionRouting,
 	setAtPath,
 } from "../core/session-routing.js";
+import { updateProjectLocalSettings } from "../core/settings-layers.js";
 import { getSharedBus } from "../core/shared-bus.js";
 import { isSkillActivation } from "../core/skill-activation.js";
 import { StartupTimer } from "../core/startup-timer.js";
@@ -2189,6 +2190,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		else updateSettings(mutator);
 		bumpSessionState();
 	};
+	const persistProjectMutation = (mutator: SettingsMutator): void => {
+		if (config?.updateProject) config.updateProject(mutator);
+		else updateProjectLocalSettings(process.cwd(), mutator);
+		bumpSessionState();
+	};
 	/**
 	 * Apply a routing change with one consistent scope: it takes effect in this
 	 * session immediately and writes through to saved settings as the default
@@ -2214,10 +2220,13 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * endpoint dies with the session that made it; "global" is the historical
 	 * write-through. Nothing on this path writes durably without a scope.
 	 */
-	const applyRoutingAtScope = (patch: RoutingPatch, scope: "session" | "global"): void => {
+	const applyRoutingAtScope = (patch: RoutingPatch, scope: "session" | "project" | "global"): void => {
 		if (scope === "global") {
 			updateSessionRouting(patch);
 			return;
+		}
+		if (scope === "project") {
+			persistProjectMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch));
 		}
 		applyRoutingPatch(sessionRouting, patch);
 		bumpSessionState();
@@ -2291,7 +2300,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * live, so the overlay only offers "global" for them; the file write is what
 	 * a later restart picks up.
 	 */
-	const commitSetting = (id: string, next: ClioSettings, scope: "session" | "global"): void => {
+	const commitSetting = (id: string, next: ClioSettings, scope: "session" | "project" | "global"): void => {
 		if (isRoutingPath(id)) {
 			// Build the patch from `next` keyed by the edited id, not by diffing
 			// against the live view: a prior session-only apply already moved the
@@ -2304,13 +2313,18 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 				updateSessionRouting(patch);
 				return;
 			}
-			applyRoutingPatch(sessionRouting, patch);
-			bumpSessionState();
+			applyRoutingAtScope(patch, scope);
 			return;
 		}
 		const value = getAtPath(next, id);
 		if (scope === "session") {
 			sessionOverrides.set(id, value);
+			bumpSessionState();
+			return;
+		}
+		if (scope === "project") {
+			persistProjectMutation((saved) => setAtPath(saved, id, value));
+			sessionOverrides.delete(id);
 			bumpSessionState();
 			return;
 		}

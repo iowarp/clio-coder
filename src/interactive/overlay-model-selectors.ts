@@ -28,7 +28,7 @@ export interface OverlayModelSelectorsDeps {
 	closeOverlay: () => void;
 	getSettings?: () => Readonly<ClioSettings>;
 	writeSettings?: (next: ClioSettings) => void;
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
 	onSelectModel?: (ref: { target: string; model: string }, scope: ModelScopeChoice) => void;
 	/** Applied with the chosen scope when the swap named a thinking level. */
 	onSetThinkingLevel?: (level: ThinkingLevel, scope?: ModelScopeChoice) => void;
@@ -121,7 +121,14 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 					deps.refreshFooter();
 					return;
 				}
-				deps.notify("success", scope === "global" ? `active and saved globally: ${swap}` : `active this session: ${swap}`);
+				deps.notify(
+					"success",
+					scope === "global"
+						? `active and saved globally: ${swap}`
+						: scope === "project"
+							? `active and saved for this project: ${swap}`
+							: `active this session: ${swap}`,
+				);
 				deps.refreshFooter();
 			},
 			onCancel: () => {
@@ -150,7 +157,7 @@ export function createOverlayModelSelectors(deps: OverlayModelSelectorsDeps): Ov
 			},
 			...(deps.commitSetting
 				? {
-						commitSetting: (id: string, next: ClioSettings, scope: "session" | "global") => {
+						commitSetting: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => {
 							deps.commitSetting?.(id, next, scope);
 							deps.refreshFooter();
 						},

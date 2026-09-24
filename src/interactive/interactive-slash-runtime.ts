@@ -115,9 +115,9 @@ export interface InteractiveSlashRuntimeDeps {
 	 * Slash commands use scope "session": they change the running session, and
 	 * making a value permanent stays the Settings overlay's explicit choice.
 	 */
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
-	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "global") => void;
-	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
+	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "project" | "global") => void;
+	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "project" | "global") => void;
 	onCompact?: (instructions: string | undefined) => Promise<void>;
 	onRecoverHandoff?: (handoffId: string, action: "reduce" | "deliver") => Promise<void>;
 	onInit?: (options: InitCommandOptions, io?: RunIo) => Promise<void>;

@@ -18,9 +18,9 @@
  * file degrades to the lower layers with an issue rather than throwing.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import {
 	applySettingsDelta,
 	type ClioSettings,
@@ -31,7 +31,14 @@ import {
 	updateSavedSettingsDocument,
 	validateSettings,
 } from "./config.js";
-import { captureProjectSurface, type ProjectSurfaceFile, projectSurfaceTrustNotice } from "./workspace-trust.js";
+import { safeResourceWrite } from "./safe-resource-write.js";
+import { withStateFileLockSync } from "./state-file-lock.js";
+import {
+	captureProjectSurface,
+	type ProjectSurfaceFile,
+	projectSurfaceTrustNotice,
+	recordProjectSurfaceTrust,
+} from "./workspace-trust.js";
 
 export type SettingsOrigin = "built-in" | "user" | "project" | "project.local" | "cli";
 
@@ -344,6 +351,87 @@ export function updateLayeredSettings(cwd: string, mutate: SettingsMutator): Cli
 	});
 	if (committed === null) throw new Error("layered settings update did not commit");
 	return committed;
+}
+
+/**
+ * Persist one explicit project-scoped settings mutation in the private local
+ * layer. The existing settings surface must already be trusted, unless both
+ * project files are absent. The exact bytes written are then approved so the
+ * setting remains active on the next read and boot; a later manual edit still
+ * invalidates that approval.
+ */
+export function updateProjectLocalSettings(cwd: string, mutate: SettingsMutator): ClioSettings {
+	const localFile = join(cwd, ".clio-coder", "settings.local.yaml");
+	const configDir = join(cwd, ".clio-coder");
+	try {
+		if (lstatSync(configDir).isSymbolicLink()) throw new Error(`project settings path is a symlink: ${configDir}`);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+	}
+	return withStateFileLockSync(localFile, () => {
+		for (const path of [configDir, join(configDir, "settings.yaml"), localFile]) {
+			try {
+				if (lstatSync(path).isSymbolicLink()) throw new Error(`project settings path is a symlink: ${path}`);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			}
+		}
+		const beforeSurface = captureProjectSurface(cwd, "settings");
+		const bothAbsent = beforeSurface.files.every((file) => file.text === null && file.error === undefined);
+		if (beforeSurface.verdict !== "trusted" && !bothAbsent) {
+			throw new Error(
+				`project settings are ${beforeSurface.verdict}; review with clio-coder config trust settings before saving`,
+			);
+		}
+		const current = readStrictLayeredSettings(cwd).settings;
+		const candidate = structuredClone(current);
+		const next = mutate(candidate) ?? candidate;
+		const validation = validateSettings(JSON.parse(JSON.stringify(next)));
+		if (validation.issues.length > 0) throw new SettingsValidationError(validation.issues);
+		const localIssues: SettingsLayerIssue[] = [];
+		const local = readRawLayer("project.local", localFile, localIssues, beforeSurface.files[1]?.text ?? undefined);
+		if (localIssues.length > 0 || (local.blob === undefined && beforeSurface.files[1]?.text !== null)) {
+			throw new Error("project local settings cannot be parsed for saving");
+		}
+		const saved = applySettingsDelta(local.blob ?? {}, current, validation.settings);
+		const credentialIssues: SettingsLayerIssue[] = [];
+		stripCredentials(saved, "project.local", "", credentialIssues);
+		if (credentialIssues.length > 0) {
+			throw new Error(`credentials are not allowed in project settings: ${credentialIssues[0]?.path}`);
+		}
+		const stackIssues: SettingsLayerIssue[] = [];
+		const prepared = prepareProjectLayers(cwd, stackIssues);
+		if (stackIssues.length > 0) throw new Error(`project settings cannot be saved: ${stackIssues[0]?.message}`);
+		const user = readRawLayer("user", settingsPath(), stackIssues);
+		const final = validateLayerStack(
+			user,
+			{
+				...prepared,
+				local: { origin: "project.local", path: localFile, blob: saved as Record<string, unknown> },
+			},
+			stackIssues,
+		).settings;
+		if (stackIssues.length > 0 || !deepEquals(final, validation.settings)) {
+			throw new Error("project settings save would not produce the requested effective settings");
+		}
+		const bytes = stringifyYaml(saved);
+		const teamBefore = beforeSurface.files[0]?.hash;
+		safeResourceWrite(localFile, bytes, { mode: 0o600 });
+		const afterSurface = captureProjectSurface(cwd, "settings");
+		if (
+			afterSurface.files[0]?.hash !== teamBefore ||
+			afterSurface.files[1]?.text !== bytes ||
+			!afterSurface.contentHash
+		) {
+			throw new Error("project settings changed while saving; review with clio-coder config trust settings");
+		}
+		recordProjectSurfaceTrust(cwd, "settings", afterSurface.contentHash);
+		const committed = readStrictLayeredSettings(cwd).settings;
+		if (!deepEquals(committed, validation.settings)) {
+			throw new Error("project settings save was overridden by another settings layer");
+		}
+		return committed;
+	});
 }
 
 /**

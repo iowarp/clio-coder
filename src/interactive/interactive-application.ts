@@ -224,14 +224,14 @@ export interface InteractiveDeps {
 	 * Scope "session" leaves settings.yaml alone; omitted means the historical
 	 * write-through, which is what the Shift+Tab cycle and `/thinking` still want.
 	 */
-	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "global") => void;
+	onSetThinkingLevel?: (level: ThinkingLevel, scope?: "session" | "project" | "global") => void;
 	/** Persist the next thinking level when Shift+Tab is pressed. */
 	onCycleThinking?: () => void;
 	/**
 	 * Apply the orchestrator target selected in /model at the scope the operator
 	 * chose. "session" routes this session only and never touches settings.yaml.
 	 */
-	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "global") => void;
+	onSelectModel?: (ref: { target: string; model: string }, scope: "session" | "project" | "global") => void;
 	/** Write handler the /settings overlay uses to persist cycled values. */
 	writeSettings?: (next: ClioSettings) => void;
 	/**
@@ -240,7 +240,7 @@ export interface InteractiveDeps {
 	 * only; "global" also persists it as the default. Absent ⇒ the overlay falls
 	 * back to writeSettings (global-only).
 	 */
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
 	/** Resume a past session id. Called from the /resume overlay. */
 	onResumeSession?: (sessionId: string) => void;
 	/** Start a fresh session. Called from /new. */

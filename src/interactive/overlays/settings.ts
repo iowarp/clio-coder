@@ -2968,7 +2968,7 @@ function renderSettingValue(
 export interface SettingsCenterOptions {
 	getBodyHeight: () => number;
 	prepareChange: (item: SettingsCenterItem, newValue: string) => SettingsChangePlan | null;
-	onApply: (plan: SettingsChangePlan, scope: "session" | "global") => void;
+	onApply: (plan: SettingsChangePlan, scope: "session" | "project" | "global") => void;
 	onCancel: () => void;
 	requestRender?: () => void;
 }
@@ -3408,17 +3408,19 @@ export class SettingsCenter implements Component {
 		const options = plan.sessionCapable
 			? [
 					{ value: "session", label: "Apply this session" },
+					{ value: "project", label: "Apply and save for this project" },
 					{ value: "global", label: "Apply and save globally" },
 					{ value: "cancel", label: "Cancel" },
 				]
 			: [
+					{ value: "project", label: "Apply and save for this project" },
 					{ value: "global", label: "Apply and save globally" },
 					{ value: "cancel", label: "Cancel" },
 				];
 		const list = new SettingsSelectList(options, options.length, DEFAULT_SELECT_THEME);
-		const finish = (chosen: "session" | "global" | "cancel"): void => {
+		const finish = (chosen: "session" | "project" | "global" | "cancel"): void => {
 			try {
-				if (chosen === "session" || chosen === "global") this.options.onApply(plan, chosen);
+				if (chosen === "session" || chosen === "project" || chosen === "global") this.options.onApply(plan, chosen);
 			} catch (error) {
 				const item = this.items.find((entry) => entry.id === plan.rowId);
 				if (item) this.showChangeError(item, plan.selectedValue, error);
@@ -3428,7 +3430,7 @@ export class SettingsCenter implements Component {
 			this.pendingValue = null;
 			this.options.requestRender?.();
 		};
-		list.onSelect = (opt) => finish(opt.value as "session" | "global" | "cancel");
+		list.onSelect = (opt) => finish(opt.value as "session" | "project" | "global" | "cancel");
 		list.onCancel = () => finish("cancel");
 		const title = (width: number): string => formatScopeConfirmTitle(plan, width);
 		const affectedBindings = plan.leaves
@@ -3889,7 +3891,7 @@ export interface OpenSettingsOverlayDeps {
 	 * and global saves through it; when absent it falls back to writeSettings
 	 * (every edit goes global, the legacy behavior).
 	 */
-	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "global") => void;
+	commitSetting?: (id: string, next: ClioSettings, scope: "session" | "project" | "global") => void;
 	notice?: (level: SettingsNoticeLevel, text: string, key?: string) => void;
 	onClose: () => void;
 	/** Open focused on this section (deep link from `/settings <section>`). */
@@ -3902,10 +3904,10 @@ export interface OpenSettingsOverlayDeps {
 	getInteropProposals?: BuildSettingItemsOptions["getInteropProposals"];
 }
 
-function formatSettingChangeNotice(id: string, value: string, scope: "session" | "global"): string {
+function formatSettingChangeNotice(id: string, value: string, scope: "session" | "project" | "global"): string {
 	const scopedRefs = id === "scope" ? parseScopedModelSelection(value) : null;
 	const displayValue = scopedRefs ? (scopedRefs.length > 0 ? scopedRefs.join(", ") : "(empty)") : value;
-	return `${id} set to ${displayValue} (${scope === "global" ? "saved globally" : "this session"})`;
+	return `${id} set to ${displayValue} (${scope === "global" ? "saved globally" : scope === "project" ? "saved for this project" : "this session"})`;
 }
 
 export interface SettingsOverlayHandle extends OverlayHandle {

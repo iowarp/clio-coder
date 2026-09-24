@@ -15,6 +15,8 @@ export interface ConfigContract {
 	 * Refreshes the in-memory snapshot and dispatches change events like set.
 	 */
 	update?(mutate: SettingsMutator): void;
+	/** Save an explicit edit to this workspace's trusted private settings layer. */
+	updateProject?(mutate: SettingsMutator): void;
 	onChange(
 		kind: ChangeKind,
 		listener: (payload: { diff: ConfigDiff; settings: Readonly<ClioSettings> }) => void,

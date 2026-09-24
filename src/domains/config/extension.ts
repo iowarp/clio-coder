@@ -3,7 +3,11 @@ import { type ClioSettings, formatSettingsFailure } from "../../core/config.js";
 import { writeDiagnostic } from "../../core/diagnostics.js";
 import type { DomainBundle, DomainContext, DomainExtension } from "../../core/domain-loader.js";
 import { setGitCommitAttributionEnabled } from "../../core/git-commit-attribution.js";
-import { readStrictLayeredSettings, updateLayeredSettings } from "../../core/settings-layers.js";
+import {
+	readStrictLayeredSettings,
+	updateLayeredSettings,
+	updateProjectLocalSettings,
+} from "../../core/settings-layers.js";
 import { assertAgentIdNamespace } from "./agent-namespace.js";
 import { type ChangeKind, diffSettings } from "./classify.js";
 import type { ConfigContract } from "./contract.js";
@@ -141,6 +145,21 @@ export function createConfigBundle(
 			// then validate it with the project layers before writing. In particular,
 			// a route may name a target supplied only by this workspace.
 			const normalized = updateLayeredSettings(process.cwd(), (candidate) => {
+				const next = mutate(candidate) ?? candidate;
+				assertAgentNamespace(next);
+				return next;
+			});
+			snapshot = normalized;
+			setGitCommitAttributionEnabled(normalized.integrations.git.commitAttribution);
+			const diff = diffSettings(previous, normalized);
+			if (diff.hotReload.length > 0) dispatch("hotReload", { diff, settings: normalized });
+			if (diff.nextTurn.length > 0) dispatch("nextTurn", { diff, settings: normalized });
+			if (diff.restartRequired.length > 0) dispatch("restartRequired", { diff, settings: normalized });
+		},
+		updateProject(mutate) {
+			if (!snapshot) throw new Error("config domain not started");
+			const previous = snapshot;
+			const normalized = updateProjectLocalSettings(process.cwd(), (candidate) => {
 				const next = mutate(candidate) ?? candidate;
 				assertAgentNamespace(next);
 				return next;
