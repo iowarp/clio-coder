@@ -12,9 +12,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
   qualify:
+    needs: ci
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v6
         with:
@@ -24,12 +28,6 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      - name: Install native search tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ripgrep fd-find
-          rg --version
-          fdfind --version
       - run: pnpm install --frozen-lockfile
       - name: Verify release version
         run: |
@@ -37,7 +35,7 @@ jobs:
           test "${GITHUB_REF_NAME#v}" = "$pkg"
       - name: Qualify exact package
         id: candidate
-        run: pnpm run ci:release
+        run: node scripts/release-candidate.mjs qualify-after-ci
       - uses: actions/upload-artifact@v4
         with:
           name: qualified-package
