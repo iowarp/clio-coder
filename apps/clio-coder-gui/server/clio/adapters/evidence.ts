@@ -1,4 +1,4 @@
-import { lstatSync, readdirSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { Value } from "typebox/value";
 import { clioDataDir } from "../../../../../src/core/xdg.js";
@@ -68,6 +68,35 @@ async function item(data: string, overview: Awaited<ReturnType<typeof inventory>
 		return { overview, verdict: "unknown" as const };
 	}
 }
+
+/** Only link-confidence counts cross into the GUI; event text stays in the artifact. */
+function attributionCounts(data: string, id: string) {
+	const counts = { exact: 0, bestEffort: 0, unclassified: 0 };
+	const path = containedFile(data, "evidence", id, "tool-events.jsonl");
+	if (!path) return counts;
+	for (const line of readFileSync(path, "utf8").split("\n")) {
+		if (!line.trim()) continue;
+		let row: unknown;
+		try {
+			row = JSON.parse(line);
+		} catch {
+			counts.unclassified += 1;
+			continue;
+		}
+		if (row === null || typeof row !== "object" || Array.isArray(row)) {
+			counts.unclassified += 1;
+			continue;
+		}
+		const event = row as { confidence?: unknown; runLink?: { confidence?: unknown } };
+		const direct = event.confidence;
+		const linked = event.runLink?.confidence;
+		const confidence = direct === undefined ? linked : linked === undefined || linked === direct ? direct : null;
+		if (confidence === "exact") counts.exact += 1;
+		else if (confidence === "best-effort") counts.bestEffort += 1;
+		else counts.unclassified += 1;
+	}
+	return counts;
+}
 export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 	const data = clioDataDir();
 	if (input.kind === "list" || input.kind === "built") {
@@ -87,7 +116,14 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 		return { items: await Promise.all(page.items.map((row) => item(data, row.overview))), nextCursor: page.nextCursor };
 	}
 	if (!Value.Check(Id, input.id)) throw new AppProblem("validation", "Invalid evidence identifier.");
-	guard(data, input.id, ["overview.json", "findings.json", "trust-status.json", "receipt.json", "gate-decisions.json"]);
+	guard(data, input.id, [
+		"overview.json",
+		"findings.json",
+		"trust-status.json",
+		"receipt.json",
+		"gate-decisions.json",
+		"tool-events.jsonl",
+	]);
 	if (!containedFile(data, "evidence", input.id, "overview.json"))
 		throw new AppProblem("not_found", "Evidence artifact was not found.");
 	try {
@@ -113,6 +149,7 @@ export async function readEvidence(input: EvidenceRequest): Promise<unknown> {
 					: [];
 			}),
 			gateDecisions: await loadEvidenceGateDecisions(data, input.id),
+			attribution: attributionCounts(data, input.id),
 		};
 	} catch {
 		throw new AppProblem(

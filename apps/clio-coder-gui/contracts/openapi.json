@@ -3278,7 +3278,16 @@
 							"application/json": {
 								"schema": {
 									"type": "object",
-									"required": ["overview", "verdict", "projection", "findings", "runs", "provenance", "gateDecisions"],
+									"required": [
+										"overview",
+										"verdict",
+										"projection",
+										"findings",
+										"runs",
+										"provenance",
+										"gateDecisions",
+										"attribution"
+									],
 									"properties": {
 										"overview": {
 											"type": "object",
@@ -3743,6 +3752,22 @@
 													"^.*$": {}
 												}
 											}
+										},
+										"attribution": {
+											"type": "object",
+											"required": ["exact", "bestEffort", "unclassified"],
+											"properties": {
+												"exact": {
+													"type": "number"
+												},
+												"bestEffort": {
+													"type": "number"
+												},
+												"unclassified": {
+													"type": "number"
+												}
+											},
+											"additionalProperties": false
 										}
 									},
 									"additionalProperties": false
