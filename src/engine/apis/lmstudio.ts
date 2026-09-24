@@ -10,6 +10,7 @@ import {
 	resolveLmStudioInstance,
 } from "../../domains/providers/runtimes/common/lmstudio-http.js";
 import type { TargetDescriptor } from "../../domains/providers/types/target-descriptor.js";
+import { clioOwnership, forgetClioLoad, leaseClioModel, recordClioLoad } from "./lmstudio-ownership.js";
 import { coResidentContextCeiling, fitLoadContextLength } from "./lmstudio-residency.js";
 import {
 	declareRuntimeNoticeProducer,
@@ -146,6 +147,7 @@ async function unloadInstance(
 ): Promise<void> {
 	await post(target, "/api/v1/models/unload", { instance_id: instanceId }, apiKey, signal);
 	ownedInstances(targetKey).delete(instanceId);
+	await forgetClioLoad(targetKey, instanceId);
 }
 
 async function unloadOwnedInstance(
@@ -159,6 +161,7 @@ async function unloadOwnedInstance(
 	if (!owned.has(instanceId)) return false;
 	await post(target, "/api/v1/models/unload", { instance_id: instanceId }, apiKey, signal);
 	owned.delete(instanceId);
+	await forgetClioLoad(targetKey, instanceId);
 	return true;
 }
 
@@ -176,7 +179,10 @@ async function loadOwnedInstance(
 	const instanceId = responseInstanceId(data);
 	if (instanceId) {
 		ownedInstances(targetKey).add(instanceId);
-		if (typeof body.model === "string") markClioLoaded(targetKey, body.model);
+		if (typeof body.model === "string") {
+			markClioLoaded(targetKey, body.model);
+			await recordClioLoad(targetKey, instanceId, body.model);
+		}
 	}
 	return instanceId;
 }
@@ -203,10 +209,23 @@ function emitResidencyNoticeOnce(key: string, notice: Parameters<typeof emitResi
 	emitResidencyNotice(notice);
 }
 
+/** The instance a request should name, and the lease that keeps other Clio processes from releasing it. */
+export interface LmStudioResidency {
+	wireModelId: string;
+	/** Ends this process's use of the model. Call it when the stream ends, success or not. */
+	release(): Promise<void>;
+}
+
+const NO_LEASE = (): Promise<void> => Promise.resolve();
+
+function unleased(wireModelId: string): LmStudioResidency {
+	return { wireModelId, release: NO_LEASE };
+}
+
 export async function ensureLmStudioResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},
-): Promise<string> {
+): Promise<LmStudioResidency> {
 	const info = metadata(model);
 	const load = effectiveLmStudioLoad(info?.lmstudio, model.id);
 	if (
@@ -229,11 +248,11 @@ export async function ensureLmStudioResidency(
 async function ensureLmStudioResidencyUnlocked(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},
-): Promise<string> {
+): Promise<LmStudioResidency> {
 	const target = targetForModel(model);
-	if (!target) return model.id;
+	if (!target) return unleased(model.id);
 	const info = metadata(model);
-	if (!info) return model.id;
+	if (!info) return unleased(model.id);
 	options.signal?.throwIfAborted();
 	const managed = residencyManagedFor(info.lifecycle);
 	const load = target.lmstudio?.load;
@@ -246,12 +265,12 @@ async function ensureLmStudioResidencyUnlocked(
 	};
 	const catalog = await listLmStudioModels(target, ctx, explicitLoad ? 0 : 3000);
 	if (!catalog.ok) {
-		if (!explicitLoad) return model.id;
+		if (!explicitLoad) return unleased(model.id);
 		throw new Error(catalog.error ?? "LM Studio model listing failed");
 	}
 	const resolution = resolveLmStudioInstance(target, catalog.models, model.id, info.lmstudioDefaultModel);
 	if (resolution.state === "unknown") {
-		if (!explicitLoad) return model.id;
+		if (!explicitLoad) return unleased(model.id);
 		const resident = catalog.models.flatMap((entry) => entry.loadedInstances.map((instance) => instance.id));
 		throw new Error(
 			`LM Studio target '${info.targetId}' does not advertise model '${model.id}'. Resident instances: ${resident.length > 0 ? resident.join(", ") : "none"}. Configure an explicit LM Studio load before requesting an unlisted model.`,
@@ -285,13 +304,19 @@ async function ensureLmStudioResidencyUnlocked(
 		capToLoadedContext(model, loadedContextLength(resolution.instance));
 		return resolution.wireModelId;
 	};
-	if (!explicitLoad || !load || catalog.tier !== "0.4+") return keepLoaded();
+	if (!explicitLoad || !load || catalog.tier !== "0.4+") return unleased(keepLoaded());
 	const modelKey = resolution.model?.key ?? model.id;
 	let instances = catalog.models.flatMap((entry) =>
 		entry.loadedInstances.map((instance) => ({ modelKey: entry.key, identifier: instance.id, instance })),
 	);
 	const targetKey = residencyTargetKey("lmstudio", target.url ?? model.baseUrl);
 	const contextLength = load.contextLength;
+	const ownership = await clioOwnership(targetKey);
+	// Taken while the residency lock is still held, so no other process releases the model in between.
+	const leased = async (wireModelId: string): Promise<LmStudioResidency> => ({
+		wireModelId,
+		release: await leaseClioModel(targetKey, modelKey),
+	});
 	if (resolution.instance) {
 		// Another client's just-in-time load takes the server's GUI defaults. The operator's
 		// profile is the contract on a managed target, so a drifted instance is reloaded.
@@ -305,7 +330,19 @@ async function ensureLmStudioResidencyUnlocked(
 			}).contextLength;
 		}
 		const drift = lmStudioLoadDrift(wanted, resolution.instance.config);
-		if (drift.length === 0) return keepLoaded();
+		if (drift.length === 0) return leased(keepLoaded());
+		if (ownership.leased.has(modelKey)) {
+			// Another Clio request is streaming on this instance; reloading would fail it.
+			emitResidencyNoticeOnce(`busy-drift|${info.targetId}|${modelKey}|${drift.join(",")}`, {
+				kind: "stress",
+				level: "warning",
+				targetId: info.targetId,
+				runtimeId: "lmstudio",
+				model: modelKey,
+				message: `'${modelKey}' on target '${info.targetId}' differs from its load profile (${drift.join(", ")}) but another Clio request is using it; Clio reloads it on a later turn once it is idle.`,
+			});
+			return leased(keepLoaded());
+		}
 		const stale = resolution.instance.id;
 		await unloadInstance(target, targetKey, stale, options.apiKey, options.signal);
 		instances = instances.filter((entry) => entry.identifier !== stale);
@@ -324,6 +361,37 @@ async function ensureLmStudioResidencyUnlocked(
 			model: modelKey,
 			message: `reloading '${modelKey}' on target '${info.targetId}' to match its load profile: ${drift.join(", ")}`,
 			detail: { instance: stale, drift: drift.join("; ") },
+		});
+	}
+	// LM Studio answers an oversubscribed card by offloading to CPU rather than refusing the load, so a
+	// co-resident load is never tested by a capacity error. Release what Clio loaded earlier on this
+	// server, from any Clio process, before loading; a model another Clio process is streaming on stays.
+	const residentIds = new Set(instances.map((entry) => entry.identifier));
+	for (const record of ownership.loads) {
+		if (!residentIds.has(record.instanceId)) await forgetClioLoad(targetKey, record.instanceId);
+	}
+	const recorded = new Set(ownership.loads.map((record) => record.instanceId));
+	for (const entry of [...instances]) {
+		if (entry.modelKey === modelKey || !recorded.has(entry.identifier) || ownership.leased.has(entry.modelKey)) {
+			continue;
+		}
+		await unloadInstance(target, targetKey, entry.identifier, options.apiKey, options.signal);
+		instances = instances.filter((resident) => resident.identifier !== entry.identifier);
+		emitResidencyMutation({
+			targetKey,
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: entry.modelKey,
+			operation: "evict",
+		});
+		emitResidencyNotice({
+			kind: "swap",
+			level: "info",
+			targetId: info.targetId,
+			runtimeId: "lmstudio",
+			model: entry.modelKey,
+			message: `unloading '${entry.modelKey}', which Clio loaded earlier on target '${info.targetId}', before loading '${modelKey}'`,
+			detail: { instance: entry.identifier, replacement: modelKey },
 		});
 	}
 	const plan = await reconcileResidency({
@@ -381,7 +449,7 @@ async function ensureLmStudioResidencyUnlocked(
 		return instanceId ?? model.id;
 	};
 	try {
-		return await loadAndReport();
+		return await leased(await loadAndReport());
 	} catch (error) {
 		options.signal?.throwIfAborted();
 		const message = error instanceof Error ? error.message : String(error);
@@ -407,7 +475,7 @@ async function ensureLmStudioResidencyUnlocked(
 				}
 			}
 			if (evicted.length === 0) throw error;
-			return await loadAndReport();
+			return await leased(await loadAndReport());
 		} catch (retryError) {
 			// A rejected replacement must not leave an otherwise working server empty.
 			for (const entry of evicted) {
@@ -539,16 +607,17 @@ export function gatewayLmStudioProfile(model: Model<Api>): LmStudioLoad | undefi
 export async function ensureGatewayLmStudioResidency(
 	model: Model<"openai-completions">,
 	options: { apiKey?: string; signal?: AbortSignal } = {},
-): Promise<void> {
+): Promise<() => Promise<void>> {
 	const load = gatewayLmStudioProfile(model);
-	if (!load) return;
+	if (!load) return NO_LEASE;
 	const deployment = await gatewayLmStudioDeployment(model, options);
-	if (!deployment) return;
+	if (!deployment) return NO_LEASE;
 	const control = gatewayControlModel(model, deployment, load);
-	await ensureLmStudioResidency(control, options.signal ? { signal: options.signal } : {});
+	const residency = await ensureLmStudioResidency(control, options.signal ? { signal: options.signal } : {});
 	if (control.contextWindow > 0 && (model.contextWindow <= 0 || control.contextWindow < model.contextWindow)) {
 		model.contextWindow = control.contextWindow;
 	}
+	return residency.release;
 }
 
 /** Resident model keys on the LM Studio server behind a gateway route, for the degraded-inference notice. */
