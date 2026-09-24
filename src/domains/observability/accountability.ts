@@ -11,6 +11,8 @@
  * contract surface this without re-running `buildEvidence`.
  */
 
+import { type DispatchOwner, dispatchOwnership } from "../dispatch/ownership.js";
+import { openLedger } from "../dispatch/state.js";
 import { type EvidenceTag, FAILURE_CAUSE_TAGS } from "../evidence/index.js";
 import { type EvidenceIndexRow, readEvidenceIndex } from "./evidence-index.js";
 
@@ -76,6 +78,16 @@ export function summarizeEvidenceIndex(rows: ReadonlyArray<EvidenceIndexRow>): A
  * `readEvidenceIndex`: a missing or corrupt index yields the empty summary
  * with zero counters and an empty failure-cause histogram.
  */
-export function readAccountabilitySummary(stateDir: string): AccountabilitySummary {
-	return summarizeEvidenceIndex(readEvidenceIndex(stateDir));
+export function readAccountabilitySummary(stateDir: string, owner?: DispatchOwner): AccountabilitySummary {
+	const rows = readEvidenceIndex(stateDir);
+	if (owner === undefined) return summarizeEvidenceIndex(rows);
+	if (owner.sessionId === null) return summarizeEvidenceIndex([]);
+	const ownership = dispatchOwnership(owner);
+	const ownedIds = new Set(
+		openLedger()
+			.list()
+			.filter((run) => run.sessionId !== null && ownership.ownsRun(run))
+			.map((run) => run.id),
+	);
+	return summarizeEvidenceIndex(rows.filter((row) => ownedIds.has(row.runId)));
 }

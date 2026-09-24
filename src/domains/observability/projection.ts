@@ -70,6 +70,8 @@ export interface ObservabilityProjection extends ObservabilityRunProjection {
 	subscribe(listener: (snapshot: ObservabilitySnapshot) => void): () => void;
 	/** Recompute after a direct session mutation (recordTokens/resetSession/safety counter). */
 	refresh(): void;
+	/** Re-read the current session's persisted evidence after a session switch. */
+	refreshAccountability(): void;
 	/** A forensic evidence build for `runId` has started. */
 	evidenceBuildStarted(runId: string): void;
 	/** The evidence build for `runId` failed; surface a bounded notice. */
@@ -753,6 +755,10 @@ export function createObservabilityProjection(bus: SafeEventBus, deps: Projectio
 			};
 		},
 		refresh() {
+			markChanged();
+		},
+		refreshAccountability() {
+			accountability = deps.readAccountability();
 			markChanged();
 		},
 		evidenceBuildStarted(runId) {
