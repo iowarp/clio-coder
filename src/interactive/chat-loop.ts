@@ -82,6 +82,7 @@ import { protectedArtifactStateFromSessionEntries } from "../domains/session/pro
 import { isRetryableErrorMessage, type RetrySettings } from "../domains/session/retry.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { createEngineAgent } from "../engine/agent.js";
+import { countImageBlocks } from "../engine/image-context.js";
 import { cwdHash } from "../engine/session.js";
 import type { AgentEvent, AgentMessage, ImageContent, Usage } from "../engine/types.js";
 import { resolveSessionTools } from "../tools/agent-tools.js";
@@ -710,6 +711,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const middlewareToolChoice = deps.middlewareToolChoice ?? createMiddlewareToolChoiceControl();
 	const state = createTurnState(deps.getSettings().chat.thinkingLevel ?? "off");
 	const toolStartTimes = new Map<string, number>();
+	let lastHistoricalImageNoticeKey: string | null = null;
 
 	const preparationListeners = new Set<(phase: TurnPreparationPhase) => void>();
 	/**
@@ -1459,13 +1461,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
 				return;
 			}
-			if (
-				options.images?.length &&
-				!acceptsImageInput({
-					runtimeId: agentRuntime.runtimeResolution.runtime.id,
-					vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
-				})
-			) {
+			const routeAcceptsImages = acceptsImageInput({
+				runtimeId: agentRuntime.runtimeResolution.runtime.id,
+				vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
+			});
+			if (options.images?.length && !routeAcceptsImages) {
 				const route = agentRuntime.runtimeResolution;
 				const choices = visionModelOptions();
 				const alternatives = choices.length
@@ -1479,6 +1479,20 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 					admission: { reason: "image-input-unsupported" },
 				});
 				return;
+			}
+			const historicalImages = countImageBlocks(agentRuntime.agent.state.messages);
+			if (!routeAcceptsImages && historicalImages > 0) {
+				const route = agentRuntime.runtimeResolution;
+				const key = `${route.targetId}/${route.wireModelId}:${historicalImages}`;
+				if (key !== lastHistoricalImageNoticeKey) {
+					lastHistoricalImageNoticeKey = key;
+					emitNotice(
+						`[Clio Coder] ${historicalImages} earlier image${historicalImages === 1 ? "" : "s"} omitted from requests to text-only ${route.targetId}/${route.wireModelId}. The original images remain in session history for a vision-capable model.`,
+						"warning",
+					);
+				}
+			} else {
+				lastHistoricalImageNoticeKey = null;
 			}
 
 			// 1. Accept the prompt: reset per-turn accounting, freeze the tool
@@ -1930,6 +1944,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 		whenPrewarmSettled: () => prewarm.settled(),
 
 		resetForSession(leafTurnId: string | null, replayMessages?: ReadonlyArray<AgentMessage>): void {
+			lastHistoricalImageNoticeKey = null;
 			continuity.cancel();
 			void continuity.pause();
 			state.currentTurnConstraints = undefined;
