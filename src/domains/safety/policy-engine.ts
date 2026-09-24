@@ -861,13 +861,18 @@ function evaluateBashPolicy(
 			execRecognition: "recognized",
 		};
 	}
+	// A repository script is unrecognized, never allowlisted: the autonomy
+	// mapping asks at suggest and auto-edit and runs it at full-auto, like any
+	// other unrecognized command. A net ask here fired at full-auto too, so
+	// every headless yolo run was denied its own typecheck and lint while
+	// `pnpm run lint` or `sh scripts/gate.sh` ran unasked.
 	if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(recognitionCommand))) {
 		return {
-			kind: posture === "confirmed" ? "allow" : "ask",
+			kind: "allow",
 			reasonCode: "project-script-confirm",
 			ruleId: "project-script-confirm",
 			reasons: [
-				"Repository-authored code requires one-shot confirmation or an operator-approved safety command declaration.",
+				"Repository-authored code is unrecognized: it asks below full-auto unless an operator-approved safety command declaration covers it.",
 				projectScriptPreview(recognitionCommand, callCwd),
 			],
 			policySource: "builtin-command-allowlist",
@@ -878,16 +883,26 @@ function evaluateBashPolicy(
 	if (chain !== null) {
 		const chainReasons = [
 			`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`,
-			...(chain.requiresConfirmation ? chain.scriptPreviews : []),
+			...(chain.requiresConfirmation || chain.runsProjectScript ? chain.scriptPreviews : []),
 		];
 		if (chain.requiresConfirmation && posture !== "confirmed") {
 			return {
 				kind: "ask",
 				ruleId: "bash-recognized-chain",
 				reasonCode: "bash-recognized-chain",
-				reasons: [...chainReasons, "repository code or project policy requires confirmation for one step"],
+				reasons: [...chainReasons, "project policy requires confirmation for one step"],
 				policySource: "builtin-command-allowlist",
 				execRecognition: "recognized",
+			};
+		}
+		if (chain.runsProjectScript) {
+			return {
+				kind: "allow",
+				ruleId: "bash-recognized-chain",
+				reasonCode: "bash-recognized-chain",
+				reasons: [...chainReasons, "a repository script in the chain leaves admission to the autonomy level"],
+				policySource: "builtin-command-allowlist",
+				execRecognition: "unrecognized",
 			};
 		}
 		return {
@@ -911,13 +926,13 @@ function evaluateBashPolicy(
 		const scriptSegments = commandArgumentSegments(recognitionCommand)
 			.map((args) => args.join(" "))
 			.filter((part) => matchesRepositoryCommand(part));
-		if (scriptSegments.length > 0 && posture !== "confirmed") {
+		if (scriptSegments.length > 0) {
 			return {
-				kind: "ask",
+				kind: "allow",
 				ruleId: "project-script-confirm",
 				reasonCode: "project-script-confirm",
 				reasons: [
-					"Repository scripts in compound commands require one-shot confirmation",
+					"Repository scripts in compound commands are unrecognized; the autonomy level decides admission",
 					...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
 				],
 				policySource: "builtin-command-allowlist",
@@ -1077,7 +1092,10 @@ const CHAIN_MAX_SEGMENTS = 6;
 
 interface ChainRecognition {
 	ruleIds: ReadonlyArray<string>;
+	/** A project policy entry in the chain requires confirmation; that asks at every level. */
 	requiresConfirmation: boolean;
+	/** A repository script runs in the chain; the autonomy level decides admission. */
+	runsProjectScript: boolean;
 	scriptPreviews: ReadonlyArray<string>;
 }
 
@@ -1120,6 +1138,7 @@ function recognizeCommandChain(
 	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
 	const ruleIds: string[] = [];
 	let requiresConfirmation = false;
+	let runsProjectScript = false;
 	let chainCwd = callCwd;
 	const scriptPreviews: string[] = [];
 	for (const segment of segments) {
@@ -1158,14 +1177,14 @@ function recognizeCommandChain(
 		}
 		if (projectScript) {
 			ruleIds.push("project-script-confirm");
-			requiresConfirmation = true;
+			runsProjectScript = true;
 			continue;
 		}
 		const builtin = BUILTIN_ALLOWLIST.find((entry) => entry.re.test(rendered));
 		if (builtin === undefined) return null;
 		ruleIds.push(builtin.id);
 	}
-	return { ruleIds, requiresConfirmation, scriptPreviews };
+	return { ruleIds, requiresConfirmation, runsProjectScript, scriptPreviews };
 }
 
 /**

@@ -144,6 +144,16 @@ describe("verify admission under headless autonomy", () => {
 		strictEqual(admission(root, { check: "python-unittest" }, "auto-edit"), "ask");
 	});
 
+	it("runs a package typecheck or lint at full-auto and asks below it", () => {
+		const root = workspace({
+			"package.json": JSON.stringify({ scripts: { typecheck: "tsc --noEmit", lint: "biome check ." } }),
+		});
+		for (const check of ["typecheck", "lint"]) {
+			strictEqual(admission(root, { check }, "full-auto"), "allow", check);
+			strictEqual(admission(root, { check }, "auto-edit"), "ask", check);
+		}
+	});
+
 	it("does not turn a listing or an undeclared id into a permission ask", () => {
 		const root = workspace({ "pyproject.toml": PYPROJECT, "tests/test_a.py": "" });
 		strictEqual(admission(root, { check: "" }, "full-auto"), "allow");
