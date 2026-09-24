@@ -635,6 +635,9 @@
 - family: qwopus3.8-27b-dense
   matchPatterns:
     - mini/qwopus3.8-27b-dense
+    # Jackrong Qwopus3.8-27B-Flash (V1) as dynamo's LM Studio and zbook's Lemonade name it.
+    # V2 is not served; its card recommends temperature 0.3 at xhigh and needs its own entry.
+    - qwopus3.8-27b
   capabilities:
     reasoning: true
   quirks:
@@ -650,7 +653,13 @@
         incompatible deployment default; its precise cause was not inspected.
         These effort levels come from that server diagnostic, not from
         Qwen or Qwopus name similarity. Other capabilities remain supplied
-        by the route probe; no sampler, hardware, or context size is inherited.
+        by the route probe; no hardware or context size is inherited.
+        The sampler is Qwen3.8's, per mode, because Jackrong's
+        Qwopus3.8-27B-Flash card states none and its generation_config.json
+        repeats Qwen's thinking defaults (temperature 1.0, top_p 0.95,
+        top_k 20). A server preset is only the fallback for a request that
+        carries no sampler, so thinking-on requests no longer inherit the
+        non-thinking preset every mini and dynamo Qwopus3.8 server starts with.
         Since 2026-09-24 mini's default route is mini/qwopus3.8-27b-dense-q4km.
         It serves Qwopus3.8-27B-Flash-MTP Q4_K_M with an F16 mmproj, four
         slots sharing one 131072-token pool with f16 KV, thinking off by
@@ -669,6 +678,21 @@
         and xhigh, and rejects high. Clio maps high and max to xhigh and
         explicitly forwards that supported effort through LiteLLM. Omitting
         active effort can expose an incompatible deployment default.
+    sampling:
+      thinking:
+        temperature: 1.0
+        topP: 0.95
+        topK: 20
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        presencePenalty: 1.5
+        repetitionPenalty: 1.0
 
 - family: qwen3.8-27b
   matchPatterns:
@@ -1252,21 +1276,29 @@
         `lmstudio` runtime, which is what the 2026-08-08 finding above was taken
         on and what carries the spelling that reaches it.
     sampling:
-      instruct:
-        temperature: 0.2
-        topP: 0.9
+      # Qwen3.6's per-mode sampler (precise-coding thinking set). Jackrong's Coder-MTP
+      # cards state no sampler of their own, so the base model's recommendation holds.
+      thinking:
+        temperature: 0.6
+        topP: 0.95
         topK: 20
-        repeatPenalty: 1.05
-        # Upstream Qwen3.6 card recommends presence_penalty 1.5 for
-        # non-thinking modes to suppress repetition loops. Measured on live
-        # dispatch (2026-07-06): without it a coder worker repeated one
-        # code_nav call into the loop-guard abort on 3 of 3 runs; with it the
-        # same task passed 3 of 3 with clean edit-then-validate trajectories.
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        # Measured on live dispatch (2026-07-06): without presence_penalty 1.5 a
+        # coder worker repeated one code_nav call into the loop-guard abort on 3
+        # of 3 runs; with it the same task passed 3 of 3.
         presencePenalty: 1.5
+        repetitionPenalty: 1.0
     gpuTiers:
       "32gb": "Default 32 GB local profile: Q4_K_M, ctx=262144, q8 KV, flash attention, parallel=1, with F32 mmproj (vision) and draft-mtp speculative decoding both active. Leaves several GiB free at 262k on a 32 GiB class card."
     runtimePreference:
-      llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile serves text-only with reasoning off and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      llamaCpp: "OpenAI-compatible chat completions with --jinja. Recommended local profile serves text-only with reasoning off and enable_thinking false. Clio sends Qwen3.6's per-mode sampler on every request."
       openaiCompat: "Use when a gateway fronts the same llama.cpp chat-completions surface with qwen tool parsing."
     llamaCpp:
       ctxSize: 262144
@@ -1327,16 +1359,27 @@
         "never" pin because nothing has measured them. Read the reasoning class
         as an untested inheritance until someone runs this model.
     sampling:
-      instruct:
-        temperature: 0.2
-        topP: 0.9
+      # Qwen3.6's per-mode sampler (precise-coding thinking set). Jackrong's Coder-MTP
+      # cards state no sampler of their own, so the base model's recommendation holds.
+      thinking:
+        temperature: 0.6
+        topP: 0.95
         topK: 20
-        repeatPenalty: 1.05
-        # Same Coder-MTP non-thinking design as the 35B; see the measured
-        # presence-penalty note there.
+        minP: 0.0
+        presencePenalty: 0.0
+        repetitionPenalty: 1.0
+      instruct:
+        temperature: 0.7
+        topP: 0.80
+        topK: 20
+        minP: 0.0
+        # Measured on live dispatch (2026-07-06): without presence_penalty 1.5 a
+        # coder worker repeated one code_nav call into the loop-guard abort on 3
+        # of 3 runs; with it the same task passed 3 of 3.
         presencePenalty: 1.5
+        repetitionPenalty: 1.0
     runtimePreference:
-      llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false; coder sampler temperature 0.2, top_p 0.9, top_k 20."
+      llamaCpp: "A local llama.cpp router serves it with --jinja and enable_thinking false. Clio sends Qwen3.6's per-mode sampler on every request."
       lmstudio: "Dense 27B Coder-MTP; configure MTP in LM Studio's per-model load settings."
     thinking:
       mechanism: none
