@@ -224,6 +224,9 @@ function resultFromEvent(event: ChatLoopEvent, current: HeadlessMainAgentResult)
 	}
 	if (event.type === "notice") {
 		if (event.surface !== "transcript") return current;
+		if (event.admission?.reason === "image-input-unsupported") {
+			return { ...current, lastNotice: event.text, error: event.text };
+		}
 		if (event.key === "turn.interrupted") {
 			return { ...current, lastNotice: event.text, abortReason: event.text };
 		}

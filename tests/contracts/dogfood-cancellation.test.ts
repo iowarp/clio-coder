@@ -1,5 +1,5 @@
 import { deepStrictEqual, doesNotMatch, match, ok, strictEqual } from "node:assert/strict";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, it } from "node:test";
 import { Type } from "typebox";
@@ -26,6 +26,7 @@ import { recordValue } from "../../src/interactive/chat-loop-messages.js";
 import { createChatPanel } from "../../src/interactive/chat-panel.js";
 import { rehydrateChatPanelFromTurns } from "../../src/interactive/chat-renderer.js";
 import { renderSessionHtml } from "../../src/interactive/export-html/index.js";
+import { expandInteractiveSubmitAsync } from "../../src/interactive/interactive-application.js";
 import { buildModelReplayAgentMessagesFromTurns } from "../../src/interactive/model-session-replay.js";
 import { createRegistry } from "../../src/tools/registry.js";
 import { dispatchStubContext } from "../harness/dispatch-stub-context.js";
@@ -456,6 +457,54 @@ it("the real chat loop persists and displays one genuine gateway failure without
 		f.next();
 		await f.loop.submit("Next");
 		match(f.panel.render(120).map(stripTerminalSequences).join("\n"), /PONG/u);
+	} finally {
+		await f.close();
+	}
+});
+
+it("a text-only route refuses an image before the provider receives bytes", { timeout: 15_000 }, async () => {
+	const f = fixture("success");
+	const notices: string[] = [];
+	f.loop.onEvent((event) => {
+		if (event.type === "notice" && event.admission?.reason === "image-input-unsupported") notices.push(event.text);
+	});
+	try {
+		writeFileSync(
+			join(process.cwd(), "pixel.png"),
+			Buffer.from(
+				"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScL/nwAAAABJRU5ErkJggg==",
+				"base64",
+			),
+		);
+		const expanded = await expandInteractiveSubmitAsync("Inspect @pixel.png", undefined, process.cwd());
+		strictEqual(expanded.images.length, 1);
+		await f.loop.submit(expanded.text, { images: expanded.images });
+		strictEqual(f.wire().calls(), 0);
+		strictEqual(notices.length, 1);
+		match(notices[0] ?? "", /IMAGE_INPUT_UNSUPPORTED.*cancellation-fixture\/unknown-cancellation-model/u);
+		strictEqual(f.session.current(), null);
+	} finally {
+		await f.close();
+	}
+});
+
+it("headless reports a stable image error before opening a turn", { timeout: 15_000 }, async () => {
+	const f = fixture("success");
+	const notices: string[] = [];
+	f.loop.onEvent((event) => {
+		if (event.type === "notice" && event.admission?.reason === "image-input-unsupported") notices.push(event.text);
+	});
+	try {
+		const code = await runHeadlessMainAgent(f.loop, {
+			prompt: "Inspect this",
+			images: [{ type: "image", mimeType: "image/png", data: "aGVsbG8=" }],
+			mode: "json",
+		});
+		strictEqual(code, 1);
+		strictEqual(f.wire().calls(), 0);
+		match(notices[0] ?? "", /IMAGE_INPUT_UNSUPPORTED/u);
+		const journal = readRunJournal(join(env.dir, "state"));
+		strictEqual(journal?.receipts.length ?? 0, 0);
 	} finally {
 		await f.close();
 	}

@@ -25,6 +25,7 @@ when it quits:
   vendored file manager, installed on request with
   `clio-coder tools install yazi`; that program's name appears nowhere else in
   the operator surface.
+
 - **The logs pane.** `/panes open logs` follows the newest dispatched run's
   event journal with `tail -F`.
 - **The shell pane.** `/panes open shell` opens a login shell in the
@@ -32,6 +33,8 @@ when it quits:
 - **The workers watch pane.** Enter on a live run in the `Alt+W` board renders
   that run's stream in a pane to the right. It is documented with the fleet
   in [Fleet Dispatch](fleet-dispatch.md); this page covers the utility panes.
+
+When an `@file` mention expands to an image and the routed model cannot accept images, Clio warns before submitting the turn. The warning names the current model and lists up to five known vision-capable models to choose in `/model`. This behavior is shipped and tested.
 
 Outside herdr, `/files` still works: the file view takes over the terminal
 for one pick and returns to the session with the selection in the composer.
