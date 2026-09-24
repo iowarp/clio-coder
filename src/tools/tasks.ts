@@ -14,7 +14,7 @@ import type { ToolResult, ToolSpec } from "./registry.js";
 /**
  * The tasks tool: the session task board. The agent declares what it is
  * about to do (action="plan"), names its current focus ("start"), and closes
- * each task with a receipt ("done" + evidence note) or an honest reason
+ * each task with a completion claim ("done" + note) or an honest reason
  * ("block"/"drop"). Every mutation persists a full taskLedger snapshot to the
  * session, so the board is replayable, survives resume, and feeds the footer
  * tasks row, the /tasks overlay, and the turn-end open-tasks nudge.
@@ -57,7 +57,7 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 	const lines: string[] = [`board "${board.title}" ${counts.completed}/${counts.total} done`];
 	for (const task of board.tasks) {
 		let line = `${STATUS_MARK[task.status]} ${task.id} ${task.title}`;
-		if (task.status === "completed" && task.evidence) line += ` — evidence: ${task.evidence}`;
+		if (task.status === "completed" && task.evidence) line += ` — completion claim: ${task.evidence}`;
 		if (task.status === "blocked" && task.reason) line += ` — blocked: ${task.reason}`;
 		if (task.status === "cancelled" && task.reason) line += ` — dropped: ${task.reason}`;
 		lines.push(line);
@@ -71,12 +71,19 @@ function renderTaskBoardText(board: TaskBoardSnapshot, userTasks: ReadonlyArray<
 		const outputs = operatorTask?.acceptance?.expectedOutputs;
 		if (outputs?.length) lines.push(`  expected outputs: ${outputs.join(", ")}`);
 		for (const item of task.requiredValidationEvidence ?? []) {
-			if (item.status === "required") {
+			const acceptance = item.id.startsWith(`${task.id}.acceptance.`);
+			const check = item.command ?? item.description;
+			if (acceptance && item.status === "required") {
 				lines.push(
-					`  acceptance requirement: ${item.command} (${item.notes}; declaration only; execution status is in verification receipts)`,
+					`  acceptance requirement: ${check} (${item.notes ?? "pending"}; declaration only; execution status is in verification receipts)`,
 				);
 			} else {
-				lines.push(`  acceptance: ${item.command} (${item.status}; ${item.notes})`);
+				const label = acceptance
+					? "acceptance result"
+					: item.status === "required"
+						? "validation requirement"
+						: "validation result";
+				lines.push(`  ${label}: ${check} (${item.status}${item.notes ? `; ${item.notes}` : ""})`);
 			}
 		}
 	}
@@ -172,8 +179,9 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 		description:
 			"Session task board. plan declares a titled board (replaces any prior board); add appends tasks; " +
 			"pick moves one operator task uN onto the board; start marks one task active (the current focus); " +
-			"done completes a task (started or still pending) and requires note as the " +
-			"evidence the work actually finished; block parks it with a required reason; drop cancels it; list shows the board. " +
+			"done completes a task (started or still pending) and requires a note describing the work and any validation outcome; " +
+			"the note is a claim, while verification receipts record observed checks. " +
+			"block parks it with a required reason; drop cancels it; list shows the board. " +
 			"For operator handoff, pick the intended uN before work and use its linked tN; CLI hand alone does not pick it. Never pick unrelated tasks. " +
 			"Before claiming completion, list: the linked row must be completed and the operator task done on the same session/board link; report IDs and states. " +
 			"Work that did not happen is blocked or dropped, never done. A self-created plan is not operator authorization. " +
@@ -190,7 +198,10 @@ export function createTasksTool(deps: TasksToolDeps): ToolSpec {
 			),
 			id: Type.Optional(Type.String({ description: 'Task id like "t2", or operator id "u2" for pick.' })),
 			note: Type.Optional(
-				Type.String({ description: "Evidence of completion (required for done) or the reason (block, drop)." }),
+				Type.String({
+					description:
+						"Completion claim and check outcomes, including checks not run (required for done), or reason (block, drop).",
+				}),
 			),
 		}),
 		baseActionClass: "read",

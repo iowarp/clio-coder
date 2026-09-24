@@ -674,9 +674,9 @@ Tracks the agent's own work plan. Source: [tasks.ts](../../src/tools/tasks.ts); 
 | `tasks` | Task-title array for plan/add. |
 | `initialStatus` | Plan/add only: `pending` or `blocked`; proposal-mode work starts blocked with a note. |
 | `id` | Required for pick/start/done/block/drop; task IDs (`tN`) or operator task ID (`uN`) for pick. |
-| `note` | Required for done (evidence) and block (reason); optional drop reason. |
+| `note` | Required for done (completion claim and validation outcome) and block (reason); optional drop reason. |
 
-Plan replaces the prior board and assigns pending IDs `t1..tN`. Start activates one task and returns any other active task to pending. Done records evidence on the session ledger; block requires a reason and suppresses the open-task nudge; drop cancels without reusing the ID. Pick links an operator inbox task; a self-authored plan is not operator authorization. Every action returns the whole board.
+Plan replaces the prior board and assigns pending IDs `t1..tN`. Start activates one task and returns any other active task to pending. Done records the agent's completion claim on the session ledger; its note does not certify validation. Verification receipts record observed checks separately. Block requires a reason and suppresses the open-task nudge; drop cancels without reusing the ID. Pick links an operator inbox task; a self-authored plan is not operator authorization. Every action returns the whole board.
 
 Mutations persist full-snapshot `taskLedger` entries, replayable after resume/fork and available to the footer and `/tasks` overlay. At turn end, pending/active tasks trigger one nudge; record an honest terminal state. Live fleet runs link to the board through `activeRunIds`; this process-live link clears after resume/fork. Claude TODO calls map to the same board.
 

@@ -15,11 +15,12 @@ import {
  * Shape mapping onto TaskLedgerEntry:
  *   - the board title is the single top-level goal
  *   - tasks are subgoals with parentGoalId pointing at that goal
- *   - a completion note becomes a passed requiredValidationEvidence row,
- *     so "done" carries its receipt instead of a bare status flip
+ *   - a completion note is a claim on the completed subgoal; validation rows
+ *     remain separate from the agent's account of the work
  */
 
 const TASK_BOARD_GOAL_ID = "board";
+export const TASK_BOARD_COMPLETION_CLAIM_PREFIX = "Completion claim: ";
 export const LEGACY_TASK_BOARD_ID = "legacy";
 
 export interface TaskBoardTask {
@@ -32,7 +33,7 @@ export interface TaskBoardTask {
 	requiredValidationEvidence?: TaskLedgerValidationEvidence[];
 	/** Block or drop reason; empty for pending/active/completed tasks. */
 	reason?: string;
-	/** Evidence note recorded when the task was completed. */
+	/** Free-text completion claim, not an observed validation result. */
 	evidence?: string;
 }
 
@@ -183,18 +184,10 @@ function boardStatus(tasks: ReadonlyArray<TaskBoardTask>): TaskLedgerStatus {
 	return "pending";
 }
 
-export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): TaskLedgerEntryFields {
+export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, _now: Date): TaskLedgerEntryFields {
 	const evidence: TaskLedgerValidationEvidence[] = [];
 	const subgoals: TaskLedgerGoal[] = board.tasks.map((task) => {
 		evidence.push(...(task.requiredValidationEvidence ?? []).map((item) => ({ ...item })));
-		if (task.status === "completed" && task.evidence) {
-			evidence.push({
-				id: `${task.id}.evidence`,
-				description: task.evidence,
-				status: "passed",
-				observedAt: now.toISOString(),
-			});
-		}
 		const goal: TaskLedgerGoal = {
 			id: task.id,
 			title: task.title,
@@ -203,7 +196,11 @@ export function toTaskLedgerEntryFields(board: TaskBoardSnapshot, now: Date): Ta
 		};
 		if (task.origin) goal.origin = task.origin;
 		if (task.userTaskId) goal.userTaskId = task.userTaskId;
-		if (task.reason) goal.description = task.reason;
+		if (task.status === "completed" && task.evidence) {
+			goal.description = `${TASK_BOARD_COMPLETION_CLAIM_PREFIX}${task.evidence}`;
+		} else if (task.reason) {
+			goal.description = task.reason;
+		}
 		return goal;
 	});
 	return {
@@ -309,6 +306,23 @@ function acceptanceRequirement(item: TaskLedgerValidationEvidence): TaskLedgerVa
 	return { ...item };
 }
 
+/** Identify only the synthetic passed row emitted by the old done projection. */
+export function legacyTaskCompletionRow(
+	goal: TaskLedgerGoal,
+	evidence: ReadonlyArray<TaskLedgerValidationEvidence>,
+): TaskLedgerValidationEvidence | undefined {
+	if (goal.status !== "completed" || goal.description?.startsWith(TASK_BOARD_COMPLETION_CLAIM_PREFIX)) return undefined;
+	return evidence.find(
+		(item) =>
+			item.id === `${goal.id}.evidence` &&
+			item.status === "passed" &&
+			item.observedAt !== undefined &&
+			item.command === undefined &&
+			item.artifactPath === undefined &&
+			item.notes === undefined,
+	);
+}
+
 function toEntryView(entry: {
 	boardId?: string;
 	goals: TaskLedgerGoal[];
@@ -317,10 +331,12 @@ function toEntryView(entry: {
 }): TaskBoardSnapshot | null {
 	const boardGoal = entry.goals[0];
 	if (!boardGoal) return null;
-	const evidenceByTask = new Map<string, string>();
-	for (const item of entry.requiredValidationEvidence) {
-		const taskId = item.id.endsWith(".evidence") ? item.id.slice(0, -".evidence".length) : item.id;
-		evidenceByTask.set(taskId, item.description);
+	// Old snapshots stored done notes as passed validation rows. Recover the
+	// note without carrying that synthetic validation into new snapshots.
+	const legacyEvidenceByTask = new Map<string, TaskLedgerValidationEvidence>();
+	for (const goal of entry.subgoals) {
+		const legacy = legacyTaskCompletionRow(goal, entry.requiredValidationEvidence);
+		if (legacy !== undefined) legacyEvidenceByTask.set(goal.id, legacy);
 	}
 	return {
 		boardId: entry.boardId ?? LEGACY_TASK_BOARD_ID,
@@ -333,11 +349,17 @@ function toEntryView(entry: {
 				origin: goal.origin ?? "agent",
 			};
 			if (goal.userTaskId) task.userTaskId = goal.userTaskId;
-			const required = entry.requiredValidationEvidence.filter((item) => item.id.startsWith(`${goal.id}.acceptance.`));
+			const required = entry.requiredValidationEvidence.filter(
+				(item) => (item.id === goal.id || item.id.startsWith(`${goal.id}.`)) && item !== legacyEvidenceByTask.get(goal.id),
+			);
 			if (required.length > 0) task.requiredValidationEvidence = required.map(acceptanceRequirement);
-			if (goal.description) task.reason = goal.description;
-			const evidence = evidenceByTask.get(goal.id);
-			if (evidence) task.evidence = evidence;
+			if (goal.status === "completed" && goal.description?.startsWith(TASK_BOARD_COMPLETION_CLAIM_PREFIX)) {
+				task.evidence = goal.description.slice(TASK_BOARD_COMPLETION_CLAIM_PREFIX.length);
+			} else {
+				if (goal.description) task.reason = goal.description;
+				const legacyEvidence = legacyEvidenceByTask.get(goal.id);
+				if (legacyEvidence) task.evidence = legacyEvidence.description;
+			}
 			return task;
 		}),
 		// Run linkage is process-live: the runs recorded in old entries ended
@@ -463,16 +485,14 @@ function applyMutation(
 	if (mutation.op === "block" && mutation.reason.trim().length === 0) {
 		return { error: "block requires a reason so the ledger records why work stopped" };
 	}
-	// Completion is the ledger's only load-bearing claim, so it carries two
-	// structural conditions rather than a bare status flip. Evidence is
-	// mandatory: a completed row becomes a passed validation record, and a row
-	// without evidence would assert a validation that nobody performed. Work
-	// that did not happen is closed with block or drop, which record a reason.
+	// Completion needs a note describing the work, but that note does not
+	// establish whether validation ran or passed. Work that did not happen is
+	// closed with block or drop, which record a reason.
 	if (mutation.op === "done") {
 		if (mutation.evidence.trim().length === 0) {
 			return {
 				error:
-					"done requires note as the evidence that the task actually finished (the command you ran, the file:line you verified). If the work did not happen, use block with a reason or drop it.",
+					"done requires a completion note describing the work and any validation outcome. If the work did not happen, use block with a reason or drop it.",
 			};
 		}
 	}
@@ -480,7 +500,7 @@ function applyMutation(
 	// A model that did the work without announcing it on the board closes
 	// several tasks in a row at the end of the turn. Refusing done on a pending
 	// task cost a live session six start/done pairs of pure ceremony; the
-	// evidence note is the load-bearing claim, so the start is recorded
+	// completion note is the load-bearing claim, so the start is recorded
 	// implicitly and named in the notes.
 	if (mutation.op === "done" && target.status === "pending") {
 		notes.push(`started ${target.id} implicitly: done on a pending task records the start and the completion together`);

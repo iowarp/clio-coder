@@ -226,7 +226,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 	},
 	// ORCHESTRATE: agent-class, receipts as evidence.
 	[ToolNames.Tasks]: {
-		objective: "Declare and track the session task board with evidence-carrying completions.",
+		objective: "Declare and track the session task board with completion claims and separate validation evidence.",
 		uiLabel: "Tasks",
 		// A repeated plan/start/done lands on the same board state; a repeated
 		// add duplicates a task, so the surface as a whole is not retry safe.
@@ -242,7 +242,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 			"Leave unrelated inbox tasks alone. Before claiming completion, list and confirm the linked board row is completed " +
 			"and the durable operator task is done with the same session/board link; report the IDs and actual state. " +
 			'For 3+ authorized steps without a board, tasks(action="plan") before edits; add steps to an existing board to preserve pickup links. ' +
-			"Start work; done needs evidence. " +
+			"Start work; done needs a note describing the work and any failed or unrun checks. Verification receipts record observed checks separately. " +
 			"Plans/reminders grant no scope: block proposal-only implementation pending explicit operator go-ahead, or drop it. " +
 			"Skill-install choices do not authorize implementation.",
 	},
