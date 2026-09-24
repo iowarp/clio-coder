@@ -42,6 +42,8 @@ export interface SessionPromptInputs {
 	toolNames?: ReadonlyArray<string>;
 	/** False for --no-skills; only explicitly supplied skills remain available. */
 	skillDiscoveryEnabled?: boolean;
+	/** True when configure_clio is registered on this session's gateway (interactive sessions only). */
+	canConfigureClio?: boolean;
 	/**
 	 * Per-tool prompt hints derived once from the frozen surface at compile
 	 * time (registry metadata `promptHint`). Rendered into the Tool Contract
@@ -254,6 +256,23 @@ function sessionCanDispatch(inputs: SessionPromptInputs): boolean {
 function sessionHasContext(inputs: SessionPromptInputs): boolean {
 	if (inputs.providerSupportsTools === false) return false;
 	return toolSurfaceHasTool(inputs.toolNames, "context") && turnAllowsTool(inputs.turnConstraints, "context");
+}
+
+/**
+ * How the model changes a setting the operator asked for. configure_clio is a
+ * gateway capability registered only on interactive sessions, and it previews
+ * only at capable (auto-edit) or yolo (full-auto) autonomy, so every other
+ * session hands the change back to the operator's own settings UI.
+ */
+function settingsChangePolicy(inputs: SessionPromptInputs, autonomyLevel: string): string {
+	if (
+		inputs.canConfigureClio === true &&
+		(autonomyLevel === "auto-edit" || autonomyLevel === "full-auto") &&
+		toolSurfaceHasTool(inputs.toolNames, "gateway") &&
+		turnAllowsTool(inputs.turnConstraints, "configure_clio")
+	)
+		return 'When the operator asks to change a setting, call gateway(op="call", capability="configure_clio") with action="preview", then apply the returned proposal id. The operator confirms Apply in a dialog, and a stale or cancelled proposal changes nothing.';
+	return "Changing a setting is the operator's step: name the /settings area or the clio-coder configure command that changes it.";
 }
 
 export function sessionCanUseSkills(inputs: SessionPromptInputs): boolean {
@@ -692,7 +711,14 @@ export function compile(table: FragmentTable, inputs: CompileInputs): CompiledSe
 			.replace("{CLIO_CODEWIKI_PATH}", join(packageRoot, "dist", "assets", "codewiki.json"))
 			.replace("{CLIO_SETTINGS_PATH}", join(clioDirs.config, "settings.yaml"))
 			.replace("{CLIO_STATE_PATH}", clioDirs.state);
-		harnessAwareness = [rendered.trim(), ...(docsRouting ? [docsRouting.body.trim()] : [])].join("\n\n");
+		const settingsRouting = sessionHasContext(session) ? table.byId.get("identity.settings-routing") : undefined;
+		harnessAwareness = [
+			rendered.trim(),
+			...(docsRouting ? [docsRouting.body.trim()] : []),
+			...(settingsRouting
+				? [settingsRouting.body.replace("{SETTINGS_CHANGE_POLICY}", settingsChangePolicy(session, autonomyLevel)).trim()]
+				: []),
+		].join("\n\n");
 	}
 
 	// Role text gated on the surface, following the Fleet-block rule: text

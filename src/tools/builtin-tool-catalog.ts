@@ -120,7 +120,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		costLatency: "local_fast",
 		promptHint: {
 			session:
-				'For questions about your settings or limits, call context(scope="settings") for the live values and UI guidance; never guess from defaults or change permission rules to bypass a denial. On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
+				'On an explicit pending skill request, first load exactly that skill with context(scope="skills", name=<skill>). Follow a [Marketplace] reminder\'s exact ask_user options. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			worker:
 				'This worker has no operator skill-activation channel; do not load or suggest skills. Recall needed [evicted ...] content with context(scope="recall", ref=...).',
 			boundWorker:
@@ -386,7 +386,7 @@ const TOOL_METADATA: Readonly<Record<string, ToolMetadata>> = {
 		resultSizePolicy: { kind: "exact", maxBytes: 8_192 },
 		costLatency: "local_slow",
 		promptHint:
-			"When asked to change Clio settings in full-auto, discover configure_clio through gateway. Preview first, then apply the returned proposal id; apply asks the operator directly and refuses stale proposals.",
+			"When asked to change Clio settings at capable or yolo autonomy, call configure_clio through gateway. Preview first, then apply the returned proposal id; apply asks the operator directly and refuses stale proposals.",
 	},
 	// ARTIFACT: terminal writers.
 	[ToolNames.Artifact]: {

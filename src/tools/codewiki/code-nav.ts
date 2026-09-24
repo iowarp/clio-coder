@@ -564,7 +564,8 @@ export const codeNavTool: ToolSpec = {
 		if (source === "clio" && mode === "wiki") {
 			return {
 				kind: "error",
-				message: "code_nav: source=clio does not provide mode=wiki; use context scope=docs for Clio documentation",
+				message:
+					"code_nav: source=clio does not provide mode=wiki; use the clio_docs capability through gateway for Clio documentation",
 			};
 		}
 		const loaded = await loadNavSource(source);
