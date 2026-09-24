@@ -42,6 +42,7 @@ import {
 } from "../domains/dispatch/gate-role-prompts.js";
 import { narrowDispatchIntentToReadOnly } from "../domains/dispatch/intent.js";
 import { renderDispatchReviewerTask } from "../domains/dispatch/intent-requirements.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
 import { UNVERIFIABLE_RECEIPT_VERIFICATION } from "../domains/dispatch/receipt-findings.js";
 import { type ReceiptIntegrityResult, verifyReceiptIntegrity } from "../domains/dispatch/receipt-integrity.js";
 import { explainRouteDecision } from "../domains/dispatch/routing-intent.js";
@@ -228,6 +229,7 @@ async function runDetached(
 			batchId: handle.batchId,
 			runs,
 			sessionId,
+			cwd: dispatchOwnerOf(deps.dispatch, sessionId).cwd,
 			...(ledgerId !== null ? { ledgerId } : {}),
 		});
 	} catch (err) {
@@ -344,6 +346,7 @@ async function backgroundedDispatchResult(
 			batchId: converted.batchId,
 			runs: converted.live,
 			sessionId,
+			cwd: dispatchOwnerOf(deps.dispatch, sessionId).cwd,
 			...(converted.ledgerId !== null ? { ledgerId: converted.ledgerId } : {}),
 		});
 	} catch (err) {
@@ -915,13 +918,32 @@ function settlePendingCompeteResource(handle: PendingGateDecisionHandle, draft: 
 }
 
 /**
+ * Whether this session owns a run by id: null when this process's ledger
+ * mirror has no row for it, which covers a sibling's run started after this
+ * process opened the ledger.
+ */
+function gateRunOwnership(deps: DispatchToolDeps): (runId: string) => boolean | null {
+	const ownership = dispatchOwnership(dispatchOwnerOf(deps.dispatch));
+	return (runId) => {
+		const run = deps.dispatch.getRun(runId);
+		return run === null ? null : ownership.ownsRun(run);
+	};
+}
+
+/**
  * Rebuild decisions whose reviewer/judge output crossed the WAL boundary but
  * whose coordinator died before parsing or materialization. Receipt integrity
  * is verified before the output protocol is trusted. Every resolved record is
  * collision-checked before compete worktrees move to their recovered state.
+ *
+ * Only this session's records and decisions are recovered. The journal and
+ * the decision artifacts are machine-wide, and this runs before every
+ * dispatch, so recovering a sibling's records failed this session's dispatch
+ * on the sibling's live compete coordinator or its not-yet-sealed receipts.
  */
 function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
-	const recovery = preparePendingGateDecisionRecovery();
+	const ownsRun = gateRunOwnership(deps);
+	const recovery = preparePendingGateDecisionRecovery(undefined, { ownsRun });
 	const resolved: PendingGateDecisionHandle[] = [];
 	for (const handle of recovery.unresolved) {
 		if (handle.record.kind !== "output") continue;
@@ -1051,7 +1073,9 @@ function recoverPendingGateEvidence(deps: DispatchToolDeps): void {
 			artifact.topology !== "compete" ||
 			artifact.outcome !== "winner" ||
 			artifact.winner === undefined ||
-			confirmedGroups.has(artifact.group)
+			confirmedGroups.has(artifact.group) ||
+			artifact.decider === undefined ||
+			ownsRun(artifact.decider.runId) !== true
 		) {
 			continue;
 		}
@@ -1193,7 +1217,9 @@ async function runCompete(
 								subjects: request.gate.subjects ?? [],
 								deciderRunId: summary.terminalAttemptRunId,
 								finalOutput: normalizedAssistantText(summary),
-								...(request.cwd !== undefined ? { resourceRoot: request.cwd } : {}),
+								// Always recorded, so restart settlement never has to guess the
+								// root from whichever process happens to recover the record.
+								resourceRoot: request.cwd ?? requestedRoot,
 							})
 						: undefined;
 				return { summary, pendingGate };

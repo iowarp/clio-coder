@@ -1,5 +1,6 @@
 import type { DispatchContract } from "../domains/dispatch/contract.js";
-import type { ToolResult, ToolSpec } from "./registry.js";
+import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import type { ToolInvokeOptions, ToolResult, ToolSpec } from "./registry.js";
 import { steerToolSurface } from "./steer-surface.js";
 
 /**
@@ -7,12 +8,43 @@ import { steerToolSurface } from "./steer-surface.js";
  * steering message the worker sees at its next turn boundary (native workers
  * only; the dispatch contract's stdin channel). action=cancel terminates the
  * run cleanly; the receipt records the cancellation.
+ *
+ * Both act only on runs this session dispatched. The run ledger and the
+ * assignment store are machine-wide, and a cancel aimed at another process's
+ * assignment reached nothing (abort only touches this process's workers) while
+ * the tool reported "cancellation signalled".
  */
 
 const TERMINAL_STATUSES = new Set(["completed", "failed", "interrupted", "stale", "dead"]);
 
 export interface SteerToolDeps {
 	dispatch: DispatchContract;
+}
+
+/** The refusal for a run or assignment this session did not dispatch, or null when it did. */
+function foreignRunError(
+	deps: SteerToolDeps,
+	runId: string,
+	options: ToolInvokeOptions | undefined,
+): ToolResult | null {
+	const run = deps.dispatch.getRun(runId);
+	const assignment = deps.dispatch.assignments?.getStored(run?.lineage?.rootRunId ?? runId) ?? null;
+	const owned = run ?? (assignment === null ? null : deps.dispatch.getRun(assignment.assignmentId));
+	if (owned !== null) {
+		if (dispatchOwnership(dispatchOwnerOf(deps.dispatch, options?.sessionId)).ownsRun(owned)) return null;
+		return {
+			kind: "error",
+			message: `steer: run '${runId}' belongs to another session; only the session that dispatched it can steer or cancel it`,
+		};
+	}
+	const holder = assignment?.status === "running" ? assignment.processOwner : undefined;
+	if (holder !== undefined && holder.pid !== process.pid) {
+		return {
+			kind: "error",
+			message: `steer: assignment '${runId}' is running in another Clio process (pid ${holder.pid}); steer or cancel it from that session`,
+		};
+	}
+	return null;
 }
 
 function guide(deps: SteerToolDeps, runId: string, message: string): ToolResult {
@@ -61,13 +93,15 @@ function cancel(deps: SteerToolDeps, runId: string): ToolResult {
 export function createSteerTool(deps: SteerToolDeps): ToolSpec {
 	return {
 		...steerToolSurface,
-		async run(args): Promise<ToolResult> {
+		async run(args, options): Promise<ToolResult> {
 			const runId = typeof args.run_id === "string" ? args.run_id.trim() : "";
 			if (runId.length === 0) return { kind: "error", message: "steer: missing run_id argument" };
 			const action = typeof args.action === "string" ? args.action : "";
 			if (action !== "guide" && action !== "cancel") {
 				return { kind: "error", message: `steer: action must be guide or cancel; got '${action}'` };
 			}
+			const foreign = foreignRunError(deps, runId, options);
+			if (foreign !== null) return foreign;
 			if (action === "guide") {
 				return guide(deps, runId, typeof args.message === "string" ? args.message.trim() : "");
 			}

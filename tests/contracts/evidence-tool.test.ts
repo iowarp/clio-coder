@@ -21,6 +21,13 @@ type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 		gateDecisions: unknown[];
 	};
 
+/** The fixture run's own session: evidence reads are scoped to the session and project asking. */
+const FIXTURE_SESSION = "session-1";
+
+function evidence(args: Record<string, unknown>, sessionId: string = FIXTURE_SESSION): Promise<ToolResult> {
+	return evidenceTool.run(args, { sessionId });
+}
+
 function output(result: ToolResult): EvidenceOutput {
 	strictEqual(result.kind, "ok");
 	return JSON.parse(result.output);
@@ -51,7 +58,7 @@ describe("evidence tool", () => {
 	afterEach(() => env.restore());
 
 	it("lists an empty inventory and bounds the newest fixture bundles", async () => {
-		deepStrictEqual(output(await evidenceTool.run({ mode: "list" })).artifacts, []);
+		deepStrictEqual(output(await evidence({ mode: "list" })).artifacts, []);
 		await fixture();
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		for (let i = 0; i < EVIDENCE_INVENTORY_MAX_ARTIFACTS + 2; i += 1) {
@@ -63,7 +70,7 @@ describe("evidence tool", () => {
 				JSON.stringify({ ...built.overview, evidenceId: id, generatedAt: new Date(2000000000000 + i).toISOString() }),
 			);
 		}
-		const listed = output(await evidenceTool.run({ mode: "list" }));
+		const listed = output(await evidence({ mode: "list" }));
 		strictEqual(listed.artifacts.length, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
 		strictEqual(listed.truncated, true);
 		strictEqual(listed.artifacts[0]?.evidenceId, `copy-${EVIDENCE_INVENTORY_MAX_ARTIFACTS + 1}`);
@@ -73,7 +80,7 @@ describe("evidence tool", () => {
 		await fixture();
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		strictEqual(built.ungroundedClaims, 11);
-		const inspected = output(await evidenceTool.run({ mode: "inspect", id: built.evidenceId }));
+		const inspected = output(await evidence({ mode: "inspect", id: built.evidenceId }));
 		deepStrictEqual(inspected.overview, built.overview);
 		deepStrictEqual(inspected.findings, built.findings);
 		deepStrictEqual(inspected.trustStatus, built.trustStatus);
@@ -102,15 +109,15 @@ describe("evidence tool", () => {
 			join(built.directory, "gate-decisions.json"),
 			JSON.stringify({ version: 1, evidenceId: built.evidenceId, decisions: [valid, { ...valid, outcome: "fail" }] }),
 		);
-		deepStrictEqual(output(await evidenceTool.run({ mode: "inspect", id: built.evidenceId })).gateDecisions, [valid]);
+		deepStrictEqual(output(await evidence({ mode: "inspect", id: built.evidenceId })).gateDecisions, [valid]);
 	});
 
 	it("builds a missing run bundle and reuses an existing bundle", async () => {
 		await fixture();
-		strictEqual(output(await evidenceTool.run({ mode: "run", runId: "fixture" })).evidenceId, "run-fixture");
+		strictEqual(output(await evidence({ mode: "run", runId: "fixture" })).evidenceId, "run-fixture");
 		const file = join(clioDataDir(), "evidence", "run-fixture", "overview.json");
 		const before = await readFile(file, "utf8");
-		await evidenceTool.run({ mode: "run", runId: "fixture" });
+		await evidence({ mode: "run", runId: "fixture" });
 		strictEqual(await readFile(file, "utf8"), before);
 		strictEqual(classify({ tool: "evidence", args: { mode: "run", runId: "fixture" } }).actionClass, "read");
 	});
@@ -120,18 +127,18 @@ describe("evidence tool", () => {
 			{ mode: "inspect", id: "missing" },
 			{ mode: "run", runId: "missing" },
 		]) {
-			const result = await evidenceTool.run(args);
+			const result = await evidence(args);
 			strictEqual(result.kind, "error");
 			deepStrictEqual(result.details, { code: "artifact_absent", artifactAbsent: true });
 			if (result.kind === "error") match(result.message, /evidence artifact not found/);
 		}
-		const invalid = await evidenceTool.run({ mode: "inspect", id: "../escape" });
+		const invalid = await evidence({ mode: "inspect", id: "../escape" });
 		strictEqual(invalid.kind, "error");
 		strictEqual(invalid.details?.artifactAbsent, false);
 		await fixture();
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		await writeFile(join(built.directory, "findings.json"), "broken");
-		const broken = await evidenceTool.run({ mode: "inspect", id: built.evidenceId });
+		const broken = await evidence({ mode: "inspect", id: built.evidenceId });
 		strictEqual(broken.kind, "error");
 		strictEqual(broken.details?.artifactAbsent, false);
 	});
@@ -155,7 +162,7 @@ describe("evidence tool", () => {
 				],
 			}),
 		);
-		const result = await evidenceTool.run({ mode: "inspect", id: built.evidenceId });
+		const result = await evidence({ mode: "inspect", id: built.evidenceId });
 		strictEqual(output(result).truncated, true);
 		if (result.kind !== "ok") return;
 		ok(Buffer.byteLength(result.output, "utf8") <= EVIDENCE_TOOL_MAX_BYTES);
@@ -167,11 +174,24 @@ describe("evidence tool", () => {
 		await fixture(true);
 		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
 		strictEqual(built.ungroundedClaims, 0);
-		const inspected = output(await evidenceTool.run({ mode: "inspect", id: built.evidenceId }));
+		const inspected = output(await evidence({ mode: "inspect", id: built.evidenceId }));
 		strictEqual(inspected.overview.totals.receipts, 0);
 		strictEqual(inspected.overview.totals.tokens, 0);
 		strictEqual(inspected.runs[0]?.verdict, "compromised");
 		ok(inspected.findings.some((finding: { tag: string }) => finding.tag === "receipt-integrity"));
+	});
+
+	it("keeps another session's bundle from another project out of list and inspect", async () => {
+		await fixture();
+		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
+		// The fixture ran in /workspace under session-1; this caller is neither.
+		deepStrictEqual(output(await evidence({ mode: "list" }, "session-2")).artifacts, []);
+		const refused = await evidence({ mode: "inspect", id: built.evidenceId }, "session-2");
+		strictEqual(refused.kind, "error");
+		deepStrictEqual(refused.details, { code: "evidence_foreign", artifactAbsent: false });
+		if (refused.kind === "error") match(refused.message, /belongs to another project/);
+		const run = await evidence({ mode: "run", runId: "fixture" }, "session-2");
+		strictEqual(run.kind, "error");
 	});
 
 	it("does not count claims from retired receipts", async () => {

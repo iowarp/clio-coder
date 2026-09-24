@@ -11,6 +11,10 @@
  * Writes go through the shared state-file lock (read/merge/write), because a
  * sibling Clio process on the same state dir may register or collect batches
  * concurrently. Reads are lock-free snapshots, matching the run ledger.
+ *
+ * The file is machine-wide, so every listing here returns every session's
+ * batches. Callers that surface or collect a batch filter it through
+ * ownership.ts first.
  */
 
 import { existsSync, readFileSync } from "node:fs";
@@ -35,6 +39,12 @@ export interface DetachedBatchRecord {
 	id: string;
 	runs: DetachedBatchRun[];
 	sessionId: string | null;
+	/**
+	 * Workspace the batch was dispatched from. Batches live in one machine-wide
+	 * file, and a batch with no session id is attributed to its project by this
+	 * field (see ownership.ts). Absent on records written before it existed.
+	 */
+	cwd?: string;
 	createdAt: string;
 	/** ISO timestamp when the batch's results were collected; null while open. */
 	collectedAt: string | null;
@@ -76,6 +86,7 @@ export interface RegisterDetachedBatchInput {
 	batchId: string;
 	runs: ReadonlyArray<DetachedBatchRun>;
 	sessionId: string | null;
+	cwd?: string;
 	ledgerId?: string;
 }
 
@@ -88,6 +99,7 @@ export async function registerDetachedBatch(input: RegisterDetachedBatchInput): 
 			agentId: run.agentId,
 		})),
 		sessionId: input.sessionId,
+		...(input.cwd !== undefined ? { cwd: input.cwd } : {}),
 		createdAt: new Date().toISOString(),
 		collectedAt: null,
 		...(input.ledgerId !== undefined ? { ledgerId: input.ledgerId } : {}),

@@ -1279,6 +1279,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 
 	let effectiveSettingsForDispatch: (() => Readonly<ClioSettings>) | null = null;
 	let protectedArtifactStateForDispatch: (() => ProtectedArtifactState) | null = null;
+	let sessionIdForDispatch: (() => string | null) | null = null;
 
 	// Panes are an interactive-surface projection. Headless, ACP, and worker boots
 	// gate detection off so they never resolve a socket path or open a descriptor.
@@ -1340,6 +1341,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			createDispatchDomainModule({
 				getSettings: () => effectiveSettingsForDispatch?.(),
 				getProtectedArtifactState: () => protectedArtifactStateForDispatch?.() ?? { artifacts: [] },
+				// Stamps every run with the session that dispatched it, which is what
+				// keeps a sibling Clio process's runs and batches out of this one.
+				getSessionId: () => sessionIdForDispatch?.() ?? null,
 				autonomyOverride: (options.headless?.autonomy ?? options.autonomy) !== undefined,
 				// The domain owns the durable journal here, not the dispatch
 				// tool's event registry: `/run`, a watchdog run, and a model
@@ -1405,6 +1409,7 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	const observability = result.getContract<ObservabilityContract>("observability");
 	const safety = result.getContract<SafetyContract>("safety");
 	const session = result.getContract<SessionContract>("session");
+	sessionIdForDispatch = () => session?.current()?.id ?? null;
 	const prompts = result.getContract<PromptsContract>("prompts");
 	const agents = result.getContract<AgentsContract>("agents");
 	const resources = result.getContract<ResourcesContract>("resources");

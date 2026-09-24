@@ -457,6 +457,13 @@ export interface DispatchBundleOptions {
 	monotonicNow?: () => number;
 	/** Immutable per-attempt session settings view; falls back to the shared snapshot. */
 	getSettings?: () => EffectiveSettings;
+	/**
+	 * Clio session this process dispatches for, read when a request enters
+	 * `dispatch()` and stamped on its run rows and receipts. Absent (the fleet
+	 * CLI, tests) means the process has no session and its rows belong to their
+	 * project instead.
+	 */
+	getSessionId?: () => string | null;
 	/** Live hard-block state cloned into each mediated worker spec. */
 	getProtectedArtifactState?: () => ProtectedArtifactState;
 	/** True only when this invocation supplied an explicit one-run autonomy override. */
@@ -4482,7 +4489,7 @@ export function createDispatchBundle(
 				runtimeId,
 				runtimeKind: "acp-delegation",
 				timing,
-				sessionId: null,
+				sessionId: req.ownerSessionId ?? null,
 				cwd: lifecycle.cwd,
 				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
@@ -4764,7 +4771,10 @@ export function createDispatchBundle(
 					toolGovernance: lifecycle.agentConfig.toolGovernance ?? "clio-coder-policy",
 					toolCallLog: acp.toolCallLog(),
 				},
-				sessionId: result.delegation.acpSessionId,
+				// The delegate's own ACP session id is recorded above as
+				// delegation.acpSessionId. This field names the Clio session that
+				// owns the run, the same as on every other runtime's receipt.
+				sessionId: req.ownerSessionId ?? null,
 			};
 		};
 
@@ -5711,7 +5721,7 @@ export function createDispatchBundle(
 				runtimeId: lifecycle.target.runtime.id,
 				runtimeKind: lifecycle.runtimeKind,
 				timing,
-				sessionId: null,
+				sessionId: req.ownerSessionId ?? null,
 				cwd: lifecycle.cwd,
 				staticShellHash: lifecycle.staticCompositionHash,
 				sessionShellHash: lifecycle.sessionShellHash,
@@ -6099,7 +6109,7 @@ export function createDispatchBundle(
 				},
 				reproducibility: collectReproducibility(lifecycle.cwd, safetyMetadata),
 				runtimeResolution: runtimeTargetSnapshot(lifecycle.target.runtimeResolution),
-				sessionId: null,
+				sessionId: req.ownerSessionId ?? null,
 			};
 		};
 
@@ -6549,6 +6559,9 @@ export function createDispatchBundle(
 		events: AsyncIterableIterator<unknown>;
 		finalPromise: Promise<RunReceipt>;
 	}> {
+		// A retry re-enters here with the request it was first admitted under, so
+		// only a request that has never been stamped takes the current session.
+		if (req.ownerSessionId === undefined) req = { ...req, ownerSessionId: options?.getSessionId?.() ?? null };
 		const constraints = snapshotTurnConstraints(preparation?.turnConstraints ?? req.turnConstraints);
 		if (constraints) {
 			req = { ...req, turnConstraints: constraints, ...(constraints.skills === "disabled" ? { noSkills: true } : {}) };
@@ -7554,6 +7567,7 @@ export function createDispatchBundle(
 		dispatch,
 		dispatchBatch,
 		sealCouncilSynthesis,
+		owner: () => ({ sessionId: options?.getSessionId?.() ?? null, cwd: process.cwd() }),
 		listRuns(status) {
 			const l = requireLedger();
 			return status ? l.list({ status }) : l.list();
