@@ -238,6 +238,7 @@ import {
 } from "../interactive/keybinding-manager.js";
 import { subscribeLoopGuardStop } from "../interactive/loop-guard-interrupt.js";
 import { BUILTIN_SLASH_COMMANDS } from "../interactive/slash-commands.js";
+import type { BootInteractivity } from "../interactive/terminal-lease.js";
 import { createToolProseRegistration } from "../interactive/tool-prose-registration.js";
 import { runWatchdogReview } from "../interactive/watchdog-run.js";
 import { type AskUserHandler, cancelledAskUserResult } from "../tools/ask-user.js";
@@ -2821,7 +2822,11 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 		...(options.terminalLease
 			? {
 					terminalLease: options.terminalLease,
-					onHydratedFrameCommit: () => timer.mark("Stage 1 hydration"),
+					onHydratedFrameCommit: (_frameId: number | null, interactivity: BootInteractivity) => {
+						timer.mark("Stage 1 hydration");
+						const line = formatBootTrace("Stage 0 input blocked", `max=${interactivity.inputBlockedMaxMs.toFixed(1)}ms`);
+						if (line) options.terminalLease?.deferDiagnostic("stderr", line);
+					},
 				}
 			: { onFirstFrameCommit: () => timer.mark("first TUI paint") }),
 		...(initialNotices.length > 0 ? { initialNotices } : {}),
