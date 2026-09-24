@@ -1,6 +1,7 @@
 import { createEngineAi, getEngineSupportedThinkingLevels } from "../../engine/ai.js";
 import type { Api, KnownProvider, Model } from "../../engine/types.js";
 import { mergeCapabilities } from "./capabilities.js";
+import { acceptsImageInput } from "./image-input.js";
 import type { CapabilityFlags, ThinkingLevel } from "./types/capability-flags.js";
 import type { CostProvenance } from "./types/cost-provenance.js";
 import type { KnowledgeBaseHit } from "./types/knowledge-base.js";
@@ -168,7 +169,11 @@ export function synthesizeCatalogBackedModel(input: CatalogBackedSynthesisInput)
 			(input.preferCatalogTransport && !sameTransport ? undefined : builtin?.baseUrl) ??
 			input.defaultBaseUrl,
 		reasoning: caps.reasoning,
-		input: caps.vision ? (builtin?.input.includes("image") ? builtin.input : ["text", "image"]) : ["text"],
+		input: acceptsImageInput({ runtimeId: input.runtimeId, vision: caps.vision })
+			? builtin?.input.includes("image")
+				? builtin.input
+				: ["text", "image"]
+			: ["text"],
 		// Catalog tiers belong to the catalog rates. An explicit target price
 		// replaces that schedule, using the same defaults as resolveEffectivePricing.
 		cost: pricing
