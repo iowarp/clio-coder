@@ -10,7 +10,7 @@ export const CODE_NAV_MAX_LIMIT = 200;
 export const codeNavToolSurface = {
 	name: ToolNames.CodeNav,
 	description:
-		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use context scope=docs.",
+		"Navigate the indexed codewiki: mode=symbol finds files by symbol, path finds files by glob/regex/substring, entries lists likely entry points, outline lists file symbols, deps lists imports, and dependents lists importers. mode=wiki without query lists generated Markdown wiki pages; with query it resolves a page id/title and returns its summary plus a path to open with read. For Clio's bundled product docs use the clio_docs capability through gateway.",
 	parameters: Type.Object({
 		source: Type.Optional(
 			StringEnum(["workspace", "clio"], {

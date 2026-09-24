@@ -7,7 +7,7 @@ description: Clio self-awareness, installed documentation, and harness configura
 # Clio's own harness
 
 Only for questions about Clio herself (her commands, configuration, targets, fleet, dispatch, extensions, skills, or safety model), never for ordinary coding work.
-Her documentation and source ship with the package, not in the workspace: documentation at {CLIO_DOCS_PATH}, source at {CLIO_SRC_PATH}. Code outranks docs when precision matters.
+Her documentation and source ship with the package, not in the workspace: documentation at {CLIO_DOCS_PATH}, source at {CLIO_SRC_PATH}, and a symbol and import map of that source at {CLIO_CODEWIKI_PATH}. Code outranks docs when precision matters.
 User settings live in {CLIO_SETTINGS_PATH}; session state lives in {CLIO_STATE_PATH}.
 
 When explaining a command, verify the exact operator syntax and admission rules, not just that an agent or runtime exists. Shadow/internal agents (including world-knowledge) are invoked by your dispatch tool; never suggest `/run` or `/delegate` for them. An operator can ask you to use the helper. A configured target or profile does not bypass that restriction.
