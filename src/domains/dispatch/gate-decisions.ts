@@ -281,7 +281,27 @@ export interface PendingGateDecisionHandle {
 
 export interface PendingGateDecisionReadResult {
 	records: PendingGateDecisionHandle[];
-	errors: Array<{ path: string; message: string }>;
+	/** `runIds` are read leniently from a damaged record so it can still be attributed to its owner. */
+	errors: Array<{ path: string; message: string; runIds: string[] }>;
+}
+
+/**
+ * Whether this session owns one run: true or false for a run it knows, null
+ * for a run it cannot see (evicted, or written by a process after this one
+ * opened its ledger).
+ */
+export type PendingGateRunOwnership = (runId: string) => boolean | null;
+
+export interface PendingGateDecisionRecoveryOptions {
+	/**
+	 * Recover only records this session owns. The journal is machine-wide, and
+	 * without this filter every dispatch call in every session recovered every
+	 * record: a live compete in one project made the next dispatch anywhere
+	 * fail closed on "still has a live coordinator", and a record whose decider
+	 * receipt was not sealed yet failed it on the missing receipt. Absent means
+	 * every record, the historical behavior.
+	 */
+	ownsRun?: PendingGateRunOwnership;
 }
 
 export interface PendingGateDecisionRecoveryPlan {
@@ -977,12 +997,18 @@ export function readPendingGateDecisions(stateDir = clioStateDir()): PendingGate
 		.filter((entry) => entry.endsWith(".json"))
 		.sort()) {
 		const path = join(directory, name);
+		let raw: unknown;
 		try {
-			const record = parsePendingGateDecisionRecord(JSON.parse(readFileSync(path, "utf8")) as unknown);
+			raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+			const record = parsePendingGateDecisionRecord(raw);
 			if (name !== `${record.id}.json`) throw new Error("pending gate decision filename does not match its id");
 			records.push({ record, path, stateDir });
 		} catch (error) {
-			errors.push({ path, message: error instanceof Error ? error.message : String(error) });
+			errors.push({
+				path,
+				message: error instanceof Error ? error.message : String(error),
+				runIds: pendingRecordRunIds(raw),
+			});
 		}
 	}
 	return { records, errors };
@@ -1002,24 +1028,76 @@ export function preflightPendingGateDecisionMaterialization(handles: ReadonlyArr
 }
 
 /**
+ * Every run id a pending record names (decider first, then subjects), read
+ * without trusting the record's shape.
+ */
+function pendingRecordRunIds(value: unknown): string[] {
+	const ids: string[] = [];
+	const push = (id: unknown): void => {
+		if (typeof id === "string" && id.length > 0 && !ids.includes(id)) ids.push(id);
+	};
+	const pushSubjects = (subjects: unknown): void => {
+		if (!Array.isArray(subjects)) return;
+		for (const subject of subjects) if (isRecord(subject)) push(subject.runId);
+	};
+	if (!isRecord(value)) return ids;
+	push(value.deciderRunId);
+	const decision = isRecord(value.decision) ? value.decision : null;
+	if (decision !== null && isRecord(decision.decider)) push(decision.decider.runId);
+	pushSubjects(value.subjects);
+	if (decision !== null) pushSubjects(decision.subjects);
+	return ids;
+}
+
+/**
+ * A record is this session's when at least one run it names is known and
+ * owned and none of them is known and foreign. A record naming only runs this
+ * session cannot see is left for the session that can.
+ */
+function pendingRecordOwned(runIds: ReadonlyArray<string>, ownsRun: PendingGateRunOwnership): boolean {
+	let owned = false;
+	for (const runId of runIds) {
+		const verdict = ownsRun(runId);
+		if (verdict === false) return false;
+		if (verdict === true) owned = true;
+	}
+	return owned;
+}
+
+/**
  * Build a mutation-free restart plan. Raw-output records remain unresolved so
  * dispatch can apply its receipt-backed protocol parser. Corrupt journals and
  * conflicting final artifacts fail closed before external resources settle.
+ *
+ * With `ownsRun`, the plan covers this session's records only. A corrupt
+ * record still fails closed when it is this session's or names no run at all,
+ * since nothing can say whose it is; one that names another session's run is
+ * that session's to fail on.
  */
-export function preparePendingGateDecisionRecovery(stateDir = clioStateDir()): PendingGateDecisionRecoveryPlan {
+export function preparePendingGateDecisionRecovery(
+	stateDir = clioStateDir(),
+	options: PendingGateDecisionRecoveryOptions = {},
+): PendingGateDecisionRecoveryPlan {
 	const pending = readPendingGateDecisions(stateDir);
-	if (pending.errors.length > 0) {
+	const ownsRun = options.ownsRun;
+	const errors =
+		ownsRun === undefined
+			? pending.errors
+			: pending.errors.filter((entry) => entry.runIds.length === 0 || pendingRecordOwned(entry.runIds, ownsRun));
+	if (errors.length > 0) {
 		throw new Error(
-			`pending gate decision journal is untrustworthy: ${pending.errors
-				.map((entry) => `${entry.path}: ${entry.message}`)
-				.join("; ")}`,
+			`pending gate decision journal is untrustworthy: ${errors.map((entry) => `${entry.path}: ${entry.message}`).join("; ")}`,
 		);
 	}
-	const ready = pending.records.filter((handle) => handle.record.kind === "decision");
+	const records =
+		ownsRun === undefined
+			? pending.records
+			: pending.records.filter((handle) => pendingRecordOwned(pendingRecordRunIds(handle.record), ownsRun));
+	const ready = records.filter((handle) => handle.record.kind === "decision");
 	preflightPendingGateDecisionMaterialization(ready);
 	return {
 		ready,
-		unresolved: pending.records.filter((handle) => handle.record.kind === "output"),
+		unresolved: records.filter((handle) => handle.record.kind === "output"),
 	};
 }
 

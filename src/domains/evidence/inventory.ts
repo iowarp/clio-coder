@@ -110,11 +110,18 @@ function byNewest(a: EvidenceOverview, b: EvidenceOverview): number {
 	return (Date.parse(b.generatedAt) || 0) - (Date.parse(a.generatedAt) || 0);
 }
 
+/**
+ * `include` narrows the bundles before the newest-first window is taken, so a
+ * caller scoping the inventory to one session or project still gets a full
+ * window of its own bundles rather than whatever survived a machine-wide cut.
+ */
 export async function evidenceInventorySnapshot(
 	now: () => number = Date.now,
 	dataDir: string = clioDataDir(),
+	include?: (overview: EvidenceOverview) => boolean,
 ): Promise<EvidenceInventorySnapshot> {
-	const all = (await listEvidenceOverviews(dataDir)).sort(byNewest);
+	const listed = await listEvidenceOverviews(dataDir);
+	const all = (include === undefined ? listed : listed.filter(include)).sort(byNewest);
 	const window = all.slice(0, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
 	const artifacts: EvidenceInventoryArtifact[] = [];
 	for (const overview of window) {
