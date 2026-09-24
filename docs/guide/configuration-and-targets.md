@@ -181,7 +181,7 @@ The safety-limit leaves have no one-process `CLIO_CODER_*` overrides in the curr
 | Key | Default | When it applies |
 | --- | --- | --- |
 | `interface.terminalProgress` | `false` | next turn |
-| `interface.demo` | `true` | tips immediately; persona next turn |
+| `interface.demo` | `true` | tips and footer hints immediately; prompt line next turn |
 | `interface.outputDetail` | `standard` | immediately |
 | `interface.mode` | `regular` | restart |
 | `interface.fullscreenScrollbar` | `auto` | restart |

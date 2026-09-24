@@ -82,6 +82,8 @@ export interface EditorSubmitSessionTranscript {
 
 export interface EditorSubmitDeps {
 	onLocalBashRunning?: (running: boolean) => void;
+	/** Note a harness feature the operator used, for demo guidance; see recordOperatorFeature. */
+	recordFeature?: (feature: string) => void;
 	/** Bring a fullscreen transcript back to its live edge before a local command's block lands. */
 	returnToLiveEdge?: () => void;
 	editor: EditorSubmitEditor;
@@ -151,6 +153,7 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		}
 		const abort = new AbortController();
 		activeEditorBash = abort;
+		deps.recordFeature?.("!");
 		let parentTurnId: string | null = null;
 		try {
 			deps.sessionTranscript.ensureSessionForLocalEntry();
@@ -341,6 +344,8 @@ export function createEditorSubmitController(deps: EditorSubmitDeps): EditorSubm
 		const trimmed = literalText.trim();
 		if (trimmed.length === 0) return;
 		deps.collapseLaunchpadBeforeSubmit?.();
+		// An @ mention of a path, not an @agent steer: the token has a / or a dot.
+		if (/(?:^|\s)@[\w~-]*[./][\w./-]+/u.test(literalText)) deps.recordFeature?.("@");
 		if (parseEditorBashCommand(text)) {
 			if (!deps.chat.isStreaming() && !activeEditorBash) {
 				deps.editor.addToHistory(literalText);

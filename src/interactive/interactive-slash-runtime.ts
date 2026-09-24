@@ -90,6 +90,8 @@ type SlashAgents = Pick<AgentsContract, "getSpec" | "listSpecs">;
 type SlashShare = Pick<ShareContract, "writeArchive" | "planImport" | "importArchive">;
 
 export interface InteractiveSlashRuntimeDeps {
+	/** Note a harness feature the operator used, for demo guidance. */
+	recordFeature?: (feature: string) => void;
 	keyboardActions?: SlashCommandContext["keyboardActions"];
 	operatorExtensions?: SlashCommandContext["operatorExtensions"];
 	showExtensionOutput?: SlashCommandContext["showExtensionOutput"];
@@ -356,6 +358,14 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 			deps.requestRender();
 			return Promise.resolve();
 		}
+	};
+
+	/** `/context init` counts as its own feature; every other command by its name. */
+	const recordSlashFeature = (text: string): void => {
+		if (!deps.recordFeature) return;
+		const match = /^\s*\/([a-z][\w-]*)(?:\s+(\S+))?/u.exec(text);
+		if (!match?.[1]) return;
+		deps.recordFeature(match[1] === "context" && match[2] === "init" ? "/context init" : `/${match[1]}`);
 	};
 
 	const admitChat = async (text: string, signal?: AbortSignal): Promise<void> => {
@@ -807,9 +817,13 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 	return {
 		context,
 		notice: appendCommandNotice,
-		dispatchCommand: (text) => dispatchSlashCommand(parseSlashCommand(text), context),
+		dispatchCommand: (text) => {
+			recordSlashFeature(text);
+			return dispatchSlashCommand(parseSlashCommand(text), context);
+		},
 		admitCommand: async (text, signal) => {
 			signal?.throwIfAborted();
+			recordSlashFeature(text);
 			// Pane opens and focus changes mutate a remote registry. A following
 			// slash read must observe their settled state, just as the tool path does.
 			await latestLocalOperation;

@@ -346,6 +346,8 @@ export function cloneMiddlewareEffect(effect: MiddlewareEffect): MiddlewareEffec
 			return { kind: "require_tool", toolName: effect.toolName };
 		case "lock_tools":
 			return { kind: "lock_tools" };
+		case "notify_operator":
+			return { kind: "notify_operator", message: effect.message, key: effect.key };
 	}
 }
 

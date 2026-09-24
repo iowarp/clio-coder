@@ -31,6 +31,12 @@ export interface TurnMiddlewareDeps {
 	middlewareToolChoice: MiddlewareToolChoiceControl;
 	emitNotice: (text: string, level?: "info" | "warning" | "error") => void;
 	emitFooterNotice: (level: "info" | "success" | "warning" | "error", text: string, key: string) => void;
+	/**
+	 * Show an operator-only message from a `notify_operator` effect, such as a
+	 * capability tip. Absent, it becomes an info notice. Either way it never
+	 * joins the reminder buffer, so the model does not see it.
+	 */
+	emitOperatorTip?: (message: string, key: string) => void;
 }
 
 export interface TurnMiddleware {
@@ -178,6 +184,11 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		deps.emitNotice(message, reminderNoticeLevel(severity));
 	};
 
+	const notifyOperator = (message: string, key: string): void => {
+		if (deps.emitOperatorTip) deps.emitOperatorTip(message, key);
+		else deps.emitNotice(message, "info");
+	};
+
 	const applyRequestContinuation = (message: string): void => {
 		if (state.stalledTurnNudgeSpent) {
 			// One continuation per user prompt, and that cap is all this branch
@@ -271,6 +282,8 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 			for (const effect of effects) {
 				if (effect.kind === "inject_reminder") {
 					bufferReminder(effect.message, effect.severity ?? "info");
+				} else if (effect.kind === "notify_operator") {
+					notifyOperator(effect.message, effect.key);
 				}
 			}
 		},
@@ -330,7 +343,9 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 				}
 				if (effect.kind === "request_continuation" && turnAllowsContinuation(state.currentTurnConstraints)) {
 					applyRequestContinuation(effect.message);
+					continue;
 				}
+				if (effect.kind === "notify_operator") notifyOperator(effect.message, effect.key);
 			}
 		},
 

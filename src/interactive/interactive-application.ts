@@ -4,6 +4,7 @@ import { nextOutputStyle } from "../core/defaults.js";
 import { installDiagnosticSink } from "../core/diagnostics.js";
 import type { SafeEventBus } from "../core/event-bus.js";
 import { expandInlineFileReferencesAsync } from "../core/file-references.js";
+import { recordHarnessFeature } from "../core/harness-profile.js";
 import { readClioVersion } from "../core/package-root.js";
 import type { PendingSkillRequest } from "../core/skill-activation.js";
 import { getTerminationCoordinator } from "../core/termination.js";
@@ -362,6 +363,8 @@ export interface KeyBindingDeps {
 	cycleScopedModelBackward: () => void;
 	dismissNotifications: () => void;
 	cycleOutputStyle: () => void;
+	/** Note a harness feature the operator used, for demo guidance. */
+	recordFeature?: (feature: string) => void;
 	openExternalEditor: () => void;
 	queueFollowUp: () => void;
 	interruptWithMessage: () => void;
@@ -390,7 +393,15 @@ export function resolveCtrlCAction(deps: CtrlCActionDeps): CtrlCAction {
 	return "arm-shutdown";
 }
 
+const ACTION_FEATURES: Partial<Record<ClioKeybinding, string>> = {
+	"clio-coder.output.cycle": "output-style",
+	"clio-coder.model.select": "/model",
+	"clio-coder.session.tree": "/tree",
+};
+
 export function dispatchInteractiveAction(id: ClioKeybinding, deps: KeyBindingDeps): boolean {
+	const feature = ACTION_FEATURES[id];
+	if (feature !== undefined) deps.recordFeature?.(feature);
 	switch (id) {
 		case "clio-coder.output.cycle":
 			deps.cycleOutputStyle();
@@ -786,7 +797,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	// operator-typed council parks.
 	const toolRegistry = deps.toolRegistry;
 	const interopSurface = interop ? interopOverlaySurface(interop, (level, text) => notify(level, text)) : null;
+	// What the operator uses themselves retires the matching demo guidance tip.
+	// Off with interface.demo: no profile read or write while guidance is off.
+	const recordFeature = (feature: string): void => {
+		if (deps.getSettings?.().interface.demo === true) recordHarnessFeature(feature);
+	};
 	const slashRuntime = createInteractiveSlashRuntime({
+		recordFeature,
 		keyboardActions: {
 			background: () => backgroundActiveDispatch(),
 			editor: (text) => editorSubmit.openExternalEditorForInput(text),
@@ -906,6 +923,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	});
 
 	const editorSubmit = createEditorSubmitController({
+		recordFeature,
 		onLocalBashRunning: presentation.setLocalBashRunning,
 		returnToLiveEdge: liveEdge,
 		editor,
@@ -1250,6 +1268,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				}
 				return true;
 			},
+			recordFeature,
 			cycleOutputStyle: () => {
 				const settings = deps.getSettings?.();
 				if (!settings || !deps.commitSetting) return;

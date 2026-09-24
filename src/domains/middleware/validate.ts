@@ -121,6 +121,12 @@ function readMiddlewareEffect(
 		case "lock_tools":
 			rejectUnexpectedFields(value, path, ["kind"], issues);
 			return { kind: "lock_tools" };
+		case "notify_operator": {
+			rejectUnexpectedFields(value, path, ["kind", "message", "key"], issues);
+			const message = readRequiredString(value, `${path}.message`, issues);
+			const key = readRequiredString(value, `${path}.key`, issues);
+			return message === null || key === null ? null : { kind: "notify_operator", message, key };
+		}
 	}
 }
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import chalk from "chalk";
 import { modelBootstrapGenerate, resolveBootstrapRoute } from "../cli/bootstrap-generate.js";
@@ -50,6 +50,7 @@ import type { AgentsContract } from "../domains/agents/contract.js";
 import { AgentsDomainModule } from "../domains/agents/index.js";
 import type { ConfigContract } from "../domains/config/contract.js";
 import { ConfigDomainModule, createConfigDomainModule } from "../domains/config/index.js";
+import { CLIO_KEYBINDINGS, type ClioKeybinding } from "../domains/config/keybindings.js";
 import type { ContextContract } from "../domains/context/contract.js";
 import { bootstrapInputFromInitOptions } from "../domains/context/init-options.js";
 import { createContextDomainModule } from "../domains/context/runtime.js";
@@ -89,13 +90,13 @@ import { loadMemoryRecordsSync } from "../domains/memory/store.js";
 import { TaskMemoryBank } from "../domains/memory/task-bank.js";
 import { TaskMemoryEndpointBusyError } from "../domains/memory/task-memory-policy.js";
 import { createDecisionHintsRegistration } from "../domains/middleware/decision-hints.js";
-import { createDemoGuidanceRegistration } from "../domains/middleware/demo-guidance.js";
 import {
 	createDetachedDispatchNudgeRegistration,
 	createReadOnlyExplorationNudgeRegistration,
 	createUnbackedWorkerClaimRegistration,
 	openDetachedBatchViews,
 } from "../domains/middleware/dispatch-nudge.js";
+import { createGuidanceRegistration } from "../domains/middleware/guidance.js";
 import {
 	createHookReceiptLog,
 	createMarketplaceOfferRegistration,
@@ -236,6 +237,7 @@ import { bindTaskMemoryLifecycle, captureTaskMemoryUsage } from "./task-memory-l
 export type { BootOptions, HeadlessSamplingOverrides } from "./boot-options.js";
 
 import {
+	boundKeyLabel,
 	detectPlatformKeybindingWarnings,
 	detectTerminalKeySupport,
 	formatInvalidKeybindingNotice,
@@ -2516,7 +2518,21 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	}
 
 	if (!options.headless && !options.acp) {
-		middleware.registerHook(createDemoGuidanceRegistration(() => getCurrentSettings().interface.demo));
+		// Demo guidance: operator-only capability tips after a turn. Everything it
+		// does, profile writes included, stops while interface.demo is off.
+		middleware.registerHook(
+			createGuidanceRegistration({
+				enabled: () => getCurrentSettings().interface.demo,
+				autonomy: () => resolveEffectiveAutonomy(),
+				keyFor: (actionId) =>
+					Object.hasOwn(CLIO_KEYBINDINGS, actionId) ? boundKeyLabel(actionId as ClioKeybinding) : null,
+				hasProjectContext: () => existsSync(join(process.cwd(), "CLIO-CODER.md")),
+				contextPressure: () => {
+					const ledger = chat.contextLedger();
+					return ledger.contextWindow > 0 ? ledger.usedTokens / ledger.contextWindow : null;
+				},
+			}),
+		);
 	}
 	// Pre-turn decision hints for the main agent. Registered on every surface
 	// that runs a chat turn; with no site bound the store holds nothing and the
