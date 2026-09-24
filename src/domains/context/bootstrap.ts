@@ -3,8 +3,10 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
+import { readCiRunCommands } from "../../core/ci-commands.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
+import { pythonProposals } from "../../tools/verify/toolchain.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import {
 	FULL_PROJECT_CONTEXT_MAX_CHARS,
@@ -537,24 +539,47 @@ function cmakeVerificationLines(cwd: string): string[] {
 
 /**
  * Python has no single scripts manifest, so this names a runner only where the
- * project declares one: a tox configuration declares `tox`, and a declared
- * pytest configuration declares `pytest`. An undeclared layout stays silent
- * rather than guessing `python -m unittest` at a repository that tests some
- * other way. Tox wins when both are declared because it typically wraps the
- * pytest run.
+ * project declares one: a tox configuration declares `tox`, a pytest
+ * configuration or dependency declares `pytest`, and test modules under
+ * `tests/` with neither declare the standard-library unittest runner. A uv
+ * project runs each through `uv run`, because a bare interpreter does not see
+ * the project environment. Tox wins when both are declared because it
+ * typically wraps the pytest run. Detection is shared with the verify tool's
+ * derived checks, so the handbook names the command verify would run.
  */
 function pythonVerificationLines(cwd: string, tomlFiles: TomlFileReader): string[] {
+	const launcher = existsSync(join(cwd, "uv.lock")) ? "uv run " : "";
 	const pyproject = tomlFiles.read("pyproject.toml");
 	if (existsSync(join(cwd, "tox.ini")) || (pyproject !== null && tomlTableAt(pyproject, ["tool", "tox"]))) {
-		return ["Run `tox` before handoff."];
+		return [`Run \`${launcher}tox\` before handoff.`];
 	}
 	if (
 		existsSync(join(cwd, "pytest.ini")) ||
 		(pyproject !== null && tomlTableAt(pyproject, ["tool", "pytest", "ini_options"]))
 	) {
-		return ["Run `pytest` before handoff."];
+		return [`Run \`${launcher}pytest\` before handoff.`];
 	}
-	return [];
+	const derived = pythonProposals(cwd, []).find((proposal) => proposal.tags.includes("test"));
+	return derived ? [`Run the Python tests with \`${derived.command.join(" ")}\` before handoff.`] : [];
+}
+
+/** CI steps that prepare the machine rather than judge the change. */
+const CI_SETUP_RE =
+	/^(?:uv\s+(?:sync|venv|pip|python\s+install)|pip3?\s+install|python3?\s+-m\s+pip\b|(?:npm|pnpm|yarn|bun)\s+(?:ci|install)\b|yarn$|corepack\b|sudo\b|apt(?:-get)?\b|brew\b|curl\b|wget\b|git\s+(?:config|fetch|clone|submodule)\b|cd\b|echo\b|export\b|mkdir\b|cp\b|mv\b|rm\b|ls\b|cat\b)/;
+const MAX_CI_GATE_COMMANDS = 8;
+
+/**
+ * The commands CI runs to judge a change, named exactly. A repository whose
+ * gate is a script (`scripts/gate.sh`) or a make target declares nothing a
+ * manifest reader sees, so without this line its handbook named no command
+ * and agents recorded that they could not run the tests.
+ */
+function ciGateLines(cwd: string): string[] {
+	const gates = readCiRunCommands(cwd)
+		.filter((command) => !CI_SETUP_RE.test(command) && !command.includes("${{") && !command.includes("`"))
+		.slice(0, MAX_CI_GATE_COMMANDS);
+	if (gates.length === 0) return [];
+	return [`CI runs ${gates.map((command) => `\`${command}\``).join(", ")}; a change must pass the same commands.`];
 }
 
 function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSection | null {
@@ -605,7 +630,11 @@ function verificationSection(cwd: string, tomlFiles: TomlFileReader): ClioMdSect
 		lines.push("Run `go build ./...` and `go test ./...` before handoff.");
 	}
 	lines.push(...pythonVerificationLines(cwd, tomlFiles));
+	lines.unshift(...ciGateLines(cwd));
 	if (lines.length === 0) return null;
+	lines.push(
+		"`verify` runs declared and derived checks; when it cannot run one of these commands, run the same command through `bash` instead of skipping it.",
+	);
 	return { title: "Verification expectations", body: lines.join(" ") };
 }
 
