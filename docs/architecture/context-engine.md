@@ -159,7 +159,7 @@ Project-level context is authored in Markdown and discovered hierarchically:
 
 - **Root Handbook (`CLIO-CODER.md`)**: Defines project architecture, coding standards, build workflows, and test commands.
 - **Directory Overrides (`CLIO-CODER.override.md`)**: Scoped instructions for specific subtrees, overriding root rules for contained files.
-- **Preload Budgeting**: Handbooks under 8,000 tokens are embedded directly into the prompt prefix. Oversized handbooks are truncated with explicit omitted line markers, directing the agent to read the full file with `read` if needed.
+- **Preload Budgeting**: Project context up to 24,000 UTF-16 units and 220 rendered lines (`FULL_PROJECT_CONTEXT_MAX_CHARS`, `FULL_PROJECT_CONTEXT_MAX_LINES` in `src/domains/prompts/preload.ts`) is embedded directly into the prompt prefix. That fits a handbook written to the 200-line guideline. Oversized handbooks are truncated with explicit omitted line markers, directing the agent to read the full file with `read` if needed.
 
 ---
 

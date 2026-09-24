@@ -5,7 +5,12 @@ import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
-import { type ProjectPreloadClass, selectProjectPreload } from "../prompts/preload.js";
+import {
+	FULL_PROJECT_CONTEXT_MAX_CHARS,
+	FULL_PROJECT_CONTEXT_MAX_LINES,
+	type ProjectPreloadClass,
+	selectProjectPreload,
+} from "../prompts/preload.js";
 import { detectProjectType, type ProjectType } from "../session/workspace/project-type.js";
 import {
 	type AdoptionScanResult,
@@ -619,7 +624,7 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 	const scripts = packageScripts(input.cwd);
 	const evidence = [
 		...siblingEvidence,
-		(input.existingClioMdText ?? "").slice(0, 8000),
+		(input.existingClioMdText ?? "").slice(0, FULL_PROJECT_CONTEXT_MAX_CHARS),
 		input.expectedProjectName ?? "",
 		input.projectType,
 		[...indexedPaths].join("\n").slice(0, 64_000),
@@ -1524,7 +1529,7 @@ export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBo
 	if (preload.mode === "full" && preload.nearLimit) {
 		warn(
 			input.io,
-			`  warning: project context is within 10% of the preload limit (${preload.chars} UTF-16 units of 8000, ${preload.lines} rendered lines of 220); further growth may omit authored suffixes\n`,
+			`  warning: project context is within 10% of the preload limit (${preload.chars} UTF-16 units of ${FULL_PROJECT_CONTEXT_MAX_CHARS}, ${preload.lines} rendered lines of ${FULL_PROJECT_CONTEXT_MAX_LINES}); further growth may omit authored suffixes\n`,
 		);
 	}
 	progress(input, {

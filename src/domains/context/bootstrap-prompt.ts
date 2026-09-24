@@ -1,4 +1,5 @@
 import { parseJsonObjectPayload } from "../../core/json-payload.js";
+import { FULL_PROJECT_CONTEXT_MAX_CHARS } from "../prompts/preload.js";
 import type { ProjectType } from "../session/workspace/project-type.js";
 import type { AdoptionScanResult } from "./adoption.js";
 import type { BootstrapStructuredOutput } from "./bootstrap.js";
@@ -170,7 +171,9 @@ export function buildBootstrapPrompt(input: BootstrapPromptInput): string {
 		projectRoot: ".",
 		expectedProjectName: truncate(input.expectedProjectName ?? "Project", 80),
 		projectType: input.projectType,
-		...(input.existingClioMdText ? { existingClioMd: truncate(input.existingClioMdText, 8000) } : {}),
+		...(input.existingClioMdText
+			? { existingClioMd: truncate(input.existingClioMdText, FULL_PROJECT_CONTEXT_MAX_CHARS) }
+			: {}),
 		...(input.codewiki ? { codewikiDigest: renderCodewikiDigest(input.codewiki, 1200) } : {}),
 		siblingFiles,
 		adoption,

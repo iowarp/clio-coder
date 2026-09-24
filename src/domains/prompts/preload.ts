@@ -3,8 +3,15 @@ import { renderProjectContextFragment } from "../context/index.js";
 import { sha256 } from "./hash.js";
 import { safePrefixOffsets, sourceLineCount } from "./preload-prefix.js";
 
-/** Historical limits, measured in UTF-16 code units and rendered lines. */
-export const FULL_PROJECT_CONTEXT_MAX_CHARS = 8000;
+/**
+ * Full-preload limits, in UTF-16 code units and rendered lines. The line cap
+ * leaves room for a handbook written to the 200-line guideline plus its support
+ * fragments; the character cap admits those lines at a dense ~120 units each and
+ * only stops pathological line lengths. A partial preload is not a safe
+ * fallback: small models rarely follow the omission notice to read the rest, so
+ * the rules past the cut never reach them.
+ */
+export const FULL_PROJECT_CONTEXT_MAX_CHARS = 24_000;
 export const FULL_PROJECT_CONTEXT_MAX_LINES = 220;
 export type ProjectPreloadMode = "full" | "partial" | "synopsis" | "none";
 export type ProjectPreloadReason = "size" | "lines" | "no-clio-md";
