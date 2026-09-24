@@ -93,6 +93,118 @@ export function applyRoutingPatch(routing: SessionRoutingState, patch: RoutingPa
 }
 
 /**
+ * Move the live route, then persist it; a persist that throws puts the route
+ * back before rethrowing. A global save can be refused after the route has
+ * moved (a higher-precedence project leaf, an unreadable settings.yaml), and
+ * without the rollback the session kept running on a route nothing saved while
+ * the caller reported the failure. `onChange` runs after each move so derived
+ * projections follow both the change and its rollback.
+ */
+export function commitRoutingPatch(
+	routing: SessionRoutingState,
+	patch: RoutingPatch,
+	persist: () => void,
+	onChange: () => void,
+): void {
+	const prior = structuredClone(routing);
+	applyRoutingPatch(routing, patch);
+	onChange();
+	try {
+		persist();
+	} catch (error) {
+		applyRoutingPatch(routing, prior);
+		onChange();
+		throw error;
+	}
+}
+
+export interface RoutingGestureDeps {
+	/** The level Shift+Tab steps to from the active route's current one. */
+	nextThinkingLevel(): SessionThinkingLevel;
+	/** The next entry of the scoped model cycle, or null when the cycle is empty. */
+	nextScopedTarget(direction: "forward" | "backward"): { target: string; model: string | null } | null;
+	apply(patch: RoutingPatch, scope: "session" | "global"): void;
+}
+
+export interface RoutingGestures {
+	cycleThinking(): void;
+	cycleScopedModel(direction: "forward" | "backward"): boolean;
+}
+
+/**
+ * Keyboard routing gestures (the Shift+Tab thinking cycle and the scoped model
+ * cycle) are a change of mind inside one session, so they move only that
+ * session's live route. They used to write through to settings.yaml on every
+ * press, which made a keystroke in one project the model and thinking level
+ * every other project booted on next. Saving a default stays a deliberate act
+ * of the scope dialog and /settings.
+ */
+export function createRoutingGestures(deps: RoutingGestureDeps): RoutingGestures {
+	return {
+		cycleThinking(): void {
+			deps.apply({ orchestrator: { thinkingLevel: deps.nextThinkingLevel() } }, "session");
+		},
+		cycleScopedModel(direction): boolean {
+			const next = deps.nextScopedTarget(direction);
+			if (!next) return false;
+			deps.apply({ orchestrator: { target: next.target, model: next.model } }, "session");
+			return true;
+		},
+	};
+}
+
+/** The route a session last recorded running on; see domains/session/resumed-route.ts. */
+export interface ResumedRoute {
+	target: string | null;
+	model: string | null;
+	/** Present only when the session recorded a thinking change. */
+	thinkingLevel?: SessionThinkingLevel;
+}
+
+export interface ResumedRoutingPlan {
+	/** Session-scoped patch that puts the live route back on the session's own; null when nothing moves. */
+	patch: RoutingPatch | null;
+	/** Operator-facing line when the recorded route can no longer be restored. */
+	notice: string | null;
+}
+
+/**
+ * Plan the live-route change that resuming a session implies. The saved
+ * default in settings.yaml is whatever some session last saved, possibly in
+ * another project, so a resumed session that took it would silently continue
+ * on a model it never ran on. The plan restores the session's recorded route
+ * instead, field by field: `pinned.route` and `pinned.thinking` mark what an
+ * explicit CLI flag already chose, and a recorded target that is no longer
+ * configured keeps the current route and says so rather than failing the turn.
+ */
+export function planResumedRouting(
+	route: ResumedRoute,
+	settings: Readonly<ClioSettings>,
+	pinned: { route?: boolean; thinking?: boolean } = {},
+): ResumedRoutingPlan {
+	const orchestrator: Partial<SessionRoutingTarget> = {};
+	let notice: string | null = null;
+	if (pinned.route !== true && route.target !== null && route.model !== null) {
+		const current = { target: settings.chat.target ?? null, model: settings.chat.model ?? null };
+		if (!settings.targets.some((entry) => entry.id === route.target)) {
+			const kept = current.target === null ? "the current route" : `${current.target}/${current.model ?? "(no model)"}`;
+			notice = `resumed session ran on ${route.target}/${route.model}, which is no longer configured; continuing on ${kept}.`;
+		} else if (route.target !== current.target || route.model !== current.model) {
+			orchestrator.target = route.target;
+			orchestrator.model = route.model;
+		}
+	}
+	if (
+		pinned.thinking !== true &&
+		route.thinkingLevel !== undefined &&
+		route.thinkingLevel !== (settings.chat.thinkingLevel ?? "off")
+	) {
+		orchestrator.thinkingLevel = route.thinkingLevel;
+	}
+	return { patch: Object.keys(orchestrator).length > 0 ? { orchestrator } : null, notice };
+}
+
+/**
  * Session-local overrides for the non-routing settings surface (autonomy,
  * budget, compaction, retry, …). Routing has its own dedicated state above;
  * everything else a session changes "for this session only" lives here as a
@@ -177,25 +289,28 @@ export function mergeRoutingPatchIntoSettings(settings: ClioSettings, patch: Rou
  * scoped /settings commit instead of a live diff: a session-only apply moves the
  * routing state first, which would zero out a subsequent diff and make a global
  * save no-op. Only the touched fields are included, so a global save never
- * rewrites routing fields the operator did not change. Changing a target also
- * carries its rebased model. Returns null for non-routing ids.
+ * rewrites routing fields the operator did not change. Target and model travel
+ * as a pair in both directions: changing a target carries its rebased model,
+ * and changing a model carries the target it was picked on, because a model
+ * merged alone into settings.yaml lands beside whatever target the file holds
+ * and names a route that was never chosen. Returns null for non-routing ids.
  */
 export function routingPatchForId(path: string, settings: Readonly<ClioSettings>): RoutingPatch | null {
 	switch (path) {
 		case "chat.target":
 			return { orchestrator: { target: settings.chat.target, model: settings.chat.model } };
 		case "chat.model":
-			return { orchestrator: { model: settings.chat.model } };
+			return { orchestrator: { target: settings.chat.target, model: settings.chat.model } };
 		case "chat.thinkingLevel":
 			return { orchestrator: { thinkingLevel: settings.chat.thinkingLevel } };
 		case "context.memory.target":
 			return { background: { target: settings.context.memory.target, model: settings.context.memory.model } };
 		case "context.memory.model":
-			return { background: { model: settings.context.memory.model } };
+			return { background: { target: settings.context.memory.target, model: settings.context.memory.model } };
 		case "fleet.default.target":
 			return { workersDefault: { target: settings.fleet.default.target, model: settings.fleet.default.model } };
 		case "fleet.default.model":
-			return { workersDefault: { model: settings.fleet.default.model } };
+			return { workersDefault: { target: settings.fleet.default.target, model: settings.fleet.default.model } };
 		case "fleet.default.thinkingLevel":
 			return { workersDefault: { thinkingLevel: settings.fleet.default.thinkingLevel } };
 		case "chat.modelPicker.cycleSet":

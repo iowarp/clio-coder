@@ -22,10 +22,13 @@ import {
 	applyOverrides,
 	applyRoutingPatch,
 	applySessionRouting,
+	commitRoutingPatch,
+	createRoutingGestures,
 	diffRouting,
 	getAtPath,
 	isRoutingPath,
 	mergeRoutingPatchIntoSettings,
+	planResumedRouting,
 	type RoutingPatch,
 	restoreRoutingFields,
 	routingChangeNotices,
@@ -121,10 +124,10 @@ import {
 	AGENT_ROLE_TOOLS_REQUIRED_REASON,
 	applyModelCapabilityPatch,
 	canonicalEndpointKey,
+	createProvidersDomainModule,
 	firstRuntimeResolutionError,
 	isOrchestratorEligibleRuntime,
 	normalizeCostProvenance,
-	ProvidersDomainModule,
 	probeCapabilitiesForModel,
 	refineRuntimeTargetWithModelHints,
 	registerForegroundStream,
@@ -189,6 +192,7 @@ import {
 	protectedArtifactEntryFromArtifact,
 	protectedArtifactStateFromSessionEntries,
 } from "../domains/session/protected-artifacts.js";
+import { resumedSessionRoute } from "../domains/session/resumed-route.js";
 import { createTaskBoardStore } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
 import { type ShareContract, ShareDomainModule } from "../domains/share/index.js";
@@ -357,6 +361,11 @@ const CONSULT_DECISION_TIMEOUT_MS = 3_000;
 function resolveTarget(providers: ProvidersContract, targetId: string | null | undefined): TargetDescriptor | null {
 	if (!targetId) return null;
 	return providers.getTarget(targetId);
+}
+
+function settingsTargetRuntime(settings: Readonly<ClioSettings>, targetId: string | null | undefined): string | null {
+	if (!targetId) return null;
+	return settings.targets.find((entry) => entry.id === targetId)?.runtime ?? null;
 }
 
 function advanceThinkingLevel(current: ThinkingLevel, available: ReadonlyArray<ThinkingLevel>): ThinkingLevel {
@@ -1313,7 +1322,9 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			}),
 			ShareDomainModule,
 			createContextDomainModule({ noContextFiles: options.noContextFiles === true }),
-			ProvidersDomainModule,
+			// Live probes exercise this session's chat model once the effective view
+			// exists (assigned below with dispatch's); until then, the shared snapshot.
+			createProvidersDomainModule({ getSettings: () => effectiveSettingsForDispatch?.() }),
 			ToolchainDomainModule,
 			SafetyDomainModule,
 			createPromptsDomainModule({
@@ -2163,15 +2174,20 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 * Apply a routing change with one consistent scope: it takes effect in this
 	 * session immediately and writes through to saved settings as the default
 	 * for future sessions. Only the patched fields hit the file, so concurrent
-	 * sessions cannot clobber each other's saved defaults wholesale.
+	 * sessions cannot clobber each other's saved defaults wholesale. A save the
+	 * file refuses puts the live route back (commitRoutingPatch) and rethrows.
 	 */
 	const updateSessionRouting = (patch: RoutingPatch, mutateSaved?: (saved: ClioSettings) => void): void => {
-		applyRoutingPatch(sessionRouting, patch);
-		bumpSessionState();
-		persistSavedMutation((saved) => {
-			mergeRoutingPatchIntoSettings(saved, patch);
-			mutateSaved?.(saved);
-		});
+		commitRoutingPatch(
+			sessionRouting,
+			patch,
+			() =>
+				persistSavedMutation((saved) => {
+					mergeRoutingPatchIntoSettings(saved, patch);
+					mutateSaved?.(saved);
+				}),
+			bumpSessionState,
+		);
 	};
 	/**
 	 * A routing change at the scope the operator chose. "session" moves the live
@@ -2227,20 +2243,22 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 	 */
 	const applySettingsBlob = (next: ClioSettings): void => {
 		const patch = diffRouting(getCurrentSettings(), next);
-		if (patch) {
-			applyRoutingPatch(sessionRouting, patch);
-			bumpSessionState();
-		}
-		persistSavedMutation((fresh) => {
-			const persisted = structuredClone(next);
-			restoreRoutingFields(persisted, fresh);
-			// A whole-blob write (providers, favorites) must not globalize a
-			// session-only override: restore every overridden leaf from the
-			// fresh file so it stays session-local until explicitly saved.
-			for (const path of sessionOverrides.keys()) setAtPath(persisted, path, getAtPath(fresh, path));
-			if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
-			return persisted;
-		});
+		commitRoutingPatch(
+			sessionRouting,
+			patch ?? {},
+			() =>
+				persistSavedMutation((fresh) => {
+					const persisted = structuredClone(next);
+					restoreRoutingFields(persisted, fresh);
+					// A whole-blob write (providers, favorites) must not globalize a
+					// session-only override: restore every overridden leaf from the
+					// fresh file so it stays session-local until explicitly saved.
+					for (const path of sessionOverrides.keys()) setAtPath(persisted, path, getAtPath(fresh, path));
+					if (patch) mergeRoutingPatchIntoSettings(persisted, patch);
+					return persisted;
+				}),
+			bumpSessionState,
+		);
 	};
 	/**
 	 * Commit a single /settings edit, keyed by its config-path id. `next` is the
@@ -2263,9 +2281,12 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			// sessions never clobber each other's saved routing.
 			const patch = routingPatchForId(id, next);
 			if (!patch) return;
+			if (scope === "global") {
+				updateSessionRouting(patch);
+				return;
+			}
 			applyRoutingPatch(sessionRouting, patch);
 			bumpSessionState();
-			if (scope === "global") persistSavedMutation((saved) => mergeRoutingPatchIntoSettings(saved, patch));
 			return;
 		}
 		const value = getAtPath(next, id);
@@ -2274,17 +2295,131 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			bumpSessionState();
 			return;
 		}
+		// Same contract as a routing save: a refused write leaves the session
+		// override it would have replaced in place.
+		const hadOverride = sessionOverrides.has(id);
+		const priorOverride = sessionOverrides.get(id);
 		sessionOverrides.delete(id);
 		bumpSessionState();
-		persistSavedMutation((saved) => setAtPath(saved, id, value));
+		try {
+			persistSavedMutation((saved) => setAtPath(saved, id, value));
+		} catch (error) {
+			if (hadOverride) sessionOverrides.set(id, priorOverride);
+			bumpSessionState();
+			throw error;
+		}
 	};
-	/** Scoped model cycle actions: step this session's orchestrator through the scope list. */
-	const cycleScopedSession = (direction: "forward" | "backward"): boolean => {
-		const next = advanceScopedTarget(getCurrentSettings(), direction);
-		if (!next) return false;
-		updateSessionRouting({ orchestrator: { target: next.target, model: next.model } });
-		return true;
+	// Shift+Tab and the scoped model cycle move this session only; see createRoutingGestures.
+	const routingGestures = createRoutingGestures({
+		nextThinkingLevel: () => {
+			const current = getCurrentSettings();
+			const thinking = resolveModelRuntimeCapabilitiesForProviders(
+				providers,
+				current.chat.target,
+				current.chat.model,
+				current.chat.thinkingLevel ?? "off",
+			)?.thinking;
+			const effectiveAvailable = thinking?.supportedLevels ?? (["off"] as ThinkingLevel[]);
+			return advanceThinkingLevel(thinking?.effectiveLevel ?? current.chat.thinkingLevel ?? "off", effectiveAvailable);
+		},
+		nextScopedTarget: (direction) => advanceScopedTarget(getCurrentSettings(), direction),
+		apply: applyRoutingAtScope,
+	});
+	/**
+	 * Put the live route back on the one the current, just-resumed session last
+	 * ran on (planResumedRouting), at session scope: settings.yaml keeps
+	 * whatever default some session saved, possibly in another project. When
+	 * the session is going to run on a different route anyway (an explicit CLI
+	 * flag, a recorded target that is gone), that route is appended as the
+	 * session's newest, because the first runtime this process builds records
+	 * nothing and the next resume would otherwise go back to the old one.
+	 * Returns the operator notice, if any; the caller knows where it can go.
+	 */
+	const restoreResumedSessionRoute = (pinned?: { route?: boolean; thinking?: boolean }): string | null => {
+		const meta = session?.current();
+		if (!session || !meta) return null;
+		let recorded: ReturnType<typeof resumedSessionRoute>;
+		try {
+			recorded = resumedSessionRoute(meta, readSessionEntriesForCompact(meta.id));
+		} catch {
+			// An unreadable ledger has no route to offer; the session keeps the
+			// current one, which is what resume did before it looked.
+			return null;
+		}
+		const plan = planResumedRouting(recorded, getCurrentSettings(), pinned);
+		if (plan.patch) applyRoutingAtScope(plan.patch, "session");
+		const effective = getCurrentSettings().chat;
+		const parentTurnId = (() => {
+			try {
+				return session.tree(meta.id).leafId;
+			} catch {
+				return null;
+			}
+		})();
+		try {
+			const runtimeId = settingsTargetRuntime(getCurrentSettings(), effective.target);
+			if (
+				effective.target &&
+				effective.model &&
+				runtimeId &&
+				(effective.target !== recorded.target || effective.model !== recorded.model)
+			) {
+				session.appendEntry({
+					kind: "modelChange",
+					parentTurnId,
+					provider: runtimeId,
+					modelId: effective.model,
+					target: effective.target,
+				});
+			}
+			const level = effective.thinkingLevel ?? "off";
+			if (pinned?.thinking === true && level !== recorded.thinkingLevel) {
+				session.appendEntry({ kind: "thinkingLevelChange", parentTurnId, thinkingLevel: level });
+			}
+		} catch {
+			// Best effort, like the chat loop's own markers: a lost row only means
+			// the next resume restores the older route.
+		}
+		return plan.notice;
 	};
+	// A headless `--session`/`--continue` resumed before the route was seeded;
+	// restore it now, letting an explicit --target/--model/--thinking win.
+	if (resumedSessionAtBoot) {
+		const notice = restoreResumedSessionRoute({
+			route: options.headless?.target !== undefined || options.headless?.model !== undefined,
+			thinking: options.headless?.thinking !== undefined,
+		});
+		if (notice !== null) bootStderr(`Clio Coder: ${notice}\n`);
+	}
+	// Every later resume (/resume, ACP session/load) goes through the session
+	// domain, which announces it synchronously before the caller replays the
+	// transcript. A `/tree` branch switch is a different event and keeps the
+	// route the operator is on.
+	const unsubscribeResumedRoute = bus.on(BusChannels.SessionResumed, (payload) => {
+		const event = payload as { sessionId?: unknown; via?: unknown } | null | undefined;
+		if (event?.via !== "resume" || session?.current()?.id !== event.sessionId) return;
+		const notice = restoreResumedSessionRoute();
+		if (notice === null) return;
+		if (interactive && deferredWatchdogNoticeSink) {
+			deferredWatchdogNoticeSink(notice);
+		} else if (options.acp !== undefined) {
+			// ACP has no advisory channel outside a prompt; record it where the
+			// routing notices already go (see the ConfigNextTurn subscriber below).
+			try {
+				session?.appendEntry({
+					kind: "custom",
+					customType: "clio-coder.routing-notice",
+					parentTurnId: null,
+					data: { kind: "resumed-route-unavailable", level: "warning", text: notice },
+				});
+			} catch {
+				// Advisory only.
+			}
+		} else {
+			bootStderr(`Clio Coder: ${notice}\n`);
+		}
+	});
+	termination.onDrain(() => unsubscribeResumedRoute());
 
 	const readCurrentSessionEntries = (): ReadonlyArray<SessionEntry> => {
 		if (session === undefined) return [];
@@ -2970,23 +3105,10 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 			const nextLevel =
 				resolveModelRuntimeCapabilitiesForProviders(providers, current.chat.target, current.chat.model, level)?.thinking
 					.effectiveLevel ?? "off";
-			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "global");
+			// An unscoped caller gets the scope that cannot outlive this session.
+			applyRoutingAtScope({ orchestrator: { thinkingLevel: nextLevel } }, scope ?? "session");
 		},
-		onCycleThinking: () => {
-			const current = getCurrentSettings();
-			const thinking = resolveModelRuntimeCapabilitiesForProviders(
-				providers,
-				current.chat.target,
-				current.chat.model,
-				current.chat.thinkingLevel ?? "off",
-			)?.thinking;
-			const effectiveAvailable = thinking?.supportedLevels ?? (["off"] as ThinkingLevel[]);
-			const nextLevel = advanceThinkingLevel(
-				thinking?.effectiveLevel ?? current.chat.thinkingLevel ?? "off",
-				effectiveAvailable,
-			);
-			updateSessionRouting({ orchestrator: { thinkingLevel: nextLevel } });
-		},
+		onCycleThinking: () => routingGestures.cycleThinking(),
 		onSelectModel: ({ target, model }, scope) => {
 			const registry = getRuntimeRegistry();
 			const settings = getCurrentSettings();
@@ -3047,8 +3169,8 @@ export async function bootOrchestrator(options: BootOptions = {}): Promise<BootR
 					},
 				}
 			: {}),
-		onCycleScopedModelForward: () => cycleScopedSession("forward"),
-		onCycleScopedModelBackward: () => cycleScopedSession("backward"),
+		onCycleScopedModelForward: () => routingGestures.cycleScopedModel("forward"),
+		onCycleScopedModelBackward: () => routingGestures.cycleScopedModel("backward"),
 		onShutdown: async () => {
 			await termination.shutdown(0);
 		},

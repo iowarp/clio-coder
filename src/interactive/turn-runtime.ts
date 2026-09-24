@@ -420,6 +420,12 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 	// A target id/model names the selection, not its current URL, auth, pricing
 	// or cache policy. Keep the constructed descriptor identity across calls.
 	let runtimeTargetSettings: string | null = null;
+	// The requested thinking level the runtime last ran under. A change gets a
+	// `thinkingLevelChange` row where it takes effect, the same way a model swap
+	// gets its `modelChange` row, so /resume can put a session back on the level
+	// it was using. The first build only notes the level: the session was
+	// created under it, and a marker per session start would be noise.
+	let lastRequestedThinkingLevel: string | null = null;
 	const ensureRuntime = (options?: { silent?: boolean }): AgentRuntime | null => {
 		const target = readTarget();
 		if (!target) return null;
@@ -436,6 +442,11 @@ export function createTurnRuntime(deps: TurnRuntimeDeps): TurnRuntime {
 				"target-unknown",
 			);
 		}
+		const requestedThinkingLevel = target.runtimeResolution.requestedThinkingLevel;
+		if (lastRequestedThinkingLevel !== null && lastRequestedThinkingLevel !== requestedThinkingLevel) {
+			persistence.appendThinkingLevelChangeEntry(requestedThinkingLevel);
+		}
+		lastRequestedThinkingLevel = requestedThinkingLevel;
 		if (
 			state.runtime &&
 			state.runtime.targetId === target.target.id &&

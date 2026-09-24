@@ -559,7 +559,7 @@ export function createInteractiveSlashRuntime(deps: InteractiveSlashRuntimeDeps)
 				next.chat.thinkingLevel = match;
 				deps.commitSetting("chat.thinkingLevel", next, "session");
 			} else {
-				deps.onSetThinkingLevel(match);
+				deps.onSetThinkingLevel(match, "session");
 			}
 			deps.refreshFooter();
 			return { status: "applied", level: match, display: labelFor(match) };
