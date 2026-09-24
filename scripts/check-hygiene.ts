@@ -423,8 +423,26 @@ function checkCiScripts(): void {
 	const release = parseYaml(readRoot(".github/workflows/release.yml"));
 	if (ci.concurrency?.["cancel-in-progress"] !== true) fail("ci-scripts", "CI must cancel superseded runs");
 	if (ci.permissions?.contents !== "read") fail("ci-scripts", "routine CI must be read-only");
+	if (!Object.hasOwn(ci.on ?? {}, "workflow_call"))
+		fail("ci-scripts", "release must be able to call the same CI gates as pull requests");
+	if (ci.jobs?.ci?.name !== "ci (22)" || ci.jobs?.["runtime-compatibility"]?.name !== "ci (24)")
+		fail("ci-scripts", "keep the required branch-protection status names");
+	if (!isDeepStrictEqual([...(ci.jobs?.ci?.needs ?? [])].sort(), ["checks", "core-tests", "windows-subprocess"].sort()))
+		fail("ci-scripts", "the required Node 22 status must depend on all routine checks");
+	if (release.jobs?.ci?.uses !== "./.github/workflows/ci.yml" || release.jobs?.qualify?.needs !== "ci")
+		fail("ci-scripts", "tag qualification must wait for the reusable CI workflow");
+	if (release.permissions?.contents !== "read" || release.jobs?.release?.permissions?.contents !== "write")
+		fail("ci-scripts", "only the release job may write repository contents");
+	if (
+		!release.jobs?.qualify?.steps?.some((step: { run?: string }) =>
+			step.run?.includes("release-candidate.mjs qualify-after-ci"),
+		)
+	)
+		fail("ci-scripts", "tag qualification must audit and test the exact package");
 	if (release.jobs?.release?.needs !== "qualify")
 		fail("ci-scripts", "release creation must depend on successful qualification");
+	if (!release.jobs?.release?.steps?.some((step: { run?: string }) => step.run?.includes("sha256sum --check")))
+		fail("ci-scripts", "release creation must verify the qualified package digest");
 	for (const workflow of [ci, release]) {
 		for (const job of Object.values(workflow.jobs ?? {}) as Array<{
 			"continue-on-error"?: boolean;
@@ -977,6 +995,8 @@ const NPM_IMPLICIT_FILES = new Set(["package.json"]);
 const ROOT_ONLY_RESOLVERS = new Set([
 	// Hands the root to the component scanner, which walks whatever is present.
 	"src/cli/components.ts",
+	// Installation identity uses the root's layout to preserve its package-manager prefix.
+	"src/domains/lifecycle/install-method.ts",
 ]);
 const PATH_JOINERS = new Set(["join", "resolve"]);
 

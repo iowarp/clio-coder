@@ -41,13 +41,15 @@ function releaseVersion() {
 const scratch = mkdtempSync(join(tmpdir(), "clio-candidate-"));
 try {
 	const mode = process.argv[2];
-	if (mode === "qualify") {
+	if (mode === "qualify" || mode === "qualify-after-ci") {
 		mkdirSync(directory, { recursive: true });
 		// Invalidate old evidence before starting: cancellation/failure cannot
 		// leave an earlier success available for publication.
 		rmSync(receiptPath, { force: true });
 		const commit = source();
-		run("pnpm", ["run", "ci"]);
+		// The tag workflow has already run the reusable CI workflow against this
+		// commit. It only needs a fresh build for the exact package audit.
+		run("pnpm", ["run", mode === "qualify" ? "ci" : "build"]);
 		run(process.execPath, ["scripts/check-release.mjs"]);
 		const packed = pack(scratch);
 		run("pnpm", ["run", "test:package"], { env: { ...process.env, CLIO_CODER_RELEASE_TARBALL: packed } });
@@ -60,11 +62,15 @@ try {
 		if (digest(readFileSync(pack(check))) !== sha256) throw new Error("Package changed during qualification.");
 		copyFileSync(packed, artifact);
 		writeFileSync(`${artifact}.sha256`, `${sha256}  candidate.tgz\n`);
-		writeFileSync(
-			receiptPath,
-			`${JSON.stringify({ schema: 1, commit, sha256, node: process.version, qualifiedAt: Date.now() })}\n`,
-			{ mode: 0o600 },
-		);
+		// Local publication preflight accepts only a receipt from full qualification.
+		// CI's split gate passes through Actions dependencies instead of this cache.
+		if (mode === "qualify") {
+			writeFileSync(
+				receiptPath,
+				`${JSON.stringify({ schema: 1, commit, sha256, node: process.version, qualifiedAt: Date.now() })}\n`,
+				{ mode: 0o600 },
+			);
+		}
 		if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `artifact=${artifact}\n`);
 		console.log(`Qualified ${commit}\nArtifact: ${artifact}\nSHA-256: ${sha256}`);
 	} else if (mode === "preflight") {
@@ -86,7 +92,7 @@ try {
 		}
 		console.log(`Publication preflight passed for ${receipt.commit}\nArtifact: ${artifact}`);
 	} else {
-		throw new Error("Usage: node scripts/release-candidate.mjs qualify|preflight");
+		throw new Error("Usage: node scripts/release-candidate.mjs qualify|qualify-after-ci|preflight");
 	}
 } catch (error) {
 	console.error(`release-candidate: ${error.message}`);
