@@ -6,11 +6,17 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ### Session and project isolation
 
-- Dispatch runs, receipts, and batches now carry their owning Clio session. A sibling session in the same project can inspect a run, while collect, steer, nudge, and gate recovery act only on runs owned by the current session.
-- Resuming a session restores its own model and thinking level without changing global settings. Model changes in the picker and keyboard cycle stay in the current session until explicitly saved.
-- `/model` and `/settings` can save edits for the current project in `.clio-coder/settings.local.yaml`. Existing project settings must be trusted; an explicit save approves only the exact bytes Clio wrote.
-- `fleet status`, `inspect`, `decisions`, and `view` now show the current project by default. `--all` enables machine-wide inspection, including run and fleet root IDs from other projects.
-- The footer's first-pass success and accountability figures now count only runs owned by the current session.
+- Dispatch runs, receipts, and batches now carry their owning Clio session. A sibling session in the same project can inspect a run, while collect, steer, nudge, and gate recovery act only on runs owned by the current session (#392).
+- Resuming a session restores its own model and thinking level without changing global settings. Model changes in the picker and keyboard cycle stay in the current session until explicitly saved (#393).
+- `/model` and `/settings` can save edits for the current project in `.clio-coder/settings.local.yaml`. Existing project settings must be trusted; an explicit save approves only the exact bytes Clio wrote (#394).
+- `fleet status`, `inspect`, `decisions`, and `view` now show the current project by default. `--all` enables machine-wide inspection, including run and fleet root IDs from other projects (#395).
+- The footer's first-pass success and accountability figures now count only runs owned by the current session (#396).
+
+### Startup and input readiness
+
+- The instant shell answers the keyboard while the full interface loads. Boot yields between its phases, so keystrokes echo, Enter queues a submission that runs once in order after loading, and Ctrl+C, SIGTERM and resize work before the full interface appears. `CLIO_CODER_INSTANT_SHELL=0` restores the old single-step boot.
+- Operator extensions start just after the first full frame instead of before it, about 60 to 80 ms sooner to a usable screen with many plugins installed.
+- Installed plugins are verified at most once per operation. Plain-text submits no longer verify them at all, slash completion and the `/help` and `/extensions` views read the plugin state committed at load, and `context`, library inventory and a session's first turn verify each plugin once. Running a template or an extension command still verifies it first.
 
 ### Transcript presentation
 
