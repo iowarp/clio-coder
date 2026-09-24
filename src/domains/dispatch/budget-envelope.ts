@@ -19,7 +19,11 @@ export type BudgetEnvelopeReasonCode =
 	| "retry-growth-authorized"
 	| "retry-growth-denied"
 	| "revision-growth-authorized"
-	| "revision-growth-denied";
+	| "revision-growth-denied"
+	| "read-only-research-synthesis";
+
+/** Native read-only scout/provenance runs finish their tool phase at this bound. */
+export const READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS = 36;
 
 export interface BudgetEnvelopeReason {
 	code: BudgetEnvelopeReasonCode;
@@ -145,6 +149,8 @@ export interface ResolveToolBudgetEnvelopeInput {
 	retry: boolean;
 	revision: boolean;
 	enforcement?: "native-per-tool" | "external-one-shot";
+	/** Only a native, read-only scout or provenance worker may use this policy. */
+	nativeReadOnlyResearch?: boolean;
 }
 
 /** Resolve the one immutable envelope used by admission, enforcement, and evidence. */
@@ -174,15 +180,24 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 			});
 		}
 	}
+	const forceSynthesis = input.nativeReadOnlyResearch === true && input.enforcement !== "external-one-shot";
 	const revisionCeiling = phaseKind === null ? request?.retryRevision : undefined;
-	if (revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
+	if (!forceSynthesis && revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
 		reasons.push({
 			code: "revision-growth-authorized",
 			detail: `a result-contract revision may grow from ${selected.toolCalls}/${selected.readReserve} to the advisory estimate ${revisionCeiling.toolCalls}/${revisionCeiling.readReserve}`,
 		});
 	}
 
-	const toolCalls = selected.toolCalls;
+	const toolCalls = forceSynthesis
+		? Math.min(READ_ONLY_RESEARCH_SYNTHESIS_TOOL_CALLS, input.hardCap)
+		: selected.toolCalls;
+	if (forceSynthesis) {
+		reasons.push({
+			code: "read-only-research-synthesis",
+			detail: `native read-only research enters final synthesis after ${toolCalls} observed tool calls`,
+		});
+	}
 	let readReserve = selected.readReserve;
 	if (!input.hasReadTool && readReserve > 0) {
 		reasons.push({
@@ -200,7 +215,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 		readReserve = maximumEffectiveReserve;
 	}
 	let effectiveRevision: DispatchBudgetPhase | undefined;
-	if (revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
+	if (!forceSynthesis && revisionCeiling !== undefined && !samePhase(revisionCeiling, selected)) {
 		let revisionReadReserve = revisionCeiling.readReserve;
 		if (!input.hasReadTool && revisionReadReserve > 0) {
 			reasons.push({
@@ -224,8 +239,8 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 					}
 				: {
 						classification: "native-per-tool",
-						perTool: "advisory",
-						clioControls: [...ADVISORY_CLIO_CONTROLS],
+						perTool: forceSynthesis ? "enforced" : "advisory",
+						clioControls: forceSynthesis ? [...NATIVE_CLIO_CONTROLS] : [...ADVISORY_CLIO_CONTROLS],
 					},
 		policy: {
 			recipeId: input.recipeId,
@@ -239,7 +254,7 @@ export function resolveToolBudgetEnvelope(input: ResolveToolBudgetEnvelopeInput)
 		},
 		request,
 		effective: {
-			mode: "advisory",
+			mode: forceSynthesis ? "enforced" : "advisory",
 			toolCalls,
 			readReserve,
 			synthesis: input.policy.synthesis,
@@ -297,6 +312,7 @@ const BUDGET_REASON_CODES: ReadonlySet<string> = new Set<BudgetEnvelopeReasonCod
 	"retry-growth-denied",
 	"revision-growth-authorized",
 	"revision-growth-denied",
+	"read-only-research-synthesis",
 ]);
 
 function isExactStringArray(value: unknown[], expected: readonly string[]): boolean {

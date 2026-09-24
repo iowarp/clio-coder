@@ -1896,6 +1896,7 @@ function resolveEffectiveWorkerBudget(input: {
 	allowedTools: ReadonlyArray<ToolName>;
 	settings: EffectiveSettings;
 	runtime: RuntimeDescriptor;
+	readOnly: boolean;
 }): RunToolBudgetEnvelope {
 	const hardCap = workerToolCallHardCap(input.settings);
 	const declared = input.declared ?? {
@@ -1912,6 +1913,8 @@ function resolveEffectiveWorkerBudget(input: {
 		retry: (input.req.lineage?.attempt ?? 0) > 0,
 		revision: input.req.gate?.role === "builder" && input.req.gate.cycle > 1 && input.req.gate.verdict === "revise",
 		enforcement: budgetEnforcementForRuntime(input.runtime),
+		nativeReadOnlyResearch:
+			input.readOnly && (input.recipeId === "scout" || input.recipeId === "provenance") && declared.synthesis,
 	});
 }
 
@@ -4140,6 +4143,7 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
+			readOnly: effectiveAutonomy === "read-only",
 		});
 		// Fetch captured project context only for tiers that receive it, so
 		// read-only scouts never pay the CLIO-CODER.md read. The tier is spec policy
@@ -6980,6 +6984,9 @@ export function createDispatchBundle(
 			allowedTools: effectiveTools,
 			settings,
 			runtime: target.runtime,
+			readOnly:
+				effectiveWorkerAutonomy(settings?.safety.autonomy ?? "auto-edit", req.autonomy, agentSpec.capabilityClass) ===
+				"read-only",
 		});
 		const endpoint = endpointCapacityForTarget(target.target.id);
 		return {

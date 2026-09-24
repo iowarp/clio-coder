@@ -196,7 +196,7 @@ describe("dispatch advisory admission and explicit authority", () => {
 			{
 				spawnWorker: (spec) => {
 					starts++;
-					equal(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).budget.mode, "advisory");
+					equal(parseWorkerSpec(JSON.parse(JSON.stringify(spec))).budget.mode, "enforced");
 					throw new Error("fixture launch reached");
 				},
 			},
