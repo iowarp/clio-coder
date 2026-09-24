@@ -56,9 +56,12 @@ import type { PromptsContract } from "../domains/prompts/contract.js";
 import { toContextOverflowError } from "../domains/providers/errors.js";
 import type { ProvidersContract } from "../domains/providers/index.js";
 import {
+	acceptsImageInput,
 	canonicalEndpointKey,
+	modelCandidatesForStatus,
 	normalizeCostProvenance,
 	registerForegroundStream,
+	resolveModelCapabilities,
 	runtimeTargetSnapshot,
 	targetRequiresAuth,
 } from "../domains/providers/index.js";
@@ -882,6 +885,18 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 	const emitAdmissionNotice = (text: string, reason: string): void => {
 		emit({ type: "notice", level: "info", surface: "transcript", text, admission: { reason } });
 	};
+	const visionModelOptions = (): string[] => {
+		const options: string[] = [];
+		for (const status of deps.providers.list()) {
+			for (const candidate of modelCandidatesForStatus(status)) {
+				const caps = resolveModelCapabilities(status, candidate.id, deps.providers.knowledgeBase);
+				if (!acceptsImageInput({ runtimeId: status.runtime?.id ?? status.target.runtime, vision: caps.vision })) continue;
+				options.push(`${status.target.id}/${candidate.id}`);
+				if (options.length === 5) return options;
+			}
+		}
+		return options;
+	};
 
 	/**
 	 * Which of the two settings is actually missing when the runtime resolves to
@@ -1442,6 +1457,27 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 			}
 			if (!agentRuntime) {
 				emitAdmissionNotice(notConfiguredNotice(), nullRuntimeAdmissionReason());
+				return;
+			}
+			if (
+				options.images?.length &&
+				!acceptsImageInput({
+					runtimeId: agentRuntime.runtimeResolution.runtime.id,
+					vision: agentRuntime.runtimeResolution.capabilityDecisions.vision,
+				})
+			) {
+				const route = agentRuntime.runtimeResolution;
+				const choices = visionModelOptions();
+				const alternatives = choices.length
+					? ` Known vision-capable models: ${choices.join(", ")}. Open /model to switch.`
+					: " No vision-capable models are known in the configured catalog.";
+				emit({
+					type: "notice",
+					level: "warning",
+					surface: "transcript",
+					text: `IMAGE_INPUT_UNSUPPORTED: ${route.targetId}/${route.wireModelId} cannot accept image input.${alternatives}`,
+					admission: { reason: "image-input-unsupported" },
+				});
 				return;
 			}
 
