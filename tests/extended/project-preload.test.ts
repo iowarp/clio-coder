@@ -3,7 +3,11 @@ import { describe, it } from "node:test";
 import { renderProjectContextFragment } from "../../src/domains/context/clio-md.js";
 import type { ProjectPromptContext } from "../../src/domains/context/contract.js";
 import { sha256 } from "../../src/domains/prompts/hash.js";
-import { selectProjectPreload } from "../../src/domains/prompts/preload.js";
+import {
+	FULL_PROJECT_CONTEXT_MAX_CHARS,
+	FULL_PROJECT_CONTEXT_MAX_LINES,
+	selectProjectPreload,
+} from "../../src/domains/prompts/preload.js";
 import { isProjectPreloadClass } from "../../src/domains/session/prompt-manifest.js";
 
 function context(sources: string[], supportFragments = ["<project-type>unknown</project-type>"]): ProjectPromptContext {
@@ -21,8 +25,8 @@ function context(sources: string[], supportFragments = ["<project-type>unknown</
 	};
 }
 function assertBudget(selected: ReturnType<typeof selectProjectPreload>): void {
-	strictEqual(selected.text.length <= 8000, true);
-	strictEqual(selected.text.split("\n").length <= 220, true);
+	strictEqual(selected.text.length <= FULL_PROJECT_CONTEXT_MAX_CHARS, true);
+	strictEqual(selected.text.split("\n").length <= FULL_PROJECT_CONTEXT_MAX_LINES, true);
 	strictEqual(selected.classification.includedChars, selected.text.length);
 	strictEqual(selected.classification.includedLines, selected.text.split("\n").length);
 	strictEqual(isProjectPreloadClass(selected.classification), true);
@@ -37,10 +41,13 @@ describe("bounded authored preload", () => {
 		strictEqual(selected.classification.mode, "full");
 		strictEqual(selected.classification.sources?.[0]?.contentHash, sha256(source));
 		strictEqual(selected.classification.sources?.[0]?.availableLines, 5);
-		for (const size of [8000, 8001]) {
+		for (const size of [FULL_PROJECT_CONTEXT_MAX_CHARS, FULL_PROJECT_CONTEXT_MAX_CHARS + 1]) {
 			const padded = context([`EARLY\n\n${"x".repeat(size - context(["EARLY\n\n"]).text.length)}`]);
 			strictEqual(padded.text.length, size);
-			strictEqual(selectProjectPreload(padded).classification.mode, size === 8000 ? "full" : "partial");
+			strictEqual(
+				selectProjectPreload(padded).classification.mode,
+				size === FULL_PROJECT_CONTEXT_MAX_CHARS ? "full" : "partial",
+			);
 			assertBudget(selectProjectPreload(padded));
 		}
 	});
@@ -60,7 +67,7 @@ describe("bounded authored preload", () => {
 	it("preserves safe Unicode/CRLF prefixes and omits indivisible pathological blocks", () => {
 		const prefix = "KEEP 👩🏽‍🔬 é café.  \r\n\r\n";
 		for (const block of [
-			"x".repeat(9000),
+			"x".repeat(FULL_PROJECT_CONTEXT_MAX_CHARS + 1000),
 			`\`\`\`\`sh\ncommand\n\`\`\`\n\n${"x\n".repeat(300)}\`\`\`\`\n`,
 			`~~~~sh\ncommand\n~~~\n\n${"x\n".repeat(300)}~~~~\n`,
 			`\`\`\`sh\n${"unclosed\n".repeat(300)}`,
@@ -91,7 +98,9 @@ describe("bounded authored preload", () => {
 			strictEqual(selected.text.includes("If tools are available"), tools === null);
 		}
 		const overflow = context(["rule\n\n".repeat(400)]);
-		overflow.handbookSources = [{ path: `/${"p".repeat(8000)}`, source: "rule\n\n".repeat(400) }];
+		overflow.handbookSources = [
+			{ path: `/${"p".repeat(FULL_PROJECT_CONTEXT_MAX_CHARS)}`, source: "rule\n\n".repeat(400) },
+		];
 		throws(() => selectProjectPreload(overflow), /metadata-budget overflow for 1 handbook sources/);
 	});
 	it("accepts historical full/synopsis records and validates additive accounting", () => {
