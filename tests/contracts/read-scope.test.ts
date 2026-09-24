@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, 
 import { homedir, tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, it } from "node:test";
+import { resolvePackageRoot } from "../../src/core/package-root.js";
 import { ToolNames } from "../../src/core/tool-names.js";
 import { type AutonomyLevel, mapAutonomy } from "../../src/domains/safety/autonomy.js";
 import { createSafetyPolicyEngine } from "../../src/domains/safety/policy-engine.js";
@@ -197,6 +198,27 @@ describe("read scope admission", () => {
 		strictEqual(engine.evaluate({ tool: ToolNames.Ls, args: { path: "caf\u00e9" } }).readScope, "outside-workspace");
 		writeFileSync(join(root, "plain's.txt"), "inside\n");
 		strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path: "plain's.txt" } }).readScope, undefined);
+	});
+
+	it("keeps the installed package's docs and source readable, and nothing else in the package", () => {
+		const engine = createSafetyPolicyEngine({ cwd: root });
+		const packageRoot = resolvePackageRoot();
+		for (const path of [
+			join(packageRoot, "docs", "README.md"),
+			join(packageRoot, "src", "core", "package-root.ts"),
+			join(packageRoot, "README.md"),
+			join(packageRoot, "CHANGELOG.md"),
+		]) {
+			strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path } }).readScope, undefined, path);
+		}
+		for (const path of [
+			join(packageRoot, "package.json"),
+			join(packageRoot, "node_modules"),
+			join(packageRoot, "dist", "assets", "codewiki.json"),
+			`${join(packageRoot, "docs")}/../package.json`,
+		]) {
+			strictEqual(engine.evaluate({ tool: ToolNames.Read, args: { path } }).readScope, "outside-workspace", path);
+		}
 	});
 
 	it("keeps the interop skill roots and dispatch receipts readable", () => {
