@@ -7,7 +7,8 @@ tests were checked before changes. Clio work is isolated on branch
 `/home/akougkas/iowarp/clio-coder/.clio-coder/worktrees/harness-sprint-20260924`
 (base `1cebdaf7`). The shared `v055` checkout and other agents' worktrees are untouched.
 Herdr tab `wT:t2`: orchestrator `p1W`, Codex Sol xhigh `p28`, Codex Sol medium `p29`.
-No sprint worker used a homelab target or spawned another agent.
+The first two Clio instances selected a homelab route and were stopped before
+edits; all implementation and tests used Codex Sol panes. No pane spawned an agent.
 
 | Lead | Delivered fix | Commit |
 | --- | --- | --- |
