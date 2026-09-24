@@ -1407,9 +1407,6 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		}, delay);
 		operatorTimer.unref();
 	};
-	queueMicrotask(() => {
-		void operatorExtensions?.reload("startup");
-	});
 	getTerminationCoordinator().onDrain(
 		async () => {
 			clearTimeout(operatorTimer);
@@ -1514,7 +1511,18 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				.catch(() => {});
 	};
 	void shell.nextCommittedFrame().then((frame) => {
-		if (frame === null || startupAbort.signal.aborted) return;
+		if (startupAbort.signal.aborted) return;
+		// The startup reload starts operator extension runtimes and commits the
+		// next extension and hook generation, walking every installed plugin
+		// again. Boot already committed a paired generation from the same
+		// inventory, so running it after the first committed frame only starts
+		// runtimes one frame later and takes the walk off the path to that frame.
+		// A shell that reports no frames still reloads.
+		if (operatorExtensions)
+			setImmediate(() => {
+				if (!startupAbort.signal.aborted) void operatorExtensions.reload("startup");
+			});
+		if (frame === null) return;
 		// Pay the transcript renderers' first-use cost now, between the hydrated
 		// frame and the first answer, rather than in the middle of that answer.
 		setImmediate(() => {

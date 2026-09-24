@@ -1,4 +1,5 @@
 import { deepStrictEqual, ok, strictEqual } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -230,6 +231,44 @@ async function waitForBashCommands(root: string, count: number): Promise<string[
 	}
 }
 
+/** A project-scoped operator extension that writes `marker` when a session opens. */
+function installSessionOpenExtension(scratch: Fixture, marker: string): void {
+	const source = mkdtempSync(join(tmpdir(), "clio-coder-boot-handoff-extension-"));
+	try {
+		writeFileSync(
+			join(source, "clio-coder-extension.json"),
+			JSON.stringify({
+				id: "clio-coder-boot-fixture",
+				name: "Boot fixture",
+				version: "1.0.0",
+				description: "Marks session_open",
+				runtime: { api: 1, entrypoint: "extension.mjs", events: ["session_open"] },
+			}),
+		);
+		writeFileSync(
+			join(source, "extension.mjs"),
+			`import {writeFileSync} from "node:fs";export default api=>{api.on("session_open",()=>writeFileSync(${JSON.stringify(marker)},"opened"));};`,
+		);
+		const install = spawnSync(process.execPath, [CLI, "extensions", "install", source, "--project", "--json"], {
+			cwd: scratch.project,
+			env: { ...scratch.env, CLIO_CODER_INTERACTIVE: "0" },
+			encoding: "utf8",
+			timeout: 15_000,
+		});
+		strictEqual(install.status, 0, install.stderr);
+	} finally {
+		rmSync(source, { recursive: true, force: true });
+	}
+}
+
+async function waitForFile(path: string): Promise<void> {
+	const deadline = Date.now() + 15_000;
+	while (!existsSync(path)) {
+		ok(Date.now() < deadline, `${path} never appeared`);
+		await new Promise((settle) => setTimeout(settle, 20));
+	}
+}
+
 interface FrameRecord {
 	type: string;
 	frameId: number;
@@ -397,6 +436,28 @@ describe("boot handoff through a real terminal", { concurrency: false, skip: pro
 			scratch.cleanup();
 		}
 	});
+
+	for (const instantShell of ["1", "0"]) {
+		it(`starts operator extensions once the shell has painted (instant shell ${instantShell})`, async () => {
+			// The startup reload runs after the first committed frame. A shell path
+			// that never reports that frame would leave extensions unstarted.
+			const scratch = fixture({ CLIO_CODER_INSTANT_SHELL: instantShell });
+			const marker = join(scratch.project, "session-open.txt");
+			installSessionOpenExtension(scratch, marker);
+			const terminal = launch(scratch.env, scratch.project);
+			try {
+				await terminal.waitFor(HYDRATED);
+				await waitForFile(marker);
+				process.kill(terminal.pid, "SIGTERM");
+				strictEqual(await terminal.exited(), 143, terminal.visible().slice(-2_000));
+				assertRestoredOnce(terminal.raw());
+				assertNoFailure(terminal.raw());
+			} finally {
+				terminal.kill();
+				scratch.cleanup();
+			}
+		});
+	}
 
 	it("boots straight to the hydrated shell with the instant shell rolled back", async () => {
 		const scratch = fixture({ CLIO_CODER_INSTANT_SHELL: "0" });
