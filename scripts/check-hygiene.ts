@@ -78,8 +78,12 @@ function checkDocumentationLinks(): void {
 	for (const file of files) {
 		const display = relative(root, file);
 		for (const [index, line] of linesWithoutFences(file).entries()) {
-			for (const match of line.matchAll(/(?<!!)\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/gu)) {
-				const target = (match[1] ?? match[2] ?? "").replace(/&amp;/gu, "&");
+			const markdownTargets = [...line.matchAll(/\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/gu)].map(
+				(match) => match[1] ?? match[2] ?? "",
+			);
+			const htmlTargets = [...line.matchAll(/\b(?:href|src)="([^"]+)"/gu)].map((match) => match[1] ?? "");
+			for (const rawTarget of [...markdownTargets, ...htmlTargets]) {
+				const target = rawTarget.replace(/&amp;/gu, "&");
 				if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/iu.test(target)) continue;
 				const [pathname, fragment] = target.split("#", 2);
 				const resolved = pathname ? resolve(dirname(file), decodeURIComponent(pathname)) : file;
