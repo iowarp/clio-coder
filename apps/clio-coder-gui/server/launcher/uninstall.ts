@@ -8,6 +8,8 @@ export interface WebUninstallOptions {
 	stateDir: string;
 	desktopPrefix: string;
 	packageRoot: string;
+	/** State reset removes the service whose records it clears, preserving standalone launchers. */
+	backgroundOnly?: boolean;
 }
 
 export interface WebUninstallPlan {
@@ -22,7 +24,7 @@ export async function prepareGuiUninstall(
 ): Promise<WebUninstallPlan> {
 	if (process.platform !== "linux") return { items: [], remove: async () => {} };
 	const directories = new Set([join(options.stateDir, "gui/background")]);
-	const desktop = await launcherStatus(options.desktopPrefix);
+	const desktop = options.backgroundOnly ? { status: "absent" as const } : await launcherStatus(options.desktopPrefix);
 	if (desktop.status === "conflict")
 		throw new Error("Desktop launcher ownership could not be verified; uninstall stopped before removing Clio state.");
 	if (desktop.status !== "absent") {
@@ -51,7 +53,7 @@ export async function prepareGuiUninstall(
 			if (JSON.stringify(current.items) !== JSON.stringify(items))
 				throw new Error("Web installation changed during confirmation; run uninstall again.");
 			for (const plan of backgrounds) await plan.remove();
-			await uninstallLauncher(options.desktopPrefix);
+			if (!options.backgroundOnly) await uninstallLauncher(options.desktopPrefix);
 		},
 	};
 }

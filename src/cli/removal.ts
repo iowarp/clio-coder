@@ -43,8 +43,9 @@ export function removePath(label: string, path: string, dryRun: boolean): Remova
 	let stat: ReturnType<typeof lstatSync>;
 	try {
 		stat = lstatSync(path);
-	} catch {
-		return null;
+	} catch (error) {
+		if (["ENOENT", "ENOTDIR"].includes((error as NodeJS.ErrnoException).code ?? "")) return null;
+		return { label, path, reason: error instanceof Error ? error.message : String(error) };
 	}
 	try {
 		if (stat.isSymbolicLink()) unlinkSync(path);

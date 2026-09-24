@@ -8,8 +8,8 @@ Usage: scripts/install-local.sh [--skip-deps] [--no-build] [--dry-run] [--force]
 
 Install Clio Coder from this source checkout by placing a deterministic symlink at:
   ${CLIO_CODER_BIN_DIR:-$HOME/.local/bin}/clio-coder
-After linking, the script runs the installed CLI's structure repair
-(node dist/cli/index.js doctor --fix) so a fresh install passes plain clio-coder doctor.
+After linking, the script applies the installed CLI's pending migrations and
+structure repair so a fresh install passes plain clio-coder doctor.
 
 Options:
   --skip-deps    Skip the frozen pnpm dependency sync.
@@ -256,7 +256,7 @@ if [[ $dry_run -eq 1 ]]; then
 else
 	ln -sfn "$cli_target" "$link_path"
 	ok "linked $link_path -> $cli_target"
-	version_output="$($link_path --version 2>/dev/null || true)"
+	version_output="$("$link_path" --version 2>/dev/null || true)"
 	if [[ -n "$version_output" ]]; then
 		ok "$version_output"
 	else
@@ -278,12 +278,15 @@ fi
 warn_about_shadowing_clio
 
 if [[ $dry_run -eq 1 ]]; then
+	log "would run: node $cli_target upgrade --post-install"
 	log "would run: node $cli_target doctor --fix"
 	ok "dry run complete"
 	print_next_steps
 	exit 0
 fi
 
+log "running: node $cli_target upgrade --post-install"
+node "$cli_target" upgrade --post-install || fail "post-install migrations did not finish; resolve the error above and rerun this installer"
 log "running: node $cli_target doctor --fix"
 node "$cli_target" doctor --fix || fail "doctor --fix could not bring the install to green; inspect the output above"
 

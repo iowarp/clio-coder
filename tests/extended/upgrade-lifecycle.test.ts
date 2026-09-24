@@ -5,6 +5,7 @@ import { describe, it } from "node:test";
 
 import { runUpgradeCommand, type UpgradeDependencies } from "../../src/cli/upgrade.js";
 import { resetXdgCache } from "../../src/core/xdg.js";
+import { type Installation, inspectInstallation } from "../../src/domains/lifecycle/install-method.js";
 import { getVersionInfo } from "../../src/domains/lifecycle/version.js";
 import { createLifecycleHome, type LifecycleHome, runInHome } from "../harness/lifecycle-home.js";
 
@@ -16,6 +17,12 @@ const MIGRATION_IDS = [
 	"2026-09-18-ollama-runtime-id",
 ] as const;
 
+const installation = (kind: Installation["kind"]): Installation => ({
+	...inspectInstallation(),
+	kind,
+	prefix: kind === "npm" ? "/fixture/prefix" : null,
+});
+
 /** Upgrade caches the resolved state dir, so every run gets a fresh resolution. */
 async function upgrade(
 	temp: LifecycleHome,
@@ -24,7 +31,9 @@ async function upgrade(
 ): Promise<{ code: number; stdout: string }> {
 	resetXdgCache();
 	try {
-		return await runInHome(temp, () => runUpgradeCommand(argv, { detectInstallMethod: () => "source", ...dependencies }));
+		return await runInHome(temp, () =>
+			runUpgradeCommand(argv, { inspectInstallation: () => installation("source"), ...dependencies }),
+		);
 	} finally {
 		resetXdgCache();
 	}
@@ -172,7 +181,7 @@ describe("contracts/upgrade-lifecycle", () => {
 		try {
 			const plain = await upgrade(temp, [], FAIL_MIGRATION);
 			strictEqual(plain.code, 1);
-			match(plain.stdout, /clio-coder upgrade --skip-migrations/u);
+			match(plain.stdout, /clio-coder upgrade --post-install --skip-migrations/u);
 
 			// fail() used to serialize the report before the advice was recorded,
 			// so a scripted caller got the error and not the recovery.
@@ -185,7 +194,7 @@ describe("contracts/upgrade-lifecycle", () => {
 			};
 			strictEqual(parsed.status, "error");
 			match(parsed.errors[0] ?? "", /migration failed/u);
-			strictEqual(parsed.advice[0]?.command, "clio-coder upgrade --skip-migrations");
+			strictEqual(parsed.advice[0]?.command, "clio-coder upgrade --post-install --skip-migrations");
 		} finally {
 			temp.cleanup();
 		}
@@ -202,7 +211,7 @@ for (const failedStep of ["npm", "post-install", "doctor"] as const) {
 		};
 		try {
 			const { code, stdout } = await upgrade(temp, failedStep === "doctor" ? ["--post-install", "--json"] : ["--json"], {
-				detectInstallMethod: () => "npm",
+				inspectInstallation: () => installation("npm"),
 				lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
 				runNpmInstall: async () => run("npm"),
 				runPostInstallUpgrade: async () => run("post-install"),
@@ -216,7 +225,11 @@ for (const failedStep of ["npm", "post-install", "doctor"] as const) {
 			const report = JSON.parse(stdout);
 			strictEqual(report.status, "error");
 			match(report.errors.join("\n"), new RegExp(`fixture ${failedStep} failure`, "u"));
-			ok(report.advice.some((entry: { command: string }) => entry.command.includes("clio-coder doctor --fix")));
+			ok(
+				report.advice.some((entry: { command: string }) =>
+					entry.command.includes(failedStep === "doctor" ? "doctor --fix" : "upgrade --post-install"),
+				),
+			);
 			deepStrictEqual(
 				calls,
 				failedStep === "npm" ? ["npm"] : failedStep === "post-install" ? ["npm", "post-install"] : ["migration", "doctor"],
@@ -232,7 +245,7 @@ it("hands post-install checks to the installed binary with the selected options"
 	const calls: string[] = [];
 	try {
 		const { code } = await upgrade(temp, ["--channel", "beta", "--skip-migrations"], {
-			detectInstallMethod: () => "npm",
+			inspectInstallation: () => installation("npm"),
 			lookUpAvailableVersion: async () => ({ asked: true, version: "99.0.0" }),
 			runNpmInstall: async (channel) => {
 				calls.push(`install:${channel}`);

@@ -83,3 +83,22 @@ test("root cleanup preserves changed and foreign desktop entries, and discovers 
 	await plan.remove();
 	assert.equal((await launcherStatus(desktopPrefix)).status, "absent");
 });
+
+test("state reset preserves an independent desktop launcher", async (t) => {
+	const root = await mkdtemp(join(tmpdir(), "clio-gui-reset-"));
+	t.after(() => rm(root, { recursive: true, force: true }));
+	const desktopPrefix = join(root, "desktop");
+	await installLauncher(desktopPrefix, launch);
+	const before = await launcherStatus(desktopPrefix);
+	const content = await readFile(before.entry, "utf8");
+	const plan = await prepareGuiUninstall({
+		stateDir: join(root, "state"),
+		desktopPrefix,
+		packageRoot: root,
+		backgroundOnly: true,
+	});
+	assert.deepEqual(plan.items, []);
+	await plan.remove();
+	assert.equal((await launcherStatus(desktopPrefix)).status, "installed");
+	assert.equal(await readFile(before.entry, "utf8"), content);
+});

@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { initializeClioHome } from "../core/init.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
+import { stopDocsBeforeRemoval } from "./docs-server.js";
+import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
 import { printError } from "./shared.js";
@@ -16,6 +18,7 @@ empty roots are recreated so the next run has somewhere to write.
 Levels (combinable except --all):
   --state       state root only (default). Holds every session transcript, so a
                 reset is the end of resume, /view, and the audit behind them.
+                Owned background services are stopped and removed first.
   --data        data root only: memory, evidence, vendored tools (durable products)
   --cache       cache root only
   --auth        credentials.yaml only
@@ -182,6 +185,16 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	const resetData = args.all || args.data;
 	const resetState = args.all || args.state;
 	const resetCache = args.all || args.cache;
+	let web: Awaited<ReturnType<typeof prepareGuiUninstall>> | null = null;
+	if (resetState) {
+		try {
+			web = await prepareGuiUninstall({ stateDir: dirs.state, desktopPrefix: dirs.data, backgroundOnly: true });
+		} catch (error) {
+			presenter.fail(error instanceof Error ? error.message : "Background service ownership could not be checked.");
+			presenter.finish();
+			return 1;
+		}
+	}
 
 	const configSize = measurePath(dirs.config);
 	const dataSize = measurePath(dirs.data);
@@ -295,6 +308,17 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 	// command cannot act on is one more line between the operator and the four
 	// that decide whether to go ahead.
 	presenter.listItems("The following will be cleared", items);
+	if (web?.items.length)
+		presenter.note("The owned background app will be stopped and uninstalled before its state is cleared.");
+	if (web?.unmanaged.length) {
+		presenter.warn("Background service state cannot be safely reset by this build.");
+		presenter.commandAdvice(GUI_UNINSTALL_ADVICE.lead, GUI_UNINSTALL_ADVICE.command);
+		if (!args.dryRun) {
+			presenter.fail("Reset stopped; Clio state was preserved.");
+			presenter.finish();
+			return 1;
+		}
+	}
 
 	// One consequence line, not one per scope. `--all` states the whole outcome,
 	// so the per-root notes underneath it would only repeat it.
@@ -329,6 +353,18 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		}
 	}
 
+	if (resetState) {
+		try {
+			await stopDocsBeforeRemoval();
+			await web?.remove();
+		} catch (error) {
+			presenter.fail(
+				error instanceof Error ? error.message : "Could not stop background services; Clio state was preserved.",
+			);
+			presenter.finish();
+			return 1;
+		}
+	}
 	const toRemove: Array<{ label: string; path: string }> = [];
 	if (args.all) {
 		toRemove.push(
@@ -363,8 +399,16 @@ export async function runResetCommand(argv: ReadonlyArray<string>): Promise<numb
 		presenter.completedStep("Nothing to clear; every selected root was already empty");
 
 	resetXdgCache();
-	initializeClioHome();
-	presenter.completedStep("Recreated the empty roots");
+	try {
+		initializeClioHome();
+		presenter.completedStep("Recreated the empty roots");
+	} catch (error) {
+		failures.push({
+			label: "Initialize",
+			path: dirs.state,
+			reason: error instanceof Error ? error.message : String(error),
+		});
+	}
 
 	if (failures.length > 0) {
 		presenter.fail("reset did not clear everything");

@@ -1,11 +1,11 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 import { resolvePackageRoot } from "../core/package-root.js";
 import { resetXdgCache, resolveClioDirs } from "../core/xdg.js";
-import { detectInstallMethod } from "../domains/lifecycle/install-method.js";
+import { type Installation, inspectInstallation, installationCommand } from "../domains/lifecycle/install-method.js";
+import { stopDocsBeforeRemoval } from "./docs-server.js";
 import { GUI_UNINSTALL_ADVICE, prepareGuiUninstall } from "./gui.js";
 import { createLifecyclePresenter, type LifecycleItem, measurePath, shortenPath } from "./lifecycle-presenter.js";
 import { type RemovalFailure, removePath, reportRemovalFailures } from "./removal.js";
@@ -206,22 +206,6 @@ function findClioOnPath(): string | null {
 	return null;
 }
 
-function readNpmPrefix(): string | null {
-	try {
-		const result = spawnSync("npm", ["config", "get", "prefix"], {
-			encoding: "utf8",
-			timeout: 5000,
-			stdio: ["ignore", "pipe", "ignore"],
-			env: { ...process.env, npm_config_logs_max: "0", npm_config_update_notifier: "false" },
-		});
-		if (result.status !== 0) return null;
-		const prefix = result.stdout.trim();
-		return prefix.length > 0 ? prefix : null;
-	} catch {
-		return null;
-	}
-}
-
 function otherClioOnPath(pathClio: string | null, localLink: string): string | null {
 	if (pathClio === null) return null;
 	if (pathClio === localLink) return null;
@@ -286,15 +270,13 @@ function launcherItemDetail(verdict: LauncherVerdict, removeRequested: boolean):
 }
 
 /** The removal command that matches how this installation was put on disk. */
-function binaryRemovalAdvice(method: "source" | "npm", linkPath: string): { lead: string; command: string } {
-	if (method === "npm") {
-		const prefix = readNpmPrefix();
-		return {
-			lead: prefix === null ? "To remove the launcher, run:" : `To remove the launcher from ${join(prefix, "bin")}, run:`,
-			command: "npm uninstall -g @iowarp/clio-coder\nhash -r",
-		};
-	}
-	return { lead: "To finish removing the launcher, run:", command: `rm "${linkPath}"\nhash -r` };
+function binaryRemovalAdvice(installation: Installation, linkPath: string): { lead: string; command: string } {
+	if (installation.kind === "source")
+		return { lead: "To finish removing the launcher, run:", command: `rm "${linkPath}"\nhash -r` };
+	return {
+		lead: "To remove the package with its original package manager, run:",
+		command: `${installationCommand(installation, "uninstall")}\nhash -r`,
+	};
 }
 
 export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<number> {
@@ -320,17 +302,21 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	}
 
 	const dirs = resolveClioDirs();
-	const method = detectInstallMethod();
+	const installation = inspectInstallation();
+	const method = installation.kind;
 	const presenter = createLifecyclePresenter({ json: args.json });
 
 	presenter.header("Uninstall Clio Coder", "uninstall");
-	presenter.step(`Installation method: ${method === "source" ? "source symlink" : "npm global"}`);
+	presenter.step(
+		`Installation method: ${method === "source" ? "source symlink" : method === "npm" ? "npm global" : method}`,
+	);
 
 	const configSize = measurePath(dirs.config);
 	const dataSize = measurePath(dirs.data);
 	const stateSize = measurePath(dirs.state);
 	const cacheSize = measurePath(dirs.cache);
-	const linkPath = launcherLinkPath();
+	const linkPath =
+		method === "npm" && installation.prefix ? join(installation.prefix, "bin", "clio-coder") : launcherLinkPath();
 	const linkSize = measurePath(linkPath);
 	const launcher = classifyLauncher(linkPath);
 	const shellEdits = detectShellRcEdits();
@@ -423,11 +409,12 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 	// The same guidance on the dry run and on the real run, so the preview is the
 	// listing the run produces and nothing more.
 	const survivor = survivingClioOnPath(linkPath);
-	const advice = binaryRemovalAdvice(method, linkPath);
+	const advice = binaryRemovalAdvice(installation, linkPath);
 
 	if (args.dryRun) {
 		presenter.warn("Dry run: no changes made");
-		if (launcher.kind !== "absent" && !args.removeBinary) presenter.commandAdvice(advice.lead, advice.command);
+		if (method !== "source" || (launcher.kind !== "absent" && !args.removeBinary))
+			presenter.commandAdvice(advice.lead, advice.command);
 		if (survivor !== null)
 			presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
 		presenter.done("Done");
@@ -445,6 +432,7 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 
 	const failures: RemovalFailure[] = [];
 	try {
+		await stopDocsBeforeRemoval();
 		await web.remove();
 		for (const item of web.items) presenter.completedStep(`Removed ${item.label}`);
 	} catch (error) {
@@ -509,7 +497,8 @@ export async function runUninstallCommand(argv: ReadonlyArray<string>): Promise<
 		return 1;
 	}
 
-	if (launcher.kind !== "absent" && !launcherRemoved) presenter.commandAdvice(advice.lead, advice.command);
+	if (method !== "source" || (launcher.kind !== "absent" && !launcherRemoved))
+		presenter.commandAdvice(advice.lead, advice.command);
 	if (survivor !== null)
 		presenter.warn(`Another clio-coder stays on your PATH at ${survivor}; it is a separate install`);
 

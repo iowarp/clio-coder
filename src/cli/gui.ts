@@ -71,6 +71,7 @@ export async function prepareGuiUninstall(options: {
 	stateDir: string;
 	desktopPrefix: string;
 	packageRoot?: string;
+	backgroundOnly?: boolean;
 }): Promise<GuiUninstallPlan> {
 	// Most CLI-only installs have no web lifecycle files. Keep that path lazy,
 	// including checkouts whose optional web bundle has not been built yet.
@@ -82,7 +83,8 @@ export async function prepareGuiUninstall(options: {
 			path: join(options.desktopPrefix, "applications/io.iowarp.ClioCoder.desktop.owner.json"),
 		},
 	];
-	const present = paths.filter(({ path }) => {
+	const present = paths.filter(({ path }, index) => {
+		if (options.backgroundOnly && index !== 0) return false;
 		try {
 			lstatSync(path);
 			return true;
@@ -96,7 +98,8 @@ export async function prepareGuiUninstall(options: {
 			items: [],
 			unmanaged: [],
 			remove: async () => {
-				if ((await prepareGuiUninstall(options)).items.length)
+				const current = await prepareGuiUninstall(options);
+				if (current.items.length || current.unmanaged.length)
 					throw new Error("A web installation appeared during confirmation; run uninstall again.");
 			},
 		};

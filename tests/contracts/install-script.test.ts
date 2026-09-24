@@ -507,13 +507,16 @@ describe("contracts/install-script", () => {
 		}
 	});
 
-	it("treats a failing post-install as a warning that names the repair command, not as a failed install", () => {
+	it("returns failure when post-install is incomplete and names the migration retry command", () => {
 		const s = scratch();
 		try {
 			const r = run(s, [], { env: { FAKE_CLI_UPGRADE_FAIL: "1" } });
-			strictEqual(r.code, 0, r.all);
-			match(r.stderr, /post-install checks did not finish; the package is installed\. Run: .*clio-coder doctor --fix/u);
-			match(r.stdout, /Installed: /u);
+			strictEqual(r.code, 1, r.all);
+			match(
+				r.stderr,
+				/post-install checks did not finish; the package is installed\. Run: .*clio-coder upgrade --post-install/u,
+			);
+			doesNotMatch(r.stdout, /Installed: /u);
 		} finally {
 			s.cleanup();
 		}
