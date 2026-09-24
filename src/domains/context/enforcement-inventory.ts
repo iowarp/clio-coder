@@ -38,7 +38,7 @@ const CHECK_FN_RE =
 
 /** A failure message that leads with a rule code: `rule6: ...`, `E501: ...`, `D14: ...`. */
 const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g;
-const MAX_FAILURE_CHARS = 160;
+const MAX_FAILURE_CHARS = 360;
 
 const MAX_CI_COMMANDS = 60;
 const MAX_CHECK_FILES = 24;
