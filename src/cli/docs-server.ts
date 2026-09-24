@@ -259,16 +259,30 @@ export interface StopResult {
 }
 
 /** Stop the docs server this command started, if one is still running. */
-export function stopDocsServer(options: Pick<DocsServerOptions, "birthVerified"> = {}): Promise<StopResult> {
+export function stopDocsServer(
+	options: Pick<DocsServerOptions, "birthVerified"> & { preserveUnverifiedRecord?: boolean } = {},
+): Promise<StopResult> {
 	return withStateFileLock(registryPath(), async () => {
 		const record = readRecord();
 		if (!record) return { stopped: false };
 		const outcome = await terminate(record, options.birthVerified ?? BIRTH_TOKEN_SOURCE_AVAILABLE);
 		if (outcome === "survived") return { stopped: false, pid: record.pid, survived: true };
+		if (outcome === "not-owned" && processAlive(record.pid) && options.preserveUnverifiedRecord)
+			return { stopped: false, pid: record.pid, unverified: true };
 		removeRecord();
 		if (outcome === "exited") return { stopped: true, pid: record.pid };
 		return processAlive(record.pid) ? { stopped: false, pid: record.pid, unverified: true } : { stopped: false };
 	});
+}
+
+/** Called only after destructive lifecycle confirmation, before clearing any roots. */
+export async function stopDocsBeforeRemoval(): Promise<void> {
+	if (!existsSync(registryPath())) return;
+	const result = await stopDocsServer({ preserveUnverifiedRecord: true });
+	if (result.survived || result.unverified)
+		throw new Error(
+			"The documentation server could not be stopped safely. Clio state was preserved; close it and retry.",
+		);
 }
 
 /**

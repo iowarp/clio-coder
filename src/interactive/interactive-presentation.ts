@@ -78,6 +78,7 @@ export interface InteractivePresentationDeps {
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	extensionCommands?: import("./slash-autocomplete.js").SlashAutocompleteOptions["extensionCommands"];
 	getExtensionStatus?: () => ReadonlyArray<string>;
+	getLifecycleHint?: () => string | null;
 	bus: SafeEventBus;
 	providers: ProvidersContract;
 	dispatch: Pick<DispatchContract, "snapshot">;
@@ -438,6 +439,7 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 		getWorkspaceSnapshot: getLiveWorkspaceSnapshot,
 		getExtensionStats,
 		...(deps.getExtensionStatus ? { getExtensionStatus: deps.getExtensionStatus } : {}),
+		...(deps.getLifecycleHint ? { getLifecycleHint: deps.getLifecycleHint } : {}),
 		getSessionInfo: () => {
 			const meta = deps.session?.current();
 			return {

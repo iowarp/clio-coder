@@ -95,6 +95,7 @@ export interface FooterDashboardDeps {
 	getQuotaSnapshots?: () => ReadonlyArray<UsageSnapshot>;
 	getConnections?: () => { mcp: string[]; plugins: string[] };
 	getExtensionStatus?: () => ReadonlyArray<string>;
+	getLifecycleHint?: () => string | null;
 	providers: ProvidersContract;
 	getSettings?: () => Readonly<ClioSettings>;
 	getAgentStatus?: () => AgentStatus;
@@ -565,6 +566,8 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 	};
 	function composeFooter(width: number): string {
 		const current = state(width);
+		const lifecycleHint = deps.getLifecycleHint?.();
+		const lifecycleLine = lifecycleHint ? [fitDashboardLine(clioTheme().fg("dim", lifecycleHint), width)] : [];
 		const notices =
 			dashboardMode === "compact" ? [] : renderFooterNotices(current.notices, width, dashboardMode, deps.dismissKeyLabel);
 		const contributed = deps.getExtensionStatus?.() ?? [];
@@ -578,11 +581,14 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 						current,
 						page,
 						width,
-						(deps.getTerminalRows?.() ?? process.stdout.rows ?? 40) - notices.length - extensionLine.length,
+						(deps.getTerminalRows?.() ?? process.stdout.rows ?? 40) -
+							notices.length -
+							extensionLine.length -
+							lifecycleLine.length,
 						getKeybindings().getKeys("clio-coder.status.toggle").join(" / "),
 					)
 				: renderFooterDashboardLines(current, width, dashboardMode);
-		return [...grid, ...extensionLine, ...notices].join("\n");
+		return [...grid, ...extensionLine, ...lifecycleLine, ...notices].join("\n");
 	}
 	const refresh = (): void => {
 		if (disposed) return;

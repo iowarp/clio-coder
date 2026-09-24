@@ -582,6 +582,9 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	 * here for the same reason as the leader flag above.
 	 */
 	let shutdownArmed = false;
+	const updateAbort = new AbortController();
+	let updateTimer: ReturnType<typeof setTimeout> | undefined;
+	let updateMonitor: ReturnType<typeof import("./update-monitor.js").startUpdateMonitor> | undefined;
 	/**
 	 * Assigned after the presentation because it renders into it. The composer
 	 * rail reads it through the optional chain before then as "no prompt".
@@ -625,6 +628,7 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		: undefined;
 	const presentation = createInteractivePresentation({
 		bus: deps.bus,
+		getLifecycleHint: () => updateMonitor?.text() ?? null,
 		getLeaderArmed: () => leaderArmed,
 		extensionCommands: () => operatorExtensions?.commands() ?? [],
 		getExtensionStatus: () =>
@@ -1337,7 +1341,13 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 		editor,
 		editorSubmit,
 		requestRender: () => tui.requestRender(),
-		notifications,
+		notifications: {
+			...notifications,
+			dismissAll: () => {
+				updateMonitor?.dismiss();
+				notifications.dismissAll();
+			},
+		},
 		shutdown: {
 			stopTickers: presentation.stopTickers,
 			disposeInteractiveTickers: interactiveTickers.dispose,
@@ -1349,6 +1359,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 			stopAgentProgress: agentProgress.stop,
 			disposeChat: () => deps.chat.dispose(),
 			disposeSubscriptions: () => {
+				clearTimeout(updateTimer);
+				updateAbort.abort();
 				clearTimeout(operatorTimer);
 				for (const unsubscribe of operatorSubscriptions) unsubscribe();
 				void operatorExtensions?.dispose();
@@ -1542,6 +1554,43 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 				if (!startupAbort.signal.aborted) void operatorExtensions.reload("startup");
 			});
 		if (frame === null) return;
+		if (process.env.CLIO_CODER_UPDATE_CHECK !== "0" && !process.env.NO_UPDATE_NOTIFIER && !process.env.CI) {
+			// No import, disk probe, subprocess or registry request belongs on the boot path.
+			const runningVersion = readClioVersion();
+			updateTimer = setTimeout(() => {
+				if (updateAbort.signal.aborted) return;
+				void import("./update-monitor.js")
+					.then(({ startUpdateMonitor }) => {
+						if (updateAbort.signal.aborted) return;
+						updateMonitor = startUpdateMonitor({
+							runningVersion,
+							signal: updateAbort.signal,
+							onChange: () => {
+								footer.refresh();
+								tui.requestRender();
+							},
+							isIdle: () => {
+								const queue = deps.chat.queuedMessages();
+								return (
+									overlayLifecycle.getState() === "closed" &&
+									editor.getText().length === 0 &&
+									!leaderArmed &&
+									!shutdownArmed &&
+									!operatorExtensions?.busy &&
+									!editorSubmit.hasActiveEditorBash() &&
+									!deps.chat.isStreaming() &&
+									deps.chat.turnPreparation().phase === "idle" &&
+									deps.dispatch.snapshot().running.length === 0 &&
+									queue.steer.length + queue.followUp.length === 0 &&
+									notifications.count() === 0
+								);
+							},
+						});
+					})
+					.catch(() => {});
+			}, 5000);
+			updateTimer.unref();
+		}
 		// Pay the transcript renderers' first-use cost now, between the hydrated
 		// frame and the first answer, rather than in the middle of that answer.
 		setImmediate(() => {
@@ -1558,6 +1607,8 @@ export async function createInteractiveApplication(deps: InteractiveDeps): Promi
 	try {
 		return await applicationController.run;
 	} finally {
+		clearTimeout(updateTimer);
+		updateAbort.abort();
 		clearTimeout(startupTimer);
 		startupAbort.abort();
 		removeDiagnosticSink();

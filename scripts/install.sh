@@ -240,7 +240,8 @@ run_post_install() {
 	if "$launcher" upgrade --post-install </dev/null; then
 		return 0
 	fi
-	warn "post-install checks did not finish; the package is installed. Run: $launcher doctor --fix"
+	warn "post-install checks did not finish; the package is installed. Run: $launcher upgrade --post-install"
+	return 1
 }
 
 # The next steps name the terminal only. The graphical application is an opt-in

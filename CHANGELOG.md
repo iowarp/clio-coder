@@ -4,6 +4,14 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.5.4 - Unreleased
 
+### Installation and upgrades
+
+- Added a quiet, dismissible update hint that waits for an idle terminal. Checks start after the first full frame, cache registry results for a day, and detect when the running installation has been replaced. `CLIO_CODER_UPDATE_CHECK=0` disables the monitor.
+- Added `clio-coder upgrade --restart` to upgrade an npm installation, complete migrations, and resume the project's last session after success.
+- Preserve an npm installation's actual prefix and invoke the exact installed binary for post-install checks. Other package managers receive matching instructions; older dist-tags do not downgrade newer installations.
+- Source installation now applies migrations before repair. Bootstrap installation reports incomplete post-install checks as a failure with the correct retry command.
+- Reset and uninstall stop owned documentation servers before removing state. State reset also removes owned background services and preserves state if ownership or shutdown cannot be verified.
+
 ### Session and project isolation
 
 - Dispatch runs, receipts, and batches now carry their owning Clio session. A sibling session in the same project can inspect a run, while collect, steer, nudge, and gate recovery act only on runs owned by the current session (#392).

@@ -228,12 +228,26 @@ Runs a series of health sweeps across the environment:
 ### B. Upgrades (`clio-coder upgrade`)
 Refreshes state metadata and applies pending lifecycle migrations, which may update settings, state, or extension data.
 ```bash
-clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--json]
+clio-coder upgrade [--dry-run] [--channel=<latest|beta|dev>] [--skip-migrations] [--restart] [--json]
 ```
 On a source checkout, the command applies pending migrations, refreshes
-`install.json`, and prints the source update steps (`git pull`,
-`pnpm run install:local`, `hash -r`). An npm global installation can be
-reinstalled through npm when a newer version or pending work requires it.
+`install.json`, and prints the checkout path and source update steps. Fetch tags,
+choose the desired release, and run `pnpm run install:local`; the installer applies
+migrations before its final doctor repair.
+
+For npm global installs, `upgrade` derives the prefix from the running package,
+including custom prefixes, and runs post-install checks through the exact installed
+entry. Another launcher on `PATH` cannot take over those checks. An older dist-tag
+does not trigger a downgrade. To update and resume the project's last conversation,
+finish the turn, leave with `/quit`, and run:
+
+```bash
+clio-coder upgrade --restart
+```
+
+Relaunch happens only after successful installation and checks, using `--continue`
+in the current directory. `--restart` requires a terminal and cannot combine with
+`--json` or `--post-install`. A dry run never installs or relaunches.
 
 For pnpm, Bun, Yarn, repository-local, and cached installations, first update
 with the package manager that owns that installation, then run:
@@ -245,25 +259,51 @@ clio-coder doctor
 
 `--post-install` applies local migration and metadata checks without querying
 the registry or reinstalling a package. Its `--dry-run` previews only those
-local operations. Automatic package replacement without this flag currently
-assumes npm for packaged installations; use the owning manager's removal
-command as well. Package removal preserves Clio's user configuration and
+local operations. It also repairs an installation whose migration manifest is
+already current. pnpm, Bun, local, and unknown layouts receive instructions instead
+of being replaced through npm. Keep the original manager's global directory or
+prefix when updating or removing the package. Package removal preserves Clio's user configuration and
 sessions; the uninstall operation below deliberately removes those roots.
+
+An incomplete post-install step makes the bootstrap installer exit nonzero and
+print the migration retry command. The package remains installed;
+`doctor --fix` alone does not apply migrations.
+
+#### Quiet update hints
+
+Interactive sessions start an update monitor after the first full frame and a
+five-second delay. Registry requests have a 2.5-second timeout and are cached for
+24 hours, including failed attempts. Stable npm, pnpm, and Bun installs check the
+public npm `latest` tag; source, prerelease, local/npx, and unknown installations
+skip registry checks. Installed files are also checked once a minute for a version
+change or a rebuild since this process started.
+
+The result is one muted footer line, visible for up to 30 seconds only when the
+editor is empty and there is no turn, worker, local command, queued message,
+overlay, or other notice. It hides during work and supports the usual notification
+dismiss shortcut. It never opens a prompt, writes a conversation message, sends a
+desktop notification, or starts an upgrade. An update hint appears at most once
+per session and once per day across sessions; the same version is suggested no
+more than once a week. Cache records live under the resolved cache directory.
+
+Set `CLIO_CODER_UPDATE_CHECK=0` or `NO_UPDATE_NOTIFIER=1` to disable the monitor.
+CI, headless runs, ACP, and CLI subcommands do not start it. Explicit upgrades
+remain available when the monitor is disabled.
 
 #### Current migration contract
 
-The source tree registers four migrations in execution order:
+The source tree registers five migrations in execution order:
 
 1. `2026-09-01-settings-v2`
 2. `2026-09-01-clio-coder-naming`
 3. `2026-09-01-retire-panes-knobs`
 4. `2026-08-18-lmstudio-runtime-id`
+5. `2026-09-18-ollama-runtime-id`
 
 Applied IDs are recorded in `<stateDir>/migrations.json`. An ID already in that
 manifest is skipped, and each successful migration is recorded immediately so a
 later failure does not cause it to run again. `clio-coder upgrade --dry-run`
-lists every registered migration it would consider; it does not claim that
-every listed ID is pending. `--skip-migrations` is a recovery override that lets
+lists the migrations not yet recorded as applied. `--skip-migrations` is a recovery override that lets
 the independent install and metadata work proceed after a migration failure.
 Fix the migration's cause and rerun the ordinary upgrade afterward.
 
@@ -340,6 +380,14 @@ Selective recovery wipes:
 clio-coder reset [--state|--data|--cache|--auth|--config|--all] [--dry-run] [--force] [--json]
 ```
 Levels are combinable except `--all`. Each level clears exactly the root or file it names and nothing else, then bootstraps the missing structure again unless `--dry-run` is present. `--force` is required only for destructive execution.
+
+Before clearing state, reset stops the owned documentation server and removes an
+owned background app service through its ownership checks. Independent desktop
+launchers remain installed. If ownership cannot be verified or a server cannot be
+stopped, reset fails before deleting user roots and retains recovery records.
+Previews never stop processes. Reinstall the optional background service explicitly
+if needed after a state reset. Uninstall also stops the documentation server before
+removing user roots.
 
 Every run lists each selected root and then the entries inside it, read off the
 disk on that run, before removing anything; `--dry-run` prints the identical
