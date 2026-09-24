@@ -24,6 +24,7 @@ import {
 	type TrustVerdict,
 	trustVerdict,
 } from "./index.js";
+import { compareCodepoints } from "./ordering.js";
 
 export const EVIDENCE_INVENTORY_MAX_ARTIFACTS = 12;
 export const EVIDENCE_INVENTORY_MAX_IDS = 8;
@@ -78,6 +79,8 @@ export interface EvidenceInventorySnapshot {
 	readonly generatedAt: string;
 	readonly artifacts: readonly EvidenceInventoryArtifact[];
 	readonly truncated: boolean;
+	/** Present only on explicitly paginated reads; pass this to the next read. */
+	readonly nextCursor?: string | null;
 }
 
 function bounded(value: string, width: number): string {
@@ -107,7 +110,14 @@ function amount(value: number | undefined): number {
 
 /** Newest generation first. An unparseable stamp sorts oldest rather than throwing. */
 function byNewest(a: EvidenceOverview, b: EvidenceOverview): number {
-	return (Date.parse(b.generatedAt) || 0) - (Date.parse(a.generatedAt) || 0);
+	return (
+		(Date.parse(b.generatedAt) || 0) - (Date.parse(a.generatedAt) || 0) || compareCodepoints(b.evidenceId, a.evidenceId)
+	);
+}
+
+export interface EvidenceInventoryPage {
+	readonly cursor?: string;
+	readonly limit?: number;
 }
 
 /**
@@ -119,10 +129,15 @@ export async function evidenceInventorySnapshot(
 	now: () => number = Date.now,
 	dataDir: string = clioDataDir(),
 	include?: (overview: EvidenceOverview) => boolean,
+	page?: EvidenceInventoryPage,
 ): Promise<EvidenceInventorySnapshot> {
 	const listed = await listEvidenceOverviews(dataDir);
 	const all = (include === undefined ? listed : listed.filter(include)).sort(byNewest);
-	const window = all.slice(0, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
+	const cursorIndex = page?.cursor === undefined ? -1 : all.findIndex((item) => item.evidenceId === page.cursor);
+	if (page?.cursor !== undefined && cursorIndex < 0) throw new Error("cursor unavailable in visible evidence inventory");
+	const start = cursorIndex + 1;
+	const limit = Math.min(EVIDENCE_INVENTORY_MAX_ARTIFACTS, Math.max(1, page?.limit ?? EVIDENCE_INVENTORY_MAX_ARTIFACTS));
+	const window = all.slice(start, start + limit);
 	const artifacts: EvidenceInventoryArtifact[] = [];
 	for (const overview of window) {
 		// One unreadable trust file costs that artifact its verdict, never the
@@ -165,10 +180,12 @@ export async function evidenceInventorySnapshot(
 			trust: { verdict, runsCovered, historical },
 		});
 	}
+	const hasMore = start + window.length < all.length;
 	return {
 		version: 1,
 		generatedAt: new Date(now()).toISOString(),
 		artifacts,
-		truncated: all.length > window.length,
+		truncated: hasMore,
+		...(page === undefined ? {} : { nextCursor: hasMore ? (window.at(-1)?.evidenceId ?? null) : null }),
 	};
 }
