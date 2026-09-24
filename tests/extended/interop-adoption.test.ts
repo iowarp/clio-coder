@@ -88,6 +88,25 @@ describe("interop discovery and adoption", () => {
 		ok(!existsSync(path.join(home, "probe-marker")));
 		ok(!existsSync(path.join(cwd, "project-marker")));
 	});
+	it("requires the pinned ACP package rather than a different global bridge", async () => {
+		const bin = path.join(home, "bin");
+		mkdirSync(bin);
+		for (const name of ["codex", "codex-acp"]) {
+			const executable = path.join(bin, name);
+			writeFileSync(executable, "#!/bin/sh\nexit 0\n");
+			chmodSync(executable, 0o755);
+		}
+		process.env.PATH = bin;
+		const adapterPackage = path.join(cwd, "node_modules", "@agentclientprotocol", "codex-acp", "package.json");
+		const presence = async () =>
+			(await detectInteropAgents({ cwd, home }, [])).agents.find((agent) => agent.kind === "codex")?.adapter;
+		strictEqual(await presence(), "unknown");
+		mkdirSync(path.dirname(adapterPackage), { recursive: true });
+		writeFileSync(adapterPackage, JSON.stringify({ version: "1.12.0" }));
+		strictEqual(await presence(), "unknown");
+		writeFileSync(adapterPackage, JSON.stringify({ version: "1.10.0" }));
+		strictEqual(await presence(), "present");
+	});
 	it("reads Codex cache marketplace and activation evidence", () => {
 		file(
 			".codex/plugins/cache/market/example/1.2.3/plugin.json",

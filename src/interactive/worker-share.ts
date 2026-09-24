@@ -22,6 +22,9 @@ export interface WorkerShareFacts {
 	runId: string;
 	outcome: string;
 	text: string;
+	placement?:
+		| { mode: "current"; cwd: string; changedPaths?: string[] }
+		| { mode: "worktree"; cwd: string; branch: string; changedPaths?: string[] };
 }
 
 /**
@@ -65,7 +68,12 @@ function shareNote(facts: WorkerShareFacts, body: string): string | null {
 	const text = body.trim();
 	if (text.length === 0) return null;
 	const header = `${WORKER_SHARE_NOTE_PREFIX} ${facts.agentId} · run ${facts.runId} · ${outcomeWord(facts.outcome)} · ${WORKER_SHARE_ORIGIN}`;
-	return `${header}\n${truncateUtf8(text, WORKER_SHARE_MAX_BYTES, SHARE_TRUNCATION_MARKER)}`;
+	const workspace = facts.placement
+		? facts.placement.mode === "worktree"
+			? `\nWorkspace: isolated worktree ${facts.placement.cwd}; branch ${facts.placement.branch}${facts.placement.changedPaths?.length ? `\nChanged paths: ${facts.placement.changedPaths.slice(0, 20).join(", ")}${facts.placement.changedPaths.length > 20 ? ` (+${facts.placement.changedPaths.length - 20} more)` : ""}` : ""}`
+			: `\nWorkspace: current checkout ${facts.placement.cwd}; edits may be immediate${facts.placement.changedPaths?.length ? `\nObserved changed paths during run: ${facts.placement.changedPaths.slice(0, 20).join(", ")}${facts.placement.changedPaths.length > 20 ? ` (+${facts.placement.changedPaths.length - 20} more)` : ""}` : ""}`
+		: "";
+	return `${header}${workspace}\n${truncateUtf8(text, WORKER_SHARE_MAX_BYTES, SHARE_TRUNCATION_MARKER)}`;
 }
 
 /** One member's answer under its roster label, or its failure when it produced none. */
@@ -129,7 +137,13 @@ export function isWorkerShareNote(text: string): boolean {
 /** Terminal facts of a settled worker block, or null while it is still running. */
 export function workerShareFactsFromEntry(entry: WorkerEntryState): WorkerShareFacts | null {
 	if (entry.pending || entry.receipt === undefined) return null;
-	return { agentId: entry.agentId, runId: entry.runId, outcome: entry.receipt.outcome, text: entry.text };
+	return {
+		agentId: entry.agentId,
+		runId: entry.runId,
+		outcome: entry.receipt.outcome,
+		text: entry.text,
+		...(entry.receipt.placement ? { placement: entry.receipt.placement } : {}),
+	};
 }
 
 /**

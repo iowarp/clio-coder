@@ -7,7 +7,7 @@ import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { tokenHex } from "../../src/core/theme-token-hex.js";
 import { parseTomlDocument } from "../../src/core/toml.js";
 import { CLIO_APP_KEYBINDINGS } from "../../src/domains/config/keybindings.js";
-import type { MuxContract } from "../../src/domains/mux/contract.js";
+import type { MuxContract, MuxOpenUtilityPaneRequest } from "../../src/domains/mux/contract.js";
 import {
 	PANES_PRESET_ALIASES,
 	PANES_PRESET_IDS,
@@ -23,10 +23,12 @@ import {
 	type YaziSessionOptions,
 } from "../../src/domains/mux/yazi/session.js";
 import { renderHerdrThemeBlock, renderYaziTheme } from "../../src/domains/mux/yazi/theme.js";
+import { classify } from "../../src/domains/safety/action-classifier.js";
 import { GLOBAL_ACTION_ORDER } from "../../src/interactive/application-controller.js";
 import { createPanesRuntime } from "../../src/interactive/panes-runtime.js";
 import { BUILTIN_SLASH_COMMANDS, parseSlashCommand } from "../../src/interactive/slash-commands.js";
 import { createYaziBridge } from "../../src/interactive/yazi-bridge.js";
+import { createPanesTool } from "../../src/tools/panes.js";
 import { panesToolSurface } from "../../src/tools/panes-surface.js";
 
 const SNAPSHOT = {
@@ -39,6 +41,7 @@ const SNAPSHOT = {
 /** A pane host stand-in that records what was asked of it. */
 function fakeMux(options: { available?: boolean; reason?: string } = {}) {
 	const calls: string[] = [];
+	const requests: MuxOpenUtilityPaneRequest[] = [];
 	const records: MuxPaneRecord[] = [];
 	let next = 0;
 	const mux = {
@@ -54,7 +57,8 @@ function fakeMux(options: { available?: boolean; reason?: string } = {}) {
 			refused: false,
 		}),
 		list: () => records,
-		async openUtilityPane(request: { label: string }) {
+		async openUtilityPane(request: MuxOpenUtilityPaneRequest) {
+			requests.push(request);
 			next += 1;
 			const ref = { paneId: `p${next}`, tabId: "t1", workspaceId: "w1" };
 			records.push({ ref, purpose: "utility", label: request.label, openedAt: next });
@@ -82,7 +86,13 @@ function fakeMux(options: { available?: boolean; reason?: string } = {}) {
 		},
 		docks: () => [],
 	};
-	return { mux: mux as unknown as MuxContract, calls, records, drop: (paneId: string) => void mux.closePane(paneId) };
+	return {
+		mux: mux as unknown as MuxContract,
+		calls,
+		requests,
+		records,
+		drop: (paneId: string) => void mux.closePane(paneId),
+	};
 }
 
 const filesEnabled = {
@@ -181,6 +191,44 @@ describe("contracts/panes files surface", () => {
 		deepStrictEqual(second, { status: "opened", label: "shell", paneId: "p1", existing: true });
 		deepStrictEqual(calls, ["open:shell", "unzoom:self", "focus:p1"]);
 		strictEqual(mux.list().length, 1);
+	});
+
+	it("hands a fixed peer a brief and selected workspace without a managed receipt", async () => {
+		const { mux, requests } = fakeMux();
+		const root = mkdtempSync(join(tmpdir(), "clio-coder-peer-pane-"));
+		try {
+			const panes = createPanesRuntime({
+				mux,
+				getSettings: () => filesEnabled,
+				getDispatchSnapshot: () => SNAPSHOT,
+				getCwd: () => root,
+				resolveBinaryPath: (name) => (name === "codex" ? "/usr/bin/codex" : null),
+			});
+			deepStrictEqual(parseSlashCommand(`/peer --cwd ${root} codex Fix parser`), {
+				kind: "peer-pane",
+				peer: "codex",
+				cwd: root,
+				brief: "Fix parser",
+			});
+			const tool = createPanesTool({ panes });
+			const result = await tool.run({ action: "handoff", peer: "codex", brief: "Fix parser", cwd: root }, {});
+			strictEqual(result.kind, "ok");
+			match(result.output, /no managed run or receipt/u);
+			deepStrictEqual(requests[0]?.argv, ["/usr/bin/codex", "Fix parser"]);
+			strictEqual(requests[0]?.cwd, root);
+			strictEqual(classify({ tool: "panes", args: { action: "handoff", peer: "codex" } }).actionClass, "dispatch");
+			strictEqual(classify({ tool: "panes", args: { action: "list" } }).actionClass, "read");
+			deepStrictEqual(await panes.handoff({ peer: "opencode" }), {
+				status: "missing-binary",
+				preset: "opencode",
+				binary: "opencode",
+				installHint: "install opencode",
+				detail: "opencode was not found",
+			});
+			strictEqual(requests.length, 1);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
 	});
 
 	it("routes /files through the shared controller: toggle opens, toggle closes, pick is one-shot", async () => {

@@ -50,6 +50,9 @@ export const BUILTIN_RUNTIME_BOOT_MANIFEST: ReadonlyArray<RuntimeBootMetadata> =
 	{ id: "vllm", kind: "http", tier: "local-native", auth: "api-key" },
 	{ id: "claude-code", kind: "subprocess", tier: "subscription", auth: "claude-cli" },
 	{ id: "claude-sdk", kind: "sdk", tier: "subscription", auth: "claude-cli" },
+	{ id: "codex-cli", kind: "subprocess", tier: "subscription", auth: "none" },
+	{ id: "opencode-cli", kind: "subprocess", tier: "subscription", auth: "none" },
+	{ id: "pi-cli", kind: "subprocess", tier: "subscription", auth: "none" },
 	{ id: "antigravity-code", kind: "subprocess", tier: "subscription", auth: "none" },
 ];
 

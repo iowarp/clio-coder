@@ -1,10 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import {
+	closeSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
+	readSync,
 	realpathSync,
 	renameSync,
 	rmSync,
@@ -65,7 +70,11 @@ export interface TaskWorktreeRecoveryResult {
 export interface TaskWorktreeReceipt {
 	path: string;
 	branch: string;
-	diffHash: string;
+	/** Null only when a failed run's working-tree snapshot could not be read. */
+	diffHash: string | null;
+	changedPaths?: string[];
+	/** Absent means the diff is committed on the task branch. */
+	snapshot?: "working-tree" | "unavailable";
 	apply: TaskWorktreeApply;
 	applied: boolean;
 	reason?: string;
@@ -309,6 +318,49 @@ function taskWorktreeDiffHash(worktree: Pick<TaskWorktree, "root" | "base" | "br
 	return createHash("sha256").update(bytes).digest("hex");
 }
 
+function nullDelimitedPaths(bytes: Buffer): string[] {
+	return bytes.toString("utf8").split("\0").filter(Boolean).sort();
+}
+
+/** Preserve failure evidence without committing a peer's incomplete edits. */
+export function snapshotTaskWorktree(worktree: TaskWorktree, apply: TaskWorktreeApply): TaskWorktreeReceipt {
+	assertOwnership(worktree);
+	const tracked = gitBytes(worktree.path, ["diff", "--binary", "HEAD"]);
+	const untracked = nullDelimitedPaths(gitBytes(worktree.path, ["ls-files", "--others", "--exclude-standard", "-z"]));
+	const changedPaths = [
+		...new Set([...nullDelimitedPaths(gitBytes(worktree.path, ["diff", "--name-only", "-z", "HEAD"])), ...untracked]),
+	].sort();
+	const hash = createHash("sha256").update("working-tree\0").update(tracked);
+	for (const name of untracked) {
+		const candidate = join(worktree.path, name);
+		const stat = lstatSync(candidate);
+		hash.update(name).update("\0").update(String(stat.mode)).update("\0");
+		if (stat.isSymbolicLink()) hash.update(readlinkSync(candidate));
+		else if (stat.isFile()) {
+			const descriptor = openSync(candidate, "r");
+			try {
+				const buffer = Buffer.allocUnsafe(64 * 1024);
+				for (;;) {
+					const count = readSync(descriptor, buffer, 0, buffer.length, null);
+					if (count === 0) break;
+					hash.update(buffer.subarray(0, count));
+				}
+			} finally {
+				closeSync(descriptor);
+			}
+		}
+	}
+	return {
+		path: worktree.path,
+		branch: worktree.branch,
+		diffHash: hash.digest("hex"),
+		changedPaths,
+		snapshot: "working-tree",
+		apply,
+		applied: false,
+	};
+}
+
 function protectedPathsChangedByTaskBranch(
 	worktree: Pick<TaskWorktree, "root" | "branch">,
 	protectedPaths: ReadonlyArray<string>,
@@ -327,6 +379,9 @@ export function applyTaskWorktree(input: {
 		path: input.worktree.path,
 		branch: input.worktree.branch,
 		diffHash: taskWorktreeDiffHash(input.worktree),
+		changedPaths: nullDelimitedPaths(
+			gitBytes(input.worktree.root, ["diff", "--name-only", "-z", `${input.worktree.base}..${input.worktree.branch}`]),
+		),
 		apply: input.apply,
 		applied: false,
 	};

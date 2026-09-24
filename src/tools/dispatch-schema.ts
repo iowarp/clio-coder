@@ -298,8 +298,8 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		agent: Type.Optional(
 			Type.String({
 				description: composition.council
-					? "Recipe id, not model: coder, verifier, scout, or auto. Default coder; researcher for council."
-					: "Recipe id, not model: coder, verifier, scout, or auto. Default coder.",
+					? "Recipe or configured ACP peer ID; default researcher for council."
+					: "Recipe or configured ACP peer ID; default coder.",
 			}),
 		),
 		context: Type.Optional(WorkerContextSchema),
@@ -313,7 +313,11 @@ export function buildDispatchParameters(composition: DispatchSchemaComposition =
 		persona: Type.Optional(Type.String({ description: "Default persona for the batch, max 8000 chars." })),
 		tool_profile: Type.Optional(StringEnum(TOOL_PROFILE_NAMES, { description: "Default worker tool profile." })),
 		budget: Type.Optional(DispatchBudgetSchema),
-		target: Type.Optional(Type.String({ description: "Default target id (omit for the fleet default)." })),
+		target: Type.Optional(
+			Type.String({
+				description: "Target ID; configured external CLI selects headless mode.",
+			}),
+		),
 		model: Type.Optional(Type.String({ description: "Default model override." })),
 		node: Type.Optional(Type.String({ description: "Default fleet node pin (omit for automatic placement)." })),
 		routing: Type.Optional(

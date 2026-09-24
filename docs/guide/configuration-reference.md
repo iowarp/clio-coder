@@ -137,6 +137,11 @@ The schema, validation, migration paths, and user settings path are in [`src/cor
 | Prompt fragment metadata | [`src/domains/prompts/`](../../src/domains/prompts/compiler.ts) |
 | Local model tags and knowledge | [`src/domains/providers/models/local-models/`](../../src/domains/providers/models/local-models/clio-coder-local-coding-targets.yaml) |
 
+For an ACP peer, `integrations.externalAgents.entries[].env` may use an exact
+`"{env:NAME}"` value. Clio resolves that named host variable for the configured
+peer at launch and refuses a missing reference. Keep provider keys out of the
+settings file; see [Coding Agent Interoperability](interop.md#delegate-work-to-an-installed-coding-agent).
+
 ## Project files
 
 Project configuration lives under `.clio-coder/`. The owning loader or validator is authoritative for each file's schema.
