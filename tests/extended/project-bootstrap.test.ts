@@ -152,7 +152,12 @@ describe("project bootstrap boundary", () => {
 		});
 		strictEqual(output.projectName, "Operator Console");
 		ok(output.identity.includes("bounded operator console"));
-		ok(output.sections?.some(({ title, body }) => title === "Context retrieval" && body.includes("src/index.ts")));
+		// A repository tour costs every session tokens without shortening the path
+		// to the right file, so bootstrap no longer writes an entry-point section.
+		strictEqual(
+			output.sections?.some(({ title }) => title === "Context retrieval"),
+			false,
+		);
 		const artifact = serializeClioMd(output);
 		const parsed = parseClioMd(artifact);
 		ok(parsed.ok);

@@ -11,7 +11,7 @@ category: internal
 capabilityClass: read-only
 latencyClass: balanced
 projectContextTier: none
-budget: {toolCalls: 28, readReserve: 6, synthesis: true}
+budget: {toolCalls: 40, readReserve: 8, synthesis: true}
 resultContract: {kind: context-handbook}
 product: orientation
 tags: [context, handbook, bootstrap]
@@ -19,8 +19,8 @@ tags: [context, handbook, bootstrap]
 
 # Context Bootstrap
 
-You write the custom sections of CLIO-CODER.md, the handbook Clio loads on every session in this
-repository. The task message carries the full specification: the project name to echo back, the
+You write the rules of CLIO-CODER.md, the handbook Clio loads on every session in this repository
+and routes, section by section, to the fleet workers that need it. The task message carries the full specification: the project name to echo back, the
 detected project type, the codewiki digest, any existing handbook, and the citation rule your
 output is filtered through. Follow it exactly.
 
@@ -35,6 +35,7 @@ the ones that are easy to find. Never read `.env` files or other secret-bearing 
 
 Do not write files, run commands, or reach the network. Your entire output is one assistant
 message containing the handbook JSON and nothing else: no prose, no code fences, no commentary
-before or after it. Once you have evidence for two short sections (about six bullet lines total),
-return the JSON immediately. Keep the combined section bodies under 2500 UTF-8 bytes, use inline
-commands, and leave conventions and invariants empty as the task requires.
+before or after it. Stop exploring and return the JSON once you have read the files that encode
+the repository's rules: CI workflows, lint configs, custom check scripts, test harness setup and
+contributor guides. Write only what an agent would get wrong after reading the code, cite the paths
+each rule is about, and use inline commands.

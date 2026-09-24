@@ -19,7 +19,14 @@ import {
 	renderImportedAgentContext,
 	scanAgentConfigs,
 } from "./adoption.js";
-import { type ClioMdSection, type ParsedClioMd, parseClioMd, serializeClioMd, tryReadClioMd } from "./clio-md.js";
+import {
+	type ClioMdSection,
+	HANDBOOK_TARGETS,
+	type ParsedClioMd,
+	parseClioMd,
+	serializeClioMd,
+	tryReadClioMd,
+} from "./clio-md.js";
 import { buildCodewikiCandidate, coordinateCodewikiWrite } from "./codewiki/coordinator.js";
 import type { Codewiki } from "./codewiki/schema.js";
 import type { Fingerprint } from "./fingerprint.js";
@@ -698,7 +705,7 @@ function groundedToken(token: string, evidence: ModelGroundingCorpus): boolean {
  * `npm publish` in a repository with no publish script is dropped even though the
  * rest of the sentence is unremarkable, which was the real failure mode.
  */
-function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string {
+function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChars = MODEL_SECTION_MAX_CHARS): string {
 	const kept: string[] = [];
 	let inFence = false;
 	for (const rawLine of body.split(/\r?\n/)) {
@@ -724,11 +731,25 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus): string
 	let length = 0;
 	for (const line of kept) {
 		const nextLength = length + (bounded.length > 0 ? 1 : 0) + line.length;
-		if (nextLength > 1200) break;
+		if (nextLength > maxChars) break;
 		bounded.push(line);
 		length = nextLength;
 	}
 	return bounded.join("\n").trim();
+}
+
+/**
+ * A grounded model section may use the whole per-section budget the parser
+ * allows. At 1200 characters a recipe section was cut after two bullets.
+ */
+const MODEL_SECTION_MAX_CHARS = HANDBOOK_TARGETS.sectionChars;
+
+/** One model-written rule line, kept only when it passes the citation rule whole. */
+function groundedModelLine(line: string, evidence: ModelGroundingCorpus | null): string | null {
+	const trimmed = line.replace(/\s+/g, " ").trim();
+	if (trimmed.length === 0) return null;
+	if (!evidence) return trimmed;
+	return groundedModelBody(trimmed, evidence) === trimmed ? trimmed : null;
 }
 
 function sanitizeModelSection(section: ClioMdSection, evidence: ModelGroundingCorpus): ClioMdSection | null {
@@ -746,13 +767,24 @@ function stabilizeGeneratedOutput(
 ): BootstrapStructuredOutput {
 	const tomlFiles = input.tomlFiles ?? createTomlFileReader(input.cwd);
 	const existing = input.existingClioMd;
+	const groundingCorpus = groundModelOutput ? createModelGroundingCorpus(input) : null;
+	// Human-authored rules first, then the model's grounded rules, then the
+	// sibling-file heuristics, so a generated rule never displaces an authored one.
 	const conventions: string[] = [];
 	for (const convention of existing?.conventions ?? []) pushUnique(conventions, convention);
+	for (const convention of base.conventions ?? []) {
+		const grounded = groundedModelLine(convention, groundingCorpus);
+		if (grounded) pushUnique(conventions, grounded);
+	}
 	for (const convention of inferConventions(input.cwd, handbookInstructionFiles(input), input.codewiki)) {
 		pushUnique(conventions, convention);
 	}
 	const invariants: string[] = [];
 	for (const invariant of existing?.invariants ?? []) pushUnique(invariants, invariant);
+	for (const invariant of base.invariants ?? []) {
+		const grounded = groundedModelLine(invariant, groundingCorpus);
+		if (grounded) pushUnique(invariants, grounded);
+	}
 	for (const invariant of inferInvariants(handbookInstructionFiles(input))) pushUnique(invariants, invariant);
 
 	const verification = verificationSection(input.cwd, tomlFiles);
@@ -769,13 +801,15 @@ function stabilizeGeneratedOutput(
 		ordinarySections.push(section);
 		return true;
 	};
-	for (const section of existing ? [...existingSections, ...inferredSections] : inferredSections) addSection(section);
-	const groundingCorpus = groundModelOutput ? createModelGroundingCorpus(input) : null;
+	// Authored sections, then the model's grounded sections, then heuristics:
+	// the model reads the repository, the heuristics only read its metadata.
+	for (const section of existingSections) addSection(section);
 	for (const section of base.sections ?? []) {
 		const sanitized = groundingCorpus ? sanitizeModelSection(section, groundingCorpus) : section;
 		if (sanitized && addSection(sanitized)) modelSections.add(sanitized);
 	}
-	const ordinaryLimit = verification ? 6 : 7;
+	for (const section of inferredSections) addSection(section);
+	const ordinaryLimit = verification ? HANDBOOK_TARGETS.sections - 1 : HANDBOOK_TARGETS.sections;
 	const retainedOrdinarySections = ordinarySections.slice(0, ordinaryLimit);
 	for (const section of retainedOrdinarySections) {
 		if (modelSections.has(section)) onModelSectionRetained?.();
@@ -784,39 +818,17 @@ function stabilizeGeneratedOutput(
 		...base,
 		projectName: existing?.projectName ?? projectName(input.cwd, tomlFiles),
 		identity: existing?.identity ?? stabilizedIdentity(input, base.identity, tomlFiles),
-		conventions: conventions.slice(0, 6),
-		invariants: invariants.slice(0, 3),
+		conventions: conventions.slice(0, HANDBOOK_TARGETS.conventions),
+		invariants: invariants.slice(0, HANDBOOK_TARGETS.invariants),
 		sections: [...retainedOrdinarySections, ...(verification ? [verification] : [])],
 	};
 }
 
-/**
- * The handbook sections whose every fact is read straight off the codewiki index:
- * which modules anchor it and where the mass sits. They are the only sections
- * nothing but the index can author, and equally the only ones that are wrong the
- * moment the tree moves, so `context refresh` re-derives them in place and leaves
- * every other section to its human or model author. An exact file count stays
- * out: the handbook persists between refreshes while the tree keeps moving, so a
- * precise number is falsified by any single added file and carries no
- * navigational value the entry-point list does not.
- */
-function codewikiSections(codewiki: Codewiki): ClioMdSection[] {
-	const sections: ClioMdSection[] = [];
-	const entryPoints = codewikiEntryPoints(codewiki, 8);
-	if (entryPoints.length > 0) {
-		sections.push({
-			title: "Context retrieval",
-			body: [
-				`Start orientation with these indexed entry points: ${entryPoints.map((entry) => `\`${entry}\``).join(", ")}.`,
-				"Use `code_nav` (modes: symbol, path, entries, outline, deps, dependents, wiki) before broad reads when the task is navigational.",
-			].join(" "),
-		});
-	}
-	return sections;
-}
-
 function inferHeuristicSections(input: BootstrapGenerateInput): ClioMdSection[] {
-	const sections: ClioMdSection[] = [...codewikiSections(input.codewiki)];
+	// No entry-point or layout section: a repository tour costs every session
+	// tokens and does not shorten the path to the right file. The session prompt
+	// already routes navigation through `code_nav`.
+	const sections: ClioMdSection[] = [];
 	const invariants = inferInvariants(handbookInstructionFiles(input));
 	if (invariants.length > 0) {
 		sections.push({
@@ -1247,31 +1259,6 @@ function summarizeAdoption(
 		rejectedCount: adoption.rejected.length,
 		includeGlobal: adoption.includeGlobal,
 	};
-}
-
-/**
- * Top entry-point modules from the codewiki, used to orient a fresh session.
- * Entries the indexer tagged as "entry point" come first; otherwise the most
- * imported modules (highest in-degree) stand in as the structural anchors.
- */
-function codewikiEntryPoints(codewiki: Codewiki, limit = 6): string[] {
-	const fileById = new Map(codewiki.files.map((file) => [file.id, file] as const));
-	const tagged = codewiki.files
-		.filter((file) => file.lang !== "config" && file.role === "entry")
-		.map((file) => file.path)
-		.sort((a, b) => a.localeCompare(b));
-	if (tagged.length >= limit) return tagged.slice(0, limit);
-	const inDegree = new Map<string, number>();
-	for (const edge of codewiki.edges) {
-		if (!("toFileId" in edge)) continue;
-		inDegree.set(edge.toFileId, (inDegree.get(edge.toFileId) ?? 0) + 1);
-	}
-	const ranked = [...inDegree.entries()]
-		.sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-		.map(([fileId]) => fileById.get(fileId)?.path)
-		.filter((path): path is string => typeof path === "string")
-		.filter((path) => !tagged.includes(path));
-	return [...tagged, ...ranked].slice(0, limit);
 }
 
 export async function runBootstrap(input: RunBootstrapInput = {}): Promise<RunBootstrapResult> {
