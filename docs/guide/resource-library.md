@@ -106,7 +106,7 @@ Every managed change is reviewed before writing. The review shows dependencies, 
 
 When you disable a package (via `library disable <ref>` or pressing `e` in the Library overlay):
 - The package state in `plugins/state.json` is updated with `enabled: false`. No files are deleted.
-- Resource discovery and admission exclude disabled recipes on subsequent reads (`enabledPluginResourceRoots` in `src/domains/plugins/resources.ts` rechecks current installation state on the next read, even before a manual session reload). A CLI disable does not broadcast cancellation into other running processes, stop an in-flight tool, or erase instructions already in model context.
+- Resource discovery and admission exclude disabled recipes on subsequent reads (`enabledPluginResourceRoots` in [resources.ts](../../src/domains/plugins/resources.ts) rechecks current installation state on the next read, even before a manual session reload). A CLI disable does not broadcast cancellation into other running processes, stop an in-flight tool, or erase instructions already in model context.
 - If a project-scope copy of a package is disabled, it explicitly suppresses any matching user-scope copy as well, ensuring that the project's intent to disable the capability is honored.
 - Re-enabling the package with `library enable <ref>` restores resource discovery. Adding or replacing recipes requires a session refresh; active UI management actions report their own refresh results, while `/library reload` reloads the inventory for the current session.
 

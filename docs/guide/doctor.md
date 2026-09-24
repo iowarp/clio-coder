@@ -1,5 +1,7 @@
 # Doctor
 
+`runDoctorCommand` in [doctor.ts](../../src/cli/doctor.ts) runs the CLI checks. The [safety model](../architecture/safety-model.md) explains command authority.
+
 `clio-coder doctor` diagnoses a Clio install and the workspace it runs in. It
 reads, probes, and reports; plain `doctor` writes nothing. This page covers
 what the checks are, the deep checks, the in-session `/doctor`, and how to
@@ -47,7 +49,7 @@ seconds from a scratch directory, and all of them run at once.
 
 - An absent tool is `INFO`. Most workspaces need none of these.
 - An absent tool is `WARN` when the workspace
-  [validation contract](../process/scientific-validation.md) names it in a
+  [validation contract](tool-usage.md#verify-run-declared-verification-checks) names it in a
   validator command, or when the contract declares `runtime.kind: slurm` and
   `sbatch` is missing.
 - An installed tool whose `--version` exits nonzero is `WARN`. An

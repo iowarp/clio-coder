@@ -1,5 +1,7 @@
 # Slurm through the clio-kit MCP server
 
+`slurmMcpFindings` in [doctor-slurm.ts](../../src/cli/doctor-slurm.ts) checks the local Slurm setup. The [MCP tool guide](tool-usage.md#gateway-discover-and-call-secondary-capabilities) explains capability calls.
+
 Clio Coder reaches Slurm through the Slurm MCP server that
 [clio-kit](https://github.com/iowarp/clio-kit) ships, over the same local stdio
 MCP gateway every other MCP server uses. There is no Slurm transport inside
@@ -78,7 +80,7 @@ asking, submissions and cancellations included, because the class is per
 server. Do that only in a workspace where an unattended `sbatch` is
 acceptable. `--action-class execute` routes the server's launch command
 through the bash policy and then follows the execute row of the
-[autonomy table](../architecture/safety-model.md#autonomy-levels). There is no
+[autonomy table](../architecture/safety-model.md#21-the-autonomy-axis-delegation-dial). There is no
 per-tool class today.
 
 ## The skill

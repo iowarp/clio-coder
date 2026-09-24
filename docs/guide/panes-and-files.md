@@ -46,7 +46,7 @@ clears the registry's minimum version.
 
 On-demand install is the decision, not a gap (#274). Bundling the two
 programs would add roughly 22 MB for herdr and 32 MB for yazi per platform
-across five platforms, and the release audit in `scripts/check-release.mjs`
+across five platforms, and the release audit in [check-release.mjs](../../scripts/check-release.mjs)
 holds the tarball to 10 MB and the unpacked package to 50 MB as its tripwire
 against packaging defects; one bundled platform alone would trip it. Both
 programs also carry their own licenses and notices, which the package would
@@ -211,7 +211,7 @@ Every key is live through `/settings` under Terminal, files pane, and in the
 
 The files pane is themed from Clio's own palette. Every color in the
 engine's generated theme comes from the theme tokens in
-`src/core/theme-token-hex.ts` (accent, action, success, warning, error, info,
+[theme-token-hex.ts](../../src/core/theme-token-hex.ts) (accent, action, success, warning, error, info,
 frame, and the rest), rendered when the managed profile is generated on open
 and stamped into the profile, so a palette change regenerates the profile on
 the next open. Clio ships one palette; there is no separate light theme to

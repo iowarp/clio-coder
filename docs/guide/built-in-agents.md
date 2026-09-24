@@ -115,7 +115,7 @@ Two rounds only help when the reason is actionable, so a validator reason names 
 
 ## Frontmatter schema
 
-`src/domains/agents/registry.ts` parses frontmatter fields from recipe markdown:
+[registry.ts](../../src/domains/agents/registry.ts) parses frontmatter fields from recipe markdown:
 
 ```yaml
 ---
@@ -141,7 +141,7 @@ resultContract: {kind: mutation-report}  # typed result shape the worker must re
 ---
 ```
 
-The closed key set is defined in `src/domains/agents/recipe-schema.ts`; an
+The closed key set is defined in [recipe-schema.ts](../../src/domains/agents/recipe-schema.ts); an
 optional `product` key also exists for product-scoped recipes. There are no
 `model`, `target`, `thinkingLevel`, or `output` frontmatter keys — target and
 model selection belong to dispatch, not the recipe.

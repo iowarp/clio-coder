@@ -1,6 +1,6 @@
 # Commands and Modes
 
-This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: [CLI](../../src/cli/), [run arguments](../../src/cli/args.ts), [slash-command registry](../../src/interactive/slash-commands.ts), and [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md).
+This guide covers the installed CLI, headless run behavior, interactive commands, keyboard controls, and operator workflows. The command registry and parser are authoritative: [CLI](../../src/cli/index.ts), [run arguments](../../src/cli/args.ts), [slash-command registry](../../src/interactive/slash-commands.ts), and [keybinding manager](../../src/interactive/keybinding-manager.ts). Exit codes and stdout guarantees are in [Exit codes and output](exit-codes-and-output.md).
 
 ## Demo guidance
 
@@ -75,7 +75,7 @@ Interactive capability guidance is enabled by default. `--demo` and `--no-demo` 
 | `clio-coder dev evolve manifest init\|validate\|summarize` | Create and check typed harness change manifests. |
 | `clio-coder extensions list\|discover\|install\|enable\|disable\|remove` | Manage installed extension packages and resource roots. `clio-coder ext` is an accepted alias. |
 | `clio-coder library list\|search\|register\|inspect\|validate\|install\|update\|enable\|disable\|drift\|pin\|remove` | Manage packages of kind plugin, skill, agent, prompt or fleet at user/project scope; `install/update --dry-run` preview. `library skills` lists runtime skills; `library inventory --json` is the fixed GUI read. |
-| `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](../gui/README.md). |
+| `clio-coder gui [--open]`, `clio-coder dev gui` | Start the graphical application, an opt-in alpha for power users listed under `clio-coder --help --all`; the terminal UI stays the primary interface and nothing starts the application unless you run it. `--open` opens the browser. See the [GUI reference](commands-and-modes.md). |
 | `clio-coder docs [topic] [--no-open] [--foreground]`, `clio-coder docs --stop` | Open the documentation in your browser, rendered directly from the canonical Markdown. Use the installed background app when there is one. Otherwise start a loopback server in the background, reuse it on the next call, and stop it with `--stop` or after 15 minutes without an open page. `--no-open` prints the launch link. `--foreground` serves privately in this terminal until Ctrl+C. |
 | `clio-coder usage report [--repo <path>] [--days <n>] [--json]` | Cross-session usage facts from session/run ledgers and retained out-of-turn calls, including known failed-compaction spending and missing coverage. The window defaults to 30 days and the JSON schema is marked experimental. |
 | `clio-coder dev share export --out <path> [--project\|--user\|--both] [--context] [--prompts] [--skills] [--settings] [--extensions]` | Export project context, prompts, skills, settings fragments, and extension bundles. |
@@ -200,14 +200,14 @@ clio-coder run \
 
 ### Turn Constraints
 
-Headless runs can explicitly constrain one submitted turn and its continuations using host-enforced bounds (`src/core/turn-constraints.ts`). Turn constraints are never guessed from natural language or derived from model-generated arguments; they can only narrow existing safety, skill, and recipe policies.
+Headless runs can explicitly constrain one submitted turn and its continuations using host-enforced bounds ([turn-constraints.ts](../../src/core/turn-constraints.ts)). Turn constraints are never guessed from natural language or derived from model-generated arguments; they can only narrow existing safety, skill, and recipe policies.
 
 - **Workflow mode (`--turn-mode <mode>`):** Selects workflow guidance (`answer` | `proposal` | `change`). Mode guides system prompt rendering and turn continuation discipline (`turnAllowsContinuation` disables autonomous continuation turns for both `answer` and `proposal`). Under `proposal`, tasks board `plan` and `add` actions automatically record `initialStatus: "blocked"` with a note awaiting operator authorization. **Important:** `mode` is prompt and workflow guidance, not an authorization boundary. `turnAllowsTool` ignores mode entirely; mutating tools such as `write` or `edit` are *not* denied by `--turn-mode proposal` alone. To mechanically enforce read-only execution or restrict modifications, pass an explicit capability allowlist (`--allow-tools read,grep,find,ls`) or set `--autonomy read-only` / `suggest`.
 - **Worker delegation (`--no-delegate`):** Sets `delegation: "forbidden"`. `turnAllowsTool` mechanically denies the `dispatch` tool, and prompt compilation instructs the model to work directly without spawning workers.
 - **Capability allowlist (`--allow-tools <names|none>`):** Restricts executable tools to an explicit comma-separated list of capability names, or disables all tools when passed `none`. Mechanically enforced by `turnAllowsTool` and tool execution admission. Naming a secondary capability (such as `data` or `clio_docs`) automatically admits its gateway transport wrapper, while naming `gateway` alone never admits every capability behind it.
 - **Skill discovery suppression (`--no-skills`):** Suppresses automatic skill discovery from catalog roots and marketplace guidance while still honoring explicitly specified skill paths (such as `--skill <path>`). Programmatic turn constraints can also set `skills: "disabled"`, which mechanically rejects `context(scope="skills")` calls at the tool boundary.
 
-In prompt generation, turn constraints render as the final `# Current task scope` section of the system prompt (`src/domains/prompts/compiler.ts`). Because they appear after identity, role, context, and memory, adjusting turn constraints between turns preserves the preceding `stablePrefix` for models with prefix caching.
+In prompt generation, turn constraints render as the final `# Current task scope` section of the system prompt ([compiler.ts](../../src/domains/prompts/compiler.ts)). Because they appear after identity, role, context, and memory, adjusting turn constraints between turns preserves the preceding `stablePrefix` for models with prefix caching.
 
 ## Interactive Slash Commands
 
@@ -450,7 +450,7 @@ Linux PTY and protocol tests; no terminal profile is installed automatically.
 ### What Ctrl+C does
 
 `Ctrl+C` is not a single action. It resolves against the current input boundary,
-first match wins (`resolveApplicationCtrlCAction`, `src/interactive/application-controller.ts`):
+first match wins (`resolveApplicationCtrlCAction`, [application-controller.ts](../../src/interactive/application-controller.ts)):
 
 | State | What Ctrl+C does |
 | --- | --- |
@@ -478,7 +478,7 @@ composer with its cursor.
 If startup fails or you interrupt it before hydration finishes, the terminal is
 restored and any pending submissions and draft text are printed to stderr rather
 than discarded. `CLIO_CODER_INSTANT_SHELL=0` opts out and waits for a fully
-hydrated first frame. The seam is `src/interactive/terminal-lease.ts`.
+hydrated first frame. The seam is [terminal-lease.ts](../../src/interactive/terminal-lease.ts).
 
 ## Live Steering
 
@@ -565,7 +565,7 @@ Clio-specific and ambient variables are listed in the [environment variable refe
 
 ### code_nav modes
 
-The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#code_nav-navigate-the-codewiki-index).
+The read-only `code_nav` tool queries the local index. Its modes and argument schema are in [Tool usage](tool-usage.md#codenav-navigate-the-codewiki-index).
 
 
 ## Output styles

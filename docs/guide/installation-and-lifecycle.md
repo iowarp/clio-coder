@@ -137,7 +137,7 @@ The core files are created automatically during the first run. `credentials.yaml
 
 ## 3. Bootstrap Initialization
 
-When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see `src/core/init.ts`) to bootstrap missing structures:
+When Clio Coder boots (or after a reset), it calls `initializeClioHome()` (see [init.ts](../../src/core/init.ts)) to bootstrap missing structures:
 1.  **Directory Tree**: Recursively creates the four roots (`config`, `data`, `state`, `cache`) and their skeletons: `agents` under config, `memory`/`evidence` under data, and `sessions`/`audit`/`receipts`/`interviews`/`scratch` under state.
 2.  **Settings Template**: If `settings.yaml` is absent, creates a fresh default config. An existing file is never read, validated, or rewritten by initialization.
 3.  **Credentials Security**: If `credentials.yaml` is absent, creates a YAML file containing a managed-file comment and an empty object (`{}`), then locks its permissions immediately to owner-only read-write (`0o600`).
@@ -157,7 +157,7 @@ hash -r
 clio-coder --version
 ```
 
-`scripts/install-local.sh` is idempotent and auditable:
+[install-local.sh](../../scripts/install-local.sh) is idempotent and auditable:
 
 - verifies `node` satisfies `package.json` `engines.node`;
 - runs `pnpm install --frozen-lockfile` to sync dependencies with the workspace lockfile unless `--skip-deps` is passed;
@@ -320,7 +320,7 @@ Key lifecycle and operational updates in v0.3.7:
   the same area.
 - Interactive launch paints a measured Stage 0 shell on the same terminal and editor that Stage 1 hydrates. Typing, queued submits, resize, and Ctrl+C remain live during hydration; set `CLIO_CODER_INSTANT_SHELL=0` for the legacy fully hydrated first-frame path.
 - Turn settlement is enforced on `/new`, `/resume`, `/tree`, and `/fork` to cleanly commit in-flight streams before session writer replacement (#114).
-- Resumed and forked session entry replays standardize message prefixes through `src/engine/messages.ts`.
+- Resumed and forked session entry replays standardize message prefixes through [messages.ts](../../src/engine/messages.ts).
 - `AI_AGENT=clio-coder` is set on all child processes for system attribution.
 
 The first interactive launch after that upgrade showed this contemporary
