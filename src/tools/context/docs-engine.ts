@@ -205,7 +205,7 @@ function unique<T>(items: ReadonlyArray<T>): T[] {
 	return [...new Set(items)];
 }
 
-function slugify(heading: string, counts: Map<string, number>): string {
+export function slugify(heading: string, counts: Map<string, number>): string {
 	const base = heading
 		.replace(/<[^>]*>/g, "")
 		.replace(/[`*_~]/g, "")

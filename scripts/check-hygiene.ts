@@ -31,7 +31,7 @@ import { ALL_TOOL_NAMES, type BuiltinToolName, ToolNames } from "../src/core/too
 import type { DispatchContract } from "../src/domains/dispatch/contract.js";
 import type { PanesOperations } from "../src/domains/mux/operations.js";
 import { loadFragments } from "../src/domains/prompts/fragment-loader.js";
-import { listDocsCorpus } from "../src/tools/context/docs-engine.js";
+import { listDocsCorpus, slugify } from "../src/tools/context/docs-engine.js";
 import { runBoundaryCheck } from "../tests/boundaries/check-boundaries.js";
 import { configurationReferenceMembership } from "./configuration-reference.js";
 import { readmeInstallVersion } from "./release-version-policy.mjs";
@@ -45,6 +45,60 @@ function fail(rule: string, message: string): void {
 
 function readRoot(relPath: string): string {
 	return readFileSync(join(root, relPath), "utf8");
+}
+
+function checkDocumentationLinks(): void {
+	const files = [...collectFiles([join(root, "docs")], [".md"]), join(root, "README.md"), join(root, "CONTRIBUTING.md")];
+	const anchors = new Map<string, Set<string>>();
+	const linesWithoutFences = (file: string): string[] => {
+		let fence = "";
+		return readFileSync(file, "utf8")
+			.split(/\r?\n/u)
+			.map((line) => {
+				const marker = /^\s*(`{3,}|~{3,})/u.exec(line)?.[1];
+				if (marker && (!fence || marker[0] === fence[0])) {
+					fence = fence ? "" : marker;
+					return "";
+				}
+				return fence ? "" : line;
+			});
+	};
+	const getAnchors = (file: string): Set<string> => {
+		const cached = anchors.get(file);
+		if (cached) return cached;
+		const found = new Set<string>();
+		const counts = new Map<string, number>();
+		for (const line of linesWithoutFences(file)) {
+			const heading = /^(#{1,6})\s+(.+?)\s*#*\s*$/u.exec(line)?.[2];
+			if (heading) found.add(slugify(heading.trim(), counts));
+		}
+		anchors.set(file, found);
+		return found;
+	};
+	for (const file of files) {
+		const display = relative(root, file);
+		for (const [index, line] of linesWithoutFences(file).entries()) {
+			for (const match of line.matchAll(/(?<!!)\[[^\]]*\]\((?:<([^>]+)>|([^\s)]+))(?:\s+"[^"]*")?\)/gu)) {
+				const target = (match[1] ?? match[2] ?? "").replace(/&amp;/gu, "&");
+				if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/iu.test(target)) continue;
+				const [pathname, fragment] = target.split("#", 2);
+				const resolved = pathname ? resolve(dirname(file), decodeURIComponent(pathname)) : file;
+				if (!existsSync(resolved) || !statSync(resolved).isFile()) {
+					fail("documentation-links", `${display}:${index + 1}: missing link target ${target}`);
+				} else if (fragment && resolved.endsWith(".md") && !getAnchors(resolved).has(decodeURIComponent(fragment))) {
+					fail("documentation-links", `${display}:${index + 1}: missing heading anchor ${target}`);
+				}
+			}
+			for (const match of line.matchAll(/`((?:src|tests|scripts|apps)\/[A-Za-z0-9_./*?{}-]+)(?::[^`]*)?`/gu)) {
+				const cited = match[1] ?? "";
+				if (cited.includes("*")) {
+					const prefix = cited.slice(0, cited.indexOf("*")).replace(/\/[^/]*$/u, "");
+					if (existsSync(join(root, prefix))) continue;
+				} else if (existsSync(join(root, cited))) continue;
+				fail("documentation-links", `${display}:${index + 1}: missing cited path ${cited}`);
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1570,6 +1624,7 @@ async function checkToolContractCoverage(): Promise<void> {
 }
 
 const checks: ReadonlyArray<[string, () => void | Promise<void>]> = [
+	["documentation-links", checkDocumentationLinks],
 	["product-namespace", checkProductNamespace],
 	["export-hygiene", checkExportHygiene],
 	["boundaries", checkBoundaries],
