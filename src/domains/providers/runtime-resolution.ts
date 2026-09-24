@@ -546,7 +546,8 @@ function modelHintPatch(target: ResolvedRuntimeTarget, model: unknown): Partial<
 	if (contextWindow !== undefined && target.capabilities.contextWindow <= 0) patch.contextWindow = contextWindow;
 	const maxTokens = nonNegativeFiniteNumber(record.maxTokens);
 	if (maxTokens !== undefined && target.capabilities.maxTokens <= 0) patch.maxTokens = maxTokens;
-	if (Array.isArray(record.input)) patch.vision = record.input.includes("image");
+	// No vision patch: a synthesized model's input list comes from the runtime defaults, catalog and
+	// knowledge base without the live probe, so it can only discard what the resolution already knows.
 	return patch;
 }
 
