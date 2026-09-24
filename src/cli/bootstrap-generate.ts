@@ -94,9 +94,9 @@ export function resolveBootstrapRoute(settings: Readonly<ClioSettings>): Bootstr
 	const fallback = settings.fleet.default;
 	if (!fallback?.target) {
 		throw new Error(
-			`bootstrap has no route: workers.agentBindings.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +
-				`workers.default has no target; bind a profile with ` +
-				`'clio-coder targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set workers.default.target`,
+			`bootstrap has no route: fleet.agentProfiles.${CONTEXT_BOOTSTRAP_AGENT_ID} is unbound and ` +
+				`fleet.default has no target; bind a profile with ` +
+				`'clio-coder targets profile bind ${CONTEXT_BOOTSTRAP_AGENT_ID} <profile>' or set fleet.default.target`,
 		);
 	}
 	return {
