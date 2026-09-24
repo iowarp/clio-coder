@@ -1,5 +1,7 @@
 # Middleware and Component Registry
 
+The [harness extensions guide](../guide/harness-extensions.md) explains how operators install command tools.
+
 Clio Coder has two related but separate surfaces:
 
 1. **Components**: deterministic inventory of files that can affect harness behavior.

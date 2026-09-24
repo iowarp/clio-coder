@@ -1,5 +1,7 @@
 # Dispatch Architecture Rationale
 
+The [fleet dispatch guide](../guide/fleet-dispatch.md) shows the operator workflows this domain serves.
+
 Why `src/domains/dispatch/` is one domain and why the repository has no
 barrel-only import convention. No code moved as a result of this document. It exists so that a
 later split is argued from invariants rather than from file counts.

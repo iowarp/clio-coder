@@ -1,5 +1,7 @@
 # Evidence Corpus and Long-Term Memory
 
+The [proactive memory guide](../guide/proactive-memory.md) explains when memory is offered and restored.
+
 Clio Coder treats run claims and agent lessons as structured artifacts to support reproducibility and scientific provenance. Evidence corpora are deterministic directories built from run ledgers, receipts, sessions, and audits. Currently, forensic evidence auto-builds on dispatch run completion: when a run finalizes, the observability domain automatically compiles the evidence bundle under `<dataDir>/evidence/run-<id>/` and updates a compact sidecar index row in `<stateDir>/evidence-index.json`. Long-term memory records are local, evidence-linked, and only injected after explicit approval. Use the TUI [`/view`](observability.md) command for interactive inspection of receipts, dispatch output, durable tool output, compaction summaries, and session accountability before building or citing evidence.
 
 Source of truth: `src/domains/evidence/**`, `src/domains/memory/**`, [evidence.ts](../../src/cli/evidence.ts), and [memory.ts](../../src/cli/memory.ts).

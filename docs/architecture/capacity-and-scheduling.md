@@ -1,5 +1,7 @@
 # Capacity Leases & Fleet Scheduling
 
+The [fleet dispatch guide](../guide/fleet-dispatch.md) explains node setup and capacity controls.
+
 This document specifies the multi-process capacity leasing protocols, node
 scheduling models, cross-process transaction locks, and failure recovery
 mechanics in the current source tree.

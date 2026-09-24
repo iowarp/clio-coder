@@ -1,5 +1,7 @@
 # Trace store contract
 
+The [tool usage guide](../guide/tool-usage.md#evidence-inspect-canonical-evidence-and-trust-status) explains how to inspect evidence from a run.
+
 Clio's trace database is a rebuildable, queryable mirror. Receipts, session
 ledgers, gate artifacts, and evidence remain the source of truth. Removing
 `<state-dir>/trace.sqlite` loses no authoritative run data.

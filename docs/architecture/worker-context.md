@@ -1,5 +1,7 @@
 # Worker context inheritance
 
+The [fleet dispatch guide](../guide/fleet-dispatch.md) explains worker context choices during dispatch.
+
 Clio dispatch separates **what a worker inherits** from **how workers are scheduled**. This implements the isolation, fork, and splice patterns discussed in [Organizing context in a multi-agent harness](https://www.langchain.com/blog/organizing-context-in-a-multi-agent-harness), using Clio's existing Pi agent loop and dispatch admission boundary.
 
 The default remains an isolated conversation. A native worker gets its own Pi Agent, worker system prompt, admitted tools, dynamic project context, task, and run-local accounting. Context inheritance does not grant additional tools, write roots, or autonomy. Conversation isolation is not a filesystem sandbox; use dispatch worktrees when filesystem isolation is required.

@@ -1,5 +1,7 @@
 # Panes and the Files Pane
 
+The [TUI design contract](../architecture/tui-design.md) explains the layout and rendering rules behind these controls.
+
 This page is the operator's path from a clean machine to a working files pane
 beside a Clio Coder session: what to install, how a session joins its pane
 host, the commands and keys, the settings that govern them, what `doctor`
