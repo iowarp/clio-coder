@@ -54,6 +54,18 @@ describe("safety gate boundary", () => {
 		return createSafetyPolicyEngine({ cwd: scratch, projectPolicy: loadProjectSafetyPolicy(scratch) });
 	}
 
+	function executionDisposition(
+		policy: SafetyPolicyEngine,
+		tool: string,
+		args: Record<string, unknown>,
+		level: "read-only" | "suggest" | "auto-edit" | "full-auto",
+	): string {
+		const decision = policy.evaluate({ tool, args });
+		return decision.kind === "allow"
+			? mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" })
+			: decision.kind;
+	}
+
 	it("hard-blocks zero-access paths before confirmation or ordinary ask rails", () => {
 		const policy = engine();
 		for (const call of [
@@ -75,13 +87,21 @@ describe("safety gate boundary", () => {
 			tool: ToolNames.Bash,
 			args: { command: "cd pkg && npm run build && git status" },
 		});
-		strictEqual(admitted.kind, "ask");
+		strictEqual(admitted.kind, "allow");
 		strictEqual(
 			policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build && git status" } }, "confirmed")
 				.kind,
 			"allow",
 		);
-		strictEqual(admitted.execRecognition, "recognized");
+		strictEqual(admitted.execRecognition, "unrecognized");
+		strictEqual(
+			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "auto-edit"),
+			"ask",
+		);
+		strictEqual(
+			executionDisposition(policy, ToolNames.Bash, { command: "cd pkg && npm run build && git status" }, "full-auto"),
+			"allow",
+		);
 		// A test runner is recognized without confirmation (#377), so the same chain runs.
 		const testChain = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm test && git status" } });
 		strictEqual(testChain.kind, "allow");
@@ -100,8 +120,9 @@ describe("safety gate boundary", () => {
 			"system_modify",
 		);
 		for (const command of ["npm run build 2>&1 | tail -30", "npm run lint > output.txt", "npm test 2>&1 | tail -30"]) {
-			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
-			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }, "confirmed").kind, "allow", command);
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "allow", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "auto-edit"), "ask", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "full-auto"), "allow", command);
 		}
 	});
 
@@ -129,7 +150,7 @@ describe("safety gate boundary", () => {
 			);
 		}
 		const preview = policy.evaluate({ tool: ToolNames.Bash, args: { command: "cd pkg && npm run build" } });
-		strictEqual(preview.kind, "ask");
+		strictEqual(preview.kind, "allow");
 		strictEqual(
 			preview.reasons.some((reason) => reason.includes("build: pkg-build")),
 			true,
@@ -180,6 +201,41 @@ describe("safety gate boundary", () => {
 		const destructive = engine().evaluate({ tool: ToolNames.Verify, args: { check: "wipe" } });
 		strictEqual(destructive.kind, "block");
 		strictEqual(destructive.reasonCode.startsWith("damage-control:"), true);
+	});
+
+	it("admits typed package verification at full-auto after the command safety scan", () => {
+		const policy = engine();
+		for (const check of ["typecheck", "lint", "build"]) {
+			const args = { check };
+			const decision = policy.evaluate({ tool: ToolNames.Verify, args });
+			strictEqual(decision.kind, "allow", check);
+			strictEqual(decision.execRecognition, "unrecognized", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "read-only"), "deny", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "suggest"), "ask", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "auto-edit"), "ask", check);
+			strictEqual(executionDisposition(policy, ToolNames.Verify, args, "full-auto"), "allow", check);
+		}
+	});
+
+	it("keeps explicit confirmations and hard execution rails at full-auto", () => {
+		writeFileSync(
+			join(scratch, ".clio-coder", "safety.yaml"),
+			"version: 1\ncommands:\n  - id: approved-build\n    command: npm run build\n    actionClass: execute\n    requireConfirmation: true\n",
+		);
+		const policy = engine();
+		const confirmed = policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm run build" } });
+		strictEqual(confirmed.kind, "ask");
+		strictEqual(confirmed.reasonCode, "project-policy:approved-build");
+		strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command: "npm run build" } }, "confirmed").kind, "allow");
+		for (const [command, kind] of [
+			["npm run build $(cat args)", "ask"],
+			["npm run build && sudo apt update", "ask"],
+			["npm run build && rm -rf /", "block"],
+			["npm run build && cat ~/.ssh/id_rsa", "block"],
+			["npm run build && clio-coder library install skill:example --yes", "ask"],
+		] as const) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, kind, command);
+		}
 	});
 
 	it("blocks project and user skill writes and redirects in worker and orchestrator admissions", () => {

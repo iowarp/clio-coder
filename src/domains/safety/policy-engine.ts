@@ -179,8 +179,9 @@ export const TEST_RUNNER_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 
 /**
  * Repository scripts that are not test runners. They still count as validation
- * evidence (`npm run <verification script>`) but keep a one-shot confirmation
- * at every autonomy level.
+ * evidence (`npm run <verification script>`). Their net verdict passes after
+ * safety checks, while autonomy asks below full-auto unless project policy
+ * explicitly declares the command safe.
  */
 export const PROJECT_SCRIPT_COMMANDS: ReadonlyArray<{ id: string; re: RegExp }> = [
 	{ id: "builtin:npm-lint", re: /^npm\s+run\s+lint(?:\s+--\s+[\w=./:-]+(?:\s+[\w=./:-]+)*)?$/ },
@@ -551,21 +552,9 @@ export function createSafetyPolicyEngine(options: SafetyPolicyEngineOptions = {}
 					posture,
 					projectPolicy,
 				);
-				if (
-					(catalogCheck !== null || packageCommand !== null) &&
-					bash.kind === "allow" &&
-					bash.execRecognition !== "recognized" &&
-					posture !== "confirmed"
-				) {
-					return askDecision(base, {
-						...bash,
-						reasonCode: "project-verifier-confirm",
-						reasons: [
-							...bash.reasons,
-							`Repository verifier requires confirmation or an approved safety declaration: ${catalogCommand ?? packageCommand}`,
-						],
-					});
-				}
+				// A typed verifier still runs through the same command safety scan.
+				// Unrecognized checks are left to the autonomy mapping: capable asks,
+				// while the operator's full-auto choice admits them headlessly.
 				if (bash.kind === "block") return blockDecision(base, bash);
 				if (bash.kind === "ask") return askDecision(base, bash);
 				return allowDecision(base, bash);
@@ -877,13 +866,14 @@ function evaluateBashPolicy(
 			execRecognition: "recognized",
 		};
 	}
-	if (PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(recognitionCommand))) {
+	const projectScript = PROJECT_SCRIPT_COMMANDS.find((entry) => entry.re.test(recognitionCommand));
+	if (projectScript !== undefined) {
 		return {
-			kind: posture === "confirmed" ? "allow" : "ask",
-			reasonCode: "project-script-confirm",
-			ruleId: "project-script-confirm",
+			kind: "allow",
+			reasonCode: "project-script-autonomy",
+			ruleId: projectScript.id,
 			reasons: [
-				"Repository-authored code requires one-shot confirmation or an operator-approved safety command declaration.",
+				"Repository-authored validation code is admitted by autonomy after safety checks; supervised levels ask unless a safety command declaration approves it.",
 				projectScriptPreview(recognitionCommand, callCwd),
 			],
 			policySource: "builtin-command-allowlist",
@@ -894,14 +884,14 @@ function evaluateBashPolicy(
 	if (chain !== null) {
 		const chainReasons = [
 			`every step of the && chain is recognized: ${chain.ruleIds.join(", ")}`,
-			...(chain.requiresConfirmation ? chain.scriptPreviews : []),
+			...chain.scriptPreviews,
 		];
 		if (chain.requiresConfirmation && posture !== "confirmed") {
 			return {
 				kind: "ask",
 				ruleId: "bash-recognized-chain",
 				reasonCode: "bash-recognized-chain",
-				reasons: [...chainReasons, "repository code or project policy requires confirmation for one step"],
+				reasons: [...chainReasons, "project policy requires confirmation for one step"],
 				policySource: "builtin-command-allowlist",
 				execRecognition: "recognized",
 			};
@@ -912,7 +902,7 @@ function evaluateBashPolicy(
 			reasonCode: "bash-recognized-chain",
 			reasons: chainReasons,
 			policySource: "builtin-command-allowlist",
-			execRecognition: "recognized",
+			execRecognition: chain.requiresAutonomyApproval ? "unrecognized" : "recognized",
 		};
 	}
 	// Remaining sequencing operators (pipes, ;, redirects, and && chains with an
@@ -923,23 +913,10 @@ function evaluateBashPolicy(
 	// this point.
 	if (hasSequencingOperators(command)) {
 		// Redirection syntax changes where output goes, not whether repository
-		// code executes. Match parsed argv so `2>&1` cannot erase this net rail.
+		// code executes. Keep script previews even though autonomy admits the call.
 		const scriptSegments = commandArgumentSegments(recognitionCommand)
 			.map((args) => args.join(" "))
 			.filter((part) => matchesRepositoryCommand(part));
-		if (scriptSegments.length > 0 && posture !== "confirmed") {
-			return {
-				kind: "ask",
-				ruleId: "project-script-confirm",
-				reasonCode: "project-script-confirm",
-				reasons: [
-					"Repository scripts in compound commands require one-shot confirmation",
-					...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
-				],
-				policySource: "builtin-command-allowlist",
-				execRecognition: "unrecognized",
-			};
-		}
 		return {
 			kind: "allow",
 			ruleId: "bash-shell-operators",
@@ -947,6 +924,7 @@ function evaluateBashPolicy(
 			reasons: [
 				"shell operators defeat per-command recognition; the autonomy level decides admission",
 				BASH_RECOGNIZED_FORM_HINT,
+				...scriptSegments.map((part) => projectScriptPreview(part, callCwd)),
 			],
 			policySource: "builtin-command-allowlist",
 			execRecognition: "unrecognized",
@@ -1093,7 +1071,10 @@ const CHAIN_MAX_SEGMENTS = 6;
 
 interface ChainRecognition {
 	ruleIds: ReadonlyArray<string>;
+	/** Explicit project policy confirmation remains a net rail at every level. */
 	requiresConfirmation: boolean;
+	/** Built-in project scripts ask at supervised levels and run at full-auto. */
+	requiresAutonomyApproval: boolean;
 	scriptPreviews: ReadonlyArray<string>;
 }
 
@@ -1136,6 +1117,7 @@ function recognizeCommandChain(
 	if (segments.length < 2 || segments.length > CHAIN_MAX_SEGMENTS) return null;
 	const ruleIds: string[] = [];
 	let requiresConfirmation = false;
+	let requiresAutonomyApproval = false;
 	let chainCwd = callCwd;
 	const scriptPreviews: string[] = [];
 	for (const segment of segments) {
@@ -1159,8 +1141,8 @@ function recognizeCommandChain(
 		// Re-rendered from tokens, so quoting is gone: a member that needed its
 		// quotes fails the allowlist regex and the whole chain stays unrecognized.
 		const rendered = segment.join(" ");
-		const projectScript = PROJECT_SCRIPT_COMMANDS.some((entry) => entry.re.test(rendered));
-		if (projectScript) scriptPreviews.push(projectScriptPreview(rendered, chainCwd));
+		const projectScript = PROJECT_SCRIPT_COMMANDS.find((entry) => entry.re.test(rendered));
+		if (projectScript !== undefined) scriptPreviews.push(projectScriptPreview(rendered, chainCwd));
 		const projectMatch = matchingProjectCommand(policy, rendered, chainCwd);
 		if (projectMatch) {
 			ruleIds.push(projectMatch.id);
@@ -1172,16 +1154,16 @@ function recognizeCommandChain(
 			ruleIds.push(testRunner.id);
 			continue;
 		}
-		if (projectScript) {
-			ruleIds.push("project-script-confirm");
-			requiresConfirmation = true;
+		if (projectScript !== undefined) {
+			ruleIds.push(projectScript.id);
+			requiresAutonomyApproval = true;
 			continue;
 		}
 		const builtin = BUILTIN_ALLOWLIST.find((entry) => entry.re.test(rendered));
 		if (builtin === undefined) return null;
 		ruleIds.push(builtin.id);
 	}
-	return { ruleIds, requiresConfirmation, scriptPreviews };
+	return { ruleIds, requiresConfirmation, requiresAutonomyApproval, scriptPreviews };
 }
 
 /**

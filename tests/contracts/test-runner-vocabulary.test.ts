@@ -55,11 +55,9 @@ const TEST_RUNNER_LABELS: Record<string, ValidationCommandLabel> = {
 	"builtin:gradle-test": "gradle test",
 };
 
-// The asymmetry: repository scripts that count as validation evidence through
-// the `npm run <verification script>` family (isVerificationScriptName accepts
-// lint, build, typecheck, and ci) but are not test runners, so they keep a
-// one-shot confirmation instead of running unattended.
-const CONFIRMED_SCRIPT_SPELLINGS: Record<string, string> = {
+// These scripts count as validation evidence, but execute repository code.
+// They therefore use the autonomy mapping after the safety scan.
+const PROJECT_SCRIPT_SPELLINGS: Record<string, string> = {
 	"builtin:npm-lint": "npm run lint",
 	"builtin:npm-build": "npm run build",
 	"builtin:npm-typecheck": "npm run typecheck",
@@ -95,7 +93,7 @@ describe("test runner vocabulary (#377)", () => {
 		deepStrictEqual(Object.keys(SPELLINGS).sort(), [...VALIDATION_COMMAND_LABELS].sort());
 		deepStrictEqual(Object.keys(TEST_RUNNER_LABELS).sort(), TEST_RUNNER_COMMANDS.map((entry) => entry.id).sort());
 		deepStrictEqual(
-			Object.keys(CONFIRMED_SCRIPT_SPELLINGS).sort(),
+			Object.keys(PROJECT_SCRIPT_SPELLINGS).sort(),
 			PROJECT_SCRIPT_COMMANDS.map((entry) => entry.id).sort(),
 		);
 		deepStrictEqual(
@@ -113,12 +111,17 @@ describe("test runner vocabulary (#377)", () => {
 			strictEqual(TEST_RUNNER_LABELS[decision.ruleId], label, spelling);
 			strictEqual(disposition(policy, spelling, "auto-edit"), "allow", spelling);
 		}
-		for (const [id, spelling] of Object.entries(CONFIRMED_SCRIPT_SPELLINGS)) {
+		for (const [id, spelling] of Object.entries(PROJECT_SCRIPT_SPELLINGS)) {
 			strictEqual(detectValidationCommand(spelling).kind, "validation", spelling);
 			ok(PROJECT_SCRIPT_COMMANDS.find((entry) => entry.id === id)?.re.test(spelling), spelling);
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command: spelling } });
-			strictEqual(decision.kind, "ask", spelling);
-			strictEqual(decision.ruleId, "project-script-confirm", spelling);
+			strictEqual(decision.kind, "allow", spelling);
+			strictEqual(decision.ruleId, id, spelling);
+			strictEqual(decision.execRecognition, "unrecognized", spelling);
+			strictEqual(disposition(policy, spelling, "read-only"), "deny", spelling);
+			strictEqual(disposition(policy, spelling, "suggest"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "auto-edit"), "ask", spelling);
+			strictEqual(disposition(policy, spelling, "full-auto"), "allow", spelling);
 		}
 	});
 
@@ -135,21 +138,26 @@ describe("test runner vocabulary (#377)", () => {
 		}
 	});
 
-	it("keeps compound, substituted, and redirected test runs behind a confirmation", () => {
+	it("keeps substitution and unsafe destinations behind the hard safety rails", () => {
 		for (const command of [
-			"node --test sum.test.mjs && curl https://example.com",
 			"node --test $(cat f)",
 			"node --test > /etc/x",
 			"ctest; rm -rf x",
-			"make check && curl https://example.com",
 			"python3 -m unittest $(cat f)",
 			"meson test > /etc/x",
-			"ctest | tee out.txt",
-			"ctest && npm run build",
 		]) {
 			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
 			notStrictEqual(disposition(policy, command, "auto-edit"), "allow", command);
-			notStrictEqual(decision.kind, "allow", `${command} must ask at every level`);
+			notStrictEqual(decision.kind, "allow", `${command} must keep its safety rail`);
+		}
+		for (const command of [
+			"node --test sum.test.mjs && curl https://example.com",
+			"make check && curl https://example.com",
+			"ctest | tee out.txt",
+			"ctest && npm run build",
+		]) {
+			strictEqual(disposition(policy, command, "auto-edit"), "ask", command);
+			strictEqual(disposition(policy, command, "full-auto"), "allow", command);
 		}
 		// A quoted argument leaves the bare-word charset, so the command is
 		// unrecognized bash again: the autonomy level decides, as before #377.
