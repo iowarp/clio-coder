@@ -99,6 +99,10 @@ export async function runClioCommand(
 		});
 		return result.exitCode;
 	} catch (error) {
+		// Ctrl+C or a signal closed the lease while Stage 1 was hydrating, and boot
+		// stopped at its next phase boundary. The shutdown that closed the lease
+		// restores the terminal and sets the process exit code.
+		if (terminalLease?.abortSignal.aborted && error === terminalLease.abortSignal.reason) return 0;
 		try {
 			await terminalLease?.fail();
 		} catch (cleanupError) {

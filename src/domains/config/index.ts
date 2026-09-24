@@ -1,19 +1,20 @@
 import type { DomainModule } from "../../core/domain-loader.js";
-import { createConfigBundle } from "./extension.js";
+import { type ConfigBundleOptions, createConfigBundle } from "./extension.js";
 import { ConfigManifest } from "./manifest.js";
 
 export const ConfigDomainModule: DomainModule = {
 	manifest: ConfigManifest,
-	createExtension: createConfigBundle,
+	createExtension: (context) => createConfigBundle(context),
 };
 
 /** Bind the one strict startup snapshot without changing other command paths. */
 export function createConfigDomainModule(
 	initialSettings: Readonly<import("../../core/config.js").ClioSettings>,
+	options: ConfigBundleOptions = {},
 ): DomainModule {
 	return {
 		manifest: ConfigManifest,
-		createExtension: (context) => createConfigBundle(context, initialSettings),
+		createExtension: (context) => createConfigBundle(context, initialSettings, options),
 	};
 }
 

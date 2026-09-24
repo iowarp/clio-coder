@@ -15,6 +15,15 @@ export function sleep(ms: number): Promise<void> {
 }
 
 /**
+ * Resolve after the event loop turns once. I/O callbacks that queued while the
+ * caller held the loop, terminal input and signals among them, run first; this
+ * resolves from the check phase that follows them.
+ */
+export function yieldToEventLoop(): Promise<void> {
+	return new Promise((resolve) => setImmediate(resolve));
+}
+
+/**
  * Elapsed between two reads of the same clock, signed.
  *
  * A negative result means the clock moved backwards between the two reads —

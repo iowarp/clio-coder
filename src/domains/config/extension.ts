@@ -15,13 +15,26 @@ interface NativeAgentNamespace {
 	list(): ReadonlyArray<{ id: string }>;
 }
 
+export interface ConfigBundleOptions {
+	/**
+	 * Interactive boot turns the event loop between its phases, so a settings
+	 * write can reach the watcher before the agents domain can validate it or
+	 * any reload subscriber exists. While held, a watcher fire only marks a
+	 * reload pending, and `releaseReloads()` runs it once with both in place.
+	 */
+	holdReloads?: boolean;
+}
+
 export function createConfigBundle(
 	context: DomainContext,
 	initialSettings?: Readonly<ClioSettings>,
+	options: ConfigBundleOptions = {},
 ): DomainBundle<ConfigContract> {
 	let watcher: ConfigWatcher | null = null;
 	let snapshot: ClioSettings | null = null;
 	let reloadFailure: string | null = null;
+	let reloadsHeld = options.holdReloads === true;
+	let reloadPending = false;
 	const listeners = new Map<ChangeKind, Set<ChangeListener>>([
 		["hotReload", new Set()],
 		["nextTurn", new Set()],
@@ -68,6 +81,10 @@ export function createConfigBundle(
 	}
 
 	function onWatcherFire(): void {
+		if (reloadsHeld) {
+			reloadPending = true;
+			return;
+		}
 		let next: ClioSettings;
 		try {
 			// One file read keeps the strict user-settings gate while workspace
@@ -140,6 +157,13 @@ export function createConfigBundle(
 			return () => {
 				listeners.get(kind)?.delete(listener);
 			};
+		},
+		releaseReloads() {
+			if (!reloadsHeld) return;
+			reloadsHeld = false;
+			if (!reloadPending) return;
+			reloadPending = false;
+			onWatcherFire();
 		},
 	};
 
