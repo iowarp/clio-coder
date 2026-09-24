@@ -10,11 +10,14 @@ import {
 	type DeclaredCheckSource,
 	type DeclaredNumericCompare,
 	type DeclaredPerfBudget,
-	loadProjectVerifierCatalog,
 	PROJECT_VERIFIER_CATALOG_RELATIVE_PATH,
-	packageDeclaredCheck,
 	resolveProjectVerifierExecutionCwd,
 } from "./catalog.js";
+import {
+	type DeclaredCheckDiscoveryResult,
+	discoverDeclaredChecks,
+	discoverDeclaredChecksAtRoot,
+} from "./discovery.js";
 import { compareNumeric, type NumericCompareReport, parseNumericPayload, renderNumericReport } from "./numeric.js";
 import {
 	capturePerfEnvironment,
@@ -25,6 +28,9 @@ import {
 	parsePerfBaseline,
 	renderPerfBaseline,
 } from "./perf.js";
+import { availableToolchainChecks } from "./resolve.js";
+import { type DeclaredProjectEntry, discoverDeclaredProjectEntriesAtRoot, parsePackageJson } from "./toolchain.js";
+import { TOOLCHAIN_DISCOVERY_SOURCES, type ToolchainCheck } from "./toolchain-checks.js";
 
 /** The structured verdict a numeric-compare or perf-budget check records beside the command facts. */
 export type DeclaredCheckReport = NumericCompareReport | PerfBudgetReport;
@@ -81,134 +87,6 @@ function judgement(execution: CheckExecutionOutcome, validation: CheckJudgement[
  * package scripts keep the established npm argument-widening behavior.
  */
 
-export type DeclaredCheckDiscoveryResult = { ok: true; sources: DeclaredCheckSource[] } | { ok: false; reason: string };
-
-export interface DeclaredProjectEntry {
-	id: string;
-	command: string[];
-	path: string;
-	detail: string;
-	kind: "package-script" | "just-recipe" | "make-target";
-}
-
-function repositoryRelativeCwd(workspaceRoot: string, resolved: string): string {
-	const relative = path.relative(workspaceRoot, resolved);
-	return relative.length === 0 ? "." : relative.split(path.sep).join("/");
-}
-
-function packageTag(id: string): string[] {
-	const separator = id.search(/[:.-]/u);
-	return [separator === -1 ? id : id.slice(0, separator)];
-}
-
-function packageCheckSource(packageRoot: string, workspaceRoot: string): DeclaredCheckSource | null {
-	const packagePath = path.join(packageRoot, "package.json");
-	if (!existsSync(packagePath)) return null;
-	const pkg = parsePackageJson(packagePath);
-	if (!pkg.ok) return null;
-	const cwd = repositoryRelativeCwd(workspaceRoot, packageRoot);
-	const checks = declaredVerificationScripts(pkg.scripts).map((id) =>
-		packageDeclaredCheck(id, packagePath, cwd, packageTag(id)),
-	);
-	return { kind: "package.json", path: packagePath, checks };
-}
-
-/** Discover every exact project-declared entry without promoting it to a verifier check. */
-export function discoverDeclaredProjectEntriesAtRoot(workspaceRoot: string): DeclaredProjectEntry[] {
-	const entries: DeclaredProjectEntry[] = [];
-	const packagePath = path.join(workspaceRoot, "package.json");
-	if (existsSync(packagePath)) {
-		const pkg = parsePackageJson(packagePath);
-		if (pkg.ok) {
-			for (const name of Object.keys(pkg.scripts).sort()) {
-				if (typeof pkg.scripts[name] !== "string") continue;
-				entries.push({
-					id: name,
-					command: ["npm", "run", name],
-					path: "package.json",
-					detail: `package.json script '${name}'`,
-					kind: "package-script",
-				});
-			}
-		}
-	}
-	for (const relative of ["justfile", "Justfile"] as const) {
-		const filePath = path.join(workspaceRoot, relative);
-		if (!existsSync(filePath)) continue;
-		const text = readFileSync(filePath, "utf8");
-		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_-]*)\s*(?:[^:=\n]*)?:\s*(?:#.*)?$/gmu)) {
-			const name = match[1];
-			if (name === undefined || name.startsWith("_")) continue;
-			entries.push({
-				id: name,
-				command: ["just", name],
-				path: relative,
-				detail: `just recipe '${name}'`,
-				kind: "just-recipe",
-			});
-		}
-		break;
-	}
-	const makePath = path.join(workspaceRoot, "Makefile");
-	if (existsSync(makePath)) {
-		const text = readFileSync(makePath, "utf8");
-		for (const match of text.matchAll(/^([A-Za-z0-9][A-Za-z0-9_.-]*)\s*:(?![=])[^\n]*$/gmu)) {
-			const name = match[1];
-			if (name === undefined || name.startsWith(".")) continue;
-			entries.push({
-				id: name,
-				command: ["make", name],
-				path: "Makefile",
-				detail: `Makefile target '${name}'`,
-				kind: "make-target",
-			});
-		}
-	}
-	return entries;
-}
-
-function providerCollision(sources: ReadonlyArray<DeclaredCheckSource>): string | null {
-	const seen = new Map<string, DeclaredCheck>();
-	for (const source of sources) {
-		for (const check of source.checks) {
-			const prior = seen.get(check.id);
-			if (prior !== undefined) {
-				return (
-					`duplicate declared check id '${check.id}' from ` +
-					`${prior.source.kind} (${prior.source.path}) and ${check.source.kind} (${check.source.path})`
-				);
-			}
-			seen.set(check.id, check);
-		}
-	}
-	return null;
-}
-
-export function discoverDeclaredChecksAtRoot(
-	workspaceRoot: string,
-	cwdArg: string | undefined,
-): DeclaredCheckDiscoveryResult {
-	let packageRoot: string;
-	try {
-		packageRoot = resolveSafeCwd(cwdArg, workspaceRoot);
-	} catch (error) {
-		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-	}
-	const sources: DeclaredCheckSource[] = [];
-	const packageSource = packageCheckSource(packageRoot, workspaceRoot);
-	if (packageSource !== null) sources.push(packageSource);
-	const projectCatalog = loadProjectVerifierCatalog(workspaceRoot);
-	if (!projectCatalog.ok) return projectCatalog;
-	if (projectCatalog.source !== null) sources.push(projectCatalog.source);
-	const collision = providerCollision(sources);
-	if (collision !== null) return { ok: false, reason: collision };
-	return { ok: true, sources };
-}
-
-export function discoverDeclaredChecks(cwdArg: string | undefined): DeclaredCheckDiscoveryResult {
-	return discoverDeclaredChecksAtRoot(process.cwd(), cwdArg);
-}
-
 function clonedSources(sources: ReadonlyArray<DeclaredCheckSource>): DeclaredCheckSource[] {
 	return sources.map((source) => ({
 		kind: source.kind,
@@ -225,19 +103,30 @@ function clonedSources(sources: ReadonlyArray<DeclaredCheckSource>): DeclaredChe
 export function listChecks(cwdArg: string | undefined): ToolResult {
 	const discovery = discoverDeclaredChecks(cwdArg);
 	if (!discovery.ok) return { kind: "error", message: `verify: ${discovery.reason}` };
+	const declared = discovery.sources.flatMap((source) => source.checks);
+	const derived = availableToolchainChecks(process.cwd(), declared);
 	const lines: string[] = [];
-	if (discovery.sources.length === 0 || discovery.sources.every((source) => source.checks.length === 0)) {
+	if (declared.length === 0 && derived.length === 0) {
 		lines.push(
 			`No declared verification checks found (no package.json verification scripts or ${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH} entries).`,
-			"Run `clio-coder verifiers author` to inspect declared project tooling, preview exact argv checks, and create the catalog after confirmation.",
+			`Nothing derivable either: looked for ${TOOLCHAIN_DISCOVERY_SOURCES}.`,
+			"Run the repository's documented test command through bash, or run `clio-coder verifiers author` to create the catalog after confirmation.",
 		);
 	} else {
-		lines.push("Declared verification checks:");
+		if (declared.length > 0) lines.push("Declared verification checks:");
 		for (const source of discovery.sources) {
+			if (source.checks.length === 0) continue;
 			lines.push(source.kind === "package.json" ? "package.json:" : `${PROJECT_VERIFIER_CATALOG_RELATIVE_PATH}:`);
 			for (const check of source.checks) {
 				const tags = check.tags.length > 0 ? ` [${check.tags.join(", ")}]` : "";
 				lines.push(`- ${check.id}${tags}: ${check.description}`);
+			}
+		}
+		if (derived.length > 0) {
+			lines.push("Derived from the repository's toolchain and CI files (argv shown is what runs):");
+			for (const check of derived) {
+				const args = check.argsBase === undefined ? " (takes no args)" : "";
+				lines.push(`- ${check.id} [${check.tags.join(", ")}]: ${check.command.join(" ")}${args}  (${check.source.path})`);
 			}
 		}
 	}
@@ -248,8 +137,36 @@ export function listChecks(cwdArg: string | undefined): ToolResult {
 	return {
 		kind: "ok",
 		output: lines.join("\n"),
-		details: { sources: clonedSources(discovery.sources) },
+		details: {
+			sources: clonedSources(discovery.sources),
+			derived: derived.map((check) => ({ id: check.id, command: [...check.command], path: check.source.path })),
+		},
 	};
+}
+
+/**
+ * Run a check derived from the repository's toolchain or CI files. The argv
+ * was resolved by resolveVerifyCall, the same resolution the safety policy
+ * engine scanned, and runs from the workspace root.
+ */
+export async function runToolchainCheck(
+	check: ToolchainCheck,
+	argv: ReadonlyArray<string>,
+	args: Record<string, unknown>,
+	options?: { signal?: AbortSignal },
+): Promise<ToolResult> {
+	const [file, ...vector] = argv;
+	if (file === undefined) return { kind: "error", message: `verify: derived check '${check.id}' has empty argv` };
+	const cwd = resolveProjectVerifierExecutionCwd(check.cwd, process.cwd());
+	if (cwd instanceof Error) return { kind: "error", message: `verify: ${cwd.message}` };
+	const result = await runVectorTool(
+		"verify",
+		file,
+		vector,
+		{ ...args, cwd, timeout_ms: typeof args.timeout_ms === "number" ? args.timeout_ms : check.timeoutMs },
+		options,
+	);
+	return withDeclaredEvidence(result, { ...check, command: [...argv] });
 }
 
 /**
@@ -626,22 +543,11 @@ export async function runScriptCheck(
 	return withCommandJudgement(await runVectorTool("verify", "npm", vector, { ...args, cwd }, options));
 }
 
-export { VERIFICATION_SCRIPT_FAMILY_HINT };
-
-function parsePackageJson(
-	packagePath: string,
-): { ok: true; scripts: Record<string, unknown> } | { ok: false; reason: string } {
-	try {
-		const parsed = JSON.parse(readFileSync(packagePath, "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-			return { ok: false, reason: "package.json root must be an object" };
-		}
-		const scripts = (parsed as Record<string, unknown>).scripts;
-		if (!scripts || typeof scripts !== "object" || Array.isArray(scripts)) {
-			return { ok: false, reason: "package.json has no scripts object" };
-		}
-		return { ok: true, scripts: scripts as Record<string, unknown> };
-	} catch (error) {
-		return { ok: false, reason: error instanceof Error ? error.message : String(error) };
-	}
-}
+export {
+	type DeclaredCheckDiscoveryResult,
+	type DeclaredProjectEntry,
+	discoverDeclaredChecks,
+	discoverDeclaredChecksAtRoot,
+	discoverDeclaredProjectEntriesAtRoot,
+	VERIFICATION_SCRIPT_FAMILY_HINT,
+};

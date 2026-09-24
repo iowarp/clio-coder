@@ -8,6 +8,15 @@ import { captureProjectSurface, recordProjectSurfaceTrust } from "../../src/doma
 import { loadProjectVerifierCatalog } from "../../src/tools/verify/catalog.js";
 import { isolateClioEnv } from "../harness/scratch-env.js";
 
+type Engine = ReturnType<typeof createSafetyPolicyEngine>;
+
+/** The net decision for a verify call, then the autonomy mapping a run applies to it. */
+function admitted(engine: Engine, check: string, level: "auto-edit" | "full-auto" = "auto-edit"): string {
+	const decision = engine.evaluate({ tool: "verify", args: { check } });
+	if (decision.kind !== "allow") return decision.kind;
+	return mapAutonomy(level, decision.actionClass, { executeRecognized: decision.execRecognition !== "unrecognized" });
+}
+
 it("requires approved safety authority for Python argv without trusting arbitrary catalog commands or losing token boundaries", async () => {
 	const scratch = await isolateClioEnv("verify-python-autonomy-");
 	try {
@@ -40,15 +49,14 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 			JSON.stringify(loadProjectVerifierCatalog(scratch.dir)),
 		);
 		const engine = createSafetyPolicyEngine({ cwd: scratch.dir });
+		for (const row of cases) strictEqual(admitted(engine, row.id), row.expected, row.id);
+		// At full-auto a catalog verifier is admitted like the same command through
+		// bash: unrecognized argv runs, while net blocks and argv the net cannot
+		// read as bare words still stop it.
 		for (const row of cases) {
-			const decision = engine.evaluate({ tool: "verify", args: { check: row.id } });
-			const actual =
-				decision.kind === "allow"
-					? mapAutonomy("auto-edit", decision.actionClass, {
-							executeRecognized: decision.execRecognition !== "unrecognized",
-						})
-					: decision.kind;
-			strictEqual(actual, row.expected, row.id);
+			const fullAuto =
+				row.expected === "block" || ["inline", "joined-args", "fake-chain"].includes(row.id) ? row.expected : "allow";
+			strictEqual(admitted(engine, row.id, "full-auto"), fullAuto, `${row.id} at full-auto`);
 		}
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),
@@ -72,7 +80,8 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 		approveSafety();
 		const confirmedPolicy = createSafetyPolicyEngine({ cwd: scratch.dir });
 		strictEqual(confirmedPolicy.metadata().projectPolicyValid, true);
-		strictEqual(confirmedPolicy.evaluate({ tool: "verify", args: { check: "absolute" } }).kind, "ask");
+		strictEqual(admitted(confirmedPolicy, "absolute"), "ask");
+		strictEqual(admitted(confirmedPolicy, "absolute", "full-auto"), "ask", "requireConfirmation asks at every level");
 		writeFileSync(
 			join(scratch.dir, ".clio-coder/safety.yaml"),
 			JSON.stringify({
@@ -87,15 +96,14 @@ it("requires approved safety authority for Python argv without trusting arbitrar
 			}),
 		);
 		strictEqual(
-			createSafetyPolicyEngine({ cwd: scratch.dir }).evaluate({ tool: "verify", args: { check: "absolute" } }).kind,
+			admitted(createSafetyPolicyEngine({ cwd: scratch.dir }), "absolute"),
 			"ask",
 			"changed declarations need renewed approval",
 		);
 		approveSafety();
 		const approved = createSafetyPolicyEngine({ cwd: scratch.dir });
-		strictEqual(approved.evaluate({ tool: "verify", args: { check: "absolute" } }).kind, "allow");
-		for (const row of cases.slice(1))
-			strictEqual(approved.evaluate({ tool: "verify", args: { check: row.id } }).kind, row.expected, row.id);
+		strictEqual(admitted(approved, "absolute"), "allow");
+		for (const row of cases.slice(1)) strictEqual(admitted(approved, row.id), row.expected, row.id);
 	} finally {
 		scratch.restore();
 	}

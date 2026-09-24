@@ -10,6 +10,7 @@
  */
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { CI_FILE_RE, ciRunCommands } from "../../core/ci-commands.js";
 import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 
 export interface EnforcementCheckFile {
@@ -27,8 +28,6 @@ export interface EnforcementInventory {
 	checkFiles: EnforcementCheckFile[];
 }
 
-const CI_FILE_RE =
-	/^(?:\.github\/workflows\/[^/]+\.ya?ml|\.gitlab-ci\.ya?ml|\.circleci\/config\.ya?ml|azure-pipelines\.ya?ml)$/;
 const HOOK_FILE_RE = /^(?:\.pre-commit-config\.ya?ml|lefthook\.ya?ml|\.husky\/[^/_][^/]*)$/;
 const CHECK_NAME_RE = /(?:check|lint|verify|guard|hygiene|drift|gate|validate|boundar|conformance)/i;
 const CHECK_DIR_RE = /^(?:scripts|tools|ci|hack|bin|build|\.github\/scripts)\//;
@@ -55,31 +54,6 @@ function readText(root: string, path: string, maxBytes = MAX_CHECK_FILE_BYTES): 
 	} catch {
 		return null;
 	}
-}
-
-/** `run:` values from CI YAML, both inline and block scalars, one command per line. */
-function ciRunCommands(text: string): string[] {
-	const commands: string[] = [];
-	const lines = text.split(/\r?\n/);
-	for (let index = 0; index < lines.length; index += 1) {
-		const match = /^(\s*)(?:-\s+)?(?:run|script):\s*(.*)$/.exec(lines[index] ?? "");
-		if (!match) continue;
-		const indent = (match[1] ?? "").length;
-		const value = (match[2] ?? "").trim();
-		if (value.length > 0 && !/^[|>][-+]?$/.test(value)) {
-			commands.push(value.replace(/^["']|["']$/g, ""));
-			continue;
-		}
-		for (let next = index + 1; next < lines.length; next += 1) {
-			const line = lines[next] ?? "";
-			if (line.trim().length === 0) continue;
-			if (line.length - line.trimStart().length <= indent) break;
-			const command = line.trim().replace(/^-\s+/, "");
-			if (command.length > 0 && !command.startsWith("#")) commands.push(command);
-			index = next;
-		}
-	}
-	return commands;
 }
 
 function packageScripts(root: string): Record<string, string> {
