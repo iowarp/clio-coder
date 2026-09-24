@@ -31,6 +31,7 @@ import {
 	type ClioKeybinding,
 } from "../domains/config/keybindings.js";
 import {
+	getKeybindings,
 	type Keybinding,
 	type KeybindingConflict,
 	type KeybindingsConfig,
@@ -570,6 +571,12 @@ export function createKeybindingManagerForTesting(
 	env: Readonly<Record<string, string | undefined>> = {},
 ): ClioKeybindingManager {
 	return buildManager(overrides, env, false);
+}
+
+/** The label of the first key bound to `actionId` in the installed bindings, or null when unbound. */
+export function boundKeyLabel(actionId: ClioKeybinding): string | null {
+	const key = getKeybindings().getKeys(actionId)[0];
+	return key ? formatKeyLabel(key) : null;
 }
 
 /** Title-case a KeyId for compact chrome hints, preserving each caller's fallback. */

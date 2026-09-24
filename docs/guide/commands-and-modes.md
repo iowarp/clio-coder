@@ -4,7 +4,11 @@ This guide covers the installed CLI, headless run behavior, interactive commands
 
 ## Demo guidance
 
-Interactive capability guidance is enabled by default. `--demo` and `--no-demo` override it for one invocation; change the saved value under Settings → Appearance → Demo guidance. Guidance adds hints only; it does not grant tool authority. Headless runs and workers do not receive it.
+Demo guidance is on by default before 1.0. After a turn, Clio may show one `[tip]` row that fits what the turn did: a question about Clio's own settings, a side question that `/btw` would keep out of the transcript, a correction that `/tree` could rewind, a long answer that another output style would fold. The harness picks the tip. The model never sees it, and no model call is made. At most four tips appear per session, spaced several turns apart, and a tip retires once you use its feature yourself or it has been shown twice.
+
+Guidance keeps a small profile in the state directory (`harness-profile.json`): the tips shown, the Clio features you used, and the topics you asked Clio about. It stays on this machine and never enters a prompt.
+
+Turn it off under Settings → Appearance → Demo guidance (`interface.demo`), or for one invocation with `--no-demo`. Off means no tips, no idle footer tips or rotating key hints, no demo prompt line, and no profile reads or writes. Guidance adds hints only; it does not grant tool authority. Headless runs, ACP sessions and workers do not receive it.
 
 ## CLI Commands
 

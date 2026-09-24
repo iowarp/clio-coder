@@ -386,7 +386,7 @@ export function renderCompactDashboard(state: FooterDashboardRenderState, width:
 				)
 			: state.demoHint
 				? `${theme.fg("accent", "Tip")} ${theme.fg("muted", clean(state.demoHint))}`
-				: theme.fg("dim", footerKeyHint(state.now, w < 120) ?? `${key} Dashboard`);
+				: theme.fg("dim", (state.demo !== false ? footerKeyHint(state.now, w < 120) : null) ?? `${key} Dashboard`);
 	// An armed escape instruction must keep its whole action at narrow widths;
 	// the workspace label can yield room that an ordinary rotating hint cannot.
 	const hintBudget = urgent ? Math.max(1, w - 3 - 8) : Math.floor(w * 0.48);

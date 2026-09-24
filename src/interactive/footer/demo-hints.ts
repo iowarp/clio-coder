@@ -1,4 +1,8 @@
-/** Small session-local hint budget. No timers, model calls, or persistent state. */
+/**
+ * Idle footer tips for demo guidance: a small session-local budget, one tip at
+ * a time. No timers or model calls; a tip whose feature the operator already
+ * uses (the harness profile) is skipped.
+ */
 export function createDemoHints() {
 	const seen = new Set<string>();
 	let current: { id: string; until: number } | null = null;
@@ -11,16 +15,19 @@ export function createDemoHints() {
 		toolsUsed: boolean;
 		contextBusy: boolean;
 		dashboardKey: string;
+		/** True when the operator already uses `feature`; absent means nothing is learned. */
+		learned?: (feature: string) => boolean;
 	}): string | null => {
 		if (!input.enabled || input.quiet) {
 			current = null;
 			return null;
 		}
+		const learned = input.learned ?? (() => false);
 		const choices: [string, boolean, string][] = [
 			["agents", input.agentActive, `${input.dashboardKey} → Activity shows agents' current actions.`],
-			["context", input.contextBusy, "/context shows what occupies your context window."],
-			["tools", input.toolsUsed, "/view lets you inspect recorded tool calls and results."],
-			["welcome", true, "Explore /help · guidance in /settings"],
+			["context", input.contextBusy && !learned("/context"), "/context shows what occupies your context window."],
+			["tools", input.toolsUsed && !learned("/view"), "/view lets you inspect recorded tool calls and results."],
+			["welcome", !learned("/help"), "Explore /help · guidance in /settings"],
 		];
 		if (current && input.now < current.until) {
 			const active = choices.find(([id, eligible]) => id === current?.id && eligible);

@@ -378,6 +378,16 @@ test("demo tips borrow the compact footer row and yield to operational notices",
 	doesNotMatch(renderCompactDashboard(input, 80).map(stripTerminalSequences).join("\n"), /Tip/);
 });
 
+test("turning demo guidance off leaves only the dashboard key in the hint slot", () => {
+	const input = state();
+	input.notices = [];
+	input.demoHint = null;
+	input.demo = false;
+	const hint = renderCompactDashboard(input, 100).map(stripTerminalSequences)[1] ?? "";
+	match(hint, /Dashboard/);
+	doesNotMatch(hint, /newline|send/i);
+});
+
 test("footer hints resolve remapped bindings and omit unbound actions", () => {
 	const previous = getKeybindings();
 	createKeybindingManager({

@@ -1,4 +1,5 @@
 import type { ClioSettings } from "../../core/config.js";
+import { readHarnessProfile } from "../../core/harness-profile.js";
 import { readClioVersion } from "../../core/package-root.js";
 import type { LiveBudgetView } from "../../domains/context/budget/live-view.js";
 import type { ContextState } from "../../domains/context/index.js";
@@ -137,6 +138,8 @@ export interface FooterDashboardRenderState {
 	quota?: ReadonlyArray<UsageSnapshot>;
 	quotaRoute?: Pick<DispatchBoardRow, "runtimeId" | "wireModelId" | "node">;
 	demoHint?: string | null;
+	/** interface.demo. False hides the rotating key hints with the tips; absent reads as on. */
+	demo?: boolean;
 	resources?: LocalMachineMetrics | null;
 	connections?: { mcp: string[]; plugins: string[] };
 	costCeilingUsd?: number;
@@ -526,8 +529,10 @@ export function buildFooterDashboard(deps: FooterDashboardDeps): FooterDashboard
 				taskBoard: deps.getTaskBoard?.() ?? null,
 				localCapacity: dispatch.length > 0 ? (deps.getLocalCapacity?.() ?? null) : null,
 			},
+			demo: settings?.interface.demo !== false,
 			demoHint: demoHints({
 				enabled: settings?.interface.demo === true,
+				learned: (feature) => (readHarnessProfile().features[feature] ?? 0) > 0,
 				now: now(),
 				quiet:
 					dashboardMode !== "compact" ||

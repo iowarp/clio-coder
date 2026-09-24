@@ -19,6 +19,7 @@ export const MIDDLEWARE_EFFECT_KINDS = [
 	"request_continuation",
 	"require_tool",
 	"lock_tools",
+	"notify_operator",
 ] as const;
 
 export type MiddlewareEffectKind = (typeof MIDDLEWARE_EFFECT_KINDS)[number];
@@ -38,7 +39,13 @@ export type MiddlewareEffect =
 	| { kind: "protect_path"; path: string; reason: string }
 	| { kind: "request_continuation"; message: string }
 	| { kind: "require_tool"; toolName: string }
-	| { kind: "lock_tools" };
+	| { kind: "lock_tools" }
+	/**
+	 * A message for the operator only, such as a capability tip. The host shows
+	 * it and never adds it to model context. `key` names the source so a
+	 * surface can replace or rate-limit repeats.
+	 */
+	| { kind: "notify_operator"; message: string; key: string };
 
 export type MiddlewareRuleSource = "builtin";
 

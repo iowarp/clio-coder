@@ -4,7 +4,6 @@ import { extractGlobalFlags } from "../../src/cli/argv.js";
 import { validateSettings } from "../../src/core/config.js";
 import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import { applyControlValue, SETTING_CONTROLS } from "../../src/core/settings-controls.js";
-import { createDemoGuidanceRegistration } from "../../src/domains/middleware/demo-guidance.js";
 import { compile } from "../../src/domains/prompts/compiler.js";
 import { loadFragments } from "../../src/domains/prompts/fragment-loader.js";
 import { createDemoHints } from "../../src/interactive/footer/demo-hints.js";
@@ -38,8 +37,8 @@ test("only an explicit interactive prompt input adds guidance; disabling restore
 	const normal = compile(table, base);
 	const demo = compile(table, { ...base, sessionInputs: { demo: true } });
 	match(demo.systemPrompt, /## Demo guidance/);
-	match(demo.systemPrompt, /Most answers need no invitation/);
-	match(demo.systemPrompt, /does not authorize extra tool calls/);
+	match(demo.systemPrompt, /do not end answers with feature tips, upsells/);
+	match(demo.systemPrompt, /interface\.demo/);
 	doesNotMatch(normal.systemPrompt, /## Demo guidance/);
 	strictEqual(compile(table, { ...base, sessionInputs: { demo: false } }).systemPrompt, normal.systemPrompt);
 	deepStrictEqual(
@@ -89,28 +88,18 @@ test("a live tip follows current eligibility and keybindings without a late welc
 	strictEqual(hints({ ...input, now: 60_000, agentActive: false }), null);
 });
 
-test("project reminder fires once after real observations, never forces work, and respects live disable", () => {
-	let enabled = true;
-	const hook = createDemoGuidanceRegistration(() => enabled);
-	const result = (kind = "ok", toolName = "read") =>
-		hook.evaluate({ hook: "after_tool", toolName, metadata: { resultKind: kind } });
-	deepStrictEqual(result(), []);
-	hook.evaluate({ hook: "turn_start" });
-	deepStrictEqual(result("error"), []);
-	deepStrictEqual(result("ok", "context"), []);
-	deepStrictEqual(result(), []);
-	deepStrictEqual(result(), []);
-	enabled = false;
-	deepStrictEqual(result(), []);
-	enabled = true;
-	const effects = result();
-	strictEqual(effects.length, 1);
-	strictEqual(effects[0]?.kind, "annotate_tool_result");
-	for (let i = 0; i < 8; i++) deepStrictEqual(result(), []);
-	hook.evaluate({ hook: "turn_end" });
-	deepStrictEqual(result(), []);
-	hook.evaluate({ hook: "turn_start" });
-	deepStrictEqual(result(), []);
-	deepStrictEqual(result(), []);
-	strictEqual(result().length, 1);
+test("footer tips skip a feature the operator already uses", () => {
+	const hints = createDemoHints();
+	const input = {
+		enabled: true,
+		now: 0,
+		quiet: false,
+		agentActive: false,
+		toolsUsed: true,
+		contextBusy: false,
+		dashboardKey: "alt+u",
+		learned: (feature: string) => feature === "/view" || feature === "/help",
+	};
+	strictEqual(hints(input), null);
+	match(hints({ ...input, learned: (feature: string) => feature === "/help" }) ?? "", /\/view/);
 });
