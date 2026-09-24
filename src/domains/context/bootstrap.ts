@@ -1,9 +1,10 @@
 import { execFileSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, parse, resolve } from "node:path";
 import type { ContextActivityPayload } from "../../core/bus-events.js";
 import { createTomlFileReader, type TomlFileReader, tomlTableAt } from "../../core/toml.js";
+import { enumerateWorkspaceFiles } from "../../core/workspace-files.js";
 import { INTEROP_AGENT_KINDS } from "../interop/registry.js";
 import {
 	FULL_PROJECT_CONTEXT_MAX_CHARS,
@@ -610,6 +611,34 @@ const VERIFICATION_SECTION_RE = /\bverification\b/i;
 interface ModelGroundingCorpus {
 	lower: string;
 	indexedPaths: ReadonlySet<string>;
+	/** Every visible repository path, including docs, configs and CI files the codewiki does not index. */
+	repositoryPaths: ReadonlySet<string>;
+	/** Lowercased text of the visible repository files, read once on first need. */
+	repositoryText: () => string;
+}
+
+/** Files larger than this are data, not rules; skip them when grounding citations. */
+const GROUNDING_FILE_MAX_BYTES = 1024 * 1024;
+/** Total text read for grounding; bounds memory on very large repositories. */
+const GROUNDING_TEXT_MAX_BYTES = 96 * 1024 * 1024;
+
+function repositoryGroundingText(cwd: string, paths: ReadonlyArray<string>): string {
+	const chunks: string[] = [];
+	let total = 0;
+	for (const path of paths) {
+		if (total >= GROUNDING_TEXT_MAX_BYTES) break;
+		try {
+			const full = join(cwd, path);
+			if (statSync(full).size > GROUNDING_FILE_MAX_BYTES) continue;
+			const bytes = readFileSync(full);
+			if (bytes.includes(0)) continue;
+			chunks.push(bytes.toString("utf8").toLowerCase());
+			total += bytes.length;
+		} catch {
+			// A file that vanished or cannot be read simply grounds nothing.
+		}
+	}
+	return chunks.join("\n");
 }
 
 /**
@@ -641,7 +670,22 @@ function createModelGroundingCorpus(input: BootstrapGenerateInput): ModelGroundi
 			.join("\n")
 			.slice(0, 128_000),
 	].join("\n");
-	return { lower: evidence.toLowerCase(), indexedPaths };
+	let repositoryPaths: string[] = [];
+	try {
+		repositoryPaths = enumerateWorkspaceFiles(input.cwd);
+	} catch {
+		// An unreadable tree leaves the indexed evidence as the only grounding.
+	}
+	let text: string | null = null;
+	return {
+		lower: evidence.toLowerCase(),
+		indexedPaths,
+		repositoryPaths: new Set(repositoryPaths),
+		repositoryText: () => {
+			text ??= repositoryGroundingText(input.cwd, repositoryPaths);
+			return text;
+		},
+	};
 }
 
 const CODE_TOKEN_RE = /`([^`\n]+)`/g;
@@ -657,8 +701,34 @@ const CITED_LOCATION_RE = /^(.*[^:]):(\d+)(?:[-:]\d+)?$/;
 /** A symbol written as a call: `priceCart()`. */
 const CITED_CALL_RE = /^(.+?)\(\s*\)$/;
 
+function groundedLiteral(literal: string, evidence: ModelGroundingCorpus): boolean {
+	const lower = literal.toLowerCase();
+	const path = literal.replace(/^\.\//, "").replace(/\/$/, "");
+	if (evidence.lower.includes(lower) || evidence.indexedPaths.has(path) || evidence.repositoryPaths.has(path))
+		return true;
+	// A directory is real when some visible file lives under it.
+	if (literal.includes("/")) {
+		for (const candidate of evidence.repositoryPaths) if (candidate.startsWith(`${path}/`)) return true;
+	}
+	return evidence.repositoryText().includes(lower);
+}
+
+/**
+ * A citation may be a pattern rather than a name: a glob (`src/engine/**`,
+ * `CLIO_*`), a placeholder (`tests/<name>.test.ts`), or a command chain joined
+ * with `&&`. Each literal piece of at least three characters must ground on
+ * its own, so a pattern can never smuggle in a name the repository lacks.
+ */
 function groundedName(token: string, evidence: ModelGroundingCorpus): boolean {
-	return evidence.lower.includes(token.toLowerCase()) || evidence.indexedPaths.has(token.replace(/^\.\//, ""));
+	const parts = token.split(/\s*&&\s*/).filter((part) => part.length > 0);
+	if (parts.length > 1) return parts.every((part) => groundedName(part, evidence));
+	const literals = token
+		.split(/<[^<>]*>|\*+|\?|\{[^{}]*\}/)
+		.map((piece) => piece.trim())
+		.filter((piece) => piece.length > 0);
+	if (literals.length === 1 && literals[0] === token) return groundedLiteral(token, evidence);
+	const meaningful = literals.filter((piece) => piece.replace(/[^A-Za-z0-9]/g, "").length >= 3);
+	return meaningful.length > 0 && meaningful.every((piece) => groundedLiteral(piece, evidence));
 }
 
 /**
