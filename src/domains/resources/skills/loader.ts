@@ -810,25 +810,39 @@ function explicitSkillRoot(filePath: string): SkillRoot {
 	};
 }
 
+/**
+ * Package roots and plugin bases, canonicalized once per load so each explicit
+ * path costs its own realpath rather than one per package root.
+ */
+interface ExplicitPathOwners {
+	packageRoots: ReadonlyArray<{ root: SkillRoot; canonicalPath: string }>;
+	pluginBases: ReadonlyArray<string>;
+}
+
+function explicitPathOwners(input: LoadSkillsInput): ExplicitPathOwners {
+	if ((input.explicitSkillPaths?.length ?? 0) === 0) return { packageRoots: [], pluginBases: [] };
+	const cwd = input.cwd ?? process.cwd();
+	return {
+		packageRoots: defaultSkillRoots(input)
+			.filter((root) => root.scope === "package")
+			.map((root) => ({ root, canonicalPath: canonicalizePath(root.path) })),
+		pluginBases: (["user", "project"] as const).map((scope) => canonicalizePath(pluginBaseDir(scope, cwd))),
+	};
+}
+
 function loadExplicitSkillPath(
 	inputPath: string,
 	diagnostics: ResourceDiagnostic[],
-	packageRoots: ReadonlyArray<SkillRoot>,
-	cwd: string,
+	owners: ExplicitPathOwners,
 ): SkillCandidate[] {
 	const resolved = path.resolve(inputPath);
 	const identity = canonicalizePath(resolved);
-	const owner = packageRoots.find((candidate) => {
-		const relative = path.relative(canonicalizePath(candidate.path), identity);
+	const contains = (anchor: string): boolean => {
+		const relative = path.relative(anchor, identity);
 		return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-	});
-	if (
-		!owner &&
-		(["user", "project"] as const).some((scope) => {
-			const relative = path.relative(canonicalizePath(pluginBaseDir(scope, cwd)), identity);
-			return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-		})
-	) {
+	};
+	const owner = owners.packageRoots.find((candidate) => contains(candidate.canonicalPath))?.root;
+	if (!owner && owners.pluginBases.some(contains)) {
 		diagnostics.push({
 			type: "warning",
 			message: "explicit skill belongs to an inactive or undeclared plugin resource",
@@ -995,15 +1009,10 @@ export function loadSkills(input: LoadSkillsInput = {}): SkillList {
 function loadSkillsInPass(input: LoadSkillsInput): SkillList {
 	const roots = input.roots ?? (input.disableDiscovery === true ? [] : defaultSkillRoots(input));
 	const diagnostics: ResourceDiagnostic[] = [];
-	const packageRoots =
-		(input.explicitSkillPaths?.length ?? 0) > 0
-			? defaultSkillRoots(input).filter((root) => root.scope === "package")
-			: [];
+	const owners = explicitPathOwners(input);
 	const candidates = [
 		...roots.flatMap((root) => loadSkillRoot(root, diagnostics)),
-		...(input.explicitSkillPaths ?? []).flatMap((skillPath) =>
-			loadExplicitSkillPath(skillPath, diagnostics, packageRoots, input.cwd ?? process.cwd()),
-		),
+		...(input.explicitSkillPaths ?? []).flatMap((skillPath) => loadExplicitSkillPath(skillPath, diagnostics, owners)),
 	];
 	const deduped = dedupeCanonicalSkillPaths(candidates, diagnostics);
 	const resolved = resolveSkillCollisions(deduped);
