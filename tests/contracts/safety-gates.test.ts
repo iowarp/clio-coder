@@ -81,6 +81,39 @@ describe("safety gate boundary", () => {
 		strictEqual(secretRead.reasonCode, "secret_path_bash");
 	});
 
+	it("admits only standalone git diff whitespace checks at capable", () => {
+		const policy = engine();
+		for (const command of ["git diff --check", "git diff --cached --check"]) {
+			const args = { command };
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args });
+			strictEqual(decision.kind, "allow", command);
+			strictEqual(decision.ruleId, "builtin:git-diff-check", command);
+			strictEqual(decision.execRecognition, "recognized", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "read-only"), "deny", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "suggest"), "ask", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "auto-edit"), "allow", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, args, "full-auto"), "allow", command);
+		}
+		for (const command of [
+			"git diff --check --ext-diff",
+			"git diff --output=report.txt --check",
+			"git diff --check --cached",
+			"git diff --check | cat",
+			"git diff --check && git status",
+		]) {
+			const decision = policy.evaluate({ tool: ToolNames.Bash, args: { command } });
+			strictEqual(decision.execRecognition, "unrecognized", command);
+			strictEqual(executionDisposition(policy, ToolNames.Bash, { command }, "auto-edit"), "ask", command);
+		}
+		for (const command of ["git diff --check $(cat args)", "git diff --check `cat args`"]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "ask", command);
+		}
+		for (const command of ["git diff --check > .env", "git diff --check && cat ~/.ssh/id_rsa"]) {
+			strictEqual(policy.evaluate({ tool: ToolNames.Bash, args: { command } }).kind, "block", command);
+		}
+		strictEqual(executionDisposition(policy, ToolNames.Bash, { command: "npm run build" }, "auto-edit"), "ask");
+	});
+
 	it("recognizes only safe complete command chains inside the workspace", () => {
 		const policy = engine();
 		const admitted = policy.evaluate({
