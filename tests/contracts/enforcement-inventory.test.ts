@@ -1,0 +1,97 @@
+import { deepStrictEqual, ok } from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { afterEach, beforeEach, it } from "node:test";
+import { buildBootstrapPrompt } from "../../src/domains/context/bootstrap-prompt.js";
+import { serializeClioMd } from "../../src/domains/context/clio-md.js";
+import { collectEnforcementInventory } from "../../src/domains/context/enforcement-inventory.js";
+
+// Generated handbooks paraphrased the contributor guide and missed the rules
+// that decided real tasks, because nothing pointed the bootstrap model at the
+// checks that fail a change. A deterministic inventory of what CI runs and
+// which custom checks exist gives it that list for any repository.
+let root: string;
+const write = (path: string, text: string): void => {
+	mkdirSync(dirname(join(root, path)), { recursive: true });
+	writeFileSync(join(root, path), text);
+};
+
+beforeEach(() => {
+	root = mkdtempSync(join(tmpdir(), "clio-coder-enforcement-"));
+	write(
+		".github/workflows/ci.yml",
+		[
+			"jobs:",
+			"  check:",
+			"    steps:",
+			"      - uses: actions/checkout@v4",
+			"      - run: pnpm run lint",
+			"      - name: extra",
+			"        run: |",
+			"          node scripts/check-drift.mjs",
+			"          pytest -q",
+			"",
+		].join("\n"),
+	);
+	write(
+		"package.json",
+		JSON.stringify({
+			scripts: { lint: "biome check . && node scripts/check-drift.mjs", build: "tsup", dev: "tsx watch src/main.ts" },
+		}),
+	);
+	write(
+		"scripts/check-drift.mjs",
+		"function checkDocsTable() {}\nasync function checkEnvRows() {}\nconst checks = [checkDocsTable, checkEnvRows];\n",
+	);
+	write("tests/boundaries/check-imports.ts", "export function runImportCheck() {}\n");
+	write("scripts/gate.sh", "#!/bin/sh\nruff check src\nmypy src\n");
+	write("src/main.ts", "export const main = 1;\n");
+});
+
+afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+it("lists the commands CI runs, the scripts they call, and custom check files with their checks", () => {
+	const inventory = collectEnforcementInventory(root);
+	for (const command of ["pnpm run lint", "node scripts/check-drift.mjs", "pytest -q"]) {
+		ok(inventory.ciCommands.includes(command), `${command} missing from ${JSON.stringify(inventory.ciCommands)}`);
+	}
+	deepStrictEqual(inventory.scripts, { lint: "biome check . && node scripts/check-drift.mjs" });
+	const byPath = Object.fromEntries(inventory.checkFiles.map((file) => [file.path, file.checks]));
+	deepStrictEqual(byPath["scripts/check-drift.mjs"], ["checkDocsTable", "checkEnvRows"]);
+	ok("tests/boundaries/check-imports.ts" in byPath);
+	ok("scripts/gate.sh" in byPath);
+	ok(!("src/main.ts" in byPath));
+});
+
+it("hands the inventory to the bootstrap model", () => {
+	const prompt = buildBootstrapPrompt({
+		cwd: root,
+		projectType: "javascript",
+		siblingFiles: [],
+		adoption: {
+			cwd: root,
+			homeDir: root,
+			includeGlobal: false,
+			sources: [],
+			rejected: [],
+			importedRules: [],
+			conflicts: [],
+			sourceHash: "fixture",
+			sourceSnapshots: [],
+		},
+		enforcement: collectEnforcementInventory(root),
+	});
+	ok(prompt.includes("checkDocsTable"));
+	ok(prompt.includes("scripts/check-drift.mjs"));
+});
+
+it("renders hard invariants before conventions, because small models keep early rules best", () => {
+	const text = serializeClioMd({
+		projectName: "Fixture",
+		identity: "A fixture.",
+		conventions: ["Use `src/main.ts`."],
+		invariants: ["Never edit `dist/`."],
+	});
+	ok(text.indexOf("## Hard invariants") < text.indexOf("## Conventions"), text);
+});
