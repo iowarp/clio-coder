@@ -4,6 +4,12 @@ All notable changes to Clio Coder are documented in this file. The format follow
 
 ## 0.5.5 - Unreleased
 
+### External coding agents
+
+- Added managed Codex, OpenCode, and Pi CLI runtimes to Clio dispatch. Named targets run through the normal run board, events, cancellation, and sealed receipts; Claude Code and Antigravity CLI keep their existing managed runners. `/interop` and `interop inspect` show each installed peer's ACP, headless, and pane choices with setup guidance.
+- Added `/run --worktree` for a preserved task branch and `/peer [--cwd <workspace>] <peer> [brief]` for an owned Herdr handoff pane. Managed receipts record worktree branches and changed paths, or the Git-visible delta observed in the current checkout. A pane remains an interactive handoff without a managed receipt.
+- ACP delegation now records task worktree edits and resolves explicitly named environment references for peer credentials. OpenCode headless forwards only credential variables referenced by its local provider configuration. ACP receipts state that peer-owned tools can write without sending a permission request; OpenCode headless refuses authority levels its CLI cannot enforce.
+
 ### Build
 
 - Building from source now works on case-insensitive filesystems such as the macOS default. Four GUI logic modules were renamed so no module stem differs from its component's only by case, and a hygiene check rejects case-only path collisions (#397).

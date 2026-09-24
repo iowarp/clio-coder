@@ -91,6 +91,32 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 	const tokenCount = optionalNumber(receipt.tokenCount);
 	const durationMs = elapsedMsFrom(receipt);
 	const toolCalls = optionalNumber(receipt.toolCalls);
+	const external = receipt.runtimeKind === "subprocess" || isRecord(receipt.delegation);
+	const worktree = isRecord(receipt.worktree) ? receipt.worktree : null;
+	const changedPaths = Array.isArray(worktree?.changedPaths)
+		? worktree.changedPaths.filter((path): path is string => typeof path === "string")
+		: undefined;
+	const checkoutChanges = isRecord(receipt.checkoutChanges) ? receipt.checkoutChanges : null;
+	const checkoutPaths = Array.isArray(checkoutChanges?.changedPaths)
+		? checkoutChanges.changedPaths.filter((path): path is string => typeof path === "string")
+		: undefined;
+	const reproducibility = isRecord(receipt.reproducibility) ? receipt.reproducibility : null;
+	const placement = external
+		? worktree && optionalString(worktree.path) && optionalString(worktree.branch)
+			? {
+					mode: "worktree" as const,
+					cwd: String(worktree.path),
+					branch: String(worktree.branch),
+					...(changedPaths ? { changedPaths } : {}),
+				}
+			: optionalString(reproducibility?.cwd)
+				? {
+						mode: "current" as const,
+						cwd: String(reproducibility?.cwd),
+						...(checkoutPaths ? { changedPaths: checkoutPaths } : {}),
+					}
+				: undefined
+		: undefined;
 	return {
 		outcome,
 		...(outcomeCode !== undefined ? { outcomeCode } : {}),
@@ -99,6 +125,7 @@ function workerReceiptFacts(receipt: Record<string, unknown>): WorkerReceiptFact
 		...(tokenCount !== undefined ? { tokenCount } : {}),
 		...(durationMs !== undefined ? { durationMs } : {}),
 		...(toolCalls !== undefined ? { toolCalls } : {}),
+		...(placement !== undefined ? { placement } : {}),
 		...(contract !== undefined ? { contract } : {}),
 		...(contractKind !== undefined ? { contractKind } : {}),
 		...(text !== undefined ? { text } : {}),
