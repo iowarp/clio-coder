@@ -29,19 +29,20 @@ function boundedResult(value: unknown): ToolResult {
 export const evidenceTool: ToolSpec = {
 	name: ToolNames.Evidence,
 	description:
-		"Read canonical evidence as JSON. List recent bundles, inspect a bundle's overview, trust axes and tier, gate decisions, and findings, or build/read evidence for a run.",
+		"Read canonical evidence as JSON. List recent bundles, inspect one bundle, build/read evidence for a run, or get a bounded summary for this session.",
 	parameters: Type.Object({
-		mode: StringEnum(["list", "inspect", "run"]),
+		mode: StringEnum(["list", "inspect", "run", "session"]),
 		id: Type.Optional(Type.String({ description: "Evidence bundle id for inspect." })),
 		runId: Type.Optional(Type.String({ description: "Run id for run." })),
+		sessionId: Type.Optional(Type.String({ description: "This session's id for a bounded session summary." })),
 	}),
 	baseActionClass: "read",
 	// Run mode may materialize a derived bundle in Clio's data directory.
 	executionMode: "sequential",
 	async run(args, options): Promise<ToolResult> {
 		const mode = args.mode;
-		if (mode !== "list" && mode !== "inspect" && mode !== "run") {
-			return { kind: "error", message: "evidence: mode must be list, inspect, or run" };
+		if (mode !== "list" && mode !== "inspect" && mode !== "run" && mode !== "session") {
+			return { kind: "error", message: "evidence: mode must be list, inspect, run, or session" };
 		}
 		try {
 			const dataDir = clioDataDir();
@@ -54,6 +55,55 @@ export const evidenceTool: ToolSpec = {
 				return boundedResult(
 					await evidenceInventorySnapshot(Date.now, dataDir, (overview) => ownership.seesBundle(overview)),
 				);
+			}
+			if (mode === "session") {
+				const sessionId = args.sessionId;
+				if (typeof sessionId !== "string" || sessionId.length === 0) {
+					return { kind: "error", message: "evidence: session requires sessionId" };
+				}
+				assertSafeId(sessionId, "session");
+				// Generated session ids preserve their spelling in artifact ids; reject
+				// aliases that could sanitize onto a different session's bundle.
+				if (!/^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(sessionId)) {
+					return {
+						kind: "error",
+						message: "evidence: invalid session id",
+						details: { code: "evidence_error", artifactAbsent: false },
+					};
+				}
+				const { buildEvidence, hasSessionRunEvidence } = await import("../domains/evidence/build.js");
+				const { listEvidenceOverviews } = await import("../domains/evidence/index.js");
+				const existing = (await listEvidenceOverviews(dataDir)).find(
+					(overview) => overview.source.kind === "session" && overview.source.sessionId === sessionId,
+				);
+				if (existing === undefined && !(await hasSessionRunEvidence(clioStateDir(), sessionId))) {
+					return {
+						kind: "error",
+						message: `evidence: session artifact not found for '${sessionId}'`,
+						details: { code: "artifact_absent", artifactAbsent: true },
+					};
+				}
+				if (ownership.owner.sessionId !== sessionId) {
+					return {
+						kind: "error",
+						message: `evidence: session '${sessionId}' belongs to another session; only its owner can request this summary`,
+						details: { code: "evidence_foreign", artifactAbsent: false },
+					};
+				}
+				const evidenceId =
+					existing?.evidenceId ?? (await buildEvidence({ dataDir, stateDir: clioStateDir(), sessionId })).evidenceId;
+				const { evidenceInventorySnapshot } = await import("../domains/evidence/inventory.js");
+				const inventory = await evidenceInventorySnapshot(
+					Date.now,
+					dataDir,
+					(overview) =>
+						overview.evidenceId === evidenceId &&
+						overview.source.kind === "session" &&
+						overview.source.sessionId === sessionId,
+				);
+				const artifact = inventory.artifacts[0];
+				if (artifact === undefined) throw new Error(`session summary unavailable: ${evidenceId}`);
+				return boundedResult({ version: 1, sessionId, artifact });
 			}
 			const id = mode === "inspect" ? args.id : args.runId;
 			if (typeof id !== "string" || id.length === 0) {

@@ -13,22 +13,21 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
 - Herdr tab: `wT:t2`. Orchestrator: `wT:p1W`; implementer: `wT:p25`; tester/reviewer: `wT:p26`.
 - Only this worktree is writable for this sprint. Leave `v055`, the other
   worktrees, global Clio settings, and `obsidian-processor` untouched.
-- File ownership: implementer owns assigned `src/` files; tester owns assigned
-  `tests/` files; orchestrator owns this log and integration. Coordinate before
-  changing a file outside the assignment. Do not dispatch nested workers or
-  use homelab AI nodes for this sprint.
+- Both panes own code and focused tests for separate assigned fixes. Orchestrator
+  owns this log and integration. Coordinate before changing another assignment's
+  files. Do not dispatch nested workers or use homelab AI nodes for this sprint.
 
 ## Fix queue
 
 | ID | Priority | Scope and acceptance | Status | Owner |
 | --- | --- | --- | --- | --- |
 | H1 | P0 | Task `done` notes remain claims, not `passed` validation. A note saying `14/16 failed; rerun pending` cannot project as passed; existing ledgers still refold; verified checks remain distinguishable. | done; 7/7 focused tests, source typecheck | panes + orchestrator |
-| H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | in progress | implementer + tester |
+| H2 | P1 | After a sealed delegated workspace mutation, one identical validation command is admitted; three unchanged attempts still block. | done; focused tests pass | xhigh pane |
 | H3 | P1 | `monitor collect` can poll again after observed batch progress (for example pending 2 to 1); unchanged rapid polling remains bounded. | queued | implementer + tester |
 | H4 | P2 | Unknown `node` that matches a configured profile returns an actionable profile/node remedy, while invalid placement stays denied. | done; 9/9 fleet lifecycle tests pass | orchestrator |
-| H5 | P2 | A provenance worker can retrieve a bounded, redacted summary for its own session ID; foreign sessions are denied distinctly from absent sessions. | queued | implementer + tester |
+| H5 | P2 | A provenance worker can retrieve a bounded, redacted summary for its own session ID; foreign sessions are denied distinctly from absent sessions. | done; 10/10 evidence-tool tests | orchestrator |
 | H6 | P3 | Align prompt manifest version documentation with source version 3. | done; diff checked | orchestrator |
-| A1 | P1 | Admit repository validation scripts and typed verifiers at `yolo` after hard safety checks. Preserve `capable`/`suggest` asks, `read-only` denial, and explicit destructive/system/operator rails. Reproduce both bash and verify forms, including headless admission. | reproduced; implementation queued | orchestrator + panes |
+| A1 | P1 | Admit repository validation scripts and typed verifiers at `yolo` after hard safety checks. Preserve `capable`/`suggest` asks, `read-only` denial, and explicit destructive/system/operator rails. Reproduce both bash and verify forms, including headless admission. | done; focused tests pass | medium pane |
 | A2 | P2 | Find a separate, narrow set of routine safe actions that `capable` can perform with fewer prompts. Require a concrete before/after admission matrix before changing its policy. | evaluating | orchestrator |
 
 ## Deferred leads
@@ -98,3 +97,8 @@ context compaction. The retrospective is evidence to recheck, not a specificatio
   by their original passed-note shape; observed failed rows survive refolding;
   task list and evidence transcript label claims and checks separately.
   `task-board-done.test.ts` passed 7/7, Biome passed, and source typecheck passed.
+- 2026-09-24: Added own-session evidence summary from the bounded inventory
+  projection. Foreign session requests are rejected before bundle materialization;
+  missing sources return `artifact_absent`. `evidence-tool.test.ts` passed 10/10.
+- 2026-09-24: A1, H2, and H5 integration check passed 62/62 focused tests,
+  source TypeScript, and Biome on changed files.
