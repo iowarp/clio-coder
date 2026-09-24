@@ -852,9 +852,11 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 				disallowedTools: [],
 			};
 			emitNotice(
-				current.length > 0
-					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
-					: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
+				policy?.allowListAdvisory === true && current.length === 0
+					? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its allowed-tools list is guidance in full-auto; explicit disallowed-tools still apply.`
+					: current.length > 0
+						? `[Clio Coder] Skill activated: ${activated.join(", ")}. Its tool surface stays armed across your next turns until another skill replaces it or you run /skill off.`
+						: `[Clio Coder] Skill activated: ${activated.join(", ")}. It declares no tool narrowing.`,
 				"info",
 				undefined,
 				change !== null && change.state !== "cleared" ? change : loaded,

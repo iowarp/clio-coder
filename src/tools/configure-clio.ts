@@ -4,7 +4,7 @@ import { readSettings, updateSettings } from "../core/config.js";
 import { getAtPath } from "../core/session-routing.js";
 import { applyControlValue, formatControlValue, settingControl } from "../core/settings-controls.js";
 import { ToolNames } from "../core/tool-names.js";
-import type { AutonomyLevel } from "../domains/safety/autonomy.js";
+import { type AutonomyLevel, autonomyFromUserInput } from "../domains/safety/autonomy.js";
 import { StringEnum } from "../engine/ai.js";
 import type { AskUserHandler } from "./ask-user.js";
 import type { ToolSpec } from "./registry.js";
@@ -65,9 +65,10 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					return { kind: "error", message: "settings value exceeds 8192 bytes" };
 				}
 				try {
+					const value = args.path === "safety.autonomy" ? (autonomyFromUserInput(args.value) ?? args.value) : args.value;
 					const saved = readSettings();
 					const candidate = structuredClone(saved);
-					applyControlValue(candidate, args.path, args.value);
+					applyControlValue(candidate, args.path, value);
 					const before = JSON.stringify(getAtPath(saved, args.path));
 					const after = JSON.stringify(getAtPath(candidate, args.path));
 					if (before === after)
@@ -83,7 +84,7 @@ export function createConfigureClioTool(deps: ConfigureClioDeps): ToolSpec {
 					pending = {
 						id: randomUUID(),
 						path: args.path,
-						value: args.value,
+						value,
 						before,
 						preview: affected.join("\n"),
 						expiresAt: Date.now() + 10 * 60_000,

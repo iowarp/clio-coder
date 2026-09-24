@@ -18,7 +18,7 @@ test("configure_clio previews an exact change and commits only after the host se
 		},
 	});
 	strictEqual(tool.name, ToolNames.ConfigureClio);
-	const preview = await tool.run({ action: "preview", path: "safety.autonomy", value: "full-auto" });
+	const preview = await tool.run({ action: "preview", path: "safety.autonomy", value: "yolo" });
 	strictEqual(preview.kind, "ok");
 	strictEqual(readSettings().safety.autonomy, "auto-edit");
 	strictEqual(asked, 0);

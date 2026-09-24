@@ -15,6 +15,7 @@ import {
 	type MiddlewareReminderSeverity,
 	type MiddlewareToolChoiceControl,
 } from "../domains/middleware/index.js";
+import { FINISH_CONTRACT_ADVISORY_MESSAGE } from "../domains/safety/finish-contract.js";
 import type { SessionContract } from "../domains/session/contract.js";
 import type { CompactionTrigger, EvictionTrigger, RecallTrigger } from "../domains/session/entries.js";
 import type { AgentMessage } from "../engine/types.js";
@@ -153,6 +154,13 @@ export function createTurnMiddleware(deps: TurnMiddlewareDeps): TurnMiddleware {
 		message: string,
 		severity: MiddlewareReminderSeverity,
 	): void => {
+		if (message === FINISH_CONTRACT_ADVISORY_MESSAGE && severity === "warn") {
+			// The finish decision is already in the evidence ledger. Surface the
+			// warning to the operator without posing it as a new user instruction
+			// or carrying stale advice into the next model turn.
+			deps.emitFooterNotice("warning", "change not verified; inspect the turn receipt", "finish.unverified");
+			return;
+		}
 		bufferReminder(message, severity);
 		if (severity === "hard-block") {
 			// Interrupt the turn unless the streaming tool-prose cutoff already
