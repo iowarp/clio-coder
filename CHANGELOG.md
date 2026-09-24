@@ -20,6 +20,11 @@ All notable changes to Clio Coder are documented in this file. The format follow
 - `fleet status`, `inspect`, `decisions`, and `view` now show the current project by default. `--all` enables machine-wide inspection, including run and fleet root IDs from other projects (#395).
 - The footer's first-pass success and accountability figures now count only runs owned by the current session (#396).
 
+### Demo guidance and self-knowledge
+
+- Demo guidance shows at most one `[tip]` row after a turn, chosen by the harness from what the turn did, such as a question about Clio's settings, a `btw` side question, or a correction that `/tree` could rewind. The model never sees tips and no model call is made. Tips are spaced out, capped at four per session, and retire once you use the feature. A local `harness-profile.json` tracks what you already know. Turning off Demo guidance in `/settings` (`interface.demo`) or passing `--no-demo` stops tips, footer key hints, and the profile.
+- Clio reads her shipped docs and source without an approval prompt, always knows where her live settings are, and can preview a settings change with `configure_clio` at capable autonomy. At capable she cannot propose raising autonomy.
+
 ### Startup and input readiness
 
 - The instant shell answers the keyboard while the full interface loads. Boot yields between its phases, so keystrokes echo, Enter queues a submission that runs once in order after loading, and Ctrl+C, SIGTERM and resize work before the full interface appears. `CLIO_CODER_INSTANT_SHELL=0` restores the old single-step boot.
