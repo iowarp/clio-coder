@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import type { BackendCompletionTimings } from "../../core/cache-telemetry.js";
 import type { ToolResultDigestProvenance } from "../../tools/result-disposition.js";
 import {
@@ -104,6 +106,10 @@ export type TaskMemoryPolicyReason =
 	| "suppressed"
 	/** A spontaneous reminder cited no bank entry. */
 	| "uncited"
+	/** A file named in the reminder no longer exists in the workspace. */
+	| "invalid_path"
+	/** A cited failed attempt has since succeeded in the observed trajectory. */
+	| "resolved_failure"
 	/** The reminder exceeded the token cap and was dropped rather than truncated. */
 	| "over_budget"
 	/** No envelope was found, or its operation list violated the grammar. */
@@ -183,6 +189,8 @@ export interface TaskMemoryPolicyInput {
 	suppressIntervention?: boolean;
 	/** Last visible memory reminder, used to keep repeated model output silent. */
 	previousReminder?: string | null;
+	/** Workspace used to verify file references at delivery; defaults to the process workspace. */
+	workspaceRoot?: string;
 	/** Opt-in raw-envelope observer. Absent unless an operator turned tracing on. */
 	onEnvelope?: (envelope: TaskMemoryEnvelope) => void;
 }
@@ -375,6 +383,9 @@ export async function runTaskMemoryPolicy(
 		if (reminder === input.previousReminder) return settle("silent", "duplicate_reminder", counts);
 		const citedIds = citedRenderableEntryIds(bank, reminder);
 		if (!input.deterministicTrigger && citedIds.length === 0) return settle("gated", "uncited", counts);
+		if (citesResolvedFailure(bank, citedIds, input.trajectory)) return settle("gated", "resolved_failure", counts);
+		if (!hasCurrentWorkspacePaths(reminder, input.workspaceRoot ?? process.cwd()))
+			return settle("gated", "invalid_path", counts);
 		bank.recordInjection(citedIds);
 		return settle("injected", "intervened", { ...counts, reminder });
 	} catch (error) {
@@ -656,6 +667,48 @@ function citedRenderableEntryIds(bank: TaskMemoryBank, reminder: string): string
 	return [...snapshot.knowledge, ...snapshot.procedural]
 		.map((entry) => entry.id)
 		.filter((id) => reminder.includes(`[${id}]`));
+}
+
+function citesResolvedFailure(
+	bank: TaskMemoryBank,
+	citedIds: ReadonlyArray<string>,
+	trajectory: TaskMemoryPolicyInput["trajectory"],
+): boolean {
+	const cited = new Set(citedIds);
+	for (const entry of bank.snapshot().procedural) {
+		if (!cited.has(entry.id)) continue;
+		const latest = [...trajectory].reverse().find((step) => entry.content.startsWith(`${step.callDescription} failed`));
+		if (latest?.outcome === "ok") return true;
+	}
+	return false;
+}
+
+/**
+ * Check only recognizable file references. Natural language, commands and bank
+ * citations are not paths. A missing reference drops the whole reminder: editing
+ * model text could detach its citation from the claim it supported.
+ */
+function hasCurrentWorkspacePaths(reminder: string, workspaceRoot: string): boolean {
+	const root = resolve(workspaceRoot);
+	const references = reminder.matchAll(
+		/(?:^|[\s([`"'=])((?:\/|\.{1,2}\/)?(?:[\w.-]+\/)+[\w.-]+\.[A-Za-z][A-Za-z0-9]{0,11})(?=$|[\s)\]`"',;:!?])/gu,
+	);
+	let checked = 0;
+	for (const match of references) {
+		const path = match[1];
+		if (path === undefined) continue;
+		if (++checked > 16 || path.length > 320) return false;
+		const target = resolve(root, path);
+		const within = relative(root, target);
+		// References outside this workspace have no local freshness guarantee.
+		if (within === ".." || within.startsWith("../") || isAbsolute(within)) continue;
+		try {
+			if (!existsSync(target)) return false;
+		} catch {
+			return false;
+		}
+	}
+	return true;
 }
 
 function withMemoryPrefix(content: string, maxTokens: number): string {
