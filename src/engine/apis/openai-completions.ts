@@ -53,7 +53,13 @@ import {
 	withDiffusingRequest,
 } from "./diffusion-frames.js";
 import { ensureLlamaCppResidency, listLlamaCppResidentModels } from "./llamacpp-residency.js";
-import { ensureLmStudioResidency, listLmStudioResidentModels } from "./lmstudio.js";
+import {
+	ensureGatewayLmStudioResidency,
+	ensureLmStudioResidency,
+	gatewayLmStudioProfile,
+	listGatewayLmStudioResidentModels,
+	listLmStudioResidentModels,
+} from "./lmstudio.js";
 import { remainingContextMaxTokens } from "./output-budget.js";
 import { residencyManagedFor } from "./residency.js";
 import { pickSamplingProfile, samplingParamsFromProfile } from "./sampling-overrides.js";
@@ -1079,6 +1085,11 @@ async function ensureLocalResidency(
 		}
 		return wireModelId === model.id ? model : { ...model, id: wireModelId };
 	}
+	if (gatewayLmStudioProfile(model)) {
+		// The gateway keeps the route; Clio only fixes the load behind it.
+		await ensureGatewayLmStudioResidency(model, options);
+		return model;
+	}
 	await ensureResidencyForModel(model, options);
 	return model;
 }
@@ -1091,11 +1102,13 @@ function degradedWatchOptions(
 	const baseUrl = model.baseUrl;
 	const listResident = isLmStudioModel(model)
 		? () => listLmStudioResidentModels({ ...model, headers: localRequestHeaders(model, options) }, options)
-		: () =>
-				listLlamaCppResidentModels(baseUrl, fetch, {
-					headers: localRequestHeaders(model, options),
-					...(options.signal ? { signal: options.signal } : {}),
-				});
+		: gatewayLmStudioProfile(model)
+			? () => listGatewayLmStudioResidentModels(model, options)
+			: () =>
+					listLlamaCppResidentModels(baseUrl, fetch, {
+						headers: localRequestHeaders(model, options),
+						...(options.signal ? { signal: options.signal } : {}),
+					});
 	return {
 		targetId: metadata?.targetId ?? model.provider,
 		runtimeId: metadata?.runtimeId ?? model.provider,
@@ -1114,7 +1127,9 @@ export function withLocalResidency(
 	options: LocalRequestOptions,
 	sourceFactory: (requestModel: Model<"openai-completions">) => AssistantMessageEventStream,
 ): AssistantMessageEventStream {
-	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model)) return sourceFactory(model);
+	if (!isManagedLlamaCppModel(model) && !isLmStudioModel(model) && !gatewayLmStudioProfile(model)) {
+		return sourceFactory(model);
+	}
 	const stream = createDegradedInferenceStream(degradedWatchOptions(model, options));
 	(async () => {
 		try {
