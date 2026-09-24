@@ -3,6 +3,7 @@ import { assertSafeId } from "../core/safe-id.js";
 import { ToolNames } from "../core/tool-names.js";
 import { clioDataDir, clioStateDir } from "../core/xdg.js";
 import { dispatchOwnerOf, dispatchOwnership } from "../domains/dispatch/ownership.js";
+import type { EvidenceOverview } from "../domains/evidence/types.js";
 import { StringEnum } from "../engine/ai.js";
 import type { ToolResult, ToolSpec } from "./registry.js";
 import { truncateUtf8 } from "./truncate-utf8.js";
@@ -35,6 +36,10 @@ export const evidenceTool: ToolSpec = {
 		id: Type.Optional(Type.String({ description: "Evidence bundle id for inspect." })),
 		runId: Type.Optional(Type.String({ description: "Run id for run." })),
 		sessionId: Type.Optional(Type.String({ description: "This session's id for a bounded session summary." })),
+		cursor: Type.Optional(Type.String({ description: "Next cursor from a prior evidence list page." })),
+		sourceKind: Type.Optional(
+			StringEnum(["run", "session"], { description: "Limit list pages to run or session bundles." }),
+		),
 	}),
 	baseActionClass: "read",
 	// Run mode may materialize a derived bundle in Clio's data directory.
@@ -51,10 +56,28 @@ export const evidenceTool: ToolSpec = {
 			// executed in; any other bundle stays out of the model's context.
 			const ownership = dispatchOwnership(dispatchOwnerOf({}, options?.sessionId));
 			if (mode === "list") {
-				const { evidenceInventorySnapshot } = await import("../domains/evidence/inventory.js");
-				return boundedResult(
-					await evidenceInventorySnapshot(Date.now, dataDir, (overview) => ownership.seesBundle(overview)),
+				if (args.cursor !== undefined && typeof args.cursor !== "string") {
+					return { kind: "error", message: "evidence: cursor must be a string" };
+				}
+				if (args.cursor !== undefined) assertSafeId(args.cursor, "evidence cursor");
+				if (args.sourceKind !== undefined && args.sourceKind !== "run" && args.sourceKind !== "session") {
+					return { kind: "error", message: "evidence: sourceKind must be run or session" };
+				}
+				const { evidenceInventorySnapshot, EVIDENCE_INVENTORY_MAX_ARTIFACTS } = await import(
+					"../domains/evidence/inventory.js"
 				);
+				const include = (overview: EvidenceOverview) =>
+					ownership.seesBundle(overview) && (args.sourceKind === undefined || overview.source.kind === args.sourceKind);
+				for (let limit = EVIDENCE_INVENTORY_MAX_ARTIFACTS; limit > 0; limit -= 1) {
+					const snapshot = await evidenceInventorySnapshot(Date.now, dataDir, include, {
+						...(args.cursor === undefined ? {} : { cursor: args.cursor }),
+						limit,
+					});
+					if (Buffer.byteLength(JSON.stringify(snapshot, null, 2), "utf8") <= EVIDENCE_TOOL_MAX_BYTES || limit === 1) {
+						return boundedResult(snapshot);
+					}
+				}
+				throw new Error("unable to produce bounded evidence page");
 			}
 			if (mode === "session") {
 				const sessionId = args.sessionId;

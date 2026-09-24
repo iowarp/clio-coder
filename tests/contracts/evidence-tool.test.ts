@@ -18,6 +18,7 @@ type EvidenceOutput = Awaited<ReturnType<typeof inspectEvidence>> &
 	Awaited<ReturnType<typeof evidenceDetailSnapshot>> & {
 		artifacts: { evidenceId: string }[];
 		truncated: boolean;
+		nextCursor: string | null;
 		gateDecisions: unknown[];
 		taskBoard: {
 			total: number;
@@ -84,6 +85,53 @@ describe("evidence tool", () => {
 		strictEqual(listed.artifacts.length, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
 		strictEqual(listed.truncated, true);
 		strictEqual(listed.artifacts[0]?.evidenceId, `copy-${EVIDENCE_INVENTORY_MAX_ARTIFACTS + 1}`);
+	});
+
+	it("pages visible session bundles without repeating or revealing foreign artifacts", async () => {
+		await fixture();
+		const built = await buildEvidence({ dataDir: clioDataDir(), stateDir: clioStateDir(), runId: "fixture" });
+		for (let index = 0; index < EVIDENCE_INVENTORY_MAX_ARTIFACTS + 3; index += 1) {
+			const id = `session-copy-${String(index).padStart(2, "0")}`;
+			const dir = join(clioDataDir(), "evidence", id);
+			await mkdir(dir, { recursive: true });
+			await writeFile(
+				join(dir, "overview.json"),
+				JSON.stringify({
+					...built.overview,
+					evidenceId: id,
+					source: { kind: "session", sessionId: FIXTURE_SESSION },
+					sessionId: FIXTURE_SESSION,
+					generatedAt: "2026-09-24T00:00:00.000Z",
+				}),
+			);
+		}
+		const foreignId = "session-foreign";
+		const foreignDir = join(clioDataDir(), "evidence", foreignId);
+		await mkdir(foreignDir, { recursive: true });
+		await writeFile(
+			join(foreignDir, "overview.json"),
+			JSON.stringify({
+				...built.overview,
+				evidenceId: foreignId,
+				source: { kind: "session", sessionId: "other-session" },
+				sessionId: "other-session",
+				cwds: [join(clioStateDir(), "other-project")],
+			}),
+		);
+
+		const first = output(await evidence({ mode: "list", sourceKind: "session" }));
+		strictEqual(first.artifacts.length, EVIDENCE_INVENTORY_MAX_ARTIFACTS);
+		strictEqual(first.truncated, true);
+		strictEqual(first.nextCursor, first.artifacts.at(-1)?.evidenceId);
+		const second = output(await evidence({ mode: "list", sourceKind: "session", cursor: first.nextCursor }));
+		strictEqual(second.artifacts.length, 3);
+		strictEqual(second.truncated, false);
+		strictEqual(second.nextCursor, null);
+		const ids = [...first.artifacts, ...second.artifacts].map((item) => item.evidenceId);
+		strictEqual(new Set(ids).size, EVIDENCE_INVENTORY_MAX_ARTIFACTS + 3);
+		ok(ids.every((id) => id !== foreignId));
+		strictEqual((await evidence({ mode: "list", sourceKind: "session", cursor: foreignId })).kind, "error");
+		strictEqual((await evidence({ mode: "list", sourceKind: "run", cursor: first.nextCursor })).kind, "error");
 	});
 
 	it("inspects the fixture using the CLI trust projection and canonical findings", async () => {
