@@ -460,9 +460,12 @@ told to work on before it starts. The declaration grants nothing on this
 transport: the peer runs its own tool surface and Clio mediates no per-tool
 call, so a resolved write boundary would be a claim nothing enforces and is
 refused outright rather than accepted and left unenforced. Declare `read_roots`
-and `relevant_paths` to bound what the peer is asked to look at; run the writing
-half of the work on a native or `claude-sdk` worker. The compatibility rules and
-reason codes are the same as for any other producer; see
+and `relevant_paths` to bound what the peer is asked to look at. For an ACP edit,
+use a Clio task worktree when Git isolation helps, then inspect the recorded
+branch and diff. The worktree does not confine the peer's other filesystem
+tools, and Clio's ACP permission policy covers only requests the peer reports.
+The compatibility rules and reason codes are the same as for any other
+producer; see
 [dispatch-typed-intent.md](dispatch-typed-intent.md).
 
 ---

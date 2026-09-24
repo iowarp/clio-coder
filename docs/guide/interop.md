@@ -2,13 +2,77 @@
 
 `detectInteropAgents` in [detect.ts](../../src/domains/interop/detect.ts) discovers local agents. The [library architecture](../architecture/library.md) explains package trust.
 
-Interoperability runs both ways. Inbound, Clio can discover resources held by
-Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, then adopt
-safe text resources into the library after approval. Outbound, the same canonical
-`library/` sources this repository ships are installable by Claude Code and
-loadable by Codex without a converted copy. Inspection and adoption use zero
-model tokens. Gemini, Cursor, and the shared Agent Skills convention retain their
-existing presence detection; this inventory does not extend their capabilities.
+Clio can delegate a task to an installed coding agent, discover resources held
+by Claude Code, Codex, Antigravity CLI, GitHub Copilot CLI, and OpenCode, and
+adopt safe text resources into its library after approval. The canonical
+`library/` sources this repository ships are also installable by Claude Code
+and loadable by Codex without a converted copy. Inspection and adoption use
+zero model tokens. Gemini, Cursor, and the shared Agent Skills convention
+retain their existing presence detection; this inventory does not extend their
+capabilities.
+
+## Delegate work to an installed coding agent
+
+Clio can run a named peer through its Agent Client Protocol (ACP) connection or
+its headless CLI, or open the peer in a Herdr pane. Clio remains the main
+conversation and records a run and receipt for ACP and headless dispatch. A pane
+is an interactive handoff and has no managed result or receipt. External peers
+are selected explicitly; Clio does not silently switch agents or modes.
+
+| Peer | ACP connection | Headless target runtime | Pane ID |
+| --- | --- | --- | --- |
+| Claude Code | Pinned Claude Code ACP bridge | `claude-code` | `claude-code` |
+| Codex | Pinned Codex ACP bridge | `codex-cli` | `codex` |
+| OpenCode | Native `opencode acp` | `opencode-cli` | `opencode` |
+| Antigravity CLI | No verified ACP recipe | `antigravity-code` | `antigravity` |
+| Pi CLI | No verified ACP recipe | `pi-cli` | `pi` |
+
+Install and authenticate the peer's own CLI first. Run
+`clio-coder interop inspect --json` or open `/interop` to see the installed binary, configured
+target, ACP adapter, and available commands. `clio-coder configure --interop`
+can add an ACP peer recipe; a headless mode needs a Clio target using the runtime
+in the table. For example, these entries in `~/.config/clio-coder/settings.yaml`
+make an installed OpenCode available in both managed modes:
+
+```yaml
+targets:
+  - id: opencode-local
+    runtime: opencode-cli
+    defaultModel: opencode-cli-default # use OpenCode's selected model
+integrations:
+  externalAgents:
+    entries:
+      - id: opencode
+        command: opencode
+        args: [acp]
+        toolGovernance: clio-coder-policy
+```
+
+Keep the rest of your settings when adding these entries. If OpenCode's provider
+uses an environment credential such as `apiKey: "{env:LAB_GATEWAY_KEY}"` in its
+user `opencode.json` or `opencode.jsonc`, the headless connector passes that
+named variable to OpenCode when it is set. For ACP, add
+`env: { LAB_GATEWAY_KEY: "{env:LAB_GATEWAY_KEY}" }` to that peer entry. Clio
+resolves the reference at launch; the key value does not enter settings or the
+receipt. Unrelated environment secrets stay out of headless CLI children by
+default.
+
+```text
+/run --target opencode-local --worktree coder Fix the parser test and report the checks.
+/delegate opencode Review the proposed parser change and its edge cases.
+/peer --cwd /path/to/project codex Investigate the failing build.
+```
+
+`/run --worktree` preserves the peer's Git task branch for review and records
+its path, branch, and changed files in the receipt. Without it, a headless peer
+works in the current checkout and edits may appear immediately. A task worktree
+separates Git changes but does not confine the peer's own filesystem, shell, or
+network tools. Clio can mediate ACP permission requests a peer reports, but a
+peer may write without requesting permission; receipts mark this enforcement
+limit. OpenCode's verified headless path supports edit authority only and
+refuses `read-only` or `suggest` runs. Use the existing Git workflow to inspect
+and merge a preserved branch, and use `/share` when the main agent should read a
+managed result.
 
 ## Outbound: Use this library from Claude Code
 

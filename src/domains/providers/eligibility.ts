@@ -11,6 +11,9 @@ export function isTargetEligibleRuntime(runtime: RuntimeDescriptor): boolean {
 		runtime.kind === "http" ||
 		runtime.id === "claude-sdk" ||
 		runtime.id === "claude-code" ||
+		runtime.id === "codex-cli" ||
+		runtime.id === "opencode-cli" ||
+		runtime.id === "pi-cli" ||
 		runtime.id === "antigravity-code"
 	);
 }

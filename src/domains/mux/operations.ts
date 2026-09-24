@@ -46,6 +46,10 @@ export const PANES_PRESETS = [
 
 export type PanesPresetId = (typeof PANES_PRESETS)[number]["id"];
 
+/** Fixed interactive coding peers. The pane tool never accepts an executable name. */
+export const PANE_PEER_IDS = ["claude-code", "codex", "opencode", "antigravity", "pi"] as const;
+export type PanePeerId = (typeof PANE_PEER_IDS)[number];
+
 export const PANES_PRESET_IDS: ReadonlyArray<PanesPresetId> = PANES_PRESETS.map((preset) => preset.id);
 
 function isPanesPresetId(value: string): value is PanesPresetId {
@@ -155,7 +159,7 @@ export interface PanesWatchController {
 
 export type PanesOpenResult =
 	/** `existing` is true when the preset already had a live pane and it was focused instead of split again. */
-	| { status: "opened"; label: string; paneId: string | null; existing?: boolean }
+	| { status: "opened"; label: string; paneId: string | null; existing?: boolean; cwd?: string }
 	| { status: "missing-binary"; preset: string; binary: string; installHint: string; detail: string }
 	| { status: "refused"; reason: string }
 	| { status: "unavailable"; reason: string };
@@ -210,6 +214,8 @@ export interface PanesOperations {
 	status(): PanesStatus;
 	show(target: string): Promise<PanesShowResult>;
 	open(request: { preset?: string; argv?: ReadonlyArray<string>; once?: boolean }): Promise<PanesOpenResult>;
+	/** Open a fixed coding CLI in an owned pane. This is an interactive handoff, not a managed run. */
+	handoff(request: { peer: PanePeerId; brief?: string; cwd?: string }): Promise<PanesOpenResult>;
 	/**
 	 * Toggle zoom on one Clio-owned pane, matched like `close` (pane id, label
 	 * substring, then purpose; newest first). Zooming steals focus, so this is

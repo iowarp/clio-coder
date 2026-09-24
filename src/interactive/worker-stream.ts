@@ -95,6 +95,10 @@ export interface WorkerReceiptSummary {
 	tokenCount?: number;
 	durationMs?: number;
 	toolCalls?: number;
+	/** Integrity-checked external workspace facts for a shared result. */
+	placement?:
+		| { mode: "current"; cwd: string; changedPaths?: string[] }
+		| { mode: "worktree"; cwd: string; branch: string; changedPaths?: string[] };
 	contract?: WorkerResultContract;
 	/** Parsed from the receipt's result-contract source id; absent on legacy and untyped receipts. */
 	contractKind?: WorkerPresentedResultContract;

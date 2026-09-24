@@ -139,11 +139,9 @@ function baseClassify(tool: string): ActionClass | null {
 		// local mirror. Neither touches the workspace, so it is never gated
 		// behind a confirmation.
 		case ToolNames.Ledger:
-		// panes focuses, opens, and closes terminal panes Clio itself created, in
-		// a pane host that lives outside the workspace. Nothing it does writes a
-		// file, runs a model-supplied command (its schema exposes presets only),
-		// or survives the session, so it is reversible, local, and never gated
-		// behind a confirmation.
+		// Non-handoff panes actions operate on Clio-owned terminal surfaces and
+		// expose only fixed utility presets. The peer handoff action is classified
+		// as dispatch above because its coding CLI may edit the workspace.
 		case ToolNames.Panes:
 		// limitation appends a typed receipt to the session ledger and touches
 		// nothing else, so it is never gated behind a confirmation.
@@ -529,6 +527,9 @@ export function normalizeCallPaths(call: ClassifierCall): ClassifierCall {
 
 export function classify(rawCall: ClassifierCall): Classification {
 	const call = normalizeCallPaths(rawCall);
+	if (call.tool === ToolNames.Panes && call.args?.action === "handoff") {
+		return { actionClass: "dispatch", reasons: ["panes:interactive-peer-handoff"] };
+	}
 	if (call.tool === ToolNames.WebFetch && webFetchIsOutward(call.args)) {
 		return { actionClass: "write", reasons: ["web-fetch:outward"] };
 	}

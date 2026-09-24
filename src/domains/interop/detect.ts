@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { runCommandVector } from "../../core/safe-exec.js";
@@ -46,21 +46,29 @@ export function resolveOnPath(binaryNames: ReadonlyArray<string>): { presence: I
 }
 
 /**
- * Whether the ACP adapter can start without a network install. `npx` is never
- * run: a package under a local node_modules or an adapter executable already on
- * PATH answers the question, and anything else means npx would fetch it.
+ * Whether the exact ACP recipe is locally verified. `npx` is never run: only a
+ * local package at the pinned version proves the exact launch. A different
+ * global executable cannot satisfy an `npx package@version` recipe, and an
+ * npm cache that might satisfy it is not inspected here.
  */
 function adapterPresence(kind: InteropAgentKind, cwd: string, binaryPresence: InteropPresence): InteropPresence {
 	const recipe = kind.acp;
 	if (recipe === undefined) return "absent";
 	if (recipe.npmPackage === undefined) return binaryPresence;
 	try {
-		if (existsSync(path.join(cwd, "node_modules", recipe.npmPackage))) return "present";
+		const packageJson = path.join(cwd, "node_modules", recipe.npmPackage, "package.json");
+		if (existsSync(packageJson)) {
+			const installed = JSON.parse(readFileSync(packageJson, "utf8")) as { version?: unknown };
+			const pinned = recipe.args
+				.find((arg) => arg.startsWith(`${recipe.npmPackage}@`))
+				?.slice(recipe.npmPackage.length + 1);
+			if (typeof installed.version !== "string") return "unknown";
+			return !pinned || installed.version === pinned ? "present" : "unknown";
+		}
 	} catch {
 		return "unknown";
 	}
-	if (recipe.npmPackageBin === undefined) return "absent";
-	return resolveOnPath([recipe.npmPackageBin]).presence;
+	return "unknown";
 }
 
 function installDirOf(kind: InteropAgentKind, home: string): string | undefined {
