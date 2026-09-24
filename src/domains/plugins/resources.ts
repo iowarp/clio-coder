@@ -89,6 +89,17 @@ export function clearPluginSnapshots(): void {
 	snapshots.clear();
 }
 
+/**
+ * The committed snapshot's roots for `kind`, without re-verifying any tree.
+ * For display only, such as naming prompt templates in a completion menu. A
+ * tree revoked or drifted since the last reload may still be listed, so
+ * nothing that runs a resource may read from here; execution goes through
+ * {@link enabledPluginResourceRoots}.
+ */
+export function committedPluginResourceRoots(kind: PluginResourceKind, cwd = process.cwd()): PluginResourceRoot[] {
+	return [...pluginSnapshotFor(cwd).resourceRoots[kind]];
+}
+
 export function enabledPluginResourceRoots(kind: PluginResourceKind, cwd = process.cwd()): PluginResourceRoot[] {
 	const snapshot = pluginSnapshotFor(cwd);
 	if (snapshot.generation === 0) return [...snapshot.resourceRoots[kind]];

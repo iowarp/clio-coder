@@ -70,6 +70,12 @@ export interface LoadPromptTemplatesInput {
 	trustProjectCompatRoots?: boolean;
 	/** Names owned by another command registry and unavailable to templates. */
 	reservedNames?: ReadonlySet<string>;
+	/**
+	 * False lists plugin prompts from the committed plugin snapshot without
+	 * re-verifying trees, for display such as completion. Expansion never
+	 * passes it, so a drifted or revoked template can show but never runs.
+	 */
+	verifyPluginTrees?: boolean;
 }
 
 export type PromptTemplateExpansion =
@@ -133,7 +139,11 @@ function defaultPromptTemplateRoots(input: LoadPromptTemplatesInput = {}): Promp
 		}
 	}
 	return [
-		...defaultScopedResourceRoots("prompts", cwd).map((root) => ({
+		...defaultScopedResourceRoots(
+			"prompts",
+			cwd,
+			input.verifyPluginTrees === false ? { verifyPluginTrees: false } : {},
+		).map((root) => ({
 			...root,
 			trusted: root.trusted !== false || trustProject,
 		})),

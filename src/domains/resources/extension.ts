@@ -33,6 +33,9 @@ export function createResourcesBundle(
 		prompts(cwd) {
 			return loader.prompts(cwd);
 		},
+		promptsForDisplay(cwd) {
+			return loader.promptsForDisplay(cwd);
+		},
 		expandPromptTemplate(text, cwd) {
 			return loader.expandPromptTemplate(text, cwd);
 		},

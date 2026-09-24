@@ -95,7 +95,7 @@ export interface InteractivePresentationDeps {
 	/** Pending boot submissions remain visible until serial admission removes them. */
 	bootPending?: Component;
 	getSettings?: () => Readonly<ClioSettings>;
-	resources?: Pick<ResourcesContract, "skills" | "prompts">;
+	resources?: Pick<ResourcesContract, "skills" | "prompts" | "promptsForDisplay">;
 	agents?: Pick<AgentsContract, "listSpecs">;
 	session?: Pick<SessionContract, "current">;
 	getSessionId?: () => string | null;
@@ -490,7 +490,9 @@ export function createInteractivePresentation(deps: InteractivePresentationDeps)
 	const editor = deps.editor ?? factories.createEditor(deps.tui, editorChrome);
 	editor.focused = true;
 	const autocomplete: AutocompleteProvider = factories.createAutocomplete({
-		promptTemplates: () => deps.resources?.prompts(getCwd()).items ?? [],
+		// Completion runs per keystroke and only names templates, so it reads the
+		// committed plugin snapshot; submitting one verifies its tree first.
+		promptTemplates: () => deps.resources?.promptsForDisplay(getCwd()).items ?? [],
 		...(deps.extensionCommands ? { extensionCommands: deps.extensionCommands } : {}),
 		completionSources: {
 			agents: async () =>
