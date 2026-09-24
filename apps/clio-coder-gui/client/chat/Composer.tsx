@@ -1,5 +1,5 @@
 /**
- * The composer. Every decision it makes lives in `composer.ts`; this file is
+ * The composer. Every decision it makes lives in `composer-model.ts`; this file is
  * the wiring and the markup.
  *
  * Two properties are load-bearing and easy to lose in a refactor:
@@ -34,7 +34,7 @@ import {
 	steerModeOffers,
 	submitIntent,
 	submitLabel,
-} from "./composer.js";
+} from "./composer-model.js";
 import { RoutePicker } from "./RoutePicker.js";
 import type { RouteFacts } from "./route.js";
 import "./composer.css";

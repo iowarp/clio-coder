@@ -14,7 +14,7 @@
 
 import type { TimelineItem } from "../../contracts/sessions.js";
 import type { StatusTone } from "../design/status.js";
-import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff.js";
+import { type DiffPanel, diffPanel, NOT_APPROVED_NOTE } from "./diff-model.js";
 
 /** Ported from the workbench's clio-host.ts generic-label table. */
 export const SAFE_TOOL_TITLES: Readonly<Record<string, string>> = {

@@ -1,5 +1,5 @@
 /**
- * The diff surface. Every decision lives in `diff.ts`; this file is the grid
+ * The diff surface. Every decision lives in `diff-model.ts`; this file is the grid
  * and the disclosure.
  *
  * Two properties are load-bearing:
@@ -15,7 +15,14 @@
 import { memo, useState } from "react";
 import { StatusMark } from "../design/status.js";
 import { CopyButton } from "../render/Markdown.js";
-import { type CollapsePlan, collapsePlan, type DiffPanel, diffCopyText, diffCounts, type ParsedDiff } from "./diff.js";
+import {
+	type CollapsePlan,
+	collapsePlan,
+	type DiffPanel,
+	diffCopyText,
+	diffCounts,
+	type ParsedDiff,
+} from "./diff-model.js";
 
 function DiffRows({ diff, plan }: { diff: ParsedDiff; plan: CollapsePlan }) {
 	const rows = diff.rows.slice(plan.start, plan.end + 1);
@@ -23,7 +30,7 @@ function DiffRows({ diff, plan }: { diff: ParsedDiff; plan: CollapsePlan }) {
 		<div className="diff__grid" role="presentation">
 			{rows.map((row) => (
 				// `row.id` is assigned by the parser, which is where the identity
-				// decision belongs. See DiffRow in diff.ts.
+				// decision belongs. See DiffRow in diff-model.ts.
 				<div key={row.id} className={`diff__row is-${row.kind}`}>
 					<span className="diff__num" aria-hidden="true">
 						{row.oldLine ?? ""}

@@ -10,7 +10,7 @@ import {
 	MAX_PROPOSED_ROWS,
 	parseDiff,
 	synthesizeProposedDiff,
-} from "../client/chat/diff.js";
+} from "../client/chat/diff-model.js";
 import {
 	applyPartialFrame,
 	basename,

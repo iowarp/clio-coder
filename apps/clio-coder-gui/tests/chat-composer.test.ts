@@ -25,7 +25,7 @@ import {
 	turnOutcome,
 	usageSummary,
 	usageTitle,
-} from "../client/chat/composer.js";
+} from "../client/chat/composer-model.js";
 import type { KeyEventLike } from "../client/interaction/keybindings.js";
 import type { AgentCapabilities } from "../contracts/capabilities.js";
 import type { Turn, Usage } from "../contracts/sessions.js";

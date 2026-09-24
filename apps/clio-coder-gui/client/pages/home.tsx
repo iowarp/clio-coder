@@ -4,7 +4,7 @@ import { routes } from "../../contracts/routes.js";
 import type { SessionSnapshot } from "../../contracts/sessions.js";
 import { type Client, emptyInput } from "../api/client.js";
 import { formatTime } from "../api/clock.js";
-import { isAwaitingAnswer } from "../chat/approval.js";
+import { isAwaitingAnswer } from "../chat/approval-model.js";
 import { StatusMark, type StatusTone } from "../design/status.js";
 import { ProjectOpenForm, useProjectLaunch } from "./project-open.js";
 import "./projects.css";
