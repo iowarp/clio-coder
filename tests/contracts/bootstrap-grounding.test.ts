@@ -53,6 +53,7 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 						title: "Change recipes",
 						body: [
 							"- A new widget needs an export from `src/index.ts` and a check with `npm run check`.",
+							"  - The export lives in `src/index.ts` beside `renderWidget()`.",
 							"- Release with `npm run deploy` after tagging.",
 						].join("\n"),
 					},
@@ -66,6 +67,7 @@ it("keeps model rules that cite real files, strings, globs and symbols, and drop
 	ok(handbook.includes("`CONTRIBUTING.md`"), handbook);
 	ok(handbook.includes("`src/widgets/**`"), handbook);
 	ok(handbook.includes("`src/index.ts`"), handbook);
+	ok(handbook.includes("\n  - The export lives in `src/index.ts`"), handbook);
 	strictEqual(handbook.includes("src/missing-module.ts"), false, handbook);
 	strictEqual(handbook.includes("npm run deploy"), false, handbook);
 });

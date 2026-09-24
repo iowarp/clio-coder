@@ -791,7 +791,10 @@ function groundedModelBody(body: string, evidence: ModelGroundingCorpus, maxChar
 		// A fenced command block is the single highest-value thing Scout can return,
 		// and dropping the fence used to drop the commands with it. Inline the line
 		// instead, so it faces the same citation rule as any other line.
-		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : trimmed;
+		// Keep a nested bullet's indentation; flattening it turned a recipe's
+		// sub-steps into unrelated top-level rules.
+		const indent = inFence ? "" : (/^(\s*)[-*+]\s/.exec(rawLine)?.[1] ?? "").replace(/\t/g, "  ");
+		const line = inFence ? `\`${trimmed.replace(/`/g, "")}\`` : `${indent}${trimmed}`;
 		const codeTokens = [...line.matchAll(CODE_TOKEN_RE)]
 			.map((match) => match[1]?.trim())
 			.filter((token): token is string => token !== undefined && token.length > 0);

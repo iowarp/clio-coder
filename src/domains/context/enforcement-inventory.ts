@@ -16,6 +16,8 @@ export interface EnforcementCheckFile {
 	path: string;
 	/** Check functions the file defines, in file order; empty when none are named that way. */
 	checks: string[];
+	/** Heads of the coded failure messages it emits (`rule6: ...`), with interpolations elided. */
+	failures: string[];
 }
 
 export interface EnforcementInventory {
@@ -34,6 +36,10 @@ const CHECK_TEST_RE = /^tests?\/(?:[^/]+\/)*(?:boundar|architecture|conventions|
 const SCRIPT_NAME_RE = /(?:^|:)(?:lint|check|verify|gate|validate|typecheck|test|ci)(?::|$)/;
 const CHECK_FN_RE =
 	/(?:^|\n)\s*(?:export\s+)?(?:async\s+)?(?:function\s+|def\s+)((?:check|lint|verify|validate|guard)[A-Za-z0-9_]*)\s*\(/g;
+
+/** A failure message that leads with a rule code: `rule6: ...`, `E501: ...`, `D14: ...`. */
+const FAILURE_RE = /[`'"]([A-Za-z]{0,12}\d{1,4}[a-z]?): ((?:[^`'"\\]|\\.){8,})/g;
+const MAX_FAILURE_CHARS = 160;
 
 const MAX_CI_COMMANDS = 60;
 const MAX_CHECK_FILES = 24;
@@ -109,6 +115,24 @@ function checkNames(text: string): string[] {
 	return names;
 }
 
+function failureHeads(text: string): string[] {
+	const heads: string[] = [];
+	const seen = new Set<string>();
+	for (const match of text.matchAll(FAILURE_RE)) {
+		const code = match[1] ?? "";
+		if (seen.has(code)) continue;
+		seen.add(code);
+		const body = (match[2] ?? "")
+			.replace(/\$\{[^}]*\}/g, "…")
+			.replace(/(?:…\s*)+/g, "… ")
+			.replace(/\s+/g, " ")
+			.trim();
+		heads.push(`${code}: ${body}`.slice(0, MAX_FAILURE_CHARS));
+		if (heads.length >= MAX_CHECKS_PER_FILE) break;
+	}
+	return heads;
+}
+
 export function collectEnforcementInventory(root: string, files?: ReadonlyArray<string>): EnforcementInventory {
 	let visible: ReadonlyArray<string> = files ?? [];
 	if (!files) {
@@ -143,7 +167,7 @@ export function collectEnforcementInventory(root: string, files?: ReadonlyArray<
 	for (const path of candidates.slice(0, MAX_CHECK_FILES)) {
 		const text = readText(root, path);
 		if (text === null || text.includes("\u0000")) continue;
-		checkFiles.push({ path, checks: checkNames(text) });
+		checkFiles.push({ path, checks: checkNames(text), failures: failureHeads(text) });
 	}
 	return { ciCommands: ciCommands.slice(0, MAX_CI_COMMANDS), scripts, checkFiles };
 }

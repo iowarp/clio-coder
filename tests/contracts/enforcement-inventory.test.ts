@@ -44,7 +44,15 @@ beforeEach(() => {
 		"scripts/check-drift.mjs",
 		"function checkDocsTable() {}\nasync function checkEnvRows() {}\nconst checks = [checkDocsTable, checkEnvRows];\n",
 	);
-	write("tests/boundaries/check-imports.ts", "export function runImportCheck() {}\n");
+	write(
+		"tests/boundaries/check-imports.ts",
+		[
+			"export function runImportCheck(file: string) {",
+			`\treturn [\`rule1: ${"$"}{file} imports the engine outside src/engine\`, \`rule2: ${"$"}{file} reaches a seam\`];`,
+			"}",
+			"",
+		].join("\n"),
+	);
 	write("scripts/gate.sh", "#!/bin/sh\nruff check src\nmypy src\n");
 	write("src/main.ts", "export const main = 1;\n");
 });
@@ -59,7 +67,8 @@ it("lists the commands CI runs, the scripts they call, and custom check files wi
 	deepStrictEqual(inventory.scripts, { lint: "biome check . && node scripts/check-drift.mjs" });
 	const byPath = Object.fromEntries(inventory.checkFiles.map((file) => [file.path, file.checks]));
 	deepStrictEqual(byPath["scripts/check-drift.mjs"], ["checkDocsTable", "checkEnvRows"]);
-	ok("tests/boundaries/check-imports.ts" in byPath);
+	const imports = inventory.checkFiles.find((file) => file.path === "tests/boundaries/check-imports.ts");
+	deepStrictEqual(imports?.failures, ["rule1: … imports the engine outside src/engine", "rule2: … reaches a seam"]);
 	ok("scripts/gate.sh" in byPath);
 	ok(!("src/main.ts" in byPath));
 });
