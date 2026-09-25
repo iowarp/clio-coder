@@ -505,8 +505,8 @@ it("keeps the menu above the draft at normal and small sizes, with live human-fa
 		const text = plain(menu.component, columns);
 		assert.match(text, /Library ·/);
 		assert.doesNotMatch(text, /skills-hub|cancel owner/);
-		assert.match(text, /Ctrl\+C cancel/);
-		assert.match(text, /ctrl\+x or Esc/);
+		assert.match(text, /\[Ctrl\+C\] cancel/);
+		assert.match(text, /\[ctrl\+x\/Esc\] close/i);
 		assert.equal(f.editor.getText(), "draft stays visible");
 		f.terminal.input("\x03");
 		assert.equal(f.state(), "closed");

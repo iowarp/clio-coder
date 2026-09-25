@@ -11,11 +11,9 @@ import {
 } from "../../engine/tui.js";
 import { buildHint, DEFAULT_SELECT_THEME, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import type { ContextClearCommandOptions } from "../slash-commands.js";
-import { clioTheme } from "../theme/index.js";
+import { clioTheme, GLYPH } from "../theme/index.js";
 
 export const CONTEXT_RESET_OVERLAY_WIDTH = 72;
-const ELLIPSIS = "…";
-
 export type ContextResetMutationChoice = "preserve-clio-md" | "delete-clio-md";
 
 export interface OpenContextResetOverlayDeps {
@@ -72,16 +70,16 @@ function buildSelectPresentation(items: ReadonlyArray<SelectItem>): {
 				// The focused description is rendered in full below the list. Keeping
 				// only its label here prevents the same explanation appearing once cut
 				// and once wrapped on the same decision surface.
-				if (isSelected) return truncateToWidth(label, maxWidth, ELLIPSIS, true);
+				if (isSelected) return truncateToWidth(label, maxWidth, GLYPH.ellipsis, true);
 				if (description.length === 0 || maxWidth < 44) {
-					return truncateToWidth(label, maxWidth, ELLIPSIS, true);
+					return truncateToWidth(label, maxWidth, GLYPH.ellipsis, true);
 				}
 
 				const labelWidth = Math.max(1, Math.min(22, maxWidth - 14));
-				const fittedLabel = truncateToWidth(label, labelWidth, ELLIPSIS, true);
+				const fittedLabel = truncateToWidth(label, labelWidth, GLYPH.ellipsis, true);
 				const spacing = " ".repeat(Math.max(1, labelWidth + 2 - visibleWidth(fittedLabel)));
 				const descriptionWidth = Math.max(1, maxWidth - visibleWidth(fittedLabel) - visibleWidth(spacing));
-				const fittedDescription = truncateToWidth(description, descriptionWidth, ELLIPSIS, true);
+				const fittedDescription = truncateToWidth(description, descriptionWidth, GLYPH.ellipsis, true);
 				return `${fittedLabel}${clioTheme().fg("muted", `${spacing}${fittedDescription}`)}`;
 			},
 		},

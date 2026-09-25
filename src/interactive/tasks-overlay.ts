@@ -271,7 +271,9 @@ export function formatCompositeTasksOverlayBodyLines(
 	const selectedIndex = Math.max(0, Math.min(state.selectedIndex ?? 0, Math.max(0, rows.length - 1)));
 	const selected = rows[selectedIndex];
 	const currentSelected = selected?.kind === "current" ? selected.task.id : null;
-	const lines = [sectionHeading("Tasks", width), ...formatTasksOverlayBodyLines(state.board, width, currentSelected)];
+	// The frame title already says Tasks; a second heading under it was the one
+	// title the overlay repeated.
+	const lines = [...formatTasksOverlayBodyLines(state.board, width, currentSelected)];
 
 	lines.push("", sectionHeading("Task history", width));
 	const historyRows = terminalHistoryRows(state.board, state.history);

@@ -11,7 +11,6 @@ import { buildHint, FocusBox, showClioOverlayFrame } from "../overlay-frame.js";
 import { clioTheme, GLYPH, screenTitle } from "../theme/index.js";
 
 export const AUTH_DIALOG_WIDTH = 88;
-const ELLIPSIS = "…";
 const KEY_WIDTH = 10;
 
 export interface AuthDialogHandle {
@@ -28,7 +27,7 @@ export interface AuthDialogHandle {
 function fitLine(text: string, width: number): string {
 	const safeWidth = Math.max(1, width);
 	if (visibleWidth(text) <= safeWidth) return text;
-	return truncateToWidth(text, safeWidth, ELLIPSIS, true);
+	return truncateToWidth(text, safeWidth, GLYPH.ellipsis, true);
 }
 
 function keyCell(label: string): string {
@@ -39,7 +38,7 @@ function keyCell(label: string): string {
 }
 
 function normalizeAuthLine(line: string): string {
-	return line.replace(/\.\.\./g, ELLIPSIS);
+	return line.replace(/\.\.\./g, GLYPH.ellipsis);
 }
 
 function formatAuthChoiceLine(line: string): string | null {
