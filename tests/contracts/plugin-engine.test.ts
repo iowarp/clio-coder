@@ -106,6 +106,20 @@ describe("agent plugin engine", () => {
 		}
 	});
 
+	it("refuses the retired themes resource kind, which nothing ever read", () => {
+		const root = fixture();
+		mkdirSync(join(root, "themes"));
+		rewriteManifest(root, (manifest) => {
+			manifest.extensions = { "ai.iowarp.clio": { manifestVersion: 1, resources: { themes: "themes" } } };
+		});
+		const candidate = readPluginManifest(root);
+		strictEqual(candidate.valid, false);
+		ok(
+			candidate.diagnostics.some((diagnostic) => diagnostic.message.includes("unknown resources key 'themes'")),
+			JSON.stringify(candidate.diagnostics),
+		);
+	});
+
 	it("loads native resources into the namespaced project installation", () => {
 		const root = fixture();
 		mkdirSync(join(root, "ai.iowarp.clio", "prompts"), { recursive: true });

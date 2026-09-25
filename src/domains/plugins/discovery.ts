@@ -17,7 +17,7 @@ import type {
 
 export const PLUGIN_SCHEMA = "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
 export const PLUGIN_EXTENSION_KEY = "ai.iowarp.clio";
-export const PLUGIN_RESOURCE_KINDS: readonly PluginResourceKind[] = ["skills", "prompts", "agents", "fleets", "themes"];
+export const PLUGIN_RESOURCE_KINDS: readonly PluginResourceKind[] = ["skills", "prompts", "agents", "fleets"];
 const COMPONENT_KINDS = new Set(["prompt", "agent", "skill", "fleet", "script", "resource", "tool"]);
 const ROOT_KEYS = new Set([
 	"$schema",
