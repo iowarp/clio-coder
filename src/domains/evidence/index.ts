@@ -1,6 +1,6 @@
 export type { BuildEvidenceOptions } from "./build.js";
 export { buildEvidence } from "./build.js";
-export { FINISH_CONTRACT_EVIDENCE_TAGS, finishContractEvidenceTags } from "./finish-contract-map.js";
+export { FINISH_CONTRACT_EVIDENCE_TAGS } from "./finish-contract-map.js";
 export type { RunEscalationCounts, RunProvenanceView } from "./provenance.js";
 export {
 	admitRunProvenance,
@@ -30,14 +30,12 @@ export {
 	TRUST_STATE_WORDS,
 	TRUST_SUMMARY_MAX_REFS,
 	TRUST_SUMMARY_VERSION,
-	TRUST_VERDICTS,
 	trustStateWord,
 	trustSummaryReferences,
 	trustVerdict,
 } from "./trust-projection.js";
 export type {
 	AbsentTrustStatus,
-	AdaptFinishContractTrustOptions,
 	AdaptRunReceiptTrustOptions,
 	ArtifactIntegrityStatus,
 	AttributedTrustStatus,
@@ -65,7 +63,6 @@ export type {
 } from "./trust-status.js";
 export {
 	absentTrustStatus,
-	adaptFinishContractCompletionStatus,
 	adaptGateDecisionReviewStatus,
 	adaptGroundedEvidenceValidationStatus,
 	adaptReceiptIntegrityStatus,
@@ -75,7 +72,6 @@ export {
 	composeTrustStatus,
 	inspectRunReceiptTrustStatus,
 	normalizeTrustStatus,
-	projectTrustStatus,
 	retiredIntegrityVersionOf,
 	retiredReceiptIntegrity,
 	retiredReceiptIntegrityReason,

@@ -39,8 +39,3 @@ export const FINISH_CONTRACT_EVIDENCE_TAGS: Record<FinishContractEvidenceKind, r
 	dispatch_receipt: ["receipt-integrity", "session-linked"],
 	limitation: ["completion-evidence"],
 } as const;
-
-/** The canonical tags a single live finish-contract kind projects onto. */
-export function finishContractEvidenceTags(kind: FinishContractEvidenceKind): readonly EvidenceTag[] {
-	return FINISH_CONTRACT_EVIDENCE_TAGS[kind];
-}
