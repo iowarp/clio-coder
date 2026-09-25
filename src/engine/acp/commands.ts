@@ -588,7 +588,6 @@ function headlessContext(
 		render: () => {},
 		listPrompts: () => unreachable("listPrompts"),
 		listAgents: () => unreachable("listAgents"),
-		listDelegationAgents: () => unreachable("listDelegationAgents"),
 		shutdown: () => unreachable("shutdown"),
 		openUsage: () => unreachable("openUsage"),
 		openSideQuestion: () => unreachable("openSideQuestion"),

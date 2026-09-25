@@ -762,13 +762,6 @@ export interface SlashCommandContext {
 		decline: (kind: InteropAgentId) => void;
 	};
 	listAgents: () => ReadonlyArray<AgentSpec>;
-	listDelegationAgents: () => ReadonlyArray<{
-		id: string;
-		command: string;
-		args: ReadonlyArray<string>;
-		toolGovernance?: string;
-		labels?: Record<string, string>;
-	}>;
 	exportShareArchive?: (outPath: string) => { fileCount: number; path: string };
 	importShareArchive?: (path: string, options: { dryRun?: boolean; force?: boolean }) => ShareImportPlan;
 	openUsage: () => void;
