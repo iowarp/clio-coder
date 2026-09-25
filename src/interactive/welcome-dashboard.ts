@@ -533,7 +533,6 @@ export function buildWelcomeDashboardLines(
 	const hints = showHints ? welcomeHints(theme, hintPage, getKeyLabel) : [];
 	const detailWidth = sideBySide ? contentWidth - artWidth - 3 : contentWidth;
 	const field = (label: string, value: string) => `${theme.fg("dim", `${label}  `)}${value}`;
-	// The banner sets its tagline in cyan under the name; the launchpad does too.
 	const tagline = theme.fg("title", WELCOME_TAGLINE);
 	const taglineLines = sideBySide ? wrapTextWithAnsi(tagline, Math.max(1, detailWidth)) : [tagline];
 	const details = [
@@ -542,7 +541,6 @@ export function buildWelcomeDashboardLines(
 		theme.fg("dim", "Model"),
 		routeRow(theme, stats, detailWidth),
 		field("Workspace", workspaceLabel(theme, stats, Math.max(1, detailWidth - 11))),
-		// yolo wears the composer rail caps' coral here too, so one color means yolo everywhere.
 		field("Permissions", theme.fg(stats.autonomy === "yolo" ? "editorDanger" : "muted", stats.autonomy)),
 		theme.fg("dim", "Ask Clio how to use or extend her."),
 		theme.fg("dim", "Targets"),
@@ -564,7 +562,7 @@ export function buildWelcomeDashboardLines(
 		{ length: Math.max(details.length, hints.length, sideBySide ? wordmark.length : 0) },
 		(_, index) => {
 			const detail = details[index] ?? "";
-			// Two-tone like the logo: CLIO in mint above, CODER in cyan below.
+			// Two-tone like the logo: mint CLIO over cyan CODER.
 			const artToken = index < WELCOME_WORDMARK_SPLIT ? "accent" : "title";
 			const art = sideBySide ? `${padAnsi(theme.fg(artToken, wordmark[index] ?? ""), artWidth)}   ` : "";
 			const content = `${art}${truncateToWidth(detail, detailWidth, GLYPH.ellipsis, false)}`;
