@@ -18,11 +18,13 @@ import {
 	type PromptCacheTelemetry,
 	type SessionEntry,
 } from "../domains/session/index.js";
+import type { GitChanges } from "../domains/session/workspace/git-probe.js";
 import { type Component, matchesKey, type OverlayHandle, type TUI, wrapTextWithAnsi } from "../engine/tui.js";
+import { ACTIVITY_SPAN_DAYS, bucketActivity, renderActivityHeatmap } from "./activity-view.js";
 import type { DispatchBoardRow } from "./dispatch-board.js";
 import { buildResponsiveHint, showClioOverlayFrame } from "./overlay-frame.js";
 import { quotaMeter, renderQuotaAccounts, renderWorkerUsage } from "./quota-view.js";
-import { clioTheme, rule } from "./theme/index.js";
+import { clioTheme, formatCompactMs, padAnsi, rule } from "./theme/index.js";
 
 const DEFAULT_CONTENT_WIDTH = 104;
 
@@ -351,13 +353,69 @@ export interface OpenUsageOverlayOptions {
 	sessionId?: string | null;
 	/** Session ledger, read on every render so newly settled and branched calls appear. */
 	getSessionEntries?: () => ReadonlyArray<SessionEntry>;
+	/** Sessions of this workspace, for the activity graph. Read once on open. */
+	listSessions?: () => ReadonlyArray<{ createdAt?: string; lastActivityAt?: string; messageCount?: number }>;
+	/** Working-tree changes; null until the probe lands or when there is no repository. */
+	getChanges?: () => GitChanges | null;
+	/** ISO instant this session began, for the elapsed time. */
+	sessionStartedAt?: string | null;
+	now?: () => number;
 }
 
-const USAGE_TABS = ["Accounts", "Session", "Models", "Workers"] as const;
+/**
+ * The glance tab: the activity graph, then the four facts an operator asks for
+ * before any table. Every row is `label  value` on one column so the eye reads
+ * down the labels, the way the Copilot usage card does.
+ */
+function renderActivity(
+	days: ReadonlyMap<string, number>,
+	sessions: number,
+	snapshot: CostSnapshot,
+	quota: ReadonlyArray<UsageSnapshot>,
+	changes: GitChanges | null,
+	startedAt: string | null,
+	now: number,
+	contentWidth: number,
+): string[] {
+	const theme = clioTheme();
+	const label = (text: string): string => padAnsi(theme.fg("muted", text), 12);
+	const lines = [
+		...renderActivityHeatmap(
+			days,
+			now,
+			contentWidth,
+			`last ${ACTIVITY_SPAN_DAYS} days · ${sessions} session${sessions === 1 ? "" : "s"} in this workspace`,
+		),
+		"",
+	];
+	const changesValue =
+		changes === null
+			? theme.fg("dim", "no repository")
+			: `${theme.fg("success", `+${changes.insertions}`)} ${theme.fg("error", `-${changes.deletions}`)} ${theme.fg("dim", `· ${changes.files} file${changes.files === 1 ? "" : "s"}`)}`;
+	lines.push(`${label("Changes")}${changesValue}`);
+	const cost = formatCostAggregate(snapshot.totalCost) ?? "$0.00";
+	const started = startedAt ? Date.parse(startedAt) : Number.NaN;
+	const elapsed = Number.isFinite(started)
+		? ` ${theme.fg("dim", `(${formatCompactMs(Math.max(0, now - started))})`)}`
+		: "";
+	lines.push(
+		`${label("Session")}${cost} ${theme.fg("dim", `· ${formatTokens(snapshot.totalTokens)} tokens`)}${elapsed}`,
+	);
+	const window = quota.flatMap((entry) => entry.windows.map((item) => ({ entry, item })))[0];
+	if (window) {
+		const pct = Math.max(0, Math.min(100, window.item.usedPct));
+		lines.push(
+			`${label("Plan")}${quotaMeter(pct, Math.min(28, Math.max(8, contentWidth - 30)))} ${pct.toFixed(0)}% used ${theme.fg("dim", `· ${window.entry.displayName} ${window.item.label}`)}`,
+		);
+	} else lines.push(`${label("Plan")}${theme.fg("dim", "no subscription window reported")}`);
+	return lines;
+}
+
+const USAGE_TABS = ["Activity", "Accounts", "Session", "Models", "Workers"] as const;
 
 class UsageOverlayBody implements Component {
 	private tab = 0;
-	private offsets = [0, 0, 0, 0];
+	private offsets = [0, 0, 0, 0, 0];
 	private height = 20;
 	private pageHeight = 16;
 	private lineCount = 0;
@@ -367,14 +425,22 @@ class UsageOverlayBody implements Component {
 		private readonly getQuotaSnapshots: () => ReadonlyArray<UsageSnapshot>,
 		private readonly getDispatchRows: () => ReadonlyArray<DispatchBoardRow>,
 		private readonly requestRender: () => void,
+		private readonly activity: {
+			days: ReadonlyMap<string, number>;
+			sessions: number;
+			getChanges: () => GitChanges | null;
+			startedAt: string | null;
+			now: () => number;
+		},
 	) {}
 
 	setHeight(rows: number): void {
-		this.height = Math.max(1, rows - 3);
+		// The dock reports its own viewport: body rows plus the two rails.
+		this.height = Math.max(1, rows - 2);
 	}
 
 	handleInput(data: string): void {
-		const selected = (["1", "2", "3", "4"] as const).findIndex((key) => matchesKey(data, key));
+		const selected = (["1", "2", "3", "4", "5"] as const).findIndex((key) => matchesKey(data, key));
 		if (selected >= 0) this.tab = selected;
 		else if (matchesKey(data, "tab") || matchesKey(data, "right")) this.tab = (this.tab + 1) % USAGE_TABS.length;
 		else if (matchesKey(data, "shift+tab") || matchesKey(data, "left"))
@@ -408,12 +474,23 @@ class UsageOverlayBody implements Component {
 		);
 		let body: string[];
 		if (this.tab === 0)
+			body = renderActivity(
+				this.activity.days,
+				this.activity.sessions,
+				snapshot,
+				quota,
+				this.activity.getChanges(),
+				this.activity.startedAt,
+				this.activity.now(),
+				contentWidth,
+			);
+		else if (this.tab === 1)
 			body = [
 				theme.fg("dim", "Account-wide limits · filled = used · shared across sessions and devices"),
 				"",
 				...renderQuotaAccounts(quota, contentWidth),
 			];
-		else if (this.tab === 1)
+		else if (this.tab === 2)
 			body = [
 				theme.style("accent", "Session tokens & cost", { bold: true }),
 				theme.fg("dim", "Recorded calls in this session · estimates are marked in the cost totals"),
@@ -424,7 +501,7 @@ class UsageOverlayBody implements Component {
 				theme.fg("dim", "Session tokens cannot be converted to subscription percentages."),
 				...(snapshot.rows.length ? [] : ["no token usage recorded for this session"]),
 			];
-		else if (this.tab === 2) {
+		else if (this.tab === 3) {
 			body = [
 				theme.style("accent", "Model activity · this session", { bold: true }),
 				theme.fg("dim", "Share of recorded processed tokens, including cache traffic; not account quota."),
@@ -441,10 +518,11 @@ class UsageOverlayBody implements Component {
 		} else body = renderWorkerUsage(this.getDispatchRows(), quota, contentWidth);
 		const lines = body.flatMap((line) => wrapTextWithAnsi(line, contentWidth));
 		this.lineCount = lines.length;
+		// One row stays free for the `n–m / N` indicator a scrolled page carries.
 		this.pageHeight = Math.max(1, this.height - tabs.length - 1);
 		const offset = Math.max(0, Math.min(this.offsets[this.tab] ?? 0, lines.length - this.pageHeight));
 		this.offsets[this.tab] = offset;
-		const visible = [...tabs, "", ...lines.slice(offset, offset + this.pageHeight)];
+		const visible = [...tabs, ...lines.slice(offset, offset + this.pageHeight)];
 		if (lines.length > this.pageHeight)
 			visible.push(theme.fg("dim", `${offset + 1}–${Math.min(lines.length, offset + this.pageHeight)} / ${lines.length}`));
 		return visible;
@@ -469,11 +547,23 @@ export function openUsageOverlay(
 ): OverlayHandle {
 	const sessionId = options?.sessionId ?? null;
 	let latest: ObservabilitySnapshot = observability.snapshot();
+	const now = options?.now ?? (() => Date.now());
+	const sessions = options?.listSessions?.() ?? [];
 	const body = new UsageOverlayBody(
 		() => buildCostSnapshot(observability, sessionId, latest, options?.getSessionEntries),
 		options?.getQuotaSnapshots ?? (() => []),
 		options?.getDispatchRows ?? (() => []),
 		() => tui.requestRender(),
+		{
+			days: bucketActivity(
+				sessions.map((meta) => ({ at: meta.lastActivityAt ?? meta.createdAt, weight: meta.messageCount ?? 1 })),
+				now(),
+			),
+			sessions: sessions.length,
+			getChanges: options?.getChanges ?? (() => null),
+			startedAt: options?.sessionStartedAt ?? null,
+			now,
+		},
 	);
 	const handle = showClioOverlayFrame(tui, body, {
 		anchor: "center",
@@ -482,7 +572,7 @@ export function openUsageOverlay(
 		markerId: "usage",
 		title: sessionId && sessionId.length > 0 ? `Usage (${sessionId})` : "Usage",
 		footerHint: buildResponsiveHint([
-			{ key: "1–4 / Tab", verb: "view", critical: true },
+			{ key: "1–5 / Tab", verb: "view", critical: true },
 			{ key: "↑↓", verb: "scroll" },
 			{ key: "PgUp/PgDn", verb: "page" },
 		]),

@@ -19,6 +19,7 @@ import type { SessionMeta } from "../domains/session/index.js";
 import { foldSessionArtifacts } from "../domains/session/session-artifacts.js";
 import { foldSessionTaskHistory } from "../domains/session/task-board.js";
 import { filterEntriesToActivePath } from "../domains/session/tree/active-path.js";
+import { type GitChanges, probeGitChangesAsync } from "../domains/session/workspace/git-probe.js";
 import { formatUserTaskHandoff } from "../domains/user-tasks/handoff.js";
 import type { UserTasksStore } from "../domains/user-tasks/store.js";
 import type { TUI } from "../engine/tui.js";
@@ -77,6 +78,8 @@ export interface OverlayGeneralOpenersDeps {
 	dispatch: DispatchContract;
 	stateDir: string;
 	getSessionMeta: () => SessionMeta | null;
+	/** Every session of this workspace, for the usage activity graph. */
+	listSessions?: () => ReadonlyArray<SessionMeta>;
 	readSessionEntries?: ArtifactProviderDeps["readSessionEntries"];
 	/** Live settings, so `/context` can state the configured working-set policy. */
 	getSettings?: () => Readonly<ClioSettings>;
@@ -172,8 +175,19 @@ export function createOverlayGeneralOpeners(deps: OverlayGeneralOpenersDeps): Ov
 	const openUsage = (): void => {
 		if (deps.transitions.state !== "closed") return;
 		deps.transitions.state = "usage";
+		// The changes probe is a subprocess; the card opens at once and the row
+		// fills in when it lands.
+		let changes: GitChanges | null = null;
+		const workspace = deps.getSessionMeta()?.cwd ?? process.cwd();
+		void probeGitChangesAsync(workspace).then((result) => {
+			changes = result;
+			deps.requestRender();
+		});
 		deps.transitions.handle = openUsageOverlayFactory(deps.tui, deps.observability, {
 			sessionId: deps.getSessionId?.() ?? null,
+			...(deps.listSessions ? { listSessions: deps.listSessions } : {}),
+			getChanges: () => changes,
+			sessionStartedAt: deps.getSessionMeta()?.createdAt ?? null,
 			...(deps.getQuotaSnapshots ? { getQuotaSnapshots: deps.getQuotaSnapshots } : {}),
 			...(deps.getDispatchRows ? { getDispatchRows: deps.getDispatchRows } : {}),
 			...(deps.readSessionEntries

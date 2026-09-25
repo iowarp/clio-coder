@@ -269,6 +269,8 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 	};
 	try {
 		match(titles.at(-1) ?? "", /modal:usage/);
+		match(render(), /Less .* More · last 182 days/);
+		frame?.handleInput?.("2");
 		const text = scrolled();
 		match(text, /Claude Code \(Max\)/);
 		match(text, /\$30.41\/\$50.00/);
@@ -286,7 +288,7 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		const before = renders;
 		listener?.(snapshot);
 		ok(renders > before);
-		frame?.handleInput?.("2");
+		frame?.handleInput?.("3");
 		match(render(), /Session tokens & cost/);
 		render(40, 12);
 		// Twelve rows leave the dock five body rows, one of them content, so the
@@ -295,9 +297,9 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 		match(render(40, 16), /no token usage recorded/);
 		frame?.handleInput?.("\x1b[H");
 		match(render(40, 16), /Session tokens/);
-		frame?.handleInput?.("1");
+		frame?.handleInput?.("2");
 		match(render(), /Account-wide limits/);
-		frame?.handleInput?.("3");
+		frame?.handleInput?.("4");
 		costs.accumulate("fixture", "model-a", 1234, 0.25, { input: 1000, output: 234, apiCalls: 1 }, "known");
 		listener?.({ ...snapshot, session: { ...snapshot.session, cost: costs.sessionCost() } });
 		const live = render();
@@ -315,12 +317,12 @@ test("usage overlay shows account details and live session totals, scrolls, resi
 				message: "run agy",
 			},
 		];
-		frame?.handleInput?.("1");
+		frame?.handleInput?.("2");
 		match(render(), /expired · run agy/);
-		frame?.handleInput?.("4");
+		frame?.handleInput?.("5");
 		match(render(), /No worker invocations/);
 		frame?.handleInput?.("\t");
-		match(render(), /Account-wide limits/);
+		match(render(), /Less .* More/);
 	} finally {
 		handle.hide();
 	}

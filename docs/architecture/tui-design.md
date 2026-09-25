@@ -237,7 +237,7 @@ Every transcript row follows a rigid 2-column gutter format:
 ## 6. Overlays & Inspection
 
 - **`/view transcript`**: Inspect complete un-truncated output, tool payloads, and raw responses.
-- **`/usage`**: 4 tabs (Accounts, Session, Models, Workers) with consumption vs budget percentages.
+- **`/usage`**: 5 tabs (Activity, Accounts, Session, Models, Workers) with consumption vs budget percentages.
 - **`/tasks`**: Interactive task board tracking parent/child subagent execution status.
 - **`/doctor`**: In-session diagnostic reports with severity-ordered findings.
 
@@ -289,3 +289,5 @@ Renderer-only presentation constants remain private to their owning modules.
 Renderer-only presentation constants remain private to their owning modules.
 
 On an empty composer, `?` opens a docked key card, `←` opens Fleet Runs and `↓` opens Tasks. The next key dismisses the key card and is consumed. With a draft, these keys keep their editing meaning. Task cards have bold section headings, a two-cell body gutter and an explicit empty state in each section; scrolling and section navigation keep every task reachable.
+
+Usage opens on Activity with a Monday-first workspace session heatmap, working-tree changes, session consumption and the first reported plan window. The graph shows up to 182 days, narrowing to recent weeks on small terminals. Git changes load asynchronously; every tab scrolls within the dock.

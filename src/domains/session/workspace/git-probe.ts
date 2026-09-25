@@ -165,3 +165,30 @@ export async function probeGitStatusAsync(cwd: string): Promise<GitStatusProbeRe
 		remoteUrl: remoteFrom(remoteRaw),
 	};
 }
+
+export interface GitChanges {
+	files: number;
+	insertions: number;
+	deletions: number;
+}
+
+/**
+ * Working-tree changes against HEAD as `git diff --shortstat` counts them.
+ * Null outside a work tree or when Git fails, never zeros: an unknown is not
+ * an empty diff.
+ */
+export async function probeGitChangesAsync(cwd: string): Promise<GitChanges | null> {
+	const inside = await gitOkAsync(cwd, ["rev-parse", "--is-inside-work-tree"]);
+	if (inside !== "true") return null;
+	const stat = await gitOkAsync(cwd, ["diff", "--shortstat", "HEAD", "--", "."]);
+	if (stat === null) return null;
+	const read = (pattern: RegExp): number => {
+		const match = pattern.exec(stat);
+		return match?.[1] ? Number.parseInt(match[1], 10) : 0;
+	};
+	return {
+		files: read(/(\d+) files? changed/u),
+		insertions: read(/(\d+) insertions?/u),
+		deletions: read(/(\d+) deletions?/u),
+	};
+}
