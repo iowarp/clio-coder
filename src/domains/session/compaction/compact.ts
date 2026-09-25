@@ -685,11 +685,17 @@ async function runSummaryStream(
 	if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
 		throw new Error("compaction requires a positive finite model context window");
 	}
-	if (estimatedInput + maxTokens > contextWindow) {
+	// The output budget is a ceiling. A small window keeps whatever the request
+	// leaves it, down to the 1024-token floor compact() sets; a summary that
+	// needs more stops at the length check below and is never saved.
+	const minOutput = Math.min(maxTokens, 1024);
+	if (estimatedInput + minOutput > contextWindow) {
 		throw new Error(
-			`compaction estimated input ${estimatedInput} tokens plus output ${maxTokens} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
+			`compaction estimated input ${estimatedInput} tokens plus output ${minOutput} tokens exceeds model context window ${contextWindow}; use a larger compaction model or reduce the working set`,
 		);
 	}
+	maxTokens = Math.min(maxTokens, contextWindow - estimatedInput);
+	options.maxTokens = maxTokens;
 
 	input.signal?.throwIfAborted();
 	input.beforeSummaryCall?.();

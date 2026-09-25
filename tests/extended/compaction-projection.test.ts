@@ -576,6 +576,19 @@ describe("compaction working-set provider boundary", () => {
 		strictEqual(calls.length, 2);
 	});
 
+	it("fits the summary output into a small window instead of refusing the request", async () => {
+		// `--max-context-tokens 16000` on a local model: the default reserve asked
+		// for 13107 output tokens and left 2893 for a 3399-token summary request.
+		const entries = chain([
+			message("old", "user", { text: "Retain this constraint. ".repeat(600) }),
+			message("new", "user", { text: "Continue" }),
+		]);
+		await compact({ entries, model: model(16_000, 32_768) });
+		const call = calls[0];
+		ok(call?.maxTokens !== undefined && call.inputTokens > 16_000 - 13_107, JSON.stringify(call));
+		ok(call.inputTokens + call.maxTokens <= 16_000, JSON.stringify(call));
+	});
+
 	it("rejects invalid model and output budgets without a provider call", async () => {
 		const entries = chain([message("old", "user", { text: "Old" }), message("new", "user", { text: "New" })]);
 		for (const invalid of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
