@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "../client/pages/artifact-pagination.js";
 import { Problem } from "../contracts/common.js";
 import { EvidencePage } from "../contracts/evidence.js";
 import { DispatchRuns, FleetRoots } from "../contracts/fleet.js";
@@ -136,5 +138,51 @@ test("every response carries the full security header set", async (t) => {
 		assert.equal(response.headers.get("Referrer-Policy"), "no-referrer");
 		assert.equal(response.headers.get("X-Content-Type-Options"), "nosniff");
 		assert.match(response.headers.get("Permissions-Policy") ?? "", /camera=\(\)/);
+	}
+});
+
+test("every evidence link the paginated page still renders stays admitted, even while the next page is in flight", async () => {
+	const artifacts = new ArtifactWindow();
+	const served = Array.from({ length: 200 }, (_, index) => `evidence-${String(index).padStart(3, "0")}`);
+	const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+	let loseResponse = false;
+	// Mirrors EvidencePage: the same page size and retention, fed by a stand-in
+	// for the list route that records what it served exactly as the route does.
+	const observer = new InfiniteQueryObserver(queries, {
+		queryKey: ["evidence"],
+		initialPageParam: undefined as string | undefined,
+		queryFn: async ({ pageParam }) => {
+			const start = pageParam ? Number(pageParam) : 0;
+			const ids = served.slice(start, start + ARTIFACT_PAGE_SIZE);
+			artifacts.page("evidence", pageParam, ids);
+			for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id, "Rendered while the next page loads");
+			if (loseResponse) throw new Error("response lost after the server recorded the page");
+			const next = start + ids.length;
+			return { ids, nextCursor: next < served.length ? String(next) : null };
+		},
+		getNextPageParam: (page) => page.nextCursor ?? undefined,
+		maxPages: ARTIFACT_MAX_PAGES,
+	});
+	const rendered = () => observer.getCurrentResult().data?.pages.flatMap((page) => page.ids) ?? [];
+	const unsubscribe = observer.subscribe(() => {});
+	try {
+		await observer.refetch();
+		for (let page = 0; page < 6; page++) {
+			const result = await observer.fetchNextPage();
+			assert.equal(result.status, "success", String(result.error));
+			for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id);
+		}
+		// A load-more whose response never reaches the browser leaves the old pages
+		// on screen, so the server must not have evicted them either.
+		loseResponse = true;
+		const before = rendered();
+		assert.equal((await observer.fetchNextPage()).status, "error");
+		assert.deepEqual(rendered(), before);
+		for (const id of before) assert.equal(artifacts.admit("evidence", id), id);
+		// Retention stays bounded: the first page aged out on both sides.
+		assert.throws(() => artifacts.admit("evidence", "evidence-000"), { reason: "outside-window" });
+	} finally {
+		unsubscribe();
+		queries.clear();
 	}
 });
