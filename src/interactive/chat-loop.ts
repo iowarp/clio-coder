@@ -488,6 +488,11 @@ export interface ChatLoop {
 export interface CreateChatLoopDeps {
 	memoryCommitBridge?: MemoryInterventionRegistration | undefined;
 	interactiveGuidance?: boolean;
+	/**
+	 * True for a headless `clio-coder run`. Its permission listener denies every
+	 * approval ask, so the session prompt says so instead of promising a pause.
+	 */
+	headless?: boolean;
 	getSettings: () => Readonly<ClioSettings>;
 	/**
 	 * The same effective autonomy level registry admission resolves, so the
@@ -972,6 +977,7 @@ export function createChatLoop(deps: CreateChatLoopDeps): ChatLoop {
 
 	const context = createTurnContext({
 		interactiveGuidance: deps.interactiveGuidance === true,
+		headless: deps.headless === true,
 		state,
 		getSettings: deps.getSettings,
 		providers: deps.providers,
