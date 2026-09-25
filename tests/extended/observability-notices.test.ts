@@ -106,7 +106,7 @@ describe("observability projection notices", () => {
 		const notices = projection.snapshot().notices;
 		strictEqual(notices.length, 1);
 		strictEqual(notices[0]?.kind, "evidence");
-		strictEqual(notices[0]?.level, "warning");
+		strictEqual(notices[0]?.level, "error");
 		strictEqual(notices[0]?.message, "disk full");
 		strictEqual(notices[0]?.ref?.runId, "run-1");
 	});
