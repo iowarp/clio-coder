@@ -28,6 +28,7 @@ import {
 	joinFacts,
 	releaseSpaces,
 } from "../theme/index.js";
+import { workerPhaseActivity } from "../worker-activity.js";
 import { type WorkerEntryState, type WorkerReceiptSummary, workerAskedByModel } from "../worker-stream.js";
 
 const theme = clioTheme();
@@ -307,15 +308,6 @@ function workerMetrics(entry: WorkerEntryState, inspect: boolean): string[] {
 	return metrics;
 }
 
-/** What a running worker is doing when no call is in flight, by the phase its stream is in. */
-const PHASE_ACTIVITY: Readonly<Record<string, readonly [glyph: string, words: string]>> = {
-	starting: [GLYPH.phaseWaiting, "starting"],
-	waiting: [GLYPH.phaseWaiting, "waiting on the model"],
-	thinking: [GLYPH.phaseThinking, "thinking"],
-	writing: [GLYPH.phaseWriting, "writing"],
-	tool: [GLYPH.phaseTool, "between calls"],
-};
-
 /**
  * The descriptor vocabulary's progressive verbs in the past tense. A verb that
  * names a tool rather than an act (`git`, `context`, `gateway`, `tasks`) reads
@@ -394,7 +386,7 @@ function elapsedMsOf(entry: WorkerEntryState, nowMs: number): number | undefined
  */
 function progressLine(entry: WorkerEntryState, width: number, nowMs: number): string {
 	const action = describedAction(entry);
-	const [glyph, idle] = PHASE_ACTIVITY[entry.progress?.phase ?? "starting"] ?? [GLYPH.phaseWaiting, "starting"];
+	const [glyph, idle] = workerPhaseActivity(entry.progress?.phase);
 	const doing = action === null ? `${glyph} ${idle}` : `${GLYPH.phaseTool} ${action}`;
 	const elapsedMs = elapsedMsOf(entry, nowMs);
 	const tokens = entry.progress?.processedTokens;
