@@ -7,7 +7,7 @@ import { useOperation } from "../api/queries.js";
 import { Facts } from "../design/facts.js";
 import { Boundary, PanelEmpty, PanelHeading } from "../design/panel.js";
 import { emptyState, PANELS } from "../design/panel-model.js";
-import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "./artifact-pagination.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages } from "./artifact-pagination.js";
 import { useWorkspaceSelection, WorkspacePicker } from "./settings.js";
 
 const verdictText = {
@@ -159,7 +159,7 @@ export function EvidencePage({ client }: { client: Client }) {
 				</PanelEmpty>
 			)}
 			<div className="config-entries">
-				{inventory.data?.pages
+				{admittedPages(inventory)
 					.flatMap((page) => page.items)
 					.map(({ overview, verdict }) => (
 						<article key={overview.evidenceId} className="trace-panel">
@@ -177,7 +177,7 @@ export function EvidencePage({ client }: { client: Client }) {
 						</article>
 					))}
 			</div>
-			{inventory.hasNextPage && (
+			{inventory.hasNextPage && !inventory.isRefetchError && (
 				<>
 					<PanelEmpty>{emptyState.bounded("evidence bundles")}</PanelEmpty>
 					<button type="button" disabled={inventory.isFetchingNextPage} onClick={() => void inventory.fetchNextPage()}>

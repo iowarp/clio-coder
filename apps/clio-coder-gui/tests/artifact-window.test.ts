@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InfiniteQueryObserver, QueryClient } from "@tanstack/react-query";
-import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE } from "../client/pages/artifact-pagination.js";
+import { ARTIFACT_MAX_PAGES, ARTIFACT_PAGE_SIZE, admittedPages } from "../client/pages/artifact-pagination.js";
 import { Problem } from "../contracts/common.js";
 import { EvidencePage } from "../contracts/evidence.js";
 import { DispatchRuns, FleetRoots } from "../contracts/fleet.js";
@@ -141,30 +141,57 @@ test("every response carries the full security header set", async (t) => {
 	}
 });
 
-test("every evidence link the paginated page still renders stays admitted, even while the next page is in flight", async () => {
+/**
+ * Mirrors EvidencePage: the same page size, retention and rendered pages, fed by
+ * a stand-in for the list route that records what it served exactly as the
+ * route does. `failWhen` fails a request before or after the server records it;
+ * `checkInFlight` asserts every rendered link is admitted while a page loads.
+ */
+function paginatedEvidence() {
 	const artifacts = new ArtifactWindow();
-	const served = Array.from({ length: 200 }, (_, index) => `evidence-${String(index).padStart(3, "0")}`);
+	let served = Array.from({ length: 200 }, (_, index) => `evidence-${String(index).padStart(3, "0")}`);
 	const queries = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-	let loseResponse = false;
-	// Mirrors EvidencePage: the same page size and retention, fed by a stand-in
-	// for the list route that records what it served exactly as the route does.
+	const state = {
+		failWhen: undefined as undefined | ((cursor: string | undefined) => "before-record" | "after-record" | undefined),
+		checkInFlight: true,
+	};
 	const observer = new InfiniteQueryObserver(queries, {
 		queryKey: ["evidence"],
 		initialPageParam: undefined as string | undefined,
 		queryFn: async ({ pageParam }) => {
+			const failure = state.failWhen?.(pageParam);
+			if (failure === "before-record") throw new Error("the list read failed");
 			const start = pageParam ? Number(pageParam) : 0;
 			const ids = served.slice(start, start + ARTIFACT_PAGE_SIZE);
 			artifacts.page("evidence", pageParam, ids);
-			for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id, "Rendered while the next page loads");
-			if (loseResponse) throw new Error("response lost after the server recorded the page");
+			if (state.checkInFlight)
+				for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id, "Rendered while a page loads");
+			if (failure === "after-record") throw new Error("response lost after the server recorded the page");
 			const next = start + ids.length;
 			return { ids, nextCursor: next < served.length ? String(next) : null };
 		},
 		getNextPageParam: (page) => page.nextCursor ?? undefined,
 		maxPages: ARTIFACT_MAX_PAGES,
 	});
-	const rendered = () => observer.getCurrentResult().data?.pages.flatMap((page) => page.ids) ?? [];
+	const rendered = () => admittedPages(observer.getCurrentResult()).flatMap((page) => page.ids);
 	const unsubscribe = observer.subscribe(() => {});
+	return {
+		artifacts,
+		observer,
+		rendered,
+		state,
+		prepend: (ids: string[]) => {
+			served = [...ids, ...served];
+		},
+		close: () => {
+			unsubscribe();
+			queries.clear();
+		},
+	};
+}
+
+test("every evidence link the paginated page still renders stays admitted, even while the next page is in flight", async () => {
+	const { artifacts, observer, rendered, state, close } = paginatedEvidence();
 	try {
 		await observer.refetch();
 		for (let page = 0; page < 6; page++) {
@@ -174,7 +201,7 @@ test("every evidence link the paginated page still renders stays admitted, even 
 		}
 		// A load-more whose response never reaches the browser leaves the old pages
 		// on screen, so the server must not have evicted them either.
-		loseResponse = true;
+		state.failWhen = (cursor) => (cursor ? "after-record" : undefined);
 		const before = rendered();
 		assert.equal((await observer.fetchNextPage()).status, "error");
 		assert.deepEqual(rendered(), before);
@@ -182,7 +209,40 @@ test("every evidence link the paginated page still renders stays admitted, even 
 		// Retention stays bounded: the first page aged out on both sides.
 		assert.throws(() => artifacts.admit("evidence", "evidence-000"), { reason: "outside-window" });
 	} finally {
-		unsubscribe();
-		queries.clear();
+		close();
+	}
+});
+
+test("a refresh whose later page fails renders no link the narrowed window refuses", async () => {
+	const { artifacts, observer, rendered, state, prepend, close } = paginatedEvidence();
+	try {
+		await observer.refetch();
+		await observer.fetchNextPage();
+		const secondPage = observer.getCurrentResult().data?.pages[1]?.ids ?? [];
+		assert.equal(secondPage.length, ARTIFACT_PAGE_SIZE);
+		// New evidence arrives, then a refresh serves a fresh first page, narrowing
+		// the window, and the second page's read fails. This test owns the settled
+		// state after that failure, not the moment between the two refresh requests.
+		state.checkInFlight = false;
+		prepend(["evidence-new"]);
+		for (const failure of ["before-record", "after-record"] as const) {
+			state.failWhen = (cursor) => (cursor ? failure : undefined);
+			const result = await observer.refetch();
+			assert.match(String(result.error), failure === "before-record" ? /list read failed/ : /response lost/);
+			assert.equal(result.isRefetchError, true);
+			// The stale second page is still cached, and the server no longer admits it.
+			assert.deepEqual(result.data?.pages[1]?.ids, secondPage);
+			assert.throws(() => artifacts.admit("evidence", secondPage.at(-1)), { reason: "outside-window" });
+			// Nothing refused is rendered, and load-more cannot resurrect the stale page.
+			assert.deepEqual(rendered(), []);
+			const shown = observer.getCurrentResult();
+			assert.equal(shown.hasNextPage && !shown.isRefetchError, false);
+		}
+		state.failWhen = undefined;
+		assert.equal((await observer.refetch()).status, "success");
+		assert.equal(rendered().length, 2 * ARTIFACT_PAGE_SIZE);
+		for (const id of rendered()) assert.equal(artifacts.admit("evidence", id), id);
+	} finally {
+		close();
 	}
 });
