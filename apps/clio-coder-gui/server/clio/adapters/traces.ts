@@ -93,8 +93,6 @@ export class TraceAdapter {
 					return reader.phases(input.runId);
 				case "gates":
 					return reader.gateResults(input.runId);
-				case "envelopes":
-					return reader.envelopes(input.runId);
 				case "processes":
 					return reader.processes(input.runId);
 				case "events":

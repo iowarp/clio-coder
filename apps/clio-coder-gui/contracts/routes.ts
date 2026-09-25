@@ -52,7 +52,6 @@ import { CliTargets, Routing, TargetAdd, TargetRuntimes } from "./targets-cli.js
 import { Install, Tools } from "./toolchain.js";
 import {
 	RowCursor,
-	TraceEnvelope,
 	TraceEventsPage,
 	TraceEventsQuery,
 	TraceGate,
@@ -630,13 +629,6 @@ export const routes = {
 		params: TraceParams,
 		response: Type.Array(TraceGate),
 		summary: "Run gates",
-	}),
-	traceEnvelopes: defineRoute({
-		...get,
-		path: "/api/traces/runs/:runId/envelopes",
-		params: TraceParams,
-		response: Type.Array(TraceEnvelope),
-		summary: "Run envelopes",
 	}),
 	traceProcesses: defineRoute({
 		...get,

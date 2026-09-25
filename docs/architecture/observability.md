@@ -12,7 +12,7 @@
 
 ## Trace retention and state usage
 
-The SQLite trace mirror at `<state-dir>/trace.sqlite` is rebuildable and bounded. By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. The policy runs after each dispatch or interactive turn becomes terminal. It deletes a run as one unit across `runs`, `phases`, `events`, `envelopes`, `gate_results`, `agent_sessions`, and `processes`. A `queued` or `running` run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.
+The SQLite trace mirror at `<state-dir>/trace.sqlite` is rebuildable and bounded. By default Clio retains terminal runs for 30 days and limits the allocated database to 128 MiB (134,217,728 bytes), whichever limit is reached first. The policy runs after each dispatch or interactive turn becomes terminal. It deletes a run as one unit across `runs`, `phases`, `events`, `gate_results`, `agent_sessions`, and `processes`, plus the legacy `envelopes` table when an older database still has it. A `queued` or `running` run is never a candidate, even when its start time is older than the age cutoff or its rows put the store over the byte limit.
 
 Two environment variables configure the automatic policy:
 

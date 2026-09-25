@@ -40,11 +40,6 @@ export function traceFixture(state: string, count = 12) {
 				"INSERT INTO processes(run_id,kind,name,pid,command,command_digest,started_at,ended_at) VALUES('run-0000','tool','shell',12345,'pnpm test','fixture-digest',?,?)",
 			)
 			.run(startedAt, endedAt);
-		store.db
-			.prepare(
-				"INSERT INTO envelopes(envelope_id,run_id,phase_id,agent,output_type,payload_json,valid,attempt,created_at) VALUES('envelope-1','run-0000','phase-1','coder','result','{\"summary\":\"verified\"}',1,2,?)",
-			)
-			.run(endedAt);
 	});
 	const append = (
 		id: string,

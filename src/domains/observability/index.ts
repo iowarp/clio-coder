@@ -77,10 +77,8 @@ export type {
 	TraceGateCheck,
 	TraceGateResultInput,
 	TracePhaseRow,
-	TraceProcessInput,
 	TraceProcessRow,
 	TraceRunRow,
-	TraceSpendInput,
 } from "./trace-store.js";
 export {
 	createDispatchTraceMirror,

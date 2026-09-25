@@ -17,9 +17,6 @@ export function traceRoutes(app: Hono, hub: EventHub, traces: TraceService) {
 	register(app, hub, routes.traceGates, ({ params }) =>
 		traces.read({ kind: "gates", ...params }, routes.traceGates.response),
 	);
-	register(app, hub, routes.traceEnvelopes, ({ params }) =>
-		traces.read({ kind: "envelopes", ...params }, routes.traceEnvelopes.response),
-	);
 	register(app, hub, routes.traceProcesses, ({ params }) =>
 		traces.read({ kind: "processes", ...params }, routes.traceProcesses.response),
 	);

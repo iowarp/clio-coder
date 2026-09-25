@@ -195,25 +195,6 @@ export interface TraceEventInput {
 	endedAt?: string | null;
 }
 
-export interface TraceSpendInput {
-	runId: string;
-	phaseId: string;
-	inputTokens: number;
-	outputTokens: number;
-	cacheReadTokens: number;
-	cacheWriteTokens: number;
-	cacheWrite1hTokens?: number;
-	reasoningTokens: number;
-	totalTokens: number;
-	inputCostUsd?: number | null;
-	outputCostUsd?: number | null;
-	cacheReadCostUsd?: number | null;
-	cacheWriteCostUsd?: number | null;
-	totalCostUsd: number;
-	contextTokens?: number | null;
-	contextWindow?: number | null;
-}
-
 /**
  * `runs.assignment_id` for a turn the operator ran themselves.
  *
@@ -294,27 +275,6 @@ export interface TraceGateResultInput {
 	createdAt: string;
 }
 
-export interface TraceEnvelopeInput {
-	envelopeId: string;
-	runId: string;
-	phaseId: string;
-	agent: string;
-	outputType: string;
-	payload: unknown;
-	valid: boolean;
-	attempt: number;
-	createdAt: string;
-}
-
-export interface TraceProcessInput {
-	runId: string;
-	kind: "orchestrator" | "worker";
-	name: string;
-	pid: number;
-	command: string;
-	startedAt: string;
-}
-
 export interface TraceEventRow {
 	rowid: number;
 	event_id: string;
@@ -368,14 +328,43 @@ export interface TracePhaseRow {
 	cache_write_1h_tokens?: number | null;
 	reasoning_tokens: number | null;
 	total_tokens: number | null;
-	input_cost_usd: number | null;
-	output_cost_usd: number | null;
-	cache_read_cost_usd: number | null;
-	cache_write_cost_usd: number | null;
 	total_cost_usd: number | null;
 	context_tokens: number | null;
 	context_window: number | null;
 }
+
+/**
+ * The phase columns readers return, in table order. A database written by an
+ * earlier build also carries four itemized cost columns no writer ever filled
+ * (`input_cost_usd`, `output_cost_usd`, `cache_read_cost_usd`,
+ * `cache_write_cost_usd`); naming the columns keeps them out of every reader
+ * and out of the GUI's closed phase schema.
+ */
+const PHASE_COLUMNS = [
+	"phase_id",
+	"run_id",
+	"seq",
+	"name",
+	"kind",
+	"owner",
+	"description",
+	"status",
+	"attempt",
+	"retries",
+	"error",
+	"started_at",
+	"ended_at",
+	"input_tokens",
+	"output_tokens",
+	"cache_read_tokens",
+	"cache_write_tokens",
+	"cache_write_1h_tokens",
+	"reasoning_tokens",
+	"total_tokens",
+	"total_cost_usd",
+	"context_tokens",
+	"context_window",
+] as const;
 
 export interface TraceProcessRow {
 	id: number;
@@ -448,7 +437,6 @@ CREATE TABLE phases (
   ended_at TEXT,
   input_tokens INTEGER, output_tokens INTEGER, cache_read_tokens INTEGER, cache_write_tokens INTEGER, cache_write_1h_tokens INTEGER,
   reasoning_tokens INTEGER, total_tokens INTEGER,
-  input_cost_usd REAL, output_cost_usd REAL, cache_read_cost_usd REAL, cache_write_cost_usd REAL,
   total_cost_usd REAL,
   context_tokens INTEGER, context_window INTEGER
 );
@@ -468,18 +456,6 @@ CREATE TABLE events (
 );
 CREATE INDEX events_run_rowid ON events(run_id);
 CREATE INDEX events_phase_rowid ON events(phase_id);
-
-CREATE TABLE envelopes (
-  envelope_id TEXT PRIMARY KEY,
-  run_id TEXT NOT NULL REFERENCES runs(run_id),
-  phase_id TEXT NOT NULL REFERENCES phases(phase_id),
-  agent TEXT NOT NULL,
-  output_type TEXT NOT NULL,
-  payload_json TEXT NOT NULL,
-  valid INTEGER NOT NULL CHECK(valid IN (0,1)),
-  attempt INTEGER NOT NULL,
-  created_at TEXT NOT NULL
-);
 
 CREATE TABLE gate_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -807,36 +783,6 @@ export class TraceStore {
 			);
 	}
 
-	recordSpend(input: TraceSpendInput): void {
-		this.transaction(() => {
-			this.db
-				.prepare(`UPDATE phases SET input_tokens=?, output_tokens=?, cache_read_tokens=?, cache_write_tokens=?, cache_write_1h_tokens=?,
-          reasoning_tokens=?, total_tokens=?, input_cost_usd=?, output_cost_usd=?, cache_read_cost_usd=?,
-          cache_write_cost_usd=?, total_cost_usd=?, context_tokens=?, context_window=? WHERE phase_id=? AND run_id=?`)
-				.run(
-					input.inputTokens,
-					input.outputTokens,
-					input.cacheReadTokens,
-					input.cacheWriteTokens,
-					input.cacheWrite1hTokens ?? null,
-					input.reasoningTokens,
-					input.totalTokens,
-					input.inputCostUsd ?? null,
-					input.outputCostUsd ?? null,
-					input.cacheReadCostUsd ?? null,
-					input.cacheWriteCostUsd ?? null,
-					input.totalCostUsd,
-					input.contextTokens ?? null,
-					input.contextWindow ?? null,
-					input.phaseId,
-					input.runId,
-				);
-			this.db
-				.prepare("UPDATE runs SET total_tokens=?, total_cost_usd=? WHERE run_id=?")
-				.run(input.totalTokens, input.totalCostUsd, input.runId);
-		});
-	}
-
 	recordContext(runId: string, contextTokens: number, contextWindow: number | null, at: string): void {
 		this.transaction(() => {
 			this.db
@@ -878,52 +824,6 @@ export class TraceStore {
 				payload: { attempt: input.attempt, checks: input.checks, violations },
 				startedAt: input.createdAt,
 			});
-		});
-	}
-
-	recordEnvelope(input: TraceEnvelopeInput): void {
-		this.transaction(() => {
-			this.db
-				.prepare(`INSERT OR REPLACE INTO envelopes
-          (envelope_id, run_id, phase_id, agent, output_type, payload_json, valid, attempt, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-				.run(
-					input.envelopeId,
-					input.runId,
-					input.phaseId,
-					input.agent,
-					input.outputType,
-					boundedJson(input.payload),
-					input.valid ? 1 : 0,
-					input.attempt,
-					input.createdAt,
-				);
-		});
-	}
-
-	startProcess(input: TraceProcessInput): number {
-		let id = 0;
-		this.transaction(() => {
-			const result = this.db
-				.prepare(`INSERT INTO processes(run_id, kind, name, pid, command, command_digest, started_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?)`)
-				.run(
-					input.runId,
-					input.kind,
-					traceText(input.name, 256),
-					input.pid,
-					traceText(input.command, 2000),
-					sha256(input.command),
-					input.startedAt,
-				);
-			id = Number(result.lastInsertRowid);
-		});
-		return id;
-	}
-
-	endProcesses(runId: string, endedAt: string): void {
-		this.transaction(() => {
-			this.db.prepare("UPDATE processes SET ended_at=? WHERE run_id=? AND ended_at IS NULL").run(endedAt, runId);
 		});
 	}
 
@@ -1178,9 +1078,26 @@ function tracePageStats(db: DatabaseSync): TracePageStats {
 	};
 }
 
+/**
+ * A database written by an earlier build has an `envelopes` table whose rows
+ * reference `runs`, so its rows go before the run. New databases never create
+ * the table: no writer ever filled it.
+ */
 function deleteTraceRun(db: DatabaseSync, runId: string): number {
 	let rows = 0;
-	for (const table of ["events", "envelopes", "gate_results", "agent_sessions", "processes", "phases", "runs"]) {
+	const legacyEnvelopes = db
+		.prepare("SELECT 1 AS found FROM sqlite_master WHERE type='table' AND name='envelopes'")
+		.get();
+	const tables = [
+		"events",
+		...(legacyEnvelopes ? ["envelopes"] : []),
+		"gate_results",
+		"agent_sessions",
+		"processes",
+		"phases",
+		"runs",
+	];
+	for (const table of tables) {
 		const result = db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(runId);
 		rows += Number(result.changes);
 	}
@@ -1222,6 +1139,12 @@ export class TraceReader {
 	 * derives the same value the migration would have written instead.
 	 */
 	private readonly runsSourceExpr: string;
+	/**
+	 * The {@link PHASE_COLUMNS} this database has. A read-only reader cannot add
+	 * `cache_write_1h_tokens` to a database no writer has opened since that
+	 * column arrived, so a missing column is left out rather than failing.
+	 */
+	private readonly phaseColumns: string;
 
 	constructor(readonly path: string) {
 		this.db = new (databaseSyncConstructor())(path, { readOnly: true });
@@ -1236,6 +1159,10 @@ export class TraceReader {
 		this.runsSourceExpr = runColumns.some((column) => column.name === "source")
 			? "*"
 			: `*, CASE WHEN assignment_id = '${SESSION_TRACE_ASSIGNMENT_ID}' THEN 'session' ELSE 'dispatch' END AS source`;
+		const phaseColumns = new Set(
+			(this.db.prepare("PRAGMA table_info(phases)").all() as { name: string }[]).map((column) => column.name),
+		);
+		this.phaseColumns = PHASE_COLUMNS.filter((column) => phaseColumns.has(column)).join(", ");
 	}
 
 	close(): void {
@@ -1292,7 +1219,7 @@ export class TraceReader {
 
 	phases(runId: string): TracePhaseRow[] {
 		return this.db
-			.prepare("SELECT * FROM phases WHERE run_id=? ORDER BY seq, phase_id")
+			.prepare(`SELECT ${this.phaseColumns} FROM phases WHERE run_id=? ORDER BY seq, phase_id`)
 			.all(runId) as unknown as TracePhaseRow[];
 	}
 
@@ -1368,12 +1295,6 @@ export class TraceReader {
 	gateResults(runId: string): Record<string, SQLInputValue>[] {
 		return this.db
 			.prepare("SELECT * FROM gate_results WHERE run_id=? ORDER BY phase_id, attempt, id")
-			.all(runId) as Record<string, SQLInputValue>[];
-	}
-
-	envelopes(runId: string): Record<string, SQLInputValue>[] {
-		return this.db
-			.prepare("SELECT * FROM envelopes WHERE run_id=? ORDER BY created_at, envelope_id")
 			.all(runId) as Record<string, SQLInputValue>[];
 	}
 
