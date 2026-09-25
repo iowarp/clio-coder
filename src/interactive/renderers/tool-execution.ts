@@ -118,6 +118,12 @@ export interface ToolExecutionFinished {
 	/** Admission's action class; an unknown dynamic tool is classified by it. */
 	actionClass?: string | undefined;
 	/**
+	 * The approval axis an operator grant answered before this call ran, as
+	 * `approvalAxisText` states it. Live only: it comes from the redacted
+	 * approval event, which never reaches the session ledger.
+	 */
+	operatorGrant?: string | undefined;
+	/**
 	 * A worker card sits under this dispatch call and states the run's outcome,
 	 * so the row does not repeat it.
 	 */
@@ -706,10 +712,9 @@ export function renderToolAwaitingApproval(
 	);
 	const lines = wrapSublineWithTail(parts.lead, AWAITING_APPROVAL_TAIL, width);
 	if (view === undefined) return lines;
-	const axis = view.axis.kind === "net" ? `safety-net rail ${view.axis.ruleId}` : `autonomy level ${view.axis.level}`;
 	const facts = [
 		["action", view.actionClass],
-		["axis", axis],
+		["axis", approvalAxisText(view)],
 		...(view.target !== undefined && view.target.length > 0 ? [["target", view.target]] : []),
 		// Size and digest, never the mutation text: this row is the transcript,
 		// which is written, replayed, and shared (issue #254).
@@ -719,6 +724,26 @@ export function renderToolAwaitingApproval(
 		lines.push(...indentAndWrap(`${dim(`${label} ·`)} ${value}`, width, false));
 	}
 	return lines;
+}
+
+/** The rule or level that asked, as the parked row and the grant row both state it. */
+export function approvalAxisText(view: Pick<ApprovalRequestView, "axis">): string {
+	return view.axis.kind === "net" ? `safety-net rail ${view.axis.ruleId}` : `autonomy level ${view.axis.level}`;
+}
+
+/**
+ * The operator's grant under the call it let run (BT-003). Enter closed the
+ * card and the settled row read exactly like a call that never asked, so an
+ * operator scrolling back could not tell which calls they had approved.
+ */
+function operatorGrantRows(
+	call: ToolExecutionStart | ToolExecutionFinished,
+	width: number,
+	failure: boolean,
+): string[] {
+	const axis = "result" in call ? call.operatorGrant : undefined;
+	if (axis === undefined) return [];
+	return indentAndWrap(`${yellow(GLYPH.classInteraction)} ${dim(`allowed by you · ${axis}`)}`, width, failure);
 }
 
 /**
@@ -1484,6 +1509,7 @@ export function renderToolExecution(
 	const row = resolveRow(finished);
 	const out: string[] = [];
 	out.push(...wrapHanging(headerLine(finished, status, statusMeta, width), width));
+	out.push(...operatorGrantRows(finished, width, finished.isError));
 
 	// A mutation produces one bounded numbered diff on result.details. It is the
 	// authority because canonical edit args can contain multiple replacements
@@ -1722,6 +1748,7 @@ export function renderToolPreview(
 		options.terminalRows,
 	);
 	const rows = renderToolSubline(call, width);
+	rows.push(...operatorGrantRows(call, width, failure));
 	const args = previewArguments(call, width);
 	const expanded = isPlainObject(args.edits) ? { ...args, ...args.edits, edits: undefined } : args;
 	rows.push(

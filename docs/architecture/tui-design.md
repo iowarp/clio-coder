@@ -224,6 +224,7 @@ Every transcript row follows a rigid 2-column gutter format:
 - **Prose Head**: `✦ ` followed by text in standard color.
 - **Prose Continuation**: `  ` indented 2 spaces.
 - **Tool Action Row**: Class glyph (`▸`, `§`, `±`, `$`, `↗`, `?`, `⇢`) + verb + scalar target + outcome (`✓ Done · 12ms`).
+- **Operator Grant**: A call that ran because the operator allowed it at a permission card keeps a rail row under its action row, `? allowed by you · safety-net rail <rule>` or `· autonomy level <level>`, with `?` in `warning`. Compact never folds such a call into its neighbors. The row is live only, because the approval facts never reach the session ledger.
 - **Worker Rows**: The origin mark (`◆` model, `◇` operator) heads the worker block; a running tool inside it shows `⚙`.
 - **Turn Settlement**: Final turn outcome closes the block with outcome in gutter (`✓ Done · 14s · 3 calls · in 100k · out 380`).
 
