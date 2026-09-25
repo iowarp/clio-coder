@@ -1,20 +1,20 @@
 /**
  * Dispatch routing never waits on a decision model.
  *
- * With the `routing` site bound, admission used to await the decision model on
- * every dispatch, for up to 3s, before a worker could start. Routing now runs
- * on the rules alone, so a bound site, however slow, sees no request from
- * dispatch and the worker starts as it would unbound.
+ * A bound `routing` site used to make admission await the decision model on
+ * every dispatch, for up to 3s, before a worker could start. That site is
+ * retired and settings refuse it. With every remaining site bound to a slow
+ * decision model, dispatch still sends it no request and the worker starts as
+ * it would unbound.
  */
 
-import { deepStrictEqual, match, ok, strictEqual } from "node:assert/strict";
+import { ok, strictEqual } from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, it } from "node:test";
-import { DEFAULT_SETTINGS } from "../../src/core/defaults.js";
+import { DECISION_SITES, DEFAULT_SETTINGS } from "../../src/core/defaults.js";
 import type { DispatchRequest } from "../../src/domains/dispatch/contract.js";
 import type { SpawnedWorker } from "../../src/domains/dispatch/worker-spawn.js";
-import { retiredDecisionSiteNotices } from "../../src/domains/providers/decision-sites.js";
 import type { ProvidersContract } from "../../src/domains/providers/index.js";
 import typesafeJevRuntime from "../../src/domains/providers/runtimes/cloud/typesafe-jev.js";
 import { isolateDispatchState, makeDispatchBundle, restoreDispatchState } from "../harness/dispatch.js";
@@ -47,7 +47,7 @@ async function slowJev(): Promise<{ server: Server; url: string; requests: () =>
 	return { server, url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, requests: () => requests };
 }
 
-async function spawnDelayMs(bindRouting: boolean, jevUrl: string): Promise<number> {
+async function spawnDelayMs(bindSites: boolean, jevUrl: string): Promise<number> {
 	const settings = structuredClone(DEFAULT_SETTINGS);
 	settings.fleet.retry.maxRetries = 0;
 	settings.targets = [
@@ -56,7 +56,8 @@ async function spawnDelayMs(bindRouting: boolean, jevUrl: string): Promise<numbe
 	];
 	settings.fleet.default = { target: "default", model: "gpt-4o", thinkingLevel: "off" };
 	settings.fleet.profiles["system-one"] = { target: "jev", model: "jev-latest", thinkingLevel: "off" };
-	if (bindRouting) settings.fleet.decisionProfiles = { routing: "system-one" };
+	if (bindSites)
+		settings.fleet.decisionProfiles = Object.fromEntries(DECISION_SITES.map((site) => [site, "system-one"]));
 	const context = dispatchStubContext({ settings });
 	const providers = context.getContract<ProvidersContract>("providers");
 	ok(providers);
@@ -99,7 +100,7 @@ async function spawnDelayMs(bindRouting: boolean, jevUrl: string): Promise<numbe
 	}
 }
 
-it("admits a dispatch without asking a bound routing site", { timeout: 20_000 }, async () => {
+it("admits a dispatch without asking any bound decision site", { timeout: 20_000 }, async () => {
 	const jev = await slowJev();
 	try {
 		const unbound = await spawnDelayMs(false, jev.url);
@@ -107,18 +108,9 @@ it("admits a dispatch without asking a bound routing site", { timeout: 20_000 },
 		strictEqual(jev.requests(), 0, "dispatch sent the decision model a request");
 		ok(
 			bound < 1_500,
-			`a bound routing site delayed the spawn to ${Math.round(bound)}ms (unbound ${Math.round(unbound)}ms)`,
+			`bound decision sites delayed the spawn to ${Math.round(bound)}ms (unbound ${Math.round(unbound)}ms)`,
 		);
 	} finally {
 		await closeServer(jev.server);
 	}
-});
-
-it("tells the operator once that a bound routing site is retired", () => {
-	const settings = structuredClone(DEFAULT_SETTINGS);
-	deepStrictEqual(retiredDecisionSiteNotices(settings), []);
-	settings.fleet.decisionProfiles = { routing: "system-one", memory: "system-one" };
-	const notices = retiredDecisionSiteNotices(settings);
-	strictEqual(notices.length, 1);
-	match(notices[0] ?? "", /^fleet\.decisionProfiles\.routing is retired and ignored: .* Remove the entry\.$/u);
 });

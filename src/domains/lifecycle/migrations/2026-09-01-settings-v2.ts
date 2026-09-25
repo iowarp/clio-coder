@@ -2,7 +2,13 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { SettingsValidationError, settingsPath, validateSettings, withSettingsLock } from "../../../core/config.js";
+import {
+	SETTINGS_V1_RETIRED_PATHS,
+	SettingsValidationError,
+	settingsPath,
+	validateSettings,
+	withSettingsLock,
+} from "../../../core/config.js";
 import { safeResourceWrite } from "../../../core/safe-resource-write.js";
 import type { Migration } from "./index.js";
 
@@ -196,6 +202,26 @@ function migrateFleetNodeAliases(transform: SettingsV2DocumentTransform): void {
 	}
 }
 
+/**
+ * Per-agent keys retired without a replacement. `delegation.agents` moves
+ * wholesale, so they are dropped from each moved entry with the same reason
+ * the settings validator gives a version-2 file that still names them.
+ */
+function dropRetiredExternalAgentKeys(transform: SettingsV2DocumentTransform): void {
+	const entries = getPath(transform.document, "integrations.externalAgents.entries");
+	if (!Array.isArray(entries)) return;
+	for (let index = 0; index < entries.length; index += 1) {
+		const entry = entries[index];
+		if (!isPlainObject(entry)) continue;
+		for (const key of ["permissionTimeoutMs", "labels"] as const) {
+			if (!(key in entry)) continue;
+			delete entry[key];
+			const reason = SETTINGS_V1_RETIRED_PATHS[`integrations.externalAgents.entries[].${key}`];
+			transform.dropped.push(`integrations.externalAgents.entries[${index}].${key}: ${reason}`);
+		}
+	}
+}
+
 /** Pure in-memory transformation used by the lifecycle migration and archive import. */
 export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTransform {
 	if (!isPlainObject(raw)) throw new Error("settings v1 to v2 migration expected a YAML map at the document root");
@@ -290,6 +316,7 @@ export function migrateSettingsV1Document(raw: unknown): SettingsV2DocumentTrans
 		"remaining panes keys have no v2 successor; the shipped keys moved to interface.panes.* and fleet.history.journal",
 	);
 	migrateFleetNodeAliases(transform);
+	dropRetiredExternalAgentKeys(transform);
 
 	if (transform.collisions.length > 0) throw new SettingsV2CollisionError(transform.collisions);
 	transform.document.version = 2;

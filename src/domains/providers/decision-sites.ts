@@ -132,21 +132,3 @@ export function resolveDecider(site: DecisionSite, input: ResolveDeciderInput): 
 	const status = inspectDecisionSite(site, input);
 	return status.bound ? status.decider : null;
 }
-
-/**
- * Sites that are still accepted in settings but no longer asked. `routing`
- * shipped as a dispatch-admission call; dispatch now routes with its rules and
- * never waits on a decision model, so a binding for it does nothing. Rejecting
- * it would refuse to start a session over a line that used to be valid, so it
- * validates and the operator is told once at startup.
- */
-const RETIRED_SITES: Readonly<Partial<Record<DecisionSite, string>>> = {
-	routing: "dispatch routes every task with its rules and never waits on a decision model",
-};
-
-/** One startup line per retired site the settings still bind. */
-export function retiredDecisionSiteNotices(settings: Pick<ClioSettings, "fleet">): string[] {
-	return Object.entries(RETIRED_SITES)
-		.filter(([site]) => settings.fleet.decisionProfiles[site as DecisionSite] !== undefined)
-		.map(([site, because]) => `fleet.decisionProfiles.${site} is retired and ignored: ${because}. Remove the entry.`);
-}
