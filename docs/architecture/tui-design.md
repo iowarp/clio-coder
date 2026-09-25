@@ -45,7 +45,7 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 | `editor` | `#09969f` | Cyan composer rails (active input only). |
 | `editorDanger` | `#e35656` | Yolo autonomy rail caps and label. |
 | `editorAction` | `#d06d25` | Orange preparation / compacting phase rails. |
-| `accent` | `#319789` | Brand and interactivity: frames, selections, prompts, voice glyph (`✦`), active phases. |
+| `accent` | `#319789` | Brand and interactivity in the logo's mint: selections, prompts, the active dashboard tab, the CLIO half of the wordmark, voice glyph (`✦`), active phases. |
 | `accentDeep` | `#188b7b` | Bold CAPS section headers and structural tags. |
 | `tool` | `#408c96` | Action-row verbs in the tool ledger. |
 | `agent` | `#c0601f` | Dispatch verbs and active worker counts. |
@@ -57,7 +57,7 @@ Tokens are defined in [src/interactive/theme/tokens.ts](../../src/interactive/th
 | `reason` | `#9c8664` | Sand reasoning indicators and thinking meter. |
 | `dim` | `#6e7b85` | Scaffolding: separators, shortcuts, durations, timestamps. |
 | `muted` | `#608096` | Secondary text: paths, previews, telemetry counts. |
-| `title` | `#319789` | Overlay and frame headers. |
+| `title` | `#09969f` | Overlay and frame headers, the CODER half of the wordmark and the `C_` of `>C_`, in the logo's cyan. |
 | `frame` | `#577287` | Borders, dividers, unused context meter space. |
 | `frameStrong` | `#09969f` | Active input rail background. |
 
@@ -89,7 +89,7 @@ All symbols are defined in [src/interactive/theme/glyphs.ts](../../src/interacti
 
 | Glyph | `GLYPH` key | Token | Meaning | Used by |
 | :--- | :--- | :--- | :--- | :--- |
-| `>C_` | `brand` | `accent` | Brand wordmark | Launchpad and session header only. |
+| `>C_` | `brand` | `accent`, `title` | Brand wordmark: mint chevron, cyan `C_` | Launchpad, session header and footer dashboard tabs. |
 | `✦` | `agent` | `accent` | Agent voice | First row of agent prose; `error` on a failed turn. |
 | `▌` | `userBar` | `accent` | Operator input | Gutter of every prompt row. |
 | `›` | `user` | `action` | Quoted operator text | Steering queue, command echoes. |

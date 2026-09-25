@@ -37,7 +37,7 @@ const TOKENS: Record<ClioToken, TokenColor> = {
 	reason: { rgb: [156, 134, 100], xterm: 137 },
 	dim: { rgb: [110, 123, 133], xterm: 244 },
 	muted: { rgb: [96, 128, 150], xterm: 102 },
-	title: { rgb: [49, 151, 137], xterm: 30 },
+	title: { rgb: [9, 150, 159], xterm: 30 },
 	frame: { rgb: [87, 114, 135], xterm: 243 },
 	frameStrong: { rgb: [9, 150, 159], xterm: 30 },
 };
